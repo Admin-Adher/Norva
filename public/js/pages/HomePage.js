@@ -188,9 +188,9 @@ class HomePage {
             <div class="dashboard-content" id="home-content">
                 <section id="home-loading-state" class="home-loading-state tv-home-loading-state" role="status" aria-live="polite">
                     <div class="tv-home-loading-copy">
-                        <span>Norva Home</span>
-                        <strong>Building your screen</strong>
-                        <p>Loading your picks, progress and connected catalogue.</p>
+                        <span data-i18n="ui_web_7b259caf0f7a">Norva Home</span>
+                        <strong data-i18n="ui_web_258c80544381">Building your screen</strong>
+                        <p data-i18n="ui_web_230b5f0daeea">Loading your picks, progress and connected catalogue.</p>
                     </div>
                     <div class="tv-home-loading-visual" aria-hidden="true">
                         <i class="tv-home-loading-hero"></i>
@@ -207,9 +207,9 @@ class HomePage {
 
                 <section class="dashboard-section hidden" id="continue-watching-section">
                     <div class="section-header">
-                        <h2>Continue Watching</h2>
+                        <h2 data-i18n="ui_web_34d8eb01e1bf">Continue Watching</h2>
                     </div>
-                    ${this.scrollSection('continue-watching-list', 'Loading history...')}
+                    ${this.scrollSection('continue-watching-list', (globalThis.NorvaI18n?.t("ui_web_9a0b66557603", { defaultValue: "Loading history..." }) ?? 'Loading history...'))}
                 </section>
 
                 <!-- The viewer's OWN content (list + channels) sits right under Continue
@@ -217,22 +217,22 @@ class HomePage {
                      rails, several screen-heights of scrolling away (home audit 2026-07-04). -->
                 <section class="dashboard-section hidden" id="my-list-section">
                     <div class="section-header">
-                        <h2>My List</h2>
+                        <h2 data-i18n="ui_web_e957f4238018">My List</h2>
                     </div>
-                    ${this.scrollSection('my-list-list', 'Loading your list...')}
+                    ${this.scrollSection('my-list-list', (globalThis.NorvaI18n?.t("ui_web_5d4e4ad530a2", { defaultValue: "Loading your list..." }) ?? 'Loading your list...'))}
                 </section>
 
                 <section class="dashboard-section hidden" id="favorite-channels-section">
                     <div class="section-header">
-                        <h2>Favorite Channels</h2>
+                        <h2 data-i18n="ui_web_a83bb854696f">Favorite Channels</h2>
                     </div>
-                    ${this.scrollSection('favorite-channels-list', 'Loading favorites...', 'channel-tiles')}
+                    ${this.scrollSection('favorite-channels-list', (globalThis.NorvaI18n?.t("ui_web_b31b68ed25f6", { defaultValue: "Loading favorites..." }) ?? 'Loading favorites...'), 'channel-tiles')}
                 </section>
 
                 <div id="home-rails">
                     <section class="dashboard-section">
                         <div class="section-header">
-                            <h2>Selection Norva</h2>
+                            <h2 data-i18n="ui_web_5399d840d3e3">Selection Norva</h2>
                         </div>
                         <div class="horizontal-scroll">${window.MediaUtils.skeletonCards(8)}</div>
                     </section>
@@ -283,12 +283,12 @@ class HomePage {
                     const bridge = window.NorvaTVCloud || window.NodeCastNative;
                     if (typeof bridge?.requestNotificationPermission === 'function') {
                         notificationsButton.disabled = true;
-                        notificationsButton.textContent = 'Opening permission...';
+                        notificationsButton.textContent = (globalThis.NorvaI18n?.t("ui_web_eeaae9348b04", { defaultValue: "Opening permission..." }) ?? 'Opening permission...');
                         try {
                             bridge.requestNotificationPermission();
                         } catch (_) {
                             notificationsButton.disabled = false;
-                            notificationsButton.textContent = 'Enable notifications';
+                            notificationsButton.textContent = (globalThis.NorvaI18n?.t("ui_web_682be64ae780", { defaultValue: "Enable notifications" }) ?? 'Enable notifications');
                         }
                     }
                 }
@@ -304,8 +304,8 @@ class HomePage {
     }
 
     setHomeLoadingState(active, {
-        title = 'Building your screen',
-        message = 'Loading your picks, progress and connected catalogue.'
+        title = (globalThis.NorvaI18n?.t("ui_web_258c80544381", { defaultValue: "Building your screen" }) ?? 'Building your screen'),
+        message = (globalThis.NorvaI18n?.t("ui_web_230b5f0daeea", { defaultValue: "Loading your picks, progress and connected catalogue." }) ?? 'Loading your picks, progress and connected catalogue.')
     } = {}) {
         const state = document.getElementById('home-loading-state');
         if (!state) return;
@@ -329,10 +329,10 @@ class HomePage {
         rails.innerHTML = `
             <section class="dashboard-section">
                 <div class="premium-state premium-state-error" role="alert" data-home-state-panel="error">
-                    <span class="premium-state-kicker">Norva Home</span>
-                    <h3>Home needs another moment</h3>
-                    <p>Your catalogue is still connected. We could not refresh this screen just now.</p>
-                    <button class="btn btn-primary" data-home-retry type="button">Try again</button>
+                    <span class="premium-state-kicker" data-i18n="ui_web_7b259caf0f7a">Norva Home</span>
+                    <h3 data-i18n="ui_web_23056a4a4376">Home needs another moment</h3>
+                    <p data-i18n="ui_web_c074a27ffba9">Your catalogue is still connected. We could not refresh this screen just now.</p>
+                    <button class="btn btn-primary" data-home-retry type="button" data-i18n="ui_web_d8b8392e2c54">Try again</button>
                 </div>
             </section>`;
     }
@@ -345,13 +345,13 @@ class HomePage {
             : `<div class="loading-state"><div class="loading"></div><span>${this.escapeHtml(loadingText)}</span></div>`);
         return `
             <div class="scroll-wrapper">
-                <button class="scroll-arrow scroll-left" aria-label="Scroll left">
+                <button class="scroll-arrow scroll-left" aria-label="Scroll left" data-i18n-aria-label="ui_web_35dfa1045cb2">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                 </button>
                 <div class="horizontal-scroll ${extraClass}" id="${id}">
                     ${body}
                 </div>
-                <button class="scroll-arrow scroll-right" aria-label="Scroll right">
+                <button class="scroll-arrow scroll-right" aria-label="Scroll right" data-i18n-aria-label="ui_web_366bd578350a">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
                 </button>
             </div>
@@ -708,19 +708,19 @@ class HomePage {
             return `
                 <section class="norva-setup-building norva-setup-building-home home-sync-hint home-state-panel" role="status" aria-live="polite">
                     <div class="norva-setup-building-copy">
-                        <p class="norva-setup-kicker">${fullyReady ? 'Your full library is ready' : cinemaReady ? 'Your cinema is ready' : liveReady ? 'Live TV is ready' : 'Building your cinema'}</p>
-                        <h2>${cinemaReady || liveReady ? 'Start watching while the import continues' : 'Movies and series are arriving'}</h2>
+                        <p class="norva-setup-kicker">${fullyReady ? (globalThis.NorvaI18n?.t("ui_web_e668d3a60962", { defaultValue: "Your full library is ready" }) ?? 'Your full library is ready') : cinemaReady ? (globalThis.NorvaI18n?.t("ui_web_51b097c99616", { defaultValue: "Your cinema is ready" }) ?? 'Your cinema is ready') : liveReady ? (globalThis.NorvaI18n?.t("ui_web_314c2bf74b46", { defaultValue: "Live TV is ready" }) ?? 'Live TV is ready') : (globalThis.NorvaI18n?.t("ui_web_ff89eaee4491", { defaultValue: "Building your cinema" }) ?? 'Building your cinema')}</p>
+                        <h2>${cinemaReady || liveReady ? (globalThis.NorvaI18n?.t("ui_web_056a07d0a2e1", { defaultValue: "Start watching while the import continues" }) ?? 'Start watching while the import continues') : (globalThis.NorvaI18n?.t("ui_web_3a1da7c29ada", { defaultValue: "Movies and series are arriving" }) ?? 'Movies and series are arriving')}</h2>
                         <p>${fullyReady
-                            ? 'Movies, series and Live TV are now available.'
+                            ? (globalThis.NorvaI18n?.t("ui_web_d150b3c2c5f1", { defaultValue: "Movies, series and Live TV are now available." }) ?? 'Movies, series and Live TV are now available.')
                             : cinemaReady
-                                ? 'Open each ready section now. Live TV is added last in the background.'
+                                ? (globalThis.NorvaI18n?.t("ui_web_df9b42d90e5f", { defaultValue: "Open each ready section now. Live TV is added last in the background." }) ?? 'Open each ready section now. Live TV is added last in the background.')
                                 : liveReady
-                                    ? 'Open Live TV now. Movies and series will appear as soon as their first batches are ready.'
-                                    : 'Movies and series unlock from their first ready batch. Live TV follows last.'}</p>
+                                    ? (globalThis.NorvaI18n?.t("ui_web_189d71f03126", { defaultValue: "Open Live TV now. Movies and series will appear as soon as their first batches are ready." }) ?? 'Open Live TV now. Movies and series will appear as soon as their first batches are ready.')
+                                    : (globalThis.NorvaI18n?.t("ui_web_a289d826ef62", { defaultValue: "Movies and series unlock from their first ready batch. Live TV follows last." }) ?? 'Movies and series unlock from their first ready batch. Live TV follows last.')}</p>
                         <div class="norva-setup-building-actions">
-                            ${moviesReady ? '<button type="button" class="btn btn-primary" data-open-movies>Open Movies</button>' : ''}
-                            ${seriesReady ? `<button type="button" class="btn ${moviesReady ? 'btn-secondary' : 'btn-primary'}" data-open-series>Open Series</button>` : ''}
-                            ${liveReady ? `<button type="button" class="btn ${cinemaReady ? 'btn-secondary' : 'btn-primary'}" data-open-live>Open Live</button>` : ''}
+                            ${moviesReady ? '<button type="button" class="btn btn-primary" data-open-movies data-i18n="ui_web_e69b7d25680a">Open Movies</button>' : ''}
+                            ${seriesReady ? `<button type="button" class="btn ${moviesReady ? 'btn-secondary' : 'btn-primary'}" data-open-series data-i18n="ui_web_84401a78d5b9">Open Series</button>` : ''}
+                            ${liveReady ? `<button type="button" class="btn ${cinemaReady ? 'btn-secondary' : 'btn-primary'}" data-open-live data-i18n="ui_web_bf668349ee26">Open Live</button>` : ''}
                         </div>
                     </div>
                     ${this.renderSetupPosterStrip()}
@@ -734,16 +734,16 @@ class HomePage {
         if (summary.state === 'not_configured' || !summary.state) {
             return `
                 <section class="dashboard-section">
-                    <div class="empty-state hint home-state-panel" role="status">Add a TV service from Settings to build your Home.</div>
+                    <div class="empty-state hint home-state-panel" role="status" data-i18n="ui_web_9c37792c7af2">Add a TV service from Settings to build your Home.</div>
                 </section>
             `;
         }
         return `
             <section class="dashboard-section">
                 <div class="empty-state hint home-state-panel home-state-panel-error" role="alert">
-                    <strong>We couldn't load your Home right now</strong>
-                    <p>Your services are fine — this is a temporary hiccup.</p>
-                    <button class="btn btn-secondary" data-home-retry type="button">Retry</button>
+                    <strong data-i18n="ui_web_c2c5edcdcad0">We couldn't load your Home right now</strong>
+                    <p data-i18n="ui_web_f652450d785a">Your services are fine — this is a temporary hiccup.</p>
+                    <button class="btn btn-secondary" data-home-retry type="button" data-i18n="ui_web_942087cc2d41">Retry</button>
                 </div>
             </section>
         `;
@@ -756,7 +756,7 @@ class HomePage {
         const note = document.createElement('div');
         note.setAttribute('data-rails-stale-notice', '');
         note.className = 'empty-state hint home-state-inline';
-        note.textContent = "Showing your last Home — we couldn't refresh it just now.";
+        note.textContent = (globalThis.NorvaI18n?.t("ui_web_65b68c5c8195", { defaultValue: "Showing your last Home — we couldn't refresh it just now." }) ?? "Showing your last Home — we couldn't refresh it just now.");
         container.prepend(note);
         setTimeout(() => { try { note.remove(); } catch (_) { /* gone */ } }, 8000);
     }
@@ -832,24 +832,24 @@ class HomePage {
             ? `
                 <div class="home-ecosystem-notifications">
                     <span>
-                        <strong>Know when Norva is ready</strong>
-                        <small>Get a notification when imports and subtitles finish.</small>
+                        <strong data-i18n="ui_web_eb83f8801905">Know when Norva is ready</strong>
+                        <small data-i18n="ui_web_f6a88e0748ee">Get a notification when imports and subtitles finish.</small>
                     </span>
-                    <button type="button" class="btn btn-secondary" data-ecosystem-notifications>Enable notifications</button>
+                    <button type="button" class="btn btn-secondary" data-ecosystem-notifications data-i18n="ui_web_682be64ae780">Enable notifications</button>
                 </div>`
             : '';
 
         container.innerHTML = `
             <div class="home-ecosystem-surface">
                 <button type="button" class="home-ecosystem-dismiss" data-ecosystem-dismiss
-                    aria-label="Dismiss TV setup tip">
+                    aria-label="Dismiss TV setup tip" data-i18n-aria-label="ui_web_e1d865bed06d">
                     <img src="/img/icons/norva-close-simple.svg?v=1" alt="" aria-hidden="true">
                 </button>
 
                 <div class="home-ecosystem-copy">
-                    <span class="home-ecosystem-kicker">TV setup · about a minute</span>
-                    <h2 id="home-ecosystem-title">Ready for the big screen?</h2>
-                    <p>Open Norva on your TV, enter the code, and keep watching with the same account.</p>
+                    <span class="home-ecosystem-kicker" data-i18n="ui_web_893450be6ad5">TV setup · about a minute</span>
+                    <h2 id="home-ecosystem-title" data-i18n="ui_web_f99e099d857d">Ready for the big screen?</h2>
+                    <p data-i18n="ui_web_548a29791717">Open Norva on your TV, enter the code, and keep watching with the same account.</p>
                 </div>
 
                 <div class="home-ecosystem-visual" aria-hidden="true">
@@ -859,9 +859,9 @@ class HomePage {
                                 <img src="/img/norva-app-icon-96.png?v=1" width="20" height="20"
                                     alt="" aria-hidden="true" decoding="async" draggable="false">
                             </div>
-                            <span class="home-ecosystem-code-label">Pairing code</span>
+                            <span class="home-ecosystem-code-label" data-i18n="ui_web_1c5ea2f7ed52">Pairing code</span>
                             <strong class="home-ecosystem-code">K7M 4Q9</strong>
-                            <small>Enter this code on your phone</small>
+                            <small data-i18n="ui_web_26b2094876c6">Enter this code on your phone</small>
                         </div>
                         <span class="home-ecosystem-tv-stand"></span>
                     </div>
@@ -876,18 +876,18 @@ class HomePage {
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="m7.5 12.5 3 3 6-7"></path>
                             </svg>
-                            <strong>TV connected</strong>
-                            <small>Ready to watch</small>
+                            <strong data-i18n="ui_web_5710cbfa401a">TV connected</strong>
+                            <small data-i18n="ui_web_3b6c8cad0a0a">Ready to watch</small>
                         </div>
                     </div>
                 </div>
 
                 <div class="home-ecosystem-actions">
-                    <button type="button" class="btn btn-primary" data-ecosystem-pair>Pair a TV</button>
+                    <button type="button" class="btn btn-primary" data-ecosystem-pair data-i18n="ui_web_786037f7d592">Pair a TV</button>
                     <a class="home-ecosystem-install"
                         href="https://play.google.com/store/apps/details?id=tv.norva.tv"
                         target="_blank" rel="noopener noreferrer">
-                        <span>Need the TV app?</span><strong>Get it on Google Play</strong>
+                        <span data-i18n="ui_web_539a0c8817af">Need the TV app?</span><strong data-i18n="ui_web_8d99d92a6c10">Get it on Google Play</strong>
                     </a>
                 </div>
             </div>
@@ -915,7 +915,7 @@ class HomePage {
         const state = summary.state || 'not_configured';
         const copy = this.setupCopy(summary);
         const steps = this.setupSteps(state);
-        const secondaryLabel = copy.secondary || 'Check again';
+        const secondaryLabel = copy.secondary || (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again');
         const showSecondary = secondaryLabel && secondaryLabel !== copy.primary;
 
         if (state === 'disabled' && !this.isPairedScreen()) {
@@ -937,7 +937,7 @@ class HomePage {
         container.innerHTML = `
             <section class="norva-setup-gate" data-setup-state="${this.escapeAttr(state)}" data-paired-screen="${this.isPairedScreen() ? 'true' : 'false'}">
                 <div class="norva-setup-card">
-                    <div class="norva-setup-kicker">Norva setup</div>
+                    <div class="norva-setup-kicker" data-i18n="ui_web_a78790584849">Norva setup</div>
                     <h1>${this.escapeHtml(copy.title)}</h1>
                     <p>${this.escapeHtml(copy.message)}</p>
                     <div class="norva-setup-actions">
@@ -945,7 +945,7 @@ class HomePage {
                         ${showSecondary ? `<button class="btn btn-secondary" id="norva-setup-refresh">${this.escapeHtml(secondaryLabel)}</button>` : ''}
                     </div>
                 </div>
-                <div class="norva-setup-steps" role="list" aria-label="Norva setup progress">
+                <div class="norva-setup-steps" role="list" aria-label="Norva setup progress" data-i18n-aria-label="ui_web_5d6494249fb6">
                     ${steps.map((step, index) => `
                         <div class="norva-setup-step ${step.state}" role="listitem" ${['active', 'attention'].includes(step.state) ? 'aria-current="step"' : ''} aria-label="${this.escapeAttr(`Step ${index + 1}: ${step.title}. ${this.setupStepStatusLabel(step.state)}.`)}">
                             <span class="norva-setup-step-index" aria-hidden="true">${this.escapeHtml(step.index)}</span>
@@ -987,24 +987,24 @@ class HomePage {
                 <div class="norva-paused-home-main">
                     <div class="norva-paused-home-status" role="status">
                         <span class="norva-paused-home-dot" aria-hidden="true"></span>
-                        <span>${multiple ? 'TV services paused' : 'TV service paused'}</span>
-                        <span class="norva-paused-home-count">${this.escapeHtml(pausedCount)} saved</span>
+                        <span>${multiple ? (globalThis.NorvaI18n?.t("ui_web_6c712729c953", { defaultValue: "TV services paused" }) ?? 'TV services paused') : (globalThis.NorvaI18n?.t("ui_web_0139f3c27706", { defaultValue: "TV service paused" }) ?? 'TV service paused')}</span>
+                        <span class="norva-paused-home-count" data-i18n="ui_web_8cf74f29f957" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(pausedCount)}) || "{}")}">${this.escapeHtml(pausedCount)} saved</span>
                     </div>
-                    <h1 id="norva-paused-home-title">${multiple ? 'All TV services are paused' : 'Your TV service is paused'}</h1>
-                    <p>Your saved ${multiple ? 'catalogs are' : 'catalog is'} preserved. Enable ${multiple ? 'any service' : 'the service'} when you are ready to bring its channels, movies and series back.</p>
+                    <h1 id="norva-paused-home-title">${multiple ? (globalThis.NorvaI18n?.t("ui_web_f2dce3d301e9", { defaultValue: "All TV services are paused" }) ?? 'All TV services are paused') : (globalThis.NorvaI18n?.t("ui_web_a82f82235cb8", { defaultValue: "Your TV service is paused" }) ?? 'Your TV service is paused')}</h1>
+                    <p data-i18n="ui_web_0f570844affa" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p3":(multiple ? 'catalogs are' : 'catalog is'),"p4":(multiple ? 'any service' : 'the service')}) || "{}")}">Your saved ${multiple ? (globalThis.NorvaI18n?.t("ui_web_ee2b4cac269e", { defaultValue: "catalogs are" }) ?? 'catalogs are') : (globalThis.NorvaI18n?.t("ui_web_7356249e5392", { defaultValue: "catalog is" }) ?? 'catalog is')} preserved. Enable ${multiple ? (globalThis.NorvaI18n?.t("ui_web_19f23f4773bf", { defaultValue: "any service" }) ?? 'any service') : (globalThis.NorvaI18n?.t("ui_web_310fdb894dca", { defaultValue: "the service" }) ?? 'the service')} when you are ready to bring its channels, movies and series back.</p>
                     <div class="norva-paused-home-actions">
-                        <button class="btn btn-primary" id="norva-paused-home-manage" type="button">Enable ${multiple ? 'a service' : 'service'}</button>
+                        <button class="btn btn-primary" id="norva-paused-home-manage" type="button" data-i18n="ui_web_028706741ea2" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p5":(multiple ? 'a service' : 'service')}) || "{}")}">Enable ${multiple ? 'a service' : 'service'}</button>
                     </div>
-                    <ul class="norva-paused-home-assurances" aria-label="What stays safe while services are paused">
-                        <li><strong>Catalog preserved</strong><span>Norva keeps the saved library while the service is paused.</span></li>
-                        <li><strong>No automatic renewal</strong><span>Provider access dates and reminders remain separate.</span></li>
+                    <ul class="norva-paused-home-assurances" aria-label="What stays safe while services are paused" data-i18n-aria-label="ui_web_ed4921b3e221">
+                        <li><strong data-i18n="ui_web_0aa62fec0c62">Catalog preserved</strong><span data-i18n="ui_web_8e87bff81c92">Norva keeps the saved library while the service is paused.</span></li>
+                        <li><strong data-i18n="ui_web_e272a7426fe0">No automatic renewal</strong><span data-i18n="ui_web_25484f9537dd">Provider access dates and reminders remain separate.</span></li>
                     </ul>
                 </div>
-                <aside class="norva-paused-home-next" aria-label="Next step">
+                <aside class="norva-paused-home-next" aria-label="Next step" data-i18n-aria-label="ui_web_298a9207a732">
                     <img src="/img/icons/norva-live-tv.svg" alt="" aria-hidden="true">
-                    <span>Next step</span>
-                    <strong>Choose the service you want to enable.</strong>
-                    <p>You can review its access period or login separately before syncing.</p>
+                    <span data-i18n="ui_web_298a9207a732">Next step</span>
+                    <strong data-i18n="ui_web_bddad77c776e">Choose the service you want to enable.</strong>
+                    <p data-i18n="ui_web_1555b98a7be9">You can review its access period or login separately before syncing.</p>
                 </aside>
             </section>
         `;
@@ -1025,10 +1025,10 @@ class HomePage {
     renderSetupProgressBar(percent = 0) {
         const value = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
         return `
-            <div class="norva-setup-building-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100"${value ? ` aria-valuenow="${value}"` : ''} aria-label="Catalog import progress">
+            <div class="norva-setup-building-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100"${value ? ` aria-valuenow="${value}"` : ''} aria-label="Catalog import progress" data-i18n-aria-label="ui_web_401b61b8c432">
                 <span style="width:${value}%"></span>
             </div>
-            <p class="norva-setup-building-status">${value ? `${value}% · Movies and series first · Live TV last` : 'Connecting to your TV service'}</p>
+            <p class="norva-setup-building-status">${value ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9df9f55b92d9", {defaultValue: "{{p0}}% · Movies and series first · Live TV last", p0:(value)}) : `${value}% · Movies and series first · Live TV last`) : (globalThis.NorvaI18n?.t("ui_web_679bcab5b9ff", { defaultValue: "Connecting to your TV service" }) ?? 'Connecting to your TV service')}</p>
         `;
     }
 
@@ -1042,7 +1042,7 @@ class HomePage {
         ribbon.id = 'home-import-ribbon';
         ribbon.className = 'norva-setup-import-ribbon';
         ribbon.setAttribute('role', 'status');
-        ribbon.textContent = 'Still adding the rest of your library in the background.';
+        ribbon.textContent = (globalThis.NorvaI18n?.t("ui_web_9ac01274a97f", { defaultValue: "Still adding the rest of your library in the background." }) ?? 'Still adding the rest of your library in the background.');
         host.prepend(ribbon);
     }
 
@@ -1057,15 +1057,15 @@ class HomePage {
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-building norva-setup-sync-embedded" data-setup-state="syncing">
                 <div class="norva-setup-building-copy">
-                    <div class="norva-setup-kicker">Building your cinema</div>
-                    <h1>Your movies and series are arriving first</h1>
-                    <p>Each cinema section unlocks from its first ready batch. Live TV is imported last.</p>
+                    <div class="norva-setup-kicker" data-i18n="ui_web_ff89eaee4491">Building your cinema</div>
+                    <h1 data-i18n="ui_web_e68a17269623">Your movies and series are arriving first</h1>
+                    <p data-i18n="ui_web_e8a11ce9bbee">Each cinema section unlocks from its first ready batch. Live TV is imported last.</p>
                     ${this.renderSetupProgressBar(percent)}
                     <div class="norva-setup-actions">
-                        <button class="btn btn-secondary" id="norva-setup-sync-settings" type="button">TV Service settings</button>
+                        <button class="btn btn-secondary" id="norva-setup-sync-settings" type="button" data-i18n="ui_web_a6477ffe5ba5">TV Service settings</button>
                     </div>
                 </div>
-                <div class="norva-setup-sync-panel" aria-label="Catalog import progress">
+                <div class="norva-setup-sync-panel" aria-label="Catalog import progress" data-i18n-aria-label="ui_web_401b61b8c432">
                     ${this.renderSetupPosterStrip()}
                 </div>
             </section>
@@ -1178,7 +1178,7 @@ class HomePage {
     renderSetupSyncFallback(summary = {}) {
         const steps = this.setupSteps(summary.state || 'syncing');
         return `
-            <div class="norva-setup-steps" role="list" aria-label="Norva setup progress">
+            <div class="norva-setup-steps" role="list" aria-label="Norva setup progress" data-i18n-aria-label="ui_web_5d6494249fb6">
                 ${steps.map((step, index) => `
                     <div class="norva-setup-step ${step.state}" role="listitem" ${['active', 'attention'].includes(step.state) ? 'aria-current="step"' : ''} aria-label="${this.escapeAttr(`Step ${index + 1}: ${step.title}. ${this.setupStepStatusLabel(step.state)}.`)}">
                         <span class="norva-setup-step-index" aria-hidden="true">${this.escapeHtml(step.index)}</span>
@@ -1200,56 +1200,56 @@ class HomePage {
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
                 <div class="norva-setup-connect-card">
-                    <div class="norva-setup-kicker">One step to watch</div>
-                    <div class="norva-setup-flow-progress" data-setup-flow-progress data-setup-flow-steps="2" aria-label="Setup progress, 2 steps">
-                        <span class="is-current" data-setup-flow-marker="connection"><i>1</i><b>Connect</b></span>
+                    <div class="norva-setup-kicker" data-i18n="ui_web_5e9e04c8492d">One step to watch</div>
+                    <div class="norva-setup-flow-progress" data-setup-flow-progress data-setup-flow-steps="2" aria-label="Setup progress, 2 steps" data-i18n-aria-label="ui_web_a32fbecf9ed9">
+                        <span class="is-current" data-setup-flow-marker="connection"><i>1</i><b data-i18n="ui_web_1a2303ede074">Connect</b></span>
                         <span class="norva-setup-flow-line"></span>
-                        <span class="hidden" data-setup-flow-marker="access" data-setup-flow-access-only hidden><i>2</i><b>Access</b></span>
+                        <span class="hidden" data-setup-flow-marker="access" data-setup-flow-access-only hidden><i>2</i><b data-i18n="ui_web_ec5ba0abb717">Access</b></span>
                         <span class="norva-setup-flow-line hidden" data-setup-flow-access-only hidden></span>
-                        <span data-setup-flow-marker="finish"><i data-setup-flow-finish-index>2</i><b>Finish</b></span>
+                        <span data-setup-flow-marker="finish"><i data-setup-flow-finish-index>2</i><b data-i18n="ui_web_a6c7a84baa67">Finish</b></span>
                     </div>
-                    <h1 data-setup-flow-title>Paste your TV service link</h1>
-                    <p data-setup-flow-description>We’ll organize your catalog. Nothing else.</p>
+                    <h1 data-setup-flow-title data-i18n="ui_web_93c8c94e9ca4">Paste your TV service link</h1>
+                    <p data-setup-flow-description data-i18n="ui_web_99c85333e6c2">We’ll organize your catalog. Nothing else.</p>
                     <form class="norva-setup-inline-form" id="home-tv-service-form" data-setup-flow-step="connection" data-setup-connection-type="m3u" data-setup-assistance-view="connection" autocomplete="off" novalidate>
                         <div data-setup-connection-step>
                             <div data-setup-connection-main>
-                                <div class="setup-mode-tabs" role="tablist" aria-label="Connection format">
-                                    <button class="setup-mode-tab" id="home-source-mode-m3u" type="button" role="tab" aria-selected="true" aria-controls="home-source-panel-m3u" data-setup-mode="m3u">M3U link</button>
-                                    <button class="setup-mode-tab" id="home-source-mode-xtream" type="button" role="tab" aria-selected="false" aria-controls="home-source-panel-xtream" data-setup-mode="xtream" tabindex="-1">Xtream login</button>
+                                <div class="setup-mode-tabs" role="tablist" aria-label="Connection format" data-i18n-aria-label="ui_web_b7cd021f8244">
+                                    <button class="setup-mode-tab" id="home-source-mode-m3u" type="button" role="tab" aria-selected="true" aria-controls="home-source-panel-m3u" data-setup-mode="m3u" data-i18n="ui_web_10401de048cf">M3U link</button>
+                                    <button class="setup-mode-tab" id="home-source-mode-xtream" type="button" role="tab" aria-selected="false" aria-controls="home-source-panel-xtream" data-setup-mode="xtream" tabindex="-1" data-i18n="ui_web_f425b12da53b">Xtream login</button>
                                 </div>
                                 <input type="hidden" id="home-source-name" name="provider-display-name" value="">
                                 <div class="setup-mode-panel" id="home-source-panel-m3u" role="tabpanel" aria-labelledby="home-source-mode-m3u" data-setup-panel="m3u">
                                     <div class="form-group">
-                                        <label for="home-source-url">Full M3U or M3U8 link</label>
+                                        <label for="home-source-url" data-i18n="ui_web_e8ed07209fe1">Full M3U or M3U8 link</label>
                                         <input type="url" id="home-source-url" class="form-input setup-form-input"
                                                placeholder="https://provider.example/get.php?…"
                                                name="provider-playlist-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"
                                                aria-describedby="home-source-url-hint home-source-url-error">
-                                        <p class="setup-form-hint" id="home-source-url-hint" role="status" aria-live="polite" aria-atomic="true">Usually found in your provider email or account area.</p>
+                                        <p class="setup-form-hint" id="home-source-url-hint" role="status" aria-live="polite" aria-atomic="true" data-i18n="ui_web_cda2a53e56ad">Usually found in your provider email or account area.</p>
                                         <p class="setup-field-error hidden" id="home-source-url-error"></p>
                                     </div>
                                 </div>
                                 <div class="setup-mode-panel" id="home-source-panel-xtream" role="tabpanel" aria-labelledby="home-source-mode-xtream" data-setup-panel="xtream" hidden>
                                     <div class="form-group">
-                                        <label for="home-source-server">Server address</label>
+                                        <label for="home-source-server" data-i18n="ui_web_8be89710b2f1">Server address</label>
                                         <input type="url" id="home-source-server" class="form-input setup-form-input"
                                                placeholder="https://provider.example:8080"
                                                name="provider-server-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"
                                                aria-describedby="home-source-server-hint home-source-server-error">
-                                        <p class="setup-form-hint" id="home-source-server-hint" role="status" aria-live="polite" aria-atomic="true">Paste a complete Xtream link to fill the login automatically.</p>
+                                        <p class="setup-form-hint" id="home-source-server-hint" role="status" aria-live="polite" aria-atomic="true" data-i18n="ui_web_eb340de9b7b3">Paste a complete Xtream link to fill the login automatically.</p>
                                         <p class="setup-field-error hidden" id="home-source-server-error"></p>
                                     </div>
                                     <div class="setup-credentials-grid">
                                         <div class="form-group">
-                                            <label for="home-source-username">Username</label>
-                                            <input type="text" id="home-source-username" name="provider-login" class="form-input setup-form-input" placeholder="Username" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-username-error">
+                                            <label for="home-source-username" data-i18n="ui_web_e3b89e9d33f8">Username</label>
+                                            <input type="text" id="home-source-username" name="provider-login" class="form-input setup-form-input" placeholder="Username" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-username-error" data-i18n-placeholder="ui_web_e3b89e9d33f8">
                                             <p class="setup-field-error hidden" id="home-source-username-error"></p>
                                         </div>
                                         <div class="form-group">
-                                            <label for="home-source-password">Password</label>
+                                            <label for="home-source-password" data-i18n="ui_web_e7cf3ef4f17c">Password</label>
                                             <div class="setup-password-field">
-                                                <input type="password" id="home-source-password" name="provider-secret" class="form-input setup-form-input" placeholder="Password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-password-error">
-                                                <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false">${Icons.hide}</button>
+                                                <input type="password" id="home-source-password" name="provider-secret" class="form-input setup-form-input" placeholder="Password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other" aria-describedby="home-source-password-error" data-i18n-placeholder="ui_web_e7cf3ef4f17c">
+                                                <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password" aria-pressed="false" data-i18n-aria-label="ui_web_6aeaa6a53d09">${Icons.hide}</button>
                                             </div>
                                             <p class="setup-field-error hidden" id="home-source-password-error"></p>
                                         </div>
@@ -1257,49 +1257,49 @@ class HomePage {
                                 </div>
                                 <button class="setup-compatibility-help" type="button" data-setup-app-login-trigger>
                                     <span class="setup-compatibility-icon" aria-hidden="true">${Icons.info}</span>
-                                    <span><strong>My provider only gave me an app login</strong><small>No M3U link or Xtream server details</small></span>
+                                    <span><strong data-i18n="ui_web_9513c3552d56">My provider only gave me an app login</strong><small data-i18n="ui_web_091723fa6720">No M3U link or Xtream server details</small></span>
                                     <span class="setup-compatibility-arrow" aria-hidden="true">${Icons.chevronRight}</span>
                                 </button>
-                                <div class="setup-player-note"><span aria-hidden="true">${Icons.fingerprint}</span><span>Your service details are encrypted. Norva is a player and never supplies content.</span></div>
+                                <div class="setup-player-note"><span aria-hidden="true">${Icons.fingerprint}</span><span data-i18n="ui_web_9946d5d903db">Your service details are encrypted. Norva is a player and never supplies content.</span></div>
                                 ${offerNotifications ? `<div class="home-ecosystem-notifications setup-notification-nudge">
-                                    <span><strong>Let Norva finish in the background</strong><small>Enable notifications to know when a large catalogue is ready or needs attention.</small></span>
-                                    <button type="button" class="btn btn-secondary" data-ecosystem-notifications>Enable notifications</button>
+                                    <span><strong data-i18n="ui_web_2fe7ded71185">Let Norva finish in the background</strong><small data-i18n="ui_web_029b350b325c">Enable notifications to know when a large catalogue is ready or needs attention.</small></span>
+                                    <button type="button" class="btn btn-secondary" data-ecosystem-notifications data-i18n="ui_web_682be64ae780">Enable notifications</button>
                                 </div>` : ''}
                             </div>
                             <section class="setup-assistance-panel" data-setup-app-login-panel aria-labelledby="home-app-login-title" hidden>
-                                <button class="setup-back-button" type="button" data-setup-assist-back><span aria-hidden="true">${Icons.chevronRight}</span>Back to connection formats</button>
+                                <button class="setup-back-button" type="button" data-setup-assist-back><span aria-hidden="true">${Icons.chevronRight}</span><norva-i18n data-i18n="ui_web_7524c5f6d71d">Back to connection formats</norva-i18n></button>
                                 <span class="setup-assistance-icon" aria-hidden="true">${Icons.info}</span>
-                                <h2 id="home-app-login-title" tabindex="-1">An app login cannot be imported directly</h2>
-                                <p>Norva needs an <strong>M3U/M3U8 link</strong> or <strong>Xtream server credentials</strong> from your provider.</p>
-                                <div class="setup-privacy-callout"><span aria-hidden="true">${Icons.fingerprint}</span><span>Do not enter your provider app password here.</span></div>
-                                <button class="btn btn-primary setup-guide-open" type="button" data-setup-guide-open>How to get M3U or Xtream access</button>
+                                <h2 id="home-app-login-title" tabindex="-1" data-i18n="ui_web_ec8a17582163">An app login cannot be imported directly</h2>
+                                <p><norva-i18n data-i18n="ui_web_dd97893027c5">Norva needs an </norva-i18n><strong data-i18n="ui_web_3009958ac891">M3U/M3U8 link</strong><norva-i18n data-i18n="ui_web_7175517a370b"> or </norva-i18n><strong data-i18n="ui_web_750b436e4c7d">Xtream server credentials</strong><norva-i18n data-i18n="ui_web_bc6556a0f2b7"> from your provider.</norva-i18n></p>
+                                <div class="setup-privacy-callout"><span aria-hidden="true">${Icons.fingerprint}</span><span data-i18n="ui_web_a051b583aa00">Do not enter your provider app password here.</span></div>
+                                <button class="btn btn-primary setup-guide-open" type="button" data-setup-guide-open data-i18n="ui_web_a7286d784965">How to get M3U or Xtream access</button>
                             </section>
                             <section class="setup-assistance-panel setup-access-guide" data-setup-access-guide aria-labelledby="home-access-guide-title" hidden>
-                                <button class="setup-back-button" type="button" data-setup-guide-back><span aria-hidden="true">${Icons.chevronRight}</span>Back</button>
-                                <h2 id="home-access-guide-title" tabindex="-1">Ask your provider for compatible access</h2>
-                                <p>Look in your welcome email, account area or provider support.</p>
-                                <div class="setup-access-formats" aria-label="Compatible formats">
-                                    <div><span aria-hidden="true">${Icons.link}</span><span><strong>M3U / M3U8 playlist</strong><small>A complete URL, often ending in .m3u or containing get.php</small></span></div>
-                                    <div><span aria-hidden="true">${Icons.fingerprint}</span><span><strong>Xtream access</strong><small>Server URL, username and password</small></span></div>
+                                <button class="setup-back-button" type="button" data-setup-guide-back><span aria-hidden="true">${Icons.chevronRight}</span><norva-i18n data-i18n="ui_web_76900f1bfd16">Back</norva-i18n></button>
+                                <h2 id="home-access-guide-title" tabindex="-1" data-i18n="ui_web_f28de2b02874">Ask your provider for compatible access</h2>
+                                <p data-i18n="ui_web_a28b4ae83365">Look in your welcome email, account area or provider support.</p>
+                                <div class="setup-access-formats" aria-label="Compatible formats" data-i18n-aria-label="ui_web_c61307c7ff49">
+                                    <div><span aria-hidden="true">${Icons.link}</span><span><strong data-i18n="ui_web_e13a9fd38481">M3U / M3U8 playlist</strong><small data-i18n="ui_web_196516c9f941">A complete URL, often ending in .m3u or containing get.php</small></span></div>
+                                    <div><span aria-hidden="true">${Icons.fingerprint}</span><span><strong data-i18n="ui_web_020605b89556">Xtream access</strong><small data-i18n="ui_web_d939dd5ed96f">Server URL, username and password</small></span></div>
                                 </div>
                                 <div class="setup-provider-request">
-                                    <strong>Message for your provider</strong>
+                                    <strong data-i18n="ui_web_09c1793b0cb5">Message for your provider</strong>
                                     <div class="setup-provider-message" data-setup-provider-message>
-                                        <p>Hello, could you please send me one of these access formats?</p>
+                                        <p data-i18n="ui_web_251db7feb14c">Hello, could you please send me one of these access formats?</p>
                                         <ol>
-                                            <li>My complete M3U/M3U8 playlist URL</li>
-                                            <li>My Xtream Codes details: server URL (including the port), username and password</li>
+                                            <li data-i18n="ui_web_90b277f27c7c">My complete M3U/M3U8 playlist URL</li>
+                                            <li data-i18n="ui_web_6d771c44295a">My Xtream Codes details: server URL (including the port), username and password</li>
                                         </ol>
-                                        <p>Thank you.</p>
+                                        <p data-i18n="ui_web_8569efc4ed5a">Thank you.</p>
                                     </div>
                                 </div>
-                                <button class="btn btn-primary setup-copy-message" type="button" data-setup-copy-message>Copy message</button>
+                                <button class="btn btn-primary setup-copy-message" type="button" data-setup-copy-message data-i18n="ui_web_457efe538b25">Copy message</button>
                                 <p class="setup-copy-feedback" data-setup-copy-feedback role="status" aria-live="polite" aria-atomic="true"></p>
                             </section>
                         </div>
                         <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert" aria-atomic="true" tabindex="-1"></div>
                         ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true, deferred: true }) || ''}
-                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Check playlist</button>
+                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit" data-i18n="ui_web_5d329e5a79c1">Check playlist</button>
                     </form>
                 </div>
             </section>
@@ -1328,11 +1328,11 @@ class HomePage {
 
     setupStepStatusLabel(state) {
         return ({
-            active: 'Current step',
-            complete: 'Completed',
-            attention: 'Needs attention',
-            pending: 'Locked until the previous step is complete'
-        })[state] || 'Pending';
+            active: (globalThis.NorvaI18n?.t("ui_web_a22aa04ba67b", { defaultValue: "Current step" }) ?? 'Current step'),
+            complete: (globalThis.NorvaI18n?.t("ui_web_22a970d2e5b1", { defaultValue: "Completed" }) ?? 'Completed'),
+            attention: (globalThis.NorvaI18n?.t("ui_web_c1ebc7817870", { defaultValue: "Needs attention" }) ?? 'Needs attention'),
+            pending: (globalThis.NorvaI18n?.t("ui_web_4435d48aab8f", { defaultValue: "Locked until the previous step is complete" }) ?? 'Locked until the previous step is complete')
+        })[state] || (globalThis.NorvaI18n?.t("ui_web_331551b0de41", { defaultValue: "Pending" }) ?? 'Pending');
     }
 
     setupConnectionFailureFamily(error = {}, type = 'xtream') {
@@ -1358,48 +1358,48 @@ class HomePage {
         const family = this.setupConnectionFailureFamily(error, type);
         if (status === 404 || code.includes('ENDPOINT_NOT_FOUND') || code.includes('NOT_FOUND')) {
             return {
-                title: 'This provider address was not found',
-                body: 'We reached the server, but this path does not exist. Check the complete link or server address.'
+                title: (globalThis.NorvaI18n?.t("ui_web_b8068f1e76de", { defaultValue: "This provider address was not found" }) ?? 'This provider address was not found'),
+                body: (globalThis.NorvaI18n?.t("ui_web_24f9c2287225", { defaultValue: "We reached the server, but this path does not exist. Check the complete link or server address." }) ?? 'We reached the server, but this path does not exist. Check the complete link or server address.')
             };
         }
         if (family === 'credentials') {
             return {
-                title: 'The provider rejected this login',
-                body: 'Check the server address, username and password supplied by your provider.'
+                title: (globalThis.NorvaI18n?.t("ui_web_1deca541146d", { defaultValue: "The provider rejected this login" }) ?? 'The provider rejected this login'),
+                body: (globalThis.NorvaI18n?.t("ui_web_09723539d23e", { defaultValue: "Check the server address, username and password supplied by your provider." }) ?? 'Check the server address, username and password supplied by your provider.')
             };
         }
         if (family === 'provider_busy') {
             return {
-                title: 'This TV service is busy',
-                body: 'Your details were kept. Wait a few seconds, then try again.'
+                title: (globalThis.NorvaI18n?.t("ui_web_3be599075bbf", { defaultValue: "This TV service is busy" }) ?? 'This TV service is busy'),
+                body: (globalThis.NorvaI18n?.t("ui_web_14f0329847d8", { defaultValue: "Your details were kept. Wait a few seconds, then try again." }) ?? 'Your details were kept. Wait a few seconds, then try again.')
             };
         }
         if (family === 'payload_too_large') {
             return {
-                title: 'This playlist contains an oversized entry',
-                body: 'Your link was kept, but one playlist line exceeded the safe parsing limit. Ask your provider for a standard M3U or filtered playlist, then try again.'
+                title: (globalThis.NorvaI18n?.t("ui_web_4658d5da7c2a", { defaultValue: "This playlist contains an oversized entry" }) ?? 'This playlist contains an oversized entry'),
+                body: (globalThis.NorvaI18n?.t("ui_web_364ff4192cfb", { defaultValue: "Your link was kept, but one playlist line exceeded the safe parsing limit. Ask your provider for a standard M3U or filtered playlist, then try again." }) ?? 'Your link was kept, but one playlist line exceeded the safe parsing limit. Ask your provider for a standard M3U or filtered playlist, then try again.')
             };
         }
         if (family === 'provider_unreachable' || family === 'timeout' || family === 'network') {
             return {
-                title: 'Your provider server is not responding',
-                body: 'Your details were kept. Try again in a few minutes, or ask your provider whether the server is online.'
+                title: (globalThis.NorvaI18n?.t("ui_web_27bd9be226c9", { defaultValue: "Your provider server is not responding" }) ?? 'Your provider server is not responding'),
+                body: (globalThis.NorvaI18n?.t("ui_web_3c3a61ddfc71", { defaultValue: "Your details were kept. Try again in a few minutes, or ask your provider whether the server is online." }) ?? 'Your details were kept. Try again in a few minutes, or ask your provider whether the server is online.')
             };
         }
         if (family === 'format') {
             return {
-                title: 'This isn’t a complete playlist link',
-                body: 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.'
+                title: (globalThis.NorvaI18n?.t("ui_web_9048277faadb", { defaultValue: "This isn’t a complete playlist link" }) ?? 'This isn’t a complete playlist link'),
+                body: (globalThis.NorvaI18n?.t("ui_web_f7c75d23707a", { defaultValue: "Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php." }) ?? 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.')
             };
         }
         return type === 'm3u'
             ? {
-                title: 'Norva could not connect this playlist',
-                body: 'Your link was kept. Check it with your provider, then try again.'
+                title: (globalThis.NorvaI18n?.t("ui_web_b5531a4e62e1", { defaultValue: "Norva could not connect this playlist" }) ?? 'Norva could not connect this playlist'),
+                body: (globalThis.NorvaI18n?.t("ui_web_1895c31501ad", { defaultValue: "Your link was kept. Check it with your provider, then try again." }) ?? 'Your link was kept. Check it with your provider, then try again.')
             }
             : {
-                title: 'Norva could not connect this TV service',
-                body: 'Check the server address and login, then try again.'
+                title: (globalThis.NorvaI18n?.t("ui_web_ae85528fd848", { defaultValue: "Norva could not connect this TV service" }) ?? 'Norva could not connect this TV service'),
+                body: (globalThis.NorvaI18n?.t("ui_web_fd02281fda94", { defaultValue: "Check the server address and login, then try again." }) ?? 'Check the server address and login, then try again.')
             };
     }
 
@@ -1435,8 +1435,8 @@ class HomePage {
         if (!form || !m3uInput || !serverInput || !usernameInput || !passwordInput || !submit) return;
         const accessWizard = manager?.bindProviderAccessTerms?.(form);
         let accessWizardApproved = false;
-        const defaultM3uHint = 'Usually found in your provider email or account area.';
-        const defaultServerHint = 'Paste a complete Xtream link to fill the login automatically.';
+        const defaultM3uHint = (globalThis.NorvaI18n?.t("ui_web_cda2a53e56ad", { defaultValue: "Usually found in your provider email or account area." }) ?? 'Usually found in your provider email or account area.');
+        const defaultServerHint = (globalThis.NorvaI18n?.t("ui_web_eb340de9b7b3", { defaultValue: "Paste a complete Xtream link to fill the login automatically." }) ?? 'Paste a complete Xtream link to fill the login automatically.');
 
         const fieldErrors = new Map([
             [m3uInput, container.querySelector('#home-source-url-error')],
@@ -1521,7 +1521,7 @@ class HomePage {
         const selectedType = () => form.dataset.setupConnectionType === 'xtream' ? 'xtream' : 'm3u';
         const hasAccessStep = () => selectedType() === 'xtream' && Boolean(accessTerms);
         const activeUrlInput = () => selectedType() === 'xtream' ? serverInput : m3uInput;
-        const connectionSubmitLabel = () => selectedType() === 'xtream' ? 'Connect source' : 'Check playlist';
+        const connectionSubmitLabel = () => selectedType() === 'xtream' ? (globalThis.NorvaI18n?.t("ui_web_aeccadaebf5b", { defaultValue: "Connect source" }) ?? 'Connect source') : (globalThis.NorvaI18n?.t("ui_web_5d329e5a79c1", { defaultValue: "Check playlist" }) ?? 'Check playlist');
         const updateFlowTopology = () => {
             const accessAvailable = hasAccessStep();
             accessOnlyProgressItems.forEach((item) => {
@@ -1532,7 +1532,7 @@ class HomePage {
             if (flowProgress) {
                 const totalSteps = accessAvailable ? '3' : '2';
                 flowProgress.dataset.setupFlowSteps = totalSteps;
-                flowProgress.setAttribute('aria-label', `Setup progress, ${totalSteps} steps`);
+                flowProgress.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0fc2114865b0", {defaultValue: "Setup progress, {{p0}} steps", p0:(totalSteps)}) : `Setup progress, ${totalSteps} steps`));
             }
         };
         const updateSubmitVisibility = () => {
@@ -1592,10 +1592,10 @@ class HomePage {
             if (connectionStep) connectionStep.hidden = accessActive;
             if (accessTerms) accessTerms.hidden = !accessActive;
             updateSubmitVisibility();
-            if (flowTitle) flowTitle.textContent = accessActive ? 'When can you use this service?' : 'Paste your TV service link';
+            if (flowTitle) flowTitle.textContent = accessActive ? (globalThis.NorvaI18n?.t("ui_web_602382c2e7c6", { defaultValue: "When can you use this service?" }) ?? 'When can you use this service?') : (globalThis.NorvaI18n?.t("ui_web_93c8c94e9ca4", { defaultValue: "Paste your TV service link" }) ?? 'Paste your TV service link');
             if (flowDescription) flowDescription.textContent = accessActive
-                ? 'Add the access period now, or safely choose to do it later.'
-                : 'We’ll organize your catalog. Nothing else.';
+                ? (globalThis.NorvaI18n?.t("ui_web_79c36658663e", { defaultValue: "Add the access period now, or safely choose to do it later." }) ?? 'Add the access period now, or safely choose to do it later.')
+                : (globalThis.NorvaI18n?.t("ui_web_99c85333e6c2", { defaultValue: "We’ll organize your catalog. Nothing else." }) ?? 'We’ll organize your catalog. Nothing else.');
             container.querySelectorAll('[data-setup-flow-marker]').forEach((marker) => {
                 const markerStep = marker.dataset.setupFlowMarker;
                 marker.classList.toggle('is-current', markerStep === step);
@@ -1618,7 +1618,7 @@ class HomePage {
             const currentPathShape = manager?.sourceInputPathShape?.(serverInput.value) || 'invalid';
             const parsed = manager?.parseXtreamLink?.(serverInput.value);
             if (!parsed) {
-                if (serverHint) serverHint.textContent = 'Paste a complete Xtream link to fill the login automatically.';
+                if (serverHint) serverHint.textContent = (globalThis.NorvaI18n?.t("ui_web_eb340de9b7b3", { defaultValue: "Paste a complete Xtream link to fill the login automatically." }) ?? 'Paste a complete Xtream link to fill the login automatically.');
                 return null;
             }
             if (!serverInput.dataset.sourceInputPathShape || currentPathShape !== 'root') {
@@ -1632,8 +1632,8 @@ class HomePage {
             if (parsed.password && (force || !passwordInput.value.trim())) passwordInput.value = parsed.password;
             if (serverHint) {
                 serverHint.textContent = usernameInput.value.trim() && passwordInput.value.trim()
-                    ? 'Login detected from the link. You can review it before connecting.'
-                    : 'Server detected. Add the username and password if they were provided separately.';
+                    ? (globalThis.NorvaI18n?.t("ui_web_756edfed59f1", { defaultValue: "Login detected from the link. You can review it before connecting." }) ?? 'Login detected from the link. You can review it before connecting.')
+                    : (globalThis.NorvaI18n?.t("ui_web_f5df0f98919e", { defaultValue: "Server detected. Add the username and password if they were provided separately." }) ?? 'Server detected. Add the username and password if they were provided separately.');
             }
             clearFieldError(serverInput);
             if (usernameInput.value.trim()) clearFieldError(usernameInput);
@@ -1679,7 +1679,7 @@ class HomePage {
         passwordToggle?.addEventListener('click', () => {
             const visible = passwordInput.type === 'text';
             passwordInput.type = visible ? 'password' : 'text';
-            passwordToggle.setAttribute('aria-label', visible ? 'Show password' : 'Hide password');
+            passwordToggle.setAttribute('aria-label', visible ? (globalThis.NorvaI18n?.t("ui_web_6aeaa6a53d09", { defaultValue: "Show password" }) ?? 'Show password') : (globalThis.NorvaI18n?.t("ui_web_a60a56c584b3", { defaultValue: "Hide password" }) ?? 'Hide password'));
             passwordToggle.setAttribute('aria-pressed', String(!visible));
         });
 
@@ -1725,15 +1725,15 @@ class HomePage {
             if (copyResetTimer) clearTimeout(copyResetTimer);
             try {
                 await writeClipboard(providerRequest);
-                copyMessage.textContent = 'Copied';
-                if (copyFeedback) copyFeedback.textContent = 'Message copied to clipboard.';
+                copyMessage.textContent = (globalThis.NorvaI18n?.t("ui_web_8d525e5f158b", { defaultValue: "Copied" }) ?? 'Copied');
+                if (copyFeedback) copyFeedback.textContent = (globalThis.NorvaI18n?.t("ui_web_5e19d709b999", { defaultValue: "Message copied to clipboard." }) ?? 'Message copied to clipboard.');
             } catch (_) {
-                copyMessage.textContent = 'Copy message';
-                if (copyFeedback) copyFeedback.textContent = 'Could not copy automatically. Select the message above to copy it.';
+                copyMessage.textContent = (globalThis.NorvaI18n?.t("ui_web_457efe538b25", { defaultValue: "Copy message" }) ?? 'Copy message');
+                if (copyFeedback) copyFeedback.textContent = (globalThis.NorvaI18n?.t("ui_web_885e4c5495fb", { defaultValue: "Could not copy automatically. Select the message above to copy it." }) ?? 'Could not copy automatically. Select the message above to copy it.');
             } finally {
                 copyMessage.disabled = false;
                 copyResetTimer = setTimeout(() => {
-                    copyMessage.textContent = 'Copy message';
+                    copyMessage.textContent = (globalThis.NorvaI18n?.t("ui_web_457efe538b25", { defaultValue: "Copy message" }) ?? 'Copy message');
                     if (copyFeedback) copyFeedback.textContent = '';
                 }, 2200);
             }
@@ -1748,22 +1748,22 @@ class HomePage {
             if (rawUrl && !urlInput.dataset.sourceInputPathShape) urlInput.dataset.sourceInputPathShape = pathShape;
             let firstInvalid = null;
             if (!rawUrl) {
-                const message = type === 'm3u' ? 'Paste your complete M3U or M3U8 link.' : 'Enter the server address supplied by your provider.';
+                const message = type === 'm3u' ? (globalThis.NorvaI18n?.t("ui_web_c58657cc0dd1", { defaultValue: "Paste your complete M3U or M3U8 link." }) ?? 'Paste your complete M3U or M3U8 link.') : (globalThis.NorvaI18n?.t("ui_web_b56f15e646bd", { defaultValue: "Enter the server address supplied by your provider." }) ?? 'Enter the server address supplied by your provider.');
                 setFieldError(urlInput, message);
                 showSummaryError({
-                    title: type === 'm3u' ? 'Add your playlist link' : 'Add your Xtream server',
+                    title: type === 'm3u' ? (globalThis.NorvaI18n?.t("ui_web_a995ed9821d6", { defaultValue: "Add your playlist link" }) ?? 'Add your playlist link') : (globalThis.NorvaI18n?.t("ui_web_e337ab61b2a8", { defaultValue: "Add your Xtream server" }) ?? 'Add your Xtream server'),
                     body: message
                 });
                 firstInvalid = urlInput;
             } else if (feedback?.state === 'invalid' || pathShape === 'invalid' || pathShape === 'web_page') {
                 const copy = type === 'm3u'
                     ? {
-                        title: 'This isn’t a complete playlist link',
-                        body: feedback?.message || 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.'
+                        title: (globalThis.NorvaI18n?.t("ui_web_9048277faadb", { defaultValue: "This isn’t a complete playlist link" }) ?? 'This isn’t a complete playlist link'),
+                        body: feedback?.message || (globalThis.NorvaI18n?.t("ui_web_f7c75d23707a", { defaultValue: "Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php." }) ?? 'Paste the full M3U/M3U8 link from your provider. It may end in .m3u or include get.php.')
                     }
                     : {
-                        title: 'This isn’t a valid Xtream server address',
-                        body: feedback?.message || 'Enter the complete http or https server address supplied by your provider.'
+                        title: (globalThis.NorvaI18n?.t("ui_web_86e32cafc697", { defaultValue: "This isn’t a valid Xtream server address" }) ?? 'This isn’t a valid Xtream server address'),
+                        body: feedback?.message || (globalThis.NorvaI18n?.t("ui_web_1787db55e575", { defaultValue: "Enter the complete http or https server address supplied by your provider." }) ?? 'Enter the complete http or https server address supplied by your provider.')
                     };
                 setFieldError(urlInput, copy.body);
                 showSummaryError(copy);
@@ -1771,18 +1771,18 @@ class HomePage {
             }
             if (type === 'xtream') {
                 if (!usernameInput.value.trim()) {
-                    setFieldError(usernameInput, 'Enter the username supplied by your provider.');
+                    setFieldError(usernameInput, (globalThis.NorvaI18n?.t("ui_web_13d4de5378c3", { defaultValue: "Enter the username supplied by your provider." }) ?? 'Enter the username supplied by your provider.'));
                     firstInvalid = firstInvalid || usernameInput;
                 }
                 if (!passwordInput.value.trim()) {
-                    setFieldError(passwordInput, 'Enter the password supplied by your provider.');
+                    setFieldError(passwordInput, (globalThis.NorvaI18n?.t("ui_web_9e67025b775c", { defaultValue: "Enter the password supplied by your provider." }) ?? 'Enter the password supplied by your provider.'));
                     firstInvalid = firstInvalid || passwordInput;
                 }
                 if (!firstInvalid && pathShape !== 'invalid' && pathShape !== 'web_page') return true;
                 if (rawUrl && (!usernameInput.value.trim() || !passwordInput.value.trim())) {
                     showSummaryError({
-                        title: 'Complete your Xtream login',
-                        body: 'Enter the server address, username and password supplied by your provider.'
+                        title: (globalThis.NorvaI18n?.t("ui_web_bb89e5289b8a", { defaultValue: "Complete your Xtream login" }) ?? 'Complete your Xtream login'),
+                        body: ((globalThis.NorvaI18n?.t("ui_web_fe320ff434f3", { defaultValue: "Enter the server address, username and password supplied by your provider." }) ?? 'Enter the server address, username and password supplied by your provider.'))
                     });
                 }
             }
@@ -1836,7 +1836,7 @@ class HomePage {
                     try { target?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
                     return;
                 }
-                showSummaryError('Review the provider access details, then try again.');
+                showSummaryError((globalThis.NorvaI18n?.t("ui_web_0b002f720075", { defaultValue: "Review the provider access details, then try again." }) ?? 'Review the provider access details, then try again.'));
                 return;
             }
 
@@ -1884,9 +1884,9 @@ class HomePage {
                 });
                 document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
                 if (accessSaveFailed) {
-                    NorvaModal.toast('Your service is connected. Add its access period later from Settings → TV Service.', 'error');
+                    NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_9c23af5a6dac", { defaultValue: "Your service is connected. Add its access period later from Settings → TV Service." }) ?? 'Your service is connected. Add its access period later from Settings → TV Service.'), 'error');
                 }
-                submit.textContent = 'Preparing catalog…';
+                submit.textContent = (globalThis.NorvaI18n?.t("ui_web_f9a24eb2ee66", { defaultValue: "Preparing catalog…" }) ?? 'Preparing catalog…');
                 this.lastLoadedAt = 0;
                 await this.app?.refreshSourceHealth?.();
                 await this.loadDashboardData();
@@ -1938,68 +1938,68 @@ class HomePage {
         if (pairedScreen) {
             if (state === 'disabled') {
                 return {
-                    title: 'Your TV service is paused',
-                    message: 'Enable it from your phone or web account, then check again here.',
-                    primary: 'Check again',
+                    title: (globalThis.NorvaI18n?.t("ui_web_a82f82235cb8", { defaultValue: "Your TV service is paused" }) ?? 'Your TV service is paused'),
+                    message: (globalThis.NorvaI18n?.t("ui_web_f519a6e8af01", { defaultValue: "Enable it from your phone or web account, then check again here." }) ?? 'Enable it from your phone or web account, then check again here.'),
+                    primary: (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again'),
                     primaryAction: 'refresh'
                 };
             }
             if (state === 'syncing') {
                 return {
-                    title: 'Norva is preparing your catalog',
-                    message: 'Keep this screen open. Finish setup from your phone or web account; this TV will update automatically.',
-                    primary: 'Check again',
+                    title: (globalThis.NorvaI18n?.t("ui_web_6de489f3c7c5", { defaultValue: "Norva is preparing your catalog" }) ?? 'Norva is preparing your catalog'),
+                    message: (globalThis.NorvaI18n?.t("ui_web_0c8fa94cb2dc", { defaultValue: "Keep this screen open. Finish setup from your phone or web account; this TV will update automatically." }) ?? 'Keep this screen open. Finish setup from your phone or web account; this TV will update automatically.'),
+                    primary: (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again'),
                     primaryAction: 'refresh'
                 };
             }
             if (['auth_failed', 'expired', 'unreachable', 'degraded'].includes(state)) {
                 return {
-                    title: 'Repair your TV service from your phone',
-                    message: summary.message || 'This TV is paired, but your TV service needs attention. Open Norva on your phone or web account to repair it, then check again here.',
-                    primary: 'Check again',
+                    title: (globalThis.NorvaI18n?.t("ui_web_066539b59b65", { defaultValue: "Repair your TV service from your phone" }) ?? 'Repair your TV service from your phone'),
+                    message: summary.message || (globalThis.NorvaI18n?.t("ui_web_55d79e05356c", { defaultValue: "This TV is paired, but your TV service needs attention. Open Norva on your phone or web account to repair it, then check again here." }) ?? 'This TV is paired, but your TV service needs attention. Open Norva on your phone or web account to repair it, then check again here.'),
+                    primary: (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again'),
                     primaryAction: 'refresh'
                 };
             }
             return {
-                title: 'Finish setup from your phone',
-                message: 'This TV is paired to your Norva account. Connect your TV service from your phone or web account, then return here to start watching.',
-                primary: 'Check again',
+                title: (globalThis.NorvaI18n?.t("ui_web_75e43c790807", { defaultValue: "Finish setup from your phone" }) ?? 'Finish setup from your phone'),
+                message: (globalThis.NorvaI18n?.t("ui_web_ed168c3a8963", { defaultValue: "This TV is paired to your Norva account. Connect your TV service from your phone or web account, then return here to start watching." }) ?? 'This TV is paired to your Norva account. Connect your TV service from your phone or web account, then return here to start watching.'),
+                primary: (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again'),
                 primaryAction: 'refresh'
             };
         }
 
         if (state === 'syncing') {
             return {
-                title: 'Norva is preparing your catalog',
-                message: summary.message || 'Channels, movies and series are being imported. You can keep this page open; Norva will refresh automatically.',
-                primary: 'View TV service'
+                title: (globalThis.NorvaI18n?.t("ui_web_6de489f3c7c5", { defaultValue: "Norva is preparing your catalog" }) ?? 'Norva is preparing your catalog'),
+                message: summary.message || (globalThis.NorvaI18n?.t("ui_web_b9a706cc6222", { defaultValue: "Channels, movies and series are being imported. You can keep this page open; Norva will refresh automatically." }) ?? 'Channels, movies and series are being imported. You can keep this page open; Norva will refresh automatically.'),
+                primary: (globalThis.NorvaI18n?.t("ui_web_a6844f25c6b3", { defaultValue: "View TV service" }) ?? 'View TV service')
             };
         }
         if (state === 'disabled') {
             return {
-                title: 'Your TV service is paused',
-                message: summary.message || 'Enable it from TV Service settings to make its saved catalog available again.',
-                primary: 'Manage TV service'
+                title: (globalThis.NorvaI18n?.t("ui_web_a82f82235cb8", { defaultValue: "Your TV service is paused" }) ?? 'Your TV service is paused'),
+                message: summary.message || (globalThis.NorvaI18n?.t("ui_web_48b2e8f63dc1", { defaultValue: "Enable it from TV Service settings to make its saved catalog available again." }) ?? 'Enable it from TV Service settings to make its saved catalog available again.'),
+                primary: (globalThis.NorvaI18n?.t("ui_web_059781c3e39c", { defaultValue: "Manage TV service" }) ?? 'Manage TV service')
             };
         }
         if (['auth_failed', 'expired'].includes(state)) {
             return {
-                title: 'Repair your TV service',
-                message: summary.message || 'Your provider login needs attention before Norva can play content again.',
-                primary: summary.action || 'Update login'
+                title: (globalThis.NorvaI18n?.t("ui_web_875e5a8854d1", { defaultValue: "Repair your TV service" }) ?? 'Repair your TV service'),
+                message: summary.message || (globalThis.NorvaI18n?.t("ui_web_9865d7356055", { defaultValue: "Your provider login needs attention before Norva can play content again." }) ?? 'Your provider login needs attention before Norva can play content again.'),
+                primary: summary.action || (globalThis.NorvaI18n?.t("ui_web_5483db957f58", { defaultValue: "Update login" }) ?? 'Update login')
             };
         }
         if (['unreachable', 'degraded'].includes(state)) {
             return {
-                title: 'Your TV service needs attention',
-                message: summary.message || 'Norva cannot confirm that this service is ready. Check it before inviting anyone to watch.',
-                primary: summary.action || 'Check service'
+                title: (globalThis.NorvaI18n?.t("ui_web_b4604a9b1ef1", { defaultValue: "Your TV service needs attention" }) ?? 'Your TV service needs attention'),
+                message: summary.message || (globalThis.NorvaI18n?.t("ui_web_1f41373697f5", { defaultValue: "Norva cannot confirm that this service is ready. Check it before inviting anyone to watch." }) ?? 'Norva cannot confirm that this service is ready. Check it before inviting anyone to watch.'),
+                primary: summary.action || (globalThis.NorvaI18n?.t("ui_web_54c4d87263b2", { defaultValue: "Check service" }) ?? 'Check service')
             };
         }
         return {
-            title: 'Connect your TV service to start watching',
-            message: 'Paste the complete Xtream or M3U link from your TV service. Norva will prepare your channels, movies and series automatically.',
-            primary: summary.action || 'Connect TV service'
+            title: (globalThis.NorvaI18n?.t("ui_web_0fbc1c1e4130", { defaultValue: "Connect your TV service to start watching" }) ?? 'Connect your TV service to start watching'),
+            message: (globalThis.NorvaI18n?.t("ui_web_2687780030ee", { defaultValue: "Paste the complete Xtream or M3U link from your TV service. Norva will prepare your channels, movies and series automatically." }) ?? 'Paste the complete Xtream or M3U link from your TV service. Norva will prepare your channels, movies and series automatically.'),
+            primary: summary.action || (globalThis.NorvaI18n?.t("ui_web_ecf6dd26c319", { defaultValue: "Connect TV service" }) ?? 'Connect TV service')
         };
     }
 
@@ -2011,20 +2011,20 @@ class HomePage {
         return [
             {
                 index: '1',
-                title: connected ? 'TV service connected' : 'Connect TV service',
-                hint: connected ? 'Norva has a service saved for this account.' : 'Use your full Xtream or M3U link.',
+                title: connected ? (globalThis.NorvaI18n?.t("ui_web_996048fd3348", { defaultValue: "TV service connected" }) ?? 'TV service connected') : (globalThis.NorvaI18n?.t("ui_web_ecf6dd26c319", { defaultValue: "Connect TV service" }) ?? 'Connect TV service'),
+                hint: connected ? (globalThis.NorvaI18n?.t("ui_web_4759bbaa1c25", { defaultValue: "Norva has a service saved for this account." }) ?? 'Norva has a service saved for this account.') : (globalThis.NorvaI18n?.t("ui_web_eb8f0324f13a", { defaultValue: "Use your full Xtream or M3U link." }) ?? 'Use your full Xtream or M3U link.'),
                 state: connected && !needsRepair ? 'complete' : state === 'not_configured' ? 'active' : 'attention'
             },
             {
                 index: '2',
-                title: state === 'syncing' ? 'Preparing catalog' : 'Catalog preparation',
-                hint: state === 'syncing' ? 'Importing content now.' : ready ? 'Catalog ready.' : disabled ? 'Enable the service to restore its saved catalog.' : 'Norva prepares channels, movies and series after connection.',
+                title: state === 'syncing' ? (globalThis.NorvaI18n?.t("ui_web_9bebc2afd84f", { defaultValue: "Preparing catalog" }) ?? 'Preparing catalog') : (globalThis.NorvaI18n?.t("ui_web_f9863de7e392", { defaultValue: "Catalog preparation" }) ?? 'Catalog preparation'),
+                hint: state === 'syncing' ? (globalThis.NorvaI18n?.t("ui_web_c37a10389820", { defaultValue: "Importing content now." }) ?? 'Importing content now.') : ready ? (globalThis.NorvaI18n?.t("ui_web_98ae2772b4f6", { defaultValue: "Catalog ready." }) ?? 'Catalog ready.') : disabled ? (globalThis.NorvaI18n?.t("ui_web_efded4ba4f8f", { defaultValue: "Enable the service to restore its saved catalog." }) ?? 'Enable the service to restore its saved catalog.') : (globalThis.NorvaI18n?.t("ui_web_fe16fab50f1f", { defaultValue: "Norva prepares channels, movies and series after connection." }) ?? 'Norva prepares channels, movies and series after connection.'),
                 state: ready ? 'complete' : state === 'syncing' ? 'active' : 'pending'
             },
             {
                 index: '3',
-                title: 'Start watching',
-                hint: 'Home, Live TV, Movies and Series unlock when the catalog is ready.',
+                title: (globalThis.NorvaI18n?.t("ui_web_89562c6a46cd", { defaultValue: "Start watching" }) ?? 'Start watching'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_3cbd49536953", { defaultValue: "Home, Live TV, Movies and Series unlock when the catalog is ready." }) ?? 'Home, Live TV, Movies and Series unlock when the catalog is ready.'),
                 state: ready ? 'complete' : 'pending'
             }
         ];
@@ -2076,10 +2076,10 @@ class HomePage {
         };
         const rails = [];
         if (moviesResult.status === 'fulfilled' && moviesResult.value?.length) {
-            rails.push({ id: 'recently-added-movies', title: 'Recently Added Movies', items: dedupByIdentity(moviesResult.value) });
+            rails.push({ id: 'recently-added-movies', title: (globalThis.NorvaI18n?.t("ui_web_c57f625c5d1a", { defaultValue: "Recently Added Movies" }) ?? 'Recently Added Movies'), items: dedupByIdentity(moviesResult.value) });
         }
         if (seriesResult.status === 'fulfilled' && seriesResult.value?.length) {
-            rails.push({ id: 'recently-added-series', title: 'Recently Added Series', items: dedupByIdentity(seriesResult.value) });
+            rails.push({ id: 'recently-added-series', title: (globalThis.NorvaI18n?.t("ui_web_7ce9c72b7952", { defaultValue: "Recently Added Series" }) ?? 'Recently Added Series'), items: dedupByIdentity(seriesResult.value) });
         }
 
         this.renderCloudRails({ rails });
@@ -2118,10 +2118,10 @@ class HomePage {
         // so the billboard can say WHY a title is featured (Popular / For You / New).
         const reasonOf = (rail) => {
             const rid = String(rail.id || '').toLowerCase();
-            if (/popular/.test(rid)) return 'popular';
-            if (/because-you-(?:watched|liked)/.test(rid)) return 'foryou';
-            if (/recently-added/.test(rid)) return 'new';
-            return 'featured';
+            if (/popular/.test(rid)) return ('popular');
+            if (/because-you-(?:watched|liked)/.test(rid)) return ('foryou');
+            if (/recently-added/.test(rid)) return ('new');
+            return ('featured');
         };
         for (const rail of heroRails) {
             if (railPicks.length >= 6) break;
@@ -2164,11 +2164,11 @@ class HomePage {
                 <p class="home-hero-desc"></p>
                 <div class="home-hero-actions">
                     <button class="btn btn-primary home-hero-play" id="home-hero-play"></button>
-                    <button class="btn btn-ghost home-hero-more" id="home-hero-more">Details</button>
-                    <button class="btn btn-ghost home-hero-trailer hidden" id="home-hero-trailer">▶ Trailer</button>
+                    <button class="btn btn-ghost home-hero-more" id="home-hero-more" data-i18n="ui_web_45989de49fb7">Details</button>
+                    <button class="btn btn-ghost home-hero-trailer hidden" id="home-hero-trailer" data-i18n="ui_web_e58427f333e3">▶ Trailer</button>
                 </div>
                 ${slides.length > 1 ? `<div class="home-hero-dots">${slides.map((_, i) =>
-                    `<button type="button" class="home-hero-dot" data-hero-dot="${i}" aria-label="Billboard ${i + 1}"></button>`).join('')}</div>` : ''}
+                    `<button type="button" class="home-hero-dot" data-hero-dot="${i}" aria-label="Billboard ${i + 1}" data-i18n-aria-label="ui_web_8510b7a1da63" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p1":(i + 1)}) || "{}")}"></button>`).join('')}</div>` : ''}
             </div>
         `;
 
@@ -2321,7 +2321,7 @@ class HomePage {
             const R = {
                 resume: ['▶ Resume', 'is-resume'],
                 popular: ['🔥 Popular', 'is-popular'],
-                foryou: ['💡 For You', 'is-foryou'],
+                foryou: [(globalThis.NorvaI18n?.t("ui_web_5ef3acf6123b", { defaultValue: "💡 For You" }) ?? '💡 For You'), 'is-foryou'],
                 new: ['✨ New', 'is-new'],
             }[slide.reason];
             reasonEl.className = 'home-hero-reason' + (R ? ' ' + R[1] : ' hidden');
@@ -2338,7 +2338,7 @@ class HomePage {
             desc.classList.toggle('hidden', !text);
         }
         const playBtn = hero.querySelector('#home-hero-play');
-        if (playBtn) playBtn.textContent = slide.isResume ? 'Resume' : 'Play';
+        if (playBtn) playBtn.textContent = slide.isResume ? (globalThis.NorvaI18n?.t("ui_web_d640c7421da0", { defaultValue: "Resume" }) ?? 'Resume') : (globalThis.NorvaI18n?.t("ui_web_436e61016e26", { defaultValue: "Play" }) ?? 'Play');
         hero.querySelectorAll('.home-hero-dot').forEach((dot, i) =>
             dot.classList.toggle('active', i === index));
 
@@ -2364,7 +2364,7 @@ class HomePage {
         const data = item.data || {};
         const bits = [];
         if (item.progress || data.progress) bits.push('Resume');
-        bits.push(type === 'series' ? 'Series' : type === 'channel' ? 'Live TV' : 'Movie');
+        bits.push(type === 'series' ? (globalThis.NorvaI18n?.t("ui_web_a8295e08ff7a", { defaultValue: "Series" }) ?? 'Series') : type === 'channel' ? (globalThis.NorvaI18n?.t("ui_web_d451ef69d283", { defaultValue: "Live TV" }) ?? 'Live TV') : (globalThis.NorvaI18n?.t("ui_web_941de4447b2e", { defaultValue: "Movie" }) ?? 'Movie'));
         const year = item.year || data.year || data.releaseYear;
         if (year) bits.push(year);
         const rating = item.rating || data.rating || data.voteAverage;
@@ -2454,7 +2454,7 @@ class HomePage {
     createRailSection(rail, railIndex) {
         const ranked = this.isRankedRail(rail);
         const title = ranked
-            ? (rail.itemType === 'series' ? 'Top 10 Series' : 'Top 10 Movies')
+            ? (rail.itemType === 'series' ? (globalThis.NorvaI18n?.t("ui_web_aff8a471c6f8", { defaultValue: "Top 10 Series" }) ?? 'Top 10 Series') : (globalThis.NorvaI18n?.t("ui_web_52779b5d8411", { defaultValue: "Top 10 Movies" }) ?? 'Top 10 Movies'))
             : this.railTitle(rail);
         const subtitle = ranked ? '' : this.railSubtitle(rail);
         const id = `home-rail-${this.slug(String(rail.id || railIndex))}`;
@@ -2468,9 +2468,9 @@ class HomePage {
                         <h2>${this.escapeHtml(title)}</h2>
                         ${subtitle ? `<p class="home-rail-subtitle">${this.escapeHtml(subtitle)}</p>` : ''}
                     </div>
-                    ${seeAllPage ? `<button type="button" class="home-rail-seeall" data-seeall-page="${this.escapeAttr(seeAllPage)}">See all <span aria-hidden="true">→</span></button>` : ''}
+                    ${seeAllPage ? `<button type="button" class="home-rail-seeall" data-seeall-page="${this.escapeAttr(seeAllPage)}"><norva-i18n data-i18n="ui_web_d7a8c446069a">See all </norva-i18n><span aria-hidden="true">→</span></button>` : ''}
                 </div>
-                ${this.scrollSection(id, 'Loading...', '', items.map((item, itemIndex) => this.createRailCard(item, railIndex, itemIndex, ranked)).join(''))}
+                ${this.scrollSection(id, (globalThis.NorvaI18n?.t("ui_web_47d2a515ef2f", { defaultValue: "Loading..." }) ?? 'Loading...'), '', items.map((item, itemIndex) => this.createRailCard(item, railIndex, itemIndex, ranked)).join(''))}
             </section>
         `;
     }
@@ -2501,28 +2501,28 @@ class HomePage {
 
     railTitle(rail = {}) {
         const id = String(rail.id || '').toLowerCase();
-        if (id === 'recently-added-movies') return 'Recently Added Movies';
-        if (id === 'recently-added-series') return 'Recently Added Series';
-        if (id === 'action-movies') return 'Action Movies';
-        if (id === 'popular-movies') return 'Popular Movies';
-        if (id === 'popular-series') return 'Popular Series';
+        if (id === 'recently-added-movies') return (globalThis.NorvaI18n?.t("ui_web_c57f625c5d1a", { defaultValue: "Recently Added Movies" }) ?? 'Recently Added Movies');
+        if (id === 'recently-added-series') return (globalThis.NorvaI18n?.t("ui_web_7ce9c72b7952", { defaultValue: "Recently Added Series" }) ?? 'Recently Added Series');
+        if (id === 'action-movies') return (globalThis.NorvaI18n?.t("ui_web_080692dda593", { defaultValue: "Action Movies" }) ?? 'Action Movies');
+        if (id === 'popular-movies') return (globalThis.NorvaI18n?.t("ui_web_899067e88026", { defaultValue: "Popular Movies" }) ?? 'Popular Movies');
+        if (id === 'popular-series') return (globalThis.NorvaI18n?.t("ui_web_32759cb0ed20", { defaultValue: "Popular Series" }) ?? 'Popular Series');
         if (id.startsWith('because-you-watched')) {
             // Netflix names the anchor — "Because You Watched Inception" carries the WHY.
             const anchor = String(rail.curation?.anchorTitle || '').trim();
-            return anchor ? `Because You Watched ${anchor}` : 'Because You Watched';
+            return anchor ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_1706bb518eb7", {defaultValue: "Because You Watched {{p0}}", p0:(anchor)}) : `Because You Watched ${anchor}`) : (globalThis.NorvaI18n?.t("ui_web_b410ee214ce1", { defaultValue: "Because You Watched" }) ?? 'Because You Watched');
         }
         if (id.startsWith('because-you-liked')) {
             const anchor = String(rail.curation?.anchorTitle || '').trim();
-            return anchor ? `Because You Liked ${anchor}` : 'Because You Liked';
+            return anchor ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ea65568f9461", {defaultValue: "Because You Liked {{p0}}", p0:(anchor)}) : `Because You Liked ${anchor}`) : (globalThis.NorvaI18n?.t("ui_web_4c6e007f9fd5", { defaultValue: "Because You Liked" }) ?? 'Because You Liked');
         }
-        const title = rail.title || rail.name || 'Norva Selection';
+        const title = rail.title || rail.name || (globalThis.NorvaI18n?.t("ui_web_def5e85bd583", { defaultValue: "Norva Selection" }) ?? 'Norva Selection');
         // The fast first paint intentionally combines movie and series genre
         // rails. A genre such as Action can exist in both payloads; without a
         // type suffix Home briefly showed two indistinguishable "Action" rows
         // before the personalized response arrived.
         if (['genre', 'genre_bucket'].includes(rail.curation?.kind)) {
             const type = String(rail.itemType || rail.item_type || '').toLowerCase();
-            const suffix = type === 'series' ? 'Series' : type === 'movie' ? 'Movies' : '';
+            const suffix = type === 'series' ? (globalThis.NorvaI18n?.t("ui_web_a8295e08ff7a", { defaultValue: "Series" }) ?? 'Series') : type === 'movie' ? (globalThis.NorvaI18n?.t("ui_web_dff924b69f96", { defaultValue: "Movies" }) ?? 'Movies') : '';
             if (suffix && !new RegExp(`\\b${suffix}$`, 'i').test(String(title))) {
                 return `${title} ${suffix}`;
             }
@@ -2532,10 +2532,10 @@ class HomePage {
 
     railSubtitle(rail = {}) {
         const id = String(rail.id || '').toLowerCase();
-        if (id.startsWith('because-you-watched')) return 'Suggestions based on your watch history';
-        if (id.startsWith('because-you-liked')) return 'Suggestions inspired by titles you liked';
-        if (id === 'action-movies') return 'Verified titles with enriched genres';
-        if (id === 'popular-movies') return 'Verified titles with top ratings';
+        if (id.startsWith('because-you-watched')) return (globalThis.NorvaI18n?.t("ui_web_9c255b4205e3", { defaultValue: "Suggestions based on your watch history" }) ?? 'Suggestions based on your watch history');
+        if (id.startsWith('because-you-liked')) return (globalThis.NorvaI18n?.t("ui_web_4d0280e66af6", { defaultValue: "Suggestions inspired by titles you liked" }) ?? 'Suggestions inspired by titles you liked');
+        if (id === 'action-movies') return (globalThis.NorvaI18n?.t("ui_web_ca6bfd92c059", { defaultValue: "Verified titles with enriched genres" }) ?? 'Verified titles with enriched genres');
+        if (id === 'popular-movies') return (globalThis.NorvaI18n?.t("ui_web_50f89ba7b772", { defaultValue: "Verified titles with top ratings" }) ?? 'Verified titles with top ratings');
         return '';
     }
 
@@ -2555,11 +2555,11 @@ class HomePage {
             <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(title)}" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     ${ranked ? `<div class="rank-numeral">${itemIndex + 1}</div>` : ''}
-                    ${isNew ? '<span class="new-badge">NEW</span>' : ''}
+                    ${isNew ? '<span class="new-badge" data-i18n="ui_web_a253ff09c5a8">NEW</span>' : ''}
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async"
                          ${MediaUtils.tmdbSrcset?.(posterUrl) ? `srcset="${this.escapeAttr(MediaUtils.tmdbSrcset(posterUrl))}" sizes="(max-width: 640px) 40vw, 220px"` : ''}
                          onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
-                    ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
+                    ${variantCount > 1 ? `<div class="home-card-badge" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(variantCount)}) || "{}")}">${variantCount} versions</div>` : ''}
                     ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -2607,7 +2607,7 @@ class HomePage {
     }
 
     typeLabel(type) {
-        return type === 'series' ? 'Series' : type === 'channel' ? 'Live TV' : 'Movie';
+        return type === 'series' ? (globalThis.NorvaI18n?.t("ui_web_a8295e08ff7a", { defaultValue: "Series" }) ?? 'Series') : type === 'channel' ? (globalThis.NorvaI18n?.t("ui_web_d451ef69d283", { defaultValue: "Live TV" }) ?? 'Live TV') : (globalThis.NorvaI18n?.t("ui_web_941de4447b2e", { defaultValue: "Movie" }) ?? 'Movie');
     }
 
     getResumeOffset(progress, duration = 0) {
@@ -2637,7 +2637,7 @@ class HomePage {
         });
 
         if (!item) {
-            this.app?.showToast?.('Nothing to resume right now. Your catalogue is still here.');
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_4fc9e71e15fb", { defaultValue: "Nothing to resume right now. Your catalogue is still here." }) ?? 'Nothing to resume right now. Your catalogue is still here.'));
             return false;
         }
         this.openRailItem(item, true);
@@ -2718,7 +2718,7 @@ class HomePage {
     // from the finished row, so playItem resolves the stream exactly like a resume would.
     _nextEpisodeHistoryItem(prev, next) {
         const data = prev.data || {};
-        const label = (next.season && next.episode) ? `S${next.season} E${next.episode}` : 'Next episode';
+        const label = (next.season && next.episode) ? `S${next.season} E${next.episode}` : (globalThis.NorvaI18n?.t("ui_web_a38c4e18c73d", { defaultValue: "Next episode" }) ?? 'Next episode');
         return {
             ...prev,
             item_id: String(next.id),
@@ -2757,7 +2757,7 @@ class HomePage {
             if (undone || recordId == null) return;
             try { await window.API?.history?.remove?.(recordId); } catch (_) { /* best-effort */ }
         };
-        const toast = this.app?.showToast?.('Removed from Continue Watching', {
+        const toast = this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_4bfb8de90017", { defaultValue: "Removed from Continue Watching" }) ?? 'Removed from Continue Watching'), {
             action: 'Undo',
             duration: 5000,
             onAction: () => {
@@ -2791,7 +2791,7 @@ class HomePage {
             : (data.subtitle || this.typeLabel(type));
         const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
         const remainingMin = duration > progress ? Math.max(1, Math.round((duration - progress) / 60)) : 0;
-        const timeLeft = item._upNext ? 'Next episode' : (remainingMin > 0 ? `${remainingMin} min left` : '');
+        const timeLeft = item._upNext ? (globalThis.NorvaI18n?.t("ui_web_a38c4e18c73d", { defaultValue: "Next episode" }) ?? 'Next episode') : (remainingMin > 0 ? `${remainingMin} min left` : '');
         // A zero-duration row can't compute progress — an empty bar reads broken, hide it.
         const showBar = duration > 0 && !item._upNext;
 
@@ -2799,7 +2799,7 @@ class HomePage {
             <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(item._upNext ? `Play next episode of ${title}` : `Resume ${title}`)}" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
                 <div class="card-image">
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
-                    <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching">✕</button>
+                    <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching" data-i18n-aria-label="ui_web_5b5aa26efd59">✕</button>
                     ${timeLeft ? `<div class="card-timeleft">${timeLeft}</div>` : ''}
                     ${showBar ? `<div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${percent}%"></div>
@@ -2941,7 +2941,7 @@ class HomePage {
                         streamId: String(meta.streamId || ''),
                         sourceId,
                         sourceType: meta.sourceType || 'xtream',
-                        name: fav.item_name || fav.itemName || meta.name || 'Favorite channel',
+                        name: fav.item_name || fav.itemName || meta.name || (globalThis.NorvaI18n?.t("ui_web_6d64ebccdb34", { defaultValue: "Favorite channel" }) ?? 'Favorite channel'),
                         tvgLogo: meta.poster || meta.logo || '',
                         favoriteId: fav.id || '',
                         favoriteItemId: itemId
@@ -3043,7 +3043,7 @@ class HomePage {
     playChannel(channelId, sourceId, metadata = {}) {
         const channelList = this.app.channelList;
         if (!channelList?.queueChannelSelection) {
-            this.app?.showToast?.('This channel is no longer available');
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_3804fbb8e667", { defaultValue: "This channel is no longer available" }) ?? 'This channel is no longer available'));
             return;
         }
 

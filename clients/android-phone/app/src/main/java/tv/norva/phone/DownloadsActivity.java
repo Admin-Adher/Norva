@@ -211,7 +211,7 @@ public final class DownloadsActivity extends Activity {
         close.setContentDescription(getString(R.string.downloads_close));
         close.setOnClickListener(v -> finish());
         LinearLayout.LayoutParams closeLp = (LinearLayout.LayoutParams) close.getLayoutParams();
-        closeLp.leftMargin = dp(6);
+        closeLp.setMarginStart(dp(6));
         close.setLayoutParams(closeLp);
         header.addView(close);
         LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
@@ -383,7 +383,7 @@ public final class DownloadsActivity extends Activity {
                 wifiLabelText,
                 wifiDescription);
         LinearLayout.LayoutParams wifiTogLp = new LinearLayout.LayoutParams(dp(48), dp(28));
-        wifiTogLp.leftMargin = dp(12);
+        wifiTogLp.setMarginStart(dp(12));
         wifiRow.addView(wifi, wifiTogLp);
         rulesBody.addView(wifiRow);
 
@@ -432,7 +432,7 @@ public final class DownloadsActivity extends Activity {
                 smartLabelText,
                 smartDescription);
         LinearLayout.LayoutParams smartTogLp = new LinearLayout.LayoutParams(dp(48), dp(28));
-        smartTogLp.leftMargin = dp(12);
+        smartTogLp.setMarginStart(dp(12));
         smartRow.addView(smart, smartTogLp);
         LinearLayout.LayoutParams smartRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1371,8 +1371,8 @@ public final class DownloadsActivity extends Activity {
                 item.downloadedBytes * 100 / item.totalBytes));
     }
 
-    private static String localizedInteger(int value) {
-        NumberFormat format = NumberFormat.getIntegerInstance(Locale.US);
+    private String localizedInteger(int value) {
+        NumberFormat format = NumberFormat.getIntegerInstance(Locale.forLanguageTag(tv.norva.i18n.UiLanguage.resolved(this)));
         return format.format(value);
     }
 
@@ -1468,7 +1468,7 @@ public final class DownloadsActivity extends Activity {
         number.setMinWidth(dp(36));
         number.setMinHeight(dp(36));
         LinearLayout.LayoutParams numberLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        numberLp.rightMargin = dp(10);
+        numberLp.setMarginEnd(dp(10));
         top.addView(number, numberLp);
         top.addView(posterView(item, 46, 66));
 
@@ -1524,7 +1524,7 @@ public final class DownloadsActivity extends Activity {
     private View readyMovieTile(final DownloadStore.Item item) {
         LinearLayout tile = readyTileBase();
         ImageView poster = posterView(item, 112, 164);
-        ((LinearLayout.LayoutParams) poster.getLayoutParams()).rightMargin = 0;
+        ((LinearLayout.LayoutParams) poster.getLayoutParams()).setMarginEnd(0);
         tile.addView(poster);
         TextView title = titleText(displayTitle(item));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
@@ -1549,7 +1549,7 @@ public final class DownloadsActivity extends Activity {
             final List<DownloadStore.Item> episodes) {
         LinearLayout tile = readyTileBase();
         ImageView poster = posterView(episodes.get(0), 112, 164);
-        ((LinearLayout.LayoutParams) poster.getLayoutParams()).rightMargin = 0;
+        ((LinearLayout.LayoutParams) poster.getLayoutParams()).setMarginEnd(0);
         tile.addView(poster);
         TextView title = titleText(showTitle);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
@@ -1586,7 +1586,7 @@ public final class DownloadsActivity extends Activity {
         tile.setMinimumHeight(dp(48));
         LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(
                 dp(128), ViewGroup.LayoutParams.WRAP_CONTENT);
-        tileLp.rightMargin = dp(10);
+        tileLp.setMarginEnd(dp(10));
         tile.setLayoutParams(tileLp);
         return tile;
     }
@@ -1902,7 +1902,7 @@ public final class DownloadsActivity extends Activity {
         chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        clp.rightMargin = dp(8);
+        clp.setMarginEnd(dp(8));
         chevron.setLayoutParams(clp);
         chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         h.addView(chevron);
@@ -2475,7 +2475,7 @@ public final class DownloadsActivity extends Activity {
         if (bitmap != null) poster.setImageBitmap(bitmap);
         poster.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(wDp), dp(hDp));
-        lp.rightMargin = dp(13);
+        lp.setMarginEnd(dp(13));
         poster.setLayoutParams(lp);
         return poster;
     }
@@ -2494,7 +2494,7 @@ public final class DownloadsActivity extends Activity {
     private TextView pillSpaced(String text, int bg, int textColor, View.OnClickListener cb) {
         TextView b = pill(text, bg, textColor);
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) b.getLayoutParams();
-        lp.leftMargin = dp(8);
+        lp.setMarginStart(dp(8));
         b.setLayoutParams(lp);
         b.setOnClickListener(cb);
         return b;
@@ -2603,9 +2603,9 @@ public final class DownloadsActivity extends Activity {
         return getString(R.string.downloads_size_mb, localizedNumber(mb, 0));
     }
 
-    private static String localizedNumber(double value, int fractionDigits) {
-        // Downloads intentionally stays English on every device locale.
-        NumberFormat format = NumberFormat.getNumberInstance(Locale.US);
+    private String localizedNumber(double value, int fractionDigits) {
+        // Numbers follow the same device-local UI preference as the surrounding resources.
+        NumberFormat format = NumberFormat.getNumberInstance(Locale.forLanguageTag(tv.norva.i18n.UiLanguage.resolved(this)));
         format.setGroupingUsed(false);
         format.setMinimumFractionDigits(fractionDigits);
         format.setMaximumFractionDigits(fractionDigits);

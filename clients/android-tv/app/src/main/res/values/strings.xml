@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Norva TV</string>
+    <string name="app_name" translatable="false">Norva TV</string>
 
     <!-- Native TV player navigation and primary controls. -->
     <string name="player_back">Back</string>
@@ -112,4 +112,9 @@
     <string name="tv_exit_cancel">Stay in Norva</string>
     <string name="tv_connection_settings">Connection settings</string>
     <string name="tv_exit_confirm">Exit Norva</string>
+    <string name="native_pair_hint">Connect this TV to your Norva Account. Pairing is the easiest way to attach this screen to your household.</string>
+    <string name="native_address_invalid">Invalid address. Use http://IP:PORT</string>
+    <string name="native_standalone_hint">Standalone: run Norva entirely on this TV. Use this when you do not want an account on this device. Playback uses the TV native decoder.</string>
+    <string name="native_connection_tip">Advanced connection options: press MENU, or press BACK from Home and pick \"Connection settings\".</string>
+    <string name="native_setup_failed">Norva could not start on this TV. Try again.</string>
 </resources>

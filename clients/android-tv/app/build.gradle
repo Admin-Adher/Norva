@@ -9,19 +9,15 @@ def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_FILE")
 def hasReleaseKeystore = releaseKeystorePath != null && new File(releaseKeystorePath).exists()
 
 android {
-    lint {
-        // Known legacy translations only; every other lint error remains blocking.
-        baseline = file("lint-i18n-baseline.xml")
-    }
-    namespace "tv.norva.tv"
+namespace "tv.norva.tv"
     compileSdk 36
 
     defaultConfig {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 36
-        versionCode 30
-        versionName "3.8.17-hybrid"
+        versionCode 31
+        versionName "3.8.18-hybrid"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Public routing configuration for the dedicated Android TV project.
         // Operators can still override it for an isolated build when needed.
@@ -39,6 +35,7 @@ android {
             res.srcDir "../../android-common/src/main/res"
         }
         androidTest {
+            assets.srcDir "$buildDir/generated/i18nTestAssets"
             java.srcDir "../../android-common/src/androidTest/java"
         }
         test {
@@ -68,6 +65,14 @@ android {
             }
         }
     }
+}
+
+def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
+    from("../../../public/js/i18n.js")
+    into("$buildDir/generated/i18nTestAssets/js")
+}
+tasks.configureEach { task ->
+    if (task.name.contains("AndroidTest") && (task.name.startsWith("merge") || task.name.contains("Lint") || task.name.startsWith("lint"))) task.dependsOn(copyI18nTestBundle)
 }
 
 def norvaPublicDir = file("../../../public")

@@ -57,4 +57,13 @@
     <string name="ui_cloud_sign_in" formatted="false">Iniciar sesión en Norva Cloud</string>
     <string name="ui_please_wait" formatted="false">Espera…</string>
     <string name="ui_sign_in_failed" formatted="false">No se pudo iniciar sesión. Comprueba tus datos e inténtalo de nuevo.</string>
+    <string name="ui_trial_start_duration" formatted="false">Iniciar prueba gratuita · {{duration}}</string>
+    <string name="ui_trial_started_duration" formatted="false">Ya tienes acceso completo. Tu prueba gratuita dura {{duration}}. No se cobrará ningún pago antes de que termine. Cancela en cualquier momento antes de esa fecha.</string>
+    <string name="ui_trial_duration" formatted="false">Prueba gratuita · {{duration}}</string>
+    <string name="ui_hls_source_hint" formatted="false">2. O configura tu fuente para utilizar el formato HLS (.m3u8)</string>
+    <string name="ui_draft_discount_applied" formatted="false">Se ha aplicado un descuento del {{discount}} % al borrador. Revisa la campaña para continuar.</string>
+    <string name="ui_changes_review_again" formatted="false">Los cambios se han actualizado. Vuelve a ejecutar la comprobación.</string>
+    <string name="ui_prerequisite_changed" formatted="false">Un requisito cambió durante la validación. Cierra esta ventana, comprueba la configuración y vuelve a intentarlo.</string>
+    <string name="ui_selection_kept" formatted="false">· selección actual conservada</string>
+    <string name="ui_trial_days_left" formatted="false">Quedan {{days}} días</string>
 </resources>

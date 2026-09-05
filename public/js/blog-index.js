@@ -57,9 +57,9 @@
     moreButton.hidden = candidates.length <= visibleLimit;
 
     if (filtering) {
-      status.textContent = `${matches.length} guide${matches.length === 1 ? '' : 's'} found`;
+      status.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_e7a1132e823a", {defaultValue: "{{p0}} guide{{p1}} found", p0:(matches.length),p1:(matches.length === 1 ? '' : 's')}) : `${matches.length} guide${matches.length === 1 ? '' : 's'} found`);
     } else {
-      status.textContent = `${candidates.length} more guide${candidates.length === 1 ? '' : 's'} · newest first`;
+      status.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_62122262e673", {defaultValue: "{{p0}} more guide{{p1}} · newest first", p0:(candidates.length),p1:(candidates.length === 1 ? '' : 's')}) : `${candidates.length} more guide${candidates.length === 1 ? '' : 's'} · newest first`);
     }
   }
 

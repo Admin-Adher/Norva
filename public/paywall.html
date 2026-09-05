@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Norva Access</title>
+  <title data-i18n="ui_web_90ade6b3fd3a">Norva Access</title>
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -153,7 +154,8 @@
   <script defer src="/js/marketing.js?v=5"></script>
   <script defer src="/js/native-analytics.js?v=2"></script>
   <script defer src="/js/product-analytics.js?v=2"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
   <script>
@@ -165,32 +167,32 @@
       <img src="/favicon.png" alt="">
       <span>Norva</span>
     </div>
-    <h1>Norva Access</h1>
+    <h1 data-i18n="ui_web_90ade6b3fd3a">Norva Access</h1>
     <div class="ecosystem-proof" role="note">
-      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone">
+      <img src="/assets/landing/norva-multi-device.svg" alt="Norva on a TV, laptop, tablet and phone" data-i18n-alt="ui_web_0e7ccce32a1d">
       <span>
-        <strong>One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong>
+        <strong data-i18n="ui_web_f65c520e98de">One subscription. Your catalog connected across Web, Android mobile (phone and tablet), and Android TV.</strong><norva-i18n data-i18n="ui_web_e7f0cba002e2">
         Keep profiles, favorites and playback progress in sync on compatible devices.
-      </span>
+      </norva-i18n></span>
     </div>
-    <p class="lead">
+    <p class="lead" data-i18n="ui_web_d9388d72501a">
       Norva includes 2 profiles;
       Norva Family includes 5. Norva is a media player; no content or TV subscription is included.
     </p>
-    <div class="status" id="paywall-status">Checking Norva access...</div>
+    <div class="status" id="paywall-status" data-i18n="ui_web_5c51d32c94c6">Checking Norva access...</div>
     <div class="actions">
-      <button class="btn" id="paywall-primary" type="button">Continue</button>
-      <a class="btn secondary" id="paywall-account" href="/account.html">Account</a>
-      <button class="btn secondary" id="paywall-retry" type="button">Retry check</button>
+      <button class="btn" id="paywall-primary" type="button" data-i18n="ui_web_31fbef162594">Continue</button>
+      <a class="btn secondary" id="paywall-account" href="/account.html" data-i18n="ui_web_7e1b0d5641f2">Account</a>
+      <button class="btn secondary" id="paywall-retry" type="button" data-i18n="ui_web_f2ba6d4f2252">Retry check</button>
     </div>
-    <p class="note">
+    <p class="note" data-i18n="ui_web_3ba5158126a1">
       Billing and TV service errors are intentionally separate. If your TV provider needs repair, Norva will show that
       inside Settings > TV Service instead of asking you to manage a plan.
     </p>
   </main>
 
-  <script src="/js/cloudApi.js?v=52"></script>
-  <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script src="/js/authApi.js?v=be61dee633"></script>
   <script src="/js/navigation-safety.js?v=1"></script>
   <script>
     (function () {
@@ -217,12 +219,12 @@
       }
 
       function showDenied(decision) {
-        const message = decision?.message || storedDenial()?.message || 'Norva access is required to keep watching.';
+        const message = decision?.message || storedDenial()?.message || (globalThis.NorvaI18n?.t("ui_web_0ff9ea8948c7", { defaultValue: "Norva access is required to keep watching." }) ?? 'Norva access is required to keep watching.');
         setStatus(message, true);
         // A denied user's next step is picking a plan — send them to the plan
         // picker, not the account page (audit V3, E.2-9). Account stays available
         // via the secondary button.
-        primaryBtn.textContent = 'See plans';
+        primaryBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_d989893356ee", { defaultValue: "See plans" }) ?? 'See plans');
         primaryBtn.onclick = () => {
           window.location.href = '/subscribe.html?returnTo=' + encodeURIComponent(returnTo || '/app#home');
         };
@@ -304,10 +306,10 @@
       }
 
       async function checkAccess() {
-        setStatus('Checking Norva access...', false);
+        setStatus((globalThis.NorvaI18n?.t("ui_web_5c51d32c94c6", { defaultValue: "Checking Norva access..." }) ?? 'Checking Norva access...'), false);
         if (!hasAnyCloudSession()) {
-          setStatus('Sign in to start or manage Norva access.', true);
-          primaryBtn.textContent = 'Sign in';
+          setStatus((globalThis.NorvaI18n?.t("ui_web_a110d24f2442", { defaultValue: "Sign in to start or manage Norva access." }) ?? 'Sign in to start or manage Norva access.'), true);
+          primaryBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_bfd402b2f6f3", { defaultValue: "Sign in" }) ?? 'Sign in');
           primaryBtn.onclick = () => { window.location.href = accountLink.href; };
           return;
         }
@@ -320,8 +322,8 @@
           if (decision?.allowed !== false) {
             const bounced = Boolean(sessionStorage.getItem('norva-entitlement-denied'));
             sessionStorage.removeItem('norva-entitlement-denied');
-            setStatus(decision?.message || 'Norva access is active.', false);
-            primaryBtn.textContent = 'Continue to Norva';
+            setStatus(decision?.message || (globalThis.NorvaI18n?.t("ui_web_97d6fea0315f", { defaultValue: "Norva access is active." }) ?? 'Norva access is active.'), false);
+            primaryBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_d8007b4412b2", { defaultValue: "Continue to Norva" }) ?? 'Continue to Norva');
             primaryBtn.onclick = () => { window.location.href = returnTo || '/'; };
             // Gate 0 / observe: access IS granted. If the app bounced us here
             // involuntarily (a denial flag was set), don't stop the user with an
@@ -347,13 +349,13 @@
         } catch (error) {
           console.warn('[paywall] access check failed', error);
           if (error?.status === 401) {
-            setStatus('Sign in to start or manage Norva access.', true);
-            primaryBtn.textContent = 'Sign in';
+            setStatus((globalThis.NorvaI18n?.t("ui_web_a110d24f2442", { defaultValue: "Sign in to start or manage Norva access." }) ?? 'Sign in to start or manage Norva access.'), true);
+            primaryBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_bfd402b2f6f3", { defaultValue: "Sign in" }) ?? 'Sign in');
             primaryBtn.onclick = () => { window.location.href = accountLink.href; };
             return;
           }
-          setStatus('Access could not be verified right now. Norva keeps recent access open while billing is checked.', false);
-          primaryBtn.textContent = 'Continue to Norva';
+          setStatus((globalThis.NorvaI18n?.t("ui_web_e2410699adc7", { defaultValue: "Access could not be verified right now. Norva keeps recent access open while billing is checked." }) ?? 'Access could not be verified right now. Norva keeps recent access open while billing is checked.'), false);
+          primaryBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_d8007b4412b2", { defaultValue: "Continue to Norva" }) ?? 'Continue to Norva');
           primaryBtn.onclick = () => { window.location.href = returnTo || '/'; };
         }
       }

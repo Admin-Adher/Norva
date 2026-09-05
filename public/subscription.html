@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Your Norva subscription</title>
+  <title data-i18n="ui_web_72d0c37fff0b">Your Norva subscription</title>
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -130,7 +131,8 @@
   <script defer src="/js/marketing.js?v=5"></script>
   <script defer src="/js/native-analytics.js?v=2"></script>
   <script defer src="/js/product-analytics.js?v=2"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
   <script>
@@ -140,39 +142,39 @@
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
   </header>
   <main class="wrap">
-    <h1 id="page-title">Your subscription</h1>
+    <h1 id="page-title" data-i18n="ui_web_917cbaf447df">Your subscription</h1>
     <div class="subscription-stage">
-    <aside class="ecosystem-proof" aria-label="Norva across your screens">
-      <img src="/img/subscription/norva-subscription-devices.png" width="1586" height="992" fetchpriority="high" decoding="async" alt="Norva on a TV, tablet and phone">
+    <aside class="ecosystem-proof" aria-label="Norva across your screens" data-i18n-aria-label="ui_web_b23bbc29c7ec">
+      <img src="/img/subscription/norva-subscription-devices.png" width="1586" height="992" fetchpriority="high" decoding="async" alt="Norva on a TV, tablet and phone" data-i18n-alt="ui_web_231601337755">
       <span>
-        <strong>Your Norva account travels with you.</strong>
+        <strong data-i18n="ui_web_8d8bdcb3ed8b">Your Norva account travels with you.</strong><norva-i18n data-i18n="ui_web_b33eb3305e38">
         Keep profiles, favorites and playback progress in sync across Web, Android mobile (phone and tablet), and Android TV.
-      </span>
+      </norva-i18n></span>
     </aside>
     <section class="account-panel" aria-labelledby="page-title">
-      <div id="content" aria-live="polite" aria-busy="true"><div class="loading">Loading your subscription…</div></div>
+      <div id="content" aria-live="polite" aria-busy="true"><div class="loading" data-i18n="ui_web_e31e45f4afbd">Loading your subscription…</div></div>
       <p class="note" id="store-note"></p>
     </section>
     </div>
     <section class="preference-card" id="marketing-preference" aria-labelledby="marketing-preference-title" hidden>
       <div class="preference-copy">
         <div>
-          <strong id="marketing-preference-title">Product and offer emails</strong>
-          <p>Occasional Norva tips, trial follow-ups and relevant subscription offers.</p>
+          <strong id="marketing-preference-title" data-i18n="ui_web_1174ebc47060">Product and offer emails</strong>
+          <p data-i18n="ui_web_214f308d9772">Occasional Norva tips, trial follow-ups and relevant subscription offers.</p>
         </div>
-        <small id="marketing-preference-status" aria-live="polite">Loading your preference…</small>
+        <small id="marketing-preference-status" aria-live="polite" data-i18n="ui_web_c765a3fba77a">Loading your preference…</small>
       </div>
       <label class="preference-check">
         <input id="marketing-email-opt-in" type="checkbox">
         <span class="switch-track" aria-hidden="true"></span>
-        <span>Email me</span>
+        <span data-i18n="ui_web_7d20e7b6c62b">Email me</span>
       </label>
     </section>
   </main>
 
   <script src="/js/navigation-safety.js?v=1"></script>
-  <script src="/js/cloudApi.js?v=52"></script>
-  <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script src="/js/authApi.js?v=be61dee633"></script>
   <script src="/js/billing-config.js?v=8"></script>
   <script src="/js/billing.js?v=17"></script>
   <script>
@@ -206,7 +208,7 @@
       }
       function planLabel(code) {
         const p = String(code || '').toLowerCase();
-        if (p === 'family') return 'Norva Family';
+        if (p === 'family') return (globalThis.NorvaI18n?.t("ui_web_fada8f5631ee", { defaultValue: "Norva Family" }) ?? 'Norva Family');
         if (!p || p === 'none' || p === 'free' || p === 'plus' || p === 'premium' || p === 'trial' || p === 'manual') return 'Norva';
         return 'Norva ' + p.charAt(0).toUpperCase() + p.slice(1);
       }
@@ -257,17 +259,17 @@
           const preference = await marketingPreferenceRequest('GET');
           input.checked = preference.marketing_email === true;
           status.textContent = input.checked
-            ? 'Subscribed. You can opt out here or from any marketing email.'
-            : 'Off by default. Billing and account emails are still sent when needed.';
+            ? (globalThis.NorvaI18n?.t("ui_web_2785ee2cf8d8", { defaultValue: "Subscribed. You can opt out here or from any marketing email." }) ?? 'Subscribed. You can opt out here or from any marketing email.')
+            : (globalThis.NorvaI18n?.t("ui_web_f410d1b7061d", { defaultValue: "Off by default. Billing and account emails are still sent when needed." }) ?? 'Off by default. Billing and account emails are still sent when needed.');
           input.disabled = false;
         } catch (_) {
-          status.textContent = 'Email preference is temporarily unavailable.';
+          status.textContent = (globalThis.NorvaI18n?.t("ui_web_0b99b8808ce2", { defaultValue: "Email preference is temporarily unavailable." }) ?? 'Email preference is temporarily unavailable.');
           return;
         }
         input.addEventListener('change', async function () {
           const requested = input.checked;
           input.disabled = true;
-          status.textContent = 'Saving…';
+          status.textContent = (globalThis.NorvaI18n?.t("ui_web_23e39291d613", { defaultValue: "Saving…" }) ?? 'Saving…');
           try {
             const saved = await marketingPreferenceRequest('POST', {
               marketing_email: requested,
@@ -275,11 +277,11 @@
             });
             input.checked = saved.marketing_email === true;
             status.textContent = input.checked
-              ? 'Subscribed. You can opt out here or from any marketing email.'
-              : 'Unsubscribed. Billing and account emails are still sent when needed.';
+              ? (globalThis.NorvaI18n?.t("ui_web_2785ee2cf8d8", { defaultValue: "Subscribed. You can opt out here or from any marketing email." }) ?? 'Subscribed. You can opt out here or from any marketing email.')
+              : (globalThis.NorvaI18n?.t("ui_web_96165777ce6d", { defaultValue: "Unsubscribed. Billing and account emails are still sent when needed." }) ?? 'Unsubscribed. Billing and account emails are still sent when needed.');
           } catch (_) {
             input.checked = !requested;
-            status.textContent = 'Could not save this preference. Please try again.';
+            status.textContent = (globalThis.NorvaI18n?.t("ui_web_8e037d974044", { defaultValue: "Could not save this preference. Please try again." }) ?? 'Could not save this preference. Please try again.');
           } finally {
             input.disabled = false;
           }
@@ -294,7 +296,7 @@
       }
 
       function backBtn(label) {
-        const a = el('a', 'btn ghost', label || 'Back to Norva');
+        const a = el('a', 'btn ghost', label || (globalThis.NorvaI18n?.t("ui_web_91d13041c60d", { defaultValue: "Back to Norva" }) ?? 'Back to Norva'));
         a.setAttribute('href', returnTo);
         return a;
       }
@@ -309,7 +311,7 @@
         if (isTvShell()) return null;
         if (isNative()) {
           if (entProvider(decision) !== 'google_play') return null;
-          const a = el('a', primary ? 'btn warn' : 'btn ghost', label || 'Manage on Google Play');
+          const a = el('a', primary ? 'btn warn' : 'btn ghost', label || (globalThis.NorvaI18n?.t("ui_web_8aa6bf85b38a", { defaultValue: "Manage on Google Play" }) ?? 'Manage on Google Play'));
           a.setAttribute('href', 'https://play.google.com/store/account/subscriptions');
           a.setAttribute('target', '_blank');
           a.setAttribute('rel', 'noopener');
@@ -317,7 +319,7 @@
         }
         const url = manageUrl();
         if (!url) return null;
-        const a = el('a', primary ? 'btn warn' : 'btn ghost', label || 'Manage / cancel');
+        const a = el('a', primary ? 'btn warn' : 'btn ghost', label || (globalThis.NorvaI18n?.t("ui_web_3118c0340f1c", { defaultValue: "Manage / cancel" }) ?? 'Manage / cancel'));
         a.setAttribute('href', url);
         a.setAttribute('target', '_blank');
         a.setAttribute('rel', 'noopener');
@@ -335,14 +337,14 @@
         // Deliberately a subtle secondary link (`.linkish`), not a primary button:
         // Norva is account-centric (signing in already restores access), so restore
         // is only a recovery affordance for an out-of-sync store purchase.
-        const b = el('button', 'linkish', 'Restore purchases');
+        const b = el('button', 'linkish', (globalThis.NorvaI18n?.t("ui_web_c6399925b391", { defaultValue: "Restore purchases" }) ?? 'Restore purchases'));
         b.addEventListener('click', async function () {
           b.disabled = true;
           const original = b.textContent;
-          b.textContent = 'Restoring…';
+          b.textContent = (globalThis.NorvaI18n?.t("ui_web_5a4918e0201c", { defaultValue: "Restoring…" }) ?? 'Restoring…');
           try {
             await window.NorvaBilling.restore({ appUserId: appUserId() });
-            b.textContent = 'Restored — refreshing…';
+            b.textContent = (globalThis.NorvaI18n?.t("ui_web_98f51f67f85f", { defaultValue: "Restored — refreshing…" }) ?? 'Restored — refreshing…');
             setTimeout(function () { location.reload(); }, 900);
           } catch (e) {
             // Don't surface raw SDK codes (e.g. "billing_not_configured" on a build
@@ -350,8 +352,8 @@
             const code = String((e && (e.code || e.message)) || '');
             if (storeNote) {
               storeNote.textContent = /not_configured|unavailable|not_ready/i.test(code)
-                ? "In-app purchases aren't available on this device yet."
-                : 'Could not restore purchases' + (e && e.message ? ': ' + e.message : '') + '.';
+                ? (globalThis.NorvaI18n?.t("ui_web_2c9057f85060", { defaultValue: "In-app purchases aren't available on this device yet." }) ?? "In-app purchases aren't available on this device yet.")
+                : (globalThis.NorvaI18n?.t("ui_web_8d39adbb14db", { defaultValue: "Could not restore purchases" }) ?? 'Could not restore purchases') + (e && e.message ? ': ' + e.message : '') + '.';
             }
             b.disabled = false;
             b.textContent = original;
@@ -376,7 +378,7 @@
             // place a plan change becomes visible before the renewal happens.
             if (p.amount_cents && p.period) {
               const d0 = el('div', 'detail');
-              d0.appendChild(el('span', null, 'Billing'));
+              d0.appendChild(el('span', null, (globalThis.NorvaI18n?.t("ui_web_3ac8bbca9a74", { defaultValue: "Billing" }) ?? 'Billing')));
               d0.appendChild(el('b', null, '$' + (p.amount_cents / 100).toFixed(2) + (p.period === 'annual' ? ' / year' : ' / month')));
               slot(d0);
             }
@@ -390,9 +392,9 @@
               const renderSave = function (mCents, yCents) {
                 if (!(isFinite(mCents) && isFinite(yCents) && mCents * 12 > yCents)) return;
                 const d3 = el('div', 'detail');
-                d3.appendChild(el('span', null, 'Annual billing'));
+                d3.appendChild(el('span', null, (globalThis.NorvaI18n?.t("ui_web_e1c8ebf14ec1", { defaultValue: "Annual billing" }) ?? 'Annual billing')));
                 const bWrap = el('b');
-                const a = el('a', null, 'Switch and save $' + ((mCents * 12 - yCents) / 100).toFixed(2) + ' a year →');
+                const a = el('a', null, (globalThis.NorvaI18n?.t("ui_web_94a60b661178", { defaultValue: "Switch and save $" }) ?? 'Switch and save $') + ((mCents * 12 - yCents) / 100).toFixed(2) + ' a year →');
                 a.setAttribute('href', '/checkout-revolut.html?plan=' + p.plan + '&period=annual&returnTo=' + encodeURIComponent('/subscription.html'));
                 a.style.cssText = 'color:var(--pink);text-decoration:none';
                 bWrap.appendChild(a);
@@ -414,15 +416,15 @@
             }
             if (p.card_last4) {
               const d = el('div', 'detail');
-              d.appendChild(el('span', null, 'Payment method'));
+              d.appendChild(el('span', null, (globalThis.NorvaI18n?.t("ui_web_b948ac04b854", { defaultValue: "Payment method" }) ?? 'Payment method')));
               d.appendChild(el('b', null, '•••• ' + p.card_last4 + (p.card_exp ? ' · exp ' + p.card_exp : '')));
               slot(d);
             }
             // A pending save-offer discount (cancel flow) applies to the next charge.
             if (p.discount_next_pct) {
               const d2 = el('div', 'detail');
-              d2.appendChild(el('span', null, 'Next payment'));
-              d2.appendChild(el('b', null, p.discount_next_pct + '% off applied'));
+              d2.appendChild(el('span', null, (globalThis.NorvaI18n?.t("ui_web_f89bb273ee46", { defaultValue: "Next payment" }) ?? 'Next payment')));
+              d2.appendChild(el('b', null, p.discount_next_pct + (globalThis.NorvaI18n?.t("ui_web_8920dd7d7366", { defaultValue: "% off applied" }) ?? '% off applied')));
               slot(d2);
             }
           }).catch(function () { /* cosmetic only */ });
@@ -482,7 +484,7 @@
       }
       function showActionError(action, error) {
         const detail = error && error.message ? ': ' + error.message : '';
-        const message = 'Could not ' + action + detail + ' — please retry or contact support@norva.tv.';
+        const message = (globalThis.NorvaI18n?.t("ui_web_df8a32dfd54d", { defaultValue: "Could not " }) ?? 'Could not ') + action + detail + (globalThis.NorvaI18n?.t("ui_web_e0ca94e30d84", { defaultValue: " — please retry or contact support@norva.tv." }) ?? ' — please retry or contact support@norva.tv.');
         if (storeNote) {
           storeNote.textContent = message;
           storeNote.classList.add('action-error');
@@ -564,7 +566,7 @@
       // "Cancel plan" — a short, accessible confirm wired to the Revolut cancel API.
       function cancelButton(decision) {
         if (!isRevolutWeb(decision) || !(window.NorvaBilling && window.NorvaBilling.revolutCancel)) return null;
-        const b = el('button', 'btn ghost', 'Cancel plan');
+        const b = el('button', 'btn ghost', (globalThis.NorvaI18n?.t("ui_web_2e5d129831b6", { defaultValue: "Cancel plan" }) ?? 'Cancel plan'));
         // A short, accessible confirm with no reason step or counter-offer. Used when
         // a payment is owed (past due / grace) and on Android TV, where a multi-step
         // radio flow is painful with a D-pad. `immediate` picks the "when access ends"
@@ -572,12 +574,12 @@
         function simpleConfirm(immediate) {
           const trialing = String(decision.status || '') === 'trialing';
           const cm = buildModal();
-          cm.modal.appendChild(el('h2', null, immediate ? 'Cancel your plan now?' : 'Cancel your plan?'));
+          cm.modal.appendChild(el('h2', null, immediate ? (globalThis.NorvaI18n?.t("ui_web_d624c4a20c1f", { defaultValue: "Cancel your plan now?" }) ?? 'Cancel your plan now?') : (globalThis.NorvaI18n?.t("ui_web_a22380b76482", { defaultValue: "Cancel your plan?" }) ?? 'Cancel your plan?')));
           cm.modal.appendChild(el('p', null, immediate
-            ? 'Your access ends immediately and nothing further is charged.'
+            ? (globalThis.NorvaI18n?.t("ui_web_81c90c10c4e9", { defaultValue: "Your access ends immediately and nothing further is charged." }) ?? 'Your access ends immediately and nothing further is charged.')
             : (trialing
-                ? "You keep full access until your trial ends, and you won't be charged."
-                : 'You keep full access until the end of the current period, and nothing further will be charged.')));
+                ? (globalThis.NorvaI18n?.t("ui_web_0265f73bc669", { defaultValue: "You keep full access until your trial ends, and you won't be charged." }) ?? "You keep full access until your trial ends, and you won't be charged.")
+                : (globalThis.NorvaI18n?.t("ui_web_aac0f87be51f", { defaultValue: "You keep full access until the end of the current period, and nothing further will be charged." }) ?? 'You keep full access until the end of the current period, and nothing further will be charged.'))));
           // Optional, same-screen feedback: it improves cancellation data without
           // adding a gate, counter-offer, or an extra confirmation step. A user can
           // still cancel immediately without answering.
@@ -585,7 +587,7 @@
           const reasons = document.createElement('fieldset');
           reasons.className = 'reasons';
           const legend = document.createElement('legend');
-          legend.textContent = 'Optional — what is the main reason?';
+          legend.textContent = (globalThis.NorvaI18n?.t("ui_web_4ad7aea7f46e", { defaultValue: "Optional — what is the main reason?" }) ?? 'Optional — what is the main reason?');
           reasons.appendChild(legend);
           [
             ['too_expensive', 'It costs too much'],
@@ -605,15 +607,15 @@
           });
           cm.modal.appendChild(reasons);
           const row = el('div', 'actions');
-          const cancelNow = el('button', 'btn danger', 'Cancel plan');
+          const cancelNow = el('button', 'btn danger', (globalThis.NorvaI18n?.t("ui_web_2e5d129831b6", { defaultValue: "Cancel plan" }) ?? 'Cancel plan'));
           const modalError = el('p', 'modal-error');
           modalError.setAttribute('role', 'alert');
           modalError.hidden = true;
           cancelNow.addEventListener('click', async function () {
             modalError.hidden = true;
             modalError.textContent = '';
-            cancelNow.disabled = true; cancelNow.textContent = 'Cancelling…';
-            b.disabled = true; b.textContent = 'Cancelling…';
+            cancelNow.disabled = true; cancelNow.textContent = (globalThis.NorvaI18n?.t("ui_web_91b104db05da", { defaultValue: "Cancelling…" }) ?? 'Cancelling…');
+            b.disabled = true; b.textContent = (globalThis.NorvaI18n?.t("ui_web_91b104db05da", { defaultValue: "Cancelling…" }) ?? 'Cancelling…');
             keep.disabled = true;
             try {
               await doCancel(cancelReason);
@@ -623,13 +625,13 @@
               const message = showActionError('cancel', e);
               modalError.textContent = message;
               modalError.hidden = false;
-              cancelNow.disabled = false; cancelNow.textContent = 'Cancel plan';
-              b.disabled = false; b.textContent = 'Cancel plan';
+              cancelNow.disabled = false; cancelNow.textContent = (globalThis.NorvaI18n?.t("ui_web_2e5d129831b6", { defaultValue: "Cancel plan" }) ?? 'Cancel plan');
+              b.disabled = false; b.textContent = (globalThis.NorvaI18n?.t("ui_web_2e5d129831b6", { defaultValue: "Cancel plan" }) ?? 'Cancel plan');
               keep.disabled = false;
               cancelNow.focus();
             }
           });
-          const keep = el('button', 'btn ghost', 'Keep my plan');
+          const keep = el('button', 'btn ghost', (globalThis.NorvaI18n?.t("ui_web_309e5b1f7b55", { defaultValue: "Keep my plan" }) ?? 'Keep my plan'));
           keep.addEventListener('click', cm.close);
           cm.modal.appendChild(modalError);
           row.appendChild(cancelNow);
@@ -647,7 +649,7 @@
       // "Update payment method" — labeled re-checkout (Revolut) that swaps the card token only.
       function updateCardLink(decision, primary) {
         if (!isRevolutWeb(decision)) return null;
-        const a = el('a', primary ? 'btn warn' : 'btn ghost', 'Update payment method');
+        const a = el('a', primary ? 'btn warn' : 'btn ghost', (globalThis.NorvaI18n?.t("ui_web_fa7bfb3b7bd8", { defaultValue: "Update payment method" }) ?? 'Update payment method'));
         a.setAttribute('href', '/checkout-revolut.html?intent=update_card&returnTo=' + encodeURIComponent('/subscription.html'));
         return a;
       }
@@ -655,19 +657,19 @@
       // other rails keep the classic link to the plan picker.
       function resumeControl(decision) {
         if (isRevolutWeb(decision) && window.NorvaBilling && window.NorvaBilling.revolutResume) {
-          const b = el('button', 'btn', 'Resume plan');
+          const b = el('button', 'btn', (globalThis.NorvaI18n?.t("ui_web_c05a75e0f571", { defaultValue: "Resume plan" }) ?? 'Resume plan'));
           b.addEventListener('click', async function () {
             clearActionError();
-            b.disabled = true; b.textContent = 'Resuming…';
+            b.disabled = true; b.textContent = (globalThis.NorvaI18n?.t("ui_web_c494e3ca3e3b", { defaultValue: "Resuming…" }) ?? 'Resuming…');
             try { await window.NorvaBilling.revolutResume(); location.reload(); }
             catch (e) {
-              b.disabled = false; b.textContent = 'Resume plan';
+              b.disabled = false; b.textContent = (globalThis.NorvaI18n?.t("ui_web_c05a75e0f571", { defaultValue: "Resume plan" }) ?? 'Resume plan');
               showActionError('resume', e);
             }
           });
           return b;
         }
-        const a = el('a', 'btn', 'Resume plan');
+        const a = el('a', 'btn', (globalThis.NorvaI18n?.t("ui_web_c05a75e0f571", { defaultValue: "Resume plan" }) ?? 'Resume plan'));
         a.setAttribute('href', subscribeHref());
         return a;
       }
@@ -689,10 +691,10 @@
           // A manually granted plan (VIP/system) has no billing cycle — nothing
           // "renews", the access simply runs until its end date.
           const granted = ['manual', 'system'].indexOf(String(proj.provider || '').toLowerCase()) !== -1;
-          const label = decision.status === 'cancelled_at_period_end' ? 'Access until'
-            : decision.status === 'trialing' ? 'Trial ends'
-            : decision.status === 'past_due' || decision.status === 'grace' ? 'Payment due'
-            : granted ? 'Access until' : 'Renews';
+          const label = decision.status === 'cancelled_at_period_end' ? (globalThis.NorvaI18n?.t("ui_web_fa053e1731e4", { defaultValue: "Access until" }) ?? 'Access until')
+            : decision.status === 'trialing' ? (globalThis.NorvaI18n?.t("ui_web_d506d4a34939", { defaultValue: "Trial ends" }) ?? 'Trial ends')
+            : decision.status === 'past_due' || decision.status === 'grace' ? (globalThis.NorvaI18n?.t("ui_web_a648708bed4a", { defaultValue: "Payment due" }) ?? 'Payment due')
+            : granted ? (globalThis.NorvaI18n?.t("ui_web_fa053e1731e4", { defaultValue: "Access until" }) ?? 'Access until') : (globalThis.NorvaI18n?.t("ui_web_8fc6e0e16f6e", { defaultValue: "Renews" }) ?? 'Renews');
           add(label, fmtDate(end));
         }
         return frag;
@@ -706,10 +708,10 @@
         // Not signed in.
         if (!decision) {
           const card = el('div', 'card');
-          card.appendChild(el('p', 'msg', 'Sign in to see your Norva subscription.'));
+          card.appendChild(el('p', 'msg', (globalThis.NorvaI18n?.t("ui_web_773175a21e7e", { defaultValue: "Sign in to see your Norva subscription." }) ?? 'Sign in to see your Norva subscription.')));
           content.appendChild(card);
           const row = el('div', 'actions');
-          const signin = el('a', 'btn', 'Sign in');
+          const signin = el('a', 'btn', (globalThis.NorvaI18n?.t("ui_web_bfd402b2f6f3", { defaultValue: "Sign in" }) ?? 'Sign in'));
           signin.setAttribute('href', '/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
           row.appendChild(signin);
           row.appendChild(backBtn('Back'));
@@ -726,9 +728,9 @@
         const hasRealSub = SUB_STATUSES.indexOf(realStatus) !== -1;
         if ((decision.enforced === false || decision.mode === 'observe') && !hasRealSub) {
           const card = el('div', 'card');
-          card.appendChild(el('span', 'pill muted', 'Active'));
+          card.appendChild(el('span', 'pill muted', (globalThis.NorvaI18n?.t("ui_web_92340695899b", { defaultValue: "Active" }) ?? 'Active')));
           card.appendChild(el('div', 'plan-name', 'Norva'));
-          card.appendChild(el('p', 'msg', "You have full access. Paid plans aren't switched on for Norva yet — there's nothing to manage for now."));
+          card.appendChild(el('p', 'msg', (globalThis.NorvaI18n?.t("ui_web_76c9a93f011d", { defaultValue: "You have full access. Paid plans aren't switched on for Norva yet — there's nothing to manage for now." }) ?? "You have full access. Paid plans aren't switched on for Norva yet — there's nothing to manage for now.")));
           content.appendChild(card);
           content.appendChild((function () { const r = el('div', 'actions'); r.appendChild(backBtn()); return r; })());
           storeNote.textContent = '';
@@ -743,32 +745,32 @@
         const needsVerification = decision.planCode === 'free'
           && String(decision.reason || '').replace(/^gate0_(?:observe|bypass)_/, '').replace(/^free_/, '') === 'billing_unverified';
         if (needsVerification) {
-          card.appendChild(el('span', 'pill warn', 'Verification needed'));
-          card.appendChild(el('div', 'plan-name', 'Norva access'));
-          card.appendChild(el('p', 'msg warn', "We couldn't verify the dates on this subscription, so Norva won't label it active yet. Retry now; if this persists, contact support and we will verify the billing record."));
+          card.appendChild(el('span', 'pill warn', (globalThis.NorvaI18n?.t("ui_web_4377586214cd", { defaultValue: "Verification needed" }) ?? 'Verification needed')));
+          card.appendChild(el('div', 'plan-name', (globalThis.NorvaI18n?.t("ui_web_de0d86adf6a7", { defaultValue: "Norva access" }) ?? 'Norva access')));
+          card.appendChild(el('p', 'msg warn', (globalThis.NorvaI18n?.t("ui_web_59b7052f79d7", { defaultValue: "We couldn't verify the dates on this subscription, so Norva won't label it active yet. Retry now; if this persists, contact support and we will verify the billing record." }) ?? "We couldn't verify the dates on this subscription, so Norva won't label it active yet. Retry now; if this persists, contact support and we will verify the billing record.")));
           content.appendChild(card);
           const row = el('div', 'actions');
-          const retry = el('button', 'btn', 'Retry verification');
+          const retry = el('button', 'btn', (globalThis.NorvaI18n?.t("ui_web_bd3e14f7c803", { defaultValue: "Retry verification" }) ?? 'Retry verification'));
           retry.addEventListener('click', function () { location.reload(); });
           row.appendChild(retry);
-          const support = el('a', 'btn ghost', 'Contact support');
+          const support = el('a', 'btn ghost', (globalThis.NorvaI18n?.t("ui_web_814f4ed2d5bd", { defaultValue: "Contact support" }) ?? 'Contact support'));
           support.setAttribute('href', 'mailto:support@norva.tv?subject=Subscription%20verification');
           row.appendChild(support);
           row.appendChild(backBtn('Back'));
           content.appendChild(row);
-          storeNote.textContent = 'No renewal or charge promise is shown until the billing dates are verified.';
+          storeNote.textContent = (globalThis.NorvaI18n?.t("ui_web_1d4759ca790e", { defaultValue: "No renewal or charge promise is shown until the billing dates are verified." }) ?? 'No renewal or charge promise is shown until the billing dates are verified.');
           return;
         }
 
         // Security/reversal states cannot be repaired by starting another
         // checkout. Keep the account on a support-only path with no billing CTA.
         if (isHardBlocked(decision)) {
-          card.appendChild(el('span', 'pill warn', 'Access unavailable'));
-          card.appendChild(el('div', 'plan-name', 'Norva account'));
-          card.appendChild(el('p', 'msg warn', 'This account cannot start or manage a payment. Contact Norva support so we can review it safely.'));
+          card.appendChild(el('span', 'pill warn', (globalThis.NorvaI18n?.t("ui_web_58b1510f8aba", { defaultValue: "Access unavailable" }) ?? 'Access unavailable')));
+          card.appendChild(el('div', 'plan-name', (globalThis.NorvaI18n?.t("ui_web_f5b0ab819cc1", { defaultValue: "Norva account" }) ?? 'Norva account')));
+          card.appendChild(el('p', 'msg warn', (globalThis.NorvaI18n?.t("ui_web_7c8131fbbdcf", { defaultValue: "This account cannot start or manage a payment. Contact Norva support so we can review it safely." }) ?? 'This account cannot start or manage a payment. Contact Norva support so we can review it safely.')));
           content.appendChild(card);
           const row = el('div', 'actions');
-          const support = el('a', 'btn', 'Contact support');
+          const support = el('a', 'btn', (globalThis.NorvaI18n?.t("ui_web_814f4ed2d5bd", { defaultValue: "Contact support" }) ?? 'Contact support'));
           support.setAttribute('href', 'mailto:support@norva.tv?subject=Account%20access%20review');
           row.appendChild(support);
           row.appendChild(backBtn('Back'));
@@ -781,9 +783,9 @@
         // billing rail. Never show a renewal date, saved card, checkout, update,
         // cancel or resume action for it, even if historical payment data exists.
         if (isIncludedAccess(decision)) {
-          card.appendChild(el('span', 'pill ok', 'Included'));
+          card.appendChild(el('span', 'pill ok', (globalThis.NorvaI18n?.t("ui_web_ba829a98b799", { defaultValue: "Included" }) ?? 'Included')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
-          card.appendChild(el('p', 'msg', 'Your Norva access is included with this account. Nothing renews and there is nothing to pay.'));
+          card.appendChild(el('p', 'msg', (globalThis.NorvaI18n?.t("ui_web_d36d041cb158", { defaultValue: "Your Norva access is included with this account. Nothing renews and there is nothing to pay." }) ?? 'Your Norva access is included with this account. Nothing renews and there is nothing to pay.')));
           content.appendChild(card);
           const row = el('div', 'actions');
           row.appendChild(backBtn('Back'));
@@ -792,17 +794,17 @@
         }
 
         if (status === 'past_due' || status === 'grace' || decision.reason === 'billing_grace') {
-          card.appendChild(el('span', 'pill warn', 'Payment issue'));
+          card.appendChild(el('span', 'pill warn', (globalThis.NorvaI18n?.t("ui_web_ca0d5a072c30", { defaultValue: "Payment issue" }) ?? 'Payment issue')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
           card.appendChild(detailRows(decision));
-          card.appendChild(el('p', 'msg warn', "We couldn't take your last payment. Update your payment method to keep watching — your access stays on during a short grace period."));
+          card.appendChild(el('p', 'msg warn', (globalThis.NorvaI18n?.t("ui_web_5679b2b7da8d", { defaultValue: "We couldn't take your last payment. Update your payment method to keep watching — your access stays on during a short grace period." }) ?? "We couldn't take your last payment. Update your payment method to keep watching — your access stays on during a short grace period.")));
           content.appendChild(card);
           appendPaymentMethod(card, decision);
           const row = el('div', 'actions');
           // Web/Revolut → our own card-update flow; native → Google Play.
           const uc = updateCardLink(decision, true);
           if (uc) row.appendChild(uc);
-          const mb = manageButton(decision, isNative() ? 'Update on Google Play' : (uc ? 'Manage billing' : 'Update payment'), true);
+          const mb = manageButton(decision, isNative() ? (globalThis.NorvaI18n?.t("ui_web_df4a942127d6", { defaultValue: "Update on Google Play" }) ?? 'Update on Google Play') : (uc ? (globalThis.NorvaI18n?.t("ui_web_7ea27c63aff1", { defaultValue: "Manage billing" }) ?? 'Manage billing') : (globalThis.NorvaI18n?.t("ui_web_026cd09052b3", { defaultValue: "Update payment" }) ?? 'Update payment')), true);
           if (mb) row.appendChild(mb);
           const cx = cancelButton(decision);
           if (cx) row.appendChild(cx);
@@ -814,36 +816,36 @@
         if (status === 'trialing') {
           const end = (decision.projection || {}).trial_ends_at || (decision.projection || {}).current_period_end;
           const dl = daysLeft(end);
-          card.appendChild(el('span', 'pill ok', 'Free trial'));
+          card.appendChild(el('span', 'pill ok', (globalThis.NorvaI18n?.t("ui_web_17f6390c3192", { defaultValue: "Free trial" }) ?? 'Free trial')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
           card.appendChild(detailRows(decision));
-          const left = (dl != null && dl >= 0) ? (dl === 0 ? 'Last day of your trial. ' : dl + ' day' + (dl === 1 ? '' : 's') + ' left. ') : '';
-          card.appendChild(el('p', 'msg', left + "You won't be charged until your trial ends — cancel anytime before then."));
+          const left = (dl != null && dl >= 0) ? (dl === 0 ? (globalThis.NorvaI18n?.t("ui_web_587f51e5a63f", { defaultValue: "Last day of your trial. " }) ?? 'Last day of your trial. ') : dl + ' day' + (dl === 1 ? '' : 's') + ' left. ') : '';
+          card.appendChild(el('p', 'msg', left + (globalThis.NorvaI18n?.t("ui_web_f35a57d125d9", { defaultValue: "You won't be charged until your trial ends — cancel anytime before then." }) ?? "You won't be charged until your trial ends — cancel anytime before then.")));
           content.appendChild(card);
         } else if (status === 'active') {
-          card.appendChild(el('span', 'pill ok', 'Active'));
+          card.appendChild(el('span', 'pill ok', (globalThis.NorvaI18n?.t("ui_web_92340695899b", { defaultValue: "Active" }) ?? 'Active')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
           card.appendChild(detailRows(decision));
           content.appendChild(card);
         } else if (status === 'cancelled_at_period_end') {
           const end = (decision.projection || {}).current_period_end;
-          card.appendChild(el('span', 'pill warn', 'Ending'));
+          card.appendChild(el('span', 'pill warn', (globalThis.NorvaI18n?.t("ui_web_a17bfde3804f", { defaultValue: "Ending" }) ?? 'Ending')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
           card.appendChild(detailRows(decision));
-          card.appendChild(el('p', 'msg', "Your plan won't renew and ends on " + fmtDate(end) + '. You can resume anytime before then.'));
+          card.appendChild(el('p', 'msg', (globalThis.NorvaI18n?.t("ui_web_f036f3554d1a", { defaultValue: "Your plan won't renew and ends on " }) ?? "Your plan won't renew and ends on ") + fmtDate(end) + (globalThis.NorvaI18n?.t("ui_web_7f2b2b097996", { defaultValue: ". You can resume anytime before then." }) ?? '. You can resume anytime before then.')));
           content.appendChild(card);
         } else {
           // none / expired / free — no active plan → win-back.
-          card.appendChild(el('span', 'pill muted', 'No active plan'));
+          card.appendChild(el('span', 'pill muted', (globalThis.NorvaI18n?.t("ui_web_637ae3d9e272", { defaultValue: "No active plan" }) ?? 'No active plan')));
           card.appendChild(el('div', 'plan-name', 'Norva'));
           card.appendChild(el('p', 'msg', status === 'expired'
-            ? 'Your Norva plan has ended. Resubscribe to keep watching on Web, Android mobile (phone and tablet), and Android TV.'
-            : "You don't have an active Norva plan yet."));
+            ? (globalThis.NorvaI18n?.t("ui_web_57d0c31353db", { defaultValue: "Your Norva plan has ended. Resubscribe to keep watching on Web, Android mobile (phone and tablet), and Android TV." }) ?? 'Your Norva plan has ended. Resubscribe to keep watching on Web, Android mobile (phone and tablet), and Android TV.')
+            : (globalThis.NorvaI18n?.t("ui_web_934e93d12803", { defaultValue: "You don't have an active Norva plan yet." }) ?? "You don't have an active Norva plan yet.")));
           content.appendChild(card);
           const row = el('div', 'actions');
           // No checkout on the TV — subscribing happens on web/phone (see storeNote).
           if (!isTvShell()) {
-            const see = el('a', 'btn', status === 'expired' ? 'Resubscribe' : 'See plans');
+            const see = el('a', 'btn', status === 'expired' ? (globalThis.NorvaI18n?.t("ui_web_f124068c9115", { defaultValue: "Resubscribe" }) ?? 'Resubscribe') : (globalThis.NorvaI18n?.t("ui_web_d989893356ee", { defaultValue: "See plans" }) ?? 'See plans'));
             see.setAttribute('href', subscribeHref());
             row.appendChild(see);
           }
@@ -872,7 +874,7 @@
             // Label by state: a real store sub can switch tier ("Change plan"); an
             // auto/system trial has no chosen plan yet, so the CTA is to pick one.
             const hasStorePlan = ['revolut', 'google_play', 'apple_app_store'].indexOf(entProvider(decision)) !== -1;
-            const change = el('a', (hasStorePlan && primaryManager) ? 'btn ghost' : 'btn', hasStorePlan ? 'Change plan' : 'Choose your plan');
+            const change = el('a', (hasStorePlan && primaryManager) ? (globalThis.NorvaI18n?.t("ui_web_a8beca52ecd4", { defaultValue: "btn ghost" }) ?? 'btn ghost') : 'btn', hasStorePlan ? (globalThis.NorvaI18n?.t("ui_web_b4669779339d", { defaultValue: "Change plan" }) ?? 'Change plan') : (globalThis.NorvaI18n?.t("ui_web_6029066fbe16", { defaultValue: "Choose your plan" }) ?? 'Choose your plan'));
             change.setAttribute('href', subscribeHref());
             row.appendChild(change);
             const uc = updateCardLink(decision, false);

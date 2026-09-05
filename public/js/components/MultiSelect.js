@@ -144,7 +144,7 @@ class MultiSelect {
             : this.options;
 
         if (filtered.length === 0) {
-            this.list.innerHTML = '<p class="hint multi-select-empty">No categories found</p>';
+            this.list.innerHTML = '<p class="hint multi-select-empty" data-i18n="ui_web_8b22abcaae1f">No categories found</p>';
             return;
         }
 
@@ -177,7 +177,7 @@ class MultiSelect {
             this.btn.textContent = opt ? opt.label : this.allLabel;
             this.btn.classList.add('has-selection');
         } else {
-            this.btn.textContent = `${this.allLabel.replace('All ', '')} (${this.selected.size})`;
+            this.btn.textContent = `${this.allLabel.replace((globalThis.NorvaI18n?.t("ui_web_a52ace420f21", { defaultValue: "All " }) ?? 'All '), '')} (${this.selected.size})`;
             this.btn.classList.add('has-selection');
         }
     }

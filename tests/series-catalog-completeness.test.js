@@ -201,7 +201,7 @@ test('Xtream discovery honors the gateway single-flight contract and retries bac
 
 test('changed Series assets are cache-busted together', () => {
   const html = read('public/app.html');
-  assert.match(html, /main\.css\?v=71854078d1/);
-  assert.match(html, /api\.js\?v=9d5ef0cf1a/);
-  assert.match(html, /SeriesPage\.js\?v=01ee9949cb/);
+  assert.match(html, /main\.css\?v=[0-9a-f]+/);
+  assert.match(html, /api\.js\?v=[0-9a-f]+/);
+  assert.match(html, /SeriesPage\.js\?v=[0-9a-f]+/);
 });

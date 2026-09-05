@@ -87,7 +87,7 @@ public final class DownloadService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startInForeground(buildNotification("Preparing downloads…", 0, 0, true));
+        startInForeground(buildNotification(tv.norva.i18n.UiLanguage.wrap(this).getString(R.string.native_downloads_preparing), 0, 0, true));
         unregisterWifiWaiter();
         if (running.compareAndSet(false, true)) {
             worker.execute(this::drainQueue);
@@ -372,7 +372,7 @@ public final class DownloadService extends Service {
                     item.downloadedBytes = written;
                     persist(item);
                     int pct = total > 0 ? (int) (written * 100 / total) : 0;
-                    notifyProgress(buildNotification("Downloading " + item.title, pct, 100, total <= 0));
+                    notifyProgress(buildNotification(tv.norva.i18n.UiLanguage.wrap(this).getString(R.string.native_downloads_item, item.title), pct, 100, total <= 0));
                 }
             }
             byte[] tail = cipher.doFinal();
@@ -598,7 +598,7 @@ public final class DownloadService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL, "Downloads", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL, tv.norva.i18n.UiLanguage.wrap(this).getString(R.string.ui_downloads), NotificationManager.IMPORTANCE_LOW);
             ch.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);

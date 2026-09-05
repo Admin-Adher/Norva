@@ -57,4 +57,13 @@
     <string name="ui_cloud_sign_in" formatted="false">تسجيل الدخول إلى Norva Cloud</string>
     <string name="ui_please_wait" formatted="false">يرجى الانتظار…</string>
     <string name="ui_sign_in_failed" formatted="false">تعذّر تسجيل الدخول. تحقّق من بياناتك وحاول مجددًا.</string>
+    <string name="ui_trial_start_duration" formatted="false">بدء الفترة التجريبية المجانية · {{duration}}</string>
+    <string name="ui_trial_started_duration" formatted="false">لديك الآن وصول كامل. تستمر فترتك التجريبية المجانية لمدة {{duration}}. لن يتم تحصيل أي دفعة قبل انتهائها. يمكنك الإلغاء في أي وقت قبل ذلك.</string>
+    <string name="ui_trial_duration" formatted="false">فترة تجريبية مجانية · {{duration}}</string>
+    <string name="ui_hls_source_hint" formatted="false">2. أو اضبط مصدرك لاستخدام تنسيق HLS (.m3u8)</string>
+    <string name="ui_draft_discount_applied" formatted="false">تم تطبيق خصم {{discount}}٪ على المسودة. راجع الحملة للمتابعة.</string>
+    <string name="ui_changes_review_again" formatted="false">تم تحديث التغييرات. أعد إجراء التحقق.</string>
+    <string name="ui_prerequisite_changed" formatted="false">تغيّر أحد المتطلبات أثناء التحقق. أغلق هذه النافذة وتحقق من الإعدادات ثم حاول مجددًا.</string>
+    <string name="ui_selection_kept" formatted="false">· تم الاحتفاظ بالتحديد الحالي</string>
+    <string name="ui_trial_days_left" formatted="false">الأيام المتبقية: {{days}}</string>
 </resources>

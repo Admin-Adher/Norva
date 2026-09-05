@@ -552,7 +552,7 @@ test('Android TV has complete EN/FR viewer copy and actionable Retry/Back errors
   const french = resourceNames(frenchXml, 'string');
 
   assert.deepEqual(
-    [...english].filter((name) => !french.has(name)).sort(),
+    [...english].filter((name) => name !== 'app_name' && !french.has(name)).sort(),
     [],
     'French TV resources are missing one or more source strings',
   );

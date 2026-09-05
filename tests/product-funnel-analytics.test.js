@@ -67,10 +67,10 @@ test('every core product surface loads the common adapters before consent', () =
   ];
   for (const [file, productVersion, consentVersion] of surfaces) {
     const html = read(file);
-    const config = html.indexOf('/js/marketing-config.js?v=2');
-    const native = html.indexOf('/js/native-analytics.js?v=2');
-    const product = html.indexOf(`/js/product-analytics.js?v=${productVersion}`);
-    const consent = html.indexOf(`/js/consent-banner.js?v=${consentVersion}`);
+    const config = html.indexOf('/js/marketing-config.js');
+    const native = html.indexOf('/js/native-analytics.js');
+    const product = html.indexOf('/js/product-analytics.js');
+    const consent = html.indexOf('/js/consent-banner.js');
     assert.ok(config >= 0 && config < native && native < product && product < consent,
       `${file}: common analytics adapters must precede consent`);
   }

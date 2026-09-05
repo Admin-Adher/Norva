@@ -21,6 +21,7 @@ public final class UiLanguage {
         if (Build.VERSION.SDK_INT >= 33) {
             LocaleManager manager = context.getSystemService(LocaleManager.class);
             if (manager != null) {
+                migrateLegacyPreference(context, manager);
                 LocaleList list = manager.getApplicationLocales();
                 if (list.isEmpty()) return "auto";
                 String normalized = UiLanguagePolicy.normalize(list.get(0).toLanguageTag());
@@ -30,6 +31,17 @@ public final class UiLanguage {
         String value = context.getSharedPreferences(STORE, Context.MODE_PRIVATE).getString(KEY, "auto");
         String normalized = UiLanguagePolicy.normalize(value);
         return normalized.isEmpty() ? "auto" : normalized;
+    }
+
+    @androidx.annotation.RequiresApi(33)
+    private static synchronized void migrateLegacyPreference(Context context, LocaleManager manager) {
+        android.content.SharedPreferences preferences = context.getSharedPreferences(STORE, Context.MODE_PRIVATE);
+        if (preferences.getBoolean("migrated_api33", false)) return;
+        String imported = UiLanguagePolicy.legacyPreferenceToImport(
+                preferences.getString(KEY, "auto"), false, !manager.getApplicationLocales().isEmpty());
+        if (!imported.isEmpty()) manager.setApplicationLocales(LocaleList.forLanguageTags(imported));
+        // A failed commit is retried; an already-imported framework locale will never be replaced.
+        preferences.edit().putBoolean("migrated_api33", true).commit();
     }
 
     public static String[] deviceLanguages(Context context) {

@@ -41,7 +41,7 @@ test('blog index creates a structured, searchable knowledge library', () => {
   assert.match(html, /data-topic="playback"/);
   assert.match(html, /data-topic="organise"/);
   assert.match(html, /data-topic="start"/);
-  assert.match(html, /\/js\/blog-index\.js\?v=1/);
+  assert.match(html, /\/js\/blog-index\.js\?v=[0-9a-f]+/);
   assert.doesNotMatch(html, /on(?:click|input|submit)=/i);
 });
 

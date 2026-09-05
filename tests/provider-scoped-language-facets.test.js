@@ -41,9 +41,9 @@ test('mobile catalog sheet exposes accessible language controls and counts them 
     const app = read('public/js/app.js');
 
     assert.match(app, /audio: 'movies-audio'/);
-    assert.match(app, /subtitle: 'movies-subtitle'/);
+    assert.match(app, /subtitle: \(?\s*'movies-subtitle'/);
     assert.match(app, /audio: 'series-audio'/);
-    assert.match(app, /subtitle: 'series-subtitle'/);
+    assert.match(app, /subtitle: \(?\s*'series-subtitle'/);
     assert.match(app, /createMobileFilterSection\('Languages'\)/);
     assert.match(app, /\['audio', 'subtitle'\]\.forEach\(name => addField\(languageSection\.body, name\)\)/);
     assert.match(app, /label\.htmlFor = el\.id/);

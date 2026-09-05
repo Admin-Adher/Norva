@@ -636,7 +636,7 @@ public class MainActivity extends Activity {
                                 } else {
                                     lastBackPressMs = now;
                                     Toast.makeText(MainActivity.this,
-                                            "Press back again to exit", Toast.LENGTH_SHORT).show();
+                                            getString(R.string.native_back_exit), Toast.LENGTH_SHORT).show();
                                 }
                             }
                         });

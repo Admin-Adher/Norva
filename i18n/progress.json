@@ -1,0 +1,42 @@
+{
+  "checkedAt": "2026-09-05T07:53:23.682Z",
+  "status": "release-validated",
+  "catalogKeys": 7074,
+  "sharedKeys": 65,
+  "missingTranslations": {
+    "en": 0,
+    "fr": 0,
+    "pt-BR": 0,
+    "es": 0,
+    "hi": 0,
+    "tr": 0,
+    "bn": 0,
+    "ar": 0,
+    "id": 0,
+    "fil": 0
+  },
+  "totalMissing": 0,
+  "invalidParameters": [],
+  "translationLedger": {
+    "characters": 801762,
+    "requests": 397
+  },
+  "validation": {
+    "tests": 3557,
+    "passed": 3549,
+    "skipped": 8,
+    "failed": 0,
+    "publicPageChecks": 56,
+    "nativePlatforms": [
+      "phone",
+      "tv"
+    ],
+    "deviceTestsPerPlatform": 2
+  },
+  "publication": {
+    "git": "Pending push",
+    "web": "Pending Cloudflare workflow",
+    "phone": "1.3.18 (31), pending Play submission",
+    "tv": "3.8.18-hybrid (31), pending Play submission"
+  }
+}

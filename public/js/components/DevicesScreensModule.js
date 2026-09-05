@@ -150,7 +150,7 @@
             this.loading = true;
             this.root.setAttribute('aria-busy', 'true');
             if (!this.hasLoaded) this.renderLoading();
-            else this.announce('Refreshing your screens.');
+            else this.announce((globalThis.NorvaI18n?.t("ui_web_29609edffee6", { defaultValue: "Refreshing your screens." }) ?? 'Refreshing your screens.'));
 
             const [profileResult, devicesResult] = await Promise.allSettled([
                 this.adapter.getProfile(),
@@ -182,7 +182,7 @@
             this.render();
             if (options.announce) {
                 this.announce(
-                    this.loadError || `${this.devices.length} linked ${this.devices.length === 1 ? 'screen' : 'screens'} loaded.`,
+                    this.loadError || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_591fac029ef3", {defaultValue: "{{p0}} linked {{p1}} loaded.", p0:(this.devices.length),p1:(this.devices.length === 1 ? 'screen' : 'screens')}) : `${this.devices.length} linked ${this.devices.length === 1 ? 'screen' : 'screens'} loaded.`),
                     Boolean(this.loadError)
                 );
             }
@@ -206,8 +206,8 @@
 
         offlineMessage() {
             return typeof navigator !== 'undefined' && navigator.onLine === false
-                ? 'You’re offline. Reconnect, then try again.'
-                : 'Couldn’t load your screens. Check your connection and try again.';
+                ? (globalThis.NorvaI18n?.t("ui_web_3c3188a5bc85", { defaultValue: "You’re offline. Reconnect, then try again." }) ?? 'You’re offline. Reconnect, then try again.')
+                : (globalThis.NorvaI18n?.t("ui_web_22b46e2382ac", { defaultValue: "Couldn’t load your screens. Check your connection and try again." }) ?? 'Couldn’t load your screens. Check your connection and try again.');
         }
 
         renderLoading() {
@@ -215,7 +215,7 @@
             this.root.setAttribute('aria-busy', 'true');
             this.root.innerHTML = `
                 ${this.mobileHeader()}
-                <div class="devices-surface devices-loading" role="status" aria-label="Loading your screens">
+                <div class="devices-surface devices-loading" role="status" aria-label="Loading your screens" data-i18n-aria-label="ui_web_fac20460ac15">
                     <div class="devices-hero devices-skeleton-hero" aria-hidden="true">
                         <span class="devices-skeleton-line is-short"></span>
                         <span class="devices-skeleton-line is-title"></span>
@@ -227,7 +227,7 @@
                             <span></span><span></span><span></span>
                         </div>
                     </section>
-                    <span class="devices-loading-label">Loading your screens…</span>
+                    <span class="devices-loading-label" data-i18n="ui_web_69ee511ff450">Loading your screens…</span>
                 </div>`;
         }
 
@@ -250,37 +250,37 @@
         mobileHeader() {
             return `
                 <header class="devices-mobile-header">
-                    <button type="button" class="devices-back" data-devices-back aria-label="Back to Settings">
+                    <button type="button" class="devices-back" data-devices-back aria-label="Back to Settings" data-i18n-aria-label="ui_web_ea37ec29c386">
                         ${ICONS.back}
                     </button>
-                    <div><strong>Devices</strong><span>Your screens</span></div>
+                    <div><strong data-i18n="ui_web_4ba5121d4d1b">Devices</strong><span data-i18n="ui_web_9fc411249e5c">Your screens</span></div>
                 </header>`;
         }
 
         hero(connected, readyCount) {
             const total = this.devices.length;
-            let title = 'Start here. Watch everywhere.';
-            let copy = 'Install or open Norva on the TV, then pair it from this phone.';
+            let title = (globalThis.NorvaI18n?.t("ui_web_1270f5fcc87e", { defaultValue: "Start here. Watch everywhere." }) ?? 'Start here. Watch everywhere.');
+            let copy = (globalThis.NorvaI18n?.t("ui_web_79ee712211a8", { defaultValue: "Install or open Norva on the TV, then pair it from this phone." }) ?? 'Install or open Norva on the TV, then pair it from this phone.');
             let summary = 'TV · web · mobile';
             let stateClass = '';
 
             if (connected) {
                 const unavailable = total - readyCount;
-                if (readyCount === total) title = 'Every screen, one Norva.';
-                else if (readyCount === 2 && unavailable === 1) title = 'Two ready. One needs you.';
-                else if (readyCount === 0) title = 'Your screens are waiting.';
-                else title = `${readyCount} ready. ${unavailable === 1 ? 'One needs you.' : `${unavailable} need you.`}`;
-                copy = 'Review your screens, pair another TV or send playback from one calm home.';
-                summary = `${readyCount} of ${total} ready`;
+                if (readyCount === total) title = (globalThis.NorvaI18n?.t("ui_web_9a5a4544b80a", { defaultValue: "Every screen, one Norva." }) ?? 'Every screen, one Norva.');
+                else if (readyCount === 2 && unavailable === 1) title = (globalThis.NorvaI18n?.t("ui_web_b991b56403fe", { defaultValue: "Two ready. One needs you." }) ?? 'Two ready. One needs you.');
+                else if (readyCount === 0) title = (globalThis.NorvaI18n?.t("ui_web_c3ef7a20be73", { defaultValue: "Your screens are waiting." }) ?? 'Your screens are waiting.');
+                else title = `${readyCount} ready. ${unavailable === 1 ? (globalThis.NorvaI18n?.t("ui_web_a60a8ce9eea2", { defaultValue: "One needs you." }) ?? 'One needs you.') : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_c3966db7bed1", {defaultValue: "{{p0}} need you.", p0:(unavailable)}) : `${unavailable} need you.`)}`;
+                copy = (globalThis.NorvaI18n?.t("ui_web_f4bbd843f42a", { defaultValue: "Review your screens, pair another TV or send playback from one calm home." }) ?? 'Review your screens, pair another TV or send playback from one calm home.');
+                summary = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_89808c542cdf", {defaultValue: "{{p0}} of {{p1}} ready", p0:(readyCount),p1:(total)}) : `${readyCount} of ${total} ready`);
                 stateClass = unavailable ? ' is-warning' : ' is-ready';
             } else if (this.loadError) {
-                summary = 'Screens unavailable';
+                summary = (globalThis.NorvaI18n?.t("ui_web_6a416021e829", { defaultValue: "Screens unavailable" }) ?? 'Screens unavailable');
                 stateClass = ' is-warning';
             }
 
             return `
                 <section class="devices-hero" aria-labelledby="devices-hero-title">
-                    <div class="devices-hero-kicker">Norva everywhere</div>
+                    <div class="devices-hero-kicker" data-i18n="ui_web_d7f7faab8a31">Norva everywhere</div>
                     <h1 id="devices-hero-title">${title}</h1>
                     <p>${copy}</p>
                     <div class="devices-hero-summary${stateClass}">
@@ -295,8 +295,8 @@
             return `
                 <div class="devices-error" role="alert">
                     <span class="devices-error-icon">${ICONS.alert}</span>
-                    <span><strong>${offline ? 'You’re offline' : 'Couldn’t refresh your screens'}</strong><span>${this.escapeHtml(this.loadError)}</span></span>
-                    <button type="button" data-devices-retry>${ICONS.retry}<span>Retry</span></button>
+                    <span><strong>${offline ? (globalThis.NorvaI18n?.t("ui_web_58420f1c06d0", { defaultValue: "You’re offline" }) ?? 'You’re offline') : (globalThis.NorvaI18n?.t("ui_web_f6cf20b27de5", { defaultValue: "Couldn’t refresh your screens" }) ?? 'Couldn’t refresh your screens')}</strong><span>${this.escapeHtml(this.loadError)}</span></span>
+                    <button type="button" data-devices-retry>${ICONS.retry}<span data-i18n="ui_web_942087cc2d41">Retry</span></button>
                 </div>`;
         }
 
@@ -306,8 +306,8 @@
             return `
                 <section class="devices-section" aria-labelledby="devices-list-title">
                     <div class="devices-section-header">
-                        <h2 id="devices-list-title">Your screens</h2>
-                        <button type="button" class="devices-section-link" data-devices-pair>Add TV</button>
+                        <h2 id="devices-list-title" data-i18n="ui_web_9fc411249e5c">Your screens</h2>
+                        <button type="button" class="devices-section-link" data-devices-pair data-i18n="ui_web_e3a7e27d408a">Add TV</button>
                     </div>
                     <div class="devices-list">
                         ${this.devices.map((device) => this.deviceRow(device, device.id === featuredId)).join('')}
@@ -329,13 +329,13 @@
                         <span class="devices-row-name-line">
                             <span class="devices-status-dot" aria-hidden="true"></span>
                             <strong class="devices-row-name" title="${this.escapeAttr(name)}">${this.escapeHtml(name)}</strong>
-                            ${current ? '<span class="devices-current-label">This device</span>' : ''}
+                            ${current ? '<span class="devices-current-label" data-i18n="ui_web_d052579c6a31">This device</span>' : ''}
                         </span>
                         <span class="devices-row-meta">${this.escapeHtml(this.deviceTypeLabel(device))} · ${this.escapeHtml(state.label)}</span>
                     </span>
                     ${current ? '<span class="devices-row-action-spacer" aria-hidden="true"></span>' : `
                         <button type="button" class="devices-more" data-devices-menu="${this.escapeAttr(id)}"
-                            aria-label="More actions for ${this.escapeAttr(name)}" aria-expanded="false">
+                            aria-label="More actions for ${this.escapeAttr(name)}" aria-expanded="false" data-i18n-aria-label="ui_web_5c35909eae80" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p1":(this.escapeAttr(name))}) || "{}")}">
                             ${ICONS.more}
                         </button>`}
                 </article>`;
@@ -344,23 +344,23 @@
         watchElsewhere() {
             return `
                 <section class="devices-section" aria-labelledby="devices-watch-title">
-                    <div class="devices-section-header"><h2 id="devices-watch-title">Watch elsewhere</h2></div>
+                    <div class="devices-section-header"><h2 id="devices-watch-title" data-i18n="ui_web_e1898095d348">Watch elsewhere</h2></div>
                     <div class="devices-actions-list">
                         <button type="button" class="devices-action" data-devices-cast>
                             <span class="devices-action-icon">${ICONS.cast}</span>
-                            <span class="devices-action-copy"><strong>Send a video link</strong><span>Play or open it on a trusted screen.</span></span>
+                            <span class="devices-action-copy"><strong data-i18n="ui_web_69ae9601d442">Send a video link</strong><span data-i18n="ui_web_2915f2f2cb44">Play or open it on a trusted screen.</span></span>
                             <span class="devices-action-end">${ICONS.chevron}</span>
                         </button>
                         <a class="devices-action" href="${TV_STORE_URL}" target="_blank" rel="noopener noreferrer"
-                            aria-label="Open Norva for Android TV on Google Play">
+                            aria-label="Open Norva for Android TV on Google Play" data-i18n-aria-label="ui_web_22e7d6584d09">
                             <span class="devices-action-icon"><img src="/img/icons/google-play-mark.svg?v=1" alt=""></span>
-                            <span class="devices-action-copy"><strong>Get the Android TV app</strong><span>Choose a compatible TV signed in to the same Google account.</span></span>
+                            <span class="devices-action-copy"><strong data-i18n="ui_web_ff7995057c90">Get the Android TV app</strong><span data-i18n="ui_web_7c7d0c03beea">Choose a compatible TV signed in to the same Google account.</span></span>
                             <span class="devices-action-end">${ICONS.external}</span>
                         </a>
                         <a class="devices-action" href="${WEB_URL}" target="_blank" rel="noopener noreferrer"
-                            aria-label="Open norva.tv">
+                            aria-label="Open norva.tv" data-i18n-aria-label="ui_web_5ce98c8ce766">
                             <span class="devices-action-icon">${ICONS.web}</span>
-                            <span class="devices-action-copy"><strong>Watch at norva.tv</strong><span>Open a browser and sign in. No install.</span></span>
+                            <span class="devices-action-copy"><strong data-i18n="ui_web_03f7e4d45ea9">Watch at norva.tv</strong><span data-i18n="ui_web_52a43f368ae2">Open a browser and sign in. No install.</span></span>
                             <span class="devices-action-end">${ICONS.external}</span>
                         </a>
                     </div>
@@ -371,31 +371,31 @@
             return `
                 <section class="devices-setup" aria-labelledby="devices-setup-title">
                     <header class="devices-setup-header">
-                        <h2 id="devices-setup-title">Start on your TV</h2>
-                        <p>Two short steps. No password typing on the big screen.</p>
+                        <h2 id="devices-setup-title" data-i18n="ui_web_ae6a5b475c28">Start on your TV</h2>
+                        <p data-i18n="ui_web_40b4c25883b5">Two short steps. No password typing on the big screen.</p>
                     </header>
                     <div class="devices-steps">
                         <div class="devices-step">
                             <span class="devices-step-number" aria-hidden="true">1</span>
-                            <span><strong>Open or install Norva</strong><span>The TV shows a QR code and a short pairing code.</span></span>
+                            <span><strong data-i18n="ui_web_0eb74dd4e8a0">Open or install Norva</strong><span data-i18n="ui_web_c949707b5698">The TV shows a QR code and a short pairing code.</span></span>
                         </div>
                         <div class="devices-step">
                             <span class="devices-step-number" aria-hidden="true">2</span>
-                            <span><strong>Approve this TV from your phone</strong><span>Scan the QR or enter all six characters.</span></span>
+                            <span><strong data-i18n="ui_web_af6c31dc79cc">Approve this TV from your phone</strong><span data-i18n="ui_web_476febe7cb6c">Scan the QR or enter all six characters.</span></span>
                         </div>
                     </div>
                     <div class="devices-setup-actions">
                         <button type="button" class="btn btn-primary devices-setup-action" data-devices-pair>
-                            ${ICONS.plus}<span>Pair a TV</span>
+                            ${ICONS.plus}<span data-i18n="ui_web_786037f7d592">Pair a TV</span>
                         </button>
                         <a class="btn btn-secondary devices-setup-action" href="${TV_STORE_URL}" target="_blank" rel="noopener noreferrer">
-                            <img src="/img/icons/google-play-mark.svg?v=1" alt=""><span>Get TV app</span>
+                            <img src="/img/icons/google-play-mark.svg?v=1" alt=""><span data-i18n="ui_web_54256245e4d1">Get TV app</span>
                         </a>
                     </div>
-                    <p class="devices-play-note">Google Play can install Norva on a compatible TV signed in to the same Google account.</p>
+                    <p class="devices-play-note" data-i18n="ui_web_ed79dfdea5f3">Google Play can install Norva on a compatible TV signed in to the same Google account.</p>
                     <a class="devices-web-shortcut" href="${WEB_URL}" target="_blank" rel="noopener noreferrer">
                         <span class="devices-action-icon">${ICONS.web}</span>
-                        <span class="devices-action-copy"><strong>Prefer a browser?</strong><span>Open norva.tv — nothing to install.</span></span>
+                        <span class="devices-action-copy"><strong data-i18n="ui_web_1df5bad952ae">Prefer a browser?</strong><span data-i18n="ui_web_6fe468fdc6ca">Open norva.tv — nothing to install.</span></span>
                         <span class="devices-action-end">${ICONS.external}</span>
                     </a>
                 </section>`;
@@ -403,16 +403,16 @@
 
         accountSection() {
             const displayName = this.profileLoaded
-                ? (this.profileName || 'Norva account')
-                : (this.profileError ? 'Name unavailable' : 'Loading…');
+                ? (this.profileName || (globalThis.NorvaI18n?.t("ui_web_f5b0ab819cc1", { defaultValue: "Norva account" }) ?? 'Norva account'))
+                : (this.profileError ? (globalThis.NorvaI18n?.t("ui_web_c76c65bbcf32", { defaultValue: "Name unavailable" }) ?? 'Name unavailable') : (globalThis.NorvaI18n?.t("ui_web_ba3bbbe10d8b", { defaultValue: "Loading…" }) ?? 'Loading…'));
             return `
                 <section class="devices-section" aria-labelledby="devices-account-title">
-                    <div class="devices-section-header"><h2 id="devices-account-title">Your account</h2></div>
+                    <div class="devices-section-header"><h2 id="devices-account-title" data-i18n="ui_web_dbb5f6371b6a">Your account</h2></div>
                     <div class="devices-account-row">
-                        <span><span>Account name</span><strong title="${this.escapeAttr(displayName)}">${this.escapeHtml(displayName)}</strong></span>
-                        <button type="button" data-devices-edit-name>Edit</button>
+                        <span><span data-i18n="ui_web_a704d8d4a818">Account name</span><strong title="${this.escapeAttr(displayName)}">${this.escapeHtml(displayName)}</strong></span>
+                        <button type="button" data-devices-edit-name data-i18n="ui_web_464c4ffd019e">Edit</button>
                     </div>
-                    ${this.profileError ? '<p class="devices-account-hint">Couldn’t load the current name. You can still set a new one.</p>' : ''}
+                    ${this.profileError ? '<p class="devices-account-hint" data-i18n="ui_web_84b4104ae36e">Couldn’t load the current name. You can still set a new one.</p>' : ''}
                 </section>`;
         }
 
@@ -489,12 +489,12 @@
             trigger.setAttribute('aria-expanded', 'true');
             trigger.setAttribute('aria-controls', menuId);
             row.insertAdjacentHTML('beforeend', `
-                <div class="devices-menu" id="${menuId}" role="menu" aria-label="Actions for ${this.escapeAttr(this.deviceName(device))}">
+                <div class="devices-menu" id="${menuId}" role="menu" aria-label="Actions for ${this.escapeAttr(this.deviceName(device))}" data-i18n-aria-label="ui_web_69c393e5d3bf" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p1":(this.escapeAttr(this.deviceName(device)))}) || "{}")}">
                     <button type="button" role="menuitem" data-devices-cast-device="${this.escapeAttr(deviceId)}">
-                        ${ICONS.cast}<span>Send a link</span>
+                        ${ICONS.cast}<span data-i18n="ui_web_468da683a875">Send a link</span>
                     </button>
                     <button type="button" role="menuitem" class="is-danger" data-devices-remove="${this.escapeAttr(deviceId)}">
-                        ${ICONS.trash}<span>Remove screen</span>
+                        ${ICONS.trash}<span data-i18n="ui_web_9aca2712a92f">Remove screen</span>
                     </button>
                 </div>`);
             this.activeMenuTrigger = trigger;
@@ -516,8 +516,8 @@
             if (!device || this.pendingRevoke.has(deviceId)) return false;
             const name = this.deviceName(device);
             const confirmed = await window.NorvaModal?.confirm?.(
-                `${name} will lose access to this Norva account. It must be paired again to reconnect.`,
-                { title: `Remove ${name}?`, confirmLabel: 'Remove screen', cancelLabel: 'Keep screen', danger: true }
+                (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_78dab4366179", {defaultValue: "{{p0}} will lose access to this Norva account. It must be paired again to reconnect.", p0:(name)}) : `${name} will lose access to this Norva account. It must be paired again to reconnect.`),
+                { title: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5da74e0f0265", {defaultValue: "Remove {{p0}}?", p0:(name)}) : `Remove ${name}?`), confirmLabel: (globalThis.NorvaI18n?.t("ui_web_9aca2712a92f", { defaultValue: "Remove screen" }) ?? 'Remove screen'), cancelLabel: (globalThis.NorvaI18n?.t("ui_web_3a527a238a7c", { defaultValue: "Keep screen" }) ?? 'Keep screen'), danger: true }
             );
             if (!confirmed) return false;
 
@@ -529,13 +529,13 @@
                 if (this.isCurrentDevice(device)) this.clearCurrentDeviceToken();
                 this.devices = this.devices.filter((item) => String(item.id) !== String(deviceId));
                 this.render();
-                this.announce(`${name} removed.`);
-                this.toast(`${name} removed.`, 'success');
+                this.announce((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b2fc951e2f57", {defaultValue: "{{p0}} removed.", p0:(name)}) : `${name} removed.`));
+                this.toast((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b2fc951e2f57", {defaultValue: "{{p0}} removed.", p0:(name)}) : `${name} removed.`), 'success');
                 return true;
             } catch (_) {
                 row?.removeAttribute('aria-busy');
-                this.announce('Could not remove this screen. Try again.', true);
-                this.toast('Could not remove this screen. Try again.', 'error');
+                this.announce((globalThis.NorvaI18n?.t("ui_web_a67f76f09a9d", { defaultValue: "Could not remove this screen. Try again." }) ?? 'Could not remove this screen. Try again.'), true);
+                this.toast((globalThis.NorvaI18n?.t("ui_web_a67f76f09a9d", { defaultValue: "Could not remove this screen. Try again." }) ?? 'Could not remove this screen. Try again.'), 'error');
                 return false;
             } finally {
                 this.pendingRevoke.delete(deviceId);
@@ -544,16 +544,16 @@
 
         openNameSheet(opener) {
             const overlay = this.createSheet({
-                title: 'Account name',
-                description: 'This label helps identify your Norva home.',
+                title: (globalThis.NorvaI18n?.t("ui_web_a704d8d4a818", { defaultValue: "Account name" }) ?? 'Account name'),
+                description: (globalThis.NorvaI18n?.t("ui_web_a685a5cf661a", { defaultValue: "This label helps identify your Norva home." }) ?? 'This label helps identify your Norva home.'),
                 icon: ICONS.edit,
                 body: `
                     <form class="devices-sheet-form" data-devices-name-form novalidate>
-                        <label for="devices-account-name">Name</label>
+                        <label for="devices-account-name" data-i18n="ui_web_dcd1d5223f73">Name</label>
                         <input id="devices-account-name" type="text" maxlength="80" autocomplete="name"
-                            value="${this.escapeAttr(this.profileName)}" placeholder="Norva home">
+                            value="${this.escapeAttr(this.profileName)}" placeholder="Norva home" data-i18n-placeholder="ui_web_1a123bf0fced">
                         <p class="devices-sheet-status" role="status" aria-live="polite" aria-atomic="true"></p>
-                        <button type="submit" class="btn btn-primary devices-sheet-primary">Save name</button>
+                        <button type="submit" class="btn btn-primary devices-sheet-primary" data-i18n="ui_web_b7297226fd1f">Save name</button>
                     </form>`,
                 initialFocus: '#devices-account-name',
                 opener
@@ -575,9 +575,9 @@
             if (button) {
                 button.disabled = true;
                 button.setAttribute('aria-busy', 'true');
-                button.textContent = 'Saving…';
+                button.textContent = (globalThis.NorvaI18n?.t("ui_web_23e39291d613", { defaultValue: "Saving…" }) ?? 'Saving…');
             }
-            this.setSheetStatus(status, 'Saving your account name.');
+            this.setSheetStatus(status, (globalThis.NorvaI18n?.t("ui_web_975335b4e66c", { defaultValue: "Saving your account name." }) ?? 'Saving your account name.'));
             try {
                 await this.adapter.saveProfile({ displayName: name, locale: navigator.language || 'en-US' });
                 this.profileName = name;
@@ -585,17 +585,17 @@
                 this.profileError = false;
                 this.closeSheet();
                 this.render();
-                this.announce('Account name saved.');
-                this.toast('Account name saved.', 'success');
+                this.announce((globalThis.NorvaI18n?.t("ui_web_08e204d0ad54", { defaultValue: "Account name saved." }) ?? 'Account name saved.'));
+                this.toast((globalThis.NorvaI18n?.t("ui_web_08e204d0ad54", { defaultValue: "Account name saved." }) ?? 'Account name saved.'), 'success');
                 return true;
             } catch (_) {
                 form.dataset.busy = '0';
                 if (button) {
                     button.disabled = false;
                     button.removeAttribute('aria-busy');
-                    button.textContent = 'Save name';
+                    button.textContent = (globalThis.NorvaI18n?.t("ui_web_b7297226fd1f", { defaultValue: "Save name" }) ?? 'Save name');
                 }
-                this.setSheetStatus(status, 'Could not save the account name. Try again.', true);
+                this.setSheetStatus(status, (globalThis.NorvaI18n?.t("ui_web_787bc661ebf6", { defaultValue: "Could not save the account name. Try again." }) ?? 'Could not save the account name. Try again.'), true);
                 input?.focus?.({ preventScroll: true });
                 return false;
             }
@@ -603,7 +603,7 @@
 
         openCastSheet(preselectedDeviceId, opener) {
             if (!this.devices.length) {
-                this.toast('Pair a screen before sending a link.', 'info');
+                this.toast((globalThis.NorvaI18n?.t("ui_web_8bb3683b50bc", { defaultValue: "Pair a screen before sending a link." }) ?? 'Pair a screen before sending a link.'), 'info');
                 return false;
             }
             const preferred = this.deviceById(preselectedDeviceId)
@@ -615,22 +615,22 @@
                 return `<option value="${this.escapeAttr(device.id)}"${selected}>${this.escapeHtml(label)}</option>`;
             }).join('');
             const overlay = this.createSheet({
-                title: 'Send a video link',
-                description: 'Open or start playback on a trusted screen.',
+                title: (globalThis.NorvaI18n?.t("ui_web_69ae9601d442", { defaultValue: "Send a video link" }) ?? 'Send a video link'),
+                description: (globalThis.NorvaI18n?.t("ui_web_b8e8732d3249", { defaultValue: "Open or start playback on a trusted screen." }) ?? 'Open or start playback on a trusted screen.'),
                 icon: ICONS.cast,
                 body: `
                     <form class="devices-sheet-form" data-devices-cast-form novalidate>
-                        <label for="devices-cast-target">Screen</label>
+                        <label for="devices-cast-target" data-i18n="ui_web_6e56137e21d3">Screen</label>
                         <select id="devices-cast-target">${options}</select>
-                        <label for="devices-cast-title">Title <span>optional</span></label>
+                        <label for="devices-cast-title"><norva-i18n data-i18n="ui_web_7e8cd2056da7">Title </norva-i18n><span data-i18n="ui_web_ec91fdd9256c">optional</span></label>
                         <input id="devices-cast-title" type="text" maxlength="120" autocomplete="off" placeholder="Norva">
-                        <label for="devices-cast-url">Video link</label>
+                        <label for="devices-cast-url" data-i18n="ui_web_1569cde90525">Video link</label>
                         <input id="devices-cast-url" type="url" inputmode="url" autocomplete="url" placeholder="https://…">
-                        <p class="devices-sheet-helper">A link is required for playback. Leave it empty and choose Open Norva to open the app home.</p>
+                        <p class="devices-sheet-helper" data-i18n="ui_web_f67fe1942c21">A link is required for playback. Leave it empty and choose Open Norva to open the app home.</p>
                         <p class="devices-sheet-status" role="status" aria-live="polite" aria-atomic="true"></p>
                         <div class="devices-sheet-actions">
-                            <button type="submit" class="btn btn-primary">Play on screen</button>
-                            <button type="button" class="btn btn-secondary" data-devices-command-open>Open Norva</button>
+                            <button type="submit" class="btn btn-primary" data-i18n="ui_web_f53036e59e50">Play on screen</button>
+                            <button type="button" class="btn btn-secondary" data-devices-command-open data-i18n="ui_web_58b4fd1126eb">Open Norva</button>
                         </div>
                     </form>`,
                 initialFocus: '#devices-cast-url',
@@ -655,16 +655,16 @@
             const status = form.querySelector('.devices-sheet-status');
             const target = this.deviceById(targetDeviceId);
             if (!target) {
-                this.setSheetStatus(status, 'Choose a trusted screen.', true);
+                this.setSheetStatus(status, (globalThis.NorvaI18n?.t("ui_web_277008009bbb", { defaultValue: "Choose a trusted screen." }) ?? 'Choose a trusted screen.'), true);
                 return false;
             }
             if (command === 'play' && !url) {
-                this.setSheetStatus(status, 'Enter the video link you want to play.', true);
+                this.setSheetStatus(status, (globalThis.NorvaI18n?.t("ui_web_bea4d83b0915", { defaultValue: "Enter the video link you want to play." }) ?? 'Enter the video link you want to play.'), true);
                 form.querySelector('#devices-cast-url')?.focus?.({ preventScroll: true });
                 return false;
             }
             if (url && !this.isSafeWebUrl(url)) {
-                this.setSheetStatus(status, 'Enter a complete http or https link.', true);
+                this.setSheetStatus(status, (globalThis.NorvaI18n?.t("ui_web_a45158d129ba", { defaultValue: "Enter a complete http or https link." }) ?? 'Enter a complete http or https link.'), true);
                 form.querySelector('#devices-cast-url')?.focus?.({ preventScroll: true });
                 return false;
             }
@@ -676,7 +676,7 @@
                 ? form.querySelector('button[type="submit"]')
                 : form.querySelector('[data-devices-command-open]');
             activeButton?.setAttribute('aria-busy', 'true');
-            this.setSheetStatus(status, command === 'play' ? 'Sending the link.' : 'Opening Norva on the screen.');
+            this.setSheetStatus(status, command === 'play' ? (globalThis.NorvaI18n?.t("ui_web_47a3aad45fb5", { defaultValue: "Sending the link." }) ?? 'Sending the link.') : (globalThis.NorvaI18n?.t("ui_web_aae6231152c4", { defaultValue: "Opening Norva on the screen." }) ?? 'Opening Norva on the screen.'));
 
             try {
                 await this.adapter.sendCommand({
@@ -689,14 +689,14 @@
                 });
                 const name = this.deviceName(target);
                 this.closeSheet();
-                this.announce(command === 'play' ? `Link sent to ${name}.` : `Norva opened on ${name}.`);
-                this.toast(command === 'play' ? `Link sent to ${name}.` : `Norva opened on ${name}.`, 'success');
+                this.announce(command === 'play' ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f3389246ff32", {defaultValue: "Link sent to {{p0}}.", p0:(name)}) : `Link sent to ${name}.`) : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b1f488c0a10d", {defaultValue: "Norva opened on {{p0}}.", p0:(name)}) : `Norva opened on ${name}.`));
+                this.toast(command === 'play' ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f3389246ff32", {defaultValue: "Link sent to {{p0}}.", p0:(name)}) : `Link sent to ${name}.`) : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b1f488c0a10d", {defaultValue: "Norva opened on {{p0}}.", p0:(name)}) : `Norva opened on ${name}.`), 'success');
                 return true;
             } catch (_) {
                 form.dataset.busy = '0';
                 buttons.forEach((button) => { button.disabled = false; });
                 activeButton?.removeAttribute('aria-busy');
-                this.setSheetStatus(status, 'Could not reach this screen. Check that it is online and try again.', true);
+                this.setSheetStatus(status, (globalThis.NorvaI18n?.t("ui_web_6c74e32bf841", { defaultValue: "Could not reach this screen. Check that it is online and try again." }) ?? 'Could not reach this screen. Check that it is online and try again.'), true);
                 return false;
             }
         }
@@ -712,7 +712,7 @@
                     <header class="devices-sheet-header">
                         <span class="devices-sheet-icon">${icon}</span>
                         <span><h2 id="devices-sheet-title">${this.escapeHtml(title)}</h2><p id="devices-sheet-description">${this.escapeHtml(description)}</p></span>
-                        <button type="button" class="devices-sheet-close" data-devices-close-sheet aria-label="Close ${this.escapeAttr(title)}">${ICONS.close}</button>
+                        <button type="button" class="devices-sheet-close" data-devices-close-sheet aria-label="Close ${this.escapeAttr(title)}" data-i18n-aria-label="ui_web_66d27b78bb70" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p3":(this.escapeAttr(title))}) || "{}")}">${ICONS.close}</button>
                     </header>
                     ${body}
                 </section>`;
@@ -793,11 +793,11 @@
 
         deviceTypeLabel(device) {
             switch (this.deviceKind(device)) {
-                case 'tv': return 'Android TV';
-                case 'phone': return 'Android phone';
-                case 'tablet': return 'Tablet';
-                case 'web': return 'Web browser';
-                default: return 'Screen';
+                case 'tv': return (globalThis.NorvaI18n?.t("ui_web_f73ea1e23239", { defaultValue: "Android TV" }) ?? 'Android TV');
+                case 'phone': return (globalThis.NorvaI18n?.t("ui_web_fae4ea529229", { defaultValue: "Android phone" }) ?? 'Android phone');
+                case 'tablet': return (globalThis.NorvaI18n?.t("ui_web_e34a879c8b8b", { defaultValue: "Tablet" }) ?? 'Tablet');
+                case 'web': return (globalThis.NorvaI18n?.t("ui_web_21d699ed42e3", { defaultValue: "Web browser" }) ?? 'Web browser');
+                default: return (globalThis.NorvaI18n?.t("ui_web_6e56137e21d3", { defaultValue: "Screen" }) ?? 'Screen');
             }
         }
 
@@ -807,26 +807,26 @@
         }
 
         deviceStatus(device, now = Date.now()) {
-            if (this.isCurrentDevice(device)) return { ready: true, label: 'Active on this device' };
+            if (this.isCurrentDevice(device)) return { ready: true, label: (globalThis.NorvaI18n?.t("ui_web_5324f0efd808", { defaultValue: "Active on this device" }) ?? 'Active on this device') };
             const timestamp = this.deviceTimestamp(device);
-            if (!timestamp) return { ready: false, label: 'Not connected yet' };
+            if (!timestamp) return { ready: false, label: (globalThis.NorvaI18n?.t("ui_web_898569356612", { defaultValue: "Not connected yet" }) ?? 'Not connected yet') };
             const age = Math.max(0, now - timestamp);
-            if (age <= READY_WINDOW_MS) return { ready: true, label: 'Online now' };
-            return { ready: false, label: `Last seen ${this.relativeTime(timestamp, now)}` };
+            if (age <= READY_WINDOW_MS) return { ready: true, label: (globalThis.NorvaI18n?.t("ui_web_b9537ec73a25", { defaultValue: "Online now" }) ?? 'Online now') };
+            return { ready: false, label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_418fadd13500", {defaultValue: "Last seen {{p0}}", p0:(this.relativeTime(timestamp, now))}) : `Last seen ${this.relativeTime(timestamp, now)}`) };
         }
 
         relativeTime(timestamp, now = Date.now()) {
             const age = Math.max(0, now - Number(timestamp || 0));
             const minutes = Math.floor(age / 60000);
-            if (minutes < 1) return 'just now';
-            if (minutes < 60) return `${minutes} min ago`;
+            if (minutes < 1) return (globalThis.NorvaI18n?.t("ui_web_7ddb44d8a533", { defaultValue: "just now" }) ?? 'just now');
+            if (minutes < 60) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_23c5964926a1", {defaultValue: "{{p0}} min ago", p0:(minutes)}) : `${minutes} min ago`);
             const hours = Math.floor(minutes / 60);
-            if (hours < 24) return `${hours} h ago`;
+            if (hours < 24) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f1f497484232", {defaultValue: "{{p0}} h ago", p0:(hours)}) : `${hours} h ago`);
             const days = Math.floor(hours / 24);
-            if (days < 7) return `${days} d ago`;
+            if (days < 7) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_d8562d2341f6", {defaultValue: "{{p0}} d ago", p0:(days)}) : `${days} d ago`);
             const weeks = Math.floor(days / 7);
-            if (weeks < 5) return `${weeks} wk ago`;
-            return new Date(timestamp).toLocaleDateString('en-US');
+            if (weeks < 5) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_c17f522832fc", {defaultValue: "{{p0}} wk ago", p0:(weeks)}) : `${weeks} wk ago`);
+            return new Date(timestamp).toLocaleDateString((globalThis.NorvaI18n?.language || 'en-US'));
         }
 
         currentDeviceId() {

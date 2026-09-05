@@ -17,7 +17,7 @@ test('web and Android Phone share one email-first funnel with a real six-digit O
   assert.match(account, /params\.get\('token_hash'\)[\s\S]*params\.get\('mode'\) === 'recovery'[\s\S]*location\.hash/);
   assert.equal((account.match(/<input[^>]+data-otp-digit/g) || []).length, 6);
   assert.match(account, /We’ll email a six-digit code/);
-  assert.match(account, /getElementById\('use-password-toggle'\)\.textContent = 'Use a password instead'/);
+  assert.match(account, /getElementById\('use-password-toggle'\)\.textContent = [^;\r\n]*'Use a password instead'/);
   assert.match(account, /id="create-password-account"[^>]*hidden/);
   assert.match(account, /NorvaAuth\.verifyEmailChallenge\([\s\S]*NorvaAuth\.verifyOtp\(proof\.tokenHash, proof\.verificationType\)/);
   assert.match(account, /id="email-review-form"[\s\S]*No account is created until you enter the code/);
@@ -27,7 +27,7 @@ test('web and Android Phone share one email-first funnel with a real six-digit O
 
 test('web activates the premium OTP surface while Android TV remains pairing-only', () => {
   const account = read('public/account.html');
-  assert.match(account, /id="tabs" role="tablist" aria-label="Account access">/);
+  assert.match(account, /id="tabs" role="tablist" aria-label="Account access"[^>]*>/);
   assert.match(account, /document\.documentElement\.classList\.add\('premium-auth'\)/);
   assert.match(account, /if \(!isPremiumAuth\)[\s\S]*email_magic_link/);
   assert.match(account, /tabs\.style\.display = tabsVisible \? 'grid' : 'none'/);

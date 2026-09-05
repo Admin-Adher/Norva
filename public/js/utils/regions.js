@@ -125,8 +125,15 @@
         return '';
     }
 
+    function localized(region) {
+        if (!region || !globalThis.NorvaI18n?.language || region.kind !== 'country') return region;
+        try {
+            return { ...region, name: new Intl.DisplayNames([globalThis.NorvaI18n.language], { type: 'region' }).of(region.code) || region.name };
+        } catch (_) { return region; }
+    }
+
     function byCode(code) {
-        return BY_CODE[normalize(code)] || null;
+        return localized(BY_CODE[normalize(code)]) || null;
     }
 
     function label(code) {
@@ -152,7 +159,7 @@
 
     /** Countries A-Z, then bundles (in declared order) — for the picker list. */
     function list() {
-        const countries = COUNTRIES.slice().sort((a, b) => a.name.localeCompare(b.name));
+        const countries = COUNTRIES.map(localized).sort((a, b) => a.name.localeCompare(b.name, globalThis.NorvaI18n?.language));
         return countries.concat(BUNDLES);
     }
 

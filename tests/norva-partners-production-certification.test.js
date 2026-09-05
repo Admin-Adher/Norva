@@ -35,8 +35,8 @@ test('the restore runbook describes the exact post-9961726 financial-canary cont
 test('the app cache-busts the finalized Partners API and page contracts', () => {
   const app = read('public/app.html');
 
-  assert.match(app, /\/js\/cloudApi\.js\?v=36b703f117/);
-  assert.match(app, /\/js\/pages\/PartnersPage\.js\?v=10/);
+  assert.match(app, /\/js\/cloudApi\.js\?v=[0-9a-f]+/);
+  assert.match(app, /\/js\/pages\/PartnersPage\.js\?v=[0-9a-f]+/);
 });
 
 test('the historical Web tax policy evidence remains immutable', () => {

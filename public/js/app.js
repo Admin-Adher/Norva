@@ -10,15 +10,15 @@
 const NORVA_DEVICE_APPS = [
     {
         key: 'mobile',
-        name: 'Android mobile app',
-        hint: 'For your phone or tablet',
+        name: (globalThis.NorvaI18n?.t("ui_web_5e266485afc7", { defaultValue: "Android mobile app" }) ?? 'Android mobile app'),
+        hint: (globalThis.NorvaI18n?.t("ui_web_b248c2e95887", { defaultValue: "For your phone or tablet" }) ?? 'For your phone or tablet'),
         storeUrl: 'https://play.google.com/store/apps/details?id=tv.norva.phone',
         available: true,
     },
     {
         key: 'tv',
-        name: 'Android TV app',
-        hint: 'For the big screen, remote-friendly',
+        name: (globalThis.NorvaI18n?.t("ui_web_b663c273952e", { defaultValue: "Android TV app" }) ?? 'Android TV app'),
+        hint: (globalThis.NorvaI18n?.t("ui_web_c4904affa46e", { defaultValue: "For the big screen, remote-friendly" }) ?? 'For the big screen, remote-friendly'),
         storeUrl: 'https://play.google.com/store/apps/details?id=tv.norva.tv',
         available: true,
     },
@@ -375,7 +375,7 @@ class App {
             });
             this.clearPendingPartnersTvRelay();
             window.NorvaModal?.toast?.(
-                'TV hand-off confirmed. Norva Partners is open securely on this device.',
+                (globalThis.NorvaI18n?.t("ui_web_f1a1d3ca448b", { defaultValue: "TV hand-off confirmed. Norva Partners is open securely on this device." }) ?? 'TV hand-off confirmed. Norva Partners is open securely on this device.'),
                 'success'
             );
             return true;
@@ -389,7 +389,7 @@ class App {
             if (terminal.has(error?.code)) {
                 this.clearPendingPartnersTvRelay();
                 window.NorvaModal?.toast?.(
-                    'This TV hand-off expired. Start a new one from the TV.',
+                    (globalThis.NorvaI18n?.t("ui_web_b42e0ee9c9d8", { defaultValue: "This TV hand-off expired. Start a new one from the TV." }) ?? 'This TV hand-off expired. Start a new one from the TV.'),
                     'warning'
                 );
             }
@@ -559,8 +559,8 @@ class App {
         if (!main) return 0;
 
         const transition = this.navigation?.model?.transitionFor?.(pageName);
-        const title = transition?.title || 'Opening Norva';
-        const detail = transition?.detail || 'Preparing this screen.';
+        const title = transition?.title || (globalThis.NorvaI18n?.t("ui_web_22b61cddd949", { defaultValue: "Opening Norva" }) ?? 'Opening Norva');
+        const detail = transition?.detail || (globalThis.NorvaI18n?.t("ui_web_c1775a129181", { defaultValue: "Preparing this screen." }) ?? 'Preparing this screen.');
         let stage = document.getElementById('tv-route-stage');
         if (!stage) {
             stage = document.createElement('div');
@@ -634,7 +634,7 @@ class App {
         }
 
         // Check authentication first
-        this.setTvLaunchPhase('Connecting your screen', 'Checking your secure Norva session.');
+        this.setTvLaunchPhase((globalThis.NorvaI18n?.t("ui_web_1cf20507a71f", { defaultValue: "Connecting your screen" }) ?? 'Connecting your screen'), (globalThis.NorvaI18n?.t("ui_web_3d1c862990c5", { defaultValue: "Checking your secure Norva session." }) ?? 'Checking your secure Norva session.'));
         window.NorvaTrace?.log?.('checkAuth() — validates the session with GoTrue (network /auth/v1/user, blocking)');
         await this.checkAuth();
         window.NorvaTrace?.log?.('checkAuth() done', this.currentUser ? (this.currentUser.email || (this.currentUser.device ? 'paired device' : 'user')) : 'no user → redirect');
@@ -650,7 +650,7 @@ class App {
             window.NorvaTrace?.log?.('boot() fired — one /boot call seeds the caches the lines below read');
             try { window.NorvaCloud?.boot?.(); } catch (_) { /* best-effort speedup */ }
         }
-        this.setTvLaunchPhase('Checking your access', 'Keeping your paired screen and catalogue in sync.');
+        this.setTvLaunchPhase((globalThis.NorvaI18n?.t("ui_web_d788caa307df", { defaultValue: "Checking your access" }) ?? 'Checking your access'), (globalThis.NorvaI18n?.t("ui_web_fdd847ef44f1", { defaultValue: "Keeping your paired screen and catalogue in sync." }) ?? 'Keeping your paired screen and catalogue in sync.'));
         window.NorvaTrace?.log?.('checkCloudAccess() — entitlements (served from boot cache if seeded)');
         if (!await this.checkCloudAccess()) return;
         window.NorvaTrace?.log?.('checkCloudAccess() done');
@@ -661,7 +661,7 @@ class App {
         // Keep the premium launch surface UNDER the profile overlay. The overlay has a
         // deliberately higher z-index, so it stays interactive, while dismissing it can
         // never expose the empty app shell that used to sit between profile and Home.
-        this.setTvLaunchPhase('Choose your profile', 'Your personal picks and progress are ready.');
+        this.setTvLaunchPhase((globalThis.NorvaI18n?.t("ui_web_a946b912bd08", { defaultValue: "Choose your profile" }) ?? 'Choose your profile'), (globalThis.NorvaI18n?.t("ui_web_710128f60027", { defaultValue: "Your personal picks and progress are ready." }) ?? 'Your personal picks and progress are ready.'));
         const launchParams = new URLSearchParams(window.location.search);
         const rendererRecovery = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '')
             && launchParams.get('_rendererRecovery') === '1';
@@ -1160,7 +1160,7 @@ class App {
             panel.className = 'norva-notif-panel';
             panel.setAttribute('role', 'dialog');
         }
-        panel.setAttribute('aria-label', 'Notifications');
+        panel.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_788011833a5a", { defaultValue: "Notifications" }) ?? 'Notifications'));
         const events = this._notifEvents || [];
         const timeAgo = (iso) => {
             const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -1184,40 +1184,40 @@ class App {
         };
         const item = (e) => e.kind === 'support'
             ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/support.html?ticket=${encodeURIComponent(e.ticket_id)}&returnTo=${encodeURIComponent(here)}">
-                    <span class="norva-notif-kind">Support</span>
-                    <div class="norva-notif-summary">${esc(e.summary || 'Support replied')}</div>
-                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · Open conversation</div>
+                    <span class="norva-notif-kind" data-i18n="ui_web_be91940b79f4">Support</span>
+                    <div class="norva-notif-summary">${esc(e.summary || (globalThis.NorvaI18n?.t("ui_web_63e6643a4a61", { defaultValue: "Support replied" }) ?? 'Support replied'))}</div>
+                    <div class="norva-notif-time" data-i18n="ui_web_6856130da850" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p4":(esc(timeAgo(e.created_at)))}) || "{}")}">${esc(timeAgo(e.created_at))} · Open conversation</div>
                 </a>`
             : lifecycleRoute(e)
                 ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="${esc(lifecycleRoute(e))}" data-lifecycle-link="${esc(lifecycleRoute(e))}" data-lifecycle-delivery="${esc(e.payload?.deliveryId || '')}">
                     <span class="norva-notif-kind">${esc(e.payload?.title || 'Norva')}</span>
-                    <div class="norva-notif-summary">${esc(e.payload?.body || e.summary || 'Open Norva to continue.')}</div>
-                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · ${esc(e.payload?.ctaLabel || 'Open Norva')}</div>
+                    <div class="norva-notif-summary">${esc(e.payload?.body || e.summary || (globalThis.NorvaI18n?.t("ui_web_24fbe70e2ec7", { defaultValue: "Open Norva to continue." }) ?? 'Open Norva to continue.'))}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · ${esc(e.payload?.ctaLabel || (globalThis.NorvaI18n?.t("ui_web_58b4fd1126eb", { defaultValue: "Open Norva" }) ?? 'Open Norva'))}</div>
                 </a>`
             : watchRoute(e)
                 ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/app.html#${esc(watchRoute(e))}" data-watch="${esc(watchRoute(e))}">
-                    <span class="norva-notif-kind">New</span>
-                    <div class="norva-notif-summary">${esc(e.summary || 'New content')}</div>
-                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · View details</div>
+                    <span class="norva-notif-kind" data-i18n="ui_web_18fdd549b2ed">New</span>
+                    <div class="norva-notif-summary">${esc(e.summary || (globalThis.NorvaI18n?.t("ui_web_12f41b1c321d", { defaultValue: "New content" }) ?? 'New content'))}</div>
+                    <div class="norva-notif-time" data-i18n="ui_web_eebb915eeb9f" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p4":(esc(timeAgo(e.created_at)))}) || "{}")}">${esc(timeAgo(e.created_at))} · View details</div>
                 </a>`
                 : `<div class="norva-notif-item${e.seen_at ? '' : ' unread'}" role="article" tabindex="0">
-                    <span class="norva-notif-kind">Update</span>
-                    <div class="norva-notif-summary">${esc(e.summary || 'New content')}</div>
+                    <span class="norva-notif-kind" data-i18n="ui_web_c1c1009d3f37">Update</span>
+                    <div class="norva-notif-summary">${esc(e.summary || (globalThis.NorvaI18n?.t("ui_web_12f41b1c321d", { defaultValue: "New content" }) ?? 'New content'))}</div>
                     <div class="norva-notif-time">${esc(timeAgo(e.created_at))}</div>
                 </div>`;
         surface.innerHTML = `
             <div class="norva-notif-head">
                 <div class="norva-notif-heading">
-                    <strong>Notifications</strong>
-                    <span>${events.length ? `${events.length} recent update${events.length === 1 ? '' : 's'}` : 'You are all caught up'}</span>
+                    <strong data-i18n="ui_web_788011833a5a">Notifications</strong>
+                    <span>${events.length ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_97f2dbd1e4ae", {defaultValue: "{{p0}} recent update{{p1}}", p0:(events.length),p1:(events.length === 1 ? '' : 's')}) : `${events.length} recent update${events.length === 1 ? '' : 's'}`) : (globalThis.NorvaI18n?.t("ui_web_fbfc24039429", { defaultValue: "You are all caught up" }) ?? 'You are all caught up')}</span>
                 </div>
-                <button type="button" class="norva-notif-close modal-close" data-notif-close>Close</button>
+                <button type="button" class="norva-notif-close modal-close" data-notif-close data-i18n="ui_web_7d9eb7acb13e">Close</button>
             </div>
             <div class="norva-notif-list">
                 ${events.length ? events.map(item).join('') : `
                     <div class="norva-notif-empty">
-                        <strong>Nothing new right now</strong>
-                        <span>Support replies and catalogue updates will appear here.</span>
+                        <strong data-i18n="ui_web_e508df1e1204">Nothing new right now</strong>
+                        <span data-i18n="ui_web_0a0e6aa506c2">Support replies and catalogue updates will appear here.</span>
                     </div>`}
             </div>`;
         document.body.appendChild(panel);
@@ -1396,9 +1396,9 @@ class App {
         panel.id = 'norva-devices-panel';
         panel.className = 'norva-notif-panel norva-devices-panel';
         panel.setAttribute('role', 'dialog');
-        panel.setAttribute('aria-label', 'Use Norva elsewhere');
+        panel.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_f5fba0f4d5b8", { defaultValue: "Use Norva elsewhere" }) ?? 'Use Norva elsewhere'));
         panel.innerHTML = `
-            <div class="norva-notif-head">Use Norva elsewhere</div>
+            <div class="norva-notif-head" data-i18n="ui_web_f5fba0f4d5b8">Use Norva elsewhere</div>
             <div class="norva-devices-list">
                 ${NORVA_DEVICE_APPS.map(a => `
                     <div class="norva-device-row">
@@ -1408,8 +1408,8 @@ class App {
                             <span class="norva-device-hint">${esc(a.hint)}</span>
                         </span>
                         ${a.storeUrl
-                            ? `<a class="norva-device-get" href="${esc(a.storeUrl)}" target="_blank" rel="noopener noreferrer">Install</a>`
-                            : `<span class="norva-device-soon">${a.available ? 'Available now' : 'Unavailable'}</span>`}
+                            ? `<a class="norva-device-get" href="${esc(a.storeUrl)}" target="_blank" rel="noopener noreferrer" data-i18n="ui_web_569ca49f4aaf">Install</a>`
+                            : `<span class="norva-device-soon">${a.available ? (globalThis.NorvaI18n?.t("ui_web_2a4729fa7647", { defaultValue: "Available now" }) ?? 'Available now') : (globalThis.NorvaI18n?.t("ui_web_ca1844969742", { defaultValue: "Unavailable" }) ?? 'Unavailable')}</span>`}
                     </div>`).join('')}
             </div>`;
         document.body.appendChild(panel);
@@ -1496,7 +1496,7 @@ class App {
                     if (SYNCING.has(status)) anySyncing = true;
                     // Toast only on a real syncing -> ready transition (skip the baseline pass).
                     if (was && was !== status && status === 'ready' && SYNCING.has(was)) {
-                        try { this.sourceManager?.toast?.(`${s.name || s.display_name || 'Your catalog'} is ready to watch!`, 'success'); } catch (_) { /* noop */ }
+                        try { this.sourceManager?.toast?.((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38b1431921a9", {defaultValue: "{{p0}} is ready to watch!", p0:(s.name || s.display_name || (globalThis.NorvaI18n?.t("ui_web_c8bf8d92554a", { defaultValue: "Your catalog" }) ?? 'Your catalog'))}) : `${s.name || s.display_name || 'Your catalog'} is ready to watch!`), 'success'); } catch (_) { /* noop */ }
                         // The Home page listens to this to bust its cache — without it, a user
                         // staring at "Preparing your Home" kept the placeholder (or day-old
                         // rails) until a manual reload even after the import finished.
@@ -1850,7 +1850,7 @@ class App {
                     stop(); // done/settled — stop polling entirely instead of hitting the DB forever
                 } else {
                     if (fill) fill.style.width = percent + '%';
-                    if (text) text.textContent = `Enrichissement du catalogue… ${percent}%`;
+                    if (text) text.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9fc88618bdb8", {defaultValue: "Enrichissement du catalogue… {{p0}}%", p0:(percent)}) : `Enrichissement du catalogue… ${percent}%`);
                     bar.hidden = false;
                 }
             } catch (_) {
@@ -1990,7 +1990,7 @@ class App {
             .then((result) => {
                 if (result?.state === 'attributed') {
                     window.NorvaModal?.toast?.(
-                        'Referral attribution saved to your Norva account.',
+                        (globalThis.NorvaI18n?.t("ui_web_54a076377e6c", { defaultValue: "Referral attribution saved to your Norva account." }) ?? 'Referral attribution saved to your Norva account.'),
                         'success'
                     );
                 }
@@ -2049,7 +2049,7 @@ class App {
                 allowed: true,
                 failOpen: true,
                 reason: 'client_entitlement_check_failed',
-                message: 'Norva access could not be verified locally.'
+                message: (globalThis.NorvaI18n?.t("ui_web_8be2eb609eb1", { defaultValue: "Norva access could not be verified locally." }) ?? 'Norva access could not be verified locally.')
             };
             window.NorvaEntitlement = this.entitlement;
         }
@@ -2077,42 +2077,42 @@ class App {
             if (!document.getElementById('norva-billing-alert-css')) {
                 const st = document.createElement('style');
                 st.id = 'norva-billing-alert-css';
-                st.textContent = '#norva-billing-alert{position:relative;z-index:120;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;padding:9px 44px 9px 16px;background:linear-gradient(90deg,rgba(251,191,36,.14),rgba(251,146,60,.12));border-bottom:1px solid rgba(251,191,36,.35);color:#fde8b0;font-size:13.5px;line-height:1.45;}'
-                    + '#norva-billing-alert a{color:#fff;font-weight:700;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.45);}'
-                    + '#norva-billing-alert .nba-x{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:0;color:#fde8b0;font-size:14px;cursor:pointer;padding:4px 6px;}';
+                st.textContent = ('#norva-billing-alert{position:relative;z-index:120;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;padding:9px 44px 9px 16px;background:linear-gradient(90deg,rgba(251,191,36,.14),rgba(251,146,60,.12));border-bottom:1px solid rgba(251,191,36,.35);color:#fde8b0;font-size:13.5px;line-height:1.45;}')
+                    + (globalThis.NorvaI18n?.t("ui_web_366a67775850", { defaultValue: "#norva-billing-alert a{color:#fff;font-weight:700;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.45);}" }) ?? '#norva-billing-alert a{color:#fff;font-weight:700;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.45);}')
+                    + ('#norva-billing-alert .nba-x{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:0;color:#fde8b0;font-size:14px;cursor:pointer;padding:4px 6px;}');
                 document.head.appendChild(st);
             }
             const bar = document.createElement('div');
             bar.id = 'norva-billing-alert';
             bar.setAttribute('role', 'status');
             const msg = document.createElement('span');
-            msg.textContent = "⚠️ Your last payment didn't go through — your access stays on for a few days while it's sorted out.";
+            msg.textContent = (globalThis.NorvaI18n?.t("ui_web_fcc214ef780d", { defaultValue: "⚠️ Your last payment didn't go through — your access stays on for a few days while it's sorted out." }) ?? "⚠️ Your last payment didn't go through — your access stays on for a few days while it's sorted out.");
             bar.appendChild(msg);
             const isTv = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
             if (isTv) {
                 const hint = document.createElement('span');
-                hint.textContent = 'Update your payment on norva.tv or in the Norva phone app.';
+                hint.textContent = (globalThis.NorvaI18n?.t("ui_web_e39586573b55", { defaultValue: "Update your payment on norva.tv or in the Norva phone app." }) ?? 'Update your payment on norva.tv or in the Norva phone app.');
                 bar.appendChild(hint);
             } else {
                 const a = document.createElement('a');
                 if (provider === 'google_play') {
                     a.href = 'https://play.google.com/store/account/subscriptions';
                     a.target = '_blank'; a.rel = 'noopener';
-                    a.textContent = 'Fix it on Google Play →';
+                    a.textContent = (globalThis.NorvaI18n?.t("ui_web_3eafca292e4d", { defaultValue: "Fix it on Google Play →" }) ?? 'Fix it on Google Play →');
                 } else if (provider === 'apple_app_store') {
                     a.href = 'https://apps.apple.com/account/subscriptions';
                     a.target = '_blank'; a.rel = 'noopener';
-                    a.textContent = 'Fix it on the App Store';
+                    a.textContent = (globalThis.NorvaI18n?.t("ui_web_28dc06ecf5f3", { defaultValue: "Fix it on the App Store" }) ?? 'Fix it on the App Store');
                 } else {
                     a.href = '/subscription.html?returnTo=' + encodeURIComponent('/app#home');
-                    a.textContent = 'Update payment →';
+                    a.textContent = (globalThis.NorvaI18n?.t("ui_web_8c3347609c05", { defaultValue: "Update payment →" }) ?? 'Update payment →');
                 }
                 bar.appendChild(a);
             }
             const x = document.createElement('button');
             x.type = 'button';
             x.className = 'nba-x';
-            x.setAttribute('aria-label', 'Dismiss');
+            x.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_48845bff334a", { defaultValue: "Dismiss" }) ?? 'Dismiss'));
             x.textContent = '✕';
             x.addEventListener('click', () => {
                 try { sessionStorage.setItem('norva-billing-alert-dismissed', '1'); } catch (_) { /* privé */ }
@@ -2171,8 +2171,8 @@ class App {
             // informative recap where converting is the positive action.
             const navbar = document.querySelector('.navbar');
             if (!navbar) return; // header not mounted yet — re-runs on catalog-ready
-            const labelText = lastDay ? 'Last day' : daysLeft + 'd left';
-            const title = lastDay ? 'Last day of your Norva free trial' : daysLeft + ' days left in your Norva free trial';
+            const labelText = lastDay ? (globalThis.NorvaI18n?.t("ui_web_a4e24bc476c8", { defaultValue: "Last day" }) ?? 'Last day') : (globalThis.NorvaI18n?.t('ui_trial_days_left', {days: daysLeft}) ?? ((globalThis.NorvaI18n?.t('ui_trial_days_left', {days: daysLeft}) ?? (daysLeft + ' days left'))));
+            const title = lastDay ? (globalThis.NorvaI18n?.t("ui_web_6523bae72f57", { defaultValue: "Last day of your Norva free trial" }) ?? 'Last day of your Norva free trial') : daysLeft + (globalThis.NorvaI18n?.t("ui_web_89d1d29123b5", { defaultValue: " days left in your Norva free trial" }) ?? ' days left in your Norva free trial');
             // Urgency palette: purple normally, amber on the last day.
             const accent = lastDay ? '#f6b64b' : '#b579ff';
             const bg = lastDay ? 'rgba(246,182,75,.13)' : 'rgba(181,121,255,.12)';
@@ -2193,7 +2193,7 @@ class App {
             }
             // (Re)apply text + palette so a day rollover updates in place.
             chip.title = title;
-            chip.setAttribute('aria-label', title + ' — view details');
+            chip.setAttribute('aria-label', title + (globalThis.NorvaI18n?.t("ui_web_8bff5b27dec7", { defaultValue: " — view details" }) ?? ' — view details'));
             chip.style.background = bg;
             chip.style.border = '1px solid ' + border;
             chip.style.color = accent;
@@ -2216,7 +2216,7 @@ class App {
             const lastDay = daysLeft === 1;
             const accent = lastDay ? '#f6b64b' : '#b579ff';
             let dateStr;
-            try { dateStr = end.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); }
+            try { dateStr = end.toLocaleDateString(globalThis.NorvaI18n?.language, { weekday: 'long', day: 'numeric', month: 'long' }); }
             catch (_) { dateStr = end.toISOString().slice(0, 10); }
             const here = location.pathname + location.search + location.hash;
             const managePlanHref = '/subscription.html?returnTo=' + encodeURIComponent(here);
@@ -2226,21 +2226,21 @@ class App {
             backdrop.id = 'norva-trial-recap';
             backdrop.setAttribute('role', 'dialog');
             backdrop.setAttribute('aria-modal', 'true');
-            backdrop.setAttribute('aria-label', 'Your free trial');
+            backdrop.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_8b97d53dbd05", { defaultValue: "Your free trial" }) ?? 'Your free trial'));
             backdrop.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(2,6,15,.62);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;opacity:0;transition:opacity .16s ease';
 
             const card = document.createElement('div');
             card.style.cssText = 'position:relative;box-sizing:border-box;width:100%;max-width:400px;background:#121722;border:1px solid #2b3448;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.5);color:#f8fafc;padding:22px;font:15px/1.5 Inter,system-ui,sans-serif;transform:translateY(10px);transition:transform .18s ease';
             card.innerHTML =
                 '<div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:12px;letter-spacing:.4px;text-transform:uppercase;color:' + accent + ';margin-bottom:10px">' +
-                    '<span aria-hidden="true" style="width:7px;height:7px;border-radius:50%;background:currentColor"></span> Free trial' +
+                    '<span aria-hidden="true" style="width:7px;height:7px;border-radius:50%;background:currentColor"></span><norva-i18n data-i18n="ui_web_17f6390c3192"> Free trial</norva-i18n>' +
                 '</div>' +
-                '<div style="font-size:22px;font-weight:800;margin-bottom:6px">' + (lastDay ? 'Last day' : daysLeft + ' days left') + '</div>' +
-                '<p style="color:#aeb8cc;margin:0 0 6px">Your free trial ends <strong style="color:#f8fafc">' + dateStr + '</strong>.</p>' +
-                '<p style="color:#aeb8cc;margin:0 0 20px">Your selected plan starts and renews automatically when the trial ends unless you cancel before then. You can manage or cancel it anytime.</p>' +
+                '<div style="font-size:22px;font-weight:800;margin-bottom:6px">' + (lastDay ? (globalThis.NorvaI18n?.t("ui_web_a4e24bc476c8", { defaultValue: "Last day" }) ?? 'Last day') : daysLeft + ' days left') + '</div>' +
+                '<p style="color:#aeb8cc;margin:0 0 6px"><norva-i18n data-i18n="ui_web_2134565ade58">Your free trial ends </norva-i18n><strong style="color:#f8fafc">' + dateStr + '</strong>.</p>' +
+                '<p style="color:#aeb8cc;margin:0 0 20px" data-i18n="ui_web_97b76e63b6d2">Your selected plan starts and renews automatically when the trial ends unless you cancel before then. You can manage or cancel it anytime.</p>' +
                 '<div style="display:flex;flex-direction:column;gap:10px">' +
-                    '<a href="' + managePlanHref + '" data-recap-primary style="display:block;text-align:center;width:100%;box-sizing:border-box;min-height:46px;line-height:46px;border-radius:12px;background:#5b7cfa;color:#fff;font-weight:800;font-size:15px;text-decoration:none">Manage plan</a>' +
-                    '<button type="button" data-recap-dismiss style="width:100%;min-height:44px;border:0;border-radius:12px;background:transparent;color:#aeb8cc;font-weight:700;font-size:14px;cursor:pointer">Not now</button>' +
+                    '<a href="' + managePlanHref + '" data-recap-primary data-i18n="ui_web_2d5ab37c33fc" style="display:block;text-align:center;width:100%;box-sizing:border-box;min-height:46px;line-height:46px;border-radius:12px;background:#5b7cfa;color:#fff;font-weight:800;font-size:15px;text-decoration:none">Manage plan</a>' +
+                    '<button type="button" data-recap-dismiss style="width:100%;min-height:44px;border:0;border-radius:12px;background:transparent;color:#aeb8cc;font-weight:700;font-size:14px;cursor:pointer" data-i18n="ui_web_a0e63d7c7125">Not now</button>' +
                 '</div>';
 
             const teardown = () => {
@@ -2285,8 +2285,8 @@ class App {
             const syncAccessibleLabel = (expanded) => {
                 const action = expanded ? 'Hide' : 'Show';
                 const suffix = activeCount ? `, ${activeCount} active` : '';
-                label.textContent = expanded ? 'Hide filters' : 'More filters';
-                button.setAttribute('aria-label', `${action} ${key} filters${suffix}`);
+                label.textContent = expanded ? (globalThis.NorvaI18n?.t("ui_web_9e6ea475a239", { defaultValue: "Hide filters" }) ?? 'Hide filters') : (globalThis.NorvaI18n?.t("ui_web_b1ab49a6fedc", { defaultValue: "More filters" }) ?? 'More filters');
+                button.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_533413439ba6", {defaultValue: "{{p0}} {{p1}} filters{{p2}}", p0:(action),p1:(key),p2:(suffix)}) : `${action} ${key} filters${suffix}`));
             };
             const setExpanded = (expanded) => {
                 button.setAttribute('aria-expanded', String(expanded));
@@ -2327,21 +2327,21 @@ class App {
         const setups = [
             this.createMobileCatalogSetup({
                 key: 'movies',
-                title: 'Movie filters',
+                title: (globalThis.NorvaI18n?.t("ui_web_dd48b2e2bd92", { defaultValue: "Movie filters" }) ?? 'Movie filters'),
                 labels: {
-                    source: 'Source',
-                    category: 'Category',
-                    genre: 'Genre',
-                    year: 'Year',
-                    rating: 'Rating',
-                    watched: 'Watch status',
-                    added: 'Added',
-                    duration: 'Duration',
-                    audio: 'Audio language',
-                    subtitle: 'Subtitle language',
-                    group: 'Group duplicates',
-                    favorite: 'Favorites only',
-                    reset: 'Reset'
+                    source: (globalThis.NorvaI18n?.t("ui_web_0e570ca6fabe", { defaultValue: "Source" }) ?? 'Source'),
+                    category: (globalThis.NorvaI18n?.t("ui_web_292c06f0045a", { defaultValue: "Category" }) ?? 'Category'),
+                    genre: (globalThis.NorvaI18n?.t("ui_web_6da795a8664f", { defaultValue: "Genre" }) ?? 'Genre'),
+                    year: (globalThis.NorvaI18n?.t("ui_web_89f6832560de", { defaultValue: "Year" }) ?? 'Year'),
+                    rating: (globalThis.NorvaI18n?.t("ui_web_9f29530464f7", { defaultValue: "Rating" }) ?? 'Rating'),
+                    watched: (globalThis.NorvaI18n?.t("ui_web_69371af8df88", { defaultValue: "Watch status" }) ?? 'Watch status'),
+                    added: (globalThis.NorvaI18n?.t("ui_web_6b02e0d363a4", { defaultValue: "Added" }) ?? 'Added'),
+                    duration: (globalThis.NorvaI18n?.t("ui_web_4fc52a3c4c55", { defaultValue: "Duration" }) ?? 'Duration'),
+                    audio: (globalThis.NorvaI18n?.t("ui_web_0be233af17d9", { defaultValue: "Audio language" }) ?? 'Audio language'),
+                    subtitle: (globalThis.NorvaI18n?.t("ui_web_d67647781e97", { defaultValue: "Subtitle language" }) ?? 'Subtitle language'),
+                    group: (globalThis.NorvaI18n?.t("ui_web_873fe9707011", { defaultValue: "Group duplicates" }) ?? 'Group duplicates'),
+                    favorite: (globalThis.NorvaI18n?.t("ui_web_3033ce280484", { defaultValue: "Favorites only" }) ?? 'Favorites only'),
+                    reset: (globalThis.NorvaI18n?.t("ui_web_daee7606b339", { defaultValue: "Reset" }) ?? 'Reset')
                 },
                 controls: {
                     source: 'movies-source-select',
@@ -2354,7 +2354,7 @@ class App {
                     added: 'movies-added',
                     duration: 'movies-duration',
                     audio: 'movies-audio',
-                    subtitle: 'movies-subtitle',
+                    subtitle: ('movies-subtitle'),
                     group: 'movies-group-toggle',
                     random: 'movies-random',
                     favorite: 'movies-favorites-btn',
@@ -2363,21 +2363,21 @@ class App {
             }),
             this.createMobileCatalogSetup({
                 key: 'series',
-                title: 'Series filters',
+                title: (globalThis.NorvaI18n?.t("ui_web_9389e620715d", { defaultValue: "Series filters" }) ?? 'Series filters'),
                 labels: {
-                    source: 'Source',
-                    category: 'Category',
-                    genre: 'Genre',
-                    year: 'Year',
-                    rating: 'Rating',
-                    watched: 'Watch status',
-                    added: 'Added',
-                    status: 'Status',
-                    audio: 'Audio language',
-                    subtitle: 'Subtitle language',
-                    group: 'Group duplicates',
-                    favorite: 'Favorites only',
-                    reset: 'Reset'
+                    source: (globalThis.NorvaI18n?.t("ui_web_0e570ca6fabe", { defaultValue: "Source" }) ?? 'Source'),
+                    category: (globalThis.NorvaI18n?.t("ui_web_292c06f0045a", { defaultValue: "Category" }) ?? 'Category'),
+                    genre: (globalThis.NorvaI18n?.t("ui_web_6da795a8664f", { defaultValue: "Genre" }) ?? 'Genre'),
+                    year: (globalThis.NorvaI18n?.t("ui_web_89f6832560de", { defaultValue: "Year" }) ?? 'Year'),
+                    rating: (globalThis.NorvaI18n?.t("ui_web_9f29530464f7", { defaultValue: "Rating" }) ?? 'Rating'),
+                    watched: (globalThis.NorvaI18n?.t("ui_web_69371af8df88", { defaultValue: "Watch status" }) ?? 'Watch status'),
+                    added: (globalThis.NorvaI18n?.t("ui_web_6b02e0d363a4", { defaultValue: "Added" }) ?? 'Added'),
+                    status: (globalThis.NorvaI18n?.t("ui_web_920e413c7d41", { defaultValue: "Status" }) ?? 'Status'),
+                    audio: (globalThis.NorvaI18n?.t("ui_web_0be233af17d9", { defaultValue: "Audio language" }) ?? 'Audio language'),
+                    subtitle: (globalThis.NorvaI18n?.t("ui_web_d67647781e97", { defaultValue: "Subtitle language" }) ?? 'Subtitle language'),
+                    group: (globalThis.NorvaI18n?.t("ui_web_873fe9707011", { defaultValue: "Group duplicates" }) ?? 'Group duplicates'),
+                    favorite: (globalThis.NorvaI18n?.t("ui_web_3033ce280484", { defaultValue: "Favorites only" }) ?? 'Favorites only'),
+                    reset: (globalThis.NorvaI18n?.t("ui_web_daee7606b339", { defaultValue: "Reset" }) ?? 'Reset')
                 },
                 controls: {
                     source: 'series-source-select',
@@ -2390,7 +2390,7 @@ class App {
                     added: 'series-added',
                     status: 'series-status',
                     audio: 'series-audio',
-                    subtitle: 'series-subtitle',
+                    subtitle: ('series-subtitle'),
                     group: 'series-group-toggle',
                     random: 'series-random',
                     favorite: 'series-favorites-btn',
@@ -2442,7 +2442,7 @@ class App {
         filterBtn.className = 'btn btn-sm mobile-filter-button';
         filterBtn.setAttribute('aria-controls', `${config.key}-filter-bar`);
         filterBtn.setAttribute('aria-expanded', 'false');
-        filterBtn.innerHTML = `Filters <span class="mobile-filter-badge" id="${config.key}-mobile-filter-badge"></span>`;
+        filterBtn.innerHTML = `<norva-i18n data-i18n="ui_web_546ebb8eb993">Filters </norva-i18n><span class="mobile-filter-badge" id="${config.key}-mobile-filter-badge"></span>`;
 
         const backdrop = document.createElement('div');
         backdrop.id = `${config.key}-mobile-filter-backdrop`;
@@ -2482,7 +2482,7 @@ class App {
         sheetHeader.className = 'mobile-filter-sheet-header';
         sheetHeader.innerHTML = `
             <span class="mobile-filter-sheet-title">${config.title}</span>
-            <button type="button" class="btn btn-sm btn-ghost mobile-filter-close">Done</button>
+            <button type="button" class="btn btn-sm btn-ghost mobile-filter-close" data-i18n="ui_web_11a6767d5674">Done</button>
         `;
 
         const sheetBody = document.createElement('div');
@@ -3013,35 +3013,35 @@ class App {
             <div class="account-menu-profile">
                 <img id="account-menu-avatar" class="account-menu-avatar" src="/img/avatars/placeholder.svg" alt="">
                 <div class="account-menu-identity">
-                    <strong id="account-menu-name">Profile</strong>
+                    <strong id="account-menu-name" data-i18n="ui_web_d696a35bdd18">Profile</strong>
                     <span id="account-menu-email"></span>
                 </div>
             </div>
-            <div class="account-menu-items" role="menu" aria-label="Profile and account">
+            <div class="account-menu-items" role="menu" aria-label="Profile and account" data-i18n-aria-label="ui_web_73b19c6bbf52">
                 <button type="button" class="account-menu-item" data-act="switch" role="menuitem">
                     <img class="account-menu-icon account-menu-current-avatar" src="/img/avatars/placeholder.svg" alt="">
-                    <span>Switch profile</span>
+                    <span data-i18n="ui_web_c1e0daeef31e">Switch profile</span>
                 </button>
                 <button type="button" class="account-menu-item" data-act="manage" role="menuitem">
                     <img class="account-menu-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="">
-                    <span>Manage profiles</span>
+                    <span data-i18n="ui_web_4be8b4595698">Manage profiles</span>
                 </button>
                 <button type="button" class="account-menu-item" data-act="settings" role="menuitem">
                     <img class="account-menu-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="">
-                    <span class="account-menu-copy"><strong>Settings</strong><small>Account, providers and playback</small></span>
+                    <span class="account-menu-copy"><strong data-i18n="ui_web_74a883a037bc">Settings</strong><small data-i18n="ui_web_03077af01052">Account, providers and playback</small></span>
                 </button>
                 <button type="button" class="account-menu-item" data-act="admin" role="menuitem" hidden aria-hidden="true">
                     <img class="account-menu-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="">
-                    <span class="account-menu-copy"><strong>Administration</strong><small>Operations and member access</small></span>
+                    <span class="account-menu-copy"><strong data-i18n="ui_web_4b42c6690ebe">Administration</strong><small data-i18n="ui_web_d9f327781792">Operations and member access</small></span>
                 </button>
                 <button type="button" class="account-menu-item" data-act="help" role="menuitem">
                     <span class="account-menu-symbol" aria-hidden="true">?</span>
-                    <span>Help &amp; support</span>
+                    <span data-i18n="ui_web_7a34ff85344e">Help &amp; support</span>
                 </button>
                 <div class="account-menu-divider" role="separator"></div>
                 <button type="button" class="account-menu-item account-menu-item-danger" data-act="logout" role="menuitem">
                     <img class="account-menu-icon" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt="">
-                    <span>Log out</span>
+                    <span data-i18n="ui_web_49616145514e">Log out</span>
                 </button>
             </div>`;
         menu.querySelectorAll('[data-act]').forEach((item) => {
@@ -3065,7 +3065,7 @@ class App {
         }
         const name = menu.querySelector('#account-menu-name');
         const email = menu.querySelector('#account-menu-email');
-        if (name) name.textContent = cur.name || 'Profile';
+        if (name) name.textContent = cur.name || (globalThis.NorvaI18n?.t("ui_web_d696a35bdd18", { defaultValue: "Profile" }) ?? 'Profile');
         if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
         const switchRow = menu.querySelector('[data-act="switch"]');
         const manageRow = menu.querySelector('[data-act="manage"]');
@@ -3128,46 +3128,46 @@ class App {
                 <div class="account-head">
                     <img id="account-avatar" class="account-avatar" src="/img/avatars/placeholder.svg" alt="">
                     <div class="account-id">
-                        <div id="account-sheet-title" class="account-name">Profile</div>
+                        <div id="account-sheet-title" class="account-name" data-i18n="ui_web_d696a35bdd18">Profile</div>
                         <div id="account-email" class="account-email"></div>
                     </div>
-                    <button type="button" class="account-close modal-close" aria-label="Close">&times;</button>
+                    <button type="button" class="account-close modal-close" aria-label="Close" data-i18n-aria-label="ui_web_7d9eb7acb13e">&times;</button>
                 </div>
                 <button type="button" class="account-row" data-act="switch">
-                    <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span>Switch profile</span>
+                    <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span data-i18n="ui_web_c1e0daeef31e">Switch profile</span>
                 </button>
                 <button type="button" class="account-row" data-act="manage">
-                    <img class="account-ic" src="/img/icons/norva-account.svg?v=sharp-core-1" alt=""><span>Manage profiles</span>
+                    <img class="account-ic" src="/img/icons/norva-account.svg?v=sharp-core-1" alt=""><span data-i18n="ui_web_4be8b4595698">Manage profiles</span>
                 </button>
                 <button type="button" class="account-row" data-act="screens">
                     <img class="account-ic account-ic-devices" src="/img/icons/norva-devices.svg?v=1" alt="">
                     <span class="account-row-copy">
-                        <span class="account-row-title">Devices &amp; screens</span>
-                        <span class="account-row-hint">Web, phone, tablet and TV</span>
+                        <span class="account-row-title" data-i18n="ui_web_8f4b123ccc1c">Devices &amp; screens</span>
+                        <span class="account-row-hint" data-i18n="ui_web_b8874e3a5021">Web, phone, tablet and TV</span>
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="partners" hidden aria-hidden="true">
                     <img class="account-ic" src="/img/norva-app-icon.png" alt="">
                     <span class="account-row-copy">
-                        <span class="account-row-title">Norva Partners</span>
-                        <span class="account-row-hint">Earn with eligible referrals</span>
+                        <span class="account-row-title" data-i18n="ui_web_eaff23c82663">Norva Partners</span>
+                        <span class="account-row-hint" data-i18n="ui_web_8d1e9c1e66a9">Earn with eligible referrals</span>
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="settings">
                     <img class="account-ic" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="">
                     <span class="account-row-copy">
-                        <span class="account-row-title">Settings</span>
-                        <span class="account-row-hint">Account, providers and playback</span>
+                        <span class="account-row-title" data-i18n="ui_web_74a883a037bc">Settings</span>
+                        <span class="account-row-hint" data-i18n="ui_web_03077af01052">Account, providers and playback</span>
                     </span>
                 </button>
                 <button type="button" class="account-row" data-act="admin" hidden aria-hidden="true">
-                    <img class="account-ic" src="/img/icons/norva-account.svg?v=sharp-core-1" alt=""><span>Administration</span>
+                    <img class="account-ic" src="/img/icons/norva-account.svg?v=sharp-core-1" alt=""><span data-i18n="ui_web_4b42c6690ebe">Administration</span>
                 </button>
                 <button type="button" class="account-row" data-act="help">
-                    <span class="account-sheet-symbol" aria-hidden="true">?</span><span>Help &amp; support</span>
+                    <span class="account-sheet-symbol" aria-hidden="true">?</span><span data-i18n="ui_web_7a34ff85344e">Help &amp; support</span>
                 </button>
                 <button type="button" class="account-row account-row-danger" data-act="logout">
-                    <img class="account-ic" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt=""><span>Log out</span>
+                    <img class="account-ic" src="/img/icons/norva-logout.svg?v=sharp-core-1" alt=""><span data-i18n="ui_web_49616145514e">Log out</span>
                 </button>
             </div>`;
         // Tapping the dimmed backdrop (not the panel) closes the sheet.
@@ -3196,7 +3196,7 @@ class App {
         const partnersRow = sheet.querySelector('[data-act="partners"]');
         if (avatar && cur.avatarUrl) avatar.src = cur.avatarUrl;
         if (switchIc && cur.avatarUrl) switchIc.src = cur.avatarUrl;
-        if (name) name.textContent = cur.name || 'Profile';
+        if (name) name.textContent = cur.name || (globalThis.NorvaI18n?.t("ui_web_d696a35bdd18", { defaultValue: "Profile" }) ?? 'Profile');
         if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
         // Keep the switcher discoverable for single-profile cloud accounts so
         // they can add a second profile without first finding Manage profiles.
@@ -3226,12 +3226,12 @@ class App {
         const tv = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
         const confirmed = await window.NorvaModal.confirm(
             tv
-                ? 'This TV will be unpaired. You will need to scan a new pairing code to use it again.'
-                : 'You will need to sign in again to use Norva on this device.',
+                ? (globalThis.NorvaI18n?.t("ui_web_bee28459e0b2", { defaultValue: "This TV will be unpaired. You will need to scan a new pairing code to use it again." }) ?? 'This TV will be unpaired. You will need to scan a new pairing code to use it again.')
+                : (globalThis.NorvaI18n?.t("ui_web_6b5087350a52", { defaultValue: "You will need to sign in again to use Norva on this device." }) ?? 'You will need to sign in again to use Norva on this device.'),
             {
-                title: 'Log out of Norva?',
-                confirmLabel: 'Log out',
-                cancelLabel: 'Stay signed in',
+                title: (globalThis.NorvaI18n?.t("ui_web_588ffa639b61", { defaultValue: "Log out of Norva?" }) ?? 'Log out of Norva?'),
+                confirmLabel: (globalThis.NorvaI18n?.t("ui_web_49616145514e", { defaultValue: "Log out" }) ?? 'Log out'),
+                cancelLabel: (globalThis.NorvaI18n?.t("ui_web_b0a1ca803387", { defaultValue: "Stay signed in" }) ?? 'Stay signed in'),
                 danger: true
             }
         );
@@ -3324,14 +3324,14 @@ class App {
         ov.setAttribute('aria-hidden', 'true');
         ov.inert = true;
         ov.innerHTML = `
-            <div class="gsearch-panel" role="dialog" aria-modal="true" aria-label="Search" tabindex="-1">
+            <div class="gsearch-panel" role="dialog" aria-modal="true" aria-label="Search" tabindex="-1" data-i18n-aria-label="ui_web_49c266baaaa7">
                 <div class="gsearch-bar">
                     <span class="gsearch-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
-                    <input id="gsearch-input" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search movies & series…">
-                    <button type="button" class="gsearch-cancel modal-close">Cancel</button>
+                    <input id="gsearch-input" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search movies & series…" data-i18n-placeholder="ui_web_c14cb0d74a30">
+                    <button type="button" class="gsearch-cancel modal-close" data-i18n="ui_web_19766ed6ccb2">Cancel</button>
                 </div>
                 <div class="gsearch-results" id="gsearch-results">
-                    <div class="gsearch-hint">Type at least 2 characters to search the catalogue.</div>
+                    <div class="gsearch-hint" data-i18n="ui_web_75ebae4c0880">Type at least 2 characters to search the catalogue.</div>
                 </div>
             </div>`;
         ov.addEventListener('click', (e) => { if (e.target === ov) this.closeSearch(); });
@@ -3405,7 +3405,7 @@ class App {
         const box = document.getElementById('gsearch-results');
         if (!box) return;
         if (q.length < 2) {
-            box.innerHTML = '<div class="gsearch-hint">Type at least 2 characters to search the catalogue.</div>';
+            box.innerHTML = '<div class="gsearch-hint" data-i18n="ui_web_75ebae4c0880">Type at least 2 characters to search the catalogue.</div>';
             this._gsMovies = [];
             this._gsSeries = [];
             return;
@@ -3425,9 +3425,9 @@ class App {
             this._gsMovies = [];
             this._gsSeries = [];
             box.innerHTML = `
-                <div class="gsearch-hint gsearch-error" role="alert">
+                <div class="gsearch-hint gsearch-error" role="alert"><norva-i18n data-i18n="ui_web_2492ae897900">
                     Search is temporarily unavailable.
-                    <button type="button" class="btn btn-sm gsearch-retry">Try again</button>
+                    </norva-i18n><button type="button" class="btn btn-sm gsearch-retry" data-i18n="ui_web_d8b8392e2c54">Try again</button>
                 </div>`;
             box.querySelector('.gsearch-retry')?.addEventListener('click', () => this.runSearch(q));
             return;
@@ -3483,7 +3483,7 @@ class App {
         this.renderSearchResults(box, q, gMovies, gSeries);
         if (failedCount === 1) {
             box.insertAdjacentHTML('afterbegin',
-                '<div class="gsearch-hint gsearch-partial" role="status">Some results could not be loaded. You can retry the search.</div>');
+                '<div class="gsearch-hint gsearch-partial" role="status" data-i18n="ui_web_eea02513d563">Some results could not be loaded. You can retry the search.</div>');
         }
     }
 
@@ -3492,7 +3492,7 @@ class App {
         const row = (group, type, idx) => {
             const item = group.representative || group;
             const count = Array.isArray(group.items) ? group.items.length : 1;
-            const title = item.tmdb?.title || item.tmdb?.name || item.name || 'Untitled';
+            const title = item.tmdb?.title || item.tmdb?.name || item.name || (globalThis.NorvaI18n?.t("ui_web_f59ab8d1331b", { defaultValue: "Untitled" }) ?? 'Untitled');
             const poster = M.safeImageUrl(
                 item.stream_icon || item.cover || M.tmdbPosterUrl(item.tmdb),
                 '/img/norva-media-placeholder.png');
@@ -3504,21 +3504,21 @@ class App {
                          onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     <span class="gsearch-text">
                         <span class="gsearch-title">${M.escapeHtml(title)}</span>
-                        <span class="gsearch-sub">${type === 'series' ? 'Series' : 'Movie'}${year ? ' · ' + year : ''}${versions}</span>
+                        <span class="gsearch-sub">${type === 'series' ? (globalThis.NorvaI18n?.t("ui_web_a8295e08ff7a", { defaultValue: "Series" }) ?? 'Series') : (globalThis.NorvaI18n?.t("ui_web_941de4447b2e", { defaultValue: "Movie" }) ?? 'Movie')}${year ? ' · ' + year : ''}${versions}</span>
                     </span>
                 </button>`;
         };
         // Reachable-count on the section header ("Movies · 6") + a "See all" escape hatch to the
         // fully-paged in-page grid, since the overlay caps at 48 raw rows/type before grouping.
         const seeAll = (type, label) =>
-            `<button type="button" class="gsearch-seeall" data-seeall="${type}">See all in ${label} →</button>`;
+            `<button type="button" class="gsearch-seeall" data-seeall="${type}" data-i18n="ui_web_1b8b8c27c5bd" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(label)}) || "{}")}">See all in ${label} →</button>`;
         let html = '';
-        if (movies.length) html += `<div class="gsearch-section">Movies · ${movies.length}</div>`
+        if (movies.length) html += `<div class="gsearch-section" data-i18n="ui_web_d6b9e71e90b8" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(movies.length)}) || "{}")}">Movies · ${movies.length}</div>`
             + movies.map((m, i) => row(m, 'movie', i)).join('') + seeAll('movie', 'Movies');
-        if (series.length) html += `<div class="gsearch-section">Series · ${series.length}</div>`
+        if (series.length) html += `<div class="gsearch-section" data-i18n="ui_web_604433346c6c" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(series.length)}) || "{}")}">Series · ${series.length}</div>`
             + series.map((s, i) => row(s, 'series', i)).join('') + seeAll('series', 'Series');
         if (!html) {
-            box.innerHTML = `<div class="gsearch-hint">No results for “${M.escapeHtml(q)}”.</div>`;
+            box.innerHTML = `<div class="gsearch-hint" data-i18n="ui_web_b2ec31c13a3b" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(q)}) || "{}")}">No results for “${M.escapeHtml(q)}”.</div>`;
             return;
         }
         box.innerHTML = html;
@@ -3860,7 +3860,7 @@ class App {
 
     refreshLiveMiniMeta() {
         const title = document.getElementById('norva-mini')?.querySelector('.norva-mini-title');
-        if (title) title.textContent = this.channelList?.currentChannel?.name || 'Live TV';
+        if (title) title.textContent = this.channelList?.currentChannel?.name || (globalThis.NorvaI18n?.t("ui_web_d451ef69d283", { defaultValue: "Live TV" }) ?? 'Live TV');
     }
 
     buildLiveMini() {
@@ -3869,13 +3869,13 @@ class App {
         mini.className = 'norva-mini';
         mini.innerHTML = `
             <div class="norva-mini-stage"></div>
-            <button type="button" class="norva-mini-hit" title="Back to Live TV" aria-label="Back to Live TV"></button>
+            <button type="button" class="norva-mini-hit" title="Back to Live TV" aria-label="Back to Live TV" data-i18n-title="ui_web_b8f9cda8d5fc" data-i18n-aria-label="ui_web_b8f9cda8d5fc"></button>
             <div class="norva-mini-bar">
-                <span class="norva-mini-title">Live TV</span>
-                <button type="button" class="norva-mini-btn norva-mini-expand" title="Back to Live TV" aria-label="Back to Live TV">
+                <span class="norva-mini-title" data-i18n="ui_web_d451ef69d283">Live TV</span>
+                <button type="button" class="norva-mini-btn norva-mini-expand" title="Back to Live TV" aria-label="Back to Live TV" data-i18n-title="ui_web_b8f9cda8d5fc" data-i18n-aria-label="ui_web_b8f9cda8d5fc">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
                 </button>
-                <button type="button" class="norva-mini-btn norva-mini-close" title="Close" aria-label="Close">&times;</button>
+                <button type="button" class="norva-mini-btn norva-mini-close" title="Close" aria-label="Close" data-i18n-title="ui_web_7d9eb7acb13e" data-i18n-aria-label="ui_web_7d9eb7acb13e">&times;</button>
             </div>`;
         // Expand / tapping the video → return to Live TV (show() restores the
         // surface). A transparent hit-layer captures the gesture so the moved
@@ -4134,11 +4134,11 @@ class App {
 
     providerAccessNoticeCopy(kind) {
         return ({
-            expiry_7d: ['Catalog access reminder', 'Your external provider access expires in 7 days. Your Norva plan is not affected.'],
-            expiry_1d: ['Catalog access reminder', 'Your external provider access expires tomorrow. Your Norva plan is not affected.'],
-            expiry_today: ['Catalog access reminder', 'Your external provider access expires today. Your Norva plan is not affected.'],
-            access_hidden: ['Your catalog needs attention', 'Norva confirmed that your external provider access is unavailable. Your Norva plan is not affected.'],
-            access_restored: ['Catalog access restored', 'Your external provider access is available again.'],
+            expiry_7d: [(globalThis.NorvaI18n?.t("ui_web_22204b828553", { defaultValue: "Catalog access reminder" }) ?? 'Catalog access reminder'), (globalThis.NorvaI18n?.t("ui_web_3a33c99292ba", { defaultValue: "Your external provider access expires in 7 days. Your Norva plan is not affected." }) ?? 'Your external provider access expires in 7 days. Your Norva plan is not affected.')],
+            expiry_1d: [(globalThis.NorvaI18n?.t("ui_web_22204b828553", { defaultValue: "Catalog access reminder" }) ?? 'Catalog access reminder'), (globalThis.NorvaI18n?.t("ui_web_9a2cd8e6e161", { defaultValue: "Your external provider access expires tomorrow. Your Norva plan is not affected." }) ?? 'Your external provider access expires tomorrow. Your Norva plan is not affected.')],
+            expiry_today: [(globalThis.NorvaI18n?.t("ui_web_22204b828553", { defaultValue: "Catalog access reminder" }) ?? 'Catalog access reminder'), (globalThis.NorvaI18n?.t("ui_web_c7d1ae702a37", { defaultValue: "Your external provider access expires today. Your Norva plan is not affected." }) ?? 'Your external provider access expires today. Your Norva plan is not affected.')],
+            access_hidden: [(globalThis.NorvaI18n?.t("ui_web_af41d8582cb5", { defaultValue: "Your catalog needs attention" }) ?? 'Your catalog needs attention'), (globalThis.NorvaI18n?.t("ui_web_80cb794a49d4", { defaultValue: "Norva confirmed that your external provider access is unavailable. Your Norva plan is not affected." }) ?? 'Norva confirmed that your external provider access is unavailable. Your Norva plan is not affected.')],
+            access_restored: [(globalThis.NorvaI18n?.t("ui_web_3122184d3a5f", { defaultValue: "Catalog access restored" }) ?? 'Catalog access restored'), (globalThis.NorvaI18n?.t("ui_web_96eaafd683d0", { defaultValue: "Your external provider access is available again." }) ?? 'Your external provider access is available again.')],
         })[kind] || null;
     }
 
@@ -4151,21 +4151,21 @@ class App {
         host.className = `provider-access-in-app-notice${fullAttention ? ' is-full-attention' : ''}`;
         host.setAttribute('role', notification.kind === 'access_hidden' ? 'alert' : 'status');
         host.setAttribute('aria-live', notification.kind === 'access_hidden' ? 'assertive' : 'polite');
-        host.setAttribute('aria-label', 'External provider access');
+        host.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_eef963e16021", { defaultValue: "External provider access" }) ?? 'External provider access'));
         host.innerHTML = `<div class="provider-access-in-app-card">
             <div class="provider-access-in-app-mark" aria-hidden="true"></div>
-            <div class="provider-access-in-app-copy"><span>External provider access</span><strong></strong><p></p><small></small></div>
+            <div class="provider-access-in-app-copy"><span data-i18n="ui_web_eef963e16021">External provider access</span><strong></strong><p></p><small></small></div>
             <div class="provider-access-in-app-actions">
-              <button type="button" class="btn btn-primary" data-provider-access-review>Review access</button>
-              <button type="button" class="provider-access-in-app-dismiss" data-provider-access-dismiss aria-label="Dismiss this reminder">Dismiss</button>
+              <button type="button" class="btn btn-primary" data-provider-access-review data-i18n="ui_web_5ddb6f051115">Review access</button>
+              <button type="button" class="provider-access-in-app-dismiss" data-provider-access-dismiss aria-label="Dismiss this reminder" data-i18n-aria-label="ui_web_d963decfc48b" data-i18n="ui_web_48845bff334a">Dismiss</button>
             </div>
           </div>`;
         host.querySelector('strong').textContent = copy[0];
         host.querySelector('p').textContent = copy[1];
         const source = String(notification.sourceName || '').trim();
         host.querySelector('small').textContent = count > 1
-            ? `${count} provider access notices need review.`
-            : (source ? `Service: ${source}` : 'Open Settings to review this access.');
+            ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a2a5c1bd0c6a", {defaultValue: "{{p0}} provider access notices need review.", p0:(count)}) : `${count} provider access notices need review.`)
+            : (source ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b029b0275e75", {defaultValue: "Service: {{p0}}", p0:(source)}) : `Service: ${source}`) : (globalThis.NorvaI18n?.t("ui_web_70d5e620633d", { defaultValue: "Open Settings to review this access." }) ?? 'Open Settings to review this access.'));
         const dismiss = async () => {
             host.querySelectorAll('button').forEach((button) => { button.disabled = true; });
             try { await window.API.providerAccess.dismissNotification(notification.notificationId); } catch (_) { /* durable row remains */ }
@@ -4232,7 +4232,7 @@ class App {
         banner.id = 'norva-offline-banner';
         banner.className = 'norva-offline-banner';
         banner.setAttribute('role', 'status');
-        banner.textContent = "You're offline — showing what's cached. Reconnect to browse and play.";
+        banner.textContent = (globalThis.NorvaI18n?.t("ui_web_21d4ce489744", { defaultValue: "You're offline — showing what's cached. Reconnect to browse and play." }) ?? "You're offline — showing what's cached. Reconnect to browse and play.");
         document.body.appendChild(banner);
     }
 
@@ -4247,7 +4247,7 @@ class App {
                 // rewrite it. Keep this value equal to the first 10 characters of the
                 // file's canonical-LF SHA-256; the contract test fails if they drift apart.
                 // Using the content hash here also gives the immutable CDN cache a new URL.
-                s.src = '/js/pages/AdminPage.js?v=5300b01002';
+                s.src = '/js/pages/AdminPage.js?v=d9eb96f5b2';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);
@@ -4309,7 +4309,7 @@ class App {
                 this.navigateTo('home');
             }
             if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar();
-            try { this.sourceManager?.toast?.(profileName ? `Profile: ${profileName}` : 'Profile changed'); } catch (_) { /* noop */ }
+            try { this.sourceManager?.toast?.(profileName ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_202b39c9dabf", {defaultValue: "Profile: {{p0}}", p0:(profileName)}) : `Profile: ${profileName}`) : (globalThis.NorvaI18n?.t("ui_web_7ef06a96db1f", { defaultValue: "Profile changed" }) ?? 'Profile changed')); } catch (_) { /* noop */ }
         } catch (e) {
             console.warn('[profiles] soft profile switch failed, reloading', e);
             window.location.reload();

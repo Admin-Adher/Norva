@@ -1,3 +1,4 @@
+const visibleUiMarkup = require('./helpers/visible-ui-markup.cjs');
 'use strict';
 
 const test = require('node:test');
@@ -123,7 +124,7 @@ test('Admin Partners reads only dedicated sanitized RPCs', () => {
   assert.match(source, /'admin_partners_payout_onboarding_requests'/);
   assert.match(source, /'admin_partners_payout_onboarding_request_decide'/);
   assert.match(source, /'monitoring', 'admin_partners_monitoring'/);
-  assert.match(source, /revenuecat_transfer:\s*'Transferts RevenueCat'/);
+  assert.match(source, /revenuecat_transfer:\s*[^\n]*NorvaI18n[^\n]*'Transferts RevenueCat'/);
   assert.match(source, /revenuecat_transfer_dead_letter/);
   assert.match(source, /revenuecat_transfer_partial_aged/);
   assert.match(source, /revenuecat_transfer_quarantined_aged/);
@@ -393,15 +394,15 @@ test('Admin Partners renders Revolut Basic manual as production and keeps the AP
     },
   });
 
-  assert.match(revolut.innerHTML, /Revolut Business · Basic/);
-  assert.match(revolut.innerHTML, /Production · manuel/);
-  assert.match(revolut.innerHTML, /Flag DB API désactivé/);
-  assert.match(revolut.innerHTML, /Gate adaptateur API non validé/);
-  assert.match(revolut.innerHTML, /saisies en attente de relevé/);
-  assert.match(revolut.innerHTML, /relevés à valider/);
-  assert.match(routes.innerHTML, /FR · EUR/);
-  assert.match(routes.innerHTML, />1<\/strong><span>corridors configurés/);
-  assert.match(revolut.innerHTML, /Aucun virement n’est déclenché automatiquement/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /Revolut Business · Basic/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /Production · manuel/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /Flag DB API désactivé/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /Gate adaptateur API non validé/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /saisies en attente de relevé/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /relevés à valider/);
+  assert.match(visibleUiMarkup(routes.innerHTML), /FR · EUR/);
+  assert.match(visibleUiMarkup(routes.innerHTML), />1<\/strong><span>corridors configurés/);
+  assert.match(visibleUiMarkup(revolut.innerHTML), /Aucun virement n’est déclenché automatiquement/);
   assert.doesNotMatch(source, /data\.routes\.slice\(0,\s*50\)/);
 });
 
@@ -474,15 +475,15 @@ test('Admin partner detail renders only sanitized Revolut profile status', () =>
     }],
   });
 
-  assert.match(detail.innerHTML, /Bénéficiaire Revolut/);
-  assert.match(detail.innerHTML, /J\. H\. · FR76••••1234/);
-  assert.match(detail.innerHTML, /Mode manuel uniquement/);
-  assert.doesNotMatch(detail.innerHTML, /data-partners-action="revolut-binding-propose"/);
-  assert.match(detail.innerHTML, /data-partners-action="revolut-binding-verify"/);
-  assert.match(detail.innerHTML, /data-partners-action="revolut-binding-reject"/);
-  assert.match(detail.innerHTML, /data-partners-action="revolut-binding-revoke-request"/);
-  assert.match(detail.innerHTML, /data-partners-action="revolut-binding-revoke-confirm"/);
-  assert.doesNotMatch(detail.innerHTML, /must-never-render/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /Bénéficiaire Revolut/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /J\. H\. · FR76••••1234/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /Mode manuel uniquement/);
+  assert.doesNotMatch(visibleUiMarkup(detail.innerHTML), /data-partners-action="revolut-binding-propose"/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /data-partners-action="revolut-binding-verify"/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /data-partners-action="revolut-binding-reject"/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /data-partners-action="revolut-binding-revoke-request"/);
+  assert.match(visibleUiMarkup(detail.innerHTML), /data-partners-action="revolut-binding-revoke-confirm"/);
+  assert.doesNotMatch(visibleUiMarkup(detail.innerHTML), /must-never-render/);
 });
 
 test('Admin beneficiary proposal uses only the trusted Edge binding route', async () => {
@@ -578,15 +579,15 @@ test('Admin Partners renders unique Norva references and dual-control reconcilia
     }],
   });
 
-  assert.match(settlement.innerHTML, /NORVA-A1B2C3D4E5F6/);
-  assert.match(settlement.innerHTML, /data-partners-action="revolut-reconciliation-review"/);
-  assert.match(settlement.innerHTML, /data-partners-action="revolut-reconciliation-confirm"/);
-  assert.match(settlement.innerHTML, /data-partners-action="revolut-reconciliation-quarantine"/);
-  assert.match(settlement.innerHTML, /destination attendue FR76••••1234/);
-  assert.match(settlement.innerHTML, /à comparer dans Revolut/);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /NORVA-A1B2C3D4E5F6/);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /data-partners-action="revolut-reconciliation-review"/);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /data-partners-action="revolut-reconciliation-confirm"/);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /data-partners-action="revolut-reconciliation-quarantine"/);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /destination attendue FR76••••1234/);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /à comparer dans Revolut/);
   assert.match(source, /provider_not_completed/);
-  assert.match(settlement.innerHTML, /Importer un relevé CSV/);
-  assert.doesNotMatch(settlement.innerHTML, /provider_transaction_id|beneficiary_token_ref/i);
+  assert.match(visibleUiMarkup(settlement.innerHTML), /Importer un relevé CSV/);
+  assert.doesNotMatch(visibleUiMarkup(settlement.innerHTML), /provider_transaction_id|beneficiary_token_ref/i);
 });
 
 test('Admin Partners renders paginated sanitized Revolut incidents with maker-checker actions', () => {
@@ -685,18 +686,18 @@ test('Admin Partners renders paginated sanitized Revolut incidents with maker-ch
   });
 
   assert.equal(page._partnersReconciliationIncidents.size, 3);
-  assert.match(incidents.innerHTML, /3 action\(s\) requise\(s\)/);
-  assert.match(incidents.innerHTML, /data-partners-action="revolut-incident-review"/);
-  assert.match(incidents.innerHTML, /data-partners-resolution="quarantine"/);
-  assert.match(incidents.innerHTML, /data-partners-action="revolut-incident-decide-approve"/);
-  assert.match(incidents.innerHTML, /data-partners-action="revolut-incident-decide-quarantine"/);
-  assert.match(incidents.innerHTML, /Contrôle 1\/2 enregistré/);
-  assert.match(incidents.innerHTML, /empreinte 0123456789ab/);
-  assert.match(incidents.innerHTML, /Alias append-only · empreinte autoritaire/);
-  assert.doesNotMatch(incidents.innerHTML, /rta_0123456789abcdef01234567/);
-  assert.match(incidents.innerHTML, /data-partners-action="revolut-incident-page"/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /3 action\(s\) requise\(s\)/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /data-partners-action="revolut-incident-review"/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /data-partners-resolution="quarantine"/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /data-partners-action="revolut-incident-decide-approve"/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /data-partners-action="revolut-incident-decide-quarantine"/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /Contrôle 1\/2 enregistré/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /empreinte 0123456789ab/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /Alias append-only · empreinte autoritaire/);
+  assert.doesNotMatch(visibleUiMarkup(incidents.innerHTML), /rta_0123456789abcdef01234567/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /data-partners-action="revolut-incident-page"/);
   assert.doesNotMatch(
-    incidents.innerHTML,
+    visibleUiMarkup(incidents.innerHTML),
     /source_provider_transaction_hash|source_evidence_hash|statement_row_key|beneficiary_token_ref/i,
   );
 });
@@ -741,10 +742,10 @@ test('Admin Partners formats authoritative currency exponents and never guesses 
   });
 
   assert.equal(page._partnersReconciliationIncidents.size, 2);
-  assert.match(incidents.innerHTML, /P1 · Montant différent/);
-  assert.match(incidents.innerHTML, /1\u202f234,56\u00a0€/);
-  assert.match(incidents.innerHTML, /10,00\u00a0€/);
-  assert.match(incidents.innerHTML, /1\u202f234 EUR en unités mineures/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /P1 · Montant différent/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /1\u202f234,56\u00a0€/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /10,00\u00a0€/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /1\u202f234 EUR en unités mineures/);
 });
 
 test('Admin Partners rejects internally inconsistent Revolut incident envelopes', () => {
@@ -782,7 +783,7 @@ test('Admin Partners rejects internally inconsistent Revolut incident envelopes'
     },
   }));
   assert.equal(page._partnersReconciliationIncidents.size, 0);
-  assert.match(incidents.innerHTML, /Observation autoritative indisponible/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /Observation autoritative indisponible/);
 
   render(revolutIncident({
     status: 'resolved',
@@ -792,7 +793,7 @@ test('Admin Partners rejects internally inconsistent Revolut incident envelopes'
     transaction_alias: null,
   }));
   assert.equal(page._partnersReconciliationIncidents.size, 0);
-  assert.match(incidents.innerHTML, /Observation autoritative indisponible/);
+  assert.match(visibleUiMarkup(incidents.innerHTML), /Observation autoritative indisponible/);
 });
 
 test('Admin Partners binds incident evidence to exact maker-checker confirmations', async () => {
@@ -1059,15 +1060,15 @@ test('Admin Partners renders append-only Revolut returns with maker-checker acti
     }],
   });
 
-  assert.match(returns.innerHTML, /NORVA-A1B2C3D4E5F6/);
-  assert.match(returns.innerHTML, /Déblocage avant règlement/);
-  assert.match(returns.innerHTML, /Retour après règlement/);
-  assert.match(returns.innerHTML, /data-partners-action="revolut-return-review-eligible"/);
-  assert.match(returns.innerHTML, /data-partners-action="revolut-return-review-quarantine"/);
-  assert.match(returns.innerHTML, /data-partners-action="revolut-return-decide-confirm"/);
-  assert.match(returns.innerHTML, /aucun paiement déjà confirmé n’est réécrit/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /NORVA-A1B2C3D4E5F6/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /Déblocage avant règlement/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /Retour après règlement/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /data-partners-action="revolut-return-review-eligible"/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /data-partners-action="revolut-return-review-quarantine"/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /data-partners-action="revolut-return-decide-confirm"/);
+  assert.match(visibleUiMarkup(returns.innerHTML), /aucun paiement déjà confirmé n’est réécrit/);
   assert.doesNotMatch(
-    returns.innerHTML,
+    visibleUiMarkup(returns.innerHTML),
     /provider_transaction_id|beneficiary_token_ref|source_evidence_hash/i,
   );
 });
@@ -1137,30 +1138,30 @@ test('Admin Partners renders dual-control manual releases and late recovery', ()
   });
 
   assert.match(
-    controls.innerHTML,
+    visibleUiMarkup(controls.innerHTML),
     /data-partners-action="revolut-manual-control-confirm"/,
   );
   assert.match(
-    controls.innerHTML,
+    visibleUiMarkup(controls.innerHTML),
     /data-partners-action="revolut-manual-control-reject"/,
   );
-  assert.match(controls.innerHTML, /Annulation intégrale du lot/);
-  assert.doesNotMatch(controls.innerHTML, new RegExp('a'.repeat(64)));
+  assert.match(visibleUiMarkup(controls.innerHTML), /Annulation intégrale du lot/);
+  assert.doesNotMatch(visibleUiMarkup(controls.innerHTML), new RegExp('a'.repeat(64)));
   assert.doesNotMatch(
-    controls.innerHTML,
+    visibleUiMarkup(controls.innerHTML),
     /provider_search_evidence_hash|requested_by_pseudonym/i,
   );
   assert.match(
-    late.innerHTML,
+    visibleUiMarkup(late.innerHTML),
     /data-partners-action="revolut-late-review-eligible"/,
   );
   assert.match(
-    late.innerHTML,
+    visibleUiMarkup(late.innerHTML),
     /data-partners-action="revolut-late-decide-confirm"/,
   );
-  assert.match(late.innerHTML, /NORVA-A1B2C3D4E5F6/);
+  assert.match(visibleUiMarkup(late.innerHTML), /NORVA-A1B2C3D4E5F6/);
   assert.doesNotMatch(
-    late.innerHTML,
+    visibleUiMarkup(late.innerHTML),
     /provider_transaction_id|source_evidence_hash|beneficiary_token_ref/i,
   );
 });
@@ -1326,7 +1327,7 @@ test('Admin Partners never renders an account UUID as the visible partner refere
     source.indexOf('// ── Page: Providers'),
   );
   assert.match(section, /data-partner-id="\$\{AdminPage\.esc\(row\.id\)\}"/);
-  assert.match(section, /const ref = String\(row\.partner_key \|\| 'Partenaire'\)/);
+  assert.match(section, /const ref = String\(row\.partner_key \|\| [^\n]*'Partenaire'/);
   assert.doesNotMatch(section, /\$\{AdminPage\.esc\(row\.account_id\)\}/);
   assert.doesNotMatch(section, /<dd>\$\{AdminPage\.esc\(accountId\)\}/);
 });
@@ -1382,14 +1383,14 @@ test('Admin Partners renders capability-gated analytics without inventing unavai
     },
   });
 
-  assert.match(analytics.innerHTML, /Performance Partners sur 30 jours/);
-  assert.match(analytics.innerHTML, /Les clics ne sont pas encore instrumentés/);
-  assert.match(analytics.innerHTML, /Accès Risque requis/);
-  assert.match(analytics.innerHTML, /Accès Finance requis/);
-  assert.match(analytics.innerHTML, /Versements live non activés/);
-  assert.match(analytics.innerHTML, /Historique d’abonnement autoritatif non disponible/);
-  assert.doesNotMatch(analytics.innerHTML, /referral_click_events_not_recorded/);
-  assert.doesNotMatch(analytics.innerHTML, /<strong>0<\/strong>\s*<span>Clics/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Performance Partners sur 30 jours/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Les clics ne sont pas encore instrumentés/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Accès Risque requis/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Accès Finance requis/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Versements live non activés/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Historique d’abonnement autoritatif non disponible/);
+  assert.doesNotMatch(visibleUiMarkup(analytics.innerHTML), /referral_click_events_not_recorded/);
+  assert.doesNotMatch(visibleUiMarkup(analytics.innerHTML), /<strong>0<\/strong>\s*<span>Clics/);
 });
 
 test('Admin Partners keeps financial analytics scoped to exact minor units and currency', () => {
@@ -1456,12 +1457,12 @@ test('Admin Partners keeps financial analytics scoped to exact minor units and c
     },
   });
 
-  assert.match(analytics.innerHTML, /google_play · USD/);
-  assert.match(analytics.innerHTML, /1 234,56 USD/);
-  assert.match(analytics.innerHTML, /246,91 USD/);
-  assert.match(analytics.innerHTML, /987,65 USD/);
-  assert.match(analytics.innerHTML, /Traitement des commissions incomplet/);
-  assert.doesNotMatch(analytics.innerHTML, /9007199254740992/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /google_play · USD/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /1 234,56 USD/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /246,91 USD/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /987,65 USD/);
+  assert.match(visibleUiMarkup(analytics.innerHTML), /Traitement des commissions incomplet/);
+  assert.doesNotMatch(visibleUiMarkup(analytics.innerHTML), /9007199254740992/);
 });
 
 test('Admin Partners exposes five persistent internal views in the required order', () => {
@@ -1705,9 +1706,9 @@ test('Admin Partners renders capabilities independently when overview is unavail
   await page._partnersLoadCapabilities();
 
   assert.equal(attributes.has('aria-busy'), false);
-  assert.match(readiness.innerHTML, /Finance/);
-  assert.match(readiness.innerHTML, /Capacité serveur disponible/);
-  assert.doesNotMatch(readiness.innerHTML, /Chargement/);
+  assert.match(visibleUiMarkup(readiness.innerHTML), /Finance/);
+  assert.match(visibleUiMarkup(readiness.innerHTML), /Capacité serveur disponible/);
+  assert.doesNotMatch(visibleUiMarkup(readiness.innerHTML), /Chargement/);
 });
 
 test('Admin Partners module timeout is isolated and exposes a sanitized retry', async () => {
@@ -1748,9 +1749,9 @@ test('Admin Partners module timeout is isolated and exposes a sanitized retry', 
 
   assert.equal(result, null);
   assert.equal(attributes.has('aria-busy'), false);
-  assert.match(host.innerHTML, /Supervision : indisponible/);
-  assert.match(host.innerHTML, /data-partners-retry="monitoring"/);
-  assert.doesNotMatch(host.innerHTML, /provider payload/);
+  assert.match(visibleUiMarkup(host.innerHTML), /Supervision : indisponible/);
+  assert.match(visibleUiMarkup(host.innerHTML), /data-partners-retry="monitoring"/);
+  assert.doesNotMatch(visibleUiMarkup(host.innerHTML), /provider payload/);
 });
 
 test('Admin Partners renders all Revolut corridors with local filtering and pagination', () => {
@@ -1793,11 +1794,11 @@ test('Admin Partners renders all Revolut corridors with local filtering and pagi
     },
   });
 
-  assert.match(routes.innerHTML, />66<\/strong><span>corridors configurés/);
-  assert.match(routes.innerHTML, />1<\/strong><span>actifs/);
-  assert.match(routes.innerHTML, />65<\/strong><span>désactivés/);
+  assert.match(visibleUiMarkup(routes.innerHTML), />66<\/strong><span>corridors configurés/);
+  assert.match(visibleUiMarkup(routes.innerHTML), />1<\/strong><span>actifs/);
+  assert.match(visibleUiMarkup(routes.innerHTML), />65<\/strong><span>désactivés/);
   assert.equal((routes.innerHTML.match(/<li class="partners-control-item">/g) || []).length, 12);
-  assert.match(routes.innerHTML, /CN · USD/,
+  assert.match(visibleUiMarkup(routes.innerHTML), /CN · USD/,
     'the single active route must be promoted to the first page');
 
   const seen = new Set();
@@ -1813,7 +1814,7 @@ test('Admin Partners renders all Revolut corridors with local filtering and pagi
   page._partnersRoutePage = 0;
   page._renderPartnersRoutes();
   assert.equal((routes.innerHTML.match(/<li class="partners-control-item">/g) || []).length, 1);
-  assert.doesNotMatch(routes.innerHTML, /Route désactivée/);
+  assert.doesNotMatch(visibleUiMarkup(routes.innerHTML), /Route désactivée/);
 });
 
 test('Admin Partners uses a semantic desktop table and explicit mobile cards', () => {
@@ -1841,16 +1842,16 @@ test('Admin Partners uses a semantic desktop table and explicit mobile cards', (
     created_at: '2026-08-01T10:00:00Z',
   }], 1);
 
-  assert.match(list.innerHTML, /<table class="partners-table">/);
-  assert.match(list.innerHTML, /<caption>Comptes partenaires correspondant aux filtres<\/caption>/);
-  assert.match(list.innerHTML, /<th scope="col">Partenaire<\/th>/);
-  assert.match(list.innerHTML, /<th scope="col">KYC cash<\/th>/);
-  assert.match(list.innerHTML, /KYC cash vérifié/);
-  assert.doesNotMatch(list.innerHTML, /<th scope="col">Identité<\/th>/);
-  assert.match(list.innerHTML, /<button type="button" class="partner-open"/);
-  assert.match(list.innerHTML, /<ul id="partners-account-cards" class="partners-account-cards" role="list">/);
-  assert.match(list.innerHTML, /<dl class="partners-account-facts">/);
-  assert.doesNotMatch(list.innerHTML, /role="button" tabindex="0"/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<table class="partners-table">/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<caption[^>]*>Comptes partenaires correspondant aux filtres<\/caption>/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<th scope="col">Partenaire<\/th>/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<th scope="col">KYC cash<\/th>/);
+  assert.match(visibleUiMarkup(list.innerHTML), /KYC cash vérifié/);
+  assert.doesNotMatch(visibleUiMarkup(list.innerHTML), /<th scope="col">Identité<\/th>/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<button type="button" class="partner-open"/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<ul id="partners-account-cards" class="partners-account-cards" role="list">/);
+  assert.match(visibleUiMarkup(list.innerHTML), /<dl class="partners-account-facts">/);
+  assert.doesNotMatch(visibleUiMarkup(list.innerHTML), /role="button" tabindex="0"/);
   assert.match(source, /@media\(max-width:700px\)[\s\S]*\.partners-account-cards\{display:grid/);
 });
 
@@ -1887,10 +1888,10 @@ test('Admin Partners keeps not-started cash KYC distinct from pending cash KYC',
     readiness: {},
   });
 
-  assert.match(summary.innerHTML, />5<\/div><div class="cs-l">KYC cash non commencé/);
-  assert.match(summary.innerHTML, />1<\/div><div class="cs-l">KYC cash en cours/);
-  assert.match(summary.innerHTML, />1<\/div><div class="cs-l">KYC cash vérifié/);
-  assert.doesNotMatch(summary.innerHTML, /KYC en attente/);
+  assert.match(visibleUiMarkup(summary.innerHTML), />5<\/div><div class="cs-l">KYC cash non commencé/);
+  assert.match(visibleUiMarkup(summary.innerHTML), />1<\/div><div class="cs-l">KYC cash en cours/);
+  assert.match(visibleUiMarkup(summary.innerHTML), />1<\/div><div class="cs-l">KYC cash vérifié/);
+  assert.doesNotMatch(visibleUiMarkup(summary.innerHTML), /KYC en attente/);
 });
 
 test('Admin Partners renders a sanitized access-request queue with Risk-only decisions', () => {
@@ -1926,16 +1927,16 @@ test('Admin Partners renders a sanitized access-request queue with Risk-only dec
 
   page._renderPartnersAccessRequests(envelope);
   assert.equal(count.textContent, '1 demande');
-  assert.match(list.innerHTML, /Demande 0123456789ab/);
-  assert.match(list.innerHTML, /ad\*\*\*@example\.com/);
-  assert.match(list.innerHTML, /FR · FR-IDF/);
-  assert.doesNotMatch(list.innerHTML, /access-request-approve/);
+  assert.match(visibleUiMarkup(list.innerHTML), /Demande 0123456789ab/);
+  assert.match(visibleUiMarkup(list.innerHTML), /ad\*\*\*@example\.com/);
+  assert.match(visibleUiMarkup(list.innerHTML), /FR · FR-IDF/);
+  assert.doesNotMatch(visibleUiMarkup(list.innerHTML), /access-request-approve/);
 
   page._partnersCapabilities.risk = true;
   page._renderPartnersAccessRequests(envelope);
-  assert.match(list.innerHTML, /data-partners-action="access-request-approve"/);
-  assert.match(list.innerHTML, /data-partners-action="access-request-decline"/);
-  assert.match(list.innerHTML, /data-partners-access-request-page="prev"/);
+  assert.match(visibleUiMarkup(list.innerHTML), /data-partners-action="access-request-approve"/);
+  assert.match(visibleUiMarkup(list.innerHTML), /data-partners-action="access-request-decline"/);
+  assert.match(visibleUiMarkup(list.innerHTML), /data-partners-access-request-page="prev"/);
 });
 
 test('Admin Partners access decisions require AAL2 Risk and preserve operational gates', async () => {
@@ -2148,8 +2149,8 @@ test('Admin Partners distinguishes malformed and pending payout modules', () => 
 
   page._renderPartnersPayouts({ schema_version: 1, total: -1, items: [] }, null);
   assert.equal(attributes.get('aria-busy'), 'true');
-  assert.match(payouts.innerHTML, /data-partners-retry="payoutCycles"/);
-  assert.match(payouts.innerHTML, /Chargement des lots manuels/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /data-partners-retry="payoutCycles"/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /Chargement des lots manuels/);
 
   page._partnersRequests.clear();
   page._renderPartnersPayouts({ schema_version: 1, total: 0, items: [] }, {
@@ -2158,7 +2159,7 @@ test('Admin Partners distinguishes malformed and pending payout modules', () => 
     items: null,
   });
   assert.equal(attributes.has('aria-busy'), false);
-  assert.match(payouts.innerHTML, /data-partners-retry="manualBatches"/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /data-partners-retry="manualBatches"/);
   assert.equal(page._partnersIsPagedEnvelope({ schema_version: 1, total: 0, items: [] }), true);
   assert.equal(page._partnersIsPagedEnvelope({ schema_version: 1, total: -1, items: [] }), false);
 });
@@ -2195,8 +2196,8 @@ test('Admin Partners timeout settles even when the transport ignores AbortSignal
 
   assert.equal(result, null);
   assert.equal(attributes.has('aria-busy'), false);
-  assert.match(host.innerHTML, /Supervision : indisponible/);
-  assert.doesNotMatch(host.innerHTML, /partners_module_timeout/);
+  assert.match(visibleUiMarkup(host.innerHTML), /Supervision : indisponible/);
+  assert.doesNotMatch(visibleUiMarkup(host.innerHTML), /partners_module_timeout/);
 });
 
 test('Admin Partners cancellation settles immediately and never paints an error', async () => {
@@ -2295,20 +2296,20 @@ test('Admin Partners operational actions are hidden and rejected without exact c
   page._renderPartnersRisk(riskEnvelope);
   page._renderPartnersFinance(financeEnvelope);
   page._renderPartnerDetail(detailEnvelope);
-  assert.doesNotMatch(risk.innerHTML, /data-partners-action="account-action"/);
-  assert.doesNotMatch(finance.innerHTML, /data-partners-action="job-retry"/);
-  assert.doesNotMatch(finance.innerHTML, /data-partners-action="commission-reverse"/);
-  assert.doesNotMatch(detail.innerHTML, /data-partners-action="fiscal-review-public"/);
+  assert.doesNotMatch(visibleUiMarkup(risk.innerHTML), /data-partners-action="account-action"/);
+  assert.doesNotMatch(visibleUiMarkup(finance.innerHTML), /data-partners-action="job-retry"/);
+  assert.doesNotMatch(visibleUiMarkup(finance.innerHTML), /data-partners-action="commission-reverse"/);
+  assert.doesNotMatch(visibleUiMarkup(detail.innerHTML), /data-partners-action="fiscal-review-public"/);
 
   page._partnersCapabilities = { support: true, risk: true, finance: true };
   page._renderPartnersRisk(riskEnvelope);
   page._renderPartnersFinance(financeEnvelope);
   page._renderPartnerDetail(detailEnvelope);
-  assert.match(risk.innerHTML, /data-partners-action="account-action"/);
-  assert.match(finance.innerHTML, /data-partners-action="job-retry"/);
-  assert.match(finance.innerHTML, /data-partners-action="commission-reverse"/);
-  assert.doesNotMatch(detail.innerHTML, /data-partners-action="fiscal-review-public"/);
-  assert.doesNotMatch(detail.innerHTML, /data-partners-account=/);
+  assert.match(visibleUiMarkup(risk.innerHTML), /data-partners-action="account-action"/);
+  assert.match(visibleUiMarkup(finance.innerHTML), /data-partners-action="job-retry"/);
+  assert.match(visibleUiMarkup(finance.innerHTML), /data-partners-action="commission-reverse"/);
+  assert.doesNotMatch(visibleUiMarkup(detail.innerHTML), /data-partners-action="fiscal-review-public"/);
+  assert.doesNotMatch(visibleUiMarkup(detail.innerHTML), /data-partners-account=/);
 
   page._partnersCapabilities = { support: false, risk: false, finance: false };
   page._partnersPrompt = () => assert.fail('permission denial must happen before prompting');
@@ -2361,12 +2362,12 @@ test('Admin Partners paginates jurisdiction configuration without truncating it'
 
   page._renderPartnersConfiguration(envelope);
   assert.equal((configuration.innerHTML.match(/data-partners-action="kyc-policy"/g) || []).length, 12);
-  assert.match(configuration.innerHTML, /1–12 sur 30/);
-  assert.match(configuration.innerHTML, /aria-controls="partners-policy-list"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /1–12 sur 30/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /aria-controls="partners-policy-list"/);
   page._partnersPolicyPage = 2;
   page._renderPartnersConfiguration(envelope);
   assert.equal((configuration.innerHTML.match(/data-partners-action="kyc-policy"/g) || []).length, 6);
-  assert.match(configuration.innerHTML, /25–30 sur 30/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /25–30 sur 30/);
 });
 
 test('Admin Partners exposes programme activation only after both legal gates', () => {
@@ -2403,15 +2404,15 @@ test('Admin Partners exposes programme activation only after both legal gates', 
   };
 
   page._renderPartnersConfiguration(envelope);
-  assert.doesNotMatch(configuration.innerHTML, /data-partners-action="program-activate"/);
-  assert.match(configuration.innerHTML, /Activation bloqu/);
-  assert.match(configuration.innerHTML, /validation juridique et fiscale/);
-  assert.match(configuration.innerHTML, /validation Privacy de l’adhésion/);
+  assert.doesNotMatch(visibleUiMarkup(configuration.innerHTML), /data-partners-action="program-activate"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /Activation bloqu/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /validation juridique et fiscale/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /validation Privacy de l’adhésion/);
 
   envelope.release_gates.forEach((gate) => { gate.satisfied = true; });
   page._renderPartnersConfiguration(envelope);
-  assert.match(configuration.innerHTML, /data-partners-action="program-activate"/);
-  assert.doesNotMatch(configuration.innerHTML, /Activation bloqu/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /data-partners-action="program-activate"/);
+  assert.doesNotMatch(visibleUiMarkup(configuration.innerHTML), /Activation bloqu/);
 });
 
 test('Admin Partners explains incomplete country opening prerequisites before exposing Open', () => {
@@ -2455,13 +2456,13 @@ test('Admin Partners explains incomplete country opening prerequisites before ex
   };
 
   page._renderPartnersConfiguration(envelope);
-  assert.doesNotMatch(configuration.innerHTML, /data-partners-action="country-availability"/);
-  assert.match(configuration.innerHTML, /Ouverture bloqu/);
-  assert.match(configuration.innerHTML, /date d’effet du programme atteinte/);
-  assert.match(configuration.innerHTML, /politique KYC active/);
-  assert.match(configuration.innerHTML, /mapping pays actif/);
-  assert.match(configuration.innerHTML, /couverture des devises actives/);
-  assert.match(configuration.innerHTML, /couverture payout active/);
+  assert.doesNotMatch(visibleUiMarkup(configuration.innerHTML), /data-partners-action="country-availability"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /Ouverture bloqu/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /date d’effet du programme atteinte/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /politique KYC active/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /mapping pays actif/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /couverture des devises actives/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /couverture payout active/);
 
   program.effective_from = '2026-01-01T00:00:00Z';
   policy.kyc_attempt_policy.status = 'active';
@@ -2469,15 +2470,15 @@ test('Admin Partners explains incomplete country opening prerequisites before ex
   envelope.configuration_counts.active_currencies = 2;
   envelope.configuration_counts.active_payout_providers = 2;
   page._renderPartnersConfiguration(envelope);
-  assert.match(configuration.innerHTML, /data-partners-action="country-availability"/);
-  assert.match(configuration.innerHTML, />Ouvrir<\/button>/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /data-partners-action="country-availability"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), />Ouvrir<\/button>/);
 
   policy.individual_available = true;
   envelope.configuration_counts.active_country_mappings = 0;
   envelope.configuration_counts.active_currencies = 0;
   envelope.configuration_counts.active_payout_providers = 0;
   page._renderPartnersConfiguration(envelope);
-  assert.match(configuration.innerHTML, /data-partners-enabled="false">Fermer<\/button>/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /data-partners-enabled="false">Fermer<\/button>/);
 });
 
 test('Admin Partners country form mirrors subdivision and payout currency database limits', async () => {
@@ -2560,9 +2561,9 @@ test('Admin Partners keeps payout observations independent and retryable', () =>
     }],
   }, null);
 
-  assert.match(payouts.innerHTML, /pay_0123456789abcdef01234567/);
-  assert.match(payouts.innerHTML, /data-partners-retry="manualBatches"/);
-  assert.doesNotMatch(payouts.innerHTML, /data-partners-retry="payoutCycles"/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /pay_0123456789abcdef01234567/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /data-partners-retry="manualBatches"/);
+  assert.doesNotMatch(visibleUiMarkup(payouts.innerHTML), /data-partners-retry="payoutCycles"/);
 });
 
 test('Admin Partners never presents malformed payout counters as zero', () => {
@@ -2600,10 +2601,10 @@ test('Admin Partners never presents malformed payout counters as zero', () => {
     }],
   });
 
-  assert.match(payouts.innerHTML, /— unités mineures · — item\(s\)/);
-  assert.match(payouts.innerHTML, /—\/— saisi\(s\) · — rapproché\(s\)/);
-  assert.doesNotMatch(payouts.innerHTML, /0 unités mineures/);
-  assert.doesNotMatch(payouts.innerHTML, /0\/0 saisi\(s\)/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /— unités mineures · — item\(s\)/);
+  assert.match(visibleUiMarkup(payouts.innerHTML), /—\/— saisi\(s\) · — rapproché\(s\)/);
+  assert.doesNotMatch(visibleUiMarkup(payouts.innerHTML), /0 unités mineures/);
+  assert.doesNotMatch(visibleUiMarkup(payouts.innerHTML), /0\/0 saisi\(s\)/);
 });
 
 test('Admin Partners rejects malformed route status instead of inferring disabled', () => {
@@ -2636,8 +2637,8 @@ test('Admin Partners rejects malformed route status instead of inferring disable
     counts: {},
   });
 
-  assert.match(routes.innerHTML, /Observation autoritative indisponible/);
-  assert.doesNotMatch(routes.innerHTML, /Route désactivée/);
+  assert.match(visibleUiMarkup(routes.innerHTML), /Observation autoritative indisponible/);
+  assert.doesNotMatch(visibleUiMarkup(routes.innerHTML), /Route désactivée/);
 });
 
 test('Admin Partners incident pagination exposes direction, controlled content and live range', () => {
@@ -2681,9 +2682,9 @@ test('Admin Partners presents AAL2 as a generic sensitive-action gate', () => {
   page._partnersRenderAal2Gate();
 
   assert.equal(gate.hidden, false);
-  assert.match(gate.innerHTML, /Validation renforcée requise/);
-  assert.match(gate.innerHTML, /actions sensibles Partners/);
-  assert.doesNotMatch(gate.innerHTML, /Validation Finance requise|données Finance/);
+  assert.match(visibleUiMarkup(gate.innerHTML), /Validation renforcée requise/);
+  assert.match(visibleUiMarkup(gate.innerHTML), /actions sensibles Partners/);
+  assert.doesNotMatch(visibleUiMarkup(gate.innerHTML), /Validation Finance requise|données Finance/);
 });
 
 test('Admin Partners elevates sensitive actions through verified TOTP without exposing factor ids', async () => {
@@ -2904,20 +2905,20 @@ test('Admin Partners payout onboarding queue exposes controlled Finance actions 
     ],
   });
 
-  assert.match(queue.innerHTML, /data-partners-decision="start"/);
-  assert.match(queue.innerHTML, /data-partners-decision="reject"/);
-  assert.match(queue.innerHTML, /data-partners-decision="complete"/);
-  assert.match(queue.innerHTML, /Finalisation verrouillée/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-decision="start"/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-decision="reject"/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-decision="complete"/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /Finalisation verrouillée/);
   assert.match(
-    queue.innerHTML,
+    visibleUiMarkup(queue.innerHTML),
     /data-partners-request-key="por_333333333333333333333333"[\s\S]*?data-partners-decision="complete"[\s\S]*?disabled/,
   );
-  assert.match(queue.innerHTML, /data-partners-onboarding-open-partner="prt_/);
-  assert.match(queue.innerHTML, /data-partners-action="payout-onboarding-contact"/);
-  assert.match(queue.innerHTML, /data-partners-action="revolut-binding-propose-request"/);
-  assert.match(queue.innerHTML, /Reconfiguration requise/);
-  assert.match(queue.innerHTML, /ne satisfait plus tous les contrôles actuels/);
-  assert.doesNotMatch(queue.innerHTML, /account_id|user_id|provider_reference|bank|tax identifier/i);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-onboarding-open-partner="prt_/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-action="payout-onboarding-contact"/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-action="revolut-binding-propose-request"/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /Reconfiguration requise/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /ne satisfait plus tous les contrôles actuels/);
+  assert.doesNotMatch(visibleUiMarkup(queue.innerHTML), /account_id|user_id|provider_reference|bank|tax identifier/i);
 });
 
 test('Admin Partners payout onboarding decisions are Finance+AAL2 gated and typed', async () => {
@@ -3083,11 +3084,11 @@ test('Admin Partners fiscal queue is public-keyed, reviewable and privacy-minimi
     }],
   });
 
-  assert.match(queue.innerHTML, new RegExp(partnerKey));
-  assert.match(queue.innerHTML, /data-partners-action="fiscal-review-public"/);
-  assert.match(queue.innerHTML, /data-partners-partner-key="prt_/);
+  assert.match(visibleUiMarkup(queue.innerHTML), new RegExp(partnerKey));
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-action="fiscal-review-public"/);
+  assert.match(visibleUiMarkup(queue.innerHTML), /data-partners-partner-key="prt_/);
   assert.doesNotMatch(
-    queue.innerHTML,
+    visibleUiMarkup(queue.innerHTML),
     /account_id|user_id|email|tax_form|reference_hash|document_number/i,
   );
   assert.throws(() => page._renderPartnersFiscalProfiles({
@@ -3261,9 +3262,9 @@ test('Admin Partners exposes guided Didit certification only to Risk operators',
     action: 'kyc_certification_status',
     certification: null,
   });
-  assert.doesNotMatch(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
-  assert.match(certification.innerHTML, /Lecture seule/);
-  assert.doesNotMatch(kyc.innerHTML, /Certification pré-gate Didit/);
+  assert.doesNotMatch(visibleUiMarkup(certification.innerHTML), /data-partners-action="kyc-certification-start"/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /Lecture seule/);
+  assert.doesNotMatch(visibleUiMarkup(kyc.innerHTML), /Certification pré-gate Didit/);
 
   page._partnersCapabilities.risk = true;
   page._renderPartnersKycCertification({
@@ -3271,11 +3272,11 @@ test('Admin Partners exposes guided Didit certification only to Risk operators',
     action: 'kyc_certification_status',
     certification: null,
   });
-  assert.match(certification.innerHTML, /data-partners-action="kyc-certification-start"/);
-  assert.match(certification.innerHTML, /ne crée aucun compte et n’ouvre aucun paiement/);
-  assert.match(certification.innerHTML, /séparée du KYC cash des membres/);
-  assert.match(certification.innerHTML, /verification-privacy-notice/);
-  assert.match(certification.innerHTML, /identity-verification/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /data-partners-action="kyc-certification-start"/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /ne crée aucun compte et n’ouvre aucun paiement/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /séparée du KYC cash des membres/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /verification-privacy-notice/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /identity-verification/);
 });
 
 test('Admin Partners renders authoritative, sandbox and quarantined Didit proof states', () => {
@@ -3305,9 +3306,9 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
       verified: false,
     },
   });
-  assert.match(certification.innerHTML, /data-partners-action="kyc-certification-resume"/);
-  assert.match(certification.innerHTML, /Reprendre sur Didit/);
-  assert.doesNotMatch(certification.innerHTML, /kyc-certification-start/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /data-partners-action="kyc-certification-resume"/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /Reprendre sur Didit/);
+  assert.doesNotMatch(visibleUiMarkup(certification.innerHTML), /kyc-certification-start/);
 
   page._renderPartnersKycCertification({
     schema_version: 1,
@@ -3319,9 +3320,9 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
       verified: true,
     },
   });
-  assert.match(certification.innerHTML, /Certification technique live vérifiée/);
-  assert.match(certification.innerHTML, /Environnement live/);
-  assert.doesNotMatch(certification.innerHTML, /kyc-certification-start/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /Certification technique live vérifiée/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /Environnement live/);
+  assert.doesNotMatch(visibleUiMarkup(certification.innerHTML), /kyc-certification-start/);
 
   page._renderPartnersKycCertification({
     schema_version: 1,
@@ -3333,9 +3334,9 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
       verified: false,
     },
   });
-  assert.match(certification.innerHTML, /approuvée non autoritaire/);
-  assert.match(certification.innerHTML, /sandbox · non autoritaire/);
-  assert.match(certification.innerHTML, /kyc-certification-start/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /approuvée non autoritaire/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /sandbox · non autoritaire/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /kyc-certification-start/);
 
   page._renderPartnersKycCertification({
     schema_version: 1,
@@ -3348,8 +3349,8 @@ test('Admin Partners renders authoritative, sandbox and quarantined Didit proof 
       reason: 'provider_config_mismatch',
     },
   });
-  assert.match(certification.innerHTML, /mise en quarantaine/);
-  assert.match(certification.innerHTML, /configuration fournisseur incohérente/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /mise en quarantaine/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /configuration fournisseur incohérente/);
 });
 
 test('Admin Partners renders only sanitized Didit history without promoting cash KYC', () => {
@@ -3384,12 +3385,12 @@ test('Admin Partners renders only sanitized Didit history without promoting cash
     },
   });
 
-  assert.match(certification.innerHTML, /Historique technique sanitisé/);
-  assert.match(certification.innerHTML, /3 session\(s\)/);
-  assert.match(certification.innerHTML, /1 session\(s\) liée\(s\) à Didit sans événement local/);
-  assert.match(certification.innerHTML, /jamais convertible en KYC cash/);
-  assert.match(certification.innerHTML, /1 en quarantaine/);
-  assert.doesNotMatch(certification.innerHTML, /provider_session|account_id|user_id/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /Historique technique sanitisé/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /3 session\(s\)/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /1 session\(s\) liée\(s\) à Didit sans événement local/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /jamais convertible en KYC cash/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /1 en quarantaine/);
+  assert.doesNotMatch(visibleUiMarkup(certification.innerHTML), /provider_session|account_id|user_id/);
 });
 
 function validCertificationPreflight() {
@@ -3771,7 +3772,7 @@ test('Admin Partners polls null certification state through the complete recover
   assert.equal(page._partnersKycCertificationPollTimer, null);
   assert.equal(timers.size, 0, 'no timer survives the bounded recovery window');
   assert.match(
-    certification.innerHTML,
+    visibleUiMarkup(certification.innerHTML),
     /data-partners-action="kyc-certification-start"/,
     'the final read leaves the safe Start action available again',
   );
@@ -4020,10 +4021,10 @@ test('Admin Partners hides Start while an unknown Didit result is reconciling', 
     certification: null,
   });
   assert.doesNotMatch(
-    certification.innerHTML,
+    visibleUiMarkup(certification.innerHTML),
     /data-partners-action="kyc-certification-start"/,
   );
-  assert.match(certification.innerHTML, /Norva v&eacute;rifie/);
+  assert.match(visibleUiMarkup(certification.innerHTML), /Norva v&eacute;rifie/);
   page._partnersKycCertificationPollUntil = 0;
   page.hide();
 });
@@ -4079,12 +4080,12 @@ test('Admin Partners renders approval registry schema v2 and immutable provenanc
       registered_at: '2026-08-04T00:00:00.000Z',
     }],
   });
-  assert.match(configuration.innerHTML, /manifeste #2/);
-  assert.match(configuration.innerHTML, /préproduction uniquement/);
-  assert.match(configuration.innerHTML, /aucune autorité live/);
-  assert.match(configuration.innerHTML, /package #3/);
-  assert.match(configuration.innerHTML, /Approuver avec preuves/);
-  assert.match(configuration.innerHTML, /data-partners-action="release-manifest"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /manifeste #2/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /préproduction uniquement/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /aucune autorité live/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /package #3/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /Approuver avec preuves/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /data-partners-action="release-manifest"/);
 });
 
 test('Admin Partners can renew a production gate into preproduction without disabling it first', () => {
@@ -4138,10 +4139,10 @@ test('Admin Partners can renew a production gate into preproduction without disa
       registered_at: '2026-08-04T00:00:00.000Z',
     }],
   });
-  assert.match(configuration.innerHTML, /data-partners-action="release-gate-approve"/);
-  assert.match(configuration.innerHTML, /Renouveler avec preuves/);
-  assert.match(configuration.innerHTML, /data-partners-action="release-gate"/);
-  assert.match(configuration.innerHTML, />Désactiver<\/button>/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /data-partners-action="release-gate-approve"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /Renouveler avec preuves/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), /data-partners-action="release-gate"/);
+  assert.match(visibleUiMarkup(configuration.innerHTML), />Désactiver<\/button>/);
 });
 
 test('Admin Partners approves a gate through the immutable package RPC', async () => {

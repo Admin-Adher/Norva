@@ -2070,7 +2070,7 @@
         }
         this._releaseVideoDtsProbeAudio(writeList);
         if (writeList.length && !(await this._writePacketsChecked(writeList))) return;
-        if (++guard > 5000000) { this.report({ stage: 'pump', message: 'guard' }); break; }
+        if (++guard > 5000000) { this.report({ stage: 'pump', message: ('guard') }); break; }
       } while ((res === 0 || res === -lib.EAGAIN) && !this._stopRequested && !this.destroyed);
 
       if (this._stopRequested || this.destroyed) return;

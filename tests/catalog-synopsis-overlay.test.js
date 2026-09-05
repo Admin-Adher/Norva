@@ -141,7 +141,7 @@ test('live TMDB lookup fills only an empty movie or series fiche synopsis', () =
   for (const file of ['public/js/pages/MoviesPage.js', 'public/js/pages/SeriesPage.js']) {
     const src = read(file);
     assert.match(src, /const liveOverview = String\(meta\.overview \|\| ''\)\.trim\(\)/);
-    assert.match(src, /plotEl\.textContent === 'No summary available yet\.'/);
+    assert.match(src, /plotEl\.textContent === \(globalThis\.NorvaI18n\?\.t\('[^']+', \{ defaultValue: "No summary available yet\." \}\) \?\? 'No summary available yet\.'\)/);
     assert.match(src, /plotEl\.textContent = liveOverview/);
   }
 });

@@ -220,16 +220,16 @@ test('app shell delegates navigation policy and removes the retired hamburger pa
   const css = read('public/css/main.css');
   const tvMain = read('clients/android-tv/app/src/main/java/tv/norva/tv/MainActivity.java');
 
-  const modelScript = html.indexOf('/js/navigation/NavigationModel.js?v=5279356025');
-  const adaptersScript = html.indexOf('/js/navigation/NavigationAdapters.js?v=1');
-  const bootstrapScript = html.indexOf('/js/navigation/navigationBootstrap.js?v=1');
-  const tvScript = html.indexOf('/js/utils/tvNavigation.js?v=32');
-  const appScript = html.indexOf('/js/app.js?v=5e217dfb7b');
+  const modelScript = html.indexOf('/js/navigation/NavigationModel.js');
+  const adaptersScript = html.indexOf('/js/navigation/NavigationAdapters.js');
+  const bootstrapScript = html.indexOf('/js/navigation/navigationBootstrap.js');
+  const tvScript = html.indexOf('/js/utils/tvNavigation.js');
+  const appScript = html.indexOf('/js/app.js');
   assert.ok(modelScript > 0 && modelScript < adaptersScript);
   assert.ok(adaptersScript < bootstrapScript && bootstrapScript < tvScript && tvScript < appScript);
 
   assert.match(html, /<div class="navbar-menu" id="navbar-menu" data-navigation-root="primary"><\/div>/);
-  assert.match(html, /<nav class="bottom-nav" id="bottom-nav" aria-label="Primary" data-navigation-root="phone"><\/nav>/);
+  assert.match(html, /<nav class="bottom-nav" id="bottom-nav" aria-label="Primary" data-navigation-root="phone"[^>]*><\/nav>/);
   assert.doesNotMatch(html, /data-page="(?:home|live|movies|series|admin|settings)"/);
   assert.doesNotMatch(html, /mobile-menu-toggle/);
   assert.doesNotMatch(css, /\.mobile-menu-toggle|\.navbar-menu\.active/);

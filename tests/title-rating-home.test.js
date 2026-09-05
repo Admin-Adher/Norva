@@ -149,7 +149,7 @@ test('Because You Liked has honest editorial copy, For You hero treatment and no
     );
     assert.match(
         HOME_SOURCE,
-        /because-you-\(\?:watched\|liked\)[^\n]*return 'foryou'/
+        /because-you-\(\?:watched\|liked\)[^\n]*return \(?\s*'foryou'/
     );
 });
 

@@ -90,7 +90,7 @@
             <div class="dashboard-card" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     <img src="${esc(posterOf(item))}" alt="${esc(t)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
-                    ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
+                    ${variantCount > 1 ? `<div class="home-card-badge" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(variantCount)}) || "{}")}">${variantCount} versions</div>` : ''}
                     <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
                 </div>
                 <div class="card-info">
@@ -106,12 +106,12 @@
             <section class="dashboard-section home-rail-section" data-rail-id="${esc(rail.id || railIndex)}">
                 <div class="section-header home-rail-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
                     <div><h2>${esc(rail.title || rail.name || '')}</h2></div>
-                    <button class="genre-see-all" type="button" data-rail-index="${railIndex}" style="background:none;border:none;color:#9db4ff;font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;padding:6px 8px">See all ›</button>
+                    <button class="genre-see-all" type="button" data-rail-index="${railIndex}" style="background:none;border:none;color:#9db4ff;font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;padding:6px 8px" data-i18n="ui_web_95b1b5051ead">See all ›</button>
                 </div>
                 <div class="scroll-wrapper">
-                    <button class="scroll-arrow scroll-left" aria-label="Scroll left" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+                    <button class="scroll-arrow scroll-left" aria-label="Scroll left" type="button" data-i18n-aria-label="ui_web_35dfa1045cb2"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
                     <div class="horizontal-scroll">${cards}</div>
-                    <button class="scroll-arrow scroll-right" aria-label="Scroll right" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+                    <button class="scroll-arrow scroll-right" aria-label="Scroll right" type="button" data-i18n-aria-label="ui_web_366bd578350a"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
                 </div>
             </section>`;
     }
@@ -149,7 +149,7 @@
             // No rails to host → let the container go back to its centered grid
             // layout so the empty state sits in the middle, not stuck left.
             container.classList.remove('rail-host');
-            container.innerHTML = `<div class="empty-state"><p>${esc(options.emptyText || 'No content to show yet.')}</p></div>`;
+            container.innerHTML = `<div class="empty-state"><p>${esc(options.emptyText || (globalThis.NorvaI18n?.t("ui_web_5ca85c6b6c30", { defaultValue: "No content to show yet." }) ?? 'No content to show yet.'))}</p></div>`;
             return;
         }
         // Stack the rails as a block (see .rail-host in main.css) so an overflowing
@@ -214,9 +214,9 @@
             const wrapper = document.createElement('div');
             wrapper.className = 'scroll-wrapper';
             wrapper.innerHTML = `
-                <button class="scroll-arrow scroll-left" aria-label="Scroll left" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+                <button class="scroll-arrow scroll-left" aria-label="Scroll left" type="button" data-i18n-aria-label="ui_web_35dfa1045cb2"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
                 <div class="horizontal-scroll"></div>
-                <button class="scroll-arrow scroll-right" aria-label="Scroll right" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>`;
+                <button class="scroll-arrow scroll-right" aria-label="Scroll right" type="button" data-i18n-aria-label="ui_web_366bd578350a"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>`;
             const scroll = wrapper.querySelector('.horizontal-scroll');
             (sec.cards || []).forEach((el) => { if (el) scroll.appendChild(el); });
             section.appendChild(header);

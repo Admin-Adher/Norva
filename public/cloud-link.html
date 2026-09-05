@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b10">
-    <title>Local connector - Norva</title>
+    <title data-i18n="ui_web_aadbee8c4b9b">Local connector - Norva</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -87,7 +88,8 @@
     </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
     <main class="panel">
@@ -95,22 +97,22 @@
             <img src="/img/norva-app-icon.png" alt="Norva">
             <span>Norva</span>
         </div>
-        <h1>Link this local connector.</h1>
-        <p class="muted">
+        <h1 data-i18n="ui_web_e8bc059cd8a9">Link this local connector.</h1>
+        <p class="muted" data-i18n="ui_web_3448acf735d7">
             A local connector can keep offline playback tools while sharing a trusted device identity with your Norva account.
         </p>
         <div class="actions">
-            <button class="btn primary" id="link-button" type="button">Link connector</button>
-            <a class="btn" href="/account.html?returnTo=/cloud-link.html">Norva Account</a>
-            <a class="btn" href="/">Back to Norva</a>
-            <button class="btn danger" id="unlink-button" type="button">Unlink connector</button>
+            <button class="btn primary" id="link-button" type="button" data-i18n="ui_web_8b268c4222fd">Link connector</button>
+            <a class="btn" href="/account.html?returnTo=/cloud-link.html" data-i18n="ui_web_070ab76e8398">Norva Account</a>
+            <a class="btn" href="/" data-i18n="ui_web_91d13041c60d">Back to Norva</a>
+            <button class="btn danger" id="unlink-button" type="button" data-i18n="ui_web_94960c287ad9">Unlink connector</button>
         </div>
-        <div class="status info" id="status">Checking sessions...</div>
+        <div class="status info" id="status" data-i18n="ui_web_4ad1313a576e">Checking sessions...</div>
     </main>
 
-  <script src="/js/api.js?v=75"></script>
-    <script src="/js/cloudApi.js?v=50"></script>
-    <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/api.js?v=79bedea721"></script>
+    <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+    <script src="/js/authApi.js?v=be61dee633"></script>
     <script>
         const statusEl = document.getElementById('status');
         const linkButton = document.getElementById('link-button');
@@ -123,33 +125,33 @@
         async function boot() {
             NorvaAuth.captureSessionFromUrl();
             if (!localStorage.getItem('authToken')) {
-                setStatus('error', 'Sign in to this local connector first, then open this page again.');
+                setStatus('error', (globalThis.NorvaI18n?.t("ui_web_34049d40c216", { defaultValue: "Sign in to this local connector first, then open this page again." }) ?? 'Sign in to this local connector first, then open this page again.'));
                 linkButton.disabled = true;
                 return;
             }
             const cloudUser = await NorvaAuth.getUser().catch(() => null);
             if (!cloudUser) {
-                setStatus('info', 'Sign in to your Norva Account to link this connector.');
+                setStatus('info', (globalThis.NorvaI18n?.t("ui_web_d05ef14cdc48", { defaultValue: "Sign in to your Norva Account to link this connector." }) ?? 'Sign in to your Norva Account to link this connector.'));
                 return;
             }
             const status = await API.cloud.status().catch(() => null);
             if (status?.linked) {
-                setStatus('success', `Connector linked as ${status.deviceName || 'Norva Connector'}.`);
+                setStatus('success', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a15aa77ff015", {defaultValue: "Connector linked as {{p0}}.", p0:(status.deviceName || (globalThis.NorvaI18n?.t("ui_web_71d075a8671a", { defaultValue: "Norva Connector" }) ?? 'Norva Connector'))}) : `Connector linked as ${status.deviceName || 'Norva Connector'}.`));
             } else {
-                setStatus('info', `Ready to link this connector to ${cloudUser.email || 'your Norva Account'}.`);
+                setStatus('info', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_1dba7ab9930f", {defaultValue: "Ready to link this connector to {{p0}}.", p0:(cloudUser.email || (globalThis.NorvaI18n?.t("ui_web_c065a1a3bf69", { defaultValue: "your Norva Account" }) ?? 'your Norva Account'))}) : `Ready to link this connector to ${cloudUser.email || 'your Norva Account'}.`));
             }
         }
 
         async function linkHub() {
             linkButton.disabled = true;
             try {
-                setStatus('info', 'Linking connector...');
+                setStatus('info', (globalThis.NorvaI18n?.t("ui_web_37bbab82406a", { defaultValue: "Linking connector..." }) ?? 'Linking connector...'));
                 const cloudAccessToken = await NorvaAuth.getAccessToken();
                 if (!cloudAccessToken) throw new Error('Norva Account session is missing.');
                 const payload = await API.cloud.link({ cloudAccessToken, deviceName: 'Norva Connector' });
-                setStatus('success', `Connector linked as ${payload.deviceName || 'Norva Connector'}.`);
+                setStatus('success', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a15aa77ff015", {defaultValue: "Connector linked as {{p0}}.", p0:(payload.deviceName || (globalThis.NorvaI18n?.t("ui_web_71d075a8671a", { defaultValue: "Norva Connector" }) ?? 'Norva Connector'))}) : `Connector linked as ${payload.deviceName || 'Norva Connector'}.`));
             } catch (error) {
-                setStatus('error', 'Unable to link this connector. Check the details and try again.');
+                setStatus('error', (globalThis.NorvaI18n?.t("ui_web_97ecec80252f", { defaultValue: "Unable to link this connector. Check the details and try again." }) ?? 'Unable to link this connector. Check the details and try again.'));
             } finally {
                 linkButton.disabled = false;
             }
@@ -158,11 +160,11 @@
         async function unlinkHub() {
             unlinkButton.disabled = true;
             try {
-                setStatus('info', 'Unlinking connector...');
+                setStatus('info', (globalThis.NorvaI18n?.t("ui_web_a82a54f976a3", { defaultValue: "Unlinking connector..." }) ?? 'Unlinking connector...'));
                 await API.cloud.unlink();
-                setStatus('success', 'Connector unlinked locally.');
+                setStatus('success', (globalThis.NorvaI18n?.t("ui_web_fb6fd0e75c2c", { defaultValue: "Connector unlinked locally." }) ?? 'Connector unlinked locally.'));
             } catch (error) {
-                setStatus('error', 'Unable to unlink this connector. Try again.');
+                setStatus('error', (globalThis.NorvaI18n?.t("ui_web_6ba1f4c7206e", { defaultValue: "Unable to unlink this connector. Try again." }) ?? 'Unable to unlink this connector. Try again.'));
             } finally {
                 unlinkButton.disabled = false;
             }

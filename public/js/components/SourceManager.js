@@ -79,7 +79,7 @@ class SourceManager {
      * @param {Object} options - { title, message, details, proceedText, cancelText }
      * @returns {Promise<boolean>} - Resolves true if user clicks Proceed, false if Cancel
      */
-    showWarningModal({ title, message, details = '', proceedText = 'Proceed', cancelText = 'Cancel' }) {
+    showWarningModal({ title, message, details = '', proceedText = (globalThis.NorvaI18n?.t("ui_web_f01847dfc941", { defaultValue: "Proceed" }) ?? 'Proceed'), cancelText = (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel') }) {
         // A fast double press (touch, Enter or TV OK) must join the confirmation
         // already on screen. Rebuilding the shared #modal would replace its
         // handlers and leave the first caller's Promise unresolved.
@@ -250,29 +250,29 @@ class SourceManager {
 
         const guidance = {
             credentials: sourceType === 'xtream'
-                ? 'Norva could not verify that login. Check the server address, username and password supplied by your provider.'
-                : 'That playlist link may have expired. Ask your provider for a current M3U link, then replace it here.',
+                ? (globalThis.NorvaI18n?.t("ui_web_df7d7ce21fe7", { defaultValue: "Norva could not verify that login. Check the server address, username and password supplied by your provider." }) ?? 'Norva could not verify that login. Check the server address, username and password supplied by your provider.')
+                : (globalThis.NorvaI18n?.t("ui_web_78028c8355ca", { defaultValue: "That playlist link may have expired. Ask your provider for a current M3U link, then replace it here." }) ?? 'That playlist link may have expired. Ask your provider for a current M3U link, then replace it here.'),
             missing_credentials: sourceType === 'xtream'
-                ? 'The provider login is incomplete. You need the server address, username and password.'
-                : 'A complete M3U or M3U8 link is required before Norva can import the catalogue.',
-            endpoint_not_found: 'The saved address no longer exposes the expected catalogue endpoint. Confirm the current details with your provider.',
-            timeout: 'The provider took too long to answer. Your saved details remain private; retry when the service is responsive.',
-            provider_busy: 'The provider was temporarily busy. Retry the import without changing valid access details.',
-            rate_limited: 'The provider temporarily limited requests. Wait a little, then retry this import once.',
-            playlist_format: 'The response was not a readable M3U catalogue. Confirm that the link opens a playlist rather than a provider web page.',
+                ? (globalThis.NorvaI18n?.t("ui_web_18db2b50f148", { defaultValue: "The provider login is incomplete. You need the server address, username and password." }) ?? 'The provider login is incomplete. You need the server address, username and password.')
+                : (globalThis.NorvaI18n?.t("ui_web_877ea8e29dfe", { defaultValue: "A complete M3U or M3U8 link is required before Norva can import the catalogue." }) ?? 'A complete M3U or M3U8 link is required before Norva can import the catalogue.'),
+            endpoint_not_found: (globalThis.NorvaI18n?.t("ui_web_03772d1cca16", { defaultValue: "The saved address no longer exposes the expected catalogue endpoint. Confirm the current details with your provider." }) ?? 'The saved address no longer exposes the expected catalogue endpoint. Confirm the current details with your provider.'),
+            timeout: (globalThis.NorvaI18n?.t("ui_web_20f848bbac52", { defaultValue: "The provider took too long to answer. Your saved details remain private; retry when the service is responsive." }) ?? 'The provider took too long to answer. Your saved details remain private; retry when the service is responsive.'),
+            provider_busy: (globalThis.NorvaI18n?.t("ui_web_522a45e9fc5e", { defaultValue: "The provider was temporarily busy. Retry the import without changing valid access details." }) ?? 'The provider was temporarily busy. Retry the import without changing valid access details.'),
+            rate_limited: (globalThis.NorvaI18n?.t("ui_web_e7d687038a4e", { defaultValue: "The provider temporarily limited requests. Wait a little, then retry this import once." }) ?? 'The provider temporarily limited requests. Wait a little, then retry this import once.'),
+            playlist_format: (globalThis.NorvaI18n?.t("ui_web_9fb7bb609626", { defaultValue: "The response was not a readable M3U catalogue. Confirm that the link opens a playlist rather than a provider web page." }) ?? 'The response was not a readable M3U catalogue. Confirm that the link opens a playlist rather than a provider web page.'),
             invalid_input: sourceType === 'xtream'
-                ? 'Use the provider server address and the separate username and password fields — not an app name or web page.'
-                : 'Paste the complete M3U or M3U8 playlist link supplied by your provider.',
-            payload_too_large: 'Large catalogues are supported. Retry the import: Norva validates the beginning, then continues the bounded import in the background.',
-            provider_unreachable: 'The provider address could not be reached. Confirm that the service is online and that the address is current.',
-            infrastructure: 'Norva could not complete the import because of a temporary service problem. Your saved catalogue and access details remain protected.',
-            unknown: 'Norva could not finish this import. Review the saved details and retry from the matching service card.'
+                ? (globalThis.NorvaI18n?.t("ui_web_b8e3381f4658", { defaultValue: "Use the provider server address and the separate username and password fields — not an app name or web page." }) ?? 'Use the provider server address and the separate username and password fields — not an app name or web page.')
+                : (globalThis.NorvaI18n?.t("ui_web_56657b0092b9", { defaultValue: "Paste the complete M3U or M3U8 playlist link supplied by your provider." }) ?? 'Paste the complete M3U or M3U8 playlist link supplied by your provider.'),
+            payload_too_large: (globalThis.NorvaI18n?.t("ui_web_d2723a827335", { defaultValue: "Large catalogues are supported. Retry the import: Norva validates the beginning, then continues the bounded import in the background." }) ?? 'Large catalogues are supported. Retry the import: Norva validates the beginning, then continues the bounded import in the background.'),
+            provider_unreachable: (globalThis.NorvaI18n?.t("ui_web_1e2fcbb5b723", { defaultValue: "The provider address could not be reached. Confirm that the service is online and that the address is current." }) ?? 'The provider address could not be reached. Confirm that the service is online and that the address is current.'),
+            infrastructure: (globalThis.NorvaI18n?.t("ui_web_4c5e3ec8e971", { defaultValue: "Norva could not complete the import because of a temporary service problem. Your saved catalogue and access details remain protected." }) ?? 'Norva could not complete the import because of a temporary service problem. Your saved catalogue and access details remain protected.'),
+            unknown: (globalThis.NorvaI18n?.t("ui_web_38bf5caf4d9c", { defaultValue: "Norva could not finish this import. Review the saved details and retry from the matching service card." }) ?? 'Norva could not finish this import. Review the saved details and retry from the matching service card.')
         };
 
-        let title = 'Finish connecting your TV service';
+        let title = (globalThis.NorvaI18n?.t("ui_web_20e604427ce5", { defaultValue: "Finish connecting your TV service" }) ?? 'Finish connecting your TV service');
         let message = guidance[failureFamily];
         let target = document.getElementById(sourceType === 'xtream' ? 'add-xtream' : 'add-m3u');
-        let actionLabel = sourceType === 'xtream' ? 'Add provider login' : 'Add playlist link';
+        let actionLabel = sourceType === 'xtream' ? (globalThis.NorvaI18n?.t("ui_web_89974e70b437", { defaultValue: "Add provider login" }) ?? 'Add provider login') : (globalThis.NorvaI18n?.t("ui_web_46529de813b8", { defaultValue: "Add playlist link" }) ?? 'Add playlist link');
         const scrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
             ? 'auto'
             : 'smooth';
@@ -282,21 +282,21 @@ class SourceManager {
         if (actionable) {
             const sourceCard = cardFor(actionable.source);
             target = sourceCard?.querySelector('.source-primary-action') || sourceCard;
-            title = actionable.health?.state === 'disabled' ? 'This TV service is paused' : 'Let’s fix this import';
+            title = actionable.health?.state === 'disabled' ? (globalThis.NorvaI18n?.t("ui_web_62b29e13ad66", { defaultValue: "This TV service is paused" }) ?? 'This TV service is paused') : (globalThis.NorvaI18n?.t("ui_web_a0b0d1cf168b", { defaultValue: "Let’s fix this import" }) ?? 'Let’s fix this import');
             message = actionable.health?.state === 'disabled'
-                ? 'Enable this service before retrying its catalogue import.'
+                ? (globalThis.NorvaI18n?.t("ui_web_fe709e61c1a4", { defaultValue: "Enable this service before retrying its catalogue import." }) ?? 'Enable this service before retrying its catalogue import.')
                 : guidance[failureFamily];
-            actionLabel = String(target?.textContent || 'Review service').trim();
+            actionLabel = String(target?.textContent || (globalThis.NorvaI18n?.t("ui_web_f3bfa948a110", { defaultValue: "Review service" }) ?? 'Review service')).trim();
         } else if (syncing) {
             const sourceCard = cardFor(syncing.source);
             target = sourceCard?.querySelector('[data-action="progress"]') || sourceCard;
-            title = 'Your catalogue import is still running';
-            message = 'Norva is processing the catalogue in the background. You can leave this screen and return later.';
-            actionLabel = target?.matches?.('button') ? 'View import progress' : '';
+            title = (globalThis.NorvaI18n?.t("ui_web_822904364579", { defaultValue: "Your catalogue import is still running" }) ?? 'Your catalogue import is still running');
+            message = (globalThis.NorvaI18n?.t("ui_web_68282f8fa263", { defaultValue: "Norva is processing the catalogue in the background. You can leave this screen and return later." }) ?? 'Norva is processing the catalogue in the background. You can leave this screen and return later.');
+            actionLabel = target?.matches?.('button') ? (globalThis.NorvaI18n?.t("ui_web_ecde2cf77446", { defaultValue: "View import progress" }) ?? 'View import progress') : '';
         } else if (healthy) {
             target = cardFor(healthy.source);
-            title = 'This reminder is already resolved';
-            message = 'A working TV service is connected now, so no repair is needed. You can keep using your catalogue.';
+            title = (globalThis.NorvaI18n?.t("ui_web_81ab557abb3d", { defaultValue: "This reminder is already resolved" }) ?? 'This reminder is already resolved');
+            message = (globalThis.NorvaI18n?.t("ui_web_b9afe65a8e8a", { defaultValue: "A working TV service is connected now, so no repair is needed. You can keep using your catalogue." }) ?? 'A working TV service is connected now, so no repair is needed. You can keep using your catalogue.');
             actionLabel = '';
         }
 
@@ -385,12 +385,12 @@ class SourceManager {
 
     renderSourceList(container, sources, type) {
         const labels = {
-            xtream: 'provider accounts',
-            m3u: 'playlist links',
-            epg: 'TV guide feeds'
+            xtream: (globalThis.NorvaI18n?.t("ui_web_cd68ed5a3cba", { defaultValue: "provider accounts" }) ?? 'provider accounts'),
+            m3u: (globalThis.NorvaI18n?.t("ui_web_7e0365829ea0", { defaultValue: "playlist links" }) ?? 'playlist links'),
+            epg: (globalThis.NorvaI18n?.t("ui_web_104ad5130bd4", { defaultValue: "TV guide feeds" }) ?? 'TV guide feeds')
         };
         if (sources.length === 0) {
-            container.innerHTML = `<p class="hint">No ${labels[type] || 'providers'} configured</p>`;
+            container.innerHTML = `<p class="hint" data-i18n="ui_web_12a3ece515c9" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(labels[type] || 'providers')}) || "{}")}">No ${labels[type] || 'providers'} configured</p>`;
             return;
         }
 
@@ -401,17 +401,17 @@ class SourceManager {
             const managementEnabled = this.isSourceManagementEnabled(sourceView);
             const health = window.NorvaSourceHealth?.classifySource(sourceView, this.sourceStatuses || []) || {
                 state: managementEnabled ? 'ready' : 'disabled',
-                label: managementEnabled ? 'Ready' : 'Disabled',
-                message: managementEnabled ? '' : 'This service is paused. Its saved catalog will return when you enable it.',
+                label: managementEnabled ? (globalThis.NorvaI18n?.t("ui_web_5fa7aac5375c", { defaultValue: "Ready" }) ?? 'Ready') : (globalThis.NorvaI18n?.t("ui_web_75081b593d15", { defaultValue: "Disabled" }) ?? 'Disabled'),
+                message: managementEnabled ? '' : (globalThis.NorvaI18n?.t("ui_web_3d439b51ff45", { defaultValue: "This service is paused. Its saved catalog will return when you enable it." }) ?? 'This service is paused. Its saved catalog will return when you enable it.'),
                 needsAttention: false
             };
             const retryPending = health.state === 'ready' && health.retrying === true;
-            const healthLabel = retryPending ? 'Ready · retry pending' : health.label;
+            const healthLabel = retryPending ? (globalThis.NorvaI18n?.t("ui_web_6777acaf9e94", { defaultValue: "Ready · retry pending" }) ?? 'Ready · retry pending') : health.label;
             const healthMessage = retryPending
-                ? 'Your existing catalogue is available. Norva will retry the update automatically.'
+                ? (globalThis.NorvaI18n?.t("ui_web_cb1424e6451a", { defaultValue: "Your existing catalogue is available. Norva will retry the update automatically." }) ?? 'Your existing catalogue is available. Norva will retry the update automatically.')
                 : (health.state !== 'ready' ? health.message : '');
             const progressButton = health.state === 'syncing'
-                ? `<button class="btn btn-sm btn-secondary source-progress-btn" data-action="progress" title="View catalog import progress">Progress</button>`
+                ? `<button class="btn btn-sm btn-secondary source-progress-btn" data-action="progress" title="View catalog import progress" data-i18n-title="ui_web_fcf93cf6897d" data-i18n="ui_web_4664827f8e89">Progress</button>`
                 : '';
             // Usable-but-still-topping-up: onboarding is "done" (catalogue navigable) yet the
             // remaining VOD long-tail is still materialising in the background. Surface it as
@@ -427,23 +427,23 @@ class SourceManager {
             const needsRepair = !!health.needsAttention;
             const needsAccessReview = providerAccessEnabled
                 && ['auth_failed', 'expired', 'provider_changed'].includes(health.state);
-            let primary = { action: 'refresh', label: 'Sync', cls: '' };
+            let primary = { action: 'refresh', label: (globalThis.NorvaI18n?.t("ui_web_8d261a372fde", { defaultValue: "Sync" }) ?? 'Sync'), cls: '' };
             if (!managementEnabled) {
-                primary = { action: 'toggle', label: 'Enable service', cls: '' };
+                primary = { action: 'toggle', label: (globalThis.NorvaI18n?.t("ui_web_ee3648b17a37", { defaultValue: "Enable service" }) ?? 'Enable service'), cls: '' };
             } else if (needsAccessReview) {
                 primary = {
                     action: 'provider-access',
-                    label: accessSummary?.detail ? 'Review access' : 'Add access dates',
+                    label: accessSummary?.detail ? (globalThis.NorvaI18n?.t("ui_web_5ddb6f051115", { defaultValue: "Review access" }) ?? 'Review access') : (globalThis.NorvaI18n?.t("ui_web_bb65a00f0c36", { defaultValue: "Add access dates" }) ?? 'Add access dates'),
                     cls: 'btn-repair'
                 };
             } else if (needsRepair && type === 'xtream' && !providerAccessEnabled) {
-                primary = { action: 'test', label: 'Check service', cls: 'btn-repair' };
+                primary = { action: 'test', label: (globalThis.NorvaI18n?.t("ui_web_54c4d87263b2", { defaultValue: "Check service" }) ?? 'Check service'), cls: 'btn-repair' };
             } else if (needsRepair) {
-                primary = { action: 'edit', label: 'Repair', cls: 'btn-repair' };
+                primary = { action: 'edit', label: (globalThis.NorvaI18n?.t("ui_web_1196b6c538ec", { defaultValue: "Repair" }) ?? 'Repair'), cls: 'btn-repair' };
             }
             const legacyEditLabel = type === 'm3u'
-                ? 'Edit playlist link'
-                : (type === 'epg' ? 'Edit TV guide' : 'Edit service');
+                ? (globalThis.NorvaI18n?.t("ui_web_381abf85de4e", { defaultValue: "Edit playlist link" }) ?? 'Edit playlist link')
+                : (type === 'epg' ? (globalThis.NorvaI18n?.t("ui_web_73c96ad66ff1", { defaultValue: "Edit TV guide" }) ?? 'Edit TV guide') : (globalThis.NorvaI18n?.t("ui_web_3b3ed7a7bf0e", { defaultValue: "Edit service" }) ?? 'Edit service'));
             return `
       <div class="source-item ${managementEnabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
@@ -452,47 +452,47 @@ class SourceManager {
             <span class="source-name">${this.escapeHtml(source.name)}</span>
             <span class="source-health-badge source-health-${this.escapeHtml(health.state)} ${retryPending ? 'source-health-retrying' : ''}">${this.escapeHtml(healthLabel)}</span>
           </div>
-          <div class="source-url">${this.escapeHtml(source.url || 'Managed by Norva Cloud')}</div>
+          <div class="source-url">${this.escapeHtml(source.url || (globalThis.NorvaI18n?.t("ui_web_ec35d1c3fb4c", { defaultValue: "Managed by Norva Cloud" }) ?? 'Managed by Norva Cloud'))}</div>
           ${healthMessage ? `<div class="source-health-message">${this.escapeHtml(healthMessage)}</div>` : ''}
           ${accessSummary ? `<div class="provider-access-inline provider-access-${this.escapeHtml(accessSummary.tone)}"><span>${this.escapeHtml(accessSummary.label)}</span>${accessSummary.detail ? `<span>${this.escapeHtml(accessSummary.detail)}</span>` : ''}</div>` : ''}
-          ${backgrounding ? `<div class="source-backgrounding"><span class="source-backgrounding-dot" aria-hidden="true"></span>Adding the rest of your library in the background…</div>` : ''}
+          ${backgrounding ? `<div class="source-backgrounding"><span class="source-backgrounding-dot" aria-hidden="true"></span><norva-i18n data-i18n="ui_web_c71e5f16db44">Adding the rest of your library in the background…</norva-i18n></div>` : ''}
         </div>
         <div class="source-actions">
           ${progressButton}
-          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}" type="button"${retryPending ? ' title="Retry catalog update" aria-label="Retry catalog update"' : ''}>${primary.label}</button>
-          <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
-          <div class="source-menu" role="menu" aria-label="${this.escapeHtml(source.name || 'TV service')} actions" hidden>
+          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}" type="button"${retryPending ? (globalThis.NorvaI18n?.t("ui_web_a7fc6d2dc8f3", { defaultValue: " title=\"Retry catalog update\" aria-label=\"Retry catalog update\"" }) ?? ' title="Retry catalog update" aria-label="Retry catalog update"') : ''}>${primary.label}</button>
+          <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions" title="More actions" data-i18n-title="ui_web_f8d46c2570e7" data-i18n-aria-label="ui_web_f8d46c2570e7">⋯</button>
+          <div class="source-menu" role="menu" aria-label="${this.escapeHtml(source.name || (globalThis.NorvaI18n?.t("ui_web_bf88149dcb1d", { defaultValue: "TV service" }) ?? 'TV service'))} actions" hidden data-i18n-aria-label="ui_web_f69ae4c4d2df" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p17":(source.name || (globalThis.NorvaI18n?.t("ui_web_bf88149dcb1d", { defaultValue: "TV service" }) ?? 'TV service'))}) || "{}")}">
             ${providerAccessEnabled ? `
-              <div class="source-menu-section" role="group" aria-label="Provider access">
-                <span class="source-menu-heading" aria-hidden="true">Provider access</span>
+              <div class="source-menu-section" role="group" aria-label="Provider access" data-i18n-aria-label="ui_web_d75bbc31a119">
+                <span class="source-menu-heading" aria-hidden="true" data-i18n="ui_web_d75bbc31a119">Provider access</span>
                 <button class="source-menu-item source-menu-item-featured" data-action="provider-access" role="menuitem" type="button">
-                  <span class="source-menu-item-label">Manage provider access</span>
-                  <span class="source-menu-item-detail">Dates, duration and reminders</span>
+                  <span class="source-menu-item-label" data-i18n="ui_web_a7507a8d6763">Manage provider access</span>
+                  <span class="source-menu-item-detail" data-i18n="ui_web_9d8cd3cc1b4f">Dates, duration and reminders</span>
                 </button>
                 <button class="source-menu-item" data-action="provider-login" role="menuitem" type="button">
-                  <span class="source-menu-item-label">Repair or change login</span>
-                  <span class="source-menu-item-detail">Validate new credentials before switching anything.</span>
+                  <span class="source-menu-item-label" data-i18n="ui_web_ce7fd1f11bcc">Repair or change login</span>
+                  <span class="source-menu-item-detail" data-i18n="ui_web_973658dc3266">Validate new credentials before switching anything.</span>
                 </button>
                 <button class="source-menu-item" data-action="provider-catalogue" role="menuitem" type="button">
-                  <span class="source-menu-item-label">Change provider or catalogue</span>
-                  <span class="source-menu-item-detail">Prepare and compare a different catalogue safely.</span>
+                  <span class="source-menu-item-label" data-i18n="ui_web_77269ee88b2d">Change provider or catalogue</span>
+                  <span class="source-menu-item-detail" data-i18n="ui_web_46137aad7f38">Prepare and compare a different catalogue safely.</span>
                 </button>
               </div>
             ` : ''}
-            <div class="source-menu-section" role="group" aria-label="Catalog actions">
-              <span class="source-menu-heading" aria-hidden="true">Catalog actions</span>
-              <button class="source-menu-item" data-action="test" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first"'}><span class="source-menu-item-label">Check service</span></button>
-              <button class="source-menu-item" data-action="refresh" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first"'}><span class="source-menu-item-label">Sync now</span></button>
-              <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first"'}><span class="source-menu-item-label">Rebuild catalog</span></button>
+            <div class="source-menu-section" role="group" aria-label="Catalog actions" data-i18n-aria-label="ui_web_7ec72173b804">
+              <span class="source-menu-heading" aria-hidden="true" data-i18n="ui_web_7ec72173b804">Catalog actions</span>
+              <button class="source-menu-item" data-action="test" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first" data-i18n-title="ui_web_bbed9190867c"'}><span class="source-menu-item-label" data-i18n="ui_web_54c4d87263b2">Check service</span></button>
+              <button class="source-menu-item" data-action="refresh" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first" data-i18n-title="ui_web_bbed9190867c"'}><span class="source-menu-item-label" data-i18n="ui_web_885e8f48bd70">Sync now</span></button>
+              <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button"${managementEnabled ? '' : ' disabled aria-disabled="true" title="Enable the service first" data-i18n-title="ui_web_bbed9190867c"'}><span class="source-menu-item-label" data-i18n="ui_web_ec5494ef2be2">Rebuild catalog</span></button>
             </div>
-            <div class="source-menu-section" role="group" aria-label="Service">
-              <span class="source-menu-heading" aria-hidden="true">Service</span>
+            <div class="source-menu-section" role="group" aria-label="Service" data-i18n-aria-label="ui_web_d677190e0a99">
+              <span class="source-menu-heading" aria-hidden="true" data-i18n="ui_web_d677190e0a99">Service</span>
               ${type !== 'xtream' ? `<button class="source-menu-item" data-action="edit" role="menuitem" type="button"><span class="source-menu-item-label">${legacyEditLabel}</span></button>` : ''}
-              <button class="source-menu-item" data-action="toggle" role="menuitem" type="button"><span class="source-menu-item-label">${managementEnabled ? 'Disable service' : 'Enable service'}</span></button>
+              <button class="source-menu-item" data-action="toggle" role="menuitem" type="button"><span class="source-menu-item-label">${managementEnabled ? (globalThis.NorvaI18n?.t("ui_web_1315e04bdc58", { defaultValue: "Disable service" }) ?? 'Disable service') : (globalThis.NorvaI18n?.t("ui_web_ee3648b17a37", { defaultValue: "Enable service" }) ?? 'Enable service')}</span></button>
             </div>
-            <div class="source-menu-section source-menu-section-danger" role="group" aria-label="Danger zone">
-              <span class="source-menu-heading" aria-hidden="true">Danger zone</span>
-              <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button"><span class="source-menu-item-label">Remove</span></button>
+            <div class="source-menu-section source-menu-section-danger" role="group" aria-label="Danger zone" data-i18n-aria-label="ui_web_fd8b8dae4421">
+              <span class="source-menu-heading" aria-hidden="true" data-i18n="ui_web_fd8b8dae4421">Danger zone</span>
+              <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button"><span class="source-menu-item-label" data-i18n="ui_web_c3812fc4acb8">Remove</span></button>
             </div>
           </div>
         </div>
@@ -584,14 +584,14 @@ class SourceManager {
     sourceFormatSwitcher(type) {
         if (!['m3u', 'xtream'].includes(type)) return '';
         const help = type === 'm3u'
-            ? 'Choose this when you received one complete playlist URL, often containing get.php or ending in .m3u or .m3u8.'
-            : 'Choose this when you received a server address with a username and password.';
+            ? (globalThis.NorvaI18n?.t("ui_web_ccce1f977d5c", { defaultValue: "Choose this when you received one complete playlist URL, often containing get.php or ending in .m3u or .m3u8." }) ?? 'Choose this when you received one complete playlist URL, often containing get.php or ending in .m3u or .m3u8.')
+            : (globalThis.NorvaI18n?.t("ui_web_917faee1e73f", { defaultValue: "Choose this when you received a server address with a username and password." }) ?? 'Choose this when you received a server address with a username and password.');
         return `
           <section class="source-format-switcher" aria-labelledby="source-format-switcher-title">
-            <strong class="source-format-switcher-title" id="source-format-switcher-title">What did your provider give you?</strong>
+            <strong class="source-format-switcher-title" id="source-format-switcher-title" data-i18n="ui_web_632798b668a9">What did your provider give you?</strong>
             <div class="setup-mode-tabs source-format-tabs" role="tablist" aria-labelledby="source-format-switcher-title" data-source-format-tabs>
-              <button class="setup-mode-tab" id="source-format-m3u" type="button" role="tab" aria-selected="${type === 'm3u'}" aria-controls="source-modal-connection-panel" data-source-format="m3u"${type === 'm3u' ? '' : ' tabindex="-1"'}>M3U link</button>
-              <button class="setup-mode-tab" id="source-format-xtream" type="button" role="tab" aria-selected="${type === 'xtream'}" aria-controls="source-modal-connection-panel" data-source-format="xtream"${type === 'xtream' ? '' : ' tabindex="-1"'}>Xtream login</button>
+              <button class="setup-mode-tab" id="source-format-m3u" type="button" role="tab" aria-selected="${type === 'm3u'}" aria-controls="source-modal-connection-panel" data-source-format="m3u"${type === 'm3u' ? '' : ' tabindex="-1"'} data-i18n="ui_web_10401de048cf">M3U link</button>
+              <button class="setup-mode-tab" id="source-format-xtream" type="button" role="tab" aria-selected="${type === 'xtream'}" aria-controls="source-modal-connection-panel" data-source-format="xtream"${type === 'xtream' ? '' : ' tabindex="-1"'} data-i18n="ui_web_f425b12da53b">Xtream login</button>
             </div>
             <p class="source-format-switcher-copy">${this.escapeHtml(help)}</p>
           </section>
@@ -643,8 +643,8 @@ class SourceManager {
             modal.dataset.providerConnectTracked = 'true';
         }
 
-        const titles = { xtream: 'Add TV provider', m3u: 'Add playlist link', epg: 'Add TV guide' };
-        title.textContent = ['m3u', 'xtream'].includes(type) ? 'Add TV service' : titles[type];
+        const titles = { xtream: (globalThis.NorvaI18n?.t("ui_web_e10bf05e823c", { defaultValue: "Add TV provider" }) ?? 'Add TV provider'), m3u: (globalThis.NorvaI18n?.t("ui_web_46529de813b8", { defaultValue: "Add playlist link" }) ?? 'Add playlist link'), epg: (globalThis.NorvaI18n?.t("ui_web_c0dce16cb5bb", { defaultValue: "Add TV guide" }) ?? 'Add TV guide') };
+        title.textContent = ['m3u', 'xtream'].includes(type) ? (globalThis.NorvaI18n?.t("ui_web_67db18ddb7b2", { defaultValue: "Add TV service" }) ?? 'Add TV service') : titles[type];
         modal.classList.remove('provider-access-wizard-modal');
         footer.hidden = false;
 
@@ -656,8 +656,8 @@ class SourceManager {
             : sourceForm;
 
         footer.innerHTML = `
-      <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
-      <button class="btn btn-primary" id="modal-save">Add</button>
+      <button class="btn btn-secondary" id="modal-cancel" data-i18n="ui_web_19766ed6ccb2">Cancel</button>
+      <button class="btn btn-primary" id="modal-save" data-i18n="ui_web_9fd728c66c9a">Add</button>
     `;
 
         modal.classList.add('active');
@@ -711,7 +711,7 @@ class SourceManager {
             // builders deref source.* and would throw into a silent console.error, leaving
             // the button looking dead. Surface it and refresh the list instead.
             if (!source) {
-                NorvaModal.toast('Could not load this source — it may have been removed.', 'error');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_1c0dade2261f", { defaultValue: "Could not load this source — it may have been removed." }) ?? 'Could not load this source — it may have been removed.'), 'error');
                 try { await this.loadSources(); } catch (_) { /* noop */ }
                 return;
             }
@@ -721,18 +721,18 @@ class SourceManager {
             const body = document.getElementById('modal-body');
             const footer = document.getElementById('modal-footer');
 
-            const titles = { xtream: 'Edit TV provider', m3u: 'Edit playlist link', epg: 'Edit TV guide' };
+            const titles = { xtream: (globalThis.NorvaI18n?.t("ui_web_206ec13dc1a5", { defaultValue: "Edit TV provider" }) ?? 'Edit TV provider'), m3u: (globalThis.NorvaI18n?.t("ui_web_381abf85de4e", { defaultValue: "Edit playlist link" }) ?? 'Edit playlist link'), epg: (globalThis.NorvaI18n?.t("ui_web_73c96ad66ff1", { defaultValue: "Edit TV guide" }) ?? 'Edit TV guide') };
             const intentTitles = {
-                credentials: 'Repair or change login',
-                provider: 'Change provider or catalogue'
+                credentials: (globalThis.NorvaI18n?.t("ui_web_ce7fd1f11bcc", { defaultValue: "Repair or change login" }) ?? 'Repair or change login'),
+                provider: (globalThis.NorvaI18n?.t("ui_web_77269ee88b2d", { defaultValue: "Change provider or catalogue" }) ?? 'Change provider or catalogue')
             };
             const intentCopy = {
-                credentials: 'Enter the login supplied for this service. Norva validates it before changing the active connection.',
-                provider: 'Enter the new provider details. Norva prepares and compares the catalogue before any switch.'
+                credentials: (globalThis.NorvaI18n?.t("ui_web_4fde0395632b", { defaultValue: "Enter the login supplied for this service. Norva validates it before changing the active connection." }) ?? 'Enter the login supplied for this service. Norva validates it before changing the active connection.'),
+                provider: (globalThis.NorvaI18n?.t("ui_web_cb5369b49435", { defaultValue: "Enter the new provider details. Norva prepares and compares the catalogue before any switch." }) ?? 'Enter the new provider details. Norva prepares and compares the catalogue before any switch.')
             };
             title.textContent = type === 'xtream' && intentTitles[intent]
                 ? intentTitles[intent]
-                : (titles[type] || 'Edit provider');
+                : (titles[type] || (globalThis.NorvaI18n?.t("ui_web_5d09c4b4f821", { defaultValue: "Edit provider" }) ?? 'Edit provider'));
             modal.classList.remove('source-add-modal');
             modal.classList.remove('provider-access-wizard-modal');
             footer.hidden = false;
@@ -744,8 +744,8 @@ class SourceManager {
             ` : ''}${this.getSourceForm(type, source)}`;
 
             footer.innerHTML = `
-        <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
-        <button class="btn btn-primary" id="modal-save">Save Changes</button>
+        <button class="btn btn-secondary" id="modal-cancel" data-i18n="ui_web_19766ed6ccb2">Cancel</button>
+        <button class="btn btn-primary" id="modal-save" data-i18n="ui_web_35322b5bb5a2">Save Changes</button>
       `;
 
             modal.classList.add('active');
@@ -762,7 +762,7 @@ class SourceManager {
             this.bindSourceForm(type);
         } catch (err) {
             console.error('Error loading source:', err);
-            NorvaModal.toast('Could not open this source. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_982fce552b34", { defaultValue: "Could not open this source. Try again." }) ?? 'Could not open this source. Try again.'), 'error');
         }
     }
 
@@ -801,28 +801,28 @@ class SourceManager {
         const status = String(source.provider_access_status || source.providerAccessStatus || 'unknown').toLowerCase();
         const expiresOn = source.provider_access_expires_on || source.providerAccessExpiresOn || null;
         const labels = {
-            active: ['Access active', 'positive'],
-            expiring: ['Access ending soon', 'warning'],
-            expected_expired: ['Renewal date passed', 'warning'],
-            expired_confirmed: ['Provider access expired', 'danger'],
-            access_unavailable_confirmed: ['Provider access unavailable', 'danger'],
-            check_failed_temporary: ['Access check delayed', 'neutral'],
-            restoring: ['Restoring provider access', 'warning'],
-            unknown: ['No period recorded', 'neutral']
+            active: [(globalThis.NorvaI18n?.t("ui_web_3658ccac35fd", { defaultValue: "Access active" }) ?? 'Access active'), 'positive'],
+            expiring: [(globalThis.NorvaI18n?.t("ui_web_c4b694e470e9", { defaultValue: "Access ending soon" }) ?? 'Access ending soon'), 'warning'],
+            expected_expired: [(globalThis.NorvaI18n?.t("ui_web_f626f56e34b6", { defaultValue: "Renewal date passed" }) ?? 'Renewal date passed'), 'warning'],
+            expired_confirmed: [(globalThis.NorvaI18n?.t("ui_web_bf72169e4819", { defaultValue: "Provider access expired" }) ?? 'Provider access expired'), 'danger'],
+            access_unavailable_confirmed: [(globalThis.NorvaI18n?.t("ui_web_e6fbeec1a0e6", { defaultValue: "Provider access unavailable" }) ?? 'Provider access unavailable'), 'danger'],
+            check_failed_temporary: [(globalThis.NorvaI18n?.t("ui_web_465293ae5b43", { defaultValue: "Access check delayed" }) ?? 'Access check delayed'), 'neutral'],
+            restoring: [(globalThis.NorvaI18n?.t("ui_web_4f4be48a0fc2", { defaultValue: "Restoring provider access" }) ?? 'Restoring provider access'), 'warning'],
+            unknown: [(globalThis.NorvaI18n?.t("ui_web_a26ebbfc8bfd", { defaultValue: "No period recorded" }) ?? 'No period recorded'), 'neutral']
         };
         const [label, tone] = labels[status] || labels.unknown;
         return {
             status,
             label,
             tone,
-            detail: expiresOn ? `Until ${this.formatAccessDate(expiresOn)}` : ''
+            detail: expiresOn ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0efa35515160", {defaultValue: "Until {{p0}}", p0:(this.formatAccessDate(expiresOn))}) : `Until ${this.formatAccessDate(expiresOn)}`) : ''
         };
     }
 
     formatAccessDate(value) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '';
         try {
-            return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' })
+            return new Intl.DateTimeFormat((globalThis.NorvaI18n?.language || 'en'), { dateStyle: 'medium', timeZone: 'UTC' })
                 .format(new Date(`${value}T00:00:00Z`));
         } catch (_) {
             return String(value);
@@ -900,17 +900,17 @@ class SourceManager {
         const grid = calendar.querySelector('[data-access-calendar-grid]');
         const title = calendar.querySelector('[data-access-calendar-title]');
         if (!start || !end || !grid || !title) {
-            if (summary) summary.textContent = 'Enter a valid duration to preview its end date.';
-            if (badge) badge.textContent = 'End date unavailable';
+            if (summary) summary.textContent = (globalThis.NorvaI18n?.t("ui_web_e123b84e7706", { defaultValue: "Enter a valid duration to preview its end date." }) ?? 'Enter a valid duration to preview its end date.');
+            if (badge) badge.textContent = (globalThis.NorvaI18n?.t("ui_web_4bed8c7aac61", { defaultValue: "End date unavailable" }) ?? 'End date unavailable');
             if (grid) grid.innerHTML = '';
             return;
         }
 
-        const formatLong = (date) => new Intl.DateTimeFormat('en', {
+        const formatLong = (date) => new Intl.DateTimeFormat((globalThis.NorvaI18n?.language || 'en'), {
             year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
         }).format(date);
         const unitLabel = `${termUnit.charAt(0)}${termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}`;
-        if (summary) summary.textContent = `Ends ${formatLong(end)}`;
+        if (summary) summary.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ce629c7acc90", {defaultValue: "Ends {{p0}}", p0:(formatLong(end))}) : `Ends ${formatLong(end)}`);
         if (badge) badge.textContent = `${termValue} ${unitLabel.toLowerCase()}`;
 
         const endMonthKey = this.providerAccessDateKey(end).slice(0, 7);
@@ -920,7 +920,7 @@ class SourceManager {
         const [displayYear, displayMonthNumber] = calendar.dataset.displayMonth.split('-').map(Number);
         const displayMonth = displayMonthNumber - 1;
         const first = new Date(Date.UTC(displayYear, displayMonth, 1));
-        title.textContent = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', timeZone: 'UTC' }).format(first);
+        title.textContent = new Intl.DateTimeFormat(((globalThis.NorvaI18n?.language || 'en')), { year: ('numeric'), month: ('long'), timeZone: ('UTC') }).format(first);
         const mondayOffset = (first.getUTCDay() + 6) % 7;
         const gridStart = new Date(Date.UTC(displayYear, displayMonth, 1 - mondayOffset));
         const maxEnd = new Date(start.getTime());
@@ -939,7 +939,7 @@ class SourceManager {
                 key === startKey ? 'is-start' : '',
                 key === this.providerAccessDateKey(end) ? 'is-end' : ''
             ].filter(Boolean).join(' ');
-            const label = `${formatLong(day)}${key === this.providerAccessDateKey(end) ? ', current end date' : ''}`;
+            const label = `${formatLong(day)}${key === this.providerAccessDateKey(end) ? (globalThis.NorvaI18n?.t("ui_web_e6d9a5725740", { defaultValue: ", current end date" }) ?? ', current end date') : ''}`;
             cells.push(selectable
                 ? `<button type="button" class="${classes}" data-access-calendar-day="${key}" aria-label="${this.escapeHtml(label)}"${key === this.providerAccessDateKey(end) ? ' aria-pressed="true"' : ' aria-pressed="false"'}>${day.getUTCDate()}</button>`
                 : `<span class="${classes}" aria-hidden="true">${day.getUTCDate()}</span>`);
@@ -956,15 +956,15 @@ class SourceManager {
 
         return `
       <div class="source-saved-connection">
-        <div class="source-saved-title">Saved connection</div>
+        <div class="source-saved-title" data-i18n="ui_web_4df074367d0f">Saved connection</div>
         <div class="source-saved-grid">
-          <span>Server</span>
-          <strong>${this.escapeHtml(host || 'Saved privately')}</strong>
+          <span data-i18n="ui_web_aef7de28d529">Server</span>
+          <strong>${this.escapeHtml(host || (globalThis.NorvaI18n?.t("ui_web_8ec8c9b372c8", { defaultValue: "Saved privately" }) ?? 'Saved privately'))}</strong>
           ${type === 'xtream' ? `
-          <span>Login</span>
-          <strong>Saved privately</strong>
-          <span>Password</span>
-          <strong><span class="source-secret-mask">${hasPassword ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : 'Not saved'}</span></strong>
+          <span data-i18n="ui_web_9d6322c1f4d9">Login</span>
+          <strong data-i18n="ui_web_8ec8c9b372c8">Saved privately</strong>
+          <span data-i18n="ui_web_e7cf3ef4f17c">Password</span>
+          <strong><span class="source-secret-mask">${hasPassword ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : (globalThis.NorvaI18n?.t("ui_web_22b3467c1ba9", { defaultValue: "Not saved" }) ?? 'Not saved')}</span></strong>
           ` : ''}
         </div>
       </div>
@@ -994,35 +994,35 @@ class SourceManager {
         const initialStepNumber = normalizedStepOffset + 1;
         const initialStepTotal = normalizedStepOffset + initialSteps.length;
         const choices = [
-            ['duration', 'Duration bought', 'For example, 2 months from the activation date', '2 mo', 'Recommended'],
-            ['dates', 'Start and end dates', 'Use the exact dates from your receipt', '01–31', ''],
-            ['skip', 'Add this later', 'Continue without recording an access period', 'Later', '']
+            ['duration', (globalThis.NorvaI18n?.t("ui_web_4108bb436c8b", { defaultValue: "Duration bought" }) ?? 'Duration bought'), (globalThis.NorvaI18n?.t("ui_web_f0e90f7b6832", { defaultValue: "For example, 2 months from the activation date" }) ?? 'For example, 2 months from the activation date'), '2 mo', (globalThis.NorvaI18n?.t("ui_web_d70604e84304", { defaultValue: "Recommended" }) ?? 'Recommended')],
+            ['dates', (globalThis.NorvaI18n?.t("ui_web_d0d19295cb5a", { defaultValue: "Start and end dates" }) ?? 'Start and end dates'), (globalThis.NorvaI18n?.t("ui_web_b3ef404b2eda", { defaultValue: "Use the exact dates from your receipt" }) ?? 'Use the exact dates from your receipt'), '01–31', ''],
+            ['skip', (globalThis.NorvaI18n?.t("ui_web_b09f5d478df3", { defaultValue: "Add this later" }) ?? 'Add this later'), (globalThis.NorvaI18n?.t("ui_web_4a71b603da45", { defaultValue: "Continue without recording an access period" }) ?? 'Continue without recording an access period'), (globalThis.NorvaI18n?.t("ui_web_73b6e48a1b55", { defaultValue: "Later" }) ?? 'Later'), '']
         ];
         return `
           <fieldset class="provider-access-terms provider-access-wizard${onboarding ? ' is-onboarding' : ''}" data-provider-access-terms="${this.escapeHtml(prefix)}" data-access-onboarding="${onboarding}" data-access-has-cycle="${Boolean(cycle)}" data-access-step-offset="${normalizedStepOffset}"${deferred ? ' hidden' : ''}>
-            <legend class="provider-access-sr-only">${onboarding ? 'Provider access period' : 'Access dates and reminders'}</legend>
+            <legend class="provider-access-sr-only">${onboarding ? (globalThis.NorvaI18n?.t("ui_web_ff28b255ed86", { defaultValue: "Provider access period" }) ?? 'Provider access period') : (globalThis.NorvaI18n?.t("ui_web_e4dda6bc1b12", { defaultValue: "Access dates and reminders" }) ?? 'Access dates and reminders')}</legend>
             <div class="provider-access-wizard-progress">
               <div class="provider-access-wizard-progress-copy">
-                <span data-access-step-label>Step ${initialStepNumber} of ${initialStepTotal}</span>
-                <strong data-access-step-name>Choose period</strong>
+                <span data-access-step-label data-i18n="ui_web_c9d1330bf5bf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p7":(initialStepNumber),"p8":(initialStepTotal)}) || "{}")}">Step ${initialStepNumber} of ${initialStepTotal}</span>
+                <strong data-access-step-name data-i18n="ui_web_819a079a7754">Choose period</strong>
               </div>
-              <span class="provider-access-wizard-track" role="progressbar" aria-label="Provider access setup" aria-valuemin="1" aria-valuemax="${initialStepTotal}" aria-valuenow="${initialStepNumber}" data-access-progress>
+              <span class="provider-access-wizard-track" role="progressbar" aria-label="Provider access setup" aria-valuemin="1" aria-valuemax="${initialStepTotal}" aria-valuenow="${initialStepNumber}" data-access-progress data-i18n-aria-label="ui_web_eaf56b50f7d0">
                 <i data-access-progress-fill style="width:${(initialStepNumber / initialStepTotal) * 100}%"></i>
               </span>
             </div>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="choice" aria-labelledby="${this.escapeHtml(prefix)}-choice-title">
               <div class="provider-access-wizard-copy">
-                <span class="provider-access-wizard-eyebrow">Access period</span>
-                <h3 id="${this.escapeHtml(prefix)}-choice-title" tabindex="-1">What do you know?</h3>
-                <p>Choose the quickest way to describe the provider access you bought.</p>
+                <span class="provider-access-wizard-eyebrow" data-i18n="ui_web_4febedf42137">Access period</span>
+                <h3 id="${this.escapeHtml(prefix)}-choice-title" tabindex="-1" data-i18n="ui_web_8ac2e6cc26b7">What do you know?</h3>
+                <p data-i18n="ui_web_d949a19d7e49">Choose the quickest way to describe the provider access you bought.</p>
               </div>
               <select id="${this.escapeHtml(prefix)}-mode" data-access-mode tabindex="-1" aria-hidden="true" hidden>
-                <option value="duration"${initialMode === 'duration' ? ' selected' : ''}>Duration bought</option>
-                <option value="dates"${initialMode === 'dates' ? ' selected' : ''}>Start and end dates</option>
-                <option value="skip"${initialMode === 'skip' ? ' selected' : ''}>Add this later</option>
+                <option value="duration"${initialMode === 'duration' ? ' selected' : ''} data-i18n="ui_web_4108bb436c8b">Duration bought</option>
+                <option value="dates"${initialMode === 'dates' ? ' selected' : ''} data-i18n="ui_web_d0d19295cb5a">Start and end dates</option>
+                <option value="skip"${initialMode === 'skip' ? ' selected' : ''} data-i18n="ui_web_b09f5d478df3">Add this later</option>
               </select>
-              <div class="provider-access-choice-list" role="radiogroup" aria-label="What do you know?">
+              <div class="provider-access-choice-list" role="radiogroup" aria-label="What do you know?" data-i18n-aria-label="ui_web_8ac2e6cc26b7">
                 ${choices.map(([value, label, hint, glyph, badge]) => `
                   <button type="button" class="provider-access-choice${initialMode === value ? ' is-selected' : ''}" data-access-mode-choice="${value}" role="radio" aria-checked="${initialMode === value}">
                     <span class="provider-access-choice-glyph" aria-hidden="true">${glyph}</span>
@@ -1032,50 +1032,50 @@ class SourceManager {
                   </button>
                 `).join('')}
               </div>
-              <p class="provider-access-explainer">Your provider access is separate from your Norva plan. Norva records the period; it never sells or renews it.</p>
+              <p class="provider-access-explainer" data-i18n="ui_web_136a53910241">Your provider access is separate from your Norva plan. Norva records the period; it never sells or renews it.</p>
             </section>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="activation" aria-labelledby="${this.escapeHtml(prefix)}-activation-title" hidden>
               <div class="provider-access-wizard-copy">
-                <span class="provider-access-wizard-eyebrow">Activation</span>
-                <h3 id="${this.escapeHtml(prefix)}-activation-title" tabindex="-1">When does access begin?</h3>
-                <p>Use the purchase date if access started immediately.</p>
+                <span class="provider-access-wizard-eyebrow" data-i18n="ui_web_5d939d40080b">Activation</span>
+                <h3 id="${this.escapeHtml(prefix)}-activation-title" tabindex="-1" data-i18n="ui_web_10f2fa7b6edc">When does access begin?</h3>
+                <p data-i18n="ui_web_1ca840c6575b">Use the purchase date if access started immediately.</p>
               </div>
               <div class="form-group provider-access-activation-field">
-                <label for="${this.escapeHtml(prefix)}-activation-on">Activation or purchase date</label>
+                <label for="${this.escapeHtml(prefix)}-activation-on" data-i18n="ui_web_1f949d8eba25">Activation or purchase date</label>
                 <input id="${this.escapeHtml(prefix)}-activation-on" class="form-input" type="date" value="${this.escapeHtml(activationOn)}" data-access-activation-on>
               </div>
-              <div class="provider-access-date-shortcuts" aria-label="Activation date shortcuts">
-                <button type="button" data-access-date-shortcut="today">Today</button>
-                <button type="button" data-access-date-shortcut="yesterday">Yesterday</button>
+              <div class="provider-access-date-shortcuts" aria-label="Activation date shortcuts" data-i18n-aria-label="ui_web_fa2554fee359">
+                <button type="button" data-access-date-shortcut="today" data-i18n="ui_web_2b065c7c9ce4">Today</button>
+                <button type="button" data-access-date-shortcut="yesterday" data-i18n="ui_web_566181254b29">Yesterday</button>
               </div>
-              <div class="provider-access-context-note"><span aria-hidden="true"></span><p>Today is selected by default. Change it if this access started earlier; Norva calculates the end date from your choice.</p></div>
+              <div class="provider-access-context-note"><span aria-hidden="true"></span><p data-i18n="ui_web_c22f983e157e">Today is selected by default. Change it if this access started earlier; Norva calculates the end date from your choice.</p></div>
             </section>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="duration" aria-labelledby="${this.escapeHtml(prefix)}-duration-title" hidden>
               <div class="provider-access-wizard-copy">
-                <span class="provider-access-wizard-eyebrow">Duration</span>
-                <h3 id="${this.escapeHtml(prefix)}-duration-title" tabindex="-1">How long is access active?</h3>
-                <p>Enter the period you bought. Norva calculates its end date automatically.</p>
+                <span class="provider-access-wizard-eyebrow" data-i18n="ui_web_4fc52a3c4c55">Duration</span>
+                <h3 id="${this.escapeHtml(prefix)}-duration-title" tabindex="-1" data-i18n="ui_web_11a42fc86206">How long is access active?</h3>
+                <p data-i18n="ui_web_5a6c23634d5b">Enter the period you bought. Norva calculates its end date automatically.</p>
               </div>
               <div class="provider-access-field-row provider-access-duration-row">
                 <div class="form-group">
-                  <label for="${this.escapeHtml(prefix)}-term-value">Duration</label>
+                  <label for="${this.escapeHtml(prefix)}-term-value" data-i18n="ui_web_4fc52a3c4c55">Duration</label>
                   <input id="${this.escapeHtml(prefix)}-term-value" class="form-input" type="number" inputmode="numeric" min="1" max="10000" value="${this.escapeHtml(termValue)}" data-access-term-value>
                 </div>
                 <div class="form-group">
-                  <label for="${this.escapeHtml(prefix)}-term-unit">Unit</label>
+                  <label for="${this.escapeHtml(prefix)}-term-unit" data-i18n="ui_web_4e545960f1bf">Unit</label>
                   <span class="provider-access-select-shell">
                     <select id="${this.escapeHtml(prefix)}-term-unit" class="form-input provider-access-native-select" data-access-term-unit>
                       ${['DAY', 'WEEK', 'MONTH', 'YEAR'].map((unit) => `<option value="${unit}"${termUnit === unit ? ' selected' : ''}>${unit.charAt(0) + unit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</option>`).join('')}
                     </select>
-                    <button type="button" class="form-input provider-access-select-trigger" data-provider-access-select-trigger aria-label="Unit: ${termUnit.charAt(0) + termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${this.escapeHtml(prefix)}-term-unit-listbox" hidden>
+                    <button type="button" class="form-input provider-access-select-trigger" data-provider-access-select-trigger aria-label="Unit: ${termUnit.charAt(0) + termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${this.escapeHtml(prefix)}-term-unit-listbox" hidden data-i18n-aria-label="ui_web_5df2d08c923f" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p32":(termUnit.charAt(0) + termUnit.slice(1).toLowerCase()),"p33":(termValue === 1 ? '' : 's')}) || "{}")}">
                       <span data-provider-access-select-value>${termUnit.charAt(0) + termUnit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</span>
                       <svg class="provider-access-select-chevron" aria-hidden="true" viewBox="0 0 20 20" fill="none">
                         <path d="M5.5 7.5 10 12l4.5-4.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
                       </svg>
                     </button>
-                    <span id="${this.escapeHtml(prefix)}-term-unit-listbox" class="provider-access-select-menu is-unit" data-provider-access-select-menu role="listbox" aria-label="Unit" hidden>
+                    <span id="${this.escapeHtml(prefix)}-term-unit-listbox" class="provider-access-select-menu is-unit" data-provider-access-select-menu role="listbox" aria-label="Unit" hidden data-i18n-aria-label="ui_web_4e545960f1bf">
                       ${['DAY', 'WEEK', 'MONTH', 'YEAR'].map((unit) => `<button type="button" class="provider-access-select-option" role="option" data-provider-access-select-option="${unit}" data-provider-access-unit-label="${unit.charAt(0) + unit.slice(1).toLowerCase()}" aria-selected="${termUnit === unit}">${unit.charAt(0) + unit.slice(1).toLowerCase()}${termValue === 1 ? '' : 's'}</button>`).join('')}
                     </span>
                   </span>
@@ -1084,11 +1084,11 @@ class SourceManager {
               <details class="provider-access-calendar" data-access-calendar>
                 <summary class="provider-access-calendar-summary">
                   <div class="provider-access-calendar-copy">
-                    <span class="provider-access-calendar-kicker">Calculated end date</span>
+                    <span class="provider-access-calendar-kicker" data-i18n="ui_web_cc06aa2e4082">Calculated end date</span>
                     <strong data-access-calendar-summary aria-live="polite"></strong>
                   </div>
                   <span class="provider-access-calendar-badge" data-access-calendar-badge></span>
-                  <span class="provider-access-calendar-expand">Adjust date</span>
+                  <span class="provider-access-calendar-expand" data-i18n="ui_web_dd8c28c714e8">Adjust date</span>
                 </summary>
                 <div class="provider-access-calendar-body">
                   <div class="provider-access-calendar-timeline" aria-hidden="true">
@@ -1097,66 +1097,66 @@ class SourceManager {
                     <span class="provider-access-calendar-timeline-point is-end"></span>
                   </div>
                   <div class="provider-access-calendar-header">
-                    <button type="button" class="provider-access-calendar-nav" data-access-calendar-prev aria-label="Previous month">&#8249;</button>
+                    <button type="button" class="provider-access-calendar-nav" data-access-calendar-prev aria-label="Previous month" data-i18n-aria-label="ui_web_6a2769502a5d">&#8249;</button>
                     <strong data-access-calendar-title></strong>
-                    <button type="button" class="provider-access-calendar-nav" data-access-calendar-next aria-label="Next month">&#8250;</button>
+                    <button type="button" class="provider-access-calendar-nav" data-access-calendar-next aria-label="Next month" data-i18n-aria-label="ui_web_74e53211fef4">&#8250;</button>
                   </div>
                   <div class="provider-access-calendar-weekdays" aria-hidden="true">
-                    ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => `<span>${day}</span>`).join('')}
+                    ${['Mon', (globalThis.NorvaI18n?.t("ui_web_d1eb39b09bf5", { defaultValue: "Tue" }) ?? 'Tue'), (globalThis.NorvaI18n?.t("ui_web_58339f45df96", { defaultValue: "Wed" }) ?? 'Wed'), (globalThis.NorvaI18n?.t("ui_web_7da11212ed34", { defaultValue: "Thu" }) ?? 'Thu'), (globalThis.NorvaI18n?.t("ui_web_66dab40cea1d", { defaultValue: "Fri" }) ?? 'Fri'), (globalThis.NorvaI18n?.t("ui_web_fdeb71b569e0", { defaultValue: "Sat" }) ?? 'Sat'), (globalThis.NorvaI18n?.t("ui_web_db18f17fe532", { defaultValue: "Sun" }) ?? 'Sun')].map((day) => `<span>${day}</span>`).join('')}
                   </div>
                   <div class="provider-access-calendar-grid" data-access-calendar-grid></div>
-                  <p class="provider-access-calendar-caption">Choose an exact end date only if the calculated date is not the one you bought. Norva will then record the period in days.</p>
+                  <p class="provider-access-calendar-caption" data-i18n="ui_web_b17a725a7b48">Choose an exact end date only if the calculated date is not the one you bought. Norva will then record the period in days.</p>
                 </div>
               </details>
             </section>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="dates" aria-labelledby="${this.escapeHtml(prefix)}-dates-title" hidden>
               <div class="provider-access-wizard-copy">
-                <span class="provider-access-wizard-eyebrow">Exact dates</span>
-                <h3 id="${this.escapeHtml(prefix)}-dates-title" tabindex="-1">Enter the start and end dates</h3>
-                <p>Use the exact dates shown by your provider or on your receipt.</p>
+                <span class="provider-access-wizard-eyebrow" data-i18n="ui_web_a52b53302203">Exact dates</span>
+                <h3 id="${this.escapeHtml(prefix)}-dates-title" tabindex="-1" data-i18n="ui_web_28ffcd8453d3">Enter the start and end dates</h3>
+                <p data-i18n="ui_web_d05c86b89556">Use the exact dates shown by your provider or on your receipt.</p>
               </div>
               <div class="provider-access-field-row">
                 <div class="form-group">
-                  <label for="${this.escapeHtml(prefix)}-started-on">Start date</label>
+                  <label for="${this.escapeHtml(prefix)}-started-on" data-i18n="ui_web_8169693101a4">Start date</label>
                   <input id="${this.escapeHtml(prefix)}-started-on" class="form-input" type="date" value="${this.escapeHtml(startedOn)}" data-access-started-on>
                 </div>
                 <div class="form-group">
-                  <label for="${this.escapeHtml(prefix)}-expires-on">End date</label>
+                  <label for="${this.escapeHtml(prefix)}-expires-on" data-i18n="ui_web_14303aa0c4a0">End date</label>
                   <input id="${this.escapeHtml(prefix)}-expires-on" class="form-input" type="date" value="${this.escapeHtml(expiresOn)}" data-access-expires-on>
                 </div>
               </div>
-              <div class="provider-access-context-note"><span aria-hidden="true"></span><p data-access-dates-summary>Norva will use these dates to keep the catalogue status accurate.</p></div>
+              <div class="provider-access-context-note"><span aria-hidden="true"></span><p data-access-dates-summary data-i18n="ui_web_c6c2e11f9786">Norva will use these dates to keep the catalogue status accurate.</p></div>
             </section>
 
             <section class="provider-access-wizard-stage" data-access-wizard-stage="review" aria-labelledby="${this.escapeHtml(prefix)}-review-title" hidden>
               <div class="provider-access-wizard-copy">
-                <span class="provider-access-wizard-eyebrow">Review</span>
-                <h3 id="${this.escapeHtml(prefix)}-review-title" tabindex="-1">Everything look right?</h3>
-                <p data-access-review-intro>Review the period before saving it.</p>
+                <span class="provider-access-wizard-eyebrow" data-i18n="ui_web_aff0766a5290">Review</span>
+                <h3 id="${this.escapeHtml(prefix)}-review-title" tabindex="-1" data-i18n="ui_web_6ae5ebc0c805">Everything look right?</h3>
+                <p data-access-review-intro data-i18n="ui_web_7f23806cde73">Review the period before saving it.</p>
               </div>
               <div class="provider-access-review" data-access-review>
                 <div class="provider-access-review-hero">
-                  <span><small>Provider access period</small><strong data-access-review-title></strong></span>
+                  <span><small data-i18n="ui_web_ff28b255ed86">Provider access period</small><strong data-access-review-title></strong></span>
                   <span class="provider-access-review-duration"><b data-access-review-value></b><small data-access-review-unit></small></span>
                 </div>
                 <dl class="provider-access-review-rows" data-access-review-rows>
-                  <div><dt>Starts</dt><dd data-access-review-start></dd></div>
-                  <div><dt>Ends</dt><dd data-access-review-end></dd></div>
+                  <div><dt data-i18n="ui_web_96dbedeca7df">Starts</dt><dd data-access-review-start></dd></div>
+                  <div><dt data-i18n="ui_web_e98982c9f2ba">Ends</dt><dd data-access-review-end></dd></div>
                 </dl>
               </div>
               <label class="provider-access-reminder" data-access-reminder-row${initialMode === 'skip' ? ' hidden' : ''}>
                 <span class="provider-access-reminder-icon" aria-hidden="true"></span>
-                <span><strong>Remind me before it ends</strong><small>Explicit opt-in. You can change this at any time.</small></span>
+                <span><strong data-i18n="ui_web_bfedd73ba3ee">Remind me before it ends</strong><small data-i18n="ui_web_1cdebd48a886">Explicit opt-in. You can change this at any time.</small></span>
                 <input type="checkbox" data-access-reminders${reminders ? ' checked' : ''}>
               </label>
-              ${cycle ? '<button class="provider-access-remove-period" type="button" data-access-end>Remove recorded period</button>' : ''}
+              ${cycle ? '<button class="provider-access-remove-period" type="button" data-access-end data-i18n="ui_web_0fca0b050951">Remove recorded period</button>' : ''}
             </section>
 
             <p class="form-error provider-access-form-error" data-access-error role="alert" hidden></p>
             <div class="provider-access-wizard-actions">
-              <button class="btn btn-secondary" type="button" data-access-wizard-back>${onboarding ? 'Back' : 'Cancel'}</button>
-              <button class="btn btn-primary" type="button" data-access-wizard-next>Continue <span aria-hidden="true">→</span></button>
+              <button class="btn btn-secondary" type="button" data-access-wizard-back>${onboarding ? (globalThis.NorvaI18n?.t("ui_web_76900f1bfd16", { defaultValue: "Back" }) ?? 'Back') : (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel')}</button>
+              <button class="btn btn-primary" type="button" data-access-wizard-next><norva-i18n data-i18n="ui_web_31fbef162594">Continue </norva-i18n><span aria-hidden="true">→</span></button>
             </div>
             <span class="provider-access-sr-only" aria-live="polite" aria-atomic="true" data-access-wizard-live></span>
           </fieldset>
@@ -1201,7 +1201,7 @@ class SourceManager {
                     option.setAttribute('aria-selected', String(selected));
                     if (selected) triggerValue.textContent = option.textContent;
                 });
-                const fieldLabel = select.labels?.[0]?.textContent?.trim() || 'Select value';
+                const fieldLabel = select.labels?.[0]?.textContent?.trim() || (globalThis.NorvaI18n?.t("ui_web_7d4ba4f7bc33", { defaultValue: "Select value" }) ?? 'Select value');
                 trigger.setAttribute('aria-label', `${fieldLabel}: ${triggerValue.textContent}`);
             };
             const openSelect = (select, { focusEdge = 'selected' } = {}) => {
@@ -1308,17 +1308,17 @@ class SourceManager {
                 const rows = fieldset.querySelector('[data-access-review-rows]');
                 const intro = fieldset.querySelector('[data-access-review-intro]');
                 if (selected === 'skip') {
-                    if (title) title.textContent = fieldset.dataset.accessHasCycle === 'true' ? 'Keep current period' : 'Add later';
+                    if (title) title.textContent = fieldset.dataset.accessHasCycle === 'true' ? (globalThis.NorvaI18n?.t("ui_web_b777d5242c28", { defaultValue: "Keep current period" }) ?? 'Keep current period') : (globalThis.NorvaI18n?.t("ui_web_da391d095877", { defaultValue: "Add later" }) ?? 'Add later');
                     if (value) value.textContent = '—';
-                    if (unit) unit.textContent = 'No new dates';
+                    if (unit) unit.textContent = (globalThis.NorvaI18n?.t("ui_web_5883aa1c914f", { defaultValue: "No new dates" }) ?? 'No new dates');
                     if (rows) rows.hidden = true;
                     if (intro) intro.textContent = fieldset.dataset.accessHasCycle === 'true'
-                        ? 'Your currently recorded period will stay unchanged.'
-                        : 'You can finish now and add an access period later in Settings.';
+                        ? (globalThis.NorvaI18n?.t("ui_web_4d4b5c622d5c", { defaultValue: "Your currently recorded period will stay unchanged." }) ?? 'Your currently recorded period will stay unchanged.')
+                        : (globalThis.NorvaI18n?.t("ui_web_b9903209edd0", { defaultValue: "You can finish now and add an access period later in Settings." }) ?? 'You can finish now and add an access period later in Settings.');
                     return;
                 }
                 if (rows) rows.hidden = false;
-                if (intro) intro.textContent = 'Review the period before saving it.';
+                if (intro) intro.textContent = (globalThis.NorvaI18n?.t("ui_web_7f23806cde73", { defaultValue: "Review the period before saving it." }) ?? 'Review the period before saving it.');
                 let startKey = '';
                 let endKey = '';
                 if (selected === 'duration') {
@@ -1336,16 +1336,16 @@ class SourceManager {
                     const startDate = this.providerAccessDateFromKey(startKey);
                     const endDate = this.providerAccessDateFromKey(endKey);
                     const exactDays = startDate && endDate ? Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 86400000)) : 0;
-                    if (title) title.textContent = exactDays ? `${exactDays} days` : 'Exact dates';
+                    if (title) title.textContent = exactDays ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_6055a70ab984", {defaultValue: "{{p0}} days", p0:(exactDays)}) : `${exactDays} days`) : (globalThis.NorvaI18n?.t("ui_web_a52b53302203", { defaultValue: "Exact dates" }) ?? 'Exact dates');
                     if (value) value.textContent = exactDays ? String(exactDays) : '—';
-                    if (unit) unit.textContent = exactDays === 1 ? 'day' : 'days';
+                    if (unit) unit.textContent = exactDays === 1 ? (globalThis.NorvaI18n?.t("ui_web_944c27e5b97a", { defaultValue: "day" }) ?? 'day') : (globalThis.NorvaI18n?.t("ui_web_ab51004e9d71", { defaultValue: "days" }) ?? 'days');
                     const datesSummary = fieldset.querySelector('[data-access-dates-summary]');
                     if (datesSummary) datesSummary.textContent = exactDays
-                        ? `${exactDays} days of provider access are selected.`
-                        : 'Norva will use these dates to keep the catalogue status accurate.';
+                        ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_cd60bb5cee61", {defaultValue: "{{p0}} days of provider access are selected.", p0:(exactDays)}) : `${exactDays} days of provider access are selected.`)
+                        : (globalThis.NorvaI18n?.t("ui_web_c6c2e11f9786", { defaultValue: "Norva will use these dates to keep the catalogue status accurate." }) ?? 'Norva will use these dates to keep the catalogue status accurate.');
                 }
-                if (startNode) startNode.textContent = this.formatAccessDate(startKey) || 'Not set';
-                if (endNode) endNode.textContent = this.formatAccessDate(endKey) || 'Not set';
+                if (startNode) startNode.textContent = this.formatAccessDate(startKey) || (globalThis.NorvaI18n?.t("ui_web_4895f73177ab", { defaultValue: "Not set" }) ?? 'Not set');
+                if (endNode) endNode.textContent = this.formatAccessDate(endKey) || (globalThis.NorvaI18n?.t("ui_web_4895f73177ab", { defaultValue: "Not set" }) ?? 'Not set');
             };
             const updateCalendar = () => {
                 syncSelect(termUnit);
@@ -1353,7 +1353,7 @@ class SourceManager {
                 updateReview();
             };
             const stepNames = {
-                choice: 'Choose period', activation: 'Activation date', duration: 'Duration and end date', dates: 'Exact dates', review: 'Review'
+                choice: (globalThis.NorvaI18n?.t("ui_web_819a079a7754", { defaultValue: "Choose period" }) ?? 'Choose period'), activation: (globalThis.NorvaI18n?.t("ui_web_c6f6a6022a46", { defaultValue: "Activation date" }) ?? 'Activation date'), duration: (globalThis.NorvaI18n?.t("ui_web_520aa5caa64b", { defaultValue: "Duration and end date" }) ?? 'Duration and end date'), dates: (globalThis.NorvaI18n?.t("ui_web_a52b53302203", { defaultValue: "Exact dates" }) ?? 'Exact dates'), review: 'Review'
             };
             const stepOffset = Math.max(0, Number.parseInt(fieldset.dataset.accessStepOffset || '0', 10) || 0);
             let stepIndex = 0;
@@ -1374,24 +1374,24 @@ class SourceManager {
                 const back = fieldset.querySelector('[data-access-wizard-back]');
                 const next = fieldset.querySelector('[data-access-wizard-next]');
                 const finalStep = stepIndex === steps.length - 1;
-                if (label) label.textContent = `Step ${visibleStep} of ${visibleTotal}`;
-                if (name) name.textContent = stepNames[activeStep] || 'Provider access';
+                if (label) label.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8fdb6f5d9a23", {defaultValue: "Step {{p0}} of {{p1}}", p0:(visibleStep),p1:(visibleTotal)}) : `Step ${visibleStep} of ${visibleTotal}`);
+                if (name) name.textContent = stepNames[activeStep] || (globalThis.NorvaI18n?.t("ui_web_d75bbc31a119", { defaultValue: "Provider access" }) ?? 'Provider access');
                 if (progress) {
                     progress.setAttribute('aria-valuemax', String(visibleTotal));
                     progress.setAttribute('aria-valuenow', String(visibleStep));
                 }
                 if (fill) fill.style.width = `${(visibleStep / visibleTotal) * 100}%`;
-                if (back) back.textContent = stepIndex === 0 ? (fieldset.dataset.accessOnboarding === 'true' ? 'Back' : 'Cancel') : 'Back';
+                if (back) back.textContent = stepIndex === 0 ? (fieldset.dataset.accessOnboarding === 'true' ? (globalThis.NorvaI18n?.t("ui_web_76900f1bfd16", { defaultValue: "Back" }) ?? 'Back') : (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel')) : (globalThis.NorvaI18n?.t("ui_web_76900f1bfd16", { defaultValue: "Back" }) ?? 'Back');
                 if (next) {
                     const hasCycle = fieldset.dataset.accessHasCycle === 'true';
                     next.innerHTML = finalStep
-                        ? `${mode?.value === 'skip' ? (hasCycle ? 'Keep current period' : 'Finish without dates') : (hasCycle ? 'Save period' : (fieldset.dataset.accessOnboarding === 'true' ? 'Connect and prepare catalogue' : 'Add period'))} <span aria-hidden="true">→</span>`
-                        : 'Continue <span aria-hidden="true">→</span>';
+                        ? `${mode?.value === 'skip' ? (hasCycle ? (globalThis.NorvaI18n?.t("ui_web_b777d5242c28", { defaultValue: "Keep current period" }) ?? 'Keep current period') : (globalThis.NorvaI18n?.t("ui_web_2efabb4423c7", { defaultValue: "Finish without dates" }) ?? 'Finish without dates')) : (hasCycle ? (globalThis.NorvaI18n?.t("ui_web_0b232a02df9a", { defaultValue: "Save period" }) ?? 'Save period') : (fieldset.dataset.accessOnboarding === 'true' ? (globalThis.NorvaI18n?.t("ui_web_3d9b9cde47b9", { defaultValue: "Connect and prepare catalogue" }) ?? 'Connect and prepare catalogue') : (globalThis.NorvaI18n?.t("ui_web_5e3050f47305", { defaultValue: "Add period" }) ?? 'Add period')))} <span aria-hidden="true">→</span>`
+                        : '<norva-i18n data-i18n="ui_web_31fbef162594">Continue </norva-i18n><span aria-hidden="true">→</span>';
                 }
                 updateReview();
                 if (activeStep === 'duration') this.renderProviderAccessCalendar(fieldset, { resetMonth: true });
                 const live = fieldset.querySelector('[data-access-wizard-live]');
-                if (live) live.textContent = `${stepNames[activeStep] || 'Provider access'}, step ${visibleStep} of ${visibleTotal}.`;
+                if (live) live.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_bf06d6b33545", {defaultValue: "{{p0}}, step {{p1}} of {{p2}}.", p0:(stepNames[activeStep] || (globalThis.NorvaI18n?.t("ui_web_d75bbc31a119", { defaultValue: "Provider access" }) ?? 'Provider access')),p1:(visibleStep),p2:(visibleTotal)}) : `${stepNames[activeStep] || 'Provider access'}, step ${visibleStep} of ${visibleTotal}.`);
                 const modalBody = fieldset.closest('.modal-body');
                 if (modalBody?.closest('.provider-access-wizard-modal')) modalBody.scrollTop = 0;
                 if (focus && !fieldset.hidden) {
@@ -1412,20 +1412,20 @@ class SourceManager {
                 if (step === 'activation') {
                     const value = String(activation?.value || '');
                     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !this.providerAccessDateFromKey(value)) {
-                        return failStep('Enter a valid provider access activation date.', activation);
+                        return failStep((globalThis.NorvaI18n?.t("ui_web_7bc19fc4ea27", { defaultValue: "Enter a valid provider access activation date." }) ?? 'Enter a valid provider access activation date.'), activation);
                     }
                 }
                 if (step === 'duration') {
                     const amount = Number(termValue?.value);
                     if (!Number.isInteger(amount) || amount < 1 || amount > 10000 || !['DAY', 'WEEK', 'MONTH', 'YEAR'].includes(String(termUnit?.value || ''))) {
-                        return failStep('Enter a valid provider access duration.', termValue);
+                        return failStep((globalThis.NorvaI18n?.t("ui_web_0fe206e2206e", { defaultValue: "Enter a valid provider access duration." }) ?? 'Enter a valid provider access duration.'), termValue);
                     }
                 }
                 if (step === 'dates') {
                     const started = fieldset.querySelector('[data-access-started-on]');
                     const expires = fieldset.querySelector('[data-access-expires-on]');
                     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(started?.value || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(expires?.value || '')) || expires.value < started.value) {
-                        return failStep('Enter a valid provider access start and end date.', !started?.value ? started : expires);
+                        return failStep((globalThis.NorvaI18n?.t("ui_web_7efe7f75adbb", { defaultValue: "Enter a valid provider access start and end date." }) ?? 'Enter a valid provider access start and end date.'), !started?.value ? started : expires);
                     }
                 }
                 return true;
@@ -1554,9 +1554,9 @@ class SourceManager {
 
     getSourceForm(type, source = {}, { includeIntro = true } = {}) {
         const intros = {
-            xtream: 'Paste the complete link from your TV service, or enter the server URL, username and password separately.',
-            m3u: 'Use this when your TV service gives you a playlist link ending in .m3u or .m3u8.',
-            epg: 'Use this when your TV service gives you a separate TV guide link.'
+            xtream: (globalThis.NorvaI18n?.t("ui_web_ddc8cc8b7121", { defaultValue: "Paste the complete link from your TV service, or enter the server URL, username and password separately." }) ?? 'Paste the complete link from your TV service, or enter the server URL, username and password separately.'),
+            m3u: (globalThis.NorvaI18n?.t("ui_web_b51a6e5a2d87", { defaultValue: "Use this when your TV service gives you a playlist link ending in .m3u or .m3u8." }) ?? 'Use this when your TV service gives you a playlist link ending in .m3u or .m3u8.'),
+            epg: (globalThis.NorvaI18n?.t("ui_web_d7b5fbd38461", { defaultValue: "Use this when your TV service gives you a separate TV guide link." }) ?? 'Use this when your TV service gives you a separate TV guide link.')
         };
         const isExisting = Boolean(source.id || source.cloudId || source.cloud_id);
         const urlValue = this.editableSourceUrl(type, source);
@@ -1565,23 +1565,23 @@ class SourceManager {
             ? this.getProviderAccessTermsFields({ prefix: 'source-access-onboarding', onboarding: true, deferred: true, stepOffset: 1 })
             : '';
         const introField = includeIntro ? `
-      <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
+      <p class="source-form-intro">${this.escapeHtml(intros[type] || (globalThis.NorvaI18n?.t("ui_web_d130e1a13f99", { defaultValue: "Connect a TV service to Norva." }) ?? 'Connect a TV service to Norva.'))}</p>
     ` : '';
         const nameField = `
       <div class="form-group">
-        <label for="source-name">Service name <span class="label-optional">(optional)</span></label>
-        <input type="text" id="source-name" name="provider-display-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
+        <label for="source-name"><norva-i18n data-i18n="ui_web_1bb8870cc075">Service name </norva-i18n><span class="label-optional" data-i18n="ui_web_0059798b7f70">(optional)</span></label>
+        <input type="text" id="source-name" name="provider-display-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" data-i18n-placeholder="ui_web_b92194d11aeb">
       </div>
     `;
 
         const urlField = `
       <div class="form-group">
-        <label for="source-url">${type === 'xtream' ? 'Provider URL or complete Xtream link' : type === 'epg' ? 'TV guide URL' : 'Playlist URL'}</label>
+        <label for="source-url">${type === 'xtream' ? (globalThis.NorvaI18n?.t("ui_web_826594fbf7e5", { defaultValue: "Provider URL or complete Xtream link" }) ?? 'Provider URL or complete Xtream link') : type === 'epg' ? (globalThis.NorvaI18n?.t("ui_web_8d005136e019", { defaultValue: "TV guide URL" }) ?? 'TV guide URL') : (globalThis.NorvaI18n?.t("ui_web_498c686fc285", { defaultValue: "Playlist URL" }) ?? 'Playlist URL')}</label>
         <input type="text" id="source-url" name="provider-server-url" class="form-input"
                placeholder="${type === 'xtream' ? 'https://provider.com/get.php?username=...&password=...' : 'https://example.com/playlist.m3u'}"
                value="${this.escapeHtml(urlValue)}" autocomplete="off" autocapitalize="none" spellcheck="false">
-        ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
-        ${source.cloud ? '<p class="hint">Norva keeps the original full link private. The saved server is shown here. Paste a complete link only when replacing or repairing the login.</p>' : ''}
+        ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint" data-i18n="ui_web_bfb93439a4d0">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
+        ${source.cloud ? '<p class="hint" data-i18n="ui_web_905507b9b08e">Norva keeps the original full link private. The saved server is shown here. Paste a complete link only when replacing or repairing the login.</p>' : ''}
       </div>
         `;
 
@@ -1589,18 +1589,18 @@ class SourceManager {
             const advancedOpen = source.id ? ' open' : '';
             const manualLogin = `
               <details class="source-advanced-login source-provider-manual-login" id="source-advanced-login"${advancedOpen}>
-                <summary>Enter server login manually</summary>
-                <p class="source-provider-manual-hint">Use this when your provider sent a server address, username and password separately.</p>
+                <summary data-i18n="ui_web_5102418053c4">Enter server login manually</summary>
+                <p class="source-provider-manual-hint" data-i18n="ui_web_9d0835cb3680">Use this when your provider sent a server address, username and password separately.</p>
                 <div class="form-group">
-                <label for="source-username">Username</label>
+                <label for="source-username" data-i18n="ui_web_e3b89e9d33f8">Username</label>
                 <input type="text" id="source-username" name="provider-login" class="form-input" value="${this.escapeHtml(source.username || '')}" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                 </div>
                 <div class="form-group">
-                <label for="source-password">Password</label>
+                <label for="source-password" data-i18n="ui_web_e7cf3ef4f17c">Password</label>
                 <input type="password" id="source-password" name="provider-secret" class="form-input"
-                       placeholder="${isExisting ? 'Password saved - leave blank to keep it' : ''}"
+                       placeholder="${isExisting ? (globalThis.NorvaI18n?.t("ui_web_7de858d8cf8f", { defaultValue: "Password saved - leave blank to keep it" }) ?? 'Password saved - leave blank to keep it') : ''}"
                        value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
-                  ${isExisting ? '<p class="hint">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
+                  ${isExisting ? '<p class="hint" data-i18n="ui_web_46d8a04f5dce">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
                 </div>
               </details>
             `;
@@ -1611,28 +1611,28 @@ class SourceManager {
                     <section class="provider-access-terms provider-access-wizard is-onboarding source-provider-connection" data-source-connection-step aria-labelledby="source-provider-connection-title">
                       <div class="provider-access-wizard-progress">
                         <div class="provider-access-wizard-progress-copy">
-                          <span data-source-connection-step-label>Step 1 of ${initialTotal}</span>
-                          <strong>Connect provider</strong>
+                          <span data-source-connection-step-label data-i18n="ui_web_07f961ae978e" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(initialTotal)}) || "{}")}">Step 1 of ${initialTotal}</span>
+                          <strong data-i18n="ui_web_e1ad3eb2a000">Connect provider</strong>
                         </div>
-                        <span class="provider-access-wizard-track" role="progressbar" aria-label="TV provider setup" aria-valuemin="1" aria-valuemax="${initialTotal}" aria-valuenow="1" data-source-connection-progress>
+                        <span class="provider-access-wizard-track" role="progressbar" aria-label="TV provider setup" aria-valuemin="1" aria-valuemax="${initialTotal}" aria-valuenow="1" data-source-connection-progress data-i18n-aria-label="ui_web_0f2b9886173d">
                           <i style="width:${100 / initialTotal}%"></i>
                         </span>
                       </div>
                       <div class="provider-access-wizard-stage">
                         <div class="provider-access-wizard-copy">
-                          <span class="provider-access-wizard-eyebrow">TV provider</span>
-                          <h3 id="source-provider-connection-title" tabindex="-1">Add your TV provider</h3>
+                          <span class="provider-access-wizard-eyebrow" data-i18n="ui_web_42b3bacc2b1b">TV provider</span>
+                          <h3 id="source-provider-connection-title" tabindex="-1" data-i18n="ui_web_2d75d109e0a1">Add your TV provider</h3>
                           <p>${this.escapeHtml(intros.xtream)}</p>
                         </div>
                         ${urlField}
-                        <div class="source-provider-login-separator" aria-hidden="true"><span>or</span></div>
+                        <div class="source-provider-login-separator" aria-hidden="true"><span data-i18n="ui_web_7175517a370b">or</span></div>
                         ${manualLogin}
                         ${nameField}
                       </div>
                       <p class="form-error provider-access-form-error" data-source-connection-error role="alert" hidden></p>
                       <div class="provider-access-wizard-actions">
-                        <button class="btn btn-secondary" type="button" data-source-onboarding-cancel>Cancel</button>
-                        <button class="btn btn-primary" type="button" data-source-onboarding-next>Continue <span aria-hidden="true">→</span></button>
+                        <button class="btn btn-secondary" type="button" data-source-onboarding-cancel data-i18n="ui_web_19766ed6ccb2">Cancel</button>
+                        <button class="btn btn-primary" type="button" data-source-onboarding-next><norva-i18n data-i18n="ui_web_31fbef162594">Continue </norva-i18n><span aria-hidden="true">→</span></button>
                       </div>
                       <span class="provider-access-sr-only" aria-live="polite" aria-atomic="true" data-source-onboarding-live></span>
                     </section>
@@ -1672,7 +1672,7 @@ class SourceManager {
             const currentPathShape = this.sourceInputPathShape(urlInput.value);
             const parsed = this.parseXtreamLink(urlInput.value);
             if (!parsed) {
-                if (hint) hint.textContent = 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
+                if (hint) hint.textContent = (globalThis.NorvaI18n?.t("ui_web_bfb93439a4d0", { defaultValue: "If you paste a full Xtream link, Norva will fill the login fields automatically." }) ?? 'If you paste a full Xtream link, Norva will fill the login fields automatically.');
                 return;
             }
 
@@ -1701,8 +1701,8 @@ class SourceManager {
             }
             if (hint) {
                 hint.textContent = usernameInput.value.trim() && passwordInput.value.trim()
-                    ? 'Login detected from the link. You can review it before saving.'
-                    : 'Server detected. Add the username and password if they were provided separately.';
+                    ? (globalThis.NorvaI18n?.t("ui_web_74d4303fe750", { defaultValue: "Login detected from the link. You can review it before saving." }) ?? 'Login detected from the link. You can review it before saving.')
+                    : (globalThis.NorvaI18n?.t("ui_web_f5df0f98919e", { defaultValue: "Server detected. Add the username and password if they were provided separately." }) ?? 'Server detected. Add the username and password if they were provided separately.');
             }
         };
 
@@ -1725,7 +1725,7 @@ class SourceManager {
                 const label = connectionStep.querySelector('[data-source-connection-step-label]');
                 const progress = connectionStep.querySelector('[data-source-connection-progress]');
                 const fill = progress?.querySelector('i');
-                if (label) label.textContent = `Step 1 of ${total}`;
+                if (label) label.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_07f961ae978e", {defaultValue: "Step 1 of {{p0}}", p0:(total)}) : `Step 1 of ${total}`);
                 if (progress) progress.setAttribute('aria-valuemax', String(total));
                 if (fill) fill.style.width = `${100 / total}%`;
             };
@@ -1735,7 +1735,7 @@ class SourceManager {
                 accessWizard.fieldset.hidden = true;
                 updateConnectionProgress();
                 if (modalBody) modalBody.scrollTop = 0;
-                if (connectionLive) connectionLive.textContent = 'Connect provider, step 1.';
+                if (connectionLive) connectionLive.textContent = (globalThis.NorvaI18n?.t("ui_web_a46dcef3d19c", { defaultValue: "Connect provider, step 1." }) ?? 'Connect provider, step 1.');
                 if (focus) requestAnimationFrame(() => connectionStep.querySelector('h3')?.focus({ preventScroll: true }));
             };
             const showSourceAccessStep = () => {
@@ -1778,7 +1778,7 @@ class SourceManager {
                 accessWizard.fieldset.hidden = false;
                 accessWizard.showStep(0);
                 if (modalBody) modalBody.scrollTop = 0;
-                if (connectionLive) connectionLive.textContent = 'Choose the provider access period.';
+                if (connectionLive) connectionLive.textContent = (globalThis.NorvaI18n?.t("ui_web_2094430601ee", { defaultValue: "Choose the provider access period." }) ?? 'Choose the provider access period.');
             };
             [urlInput, usernameInput, passwordInput].forEach((control) => {
                 control.addEventListener('input', clearConnectionError);
@@ -1900,7 +1900,7 @@ class SourceManager {
             return {
                 state: 'invalid',
                 pathShape,
-                message: 'Enter a complete http or https address supplied by your provider.'
+                message: (globalThis.NorvaI18n?.t("ui_web_1612432ddb45", { defaultValue: "Enter a complete http or https address supplied by your provider." }) ?? 'Enter a complete http or https address supplied by your provider.')
             };
         }
         if (pathShape === 'web_page') {
@@ -1908,8 +1908,8 @@ class SourceManager {
                 state: 'invalid',
                 pathShape,
                 message: sourceType === 'm3u'
-                    ? 'This looks like a web page. Paste the complete M3U or M3U8 playlist link.'
-                    : 'This looks like a web page. Enter the Xtream server address supplied by your provider.'
+                    ? (globalThis.NorvaI18n?.t("ui_web_1fce81e87e5a", { defaultValue: "This looks like a web page. Paste the complete M3U or M3U8 playlist link." }) ?? 'This looks like a web page. Paste the complete M3U or M3U8 playlist link.')
+                    : (globalThis.NorvaI18n?.t("ui_web_fc3771e7f5a6", { defaultValue: "This looks like a web page. Enter the Xtream server address supplied by your provider." }) ?? 'This looks like a web page. Enter the Xtream server address supplied by your provider.')
             };
         }
         const rootHost = value.replace(/^https?:\/\//i, '').split(/[/?#]/, 1)[0];
@@ -1919,8 +1919,8 @@ class SourceManager {
                 state: 'invalid',
                 pathShape,
                 message: sourceType === 'm3u'
-                    ? 'This looks like a name, not a link. Paste the complete M3U URL from your provider.'
-                    : 'This looks like a name, not a server address. Enter the complete Xtream server URL from your provider.'
+                    ? (globalThis.NorvaI18n?.t("ui_web_9d227324d339", { defaultValue: "This looks like a name, not a link. Paste the complete M3U URL from your provider." }) ?? 'This looks like a name, not a link. Paste the complete M3U URL from your provider.')
+                    : (globalThis.NorvaI18n?.t("ui_web_b8b36fc3800c", { defaultValue: "This looks like a name, not a server address. Enter the complete Xtream server URL from your provider." }) ?? 'This looks like a name, not a server address. Enter the complete Xtream server URL from your provider.')
             };
         }
 
@@ -1929,12 +1929,12 @@ class SourceManager {
             state: recognizedPlaylist || sourceType === 'xtream' ? 'ready' : 'neutral',
             pathShape,
             message: recognizedPlaylist
-                ? 'Complete playlist link detected. Ready to check.'
+                ? (globalThis.NorvaI18n?.t("ui_web_7a28709c8243", { defaultValue: "Complete playlist link detected. Ready to check." }) ?? 'Complete playlist link detected. Ready to check.')
                 : sourceType === 'xtream'
-                    ? 'Server address detected. Add or review the provider login.'
+                    ? (globalThis.NorvaI18n?.t("ui_web_9ca01295be42", { defaultValue: "Server address detected. Add or review the provider login." }) ?? 'Server address detected. Add or review the provider login.')
                     : pathShape === 'root'
-                        ? 'Web address detected. Norva will verify that it returns an M3U playlist.'
-                        : 'Link detected. Norva will verify its playlist format before importing.'
+                        ? (globalThis.NorvaI18n?.t("ui_web_aa28cd20bca0", { defaultValue: "Web address detected. Norva will verify that it returns an M3U playlist." }) ?? 'Web address detected. Norva will verify that it returns an M3U playlist.')
+                        : (globalThis.NorvaI18n?.t("ui_web_a29410ef5838", { defaultValue: "Link detected. Norva will verify its playlist format before importing." }) ?? 'Link detected. Norva will verify its playlist format before importing.')
         };
     }
 
@@ -2091,14 +2091,14 @@ class SourceManager {
         try {
             const estimate = await API.sources.estimateByUrl(connection.url, connection.type);
             if (!estimate?.needsWarning) return true;
-            const count = Number(estimate.count || 0).toLocaleString();
-            const countLabel = estimate.countIsLowerBound ? `at least ${count}` : count;
+            const count = Number(estimate.count || 0).toLocaleString(globalThis.NorvaI18n?.language);
+            const countLabel = estimate.countIsLowerBound ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ffc9a458f1fb", {defaultValue: "at least {{p0}}", p0:(count)}) : `at least ${count}`) : count;
             return this.showWarningModal({
-                title: 'Large playlist',
-                message: `This playlist contains <strong>${countLabel}</strong> channels.`,
-                details: 'Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.',
-                proceedText: 'Proceed anyway',
-                cancelText: 'Cancel'
+                title: (globalThis.NorvaI18n?.t("ui_web_42446a157089", { defaultValue: "Large playlist" }) ?? 'Large playlist'),
+                message: `<norva-i18n data-i18n="ui_web_59734aa5ff14">This playlist contains </norva-i18n><strong>${countLabel}</strong><norva-i18n data-i18n="ui_web_4b308a27b878"> channels.</norva-i18n>`,
+                details: '<norva-i18n data-i18n="ui_web_490bc562f9e5">Syncing may take several minutes and app performance may be impacted with large playlists.</norva-i18n><br><br><norva-i18n data-i18n="ui_web_b236a36d240d">Consider using a filtered M3U from your provider to include only channels you actually watch.</norva-i18n>',
+                proceedText: (globalThis.NorvaI18n?.t("ui_web_811f7f9b720b", { defaultValue: "Proceed anyway" }) ?? 'Proceed anyway'),
+                cancelText: (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel')
             });
         } catch (_) {
             console.warn('[SourceManager] Playlist size could not be checked.');
@@ -2122,13 +2122,13 @@ class SourceManager {
     sourceFormErrorMessage(error) {
         const message = String(error?.message || '');
         const allowed = new Set([
-            'Provider URL is required.',
-            'Enter the complete server URL, username and password to replace the saved login.',
-            'Provider URL, username and password are required.'
+            (globalThis.NorvaI18n?.t("ui_web_baf76e6a65bf", { defaultValue: "Provider URL is required." }) ?? 'Provider URL is required.'),
+            (globalThis.NorvaI18n?.t("ui_web_7c425ffe7b0c", { defaultValue: "Enter the complete server URL, username and password to replace the saved login." }) ?? 'Enter the complete server URL, username and password to replace the saved login.'),
+            (globalThis.NorvaI18n?.t("ui_web_4b98db7e65d5", { defaultValue: "Provider URL, username and password are required." }) ?? 'Provider URL, username and password are required.')
         ]);
         return allowed.has(message)
             ? message
-            : 'Check the service address and credentials, then try again.';
+            : (globalThis.NorvaI18n?.t("ui_web_47783937825b", { defaultValue: "Check the service address and credentials, then try again." }) ?? 'Check the service address and credentials, then try again.');
     }
 
     sourceConnectionTestMessage(value) {
@@ -2136,22 +2136,22 @@ class SourceManager {
         const code = String(payload.code || value?.code || '').trim().toUpperCase();
         const status = Number(payload.status ?? payload.upstreamStatus ?? value?.status ?? value?.upstreamStatus);
         if (code === 'PROVIDER_BUSY' || code === 'PROVIDER_ACCOUNT_BUSY' || status === 458) {
-            return 'This TV service is busy. Wait a few seconds, then try again.';
+            return (globalThis.NorvaI18n?.t("ui_web_7ade6b75e044", { defaultValue: "This TV service is busy. Wait a few seconds, then try again." }) ?? 'This TV service is busy. Wait a few seconds, then try again.');
         }
         if (code === 'PROVIDER_CONNECT_TIMEOUT' || code === 'PROVIDER_RESPONSE_TIMEOUT' || status === 504) {
-            return 'The provider did not respond before the connection timed out.';
+            return (globalThis.NorvaI18n?.t("ui_web_3bb9e792d1c8", { defaultValue: "The provider did not respond before the connection timed out." }) ?? 'The provider did not respond before the connection timed out.');
         }
-        if (code === 'PROVIDER_DNS_FAILURE') return 'Norva cannot resolve the provider address.';
-        if (code === 'PROVIDER_TLS_FAILURE') return 'Norva could not establish a secure connection to the provider.';
-        if (code === 'PROVIDER_CONNECTION_RESET') return 'The connection to the provider was interrupted.';
-        if (code === 'PROVIDER_NETWORK_UNREACHABLE') return 'The network route to the provider is unavailable.';
-        if (status === 401 || status === 403) return 'The provider refused the saved username or password.';
-        return 'Norva cannot reach the provider right now.';
+        if (code === 'PROVIDER_DNS_FAILURE') return (globalThis.NorvaI18n?.t("ui_web_2dbf5f0d29bc", { defaultValue: "Norva cannot resolve the provider address." }) ?? 'Norva cannot resolve the provider address.');
+        if (code === 'PROVIDER_TLS_FAILURE') return (globalThis.NorvaI18n?.t("ui_web_5e067fa2655c", { defaultValue: "Norva could not establish a secure connection to the provider." }) ?? 'Norva could not establish a secure connection to the provider.');
+        if (code === 'PROVIDER_CONNECTION_RESET') return (globalThis.NorvaI18n?.t("ui_web_b29ce61d59bd", { defaultValue: "The connection to the provider was interrupted." }) ?? 'The connection to the provider was interrupted.');
+        if (code === 'PROVIDER_NETWORK_UNREACHABLE') return (globalThis.NorvaI18n?.t("ui_web_ddde35ed6177", { defaultValue: "The network route to the provider is unavailable." }) ?? 'The network route to the provider is unavailable.');
+        if (status === 401 || status === 403) return (globalThis.NorvaI18n?.t("ui_web_98b815ed7a29", { defaultValue: "The provider refused the saved username or password." }) ?? 'The provider refused the saved username or password.');
+        return (globalThis.NorvaI18n?.t("ui_web_590e4a7c4e5e", { defaultValue: "Norva cannot reach the provider right now." }) ?? 'Norva cannot reach the provider right now.');
     }
 
     sourceSyncErrorMessage(value, { hard = false } = {}) {
         if (this.isInvalidDeviceTokenError(value)) {
-            return 'This device session expired. Sign in or pair this device again.';
+            return (globalThis.NorvaI18n?.t("ui_web_e42ca55f2499", { defaultValue: "This device session expired. Sign in or pair this device again." }) ?? 'This device session expired. Sign in or pair this device again.');
         }
 
         const payload = value?.payload || value || {};
@@ -2160,42 +2160,42 @@ class SourceManager {
         ).trim().toUpperCase();
         if (code === 'PROVIDER_CREDENTIALS_REJECTED') {
             return this.providerAccessUiEnabled()
-                ? 'The provider refused the saved username or password. Open Manage provider access to update it.'
-                : 'The provider refused the saved username or password. Secure login repair is not available for this account yet.';
+                ? (globalThis.NorvaI18n?.t("ui_web_2a7438e270c4", { defaultValue: "The provider refused the saved username or password. Open Manage provider access to update it." }) ?? 'The provider refused the saved username or password. Open Manage provider access to update it.')
+                : (globalThis.NorvaI18n?.t("ui_web_4428b5abbb66", { defaultValue: "The provider refused the saved username or password. Secure login repair is not available for this account yet." }) ?? 'The provider refused the saved username or password. Secure login repair is not available for this account yet.');
         }
         if (code === 'PROVIDER_ENDPOINT_NOT_FOUND') {
             return this.providerAccessUiEnabled()
-                ? 'The provider address or account endpoint is no longer available. Open Manage provider access to review it.'
-                : 'The provider address or account endpoint is no longer available. Secure login repair is not available for this account yet.';
+                ? (globalThis.NorvaI18n?.t("ui_web_739a12237c91", { defaultValue: "The provider address or account endpoint is no longer available. Open Manage provider access to review it." }) ?? 'The provider address or account endpoint is no longer available. Open Manage provider access to review it.')
+                : (globalThis.NorvaI18n?.t("ui_web_e4417b349e95", { defaultValue: "The provider address or account endpoint is no longer available. Secure login repair is not available for this account yet." }) ?? 'The provider address or account endpoint is no longer available. Secure login repair is not available for this account yet.');
         }
         if (code === 'PROVIDER_ACCESS_EXPIRED') {
-            return 'The provider reports that this access is inactive. Review the access dates before syncing again.';
+            return (globalThis.NorvaI18n?.t("ui_web_d86320af2c5e", { defaultValue: "The provider reports that this access is inactive. Review the access dates before syncing again." }) ?? 'The provider reports that this access is inactive. Review the access dates before syncing again.');
         }
         if (code === 'PROVIDER_BUSY') {
-            return 'This TV service is busy. Wait a few seconds, then try again.';
+            return (globalThis.NorvaI18n?.t("ui_web_7ade6b75e044", { defaultValue: "This TV service is busy. Wait a few seconds, then try again." }) ?? 'This TV service is busy. Wait a few seconds, then try again.');
         }
         if (code === 'PROVIDER_TEMPORARILY_UNAVAILABLE') {
-            return 'This TV service is temporarily unavailable. Your existing catalog remains available; try again later.';
+            return (globalThis.NorvaI18n?.t("ui_web_af52331aa4cd", { defaultValue: "This TV service is temporarily unavailable. Your existing catalog remains available; try again later." }) ?? 'This TV service is temporarily unavailable. Your existing catalog remains available; try again later.');
         }
-        return `${hard ? 'Catalog rebuild' : 'Sync'} could not finish. Try again.`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_67912140b7c0", {defaultValue: "{{p0}} could not finish. Try again.", p0:(hard ? (globalThis.NorvaI18n?.t("ui_web_530e067d69f8", { defaultValue: "Catalog rebuild" }) ?? 'Catalog rebuild') : (globalThis.NorvaI18n?.t("ui_web_8d261a372fde", { defaultValue: "Sync" }) ?? 'Sync'))}) : `${hard ? 'Catalog rebuild' : 'Sync'} could not finish. Try again.`);
     }
 
     rebuildConfirmationCopy() {
         if (window.API?.isCloudMode?.() === true) {
             return {
-                title: 'Rebuild catalog?',
-                message: 'Norva will rescan the complete provider catalog. Your current catalog stays available while the rebuild runs.',
-                details: 'Norva clears only saved sync progress, then rediscovers and updates channels, movies, series and TV guide data in place.<br><br>Preserved: source settings, current catalog, favorites, profiles and watch history.',
-                proceedText: 'Rebuild catalog',
-                cancelText: 'Cancel'
+                title: (globalThis.NorvaI18n?.t("ui_web_e9f76950a555", { defaultValue: "Rebuild catalog?" }) ?? 'Rebuild catalog?'),
+                message: (globalThis.NorvaI18n?.t("ui_web_d26d385d434e", { defaultValue: "Norva will rescan the complete provider catalog. Your current catalog stays available while the rebuild runs." }) ?? 'Norva will rescan the complete provider catalog. Your current catalog stays available while the rebuild runs.'),
+                details: '<norva-i18n data-i18n="ui_web_651a5c01f575">Norva clears only saved sync progress, then rediscovers and updates channels, movies, series and TV guide data in place.</norva-i18n><br><br><norva-i18n data-i18n="ui_web_1fd9d55d61f9">Preserved: source settings, current catalog, favorites, profiles and watch history.</norva-i18n>',
+                proceedText: (globalThis.NorvaI18n?.t("ui_web_ec5494ef2be2", { defaultValue: "Rebuild catalog" }) ?? 'Rebuild catalog'),
+                cancelText: (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel')
             };
         }
         return {
-            title: 'Rebuild local catalog?',
-            message: 'This will delete the current local catalog for this source, then rebuild it from the playlist or provider.',
-            details: 'Removed locally: categories, channels, movies, series, TV guide data, sync status and source cache.<br><br>Preserved: source settings, favorites, profiles and watch history.',
-            proceedText: 'Rebuild catalog',
-            cancelText: 'Cancel'
+            title: (globalThis.NorvaI18n?.t("ui_web_d6e289ab2983", { defaultValue: "Rebuild local catalog?" }) ?? 'Rebuild local catalog?'),
+            message: (globalThis.NorvaI18n?.t("ui_web_991dedbe5a20", { defaultValue: "This will delete the current local catalog for this source, then rebuild it from the playlist or provider." }) ?? 'This will delete the current local catalog for this source, then rebuild it from the playlist or provider.'),
+            details: '<norva-i18n data-i18n="ui_web_fd8bd5ca6147">Removed locally: categories, channels, movies, series, TV guide data, sync status and source cache.</norva-i18n><br><br><norva-i18n data-i18n="ui_web_dc866e668b08">Preserved: source settings, favorites, profiles and watch history.</norva-i18n>',
+            proceedText: (globalThis.NorvaI18n?.t("ui_web_ec5494ef2be2", { defaultValue: "Rebuild catalog" }) ?? 'Rebuild catalog'),
+            cancelText: (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel')
         };
     }
 
@@ -2330,38 +2330,38 @@ class SourceManager {
             : String(attentionState || this.sourceSyncState(source).attentionState || 'degraded').toLowerCase();
         const details = {
             auth_failed: {
-                phaseLabel: 'Login required',
-                title: 'Update your provider login',
-                message: 'The provider refused the saved username or password. Update the login, then Norva can resume the import.',
-                actionLabel: 'Update login',
+                phaseLabel: (globalThis.NorvaI18n?.t("ui_web_89858f87f6ca", { defaultValue: "Login required" }) ?? 'Login required'),
+                title: (globalThis.NorvaI18n?.t("ui_web_c19f4e196a70", { defaultValue: "Update your provider login" }) ?? 'Update your provider login'),
+                message: (globalThis.NorvaI18n?.t("ui_web_224286f3bd6a", { defaultValue: "The provider refused the saved username or password. Update the login, then Norva can resume the import." }) ?? 'The provider refused the saved username or password. Update the login, then Norva can resume the import.'),
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_5483db957f58", { defaultValue: "Update login" }) ?? 'Update login'),
                 action: 'edit'
             },
             expired: {
-                phaseLabel: 'Provider access expired',
-                title: 'Review your provider access',
-                message: 'The provider reports an inactive or expired account. Renew it with the provider, then check the service again.',
-                actionLabel: 'Review service',
+                phaseLabel: (globalThis.NorvaI18n?.t("ui_web_bf72169e4819", { defaultValue: "Provider access expired" }) ?? 'Provider access expired'),
+                title: (globalThis.NorvaI18n?.t("ui_web_42e6f2c0d61b", { defaultValue: "Review your provider access" }) ?? 'Review your provider access'),
+                message: (globalThis.NorvaI18n?.t("ui_web_dea363196af6", { defaultValue: "The provider reports an inactive or expired account. Renew it with the provider, then check the service again." }) ?? 'The provider reports an inactive or expired account. Renew it with the provider, then check the service again.'),
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_f3bfa948a110", { defaultValue: "Review service" }) ?? 'Review service'),
                 action: 'edit'
             },
             unreachable: {
-                phaseLabel: 'Provider unavailable',
-                title: 'Your provider is temporarily unavailable',
-                message: 'Norva cannot reach the provider right now. Your details were not changed; wait a moment and check again.',
-                actionLabel: 'Check again',
+                phaseLabel: (globalThis.NorvaI18n?.t("ui_web_ff2113958589", { defaultValue: "Provider unavailable" }) ?? 'Provider unavailable'),
+                title: (globalThis.NorvaI18n?.t("ui_web_7f1d81c99767", { defaultValue: "Your provider is temporarily unavailable" }) ?? 'Your provider is temporarily unavailable'),
+                message: (globalThis.NorvaI18n?.t("ui_web_e5b888e2a2cf", { defaultValue: "Norva cannot reach the provider right now. Your details were not changed; wait a moment and check again." }) ?? 'Norva cannot reach the provider right now. Your details were not changed; wait a moment and check again.'),
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again'),
                 action: 'retry'
             },
             revoked: {
-                phaseLabel: 'Service disconnected',
-                title: 'This TV service is disconnected',
-                message: 'Open TV Service settings to review or reconnect this source.',
-                actionLabel: 'Open settings',
+                phaseLabel: (globalThis.NorvaI18n?.t("ui_web_95a48f2c100f", { defaultValue: "Service disconnected" }) ?? 'Service disconnected'),
+                title: (globalThis.NorvaI18n?.t("ui_web_fcc0b9c25033", { defaultValue: "This TV service is disconnected" }) ?? 'This TV service is disconnected'),
+                message: (globalThis.NorvaI18n?.t("ui_web_f6bc1e12e454", { defaultValue: "Open TV Service settings to review or reconnect this source." }) ?? 'Open TV Service settings to review or reconnect this source.'),
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_ca381c1e76e6", { defaultValue: "Open settings" }) ?? 'Open settings'),
                 action: 'settings'
             },
             degraded: {
-                phaseLabel: 'Needs attention',
-                title: 'TV service needs attention',
-                message: 'Norva could not finish this import. Check the service again; if it still fails, review its settings.',
-                actionLabel: 'Check again',
+                phaseLabel: (globalThis.NorvaI18n?.t("ui_web_c1ebc7817870", { defaultValue: "Needs attention" }) ?? 'Needs attention'),
+                title: (globalThis.NorvaI18n?.t("ui_web_82155b6ef5b5", { defaultValue: "TV service needs attention" }) ?? 'TV service needs attention'),
+                message: (globalThis.NorvaI18n?.t("ui_web_df2da0c59419", { defaultValue: "Norva could not finish this import. Check the service again; if it still fails, review its settings." }) ?? 'Norva could not finish this import. Check the service again; if it still fails, review its settings.'),
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again'),
                 action: 'retry'
             }
         };
@@ -2395,7 +2395,7 @@ class SourceManager {
     }
 
     formatCatalogCount(value, fallback = 'Scanning') {
-        return value > 0 ? value.toLocaleString() : fallback;
+        return value > 0 ? value.toLocaleString(globalThis.NorvaI18n?.language) : fallback;
     }
 
     catalogMilestones(progress = {}, counts = {}, options = {}) {
@@ -2424,13 +2424,13 @@ class SourceManager {
             };
         };
         const milestones = [
-            step('connect', 'Connecting to TV service', 0, 'Secure login check'),
-            step('movies', 'Movies found', counts.movies, 'Films catalog'),
-            step('series', 'Series found', counts.series, 'Series catalog'),
-            step('channels', 'Channels found', counts.live, 'Live TV catalog — imported last'),
-            step('categories', 'Categories', counts.categories, 'Navigation groups'),
-            step('import', 'Import catalog', counts.total, 'Saving items to Norva Cloud'),
-            step('finalize', 'Finalize Norva', 0, 'Unlocking Movies and Series first, then Live TV')
+            step('connect', (globalThis.NorvaI18n?.t("ui_web_628d5b57a457", { defaultValue: "Connecting to TV service" }) ?? 'Connecting to TV service'), 0, (globalThis.NorvaI18n?.t("ui_web_095166b33f5a", { defaultValue: "Secure login check" }) ?? 'Secure login check')),
+            step('movies', (globalThis.NorvaI18n?.t("ui_web_60a4990745f4", { defaultValue: "Movies found" }) ?? 'Movies found'), counts.movies, (globalThis.NorvaI18n?.t("ui_web_9ee2cbcec403", { defaultValue: "Films catalog" }) ?? 'Films catalog')),
+            step('series', (globalThis.NorvaI18n?.t("ui_web_2a7ccbd5edc8", { defaultValue: "Series found" }) ?? 'Series found'), counts.series, (globalThis.NorvaI18n?.t("ui_web_881c34cc4854", { defaultValue: "Series catalog" }) ?? 'Series catalog')),
+            step('channels', (globalThis.NorvaI18n?.t("ui_web_bcf3e20d0f84", { defaultValue: "Channels found" }) ?? 'Channels found'), counts.live, (globalThis.NorvaI18n?.t("ui_web_211cdbc28a82", { defaultValue: "Live TV catalog — imported last" }) ?? 'Live TV catalog — imported last')),
+            step('categories', 'Categories', counts.categories, (globalThis.NorvaI18n?.t("ui_web_67e24d9d13e3", { defaultValue: "Navigation groups" }) ?? 'Navigation groups')),
+            step('import', (globalThis.NorvaI18n?.t("ui_web_14a92c7bb4af", { defaultValue: "Import catalog" }) ?? 'Import catalog'), counts.total, (globalThis.NorvaI18n?.t("ui_web_3179e2c637f4", { defaultValue: "Saving items to Norva Cloud" }) ?? 'Saving items to Norva Cloud')),
+            step('finalize', (globalThis.NorvaI18n?.t("ui_web_9f69865859a9", { defaultValue: "Finalize Norva" }) ?? 'Finalize Norva'), 0, (globalThis.NorvaI18n?.t("ui_web_64c48cda0cfd", { defaultValue: "Unlocking Movies and Series first, then Live TV" }) ?? 'Unlocking Movies and Series first, then Live TV'))
         ];
         if (options.phase === 'error' && !milestones.some(item => item.status === 'error')) {
             const running = milestones.find(item => ['running', 'in_progress'].includes(item.status));
@@ -2443,7 +2443,7 @@ class SourceManager {
 
     renderCatalogMilestone(step) {
         const safeStatus = ['pending', 'running', 'done', 'error', 'skipped'].includes(step.status) ? step.status : 'pending';
-        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString())}</strong>` : '';
+        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString(globalThis.NorvaI18n?.language))}</strong>` : '';
         // Discovery steps (channels/movies/series/categories) report "done" the
         // moment the provider COUNT is known — long before those items are
         // materialised and browsable. Render their done-state as "Found" so the
@@ -2451,14 +2451,14 @@ class SourceManager {
         // import/finalize steps carry a true "Done".
         const isDiscovery = ['channels', 'movies', 'series', 'categories'].includes(step.key);
         const statusLabel = (isDiscovery && safeStatus === 'done')
-            ? 'Found'
+            ? (globalThis.NorvaI18n?.t("ui_web_b0ee315f4ac6", { defaultValue: "Found" }) ?? 'Found')
             : ({
-                pending: 'Waiting',
-                running: 'In progress',
-                done: 'Done',
-                error: 'Needs attention',
-                skipped: 'Skipped'
-            }[safeStatus] || 'Waiting');
+                pending: (globalThis.NorvaI18n?.t("ui_web_6e293a8c009e", { defaultValue: "Waiting" }) ?? 'Waiting'),
+                running: (globalThis.NorvaI18n?.t("ui_web_c1f88e9d6c41", { defaultValue: "In progress" }) ?? 'In progress'),
+                done: (globalThis.NorvaI18n?.t("ui_web_11a6767d5674", { defaultValue: "Done" }) ?? 'Done'),
+                error: (globalThis.NorvaI18n?.t("ui_web_c1ebc7817870", { defaultValue: "Needs attention" }) ?? 'Needs attention'),
+                skipped: (globalThis.NorvaI18n?.t("ui_web_12698ce1ea5c", { defaultValue: "Skipped" }) ?? 'Skipped')
+            }[safeStatus] || (globalThis.NorvaI18n?.t("ui_web_6e293a8c009e", { defaultValue: "Waiting" }) ?? 'Waiting'));
         return `
           <li class="source-sync-milestone source-sync-milestone-${this.escapeHtml(safeStatus)}">
             <span class="source-sync-dot" aria-hidden="true"></span>
@@ -2477,31 +2477,31 @@ class SourceManager {
     // la phase "finalizing" (heal des variantes + bascule ready) peut durer — sans
     // copy dédiée, le chiffre figé à 99 se lit comme un plantage.
     catalogSyncingCopy(progress = {}, percent = 0, phase = 'syncing', source = {}) {
-        if (phase === 'ready') return 'Your catalog is ready.';
+        if (phase === 'ready') return (globalThis.NorvaI18n?.t("ui_web_b39c70d10245", { defaultValue: "Your catalog is ready." }) ?? 'Your catalog is ready.');
         if (phase === 'error') return this.catalogErrorDetails(source).message;
         const stage = String(progress.stage || '').toLowerCase();
         if (stage === 'finalizing' || percent >= 99) {
-            return 'Finishing touches — Norva is unlocking your catalog now.';
+            return (globalThis.NorvaI18n?.t("ui_web_dc10a3644390", { defaultValue: "Finishing touches — Norva is unlocking your catalog now." }) ?? 'Finishing touches — Norva is unlocking your catalog now.');
         }
-        return 'Norva is connecting and preparing Movies and Series first. Live TV is imported last.';
+        return (globalThis.NorvaI18n?.t("ui_web_3706a9f3a27a", { defaultValue: "Norva is connecting and preparing Movies and Series first. Live TV is imported last." }) ?? 'Norva is connecting and preparing Movies and Series first. Live TV is imported last.');
     }
 
     renderCatalogPreparation(source = {}, type = 'xtream') {
         const { phase, counts, progress, attentionState } = this.sourceSyncState(source);
-        const sourceName = source.name || 'TV service';
+        const sourceName = source.name || (globalThis.NorvaI18n?.t("ui_web_bf88149dcb1d", { defaultValue: "TV service" }) ?? 'TV service');
         const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
         const determinate = percent > 0 || phase === 'ready';
         const errorDetails = this.catalogErrorDetails(source, attentionState);
         const statusText = {
             syncing: this.catalogSyncingCopy(progress, percent, 'syncing', source),
-            ready: 'Your catalog is ready.',
+            ready: (globalThis.NorvaI18n?.t("ui_web_b39c70d10245", { defaultValue: "Your catalog is ready." }) ?? 'Your catalog is ready.'),
             error: errorDetails.message
         };
-        const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? errorDetails.phaseLabel : 'Importing';
+        const phaseLabel = phase === 'ready' ? (globalThis.NorvaI18n?.t("ui_web_5fa7aac5375c", { defaultValue: "Ready" }) ?? 'Ready') : phase === 'error' ? errorDetails.phaseLabel : (globalThis.NorvaI18n?.t("ui_web_d252fffacbf0", { defaultValue: "Importing" }) ?? 'Importing');
         const progressBucket = phase === 'syncing' && determinate ? Math.floor(percent / 10) : -1;
         const progressAnnouncement = `${sourceName}. ${phaseLabel}. ${statusText[phase] || statusText.syncing}${phase === 'syncing' && determinate ? ` ${Math.round(percent)}% complete.` : ''}`;
         const milestones = this.catalogMilestones(progress, counts, { phase, attentionState }).map(step => this.renderCatalogMilestone(step)).join('');
-        const countFallback = phase === 'error' ? '—' : phase === 'ready' ? '0' : 'Scanning';
+        const countFallback = phase === 'error' ? '—' : phase === 'ready' ? '0' : (globalThis.NorvaI18n?.t("ui_web_474ad819c8ba", { defaultValue: "Scanning" }) ?? 'Scanning');
         const noteIcon = window.Icons?.info || '';
 
         return `
@@ -2514,31 +2514,31 @@ class SourceManager {
         </div>
         <div class="source-sync-grid">
           <div class="source-sync-card">
-            <span>Movies</span>
+            <span data-i18n="ui_web_dff924b69f96">Movies</span>
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.movies, countFallback))}</strong>
-            <small>films found</small>
+            <small data-i18n="ui_web_6292bbf9ec17">films found</small>
           </div>
           <div class="source-sync-card">
-            <span>Series</span>
+            <span data-i18n="ui_web_a8295e08ff7a">Series</span>
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.series, countFallback))}</strong>
-            <small>series found</small>
+            <small data-i18n="ui_web_8f22c3d567ac">series found</small>
           </div>
           <div class="source-sync-card">
-            <span>Live TV</span>
+            <span data-i18n="ui_web_d451ef69d283">Live TV</span>
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.live, countFallback))}</strong>
-            <small>channels found last</small>
+            <small data-i18n="ui_web_06eaedb4281e">channels found last</small>
           </div>
           <div class="source-sync-card">
-            <span>Categories</span>
+            <span data-i18n="ui_web_b8b1d894c683">Categories</span>
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.categories, countFallback))}</strong>
-            <small>groups found</small>
+            <small data-i18n="ui_web_434d87c25a10">groups found</small>
           </div>
         </div>
         ${phase === 'syncing' ? `
-          <p class="hint source-sync-found-note">These are titles detected from your provider. They become watchable as Norva finishes preparing them — you can keep browsing while this runs.</p>
+          <p class="hint source-sync-found-note" data-i18n="ui_web_7ced29d41a36">These are titles detected from your provider. They become watchable as Norva finishes preparing them — you can keep browsing while this runs.</p>
         ` : ''}
         <div class="source-sync-progress-wrap">
-          <div class="source-sync-progress ${determinate ? 'is-determinate' : ''}" style="--source-sync-percent: ${this.escapeHtml(String(percent))}%;" role="progressbar" aria-label="Catalog import progress" aria-valuemin="0" aria-valuemax="100"${determinate ? ` aria-valuenow="${Math.round(percent)}"` : ''}>
+          <div class="source-sync-progress ${determinate ? 'is-determinate' : ''}" style="--source-sync-percent: ${this.escapeHtml(String(percent))}%;" role="progressbar" aria-label="Catalog import progress" aria-valuemin="0" aria-valuemax="100"${determinate ? ` aria-valuenow="${Math.round(percent)}"` : ''} data-i18n-aria-label="ui_web_401b61b8c432">
             <span></span>
           </div>
           ${determinate ? `<small>${this.escapeHtml(String(Math.round(percent)))}%</small>` : ''}
@@ -2547,13 +2547,13 @@ class SourceManager {
           ${milestones}
         </ol>
         ${phase === 'syncing' ? `
-          <p class="hint source-sync-notify-note"><span class="source-sync-note-icon" aria-hidden="true">${noteIcon}</span><span><strong>You can close the app</strong> — we'll email you the moment your catalog is ready, on every device. The mobile app will notify you too. Norva keeps preparing it in the background.</span></p>
+          <p class="hint source-sync-notify-note"><span class="source-sync-note-icon" aria-hidden="true">${noteIcon}</span><span><strong data-i18n="ui_web_8a7d4fdc4f3d">You can close the app</strong><norva-i18n data-i18n="ui_web_f0cc030b2522"> — we'll email you the moment your catalog is ready, on every device. The mobile app will notify you too. Norva keeps preparing it in the background.</norva-i18n></span></p>
         ` : ''}
         ${phase === 'error' ? `
           <div class="source-sync-error-message"><strong>${this.escapeHtml(errorDetails.title)}</strong><span>${this.escapeHtml(statusText.error)}</span></div>
         ` : ''}
         ${counts.syncedAt && phase === 'ready' ? `
-          <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString())}</p>
+          <p class="hint" data-i18n="ui_web_40ac65e22430" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(new Date(counts.syncedAt).toLocaleString(globalThis.NorvaI18n?.language))}) || "{}")}">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString(globalThis.NorvaI18n?.language))}</p>
         ` : ''}
       </div>
     `;
@@ -2607,9 +2607,9 @@ class SourceManager {
             const progressBucket = phase === 'syncing' && determinate ? Math.floor(percent / 10) : -1;
             if (copyChanged || Number(announcement.dataset.progressBucket) !== progressBucket) {
                 const sourceName = source.name || 'TV service';
-                const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? this.catalogErrorDetails(source, attentionState).phaseLabel : 'Importing';
+                const phaseLabel = phase === 'ready' ? (globalThis.NorvaI18n?.t("ui_web_5fa7aac5375c", { defaultValue: "Ready" }) ?? 'Ready') : phase === 'error' ? this.catalogErrorDetails(source, attentionState).phaseLabel : (globalThis.NorvaI18n?.t("ui_web_d252fffacbf0", { defaultValue: "Importing" }) ?? 'Importing');
                 announcement.dataset.progressBucket = String(progressBucket);
-                announcement.textContent = `${sourceName}. ${phaseLabel}. ${copy}${phase === 'syncing' && determinate ? ` ${Math.round(percent)}% complete.` : ''}`;
+                announcement.textContent = `${sourceName}. ${phaseLabel}. ${copy}${phase === 'syncing' && determinate ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_e50a851d4662", {defaultValue: "{{p0}}% complete.", p0:(Math.round(percent))}) : ` ${Math.round(percent)}% complete.`) : ''}`;
             }
         }
         return true;
@@ -2851,14 +2851,14 @@ class SourceManager {
             if (retry) {
                 retry.disabled = true;
                 retry.setAttribute('aria-busy', 'true');
-                retry.textContent = 'Checking…';
+                retry.textContent = (globalThis.NorvaI18n?.t("ui_web_ec963ffc911b", { defaultValue: "Checking…" }) ?? 'Checking…');
             }
             try {
                 const latest = await API.sources.getById(sourceId) || current;
                 await closeToSettings();
                 setTimeout(() => this.showCatalogPreparation(latest, type), 0);
             } catch (_) {
-                const retryMessage = 'Norva still cannot reach this service. Wait a moment or review it in TV Service settings.';
+                const retryMessage = (globalThis.NorvaI18n?.t("ui_web_9543ccaeda78", { defaultValue: "Norva still cannot reach this service. Wait a moment or review it in TV Service settings." }) ?? 'Norva still cannot reach this service. Wait a moment or review it in TV Service settings.');
                 this.trackProduct('journey_error', {
                     journey: 'catalog', step: 'catalog_sync', outcome: 'error', failureFamily: 'provider_unreachable', catalogState: 'error'
                 });
@@ -2869,7 +2869,7 @@ class SourceManager {
                 if (retry) {
                     retry.disabled = false;
                     retry.removeAttribute('aria-busy');
-                    retry.textContent = 'Check again';
+                    retry.textContent = (globalThis.NorvaI18n?.t("ui_web_fb7099ad8e81", { defaultValue: "Check again" }) ?? 'Check again');
                     retry.focus({ preventScroll: true });
                 }
             }
@@ -2880,7 +2880,7 @@ class SourceManager {
             current = source || current;
             const { phase, attentionState } = this.sourceSyncState(current);
             const errorDetails = this.catalogErrorDetails(current, attentionState);
-            title.textContent = phase === 'ready' ? 'Catalog ready' : phase === 'error' ? errorDetails.title : 'Preparing your catalog';
+            title.textContent = phase === 'ready' ? (globalThis.NorvaI18n?.t("ui_web_859cf20487c8", { defaultValue: "Catalog ready" }) ?? 'Catalog ready') : phase === 'error' ? errorDetails.title : (globalThis.NorvaI18n?.t("ui_web_95ff326ea363", { defaultValue: "Preparing your catalog" }) ?? 'Preparing your catalog');
             // Patch en place sur un tick de même phase (la barre garde son élément →
             // la transition CSS anime) ; rebuild complet uniquement sur transition.
             if (!this.patchCatalogPreparation(body, current, type)) {
@@ -2908,8 +2908,8 @@ class SourceManager {
                     journey: 'catalog', step: 'catalog_sync', outcome: 'success', catalogState: 'ready'
                 });
                 footer.innerHTML = `
-          <button class="btn btn-secondary" id="catalog-stay">Stay in Settings</button>
-          <button class="btn btn-primary" id="catalog-start">Start Watching</button>
+          <button class="btn btn-secondary" id="catalog-stay" data-i18n="ui_web_c99ded358e14">Stay in Settings</button>
+          <button class="btn btn-primary" id="catalog-start" data-i18n="ui_web_2a206f843ca4">Start Watching</button>
         `;
                 document.getElementById('catalog-stay').onclick = closeToSettings;
                 document.getElementById('catalog-start').onclick = startWatching;
@@ -2919,7 +2919,7 @@ class SourceManager {
                     journey: 'catalog', step: 'catalog_sync', outcome: 'error', failureFamily: 'unknown', catalogState: 'error'
                 });
                 footer.innerHTML = `
-          <button class="btn btn-secondary" id="catalog-background">Close</button>
+          <button class="btn btn-secondary" id="catalog-background" data-i18n="ui_web_7d9eb7acb13e">Close</button>
           <button class="btn btn-primary" id="catalog-error-action">${this.escapeHtml(errorDetails.actionLabel)}</button>
         `;
                 document.getElementById('catalog-background').onclick = closeToSettings;
@@ -2932,7 +2932,7 @@ class SourceManager {
                 focusIfNeeded('catalog-error-action');
             } else {
                 footer.innerHTML = `
-          <button class="btn btn-secondary" id="catalog-background">Run in Background</button>
+          <button class="btn btn-secondary" id="catalog-background" data-i18n="ui_web_0db77588ae5e">Run in Background</button>
         `;
                 document.getElementById('catalog-background').onclick = closeToSettings;
                 focusIfNeeded('catalog-background');
@@ -3060,7 +3060,7 @@ class SourceManager {
             try { window.app?.startImportWatcher?.(); } catch (_) { /* noop */ } // toast when this import finishes
             this.showCatalogPreparation(createdSource, type);
             if (accessSaveFailed) {
-                NorvaModal.toast('The service was added, but its access period was not saved. Add it from Provider access in Settings.', 'error');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_661e23049e81", { defaultValue: "The service was added, but its access period was not saved. Add it from Provider access in Settings." }) ?? 'The service was added, but its access period was not saved. Add it from Provider access in Settings.'), 'error');
             }
 
             // Refresh the watch surfaces in the background. The onboarding progress
@@ -3075,7 +3075,7 @@ class SourceManager {
             this.trackProduct('journey_error', {
                 journey: 'provider_onboarding', step: 'provider_connect', outcome: 'error', failureFamily: this.productFailureFamily(err)
             });
-            NorvaModal.toast('Could not add this source. Check the details and try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_424333ad49d8", { defaultValue: "Could not add this source. Check the details and try again." }) ?? 'Could not add this source. Check the details and try again.'), 'error');
         }
     }
 
@@ -3123,7 +3123,7 @@ class SourceManager {
 
         try {
             if (type === 'xtream' && form.credentialsProvided && !this.providerAccessUiEnabled()) {
-                NorvaModal.toast('Secure login replacement is not available yet. Your saved login was not changed.', 'error');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_99ee20c9300c", { defaultValue: "Secure login replacement is not available yet. Your saved login was not changed." }) ?? 'Secure login replacement is not available yet. Your saved login was not changed.'), 'error');
                 return;
             }
 
@@ -3175,7 +3175,7 @@ class SourceManager {
             this.trackProduct('journey_error', {
                 journey: 'provider_recovery', step: 'provider_repair', outcome: 'error', failureFamily: this.productFailureFamily(err)
             });
-            NorvaModal.toast('Could not update this source. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_282a585941d7", { defaultValue: "Could not update this source. Try again." }) ?? 'Could not update this source. Try again.'), 'error');
         }
     }
 
@@ -3192,7 +3192,7 @@ class SourceManager {
         modal.classList.remove('source-add-modal');
         modal.classList.remove('provider-access-wizard-modal');
         footer.hidden = false;
-        footer.innerHTML = '<button class="btn btn-secondary" type="button" data-provider-close>Close</button>';
+        footer.innerHTML = '<button class="btn btn-secondary" type="button" data-provider-close data-i18n="ui_web_7d9eb7acb13e">Close</button>';
         const close = () => {
             if (this.providerAccessViewToken === token) this.providerAccessViewToken += 1;
             modal.classList.remove('active');
@@ -3211,24 +3211,24 @@ class SourceManager {
     providerAccessErrorMessage(error) {
         const code = String(error?.code || error?.payload?.code || '').toUpperCase();
         const messages = {
-            FEATURE_DISABLED: 'Provider access management is not available yet.',
-            REVISION_MISMATCH: 'These details changed on another device. Reload and try again.',
-            SOURCE_REVISION_MISMATCH: 'The service changed on another device. Reload and try again.',
-            TRANSITION_REVISION_MISMATCH: 'This operation already moved forward. Reload its status.',
-            PROVIDER_CHECK_TEMPORARY_FAILURE: 'The provider could not be checked right now. Your current catalog was not changed.',
-            CANDIDATE_CREDENTIALS_REJECTED: 'The provider rejected these login details.',
-            DIFFERENT_CATALOG_REQUIRES_REPLACEMENT: 'These details belong to a different catalog. Use the replacement path.',
-            INVALID_TRANSITION_STATE: 'This operation is no longer available in its current state.'
+            FEATURE_DISABLED: (globalThis.NorvaI18n?.t("ui_web_eff0d1d6617f", { defaultValue: "Provider access management is not available yet." }) ?? 'Provider access management is not available yet.'),
+            REVISION_MISMATCH: (globalThis.NorvaI18n?.t("ui_web_f8255a4f7c69", { defaultValue: "These details changed on another device. Reload and try again." }) ?? 'These details changed on another device. Reload and try again.'),
+            SOURCE_REVISION_MISMATCH: (globalThis.NorvaI18n?.t("ui_web_321a0267689b", { defaultValue: "The service changed on another device. Reload and try again." }) ?? 'The service changed on another device. Reload and try again.'),
+            TRANSITION_REVISION_MISMATCH: (globalThis.NorvaI18n?.t("ui_web_a93037dfd72c", { defaultValue: "This operation already moved forward. Reload its status." }) ?? 'This operation already moved forward. Reload its status.'),
+            PROVIDER_CHECK_TEMPORARY_FAILURE: (globalThis.NorvaI18n?.t("ui_web_d90524a93411", { defaultValue: "The provider could not be checked right now. Your current catalog was not changed." }) ?? 'The provider could not be checked right now. Your current catalog was not changed.'),
+            CANDIDATE_CREDENTIALS_REJECTED: (globalThis.NorvaI18n?.t("ui_web_8f14a0dc8210", { defaultValue: "The provider rejected these login details." }) ?? 'The provider rejected these login details.'),
+            DIFFERENT_CATALOG_REQUIRES_REPLACEMENT: (globalThis.NorvaI18n?.t("ui_web_a71858eb9313", { defaultValue: "These details belong to a different catalog. Use the replacement path." }) ?? 'These details belong to a different catalog. Use the replacement path.'),
+            INVALID_TRANSITION_STATE: (globalThis.NorvaI18n?.t("ui_web_29c162375c96", { defaultValue: "This operation is no longer available in its current state." }) ?? 'This operation is no longer available in its current state.')
         };
-        return messages[code] || 'Norva could not complete this provider access operation safely. Try again.';
+        return messages[code] || (globalThis.NorvaI18n?.t("ui_web_c1068fab3ea9", { defaultValue: "Norva could not complete this provider access operation safely. Try again." }) ?? 'Norva could not complete this provider access operation safely. Try again.');
     }
 
     showProviderAccessSavedReceipt(access = {}) {
         const expiresOn = String(access.expiresOn || access.provider_access_expires_on || '');
         const formattedEnd = this.formatAccessDate(expiresOn);
         const message = formattedEnd
-            ? `Provider access saved until ${formattedEnd}.`
-            : 'Provider access period saved.';
+            ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_798bf8fad10c", {defaultValue: "Provider access saved until {{p0}}.", p0:(formattedEnd)}) : `Provider access saved until ${formattedEnd}.`)
+            : (globalThis.NorvaI18n?.t("ui_web_c0e93d0aff09", { defaultValue: "Provider access period saved." }) ?? 'Provider access period saved.');
         NorvaModal.toast(message, 'provider-access-success', { duration: 4200 });
     }
 
@@ -3236,12 +3236,12 @@ class SourceManager {
         this.trackProduct('provider_access_opened', {
             journey: 'provider_recovery', step: 'provider_access', state: 'started'
         });
-        const view = this.openProviderAccessModal('Provider access', `
+        const view = this.openProviderAccessModal((globalThis.NorvaI18n?.t("ui_web_d75bbc31a119", { defaultValue: "Provider access" }) ?? 'Provider access'), `
           <div class="provider-access-loading" role="status" aria-live="polite">
             <span class="provider-access-skeleton"></span>
             <span class="provider-access-skeleton provider-access-skeleton-short"></span>
             <span class="provider-access-skeleton"></span>
-            <span class="sr-only">Loading provider access</span>
+            <span class="sr-only" data-i18n="ui_web_54317dfc864b">Loading provider access</span>
           </div>
         `);
         if (!view) return;
@@ -3257,7 +3257,7 @@ class SourceManager {
                 journey: 'provider_recovery', step: 'provider_access', outcome: 'error', failureFamily: this.productFailureFamily(error)
             });
             if (this.providerAccessViewToken !== view.token) return;
-            view.body.innerHTML = `<div class="provider-access-terminal" role="alert"><strong>Provider access unavailable</strong><p>${this.escapeHtml(this.providerAccessErrorMessage(error))}</p><button class="btn btn-secondary" type="button" data-access-retry>Try again</button></div>`;
+            view.body.innerHTML = `<div class="provider-access-terminal" role="alert"><strong data-i18n="ui_web_e6fbeec1a0e6">Provider access unavailable</strong><p>${this.escapeHtml(this.providerAccessErrorMessage(error))}</p><button class="btn btn-secondary" type="button" data-access-retry data-i18n="ui_web_d8b8392e2c54">Try again</button></div>`;
             view.body.querySelector('[data-access-retry]')?.addEventListener('click', () => this.showProviderAccess(id));
         }
     }
@@ -3274,13 +3274,13 @@ class SourceManager {
             ${servicePaused ? `
               <div class="provider-access-service-state" role="note">
                 <span aria-hidden="true"></span>
-                <div><strong>Service paused</strong><p>Recording an access period will not enable this service. Enable it separately when you are ready to sync.</p></div>
+                <div><strong data-i18n="ui_web_9038a49f0b72">Service paused</strong><p data-i18n="ui_web_f646a54a1f2d">Recording an access period will not enable this service. Enable it separately when you are ready to sync.</p></div>
               </div>
             ` : ''}
             <div class="provider-access-overview provider-access-${this.escapeHtml(summary.tone)}">
-              <div><span class="provider-access-eyebrow">Current status</span><strong>${this.escapeHtml(summary.label)}</strong></div>
-              <p>${access.expiresOn ? `Recorded until ${this.escapeHtml(this.formatAccessDate(access.expiresOn))}.` : 'No provider access end date is recorded.'}</p>
-              ${confirmedHidden ? '<p class="provider-access-policy-note">Your catalogue is retained but hidden. A future date starts restoration; only a successful provider check makes it visible again.</p>' : ''}
+              <div><span class="provider-access-eyebrow" data-i18n="ui_web_2f5d50add626">Current status</span><strong>${this.escapeHtml(summary.label)}</strong></div>
+              <p>${access.expiresOn ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_bd9289f25ae3", {defaultValue: "Recorded until {{p0}}.", p0:(this.escapeHtml(this.formatAccessDate(access.expiresOn)))}) : `Recorded until ${this.escapeHtml(this.formatAccessDate(access.expiresOn))}.`) : (globalThis.NorvaI18n?.t("ui_web_715bafe5908e", { defaultValue: "No provider access end date is recorded." }) ?? 'No provider access end date is recorded.')}</p>
+              ${confirmedHidden ? '<p class="provider-access-policy-note" data-i18n="ui_web_4f26e260a5cb">Your catalogue is retained but hidden. A future date starts restoration; only a successful provider check makes it visible again.</p>' : ''}
             </div>
             ${this.getProviderAccessTermsFields({ prefix: 'provider-access-settings', access })}
             <p class="provider-access-feedback" data-access-feedback role="status" aria-live="polite"></p>
@@ -3311,11 +3311,11 @@ class SourceManager {
             }
             if (!terms) {
                 view.close();
-                NorvaModal.toast(access.activeCycle ? 'Your current provider access period was kept.' : 'You can add the provider access period later from Settings.', 'info');
+                NorvaModal.toast(access.activeCycle ? (globalThis.NorvaI18n?.t("ui_web_dc6f2bf5f9eb", { defaultValue: "Your current provider access period was kept." }) ?? 'Your current provider access period was kept.') : (globalThis.NorvaI18n?.t("ui_web_5511d7889635", { defaultValue: "You can add the provider access period later from Settings." }) ?? 'You can add the provider access period later from Settings.'), 'info');
                 return;
             }
             const action = access.activeCycle ? `cycle-update-${access.revision}` : 'cycle-create';
-            setBusy(true, 'Saving provider access…');
+            setBusy(true, (globalThis.NorvaI18n?.t("ui_web_4cd034224ad3", { defaultValue: "Saving provider access…" }) ?? 'Saving provider access…'));
             try {
                 const options = { idempotencyKey: this.providerAccessIdempotency(id, action) };
                 const next = access.activeCycle
@@ -3340,7 +3340,7 @@ class SourceManager {
         });
         view.body.querySelector('[data-access-end]')?.addEventListener('click', async () => {
             const action = `cycle-end-${access.revision}`;
-            setBusy(true, 'Removing the recorded period…');
+            setBusy(true, (globalThis.NorvaI18n?.t("ui_web_c88254e8771e", { defaultValue: "Removing the recorded period…" }) ?? 'Removing the recorded period…'));
             try {
                 const next = await API.providerAccess.endCycle(id, access.activeCycle.cycleId, {
                     idempotencyKey: this.providerAccessIdempotency(id, action),
@@ -3356,20 +3356,20 @@ class SourceManager {
     }
 
     showCredentialCandidate(id, candidate) {
-        const view = this.openProviderAccessModal('Checking new login', '<div class="provider-transition" data-provider-transition></div>');
+        const view = this.openProviderAccessModal((globalThis.NorvaI18n?.t("ui_web_18503529eed0", { defaultValue: "Checking new login" }) ?? 'Checking new login'), '<div class="provider-transition" data-provider-transition></div>');
         if (!view) return;
         this.renderCredentialCandidate(id, candidate, view);
         this.pollCredentialCandidate(id, candidate.candidateId, view);
     }
 
     credentialCandidateCopy(candidate) {
-        if (candidate.state === 'COMPLETED') return ['Login changed', 'The new login is active and the catalogue check completed.'];
-        if (candidate.state === 'FAILED') return ['Login not changed', 'Norva stopped safely. The previous login and catalogue remain authoritative.'];
-        if (candidate.state === 'CANCELLED') return ['Check cancelled', 'The candidate was discarded without changing the active service.'];
-        if (candidate.comparison === 'AMBIGUOUS') return ['Confirmation needed', 'Norva could not safely tell whether these details belong to the current catalogue.'];
-        if (candidate.comparison === 'DIFFERENT_CATALOG') return ['Different catalogue detected', 'The new catalogue must be prepared separately before a switch.'];
-        if (candidate.actions?.canApply) return ['Same catalogue confirmed', 'The new login can be activated with a rollback-safe refresh.'];
-        return ['Checking safely', 'Norva is validating the login and comparing a staged catalogue. The active catalogue is unchanged.'];
+        if (candidate.state === 'COMPLETED') return [(globalThis.NorvaI18n?.t("ui_web_2ef2be52654c", { defaultValue: "Login changed" }) ?? 'Login changed'), 'The new login is active and the catalogue check completed.'];
+        if (candidate.state === 'FAILED') return [(globalThis.NorvaI18n?.t("ui_web_553bc745870d", { defaultValue: "Login not changed" }) ?? 'Login not changed'), (globalThis.NorvaI18n?.t("ui_web_30b9b07053f0", { defaultValue: "Norva stopped safely. The previous login and catalogue remain authoritative." }) ?? 'Norva stopped safely. The previous login and catalogue remain authoritative.')];
+        if (candidate.state === 'CANCELLED') return [(globalThis.NorvaI18n?.t("ui_web_b69d820d4258", { defaultValue: "Check cancelled" }) ?? 'Check cancelled'), 'The candidate was discarded without changing the active service.'];
+        if (candidate.comparison === 'AMBIGUOUS') return [(globalThis.NorvaI18n?.t("ui_web_5cc99ab3b5d1", { defaultValue: "Confirmation needed" }) ?? 'Confirmation needed'), (globalThis.NorvaI18n?.t("ui_web_20b4904a28ec", { defaultValue: "Norva could not safely tell whether these details belong to the current catalogue." }) ?? 'Norva could not safely tell whether these details belong to the current catalogue.')];
+        if (candidate.comparison === 'DIFFERENT_CATALOG') return [(globalThis.NorvaI18n?.t("ui_web_9fe6090c9047", { defaultValue: "Different catalogue detected" }) ?? 'Different catalogue detected'), (globalThis.NorvaI18n?.t("ui_web_3333742d9d8d", { defaultValue: "The new catalogue must be prepared separately before a switch." }) ?? 'The new catalogue must be prepared separately before a switch.')];
+        if (candidate.actions?.canApply) return [(globalThis.NorvaI18n?.t("ui_web_83e6a74c5a6d", { defaultValue: "Same catalogue confirmed" }) ?? 'Same catalogue confirmed'), (globalThis.NorvaI18n?.t("ui_web_df87a457b0af", { defaultValue: "The new login can be activated with a rollback-safe refresh." }) ?? 'The new login can be activated with a rollback-safe refresh.')];
+        return [(globalThis.NorvaI18n?.t("ui_web_48087e37217a", { defaultValue: "Checking safely" }) ?? 'Checking safely'), 'Norva is validating the login and comparing a staged catalogue. The active catalogue is unchanged.'];
     }
 
     renderCredentialCandidate(id, candidate, view) {
@@ -3400,17 +3400,17 @@ class SourceManager {
           </div>
           ${working ? '<div class="provider-access-progress" aria-hidden="true"><span></span></div>' : ''}
           <div class="provider-transition-actions">
-            ${candidate.actions?.canDecide ? '<button class="btn btn-primary" type="button" data-candidate-decision="KEEP_AS_SAME_CATALOG">These details are for the same catalogue</button><button class="btn btn-secondary" type="button" data-candidate-decision="REPLACE_WITH_NEW_CATALOG">This is a different provider or catalogue</button>' : ''}
-            ${candidate.actions?.canApply ? '<button class="btn btn-primary" type="button" data-candidate-apply>Activate new login</button>' : ''}
-            ${candidate.actions?.requiresReplacement ? '<button class="btn btn-primary" type="button" data-candidate-replacement>Prepare replacement catalogue</button>' : ''}
-            ${candidate.actions?.canCancel ? '<button class="btn btn-secondary" type="button" data-candidate-cancel>Cancel safely</button>' : ''}
+            ${candidate.actions?.canDecide ? '<button class="btn btn-primary" type="button" data-candidate-decision="KEEP_AS_SAME_CATALOG" data-i18n="ui_web_7fcd80672db9">These details are for the same catalogue</button><button class="btn btn-secondary" type="button" data-candidate-decision="REPLACE_WITH_NEW_CATALOG" data-i18n="ui_web_18d6b5333700">This is a different provider or catalogue</button>' : ''}
+            ${candidate.actions?.canApply ? '<button class="btn btn-primary" type="button" data-candidate-apply data-i18n="ui_web_d7f6eb470050">Activate new login</button>' : ''}
+            ${candidate.actions?.requiresReplacement ? '<button class="btn btn-primary" type="button" data-candidate-replacement data-i18n="ui_web_c36257b7a79d">Prepare replacement catalogue</button>' : ''}
+            ${candidate.actions?.canCancel ? '<button class="btn btn-secondary" type="button" data-candidate-cancel data-i18n="ui_web_2214c09b85cf">Cancel safely</button>' : ''}
           </div>
           <p class="provider-access-feedback" data-transition-feedback role="status" aria-live="polite"></p>
         `;
         const feedback = root.querySelector('[data-transition-feedback]');
         const mutate = async (action, callback) => {
             root.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-            if (feedback) feedback.textContent = 'Saving this decision…';
+            if (feedback) feedback.textContent = (globalThis.NorvaI18n?.t("ui_web_dd06f3c29e91", { defaultValue: "Saving this decision…" }) ?? 'Saving this decision…');
             try {
                 const next = await callback(this.providerAccessIdempotency(id, action));
                 this.clearProviderAccessIdempotency(id, action);
@@ -3446,7 +3446,7 @@ class SourceManager {
             async (key) => {
                 const replacement = await API.providerAccess.createReplacement(id, {
                     credentialCandidateId: candidate.candidateId,
-                    displayName: 'Replacement TV service'
+                    displayName: (globalThis.NorvaI18n?.t("ui_web_4f47bdc8ed6d", { defaultValue: "Replacement TV service" }) ?? 'Replacement TV service')
                 }, { idempotencyKey: key, ifMatch: `"source-rev-${candidate.sourceRevision}"` });
                 this.showSourceReplacement(id, replacement);
                 return candidate;
@@ -3467,7 +3467,7 @@ class SourceManager {
     }
 
     showSourceReplacement(id, replacement) {
-        const view = this.openProviderAccessModal('Preparing replacement catalogue', '<div class="provider-transition" data-replacement-transition></div>');
+        const view = this.openProviderAccessModal((globalThis.NorvaI18n?.t("ui_web_1b3d2ca37c9d", { defaultValue: "Preparing replacement catalogue" }) ?? 'Preparing replacement catalogue'), '<div class="provider-transition" data-replacement-transition></div>');
         if (!view) return;
         this.renderSourceReplacement(id, replacement, view);
         this.pollSourceReplacement(id, replacement.replacementId, view);
@@ -3481,21 +3481,21 @@ class SourceManager {
         root.innerHTML = `
           <div class="provider-transition-status" role="status" aria-live="polite">
             <span class="provider-transition-step">${this.escapeHtml(replacement.state.replaceAll('_', ' '))}</span>
-            <h3>${replacement.state === 'READY_TO_SWITCH' ? 'Replacement ready' : replacement.state === 'COMPLETED' ? 'Catalogue switched' : terminal ? 'Replacement stopped' : 'Preparing in the background'}</h3>
-            <p>${replacement.state === 'READY_TO_SWITCH' ? 'The staged catalogue passed its checks. The final switch is atomic.' : replacement.state === 'COMPLETED' ? 'The new catalogue is active. Your previous catalogue remains recoverable during the rollback window.' : terminal ? 'The active catalogue was not mixed with the candidate.' : 'Your current catalogue stays active while Norva imports and checks the candidate.'}</p>
+            <h3>${replacement.state === 'READY_TO_SWITCH' ? (globalThis.NorvaI18n?.t("ui_web_42cc79da5a42", { defaultValue: "Replacement ready" }) ?? 'Replacement ready') : replacement.state === 'COMPLETED' ? (globalThis.NorvaI18n?.t("ui_web_250d934fd3f3", { defaultValue: "Catalogue switched" }) ?? 'Catalogue switched') : terminal ? (globalThis.NorvaI18n?.t("ui_web_c9c55fb3ce6d", { defaultValue: "Replacement stopped" }) ?? 'Replacement stopped') : (globalThis.NorvaI18n?.t("ui_web_98f579128ad0", { defaultValue: "Preparing in the background" }) ?? 'Preparing in the background')}</h3>
+            <p>${replacement.state === 'READY_TO_SWITCH' ? (globalThis.NorvaI18n?.t("ui_web_b04e36c9ef0a", { defaultValue: "The staged catalogue passed its checks. The final switch is atomic." }) ?? 'The staged catalogue passed its checks. The final switch is atomic.') : replacement.state === 'COMPLETED' ? (globalThis.NorvaI18n?.t("ui_web_0c52ca82dc7f", { defaultValue: "The new catalogue is active. Your previous catalogue remains recoverable during the rollback window." }) ?? 'The new catalogue is active. Your previous catalogue remains recoverable during the rollback window.') : terminal ? (globalThis.NorvaI18n?.t("ui_web_ed1b6bd21aed", { defaultValue: "The active catalogue was not mixed with the candidate." }) ?? 'The active catalogue was not mixed with the candidate.') : (globalThis.NorvaI18n?.t("ui_web_f57d2d017965", { defaultValue: "Your current catalogue stays active while Norva imports and checks the candidate." }) ?? 'Your current catalogue stays active while Norva imports and checks the candidate.')}</p>
           </div>
           ${!terminal && replacement.state !== 'READY_TO_SWITCH' ? '<div class="provider-access-progress" aria-hidden="true"><span></span></div>' : ''}
           <div class="provider-transition-actions">
-            ${replacement.actions?.canPromote ? '<button class="btn btn-primary" type="button" data-replacement-promote>Switch catalogues</button>' : ''}
-            ${replacement.actions?.canCancel ? '<button class="btn btn-secondary" type="button" data-replacement-cancel>Cancel safely</button>' : ''}
-            ${replacement.actions?.canRollback ? '<button class="btn btn-secondary" type="button" data-replacement-rollback>Restore previous catalogue</button>' : ''}
+            ${replacement.actions?.canPromote ? '<button class="btn btn-primary" type="button" data-replacement-promote data-i18n="ui_web_1ab25d386c45">Switch catalogues</button>' : ''}
+            ${replacement.actions?.canCancel ? '<button class="btn btn-secondary" type="button" data-replacement-cancel data-i18n="ui_web_2214c09b85cf">Cancel safely</button>' : ''}
+            ${replacement.actions?.canRollback ? '<button class="btn btn-secondary" type="button" data-replacement-rollback data-i18n="ui_web_cb5d189bf9a2">Restore previous catalogue</button>' : ''}
           </div>
           <p class="provider-access-feedback" data-transition-feedback role="status" aria-live="polite"></p>
         `;
         const run = async (action, callback) => {
             root.querySelectorAll('button').forEach((button) => { button.disabled = true; });
             const feedback = root.querySelector('[data-transition-feedback]');
-            if (feedback) feedback.textContent = 'Committing the durable transition…';
+            if (feedback) feedback.textContent = (globalThis.NorvaI18n?.t("ui_web_0849a15c5b46", { defaultValue: "Committing the durable transition…" }) ?? 'Committing the durable transition…');
             try {
                 const next = await callback(this.providerAccessIdempotency(id, action));
                 this.clearProviderAccessIdempotency(id, action);
@@ -3556,8 +3556,8 @@ class SourceManager {
      */
     async deleteSource(id) {
         const ok = await NorvaModal.confirm(
-            'This source and the channels, movies and series it added will be removed from Norva. You can add it again later.',
-            { title: 'Remove source?', confirmLabel: 'Remove', danger: true }
+            (globalThis.NorvaI18n?.t("ui_web_dace7fc8cd5a", { defaultValue: "This source and the channels, movies and series it added will be removed from Norva. You can add it again later." }) ?? 'This source and the channels, movies and series it added will be removed from Norva. You can add it again later.'),
+            { title: (globalThis.NorvaI18n?.t("ui_web_3176d2707ffd", { defaultValue: "Remove source?" }) ?? 'Remove source?'), confirmLabel: (globalThis.NorvaI18n?.t("ui_web_c3812fc4acb8", { defaultValue: "Remove" }) ?? 'Remove'), danger: true }
         );
         if (!ok) return;
 
@@ -3566,13 +3566,13 @@ class SourceManager {
             await API.sources.delete(id);
         } catch (err) {
             console.warn('[SourceManager] Source removal failed before commit:', err);
-            NorvaModal.toast('Could not remove this source. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_472607561c79", { defaultValue: "Could not remove this source. Try again." }) ?? 'Could not remove this source. Try again.'), 'error');
             return;
         }
 
         // The delete is already committed. UI refresh failures must never invite
         // the user to repeat an irreversible operation or imply that it failed.
-        NorvaModal.toast('Source removed from Norva.', 'success');
+        NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_1e754155f880", { defaultValue: "Source removed from Norva." }) ?? 'Source removed from Norva.'), 'success');
         try {
             await this.loadSources();
             this.notifySourceHealthChanged();
@@ -3596,8 +3596,8 @@ class SourceManager {
         const sourceName = sourceItem?.querySelector('.source-name')?.textContent?.trim() || 'this service';
         if (currentlyEnabled) {
             const confirmed = await NorvaModal.confirm(
-                `Disable ${sourceName}? Its catalog will be hidden without being deleted, and you can enable it again later.`,
-                { title: 'Disable service?', confirmLabel: 'Disable' }
+                (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_d464e1d02982", {defaultValue: "Disable {{p0}}? Its catalog will be hidden without being deleted, and you can enable it again later.", p0:(sourceName)}) : `Disable ${sourceName}? Its catalog will be hidden without being deleted, and you can enable it again later.`),
+                { title: (globalThis.NorvaI18n?.t("ui_web_f7ed092f5412", { defaultValue: "Disable service?" }) ?? 'Disable service?'), confirmLabel: (globalThis.NorvaI18n?.t("ui_web_b7e3e4aa4257", { defaultValue: "Disable" }) ?? 'Disable') }
             );
             if (!confirmed) return;
         }
@@ -3607,14 +3607,14 @@ class SourceManager {
             await API.sources.toggle(id, !currentlyEnabled);
         } catch (err) {
             console.warn('[SourceManager] Source toggle failed before commit:', err);
-            NorvaModal.toast('Could not change this source right now. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_a05864cd9bc0", { defaultValue: "Could not change this source right now. Try again." }) ?? 'Could not change this source right now. Try again.'), 'error');
             return;
         }
 
         // A successful toggle is authoritative even if the subsequent card
         // refresh is interrupted. Do not tell the user to retry a committed CAS.
         NorvaModal.toast(
-            currentlyEnabled ? 'Service disabled. Its catalog is still saved.' : 'Service enabled.',
+            currentlyEnabled ? (globalThis.NorvaI18n?.t("ui_web_e3e05475ced4", { defaultValue: "Service disabled. Its catalog is still saved." }) ?? 'Service disabled. Its catalog is still saved.') : (globalThis.NorvaI18n?.t("ui_web_d671c586cd10", { defaultValue: "Service enabled." }) ?? 'Service enabled.'),
             'success'
         );
         try {
@@ -3635,11 +3635,11 @@ class SourceManager {
         try {
             if (button) {
                 button.disabled = true;
-                button.textContent = 'Checking…';
+                button.textContent = (globalThis.NorvaI18n?.t("ui_web_ec963ffc911b", { defaultValue: "Checking…" }) ?? 'Checking…');
             }
             const result = await API.sources.test(id);
             if (result.success) {
-                NorvaModal.toast('Connection successful!', 'success');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_04a6bbf1d545", { defaultValue: "Connection successful!" }) ?? 'Connection successful!'), 'success');
             } else {
                 NorvaModal.toast(this.sourceConnectionTestMessage(result), 'error');
             }
@@ -3684,11 +3684,11 @@ class SourceManager {
                     const estimate = await API.sources.estimate(id);
                     if (estimate.needsWarning) {
                         const proceed = await this.showWarningModal({
-                            title: 'Large playlist',
-                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
-                            details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
-                            proceedText: 'Proceed Anyway',
-                            cancelText: 'Cancel'
+                            title: (globalThis.NorvaI18n?.t("ui_web_42446a157089", { defaultValue: "Large playlist" }) ?? 'Large playlist'),
+                            message: `<norva-i18n data-i18n="ui_web_59734aa5ff14">This playlist contains </norva-i18n><strong>${estimate.count.toLocaleString(globalThis.NorvaI18n?.language)}</strong><norva-i18n data-i18n="ui_web_4b308a27b878"> channels.</norva-i18n>`,
+                            details: `<norva-i18n data-i18n="ui_web_490bc562f9e5">Syncing may take several minutes and app performance may be impacted with large playlists.</norva-i18n><br><br><norva-i18n data-i18n="ui_web_b236a36d240d">Consider using a filtered M3U from your provider to include only channels you actually watch.</norva-i18n>`,
+                            proceedText: (globalThis.NorvaI18n?.t("ui_web_bbf1bbdb40df", { defaultValue: "Proceed Anyway" }) ?? 'Proceed Anyway'),
+                            cancelText: (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel')
                         });
                         if (!proceed) {
                             refreshButtons.forEach(button => { button.disabled = false; });
@@ -3784,19 +3784,19 @@ class SourceManager {
                 if (window.app?.epgGuide) {
                     await window.app.epgGuide.loadEpg(true);
                 }
-                NorvaModal.toast(isHardRefresh ? 'EPG data hard refreshed!' : 'EPG data synced & refreshed!', 'success');
+                NorvaModal.toast(isHardRefresh ? (globalThis.NorvaI18n?.t("ui_web_f41ca7307e71", { defaultValue: "EPG data hard refreshed!" }) ?? 'EPG data hard refreshed!') : (globalThis.NorvaI18n?.t("ui_web_145d1a48c6ea", { defaultValue: "EPG data synced & refreshed!" }) ?? 'EPG data synced & refreshed!'), 'success');
             } else if (type === 'xtream') {
                 // Re-fetch xtream data by reloading channels
                 if (window.app?.channelList) {
                     await window.app.channelList.loadChannels();
                 }
-                NorvaModal.toast(isHardRefresh ? 'Xtream data hard refreshed!' : 'Xtream data synced & refreshed!', 'success');
+                NorvaModal.toast(isHardRefresh ? (globalThis.NorvaI18n?.t("ui_web_b5197afe5cfa", { defaultValue: "Xtream data hard refreshed!" }) ?? 'Xtream data hard refreshed!') : (globalThis.NorvaI18n?.t("ui_web_7e97e0912edb", { defaultValue: "Xtream data synced & refreshed!" }) ?? 'Xtream data synced & refreshed!'), 'success');
             } else if (type === 'm3u') {
                 // Re-fetch M3U data by reloading channels
                 if (window.app?.channelList) {
                     await window.app.channelList.loadChannels();
                 }
-                NorvaModal.toast(isHardRefresh ? 'M3U playlist hard refreshed!' : 'M3U playlist synced & refreshed!', 'success');
+                NorvaModal.toast(isHardRefresh ? (globalThis.NorvaI18n?.t("ui_web_e9b765338eb0", { defaultValue: "M3U playlist hard refreshed!" }) ?? 'M3U playlist hard refreshed!') : (globalThis.NorvaI18n?.t("ui_web_1242bbcca7dd", { defaultValue: "M3U playlist synced & refreshed!" }) ?? 'M3U playlist synced & refreshed!'), 'success');
             }
 
             if (this.contentSourceSelect?.value === String(id)) {
@@ -3897,8 +3897,8 @@ class SourceManager {
     setContentSearchPlaceholder(type) {
         const input = document.getElementById('content-search');
         if (!input) return;
-        input.placeholder = type === 'movies' ? 'Search movies…'
-            : type === 'series' ? 'Search shows…' : 'Search channels…';
+        input.placeholder = type === 'movies' ? (globalThis.NorvaI18n?.t("ui_web_09288a3526c6", { defaultValue: "Search movies…" }) ?? 'Search movies…')
+            : type === 'series' ? (globalThis.NorvaI18n?.t("ui_web_3372deb57849", { defaultValue: "Search shows…" }) ?? 'Search shows…') : (globalThis.NorvaI18n?.t("ui_web_951a34ca584e", { defaultValue: "Search channels…" }) ?? 'Search channels…');
     }
 
     /**
@@ -3967,7 +3967,7 @@ class SourceManager {
     setProviderModeLabel(mode) {
         const select = document.getElementById('content-source-select');
         const first = select && select.options && select.options[0];
-        if (first && first.value === '') first.textContent = 'All providers';
+        if (first && first.value === '') first.textContent = (globalThis.NorvaI18n?.t("ui_web_20e56db7dfc7", { defaultValue: "All providers" }) ?? 'All providers');
     }
 
     // --- Catalogue genre view (movies / series) ---
@@ -3976,21 +3976,21 @@ class SourceManager {
         const sourceId = (this.contentSourceSelect && this.contentSourceSelect.value) || '';
         this.treeData = { type: itemType + '-genres', itemType, genreView: true, sourceId };
         this.contentTree.innerHTML = '<div class="genre-loading">'
-            + '<span class="genre-spinner" aria-hidden="true"></span>Loading genres…</div>';
+            + '<span class="genre-spinner" aria-hidden="true"></span><norva-i18n data-i18n="ui_web_3dda9d10f5de">Loading genres…</norva-i18n></div>';
         try {
             const payload = await API.media.genreSummary({ type: itemType, source: sourceId });
             const genres = (payload && payload.genres) || [];
             this.genreHidden = new Set(payload && payload.hidden ? payload.hidden : []);
             this.genreList = genres;
             if (!genres.length) {
-                this.contentTree.innerHTML = '<div class="screens-empty">No genres detected in your catalogue yet.<br>Add a TV provider and let Norva sync your movies & shows.</div>';
+                this.contentTree.innerHTML = '<div class="screens-empty"><norva-i18n data-i18n="ui_web_f3e9187d58f0">No genres detected in your catalogue yet.</norva-i18n><br><norva-i18n data-i18n="ui_web_8cb4d922fbc8">Add a TV provider and let Norva sync your movies & shows.</norva-i18n></div>';
                 return;
             }
             this.renderGenreView(genres);
         } catch (e) {
             // Keep one concise breadcrumb so a future failure is never silent.
             console.error('[ManageContent] loadGenreView failed:', e?.message || e, e);
-            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Unable to load genres</p>';
+            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);" data-i18n="ui_web_87b3dd936e13">Unable to load genres</p>';
         }
     }
 
@@ -4002,7 +4002,7 @@ class SourceManager {
             return `<button type="button" class="genre-card ${on ? 'is-on' : 'is-off'}" data-bucket="${this.escapeHtml(g.bucket)}" role="switch" aria-checked="${on ? 'true' : 'false'}" title="${this.escapeHtml(g.label)}">
                 <span class="genre-card-text">
                     <span class="genre-card-name">${this.escapeHtml(g.label)}</span>
-                    <span class="genre-card-count">${count.toLocaleString()} ${unit}</span>
+                    <span class="genre-card-count">${count.toLocaleString(globalThis.NorvaI18n?.language)} ${unit}</span>
                 </span>
                 <span class="genre-switch" aria-hidden="true"><span class="genre-switch-knob"></span></span>
             </button>`;
@@ -4019,7 +4019,7 @@ class SourceManager {
     genreSummaryText(genres) {
         const list = genres || this.genreList || [];
         const shown = list.filter((g) => !this.genreHidden?.has(g.bucket)).length;
-        return `<strong>${shown}</strong> of ${list.length} genres shown in Norva`;
+        return `<strong>${shown}</strong><norva-i18n data-i18n="ui_web_492cfe0dfe28" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(list.length)}) || "{}")}"> of ${list.length} genres shown in Norva</norva-i18n>`;
     }
 
     onGenreToggle(card) {
@@ -4052,13 +4052,13 @@ class SourceManager {
         const status = document.getElementById('content-legend');
         try {
             const id = await this.getEditProfileId();
-            if (!id) { this.toast('No profile to save to', true); return; }
+            if (!id) { this.toast((globalThis.NorvaI18n?.t("ui_web_3205390ae662", { defaultValue: "No profile to save to" }) ?? 'No profile to save to'), true); return; }
             await window.NorvaCloud.profiles.update(id, { hiddenGenres: [...this.genreHidden] });
             try { API.media.clearRailCache?.(); } catch (_) { /* noop */ }
-            this.toast('Saved');
+            this.toast((globalThis.NorvaI18n?.t("ui_web_b5c120b316c2", { defaultValue: "Saved" }) ?? 'Saved'));
         } catch (e) {
             console.warn('[SourceManager] Profile genre preferences could not be saved:', e);
-            this.toast('Could not save these preferences. Try again.', true);
+            this.toast((globalThis.NorvaI18n?.t("ui_web_78986e369e9f", { defaultValue: "Could not save these preferences. Try again." }) ?? 'Could not save these preferences. Try again.'), true);
         }
     }
 
@@ -4077,7 +4077,7 @@ class SourceManager {
             // jargon a mass-market user neither knows nor needs to see here.
             const current = select.value;
             // Blank option = "All providers" (the default in every view now).
-            select.innerHTML = '<option value="">All providers</option>'
+            select.innerHTML = '<option value="" data-i18n="ui_web_20e56db7dfc7">All providers</option>'
                 + providers.map(source =>
                     `<option value="${source.id}">${this.escapeHtml(source.name)}</option>`).join('');
             // Preserve the current selection across reloads when still present.
@@ -4117,16 +4117,16 @@ class SourceManager {
             tree.innerHTML = `
                 <div style="text-align:center;padding:44px 20px;max-width:440px;margin:0 auto">
                     <div style="font-size:36px;margin-bottom:10px">📺</div>
-                    <p style="font-weight:700;color:#f1f5fb;margin:0 0 6px;font-size:16px">No provider added yet</p>
-                    <p class="hint" style="margin:0 0 18px">Add your TV provider to choose which channels, movies and shows appear in Norva.</p>
-                    <button class="btn btn-primary" id="content-add-provider" type="button">Add a provider</button>
+                    <p style="font-weight:700;color:#f1f5fb;margin:0 0 6px;font-size:16px" data-i18n="ui_web_02cad12301e3">No provider added yet</p>
+                    <p class="hint" style="margin:0 0 18px" data-i18n="ui_web_9f7bf8149456">Add your TV provider to choose which channels, movies and shows appear in Norva.</p>
+                    <button class="btn btn-primary" id="content-add-provider" type="button" data-i18n="ui_web_f03153fce33d">Add a provider</button>
                 </div>`;
             document.getElementById('content-add-provider')?.addEventListener('click', () => {
                 document.querySelector('.tabs .tab[data-tab="sources"]')?.click();
             });
         } else if (tree.querySelector('#content-add-provider')) {
             // A provider was just added — clear the empty state back to the prompt.
-            tree.innerHTML = '<p class="hint">Choose a provider above to manage its content.</p>';
+            tree.innerHTML = '<p class="hint" data-i18n="ui_web_3393b2772b1e">Choose a provider above to manage its content.</p>';
         }
     }
 
@@ -4152,7 +4152,7 @@ class SourceManager {
             providers = (sources || []).filter(s => s.type === 'xtream' || s.type === 'm3u');
         } catch (_) { /* fall through to empty state */ }
         if (!providers.length) {
-            this.contentTree.innerHTML = '<p class="hint">No providers yet. Add a TV provider to manage its channels.</p>';
+            this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_e94148aafe6d">No providers yet. Add a TV provider to manage its channels.</p>';
             return;
         }
         return this.loadChannels(providers.map(p => String(p.id)));
@@ -4163,7 +4163,7 @@ class SourceManager {
     // provider; the visibility set is keyed via vkey() to stay collision-safe.
     async loadChannels(sourceIds) {
         const ids = (sourceIds || []).filter(Boolean).map(String);
-        this.contentTree.innerHTML = '<div class="genre-loading"><span class="genre-spinner" aria-hidden="true"></span>Loading channels…</div>';
+        this.contentTree.innerHTML = '<div class="genre-loading"><span class="genre-spinner" aria-hidden="true"></span><norva-i18n data-i18n="ui_web_b09d106b3f77">Loading channels…</norva-i18n></div>';
         this.treeData = { type: 'channels', sourceId: ids.length === 1 ? ids[0] : '', multi: ids.length !== 1, sourceIds: ids, groups: [] };
         this.expandedGroups.clear();
         this.hiddenSet = new Set();
@@ -4223,13 +4223,13 @@ class SourceManager {
             this.originalHiddenSet = new Set(this.hiddenSet);
 
             if (!allGroups.length) {
-                this.contentTree.innerHTML = '<div class="screens-empty">No channels found for this selection.</div>';
+                this.contentTree.innerHTML = '<div class="screens-empty" data-i18n="ui_web_c6ff7065dc54">No channels found for this selection.</div>';
                 return;
             }
             this.renderTree();
         } catch (err) {
             console.error('Error loading channels:', err);
-            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Error loading content</p>';
+            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);" data-i18n="ui_web_c48821cfb29b">Error loading content</p>';
         }
     }
 
@@ -4278,7 +4278,7 @@ class SourceManager {
         const groups = this.getFilteredGroups();
 
         if (!groups.length) {
-            const msg = this.searchQuery ? 'No matches found' : 'No content found';
+            const msg = this.searchQuery ? (globalThis.NorvaI18n?.t("ui_web_4b4d7ac22cee", { defaultValue: "No matches found" }) ?? 'No matches found') : (globalThis.NorvaI18n?.t("ui_web_7e47bdc2f321", { defaultValue: "No content found" }) ?? 'No content found');
             this.contentTree.innerHTML = `<p class="hint">${msg}</p>`;
             this.updateContentDirtyState();
             return;
@@ -4459,21 +4459,21 @@ class SourceManager {
     }
 
     async loadMovieCategoriesTree(sourceId) {
-        this.contentTree.innerHTML = '<p class="hint">Loading movie categories...</p>';
+        this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_e787ffcd10f5">Loading movie categories...</p>';
         this.treeData = { type: 'movies', sourceId, groups: [] };
 
         try {
             const source = await API.sources.getById(sourceId);
 
             if (source.type !== 'xtream') {
-                this.contentTree.innerHTML = '<p class="hint">Movie categories are only available for Xtream sources</p>';
+                this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_640ccd7657c6">Movie categories are only available for Xtream sources</p>';
                 return;
             }
 
             const categories = await API.proxy.xtream.vodCategories(sourceId, { includeHidden: true });
 
             if (!categories || categories.length === 0) {
-                this.contentTree.innerHTML = '<p class="hint">No movie categories found</p>';
+                this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_10b6dc369d06">No movie categories found</p>';
                 return;
             }
 
@@ -4499,7 +4499,7 @@ class SourceManager {
 
         } catch (err) {
             console.error('Error loading movie categories:', err);
-            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Error loading movie categories</p>';
+            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);" data-i18n="ui_web_65e9ccc4f815">Error loading movie categories</p>';
         }
     }
 
@@ -4507,21 +4507,21 @@ class SourceManager {
      * Load series categories tree for a source
      */
     async loadSeriesCategoriesTree(sourceId) {
-        this.contentTree.innerHTML = '<p class="hint">Loading series categories...</p>';
+        this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_4e4f31d41d37">Loading series categories...</p>';
         this.treeData = { type: 'series', sourceId, groups: [] };
 
         try {
             const source = await API.sources.getById(sourceId);
 
             if (source.type !== 'xtream') {
-                this.contentTree.innerHTML = '<p class="hint">Series categories are only available for Xtream sources</p>';
+                this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_af101add566f">Series categories are only available for Xtream sources</p>';
                 return;
             }
 
             const categories = await API.proxy.xtream.seriesCategories(sourceId, { includeHidden: true });
 
             if (!categories || categories.length === 0) {
-                this.contentTree.innerHTML = '<p class="hint">No series categories found</p>';
+                this.contentTree.innerHTML = '<p class="hint" data-i18n="ui_web_296ba31e846c">No series categories found</p>';
                 return;
             }
 
@@ -4536,7 +4536,7 @@ class SourceManager {
 
         } catch (err) {
             console.error('Error loading series categories:', err);
-            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Error loading series categories</p>';
+            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);" data-i18n="ui_web_0f8d9a51dc7e">Error loading series categories</p>';
         }
     }
 
@@ -4674,7 +4674,7 @@ class SourceManager {
         if (hideAllBtn) hideAllBtn.disabled = true;
         if (saveBtn) {
             saveBtn.disabled = true;
-            saveBtn.textContent = visible ? '⏳ Showing all...' : '⏳ Hiding all...';
+            saveBtn.textContent = visible ? (globalThis.NorvaI18n?.t("ui_web_a9a368a2ecc2", { defaultValue: "⏳ Showing all..." }) ?? '⏳ Showing all...') : (globalThis.NorvaI18n?.t("ui_web_3bf659ede15c", { defaultValue: "⏳ Hiding all..." }) ?? '⏳ Hiding all...');
         }
 
         try {
@@ -4717,21 +4717,21 @@ class SourceManager {
 
             // Re-render to reflect changes
             this.renderTree();
-            this.toast(visible ? 'All items shown' : 'All items hidden');
+            this.toast(visible ? (globalThis.NorvaI18n?.t("ui_web_1293f439333d", { defaultValue: "All items shown" }) ?? 'All items shown') : (globalThis.NorvaI18n?.t("ui_web_9ecf21884a38", { defaultValue: "All items hidden" }) ?? 'All items hidden'));
 
             if (saveBtn) {
-                saveBtn.textContent = '✓ Done!';
+                saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_22bf1a846e1f", { defaultValue: "✓ Done!" }) ?? '✓ Done!');
                 setTimeout(() => {
-                    saveBtn.textContent = '💾 Save changes';
+                    saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_132ce9bcc7db", { defaultValue: "💾 Save changes" }) ?? '💾 Save changes');
                     saveBtn.disabled = false;
                 }, 1500);
             }
 
         } catch (err) {
             console.error('Error setting all visibility:', err);
-            NorvaModal.toast('Could not update visibility. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_47b1006e5360", { defaultValue: "Could not update visibility. Try again." }) ?? 'Could not update visibility. Try again.'), 'error');
             if (saveBtn) {
-                saveBtn.textContent = '💾 Save changes';
+                saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_132ce9bcc7db", { defaultValue: "💾 Save changes" }) ?? '💾 Save changes');
                 saveBtn.disabled = false;
             }
         } finally {
@@ -4746,14 +4746,14 @@ class SourceManager {
     async saveContentChanges() {
         if (this.treeData?.genreView) return; // genre view auto-saves on toggle
         if (!this.treeData) {
-            NorvaModal.toast('No content loaded to save', 'info');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_8e98bf4c8df3", { defaultValue: "No content loaded to save" }) ?? 'No content loaded to save'), 'info');
             return;
         }
 
         const saveBtn = document.getElementById('content-save');
         if (saveBtn) {
             saveBtn.disabled = true;
-            saveBtn.textContent = '⏳ Saving...';
+            saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_bf2921891ead", { defaultValue: "⏳ Saving..." }) ?? '⏳ Saving...');
         }
 
         try {
@@ -4813,9 +4813,9 @@ class SourceManager {
             // Check if there are any changes
             if (itemsToShow.length === 0 && itemsToHide.length === 0) {
                 if (saveBtn) {
-                    saveBtn.textContent = 'No changes';
+                    saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_c699aa00b26d", { defaultValue: "No changes" }) ?? 'No changes');
                     setTimeout(() => {
-                        saveBtn.textContent = '💾 Save changes';
+                        saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_132ce9bcc7db", { defaultValue: "💾 Save changes" }) ?? '💾 Save changes');
                         saveBtn.disabled = false;
                     }, 1500);
                 }
@@ -4886,20 +4886,20 @@ class SourceManager {
                 console.warn('[SourceManager] Channel list sync failed:', e);
             }
 
-            this.toast('Changes saved');
+            this.toast((globalThis.NorvaI18n?.t("ui_web_16bf144aa29f", { defaultValue: "Changes saved" }) ?? 'Changes saved'));
             if (saveBtn) {
-                saveBtn.textContent = '✓ Saved!';
+                saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_9a81dbfd6079", { defaultValue: "✓ Saved!" }) ?? '✓ Saved!');
                 setTimeout(() => {
-                    saveBtn.textContent = '💾 Save changes';
+                    saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_132ce9bcc7db", { defaultValue: "💾 Save changes" }) ?? '💾 Save changes');
                     saveBtn.disabled = false;
                 }, 1500);
             }
 
         } catch (err) {
             console.error('Error saving content changes:', err);
-            NorvaModal.toast('Could not save these changes. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_fd09f66cdd65", { defaultValue: "Could not save these changes. Try again." }) ?? 'Could not save these changes. Try again.'), 'error');
             if (saveBtn) {
-                saveBtn.textContent = '💾 Save changes';
+                saveBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_132ce9bcc7db", { defaultValue: "💾 Save changes" }) ?? '💾 Save changes');
                 saveBtn.disabled = false;
             }
         }
@@ -4961,19 +4961,19 @@ class SourceManager {
                 if (isSyncing) {
                     btn.disabled = true;
                     btn.classList.add('syncing');
-                    btn.textContent = 'Syncing…';
-                    btn.title = 'Catalog update in progress';
-                    btn.setAttribute('aria-label', 'Catalog update in progress');
+                    btn.textContent = (globalThis.NorvaI18n?.t("ui_web_8a046cc90ab0", { defaultValue: "Syncing…" }) ?? 'Syncing…');
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_7cbd1c9b753c", { defaultValue: "Catalog update in progress" }) ?? 'Catalog update in progress');
+                    btn.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_7cbd1c9b753c", { defaultValue: "Catalog update in progress" }) ?? 'Catalog update in progress'));
                 } else {
                     btn.disabled = false;
                     btn.classList.remove('syncing');
-                    btn.textContent = 'Sync';
+                    btn.textContent = (globalThis.NorvaI18n?.t("ui_web_8d261a372fde", { defaultValue: "Sync" }) ?? 'Sync');
                     // A transient background failure does not invalidate the
                     // completed catalogue. Keep the action truthful and neutral;
                     // the durable retry/backoff owns recovery.
                     btn.title = hasError
-                        ? 'Retry catalog update'
-                        : (lastSync ? `Last update attempt: ${new Date(lastSync).toLocaleString()}` : 'Sync catalog now');
+                        ? (globalThis.NorvaI18n?.t("ui_web_f98acca01d55", { defaultValue: "Retry catalog update" }) ?? 'Retry catalog update')
+                        : (lastSync ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_34dddff2b420", {defaultValue: "Last update attempt: {{p0}}", p0:(new Date(lastSync).toLocaleString(globalThis.NorvaI18n?.language))}) : `Last update attempt: ${new Date(lastSync).toLocaleString(globalThis.NorvaI18n?.language)}`) : (globalThis.NorvaI18n?.t("ui_web_c31dd5b04ced", { defaultValue: "Sync catalog now" }) ?? 'Sync catalog now'));
                     btn.setAttribute('aria-label', btn.title);
                 }
             }
@@ -4987,12 +4987,12 @@ class SourceManager {
                     hardBtn.removeAttribute('aria-disabled');
                 }
                 hardBtn.title = !managementEnabled
-                    ? 'Enable the service first'
+                    ? (globalThis.NorvaI18n?.t("ui_web_bbed9190867c", { defaultValue: "Enable the service first" }) ?? 'Enable the service first')
                     : isSyncing
-                    ? 'Syncing...'
+                    ? (globalThis.NorvaI18n?.t("ui_web_1567e1dadfa1", { defaultValue: "Syncing..." }) ?? 'Syncing...')
                     : (window.API?.isCloudMode?.() === true
-                        ? 'Rescan and update the complete provider catalog'
-                        : 'Clear and rebuild the local catalog');
+                        ? (globalThis.NorvaI18n?.t("ui_web_951d5598a306", { defaultValue: "Rescan and update the complete provider catalog" }) ?? 'Rescan and update the complete provider catalog')
+                        : (globalThis.NorvaI18n?.t("ui_web_ca10013a2139", { defaultValue: "Clear and rebuild the local catalog" }) ?? 'Clear and rebuild the local catalog'));
             }
 
             // Optional: Update status text/badge in .source-info

@@ -580,40 +580,40 @@
         }
 
         _statusMessage() {
-            if (this.phase === 'loading') return 'Loading your preference…';
-            if (this.phase === 'saving') return 'Saving…';
-            if (this.phase === 'saved') return 'Preference saved.';
+            if (this.phase === 'loading') return (globalThis.NorvaI18n?.t("ui_web_c765a3fba77a", { defaultValue: "Loading your preference…" }) ?? 'Loading your preference…');
+            if (this.phase === 'saving') return (globalThis.NorvaI18n?.t("ui_web_23e39291d613", { defaultValue: "Saving…" }) ?? 'Saving…');
+            if (this.phase === 'saved') return (globalThis.NorvaI18n?.t("ui_web_c250ed40f3a9", { defaultValue: "Preference saved." }) ?? 'Preference saved.');
             if (this.phase === 'offline') {
                 return this._errorStage === 'save'
-                    ? 'You’re offline. Your previous choice was restored.'
-                    : 'You’re offline. Reconnect to load your preference.';
+                    ? (globalThis.NorvaI18n?.t("ui_web_a35fbedc0891", { defaultValue: "You’re offline. Your previous choice was restored." }) ?? 'You’re offline. Your previous choice was restored.')
+                    : (globalThis.NorvaI18n?.t("ui_web_a8e50cd190bd", { defaultValue: "You’re offline. Reconnect to load your preference." }) ?? 'You’re offline. Reconnect to load your preference.');
             }
             if (this.phase === 'error') {
-                if (this._errorStage === 'unavailable') return 'Sign in to save your preference.';
+                if (this._errorStage === 'unavailable') return (globalThis.NorvaI18n?.t("ui_web_d7b57dca1379", { defaultValue: "Sign in to save your preference." }) ?? 'Sign in to save your preference.');
                 if (this._errorStage === 'conflict') {
-                    return 'Your preference changed on another device. Choose again.';
+                    return (globalThis.NorvaI18n?.t("ui_web_6c88a48c1c70", { defaultValue: "Your preference changed on another device. Choose again." }) ?? 'Your preference changed on another device. Choose again.');
                 }
                 if (this._errorStage === 'profile_locked') {
-                    return 'This profile is locked. Switch profiles or update your plan.';
+                    return (globalThis.NorvaI18n?.t("ui_web_dd600f1b1cb1", { defaultValue: "This profile is locked. Switch profiles or update your plan." }) ?? 'This profile is locked. Switch profiles or update your plan.');
                 }
                 if (this._errorStage === 'profile_unavailable') {
-                    return 'This profile is no longer available. Choose another profile.';
+                    return (globalThis.NorvaI18n?.t("ui_web_d07f31251d9f", { defaultValue: "This profile is no longer available. Choose another profile." }) ?? 'This profile is no longer available. Choose another profile.');
                 }
                 if (this._errorStage === 'identity') {
-                    return 'This title changed in your catalog. Reopen it and try again.';
+                    return (globalThis.NorvaI18n?.t("ui_web_5af4b77b5fa4", { defaultValue: "This title changed in your catalog. Reopen it and try again." }) ?? 'This title changed in your catalog. Reopen it and try again.');
                 }
                 return this._errorStage === 'save'
-                    ? 'Couldn’t save. Your previous choice was restored.'
-                    : 'Couldn’t load your preference.';
+                    ? (globalThis.NorvaI18n?.t("ui_web_bc71ce80ca6b", { defaultValue: "Couldn’t save. Your previous choice was restored." }) ?? 'Couldn’t save. Your previous choice was restored.')
+                    : (globalThis.NorvaI18n?.t("ui_web_d816f3b0d966", { defaultValue: "Couldn’t load your preference." }) ?? 'Couldn’t load your preference.');
             }
             return '';
         }
 
         _buttonLabel(rating) {
             if (rating === 1) {
-                return this.desiredRating === 1 ? 'Remove Like' : 'Like this title';
+                return this.desiredRating === 1 ? (globalThis.NorvaI18n?.t("ui_web_daac3bde7c99", { defaultValue: "Remove Like" }) ?? 'Remove Like') : (globalThis.NorvaI18n?.t("ui_web_e96aa02e91fd", { defaultValue: "Like this title" }) ?? 'Like this title');
             }
-            return this.desiredRating === -1 ? 'Remove Not for me' : 'Not for me';
+            return this.desiredRating === -1 ? (globalThis.NorvaI18n?.t("ui_web_c198943da380", { defaultValue: "Remove Not for me" }) ?? 'Remove Not for me') : (globalThis.NorvaI18n?.t("ui_web_d81123b5e9a4", { defaultValue: "Not for me" }) ?? 'Not for me');
         }
 
         render() {

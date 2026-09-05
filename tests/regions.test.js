@@ -84,3 +84,18 @@ test('tmdbRegion + flag helpers resolve', () => {
     assert.strictEqual(R.flag('FR'), '🇫🇷');
     assert.strictEqual(R.flag('UNKNOWN_XYZ'), '🌐');
 });
+
+// UI names must not rewrite the canonical content-region model.
+test('localized country names preserve stored region codes and content languages', () => {
+    const before = globalThis.NorvaI18n;
+    try {
+        globalThis.NorvaI18n = { language: 'fr' };
+        assert.strictEqual(R.byCode('GB').name, 'Royaume-Uni');
+        assert.strictEqual(R.byCode('GB').code, 'GB');
+        assert.strictEqual(R.defaultLanguage('GB'), 'en');
+        assert.strictEqual(R.COUNTRIES.find(r => r.code === 'GB').name, 'United Kingdom');
+        assert.ok(R.search('Royaume').some(r => r.code === 'GB'));
+        globalThis.NorvaI18n.language = 'ar';
+        assert.notStrictEqual(R.byCode('GB').name, 'United Kingdom');
+    } finally { if (before === undefined) delete globalThis.NorvaI18n; else globalThis.NorvaI18n = before; }
+});

@@ -19,81 +19,81 @@
     ]);
 
     const STRATEGIES = Object.freeze([
-        Object.freeze({ id: 'auto', label: 'Auto Norva', note: 'Cache valide, puis fast-path attesté, sinon fallback historique.' }),
-        Object.freeze({ id: 'legacy', label: 'Historique sûr', note: 'Réencodage vidéo et audio, avec le buffer profond actuel.' }),
-        Object.freeze({ id: 'h264-fast', label: 'Remux H.264', note: 'Copie vidéo uniquement avec identité, GOP, timestamps et compatibilité prouvés.' }),
-        Object.freeze({ id: 'audio-only', label: 'Audio seul', note: 'Copie vidéo attestée et conversion AAC de la piste audio.' }),
-        Object.freeze({ id: 'full-cache', label: 'Cache HLS complet', note: 'Lecture privée déjà matérialisée, sans fournisseur ni FFmpeg sur le hit.' })
+        Object.freeze({ id: 'auto', label: (globalThis.NorvaI18n?.t("ui_web_3964d2bd0f74", { defaultValue: "Auto Norva" }) ?? 'Auto Norva'), note: (globalThis.NorvaI18n?.t("ui_web_c1b226f359c5", { defaultValue: "Cache valide, puis fast-path attesté, sinon fallback historique." }) ?? 'Cache valide, puis fast-path attesté, sinon fallback historique.') }),
+        Object.freeze({ id: 'legacy', label: (globalThis.NorvaI18n?.t("ui_web_2cba3231471f", { defaultValue: "Historique sûr" }) ?? 'Historique sûr'), note: (globalThis.NorvaI18n?.t("ui_web_ed8ce12cd3f2", { defaultValue: "Réencodage vidéo et audio, avec le buffer profond actuel." }) ?? 'Réencodage vidéo et audio, avec le buffer profond actuel.') }),
+        Object.freeze({ id: 'h264-fast', label: (globalThis.NorvaI18n?.t("ui_web_e1f6635854fb", { defaultValue: "Remux H.264" }) ?? 'Remux H.264'), note: (globalThis.NorvaI18n?.t("ui_web_c95325e7abd0", { defaultValue: "Copie vidéo uniquement avec identité, GOP, timestamps et compatibilité prouvés." }) ?? 'Copie vidéo uniquement avec identité, GOP, timestamps et compatibilité prouvés.') }),
+        Object.freeze({ id: 'audio-only', label: (globalThis.NorvaI18n?.t("ui_web_b2f52e6880a7", { defaultValue: "Audio seul" }) ?? 'Audio seul'), note: (globalThis.NorvaI18n?.t("ui_web_ce9c2f182469", { defaultValue: "Copie vidéo attestée et conversion AAC de la piste audio." }) ?? 'Copie vidéo attestée et conversion AAC de la piste audio.') }),
+        Object.freeze({ id: 'full-cache', label: (globalThis.NorvaI18n?.t("ui_web_2ef573d54ba3", { defaultValue: "Cache HLS complet" }) ?? 'Cache HLS complet'), note: (globalThis.NorvaI18n?.t("ui_web_c154b7e078d6", { defaultValue: "Lecture privée déjà matérialisée, sans fournisseur ni FFmpeg sur le hit." }) ?? 'Lecture privée déjà matérialisée, sans fournisseur ni FFmpeg sur le hit.') })
     ]);
 
     const FIXTURES = Object.freeze([
         fixture({
-            id: 'h264-closed-aac', short: 'H.264 + AAC', title: 'H.264 High, GOP fermé, AAC-LC',
-            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: 'IDR toutes les 2 s',
-            validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: true, strongEtag: true, trainingRequired: true,
+            id: 'h264-closed-aac', short: 'H.264 + AAC', title: (globalThis.NorvaI18n?.t("ui_web_c6b83e7e2f0d", { defaultValue: "H.264 High, GOP fermé, AAC-LC" }) ?? 'H.264 High, GOP fermé, AAC-LC'),
+            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_8c19bcfc4d66", { defaultValue: "IDR toutes les 2 s" }) ?? 'IDR toutes les 2 s'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: true, strongEtag: true, trainingRequired: true,
             expected: { pipeline: 'video-copy-audio-copy', reason: 'mkv-h264-copy-ready', under10: true }
         }),
         fixture({
-            id: 'h264-closed-ac3', short: 'H.264 + AC-3', title: 'H.264 High, GOP fermé, AC-3',
+            id: 'h264-closed-ac3', short: 'H.264 + AC-3', title: (globalThis.NorvaI18n?.t("ui_web_1eab5748f7df", { defaultValue: "H.264 High, GOP fermé, AC-3" }) ?? 'H.264 High, GOP fermé, AC-3'),
             video: 'H.264 High 4.1 · 360p24', audio: 'AC-3 · 5.1', audioCodec: 'ac3', audioChannels: 6,
-            gop: 'IDR toutes les 2 s', validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: true, strongEtag: true, trainingRequired: true,
+            gop: (globalThis.NorvaI18n?.t("ui_web_8c19bcfc4d66", { defaultValue: "IDR toutes les 2 s" }) ?? 'IDR toutes les 2 s'), validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: true, strongEtag: true, trainingRequired: true,
             expected: { pipeline: 'video-copy-audio-transcode', reason: 'mkv-h264-copy-ready', under10: true }
         }),
         fixture({
-            id: 'h264-open-gop', short: 'Open GOP', title: 'H.264 avec images clés non-IDR',
-            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: 'Open GOP · K ≠ IDR',
-            validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: false, strongEtag: true,
+            id: 'h264-open-gop', short: (globalThis.NorvaI18n?.t("ui_web_7acac0c5dc77", { defaultValue: "Open GOP" }) ?? 'Open GOP'), title: (globalThis.NorvaI18n?.t("ui_web_406417507956", { defaultValue: "H.264 avec images clés non-IDR" }) ?? 'H.264 avec images clés non-IDR'),
+            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_dc34dba6a498", { defaultValue: "Open GOP · K ≠ IDR" }) ?? 'Open GOP · K ≠ IDR'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: false, strongEtag: true,
             expected: { pipeline: 'video-transcode', reason: 'open-gop', under10: true }
         }),
         fixture({
-            id: 'h264-multi-audio', short: 'Multi-audio', title: 'H.264 avec trois pistes audio',
+            id: 'h264-multi-audio', short: (globalThis.NorvaI18n?.t("ui_web_8a471a6524fa", { defaultValue: "Multi-audio" }) ?? 'Multi-audio'), title: (globalThis.NorvaI18n?.t("ui_web_f8c2f046b451", { defaultValue: "H.264 avec trois pistes audio" }) ?? 'H.264 avec trois pistes audio'),
             video: 'H.264 High 4.1 · 360p24', audio: 'AAC + AC-3 + AAC · mono', audioTracks: 3,
-            gop: 'IDR toutes les 2 s', validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: true, strongEtag: true,
+            gop: (globalThis.NorvaI18n?.t("ui_web_8c19bcfc4d66", { defaultValue: "IDR toutes les 2 s" }) ?? 'IDR toutes les 2 s'), validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: true, strongEtag: true,
             expected: { pipeline: 'video-transcode', reason: 'multi-audio', under10: true }
         }),
         fixture({
-            id: 'hevc-eac3-cold', short: 'HEVC froid', title: 'HEVC Main 10 et E-AC-3',
-            video: 'HEVC Main 10 · 720p24', videoCodec: 'hevc', width: 1280, height: 720,
-            audio: 'E-AC-3 · 5.1', audioCodec: 'eac3', audioChannels: 6, gop: 'Variable',
-            validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: false, strongEtag: true,
+            id: 'hevc-eac3-cold', short: (globalThis.NorvaI18n?.t("ui_web_1338de3ec167", { defaultValue: "HEVC froid" }) ?? 'HEVC froid'), title: (globalThis.NorvaI18n?.t("ui_web_190e8d7e41f9", { defaultValue: "HEVC Main 10 et E-AC-3" }) ?? 'HEVC Main 10 et E-AC-3'),
+            video: (globalThis.NorvaI18n?.t("ui_web_ed47bb803d72", { defaultValue: "HEVC Main 10 · 720p24" }) ?? 'HEVC Main 10 · 720p24'), videoCodec: 'hevc', width: 1280, height: 720,
+            audio: 'E-AC-3 · 5.1', audioCodec: 'eac3', audioChannels: 6, gop: (globalThis.NorvaI18n?.t("ui_web_e57e99872603", { defaultValue: "Variable" }) ?? 'Variable'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: false, strongEtag: true,
             expected: { pipeline: 'video-transcode', reason: 'video-codec', under10: true }
         }),
         fixture({
-            id: 'h264-level52', short: 'H.264 extrême', title: 'H.264 Level 5.2, cadence élevée',
+            id: 'h264-level52', short: 'H.264 extrême', title: (globalThis.NorvaI18n?.t("ui_web_338ef9f99a85", { defaultValue: "H.264 Level 5.2, cadence élevée" }) ?? 'H.264 Level 5.2, cadence élevée'),
             video: 'H.264 High 5.2 · 1080p120', width: 1920, height: 1080,
-            fps: 120, level: 5.2, refs: 1, audio: 'AAC-LC · stéréo', gop: 'IDR toutes les 1 s',
-            validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: true, strongEtag: true,
+            fps: 120, level: 5.2, refs: 1, audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_3643e3cb1175", { defaultValue: "IDR toutes les 1 s" }) ?? 'IDR toutes les 1 s'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: true, strongEtag: true,
             expected: { pipeline: 'video-transcode', reason: 'web-compatibility', under10: true }
         }),
         fixture({
-            id: 'h264-bad-timestamps', short: 'Timestamps KO', title: 'H.264 avec discontinuité PTS/DTS',
-            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: 'IDR toutes les 2 s',
-            validator: 'ETag fort stable', subtitles: 'Aucun', closedGop: true, timestampsValid: false, strongEtag: true,
+            id: 'h264-bad-timestamps', short: (globalThis.NorvaI18n?.t("ui_web_58b8e5460046", { defaultValue: "Timestamps KO" }) ?? 'Timestamps KO'), title: (globalThis.NorvaI18n?.t("ui_web_df143dca89ae", { defaultValue: "H.264 avec discontinuité PTS/DTS" }) ?? 'H.264 avec discontinuité PTS/DTS'),
+            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_8c19bcfc4d66", { defaultValue: "IDR toutes les 2 s" }) ?? 'IDR toutes les 2 s'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: true, timestampsValid: false, strongEtag: true,
             expected: { pipeline: 'video-transcode', reason: 'invalid-timestamps', under10: true }
         }),
         fixture({
-            id: 'h264-pgs', short: 'Sous-titres PGS', title: 'H.264 sûr avec sous-titres bitmap',
-            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: 'IDR toutes les 2 s',
-            validator: 'ETag fort stable', subtitles: 'PGS · OCR asynchrone', closedGop: true, strongEtag: true, trainingRequired: true,
+            id: 'h264-pgs', short: (globalThis.NorvaI18n?.t("ui_web_39cb24881044", { defaultValue: "Sous-titres PGS" }) ?? 'Sous-titres PGS'), title: (globalThis.NorvaI18n?.t("ui_web_06f9c37b7dc3", { defaultValue: "H.264 sûr avec sous-titres bitmap" }) ?? 'H.264 sûr avec sous-titres bitmap'),
+            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_8c19bcfc4d66", { defaultValue: "IDR toutes les 2 s" }) ?? 'IDR toutes les 2 s'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_7210ad7362dd", { defaultValue: "ETag fort stable" }) ?? 'ETag fort stable'), subtitles: (globalThis.NorvaI18n?.t("ui_web_40f0c8323fe1", { defaultValue: "PGS · OCR asynchrone" }) ?? 'PGS · OCR asynchrone'), closedGop: true, strongEtag: true, trainingRequired: true,
             expected: { pipeline: 'video-copy-audio-copy', reason: 'mkv-h264-copy-ready', under10: true, warning: 'subtitle-async' }
         }),
         fixture({
-            id: 'h264-no-etag', short: 'Sans ETag fort', title: 'H.264 sûr, identité fournisseur faible',
-            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: 'IDR toutes les 2 s',
-            validator: 'ETag faible + Last-Modified', subtitles: 'Aucun', closedGop: true, strongEtag: false,
+            id: 'h264-no-etag', short: (globalThis.NorvaI18n?.t("ui_web_6cabe08cea51", { defaultValue: "Sans ETag fort" }) ?? 'Sans ETag fort'), title: (globalThis.NorvaI18n?.t("ui_web_5106fd8c0c34", { defaultValue: "H.264 sûr, identité fournisseur faible" }) ?? 'H.264 sûr, identité fournisseur faible'),
+            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_8c19bcfc4d66", { defaultValue: "IDR toutes les 2 s" }) ?? 'IDR toutes les 2 s'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_fb2fade6bb98", { defaultValue: "ETag faible + Last-Modified" }) ?? 'ETag faible + Last-Modified'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), closedGop: true, strongEtag: false,
             expected: { pipeline: 'video-transcode', reason: 'strong-etag-required', under10: true }
         }),
         fixture({
-            id: 'hevc-full-cache', short: 'HEVC en cache', title: 'HEVC préfabriqué en HLS complet',
-            video: 'HEVC Main 10 720p · sortie H.264 cache', videoCodec: 'hevc', width: 1280, height: 720,
-            audio: 'E-AC-3 source · sortie AAC', audioCodec: 'eac3', audioChannels: 6, gop: 'Cache attesté',
-            validator: 'Identité cache valide', subtitles: 'Aucun', cacheHit: true, cacheValid: true,
+            id: 'hevc-full-cache', short: (globalThis.NorvaI18n?.t("ui_web_1fc2a5aeab5f", { defaultValue: "HEVC en cache" }) ?? 'HEVC en cache'), title: (globalThis.NorvaI18n?.t("ui_web_6efb86c06f68", { defaultValue: "HEVC préfabriqué en HLS complet" }) ?? 'HEVC préfabriqué en HLS complet'),
+            video: (globalThis.NorvaI18n?.t("ui_web_3620cf21d4e6", { defaultValue: "HEVC Main 10 720p · sortie H.264 cache" }) ?? 'HEVC Main 10 720p · sortie H.264 cache'), videoCodec: 'hevc', width: 1280, height: 720,
+            audio: (globalThis.NorvaI18n?.t("ui_web_25f94b6b507a", { defaultValue: "E-AC-3 source · sortie AAC" }) ?? 'E-AC-3 source · sortie AAC'), audioCodec: 'eac3', audioChannels: 6, gop: (globalThis.NorvaI18n?.t("ui_web_10fbec399e0e", { defaultValue: "Cache attesté" }) ?? 'Cache attesté'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_28c285b9abe5", { defaultValue: "Identité cache valide" }) ?? 'Identité cache valide'), subtitles: (globalThis.NorvaI18n?.t("ui_web_4679b3b12de0", { defaultValue: "Aucun" }) ?? 'Aucun'), cacheHit: true, cacheValid: true,
             expected: { pipeline: 'cache-hit', reason: 'complete-cache-hit', under10: true }
         }),
         fixture({
-            id: 'provider-458', short: 'HTTP 458', title: 'Compte fournisseur déjà occupé',
-            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: 'Non ouvert',
-            validator: 'Non lu', subtitles: 'Non lu', http458: true,
+            id: 'provider-458', short: 'HTTP 458', title: (globalThis.NorvaI18n?.t("ui_web_467691b0f4ab", { defaultValue: "Compte fournisseur déjà occupé" }) ?? 'Compte fournisseur déjà occupé'),
+            video: 'H.264 High 4.1 · 360p24', audio: 'AAC-LC · stéréo', gop: (globalThis.NorvaI18n?.t("ui_web_67afd925c7db", { defaultValue: "Non ouvert" }) ?? 'Non ouvert'),
+            validator: (globalThis.NorvaI18n?.t("ui_web_98ab209e4fc3", { defaultValue: "Non lu" }) ?? 'Non lu'), subtitles: (globalThis.NorvaI18n?.t("ui_web_98ab209e4fc3", { defaultValue: "Non lu" }) ?? 'Non lu'), http458: true,
             expected: { pipeline: 'terminal-458', reason: 'provider-busy-terminal', under10: false }
         })
     ]);
@@ -258,29 +258,29 @@
 
     function pipelineLabel(value) {
         return ({
-            'cache-hit': 'Cache HLS',
-            'video-copy-audio-copy': 'Copie vidéo + audio',
-            'video-copy-audio-transcode': 'Copie vidéo + audio AAC',
-            'video-transcode': 'Transcodage complet',
-            'terminal-458': 'Arrêt terminal 458'
-        })[value] || 'Indéterminé';
+            'cache-hit': (globalThis.NorvaI18n?.t("ui_web_441832356a7f", { defaultValue: "Cache HLS" }) ?? 'Cache HLS'),
+            'video-copy-audio-copy': (globalThis.NorvaI18n?.t("ui_web_c12f36905d8f", { defaultValue: "Copie vidéo + audio" }) ?? 'Copie vidéo + audio'),
+            'video-copy-audio-transcode': (globalThis.NorvaI18n?.t("ui_web_c652a457406a", { defaultValue: "Copie vidéo + audio AAC" }) ?? 'Copie vidéo + audio AAC'),
+            'video-transcode': (globalThis.NorvaI18n?.t("ui_web_7b0da78519f0", { defaultValue: "Transcodage complet" }) ?? 'Transcodage complet'),
+            'terminal-458': (globalThis.NorvaI18n?.t("ui_web_f2cc84b0eb4c", { defaultValue: "Arrêt terminal 458" }) ?? 'Arrêt terminal 458')
+        })[value] || (globalThis.NorvaI18n?.t("ui_web_27336a867f1a", { defaultValue: "Indéterminé" }) ?? 'Indéterminé');
     }
 
     function reasonLabel(value) {
         return ({
-            'mkv-h264-copy-ready': 'Preuve complète acceptée',
-            'complete-cache-hit': 'Cache complet attesté',
-            'complete-cache-miss': 'Cache absent, fallback sûr',
-            'legacy-safe-fallback': 'Pipeline historique demandé',
-            'container': 'Conteneur non éligible',
-            'video-codec': 'Codec vidéo à convertir',
-            'seek': 'Démarrage hors position zéro',
-            'multi-audio': 'Topologie multi-audio',
-            'web-compatibility': 'Profil Web hors enveloppe',
-            'open-gop': 'GOP non autonome',
-            'invalid-timestamps': 'Timestamps non fiables',
-            'strong-etag-required': 'Identité fichier insuffisante',
-            'provider-busy-terminal': 'Premier HTTP 458 terminal'
+            'mkv-h264-copy-ready': (globalThis.NorvaI18n?.t("ui_web_18981a407b14", { defaultValue: "Preuve complète acceptée" }) ?? 'Preuve complète acceptée'),
+            'complete-cache-hit': (globalThis.NorvaI18n?.t("ui_web_0036ed1cb5b1", { defaultValue: "Cache complet attesté" }) ?? 'Cache complet attesté'),
+            'complete-cache-miss': (globalThis.NorvaI18n?.t("ui_web_3a71ab75b36d", { defaultValue: "Cache absent, fallback sûr" }) ?? 'Cache absent, fallback sûr'),
+            'legacy-safe-fallback': (globalThis.NorvaI18n?.t("ui_web_5f58d972282f", { defaultValue: "Pipeline historique demandé" }) ?? 'Pipeline historique demandé'),
+            'container': (globalThis.NorvaI18n?.t("ui_web_feee4f444f2b", { defaultValue: "Conteneur non éligible" }) ?? 'Conteneur non éligible'),
+            'video-codec': (globalThis.NorvaI18n?.t("ui_web_3659ef84bf94", { defaultValue: "Codec vidéo à convertir" }) ?? 'Codec vidéo à convertir'),
+            'seek': (globalThis.NorvaI18n?.t("ui_web_21d22262cbd4", { defaultValue: "Démarrage hors position zéro" }) ?? 'Démarrage hors position zéro'),
+            'multi-audio': (globalThis.NorvaI18n?.t("ui_web_650ccf6bf0fd", { defaultValue: "Topologie multi-audio" }) ?? 'Topologie multi-audio'),
+            'web-compatibility': (globalThis.NorvaI18n?.t("ui_web_2ec28be0f994", { defaultValue: "Profil Web hors enveloppe" }) ?? 'Profil Web hors enveloppe'),
+            'open-gop': (globalThis.NorvaI18n?.t("ui_web_60ccae147e35", { defaultValue: "GOP non autonome" }) ?? 'GOP non autonome'),
+            'invalid-timestamps': (globalThis.NorvaI18n?.t("ui_web_60a9c2a35af5", { defaultValue: "Timestamps non fiables" }) ?? 'Timestamps non fiables'),
+            'strong-etag-required': (globalThis.NorvaI18n?.t("ui_web_8338ae291423", { defaultValue: "Identité fichier insuffisante" }) ?? 'Identité fichier insuffisante'),
+            'provider-busy-terminal': (globalThis.NorvaI18n?.t("ui_web_0a70089eac86", { defaultValue: "Premier HTTP 458 terminal" }) ?? 'Premier HTTP 458 terminal')
         })[value] || value;
     }
 
@@ -510,48 +510,48 @@
             const blocked = [...this.results.values()].filter((state) => state.status === 'blocked').length;
             const cancelled = [...this.results.values()].filter((state) => state.status === 'cancelled').length;
             const statusText = this.running
-                ? `Campagne en cours · ${completed} validé${completed === 1 ? '' : 's'}`
+                ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3293ff95fd22", {defaultValue: "Campagne en cours · {{p0}} validé{{p1}}", p0:(completed),p1:(completed === 1 ? '' : 's')}) : `Campagne en cours · ${completed} validé${completed === 1 ? '' : 's'}`)
                 : (this.results.size
                     ? `${completed} validé${completed === 1 ? '' : 's'} · ${failed} échec${failed === 1 ? '' : 's'} · ${blocked} bloqué${blocked === 1 ? '' : 's'} · ${cancelled} annulé${cancelled === 1 ? '' : 's'}`
-                    : 'Prêt · aucune lecture lancée');
+                    : (globalThis.NorvaI18n?.t("ui_web_bbbbebd1d211", { defaultValue: "Prêt · aucune lecture lancée" }) ?? 'Prêt · aucune lecture lancée'));
 
             this.root.innerHTML = `<div class="crm-page mkv-lab" aria-busy="${this.running}">
                 <header class="crm-head mkv-lab__head">
                     <div class="crm-head-ic mkv-lab__head-icon"><img src="/img/icons/norva-movies.svg" alt=""></div>
                     <div class="crm-head-tx">
-                        <div class="mkv-lab__eyebrow">QA interne · protocole ${PROTOCOL}</div>
-                        <h1 class="crm-h1" data-lab-heading tabindex="-1">Laboratoire de démarrage MKV</h1>
-                        <p class="crm-sub">Compare le pipeline historique, la copie H.264, la conversion audio et le cache complet sur des cas bornés et reproductibles.</p>
+                        <div class="mkv-lab__eyebrow" data-i18n="ui_web_65b05c15c2ea" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(PROTOCOL)}) || "{}")}">QA interne · protocole ${PROTOCOL}</div>
+                        <h1 class="crm-h1" data-lab-heading tabindex="-1" data-i18n="ui_web_352b26a1b737">Laboratoire de démarrage MKV</h1>
+                        <p class="crm-sub" data-i18n="ui_web_58f27f73e878">Compare le pipeline historique, la copie H.264, la conversion audio et le cache complet sur des cas bornés et reproductibles.</p>
                     </div>
                 </header>
 
-                <section class="mkv-lab__guardrail" aria-label="Garanties de la campagne">
-                    <span>Aucune URL libre</span><span>1 flux fournisseur maximum</span><span>Premier 458 terminal</span><span>Résultats sans identifiant sensible</span>
+                <section class="mkv-lab__guardrail" aria-label="Garanties de la campagne" data-i18n-aria-label="ui_web_8008edf588e1">
+                    <span data-i18n="ui_web_2839e8dad281">Aucune URL libre</span><span data-i18n="ui_web_3c0ef2a380fc">1 flux fournisseur maximum</span><span data-i18n="ui_web_23d214e400f5">Premier 458 terminal</span><span data-i18n="ui_web_2f3d90c5c86e">Résultats sans identifiant sensible</span>
                 </section>
 
-                <section class="mkv-lab__toolbar" aria-label="Contrôles de campagne">
+                <section class="mkv-lab__toolbar" aria-label="Contrôles de campagne" data-i18n-aria-label="ui_web_ee75b3913b75">
                     <fieldset class="mkv-lab__mode" ${this.running ? 'disabled' : ''}>
-                        <legend>Type de test</legend>
-                        <label class="${this.running ? 'is-disabled' : ''}"><input type="radio" name="mkv-lab-mode" data-lab-mode value="contract" ${this.mode === 'contract' ? 'checked' : ''}> Contrat hors ligne</label>
-                        <label class="${this.runtime && !this.running ? '' : 'is-disabled'}"><input type="radio" name="mkv-lab-mode" data-lab-mode value="media" ${this.mode === 'media' ? 'checked' : ''} ${this.runtime ? '' : 'disabled'}> Mesure média</label>
+                        <legend data-i18n="ui_web_0e46ecb9a427">Type de test</legend>
+                        <label class="${this.running ? 'is-disabled' : ''}"><input type="radio" name="mkv-lab-mode" data-lab-mode value="contract" ${this.mode === 'contract' ? 'checked' : ''}><norva-i18n data-i18n="ui_web_37d65ff61847"> Contrat hors ligne</norva-i18n></label>
+                        <label class="${this.runtime && !this.running ? '' : 'is-disabled'}"><input type="radio" name="mkv-lab-mode" data-lab-mode value="media" ${this.mode === 'media' ? 'checked' : ''} ${this.runtime ? '' : 'disabled'}><norva-i18n data-i18n="ui_web_0a4a69ee0dd1"> Mesure média</norva-i18n></label>
                     </fieldset>
                     <div class="mkv-lab__actions">
                         ${this.running
-                            ? '<button type="button" class="mkv-lab__button mkv-lab__button--danger" data-lab-action="cancel">Arrêter la campagne</button>'
-                            : `<button type="button" class="mkv-lab__button mkv-lab__button--secondary" data-lab-action="run-one">Tester ce cas</button>
-                               <button type="button" class="mkv-lab__button mkv-lab__button--primary" data-lab-action="run-suite">Tester les ${FIXTURES.length} cas</button>`}
+                            ? '<button type="button" class="mkv-lab__button mkv-lab__button--danger" data-lab-action="cancel" data-i18n="ui_web_f83ef9140ede">Arrêter la campagne</button>'
+                            : `<button type="button" class="mkv-lab__button mkv-lab__button--secondary" data-lab-action="run-one" data-i18n="ui_web_8e5f7e1bd85c">Tester ce cas</button>
+                               <button type="button" class="mkv-lab__button mkv-lab__button--primary" data-lab-action="run-suite" data-i18n="ui_web_0952c64d9afa" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(FIXTURES.length)}) || "{}")}">Tester les ${FIXTURES.length} cas</button>`}
                     </div>
                     <div class="mkv-lab__status" role="status" aria-live="polite"><span class="mkv-lab__status-dot ${this.running ? 'is-running' : ''}"></span>${esc(statusText)}</div>
                 </section>
 
-                ${!this.runtime ? `<div class="mkv-lab__notice" role="note"><strong>Mesure média verrouillée.</strong> Le runner serveur de fixtures n’est pas installé dans ce build. Le mode actif vérifie le contrat de routage sans ouvrir de vidéo ni de connexion fournisseur.</div>` : ''}
+                ${!this.runtime ? `<div class="mkv-lab__notice" role="note"><strong data-i18n="ui_web_81e8a2dc87d6">Mesure média verrouillée.</strong><norva-i18n data-i18n="ui_web_03b5fd516076"> Le runner serveur de fixtures n’est pas installé dans ce build. Le mode actif vérifie le contrat de routage sans ouvrir de vidéo ni de connexion fournisseur.</norva-i18n></div>` : ''}
 
                 <div class="mkv-lab__workspace">
-                    <aside class="mkv-lab__fixtures" aria-label="Cas de test MKV">
-                        <div class="mkv-lab__section-title"><span>Corpus contrôlé</span><strong>${FIXTURES.length}</strong></div>
+                    <aside class="mkv-lab__fixtures" aria-label="Cas de test MKV" data-i18n-aria-label="ui_web_76f3e0950186">
+                        <div class="mkv-lab__section-title"><span data-i18n="ui_web_367e585e786c">Corpus contrôlé</span><strong>${FIXTURES.length}</strong></div>
                         <div class="mkv-lab__fixture-list" data-lab-scroll="fixtures">${FIXTURES.map((item) => this.fixtureButton(item)).join('')}</div>
                     </aside>
-                    <section class="mkv-lab__bench" aria-label="Banc de stratégies VOD">
+                    <section class="mkv-lab__bench" aria-label="Banc de stratégies VOD" data-i18n-aria-label="ui_web_25395c713e40">
                         ${this.renderSelected(selected, selectedState)}
                     </section>
                 </div>
@@ -613,51 +613,51 @@
                     <td>${esc(reasonLabel(measured.reason))}</td>
                     <td>${measured.targetBufferSeconds === null ? '—' : `${esc(measured.targetBufferSeconds)} s`}</td>
                     <td>${esc(measured.providerGets)}</td>
-                    <td>${measured.expectedUnder10Seconds ? '<strong class="mkv-lab__yes">Oui</strong>' : '<span class="mkv-lab__no">Non garanti</span>'}</td>
+                    <td>${measured.expectedUnder10Seconds ? '<strong class="mkv-lab__yes" data-i18n="ui_web_0a90407639c4">Oui</strong>' : '<span class="mkv-lab__no" data-i18n="ui_web_60b251b0a0be">Non garanti</span>'}</td>
                 </tr>`;
             }).join('');
-            const stateMarkup = state ? `<span class="mkv-lab__run-state is-${esc(state.status)}">${esc(({ queued: 'En attente', running: 'En cours', passed: 'Validé', failed: 'Échec', blocked: 'Bloqué', cancelled: 'Annulé' })[state.status] || state.status)}</span>` : '<span class="mkv-lab__run-state">Non exécuté</span>';
+            const stateMarkup = state ? `<span class="mkv-lab__run-state is-${esc(state.status)}">${esc(({ queued: (globalThis.NorvaI18n?.t("ui_web_2f6c8477e92b", { defaultValue: "En attente" }) ?? 'En attente'), running: (globalThis.NorvaI18n?.t("ui_web_797f5dcd0217", { defaultValue: "En cours" }) ?? 'En cours'), passed: (globalThis.NorvaI18n?.t("ui_web_14d22432eb6d", { defaultValue: "Validé" }) ?? 'Validé'), failed: (globalThis.NorvaI18n?.t("ui_web_fdf3f6d53c9e", { defaultValue: "Échec" }) ?? 'Échec'), blocked: (globalThis.NorvaI18n?.t("ui_web_43645bfc3bda", { defaultValue: "Bloqué" }) ?? 'Bloqué'), cancelled: (globalThis.NorvaI18n?.t("ui_web_58524ce81f34", { defaultValue: "Annulé" }) ?? 'Annulé') })[state.status] || state.status)}</span>` : '<span class="mkv-lab__run-state" data-i18n="ui_web_2b1f05fae2c8">Non exécuté</span>';
             const observed = state?.observed;
             const metric = (label, value) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`;
             const milliseconds = (value) => Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
             const rate = (value) => Number.isFinite(value) ? `${Number(value).toFixed(2)}×` : '—';
-            const runtimeMetrics = observed ? `<section class="mkv-lab__metrics" aria-label="Mesures média réelles">
+            const runtimeMetrics = observed ? `<section class="mkv-lab__metrics" aria-label="Mesures média réelles" data-i18n-aria-label="ui_web_57806821b78c">
                 ${metric('TTFF', milliseconds(observed.ttffMs))}
-                ${metric('Manifest', milliseconds(observed.manifestReadyMs))}
-                ${metric('Premier segment', milliseconds(observed.firstSegmentMs))}
-                ${metric('Débit production', rate(observed.productionRateX))}
-                ${metric('Croissance buffer Web', rate(observed.browserBufferRateX))}
-                ${metric('Rebuffer', `${observed.rebufferCount ?? '—'} · ${milliseconds(observed.rebufferMs)}`)}
+                ${metric((globalThis.NorvaI18n?.t("ui_web_3c99f1f33643", { defaultValue: "Manifest" }) ?? 'Manifest'), milliseconds(observed.manifestReadyMs))}
+                ${metric((globalThis.NorvaI18n?.t("ui_web_5de108bac6f7", { defaultValue: "Premier segment" }) ?? 'Premier segment'), milliseconds(observed.firstSegmentMs))}
+                ${metric((globalThis.NorvaI18n?.t("ui_web_2fe1b110968d", { defaultValue: "Débit production" }) ?? 'Débit production'), rate(observed.productionRateX))}
+                ${metric((globalThis.NorvaI18n?.t("ui_web_e118af8e8a16", { defaultValue: "Croissance buffer Web" }) ?? 'Croissance buffer Web'), rate(observed.browserBufferRateX))}
+                ${metric((globalThis.NorvaI18n?.t("ui_web_dfad502ec48d", { defaultValue: "Rebuffer" }) ?? 'Rebuffer'), `${observed.rebufferCount ?? '—'} · ${milliseconds(observed.rebufferMs)}`)}
                 ${metric('GET / concurrence', `${observed.providerGets ?? '—'} / ${observed.maximumConcurrentProviderGets ?? '—'}`)}
                 ${metric('FFmpeg / analyseur', `${observed.ffmpegSpawns ?? '—'} / ${observed.analyzerSpawns ?? '—'}`)}
                 ${metric('458 / retry', `${observed.http458 ?? '—'} / ${observed.retriesAfter458 ?? '—'}`)}
-                ${metric('Seek · audio · cleanup', `${observed.seekPassed ? 'OK' : '—'} · ${observed.audioPassed ? 'OK' : '—'} · ${observed.cleanupPassed ? 'OK' : 'KO'}`)}
+                ${metric((globalThis.NorvaI18n?.t("ui_web_68b55e18fa78", { defaultValue: "Seek · audio · cleanup" }) ?? 'Seek · audio · cleanup'), `${observed.seekPassed ? 'OK' : '—'} · ${observed.audioPassed ? 'OK' : '—'} · ${observed.cleanupPassed ? 'OK' : 'KO'}`)}
             </section>` : '';
             return `<article class="mkv-lab__case">
                 <div class="mkv-lab__case-head">
-                    <div><div class="mkv-lab__case-kicker">Fixture ${esc(item.id)}</div><h2>${esc(item.title)}</h2></div>
+                    <div><div class="mkv-lab__case-kicker" data-i18n="ui_web_f3b4a4be252b" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(esc(item.id))}) || "{}")}">Fixture ${esc(item.id)}</div><h2>${esc(item.title)}</h2></div>
                     ${stateMarkup}
                 </div>
                 <dl class="mkv-lab__facts">
-                    <div><dt>Vidéo</dt><dd>${esc(item.video)}</dd></div>
-                    <div><dt>Audio</dt><dd>${esc(item.audio)}</dd></div>
-                    <div><dt>GOP</dt><dd>${esc(item.gop)}</dd></div>
-                    <div><dt>Identité</dt><dd>${esc(item.validator)}</dd></div>
-                    <div><dt>Sous-titres</dt><dd>${esc(item.subtitles)}</dd></div>
+                    <div><dt data-i18n="ui_web_ffda1e938e47">Vidéo</dt><dd>${esc(item.video)}</dd></div>
+                    <div><dt data-i18n="ui_web_bc1b88907d3b">Audio</dt><dd>${esc(item.audio)}</dd></div>
+                    <div><dt data-i18n="ui_web_60b73d9fa917">GOP</dt><dd>${esc(item.gop)}</dd></div>
+                    <div><dt data-i18n="ui_web_3711bc6ff06c">Identité</dt><dd>${esc(item.validator)}</dd></div>
+                    <div><dt data-i18n="ui_web_b4463f5175c6">Sous-titres</dt><dd>${esc(item.subtitles)}</dd></div>
                 </dl>
-                ${item.expected.warning === 'subtitle-async' ? '<div class="mkv-lab__warning">La vidéo peut démarrer vite, mais les sous-titres bitmap restent une opération OCR asynchrone distincte.</div>' : ''}
+                ${item.expected.warning === 'subtitle-async' ? '<div class="mkv-lab__warning" data-i18n="ui_web_462583a621cf">La vidéo peut démarrer vite, mais les sous-titres bitmap restent une opération OCR asynchrone distincte.</div>' : ''}
                 ${runtimeMetrics}
-                <div class="mkv-lab__table-wrap" data-lab-scroll="strategies" tabindex="0" role="region" aria-label="Comparaison des stratégies, défilement horizontal">
+                <div class="mkv-lab__table-wrap" data-lab-scroll="strategies" tabindex="0" role="region" aria-label="Comparaison des stratégies, défilement horizontal" data-i18n-aria-label="ui_web_70d16f24a140">
                     <table class="mkv-lab__table">
-                        <caption>Comparaison déterministe des stratégies pour cette fixture</caption>
-                        <thead><tr><th>Stratégie</th><th>Pipeline</th><th>Décision</th><th>Buffer</th><th>GET</th><th>&lt;10 s</th></tr></thead>
+                        <caption data-i18n="ui_web_da8e1db77b70">Comparaison déterministe des stratégies pour cette fixture</caption>
+                        <thead><tr><th data-i18n="ui_web_c12194f6fb30">Stratégie</th><th data-i18n="ui_web_37e1c775f452">Pipeline</th><th data-i18n="ui_web_d2dc9dcff2a0">Décision</th><th data-i18n="ui_web_e44193fd2d21">Buffer</th><th data-i18n="ui_web_14e30cd163c7">GET</th><th>&lt;10 s</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
-                <section class="mkv-lab__expected" aria-label="Verdict attendu">
-                    <div><span>Décision automatique attendue</span><strong>${esc(pipelineLabel(item.expected.pipeline))}</strong></div>
-                    <div><span>Motif</span><strong>${esc(reasonLabel(item.expected.reason))}</strong></div>
-                    <div><span>Objectif</span><strong>${item.expected.under10 ? 'Démarrage 6–10 s' : 'Fluidité avant vitesse'}</strong></div>
+                <section class="mkv-lab__expected" aria-label="Verdict attendu" data-i18n-aria-label="ui_web_dfa729322126">
+                    <div><span data-i18n="ui_web_ab37996be5e6">Décision automatique attendue</span><strong>${esc(pipelineLabel(item.expected.pipeline))}</strong></div>
+                    <div><span data-i18n="ui_web_c89ac8f0d41a">Motif</span><strong>${esc(reasonLabel(item.expected.reason))}</strong></div>
+                    <div><span data-i18n="ui_web_7d9201525b56">Objectif</span><strong>${item.expected.under10 ? (globalThis.NorvaI18n?.t("ui_web_ee417ee2042a", { defaultValue: "Démarrage 6–10 s" }) ?? 'Démarrage 6–10 s') : (globalThis.NorvaI18n?.t("ui_web_64c90c1b4d1e", { defaultValue: "Fluidité avant vitesse" }) ?? 'Fluidité avant vitesse')}</strong></div>
                 </section>
             </article>`;
         }

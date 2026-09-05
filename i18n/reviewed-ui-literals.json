@@ -1,0 +1,1397 @@
+[
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderAlerts",
+    "source": "Sous-titres IA"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadMarketingOverview",
+    "source": "Préparer une campagne"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadMarketingOverview",
+    "source": "Aucune prochaine diffusion"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadMarketingOverview",
+    "source": "Aucune notification manuelle récente"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadMarketingOverview",
+    "source": "Voir le planning"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_behavioralLifecycleMarkup",
+    "source": "Erreurs guidées"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_behavioralLifecycleMarkup",
+    "source": "Android WebView"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_wireBehavioralLifecycleControls",
+    "source": "L’hypothèse expérimentale doit contenir entre 20 et 500 caractères."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_wireBehavioralLifecycleControls",
+    "source": "Une variante doit définir une cible d’uplift relatif."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_wireNotificationComposer",
+    "source": "Le titre et le message doivent contenir au moins 2 caractères."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_wireNotificationComposer",
+    "source": "Le moteur de programmation est indisponible."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_wireNotificationComposer",
+    "source": "Choisissez une date au moins une minute dans le futur."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderFinance",
+    "source": " % du MRR"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderVatPanel",
+    "source": "disabled title=\"Résolvez d'abord les pays inconnus — la TVA exige la localisation\""
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderVatPanel",
+    "source": "title=\"Guide champ par champ, dans l'ordre du portail OSS\""
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageSupport",
+    "source": "En attente client"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadTicketContext",
+    "source": "Actif payant"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadTicketContext",
+    "source": "En essai"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadTicketContext",
+    "source": "Échec paiement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadTicketContext",
+    "source": "Annulation prévue"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageClients",
+    "source": "Actifs payants"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageClients",
+    "source": "Annulation prévue"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageClients",
+    "source": "Sans abonnement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageClients",
+    "source": "Actifs sur 7 j"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageClients",
+    "source": "Avec source"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadClientSummary",
+    "source": "Actifs sur 7 j"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadClientSummary",
+    "source": "Avec source"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_syncSourcePresets",
+    "source": "Sans source"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_syncSourcePresets",
+    "source": "Avec source · 1+"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Le compte est déjà suspendu. Ouvrir le dossier et vérifier son historique avant toute modification."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Contrôler le statut de relance dans le dossier financier. Aucun envoi manuel depuis cette vue."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Vérifier l’état de confirmation et le parcours d’activation. Aucune relance automatique depuis cette liste."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Réessayer le chargement de l’origine d’inscription. Ne pas déduire une localisation à partir de cette absence."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Observer le parcours d’activation. Aucune intervention automatique n’est nécessaire à ce stade."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Compte interne identifié. Aucune action prioritaire."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Compte pilote identifié. Suivre son usage dans le dossier sans intervention automatique."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientPriority",
+    "source": "Aucune action prioritaire. Ouvrir le dossier uniquement si une vérification détaillée est nécessaire."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Motif de la suppression"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Motif de la réactivation"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Motif du bannissement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Ce motif reste dans le journal d’audit interne. Il ne sera pas envoyé au client."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Ajoute un motif interne pour que cette décision reste compréhensible et traçable."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Adresse e-mail du compte à supprimer"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Confirmation DELETE"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "L’adresse saisie ne correspond pas au client sélectionné."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_accountControlPayload",
+    "source": "Saisis DELETE en lettres majuscules."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientAccountAction",
+    "source": "Action momentanément indisponible."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientAccountAction",
+    "source": "Suppression définitive engagée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_clientAccountAction",
+    "source": "Compte mis à jour."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_loadAcquisition",
+    "source": "Android mobile"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderBillingPanel",
+    "source": "Actif payant"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderBillingPanel",
+    "source": "En essai"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderBillingPanel",
+    "source": "Échec paiement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderBillingPanel",
+    "source": "Annulation prévue"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderBillingPanel",
+    "source": "VIP interne"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pagePartners",
+    "source": "Tous les statuts"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pagePartners",
+    "source": "Activation en attente"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pagePartners",
+    "source": "En attente de décision"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersElevateAal2",
+    "source": "Session sécurisée à AAL2. Les actions sensibles Partners sont maintenant déverrouillées."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadView",
+    "source": "Performance Partners"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadView",
+    "source": "KYC cash des membres"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadView",
+    "source": "Recours humains KYC"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadView",
+    "source": "Configuration Partners"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadView",
+    "source": "Corridors Revolut"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersKycCertificationDialog",
+    "source": "Tous les prérequis externes sont prêts. Validez Authenticator pour reprendre la session Didit existante."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersKycCertificationDialog",
+    "source": "Tous les prérequis externes sont prêts. Consentement, confirmation, motif et Authenticator sont regroupés ici avant l’unique départ vers Didit."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersKycCertificationDialog",
+    "source": "La certification ne peut pas démarrer. Réglez d’abord chaque élément marqué « À régler » ; aucun champ sensible n’est affiché."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Ledger Partners"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Cycles de versement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Revolut Business"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Lots manuels"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Rapprochement Revolut"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Retours Revolut"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Contrôles manuels"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersLoadFinanceView",
+    "source": "Paiements tardifs"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Performance Partners"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "KYC cash des membres"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Recours humains KYC"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Configuration Partners"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Revolut Business"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Ledger Partners"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Cycles de versement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Lots manuels"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Rapprochement Revolut"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Retours Revolut"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Contrôles manuels"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersRetryModule",
+    "source": "Paiements tardifs"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Compte, contrat et historique pseudonymisé"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Revue KYC, hold et fraude minimisée"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Ledger, réconciliation et versements"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Fraude et risque"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Hold, release et contre-écritures"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Ledger de commissions"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Écritures financières et rapprochement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersCapabilityCards",
+    "source": "Dry-run, approbation et envoi provider"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersAnalytics",
+    "source": "Acquisition attribuée"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersAnalytics",
+    "source": "Activation partenaire"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersAnalytics",
+    "source": "Risque et conformité"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersAnalytics",
+    "source": "Économie par rail et devise"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersAnalytics",
+    "source": "Premiers versements"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersAnalytics",
+    "source": "Rétention des filleuls"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "programme actif"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "date d’effet du programme disponible"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "date d’effet du programme atteinte"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "mapping pays actif"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "devise de versement configurée"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "couverture des devises actives"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "Nouveau programme"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "Nouvelle juridiction"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "Mapping pays"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "Couverture Revolut"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersConfiguration",
+    "source": "Pilote allowlist"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Jobs en attente"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Dead letter"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Corrections en attente"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Corrections en retry"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Corrections en dead letter"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Maturations dues"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFinance",
+    "source": "Maturations en échec"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersRisk",
+    "source": "Mettre en revue"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersFiscalProfiles",
+    "source": "Tous les statuts"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersPayoutOnboardingRequests",
+    "source": "En cours"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderPartnersPayoutOnboardingRequests",
+    "source": "Tous les statuts"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersPrompt",
+    "source": "Valeur invalide. Aucune action n’a été exécutée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersPromptJson",
+    "source": "JSON invalide. Aucune action n’a été exécutée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersJustification",
+    "source": "La justification doit contenir entre 12 et 1000 caractères."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersTypedConfirmation",
+    "source": "La confirmation ne correspond pas. Aucune action n’a été exécutée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_partnersAdminAction",
+    "source": "Action refusée ou indisponible. Vérifiez vos capacités, les prérequis de release et l’état autoritatif."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Expiration invalide ou déjà passée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Corridor non disponible"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Identité non concordante"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Destination non prise en charge"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Revue de conformité requise"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Demande déjà couverte"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Choisissez un nombre de 1 à 6."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Invitation à démarrer la configuration sécurisée"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Relance de la configuration en cours"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Nouvelle destination requise"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Choisissez un nombre de 1 à 3."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "L’identifiant doit être un UUID valide et déjà relié au bénéficiaire réel dans le registre Finance."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Le moyen de paiement doit être vide ou contenir un UUID valide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Le libellé doit être masqué, sans identifiant bancaire complet."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "L’empreinte de preuve doit être un SHA-256 hexadécimal."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucune revue n’a été enregistrée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucune contre-écriture n’a été créée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucune demande n’a été créée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucun fonds n’a été débloqué."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucune écriture financière n’a été créée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La cible doit être une référence NORVA exacte."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucun contrôle n’a été enregistré."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucune décision n’a été enregistrée."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "La confirmation ne correspond pas. Aucun règlement n’a été comptabilisé."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Environnement invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Le SHA du commit doit contenir exactement 40 ou 64 caractères hexadécimaux minuscules."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Clé de déploiement invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Empreinte SHA-256 de déploiement invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Le manifeste documentaire est invalide ou ne contient pas deployment_proof."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Aucun manifeste courant ne correspond à cet environnement."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Programme indisponible."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Périmètre de juridictions invalide ou dupliqué."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Le package de preuves est incomplet ou invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Expiration invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Clé de programme invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Version des conditions invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Version de notice invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Date d’effet invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Code pays invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Âge minimum invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Nombre de tentatives invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Fenêtre KYC invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Cooldown invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Code ISO alpha-3 invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Code ISO alpha-2 invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Code devise invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Exposant de devise invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "État de route invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "UUID utilisateur invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Action allowlist invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Subdivision invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Type de job invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Clé de job invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Clé d’écriture invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Date de début invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Date de fin invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Devise invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Mode de cycle invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Provider fiscal invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Empreinte provider invalide. Ne saisissez aucun identifiant fiscal brut."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_runPartnersAdminAction",
+    "source": "Type de formulaire invalide."
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageProviders",
+    "source": "En erreur"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageProviders",
+    "source": "Sync incomplète"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageProviders",
+    "source": "Non résolues"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_attestProviderIdentity",
+    "source": "cette source"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "engineStateView",
+    "source": "? état inconnu (legacy)"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageMoteur",
+    "source": "En cours"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageMoteur",
+    "source": "En attente"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_pageMoteur",
+    "source": "En pause"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderSysIncidents",
+    "source": "Base de données"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "_renderInfra",
+    "source": "Base de données"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "billingBadge",
+    "source": "échec paiement"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "billingBadge",
+    "source": "annulation prévue"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "signupOriginHtml",
+    "source": " · réseau indicatif"
+  },
+  {
+    "file": "public/js/pages/AdminPage.js",
+    "scope": "cronHuman",
+    "source": "chaque min"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Choose period"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Activation date"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Duration and end date"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Exact dates"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Keep current period"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Finish without dates"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Save period"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Connect and prepare catalogue"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "bindProviderAccessTerms",
+    "source": "Add period"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "sourceFormErrorMessage",
+    "source": "Provider URL is required."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "sourceFormErrorMessage",
+    "source": "Enter the complete server URL, username and password to replace the saved login."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "sourceFormErrorMessage",
+    "source": "Provider URL, username and password are required."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Connecting to TV service"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Secure login check"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Movies found"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Films catalog"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Series found"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Series catalog"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Channels found"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Live TV catalog — imported last"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Navigation groups"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Import catalog"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Saving items to Norva Cloud"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Finalize Norva"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "catalogMilestones",
+    "source": "Unlocking Movies and Series first, then Live TV"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Login changed"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Login not changed"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Norva stopped safely. The previous login and catalogue remain authoritative."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Check cancelled"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Confirmation needed"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Norva could not safely tell whether these details belong to the current catalogue."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Different catalogue detected"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "The new catalogue must be prepared separately before a switch."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Same catalogue confirmed"
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "The new login can be activated with a rollback-safe refresh."
+  },
+  {
+    "file": "public/js/components/SourceManager.js",
+    "scope": "credentialCandidateCopy",
+    "source": "Checking safely"
+  },
+  {
+    "file": "public/js/pages/HomePage.js",
+    "scope": "createHistoryCard",
+    "source": "Next episode"
+  },
+  {
+    "file": "public/js/pages/MoviesPage.js",
+    "scope": "showMovieDetails",
+    "source": "Search results"
+  },
+  {
+    "file": "public/js/pages/MoviesPage.js",
+    "scope": "renderFicheExtras",
+    "source": "No summary available yet."
+  },
+  {
+    "file": "public/js/pages/PartnersPage.js",
+    "scope": "loadMoreReferrals",
+    "source": "More referrals are temporarily unavailable. Try again."
+  },
+  {
+    "file": "public/js/pages/PartnersPage.js",
+    "scope": "loadMoreReferrals",
+    "source": "Loading the next referrals took too long. Try again."
+  },
+  {
+    "file": "public/js/pages/PartnersPage.js",
+    "scope": "loadMoreReferrals",
+    "source": "The next referrals could not be loaded. Try again."
+  },
+  {
+    "file": "public/js/pages/PartnersPage.js",
+    "scope": "referralStatusMeta",
+    "source": "Commission processing updates automatically."
+  },
+  {
+    "file": "public/js/pages/SeriesPage.js",
+    "scope": "showSeriesDetailsV2",
+    "source": "Search results"
+  },
+  {
+    "file": "public/js/pages/SeriesPage.js",
+    "scope": "renderFicheExtras",
+    "source": "No summary available yet."
+  },
+  {
+    "file": "public/js/pages/WatchPage.js",
+    "scope": "getCastSubtitles",
+    "source": "AI subtitles"
+  },
+  {
+    "file": "public/js/pages/WatchPage.js",
+    "scope": "getInformationalGatewayMuxedMonoAudioTrack",
+    "source": "Audio track"
+  },
+  {
+    "file": "public/js/pages/WatchPage.js",
+    "scope": "getProbeAudioTracks",
+    "source": "Audio track"
+  },
+  {
+    "file": "public/js/pages/WatchPage.js",
+    "scope": "getVisibleAudioTracks",
+    "source": "Audio track"
+  },
+  {
+    "file": "public/js/pages/WatchPage.js",
+    "scope": "updateAudioTracks",
+    "source": "Audio tracks unavailable"
+  },
+  {
+    "file": "public/js/app.js",
+    "scope": "toggleNotifications",
+    "source": "Open Norva"
+  },
+  {
+    "file": "public/js/components/EpgGuide.js",
+    "scope": "createChannelRow",
+    "source": "Remove from Favorites"
+  },
+  {
+    "file": "public/js/components/EpgGuide.js",
+    "scope": "createChannelRow",
+    "source": "Add to Favorites"
+  },
+  {
+    "file": "public/js/components/NorvaModal.js",
+    "source": "Please confirm"
+  },
+  {
+    "file": "public/js/landing.js",
+    "scope": "setupSessionAwareLinks",
+    "source": "Open Norva"
+  },
+  {
+    "file": "public/js/pages/HomePage.js",
+    "scope": "showHeroSlide",
+    "source": "💡 For You"
+  },
+  {
+    "file": "public/js/pages/Settings.js",
+    "scope": "initContentSettings",
+    "source": "Runs automatically after each sync when a TMDB key is set."
+  },
+  {
+    "file": "public/js/profiles.js",
+    "scope": "handleLockedProfile",
+    "source": "This profile is locked on your current plan. Upgrade to Norva Family from your phone or the web to unlock it — your profile is kept safe until then."
+  },
+  {
+    "file": "public/js/profiles.js",
+    "scope": "ensureSelected",
+    "source": "Continue for now"
+  },
+  {
+    "file": "public/js/promo-ui.js",
+    "scope": "labelFor",
+    "source": "Limited Offer"
+  },
+  {
+    "file": "public/js/utils/mediaUtils.js",
+    "scope": "versionDescriptor",
+    "source": "Audio pending"
+  },
+  {
+    "file": "public/js/utils/mediaUtils.js",
+    "scope": "versionDescriptor",
+    "source": "Audio unknown"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Connect TV service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "View service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Manage service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Repair service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Update login"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Update service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Review access"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Check service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Slot occupé"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Abonnement terminé"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Service introuvable"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Identifiants rejetés"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Panne passerelle"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "source": "Erreur non classée"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "scope": "cardHtml",
+    "source": "Your catalogue is ready to watch."
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "scope": "cardHtml",
+    "source": "View service"
+  },
+  {
+    "file": "public/js/utils/sourceHealth.js",
+    "scope": "cardHtml",
+    "source": "Show instructions"
+  }
+]

@@ -554,7 +554,7 @@ test('Admin route lazy-loads the exact lab assets and mounts only on the current
   assert.match(appSource, new RegExp(`AdminPage\\.js\\?v=${adminHash}`));
   assert.match(appHtmlSource, new RegExp(`app\\.js\\?v=${appHash}`));
   assert.match(adminSource, /'mkv-lab'/);
-  assert.match(adminSource, /label: 'Lab VOD'/);
+  assert.match(adminSource, /label: [^\n]*'Lab VOD'/);
   assert.match(adminSource, /norva-movies\.svg/);
 
   const view = { innerHTML: '' };

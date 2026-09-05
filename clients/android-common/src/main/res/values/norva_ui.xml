@@ -57,4 +57,13 @@
     <string name="ui_cloud_sign_in" formatted="false">Sign in on Norva Cloud</string>
     <string name="ui_please_wait" formatted="false">Please wait...</string>
     <string name="ui_sign_in_failed" formatted="false">Sign-in could not be completed. Check your details and try again.</string>
+    <string name="ui_trial_start_duration" formatted="false">Start free trial · {{duration}}</string>
+    <string name="ui_trial_started_duration" formatted="false">You have full access now. Your free trial lasts {{duration}}. No payment is taken before it ends. Cancel anytime before then.</string>
+    <string name="ui_trial_duration" formatted="false">Free trial · {{duration}}</string>
+    <string name="ui_hls_source_hint" formatted="false">2. Or configure your source to output HLS (.m3u8) format</string>
+    <string name="ui_draft_discount_applied" formatted="false">A {{discount}}% discount was applied to the draft. Review the campaign to continue.</string>
+    <string name="ui_changes_review_again" formatted="false">The changes have been updated. Run the check again.</string>
+    <string name="ui_prerequisite_changed" formatted="false">A prerequisite changed during validation. Close this window, check the configuration and try again.</string>
+    <string name="ui_selection_kept" formatted="false">· current selection kept</string>
+    <string name="ui_trial_days_left" formatted="false">{{days}} days left</string>
 </resources>

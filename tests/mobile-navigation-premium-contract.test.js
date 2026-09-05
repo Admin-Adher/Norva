@@ -31,7 +31,7 @@ test('mobile catalogue filters are a focus-contained modal with a safe close tar
   assert.match(app, /if \(focusWillBeHidden\)[\s\S]{0,240}filterBtn\.focus/);
   assert.match(app, /const focusWasInside = Boolean\(activeBefore && filterBar\.contains\(activeBefore\)\)/);
   assert.match(app, /const activeStillUsable = activeBefore\?\.isConnected/);
-  assert.match(app, /class="btn btn-sm btn-ghost mobile-filter-close">Done</);
+  assert.match(app, /class="btn btn-sm btn-ghost mobile-filter-close"[^>]*>Done</);
   assert.match(css, /\.mobile-filter-close\s*\{[\s\S]*?min-height:\s*48px/);
 });
 
@@ -74,7 +74,7 @@ test('global search is a real isolated dialog and distinguishes outage from no r
   assert.match(app, /event\.key !== 'Tab'/);
   assert.match(app, /Promise\.allSettled/);
   assert.match(app, /Search is temporarily unavailable\./);
-  assert.match(app, /class="btn btn-sm gsearch-retry">Try again/);
+  assert.match(app, /class="btn btn-sm gsearch-retry"[^>]*>Try again/);
   assert.match(app, /Some results could not be loaded/);
 });
 

@@ -57,4 +57,13 @@
     <string name="ui_cloud_sign_in" formatted="false">Norva Cloud-এ সাইন ইন করুন</string>
     <string name="ui_please_wait" formatted="false">অনুগ্রহ করে অপেক্ষা করুন…</string>
     <string name="ui_sign_in_failed" formatted="false">সাইন ইন করা যায়নি। আপনার তথ্য যাচাই করে আবার চেষ্টা করুন।</string>
+    <string name="ui_trial_start_duration" formatted="false">বিনামূল্যে ট্রায়াল শুরু করুন · {{duration}}</string>
+    <string name="ui_trial_started_duration" formatted="false">এখন আপনার সম্পূর্ণ অ্যাক্সেস আছে। আপনার বিনামূল্যের ট্রায়াল {{duration}} চলবে। এটি শেষ হওয়ার আগে কোনো অর্থ নেওয়া হবে না। তার আগে যেকোনো সময় বাতিল করুন।</string>
+    <string name="ui_trial_duration" formatted="false">বিনামূল্যে ট্রায়াল · {{duration}}</string>
+    <string name="ui_hls_source_hint" formatted="false">২. অথবা আপনার উৎসকে HLS (.m3u8) ফরম্যাট ব্যবহার করতে কনফিগার করুন</string>
+    <string name="ui_draft_discount_applied" formatted="false">খসড়ায় {{discount}}% ছাড় প্রয়োগ করা হয়েছে। চালিয়ে যেতে প্রচারাভিযান পর্যালোচনা করুন।</string>
+    <string name="ui_changes_review_again" formatted="false">পরিবর্তনগুলো আপডেট হয়েছে। আবার পরীক্ষা চালান।</string>
+    <string name="ui_prerequisite_changed" formatted="false">যাচাইয়ের সময় একটি পূর্বশর্ত পরিবর্তিত হয়েছে। এই উইন্ডো বন্ধ করে কনফিগারেশন পরীক্ষা করুন এবং আবার চেষ্টা করুন।</string>
+    <string name="ui_selection_kept" formatted="false">· বর্তমান নির্বাচন রাখা হয়েছে</string>
+    <string name="ui_trial_days_left" formatted="false">আর {{days}} দিন বাকি</string>
 </resources>

@@ -8,20 +8,20 @@
   'use strict';
 
   const events = Object.freeze({
-    black_friday: Object.freeze({ label: 'Black Friday', filename: 'black-friday-v2.png' }),
-    cyber_monday: Object.freeze({ label: 'Cyber Monday', filename: 'cyber-monday-v2.png' }),
-    winter_sale: Object.freeze({ label: 'Winter Sale', filename: 'winter-sale-v2.png' }),
-    summer_sale: Object.freeze({ label: 'Summer Sale', filename: 'summer-sale-v2.png' }),
-    christmas: Object.freeze({ label: 'Christmas Sale', filename: 'christmas-v2.png' }),
-    new_year: Object.freeze({ label: 'New Year Sale', filename: 'new-year-v2.png' }),
-    lunar_new_year: Object.freeze({ label: 'Lunar New Year', filename: 'lunar-new-year-v2.png' }),
-    eid: Object.freeze({ label: 'Eid Sale', filename: 'eid-v2.png' }),
-    easter: Object.freeze({ label: 'Easter Sale', filename: 'easter-v2.png' }),
-    halloween: Object.freeze({ label: 'Halloween Sale', filename: 'halloween-v2.png' }),
-    valentines: Object.freeze({ label: "Valentine's Sale", filename: 'valentines-v2.png' }),
-    back_to_school: Object.freeze({ label: 'Back to School', filename: 'back-to-school-v2.png' }),
-    birthday: Object.freeze({ label: 'Birthday Sale', filename: 'birthday-v2.png' }),
-    flash: Object.freeze({ label: 'Flash Sale', filename: 'flash-v2.png' }),
+    black_friday: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_1e988458eef2", { defaultValue: "Black Friday" }) ?? 'Black Friday'), filename: 'black-friday-v2.png' }),
+    cyber_monday: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_2b45d53582c8", { defaultValue: "Cyber Monday" }) ?? 'Cyber Monday'), filename: 'cyber-monday-v2.png' }),
+    winter_sale: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_b492b69d24cb", { defaultValue: "Winter Sale" }) ?? 'Winter Sale'), filename: 'winter-sale-v2.png' }),
+    summer_sale: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_b5a6898e4b72", { defaultValue: "Summer Sale" }) ?? 'Summer Sale'), filename: 'summer-sale-v2.png' }),
+    christmas: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_fd4b769d1ebf", { defaultValue: "Christmas Sale" }) ?? 'Christmas Sale'), filename: 'christmas-v2.png' }),
+    new_year: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_1a7f43a8d0f1", { defaultValue: "New Year Sale" }) ?? 'New Year Sale'), filename: 'new-year-v2.png' }),
+    lunar_new_year: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_36be8a0d2b9b", { defaultValue: "Lunar New Year" }) ?? 'Lunar New Year'), filename: 'lunar-new-year-v2.png' }),
+    eid: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_7d953595c71a", { defaultValue: "Eid Sale" }) ?? 'Eid Sale'), filename: 'eid-v2.png' }),
+    easter: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_df9df9f8a1c6", { defaultValue: "Easter Sale" }) ?? 'Easter Sale'), filename: 'easter-v2.png' }),
+    halloween: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_0163726a63b1", { defaultValue: "Halloween Sale" }) ?? 'Halloween Sale'), filename: 'halloween-v2.png' }),
+    valentines: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_04dcb05d5b07", { defaultValue: "Valentine's Sale" }) ?? "Valentine's Sale"), filename: 'valentines-v2.png' }),
+    back_to_school: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_193a2ce2a817", { defaultValue: "Back to School" }) ?? 'Back to School'), filename: 'back-to-school-v2.png' }),
+    birthday: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_e47bdd9503f9", { defaultValue: "Birthday Sale" }) ?? 'Birthday Sale'), filename: 'birthday-v2.png' }),
+    flash: Object.freeze({ label: (globalThis.NorvaI18n?.t("ui_web_88ccbfe6d3f1", { defaultValue: "Flash Sale" }) ?? 'Flash Sale'), filename: 'flash-v2.png' }),
   });
 
   const themes = Object.freeze({
@@ -51,7 +51,7 @@
     if (!promo || typeof promo !== 'object') return '';
     return cleanLabel(promo.label)
       || (events[promo.event] && events[promo.event].label)
-      || 'Limited Offer';
+      || (globalThis.NorvaI18n?.t("ui_web_7519da60f676", { defaultValue: "Limited Offer" }) ?? 'Limited Offer');
   }
 
   function themeFor(eventKey) {
@@ -106,7 +106,7 @@
     const nowMs = Number.isFinite(requestedNowMs) ? requestedNowMs : Date.now();
     const leftMs = endMs - nowMs;
     if (leftMs <= 0) {
-      return Object.freeze({ expired: true, urgent: true, text: '00:00:00', ariaText: 'Offer ended' });
+      return Object.freeze({ expired: true, urgent: true, text: '00:00:00', ariaText: (globalThis.NorvaI18n?.t("ui_web_790867118b8d", { defaultValue: "Offer ended" }) ?? 'Offer ended') });
     }
 
     const totalSeconds = Math.ceil(leftMs / 1000);

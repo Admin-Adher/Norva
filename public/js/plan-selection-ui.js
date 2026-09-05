@@ -47,7 +47,7 @@
       const cadence = text(card.querySelector('.per'));
 
       if (selectedPlanLabel) {
-        selectedPlanLabel.textContent = planName + (profiles ? ' \u00b7 ' + profiles + ' profiles' : '');
+        selectedPlanLabel.textContent = planName + (profiles ? ' \u00b7 ' + profiles + (globalThis.NorvaI18n?.t("ui_web_d52fd337f016", { defaultValue: " profiles" }) ?? ' profiles') : '');
       }
       if (selectedCurrency) selectedCurrency.textContent = currency;
       if (selectedAmount) selectedAmount.textContent = amount;
@@ -62,7 +62,7 @@
       ));
       continueButton.textContent = mirrorSourceState && sourceText
         ? sourceText
-        : 'Continue with ' + planName;
+        : (globalThis.NorvaI18n?.t("ui_web_d2b79489c9e6", { defaultValue: "Continue with " }) ?? 'Continue with ') + planName;
       continueButton.setAttribute('aria-busy', sourceButton && sourceButton.getAttribute('aria-busy') === 'true' ? 'true' : 'false');
     }
 

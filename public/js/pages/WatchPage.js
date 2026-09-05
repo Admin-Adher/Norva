@@ -823,7 +823,7 @@ class WatchPage {
                     source: 'hls',
                     index: this.hls.subtitleTrack,
                     ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
-                    label: track.name || track.lang || `Subtitle ${this.hls.subtitleTrack + 1}`,
+                    label: track.name || track.lang || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(this.hls.subtitleTrack + 1)}) : `Subtitle ${this.hls.subtitleTrack + 1}`),
                     language: track.lang || null
                 };
             }
@@ -837,7 +837,7 @@ class WatchPage {
                     return {
                         source: 'native',
                         index: i,
-                        label: track.label || track.language || `Subtitle ${i + 1}`,
+                        label: track.label || track.language || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(i + 1)}) : `Subtitle ${i + 1}`),
                         language: track.language || null
                     };
                 }
@@ -1538,7 +1538,7 @@ class WatchPage {
         })()
             .catch(error => {
                 console.warn('[WatchPage] Could not restore cloud playback history after refresh:', error?.message || error);
-                this.showPlaybackError('Playback failed after refresh. Try opening the title again.');
+                this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_96798af93bd4", { defaultValue: "Playback failed after refresh. Try opening the title again." }) ?? 'Playback failed after refresh. Try opening the title again.'));
                 return false;
             })
             .finally(() => {
@@ -1758,7 +1758,7 @@ class WatchPage {
                     || error?.name === 'AbortError'
                     || (restoreAttemptId !== null && this.isStalePlaybackAttempt(restoreAttemptId))) return false;
                 console.warn('[WatchPage] Could not restore playback after refresh:', error?.message || error);
-                this.showPlaybackError('Playback failed after refresh. Try opening the title again.');
+                this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_96798af93bd4", { defaultValue: "Playback failed after refresh. Try opening the title again." }) ?? 'Playback failed after refresh. Try opening the title again.'));
                 return false;
             })
             .finally(() => {
@@ -2299,7 +2299,7 @@ class WatchPage {
             }
             if (!resolved || !resolved.url) {
                 await this.cleanupStaleCloudPlaybackSession(resolvedSessionId);
-                this.showPlaybackError('This title could not be started. Please try again.', {
+                this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_05958c958fa0", { defaultValue: "This title could not be started. Please try again." }) ?? 'This title could not be started. Please try again.'), {
                     immediate: true,
                     allowAutomaticRetry: false
                 });
@@ -2515,7 +2515,7 @@ class WatchPage {
         // as "casting" and a tap re-opens the cast bar instead of a fresh picker.
         const casting = !!window.NorvaCast?.isCasting?.();
         btn.classList.toggle('is-casting', casting);
-        btn.title = casting ? 'Casting — show controls' : 'Cast to TV';
+        btn.title = casting ? (globalThis.NorvaI18n?.t("ui_web_5438e23960bd", { defaultValue: "Casting — show controls" }) ?? 'Casting — show controls') : (globalThis.NorvaI18n?.t("ui_web_7739923feca7", { defaultValue: "Cast to TV" }) ?? 'Cast to TV');
     }
 
     // The Default Media Receiver plays MP4 / WebM / HLS — NOT Matroska, raw TS or
@@ -2591,7 +2591,7 @@ class WatchPage {
             else { try { await this.video?.play(); } catch (_) { } }
             if (error?.code === 'cancel') return; // dismissing the sheet is not an error
             console.warn('[WatchPage] Cast failed:', error?.message || error);
-            this.app?.showToast?.('Cast unavailable for this title', 'error');
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_f157e45c0bbc", { defaultValue: "Cast unavailable for this title" }) ?? 'Cast unavailable for this title'), 'error');
         }
     }
 
@@ -2621,7 +2621,7 @@ class WatchPage {
             if (this._aiActiveVtt && typeof this._aiActiveVtt === 'string') {
                 const b64 = this._toBase64Utf8(this._aiActiveVtt);
                 if (b64 && b64.length < 700000) {
-                    out.push({ url: `data:text/vtt;base64,${b64}`, lang: this._aiActiveLang || 'und', name: 'AI subtitles' });
+                    out.push({ url: `data:text/vtt;base64,${b64}`, lang: this._aiActiveLang || 'und', name: (globalThis.NorvaI18n?.t("ui_web_8a7f1791674b", { defaultValue: "AI subtitles" }) ?? 'AI subtitles') });
                 }
             }
         } catch (_) { /* no subtitles → cast without, no regression */ }
@@ -2667,16 +2667,16 @@ class WatchPage {
                     <div class="watch-cast-bar-label"></div>
                     <div class="watch-cast-bar-scrub">
                         <span class="watch-cast-time cur">0:00</span>
-                        <input type="range" class="watch-cast-seek" min="0" max="1000" value="0" aria-label="Seek">
+                        <input type="range" class="watch-cast-seek" min="0" max="1000" value="0" aria-label="Seek" data-i18n-aria-label="ui_web_67ae3405bcd4">
                         <span class="watch-cast-time dur">0:00</span>
                     </div>
                 </div>
                 <div class="watch-cast-bar-controls">
-                    <button type="button" class="watch-cast-ctl" data-act="back" title="Back 10s" aria-label="Back 10 seconds">⏪</button>
-                    <button type="button" class="watch-cast-ctl watch-cast-toggle" data-act="toggle" title="Play/Pause" aria-label="Play or pause">⏯</button>
-                    <button type="button" class="watch-cast-ctl" data-act="fwd" title="Forward 10s" aria-label="Forward 10 seconds">⏩</button>
-                    <button type="button" class="watch-cast-ctl watch-cast-next" data-act="next" title="Next episode" aria-label="Next episode" hidden>⏭</button>
-                    <button type="button" class="watch-cast-stop" data-act="stop">Stop</button>
+                    <button type="button" class="watch-cast-ctl" data-act="back" title="Back 10s" aria-label="Back 10 seconds" data-i18n-title="ui_web_aaf9fb3b02f3" data-i18n-aria-label="ui_web_b07313d85440">⏪</button>
+                    <button type="button" class="watch-cast-ctl watch-cast-toggle" data-act="toggle" title="Play/Pause" aria-label="Play or pause" data-i18n-title="ui_web_c9c7c7ecde58" data-i18n-aria-label="ui_web_a78afaff2fda">⏯</button>
+                    <button type="button" class="watch-cast-ctl" data-act="fwd" title="Forward 10s" aria-label="Forward 10 seconds" data-i18n-title="ui_web_4ae6a0efa598" data-i18n-aria-label="ui_web_26551d43abbb">⏩</button>
+                    <button type="button" class="watch-cast-ctl watch-cast-next" data-act="next" title="Next episode" aria-label="Next episode" hidden data-i18n-title="ui_web_a38c4e18c73d" data-i18n-aria-label="ui_web_a38c4e18c73d">⏭</button>
+                    <button type="button" class="watch-cast-stop" data-act="stop" data-i18n="ui_web_cae7d57bc067">Stop</button>
                 </div>`;
             bar.addEventListener('click', (e) => {
                 const act = e.target.closest('[data-act]')?.dataset.act;
@@ -2702,7 +2702,7 @@ class WatchPage {
         if (this.content?.poster) { poster.src = this.content.poster; poster.hidden = false; } else { poster.hidden = true; }
         bar.querySelector('.watch-cast-bar-title').textContent =
             [this.content?.title, this.content?.subtitle].filter(Boolean).join(' — ') || 'Norva';
-        bar.querySelector('.watch-cast-bar-label').textContent = `Casting to ${device}`;
+        bar.querySelector('.watch-cast-bar-label').textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_48354e133914", {defaultValue: "Casting to {{p0}}", p0:(device)}) : `Casting to ${device}`);
         bar.querySelector('.watch-cast-next').hidden = !(this.contentType === 'series' && this.getNextEpisode());
         bar.classList.remove('hidden');
         clearInterval(this._castBarTimer);
@@ -2830,7 +2830,7 @@ class WatchPage {
             this.showCastBar(device);
         } catch (err) {
             console.warn('[Cast] next episode failed:', err);
-            this.app?.showToast?.('Could not cast the next episode', 'error');
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_1ee682ff62e6", { defaultValue: "Could not cast the next episode" }) ?? 'Could not cast the next episode'), 'error');
         }
     }
 
@@ -3548,7 +3548,7 @@ class WatchPage {
                 try {
                     payload = await res.json();
                 } catch (e) { /* non-JSON error body */ }
-                const detail = payload.error || payload.details || 'Failed to start session';
+                const detail = payload.error || payload.details || (globalThis.NorvaI18n?.t("ui_web_f8c4fb50b827", { defaultValue: "Failed to start session" }) ?? 'Failed to start session');
                 const error = new Error(detail);
                 error.details = payload.details;
                 error.code = payload.code;
@@ -3896,7 +3896,7 @@ class WatchPage {
                             && !this.isStalePlaybackAttempt(fallbackAttemptId)
                             && this._privateMediaCacheAccess === access) {
                             this.showPlaybackError(
-                                'Secure cached playback authorization expired. Please retry.',
+                                (globalThis.NorvaI18n?.t("ui_web_b602f45e2aca", { defaultValue: "Secure cached playback authorization expired. Please retry." }) ?? 'Secure cached playback authorization expired. Please retry.'),
                                 { immediate: true }
                             );
                         }
@@ -3904,7 +3904,7 @@ class WatchPage {
                         console.warn('[WatchPage] Private media cache authorization fallback failed:', fallbackError?.message || fallbackError);
                         if (!this.isStalePlaybackAttempt(fallbackAttemptId)) {
                             this.showPlaybackError(
-                                'Secure cached playback authorization expired. Please retry.',
+                                (globalThis.NorvaI18n?.t("ui_web_b602f45e2aca", { defaultValue: "Secure cached playback authorization expired. Please retry." }) ?? 'Secure cached playback authorization expired. Please retry.'),
                                 { immediate: true }
                             );
                         }
@@ -4250,17 +4250,17 @@ class WatchPage {
         const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
         if (locale.startsWith('fr')) {
             return {
-                title: 'Service déjà utilisé sur un autre appareil',
-                message: 'Norva a arrêté cette lecture parce qu’une autre lecture a pris sa place.',
-                hint: 'Pour reprendre ici, appuyez sur Reprendre ici. La lecture la plus récente sera conservée.',
-                retry: 'Reprendre ici',
+                title: (globalThis.NorvaI18n?.t("ui_web_1f1974a2bbdb", { defaultValue: "Service déjà utilisé sur un autre appareil" }) ?? 'Service déjà utilisé sur un autre appareil'),
+                message: (globalThis.NorvaI18n?.t("ui_web_5f5ece61ccb5", { defaultValue: "Norva a arrêté cette lecture parce qu’une autre lecture a pris sa place." }) ?? 'Norva a arrêté cette lecture parce qu’une autre lecture a pris sa place.'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_691b575cfb50", { defaultValue: "Pour reprendre ici, appuyez sur Reprendre ici. La lecture la plus récente sera conservée." }) ?? 'Pour reprendre ici, appuyez sur Reprendre ici. La lecture la plus récente sera conservée.'),
+                retry: (globalThis.NorvaI18n?.t("ui_web_32b8de249a2e", { defaultValue: "Reprendre ici" }) ?? 'Reprendre ici'),
             };
         }
         return {
-            title: 'Service already in use on another device',
-            message: 'Norva stopped this playback because another playback took its place.',
-            hint: 'To resume here, select Play here. The most recent playback will be kept.',
-            retry: 'Play here',
+            title: (globalThis.NorvaI18n?.t("ui_web_d55f352db2f6", { defaultValue: "Service already in use on another device" }) ?? 'Service already in use on another device'),
+            message: (globalThis.NorvaI18n?.t("ui_web_904c3f4b701a", { defaultValue: "Norva stopped this playback because another playback took its place." }) ?? 'Norva stopped this playback because another playback took its place.'),
+            hint: (globalThis.NorvaI18n?.t("ui_web_5d3881bae4dc", { defaultValue: "To resume here, select Play here. The most recent playback will be kept." }) ?? 'To resume here, select Play here. The most recent playback will be kept.'),
+            retry: (globalThis.NorvaI18n?.t("ui_web_879990bf5526", { defaultValue: "Play here" }) ?? 'Play here'),
         };
     }
 
@@ -4268,17 +4268,17 @@ class WatchPage {
         const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
         if (locale.startsWith('fr')) {
             return {
-                title: 'Service occupé',
-                message: 'Ce service TV est occupé. Norva réessaie dès que le créneau se libère.',
-                hint: 'Attendez quelques secondes, puis appuyez sur Réessayer.',
-                retry: 'Réessayer',
+                title: (globalThis.NorvaI18n?.t("ui_web_d4f8db57d70d", { defaultValue: "Service occupé" }) ?? 'Service occupé'),
+                message: (globalThis.NorvaI18n?.t("ui_web_465aeda3bebe", { defaultValue: "Ce service TV est occupé. Norva réessaie dès que le créneau se libère." }) ?? 'Ce service TV est occupé. Norva réessaie dès que le créneau se libère.'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_ab629056c210", { defaultValue: "Attendez quelques secondes, puis appuyez sur Réessayer." }) ?? 'Attendez quelques secondes, puis appuyez sur Réessayer.'),
+                retry: (globalThis.NorvaI18n?.t("ui_web_af273d956b5b", { defaultValue: "Réessayer" }) ?? 'Réessayer'),
             };
         }
         return {
-            title: 'This TV service is busy',
-            message: 'This TV service is busy. Norva will retry once the slot is free.',
-            hint: 'Wait a few seconds, then select Retry.',
-            retry: 'Retry',
+            title: (globalThis.NorvaI18n?.t("ui_web_3be599075bbf", { defaultValue: "This TV service is busy" }) ?? 'This TV service is busy'),
+            message: (globalThis.NorvaI18n?.t("ui_web_e746fa23da97", { defaultValue: "This TV service is busy. Norva will retry once the slot is free." }) ?? 'This TV service is busy. Norva will retry once the slot is free.'),
+            hint: (globalThis.NorvaI18n?.t("ui_web_f73ba788238e", { defaultValue: "Wait a few seconds, then select Retry." }) ?? 'Wait a few seconds, then select Retry.'),
+            retry: (globalThis.NorvaI18n?.t("ui_web_942087cc2d41", { defaultValue: "Retry" }) ?? 'Retry'),
         };
     }
 
@@ -4286,17 +4286,17 @@ class WatchPage {
         const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
         if (locale.startsWith('fr')) {
             return {
-                title: 'Conversion serveur nécessaire',
-                message: 'Le navigateur ne peut pas lire directement ce format. La première session a été arrêtée avant toute autre tentative.',
-                hint: 'Appuyez sur Convertir et lire pour démarrer une seule nouvelle session via le serveur.',
-                retry: 'Convertir et lire',
+                title: (globalThis.NorvaI18n?.t("ui_web_2b949cf60518", { defaultValue: "Conversion serveur nécessaire" }) ?? 'Conversion serveur nécessaire'),
+                message: (globalThis.NorvaI18n?.t("ui_web_058ccf9b7010", { defaultValue: "Le navigateur ne peut pas lire directement ce format. La première session a été arrêtée avant toute autre tentative." }) ?? 'Le navigateur ne peut pas lire directement ce format. La première session a été arrêtée avant toute autre tentative.'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_77d357ed1861", { defaultValue: "Appuyez sur Convertir et lire pour démarrer une seule nouvelle session via le serveur." }) ?? 'Appuyez sur Convertir et lire pour démarrer une seule nouvelle session via le serveur.'),
+                retry: (globalThis.NorvaI18n?.t("ui_web_799d4e0f494d", { defaultValue: "Convertir et lire" }) ?? 'Convertir et lire'),
             };
         }
         return {
-            title: 'Server conversion required',
-            message: 'This browser cannot play the file directly. The first session was stopped before any other route was attempted.',
-            hint: 'Select Convert and play to start one new server session.',
-            retry: 'Convert and play',
+            title: (globalThis.NorvaI18n?.t("ui_web_b2fdf08eeb30", { defaultValue: "Server conversion required" }) ?? 'Server conversion required'),
+            message: (globalThis.NorvaI18n?.t("ui_web_2a9f759e8ed7", { defaultValue: "This browser cannot play the file directly. The first session was stopped before any other route was attempted." }) ?? 'This browser cannot play the file directly. The first session was stopped before any other route was attempted.'),
+            hint: (globalThis.NorvaI18n?.t("ui_web_7f7372c2be5e", { defaultValue: "Select Convert and play to start one new server session." }) ?? 'Select Convert and play to start one new server session.'),
+            retry: (globalThis.NorvaI18n?.t("ui_web_58b57a88c039", { defaultValue: "Convert and play" }) ?? 'Convert and play'),
         };
     }
 
@@ -4321,58 +4321,58 @@ class WatchPage {
             return this.providerAccountConflictCopy().message;
         }
         if (/MEDIA_CACHE_(PRODUCER_ACTIVE|BACKGROUND_DRAINING)/i.test(text)) {
-            return 'This film is still being prepared. Please retry in a moment.';
+            return (globalThis.NorvaI18n?.t("ui_web_800cec00079f", { defaultValue: "This film is still being prepared. Please retry in a moment." }) ?? 'This film is still being prepared. Please retry in a moment.');
         }
         if (/PROVIDER_(CONNECT|RESPONSE)_TIMEOUT|UND_ERR_(CONNECT|HEADERS)_TIMEOUT|ETIMEDOUT/i.test(text)) {
-            return 'The TV service did not respond before the connection timed out. Retry once the service is reachable.';
+            return (globalThis.NorvaI18n?.t("ui_web_1173ac0834ae", { defaultValue: "The TV service did not respond before the connection timed out. Retry once the service is reachable." }) ?? 'The TV service did not respond before the connection timed out. Retry once the service is reachable.');
         }
         if (/PROVIDER_DNS_FAILURE|ENOTFOUND|EAI_AGAIN/i.test(text)) {
-            return 'The TV service address could not be resolved. Check the service address in Settings.';
+            return (globalThis.NorvaI18n?.t("ui_web_bd979eb9c667", { defaultValue: "The TV service address could not be resolved. Check the service address in Settings." }) ?? 'The TV service address could not be resolved. Check the service address in Settings.');
         }
         if (/PROVIDER_TLS_FAILURE|certificate|TLS|SSL/i.test(text)) {
-            return 'The TV service could not establish a secure connection.';
+            return (globalThis.NorvaI18n?.t("ui_web_382bd774f8c6", { defaultValue: "The TV service could not establish a secure connection." }) ?? 'The TV service could not establish a secure connection.');
         }
         if (/PROVIDER_CONNECTION_RESET|ECONNRESET|UND_ERR_SOCKET|EPIPE/i.test(text)) {
-            return 'The TV service closed the network connection before playback could start.';
+            return (globalThis.NorvaI18n?.t("ui_web_b87fac7544cd", { defaultValue: "The TV service closed the network connection before playback could start." }) ?? 'The TV service closed the network connection before playback could start.');
         }
         if (/PROVIDER_NETWORK_UNREACHABLE|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/i.test(text)) {
-            return 'The network route to the TV service is unavailable.';
+            return (globalThis.NorvaI18n?.t("ui_web_73302f0fcb07", { defaultValue: "The network route to the TV service is unavailable." }) ?? 'The network route to the TV service is unavailable.');
         }
         if (/NO_SUPPORTED_MIME/i.test(text)) {
-            return "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it.";
+            return (globalThis.NorvaI18n?.t("ui_web_d3aa098aaeb8", { defaultValue: "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it." }) ?? "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it.");
         }
         if (/429|Too Many Requests|Many Requests|rate limit/i.test(text)) {
             return cloud
-                ? "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again."
-                : 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.';
+                ? (globalThis.NorvaI18n?.t("ui_web_4a2178cfbf0d", { defaultValue: "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again." }) ?? "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again.")
+                : (globalThis.NorvaI18n?.t("ui_web_4700ef1bdf32", { defaultValue: "The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again." }) ?? 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.');
         }
         if (/401|Unauthorized|403|Forbidden/i.test(text)) {
             return cloud
-                ? "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off."
-                : 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.';
+                ? (globalThis.NorvaI18n?.t("ui_web_0d831becc649", { defaultValue: "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off." }) ?? "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off.")
+                : (globalThis.NorvaI18n?.t("ui_web_ec9a00a6e6b1", { defaultValue: "The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed." }) ?? 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.');
         }
         if (/404|not found/i.test(text)) {
-            return 'Stream not found on the provider (404). This title may have been removed.';
+            return (globalThis.NorvaI18n?.t("ui_web_e95a86ac0092", { defaultValue: "Stream not found on the provider (404). This title may have been removed." }) ?? 'Stream not found on the provider (404). This title may have been removed.');
         }
         if (/416|Requested Range Not Satisfiable|range not satisfiable/i.test(text)) {
-            return 'The provider refused the requested resume/seek position. Restart from the beginning or try another version.';
+            return (globalThis.NorvaI18n?.t("ui_web_ea854f56bb8b", { defaultValue: "The provider refused the requested resume/seek position. Restart from the beginning or try another version." }) ?? 'The provider refused the requested resume/seek position. Restart from the beginning or try another version.');
         }
         if (/5\d\d|Service Unavailable|server error/i.test(text)) {
-            return 'The provider is temporarily unavailable for this stream. Try another version or retry in a moment.';
+            return (globalThis.NorvaI18n?.t("ui_web_542c160150e3", { defaultValue: "The provider is temporarily unavailable for this stream. Try another version or retry in a moment." }) ?? 'The provider is temporarily unavailable for this stream. Try another version or retry in a moment.');
         }
         if (/SOURCE_NOT_MEDIA/i.test(text)) {
             // The byte-pipe fetched fine but the provider returned an error page / JSON instead of
             // the video (stream offline, link expired provider-side, or geo/auth wall on the file).
-            return 'This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment.';
+            return (globalThis.NorvaI18n?.t("ui_web_8d3b9dd0259c", { defaultValue: "This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment." }) ?? 'This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment.');
         }
         if (/SOURCE_UNSUPPORTED_CONTAINER|DEMUX_OPEN/i.test(text)) {
-            return "In-browser playback couldn't open this file's container (e.g. MPEG-TS). Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced.";
+            return (globalThis.NorvaI18n?.t("ui_web_d0feb8175eb3", { defaultValue: "In-browser playback couldn't open this file's container (e.g. MPEG-TS). Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced." }) ?? "In-browser playback couldn't open this file's container (e.g. MPEG-TS). Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced.");
         }
         if (/provider (closed|refused)|4XX Client Error|Error opening input|Invalid data|Stream ends prematurely|I\/O error/i.test(text)) {
-            return 'The provider closed or refused this stream. Try another version or wait before retrying.';
+            return (globalThis.NorvaI18n?.t("ui_web_7ff2af18d5f0", { defaultValue: "The provider closed or refused this stream. Try another version or wait before retrying." }) ?? 'The provider closed or refused this stream. Try another version or wait before retrying.');
         }
 
-        return 'Playback failed.';
+        return (globalThis.NorvaI18n?.t("ui_web_8c3a64e956bc", { defaultValue: "Playback failed." }) ?? 'Playback failed.');
     }
 
     escapeHtml(text) {
@@ -4492,7 +4492,7 @@ class WatchPage {
                 .slice(0, safeIndex + 1)
                 .filter(label => label === normalizedBase)
                 .length || (safeIndex + 1);
-            return `${base} - Piste ${occurrence}`;
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3f22d9bb0ad2", {defaultValue: "{{p0}} - Piste {{p1}}", p0:(base),p1:(occurrence)}) : `${base} - Piste ${occurrence}`);
         }
 
         return base;
@@ -4538,7 +4538,7 @@ class WatchPage {
         if (title) parts.push(title);
         if (language && !parts.some(part => part.toLowerCase() === language.toLowerCase())) parts.push(language);
         if (providerLabel) parts.push(providerLabel);
-        if (type === 'audio' && !parts.length) parts.push(fallback || 'Audio track');
+        if (type === 'audio' && !parts.length) parts.push(fallback || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'));
         if (codec && type === 'audio') parts.push(codec);
         if (channels && type === 'audio') parts.push(channels);
 
@@ -4718,7 +4718,7 @@ class WatchPage {
         this.currentPlaybackMode = 'engine';
         this.streamStartOffset = 0;
         this.gatewaySourceTimestamps = false;
-        try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
+        try { this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_db2039f22724", { defaultValue: "Navigateur" }) ?? 'Navigateur')); } catch (_) {}
 
         // HTTP 458 is a provider-account conflict, not a media/container error.
         // It is handled inside the loop before any transcode fallback or retry.
@@ -4769,7 +4769,7 @@ class WatchPage {
                 try {
                     if (this._inbandSubsEnabled() && engine.hasInbandSubtitles?.()) engine.enableSubtitleCapture();
                 } catch (_) { /* best-effort */ }
-                try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
+                try { this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_db2039f22724", { defaultValue: "Navigateur" }) ?? 'Navigateur')); } catch (_) {}
                 this.video.play().catch((e) => this.handleAutoplayError(e));
                 this.setVolumeFromStorage();
                 return;
@@ -4899,7 +4899,7 @@ class WatchPage {
         this.resumeTime = startOffset;
         console.warn(`[WatchPage] engine fallback to gateway transcode from ${startOffset}s`);
         try { this.showLoading(); } catch (_) {}
-        try { this.updateTranscodeStatus('transcoding', 'Conversion serveur…'); } catch (_) {}
+        try { this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_c8ed9eed2916", { defaultValue: "Conversion serveur…" }) ?? 'Conversion serveur…')); } catch (_) {}
         let result;
         try {
             await this.waitForProviderSlotRelease(900);
@@ -5202,7 +5202,7 @@ class WatchPage {
         try { this.setSelectedAudioPreference(selected); } catch (_) {}
         this.hidePlaybackError();
         this.showLoading();
-        try { this.updateTranscodeStatus('direct', `Audio: ${this.getTrackLabel(selected, 'Audio', 'audio')}`); } catch (_) {}
+        try { this.updateTranscodeStatus('direct', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(this.getTrackLabel(selected, 'Audio', 'audio'))}) : `Audio: ${this.getTrackLabel(selected, 'Audio', 'audio')}`)); } catch (_) {}
         await this.playWithEngine(url, {
             startTime: position,
             playbackAttemptId: this._playbackAttemptId,
@@ -5224,7 +5224,7 @@ class WatchPage {
         try { snap = this.norvaEngine?.engineSnapshot?.() || null; } catch (_) {}
         if (snap && window.NorvaTrace?.enabled) {
             try {
-                console.group('[NorvaEngine] failure snapshot');
+                console.group((globalThis.NorvaI18n?.t("ui_web_529a44428b74", { defaultValue: "[NorvaEngine] failure snapshot" }) ?? '[NorvaEngine] failure snapshot'));
                 console.warn('mime        :', snap.mime, '| video', snap.vName, '| audio', snap.aName, '| copyAudio', snap.copyAudio);
                 console.warn('codec string:', snap.videoCodecString, '| candidates', snap.videoCands, '| audioTag', snap.audioTag);
                 console.warn('init segment:', snap.initBoxes, '(' + snap.initBytes + ' B) | muxerInits', snap.muxerInits);
@@ -5327,7 +5327,7 @@ class WatchPage {
         // Pass the raw reason through; showPlaybackError → getFriendlyPlaybackError maps
         // it to a clear message (458 slot-busy, NO_SUPPORTED_MIME, 401/403, …) and keeps
         // the original code as the small detail line for diagnosis.
-        const detail = String((e && (e.message || e)) || 'Browser playback failed.');
+        const detail = String((e && (e.message || e)) || (globalThis.NorvaI18n?.t("ui_web_feb502bf9c6b", { defaultValue: "Browser playback failed." }) ?? 'Browser playback failed.'));
         this.showPlaybackError(detail, { immediate: true });
     }
 
@@ -5343,7 +5343,7 @@ class WatchPage {
         }
         if (!this.isLikelyPlaybackUrl(url)) {
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
-            await this.handlePlaybackFailure('Playback session did not return a media URL.');
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_e5c20e6e20a8", { defaultValue: "Playback session did not return a media URL." }) ?? 'Playback session did not return a media URL.'));
             return;
         }
 
@@ -5381,7 +5381,7 @@ class WatchPage {
         );
         if ((options.mediaCache || options.media_cache) && !privateMediaCacheAccess) {
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
-            await this.handlePlaybackFailure('Private media cache authorization is invalid.');
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_55e2e9cd1333", { defaultValue: "Private media cache authorization is invalid." }) ?? 'Private media cache authorization is invalid.'));
             return;
         }
         const exactSubtitleHls = options.exactSubtitleHls
@@ -5668,7 +5668,7 @@ class WatchPage {
 
         // Priority 1: Force Video Transcode (Full) or Upscaling
         if (settings.forceVideoTranscode || settings.upscaleEnabled) {
-            const statusText = settings.upscaleEnabled ? 'Upscaling' : 'Transcoding (Video)';
+            const statusText = settings.upscaleEnabled ? (globalThis.NorvaI18n?.t("ui_web_d827fea4f9a0", { defaultValue: "Upscaling" }) ?? 'Upscaling') : (globalThis.NorvaI18n?.t("ui_web_59d35c5bdd2d", { defaultValue: "Transcoding (Video)" }) ?? 'Transcoding (Video)');
             const statusMode = settings.upscaleEnabled ? 'upscaling' : 'transcoding';
             console.log(`[WatchPage] ${statusText} enabled. Starting session (encode)...`);
             this.updateTranscodeStatus(statusMode, statusText);
@@ -5728,7 +5728,7 @@ class WatchPage {
         // Priority 2: Force Remux for raw TS streams
         if (settings.forceRemux && isRawTs) {
             console.log('[WatchPage] Force Remux enabled');
-            this.updateTranscodeStatus('remuxing', 'Remux (Force)');
+            this.updateTranscodeStatus('remuxing', (globalThis.NorvaI18n?.t("ui_web_42cd3feba539", { defaultValue: "Remux (Force)" }) ?? 'Remux (Force)'));
             const startOffset = this.resumeTime || 0;
             this.currentPlaybackMode = 'remux';
             this.currentProcessingOptions = {};
@@ -5764,7 +5764,7 @@ class WatchPage {
         if (looksLikeHls && privateMediaCacheAccess && !hlsSupported) {
             this.clearPrivateMediaCacheAccess();
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
-            this.showPlaybackError('Secure cached playback is not supported by this browser.', { immediate: true });
+            this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_71be9d417435", { defaultValue: "Secure cached playback is not supported by this browser." }) ?? 'Secure cached playback is not supported by this browser.'), { immediate: true });
             return;
         }
         if (looksLikeHls && hlsSupported) {
@@ -5819,7 +5819,7 @@ class WatchPage {
         } else {
             // Direct playback for mp4/mkv/avi
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-            this.updateTranscodeStatus('direct', 'Direct Play');
+            this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_74d004705fc0", { defaultValue: "Direct Play" }) ?? 'Direct Play'));
             this.currentPlaybackMode = 'direct';
             this.currentProcessingOptions = {};
             this.streamStartOffset = 0;
@@ -6100,7 +6100,7 @@ class WatchPage {
             if (!isGatewaySession) {
                 setTimeout(() => {
                     if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
-                    if (autoplay) this.video?.play().catch(e => this.handleAutoplayError(e, 'Recovery autoplay error'));
+                    if (autoplay) this.video?.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_9cbe3245df72", { defaultValue: "Recovery autoplay error" }) ?? 'Recovery autoplay error')));
                     this._reattachAiTrackIfActive();
                 }, 500);
                 return;
@@ -6133,7 +6133,7 @@ class WatchPage {
                 this._gatewayAutomaticRebuffering = false;
                 if (bufferReady) {
                     this._stallSince = Date.now();
-                    this.video?.play().catch(e => this.handleAutoplayError(e, 'Recovery autoplay error'));
+                    this.video?.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_9cbe3245df72", { defaultValue: "Recovery autoplay error" }) ?? 'Recovery autoplay error')));
                 } else {
                     // Keep the prepared session available for an explicit retry;
                     // a slow fill is not a terminal provider/playback failure.
@@ -6272,7 +6272,7 @@ class WatchPage {
                     if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
                     await this.releasePlaybackPipelineForRetry().catch(() => {});
                     if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
-                        this.showPlaybackError('Playback buffer could not be prepared. Please try again.', { immediate: true });
+                        this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_b54d8d3e5f7a", { defaultValue: "Playback buffer could not be prepared. Please try again." }) ?? 'Playback buffer could not be prepared. Please try again.'), { immediate: true });
                     }
                     return;
                 }
@@ -6400,7 +6400,7 @@ class WatchPage {
                     ).catch(error => {
                         console.warn('[WatchPage] Private media cache fallback failed:', error?.message || error);
                         if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
-                            this.handlePlaybackFailure('Cached playback became unavailable.')
+                            this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_22156a3168f0", { defaultValue: "Cached playback became unavailable." }) ?? 'Cached playback became unavailable.'))
                                 .catch(() => {});
                         }
                     });
@@ -6476,7 +6476,7 @@ class WatchPage {
         if (url.startsWith('/api/transcode?')) {
             this.video.src = url;
             if (autoplay) {
-                this.video.play().catch(e => this.handleAutoplayError(e, 'Direct transcode play error'));
+                this.video.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_f69eb5121660", { defaultValue: "Direct transcode play error" }) ?? 'Direct transcode play error')));
             }
             return;
         }
@@ -6610,7 +6610,7 @@ class WatchPage {
 
     // === Playback Controls ===
 
-    handleAutoplayError(error, label = 'Autoplay error') {
+    handleAutoplayError(error, label = (globalThis.NorvaI18n?.t("ui_web_a227de1949a4", { defaultValue: "Autoplay error" }) ?? 'Autoplay error')) {
         if (error?.name === 'AbortError') return;
         if (error?.name === 'NotAllowedError') {
             // A long Gateway preparation can outlive the browser's transient user
@@ -6662,7 +6662,7 @@ class WatchPage {
         Promise.resolve(this.seekToTime(base + seconds, { immediate: true }))
             .catch(error => {
                 console.error('[WatchPage] Skip seek failed:', error);
-                this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+                this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_9ea4cf2324b8", { defaultValue: "Failed to seek in this title." }) ?? 'Failed to seek in this title.')).catch(() => { });
             });
     }
 
@@ -6701,7 +6701,7 @@ class WatchPage {
         Promise.resolve(this.seekToTime(target, { immediate: !debounceGatewaySeek }))
             .catch(error => {
                 console.error('[WatchPage] Seek failed:', error);
-                this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+                this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_9ea4cf2324b8", { defaultValue: "Failed to seek in this title." }) ?? 'Failed to seek in this title.')).catch(() => { });
             })
             .finally(() => {
                 if (!debounceGatewaySeek && !this._timelineScrubbing && this._pendingSeekTarget === target) {
@@ -6758,7 +6758,7 @@ class WatchPage {
             Promise.resolve(this.seekToTime(nextTarget, { immediate: true }))
                 .catch(error => {
                     console.error('[WatchPage] Scheduled seek failed:', error);
-                    this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+                    this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_9ea4cf2324b8", { defaultValue: "Failed to seek in this title." }) ?? 'Failed to seek in this title.')).catch(() => { });
                 })
                 .finally(() => {
                     if (!this._timelineScrubbing && this._pendingSeekTarget === nextTarget) {
@@ -6889,14 +6889,14 @@ class WatchPage {
         if (mode === 'remux') {
             this.video.src = this.getRemuxUrl(sourceUrl, targetTime);
             if (autoplay) {
-                this.video.play().catch(e => this.handleAutoplayError(e, 'Remux seek play error'));
+                this.video.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_a65c50da0b42", { defaultValue: "Remux seek play error" }) ?? 'Remux seek play error')));
             }
         } else if (mode === 'transcode') {
             const processingOptions = this.getFreshProcessingOptions();
             this.currentProcessingOptions = processingOptions;
             this.video.src = this.getTranscodeUrl(sourceUrl, targetTime, processingOptions);
             if (autoplay) {
-                this.video.play().catch(e => this.handleAutoplayError(e, 'Transcode seek play error'));
+                this.video.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_f76e193e7544", { defaultValue: "Transcode seek play error" }) ?? 'Transcode seek play error')));
             }
         } else if (mode === 'transcode-session') {
             const processingOptions = this.getFreshProcessingOptions({ seekOffset: targetTime });
@@ -7042,7 +7042,7 @@ class WatchPage {
         }
 
         if (!result?.url) {
-            await this.handlePlaybackFailure('Failed to start seek session.');
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_d6e24678d45a", { defaultValue: "Failed to start seek session." }) ?? 'Failed to start seek session.'));
             return;
         }
 
@@ -7175,7 +7175,7 @@ class WatchPage {
         }
 
         const showPromptFallback = () => {
-            prompt('Copy this URL:', streamUrl);
+            prompt((globalThis.NorvaI18n?.t("ui_web_1b0b51b2013f", { defaultValue: "Copy this URL:" }) ?? 'Copy this URL:'), streamUrl);
         };
 
         // navigator.clipboard is only available in secure contexts (HTTPS/localhost)
@@ -7184,9 +7184,9 @@ class WatchPage {
                 // Show brief feedback
                 const btn = document.getElementById('watch-copy-url');
                 if (btn) {
-                    btn.textContent = '✓ Copied!';
+                    btn.textContent = (globalThis.NorvaI18n?.t("ui_web_4e45a91772b8", { defaultValue: "✓ Copied!" }) ?? '✓ Copied!');
                     setTimeout(() => {
-                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
+                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><norva-i18n data-i18n="ui_web_60f1b404dc5b"> Copy Stream URL</norva-i18n>`;
                     }, 1500);
                 }
                 console.log('[WatchPage] Stream URL copied:', this.describePlaybackUrl(streamUrl));
@@ -7407,7 +7407,7 @@ class WatchPage {
         if (statusStamp !== this._bufferStatusStamp) {
             this._bufferStatusStamp = statusStamp;
             if (this.bufferStatus) {
-                this.bufferStatus.textContent = `Loaded to ${this.formatTime(bufferedPosition)} of ${this.formatTime(duration)}`;
+                this.bufferStatus.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_23a88d7bc7d7", {defaultValue: "Loaded to {{p0}} of {{p1}}", p0:(this.formatTime(bufferedPosition)),p1:(this.formatTime(duration))}) : `Loaded to ${this.formatTime(bufferedPosition)} of ${this.formatTime(duration)}`);
             }
         }
         return bufferedPosition;
@@ -7654,7 +7654,7 @@ class WatchPage {
             this.saveProgress({ force: true });
             this.clearResumeSnapshot();
             this._clearResumePosition(); // finished → don't resume next time
-            if (this.playBtnText) this.playBtnText.textContent = 'Restart';
+            if (this.playBtnText) this.playBtnText.textContent = (globalThis.NorvaI18n?.t("ui_web_6b983a81e5e8", { defaultValue: "Restart" }) ?? 'Restart');
         }
 
         // For series, propose the next episode. Autoplay controls whether the
@@ -7718,7 +7718,7 @@ class WatchPage {
                 // skipped and playback dead-looped on retry-in-place. Tag codec codes so the transcode
                 // chain runs. Network (code 2) stays untagged (not a codec issue → no format transcode).
                 const isCodecError = error.code === 3 || error.code === 4;
-                const message = (isCodecError ? 'MEDIA_ELEMENT_ERROR: Format error — ' : '')
+                const message = (isCodecError ? (globalThis.NorvaI18n?.t("ui_web_714af210e14c", { defaultValue: "MEDIA_ELEMENT_ERROR: Format error — " }) ?? 'MEDIA_ELEMENT_ERROR: Format error — ') : '')
                     + (error.message || `code ${error.code}`);
                 if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
                 this.sendPlaybackEvent('playback_error', {
@@ -7842,8 +7842,8 @@ class WatchPage {
         const response = data.response || {};
         const networkDetails = data.networkDetails || {};
         const code = Number(response.code ?? response.status ?? response.statusCode ?? networkDetails.status);
-        if (code === 410) return 'Gateway session expired.';
-        return 'Gateway session not found.';
+        if (code === 410) return (globalThis.NorvaI18n?.t("ui_web_5fcfcc618a1c", { defaultValue: "Gateway session expired." }) ?? 'Gateway session expired.');
+        return (globalThis.NorvaI18n?.t("ui_web_22033bd45598", { defaultValue: "Gateway session not found." }) ?? 'Gateway session not found.');
     }
 
     isGatewayOnlyContainer() {
@@ -7880,7 +7880,7 @@ class WatchPage {
         console.warn('[WatchPage] Gateway media append failed. Retrying through Relay.');
         this.hidePlaybackError();
         this.showLoading();
-        this.updateTranscodeStatus('remuxing', 'Norva Relay');
+        this.updateTranscodeStatus('remuxing', (globalThis.NorvaI18n?.t("ui_web_6a16b991523c", { defaultValue: "Norva Relay" }) ?? 'Norva Relay'));
 
         try {
             await this.releasePlaybackPipelineForRetry();
@@ -7931,7 +7931,7 @@ class WatchPage {
         console.warn('[WatchPage] Gateway remux failed. Retrying with full Gateway transcode.');
         this.hidePlaybackError();
         this.showLoading();
-        this.updateTranscodeStatus('transcoding', 'Norva Gateway');
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_3cc84f4b402a", { defaultValue: "Norva Gateway" }) ?? 'Norva Gateway'));
 
         const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
         const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
@@ -8029,7 +8029,7 @@ class WatchPage {
         console.warn('[WatchPage] Browser rejected copied/direct video. Retrying with full video transcode.');
         this.hidePlaybackError();
         this.showLoading();
-        this.updateTranscodeStatus('transcoding', 'Transcoding (Video)');
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_59d35c5bdd2d", { defaultValue: "Transcoding (Video)" }) ?? 'Transcoding (Video)'));
 
         if (this.hls) {
             this.hls.destroy();
@@ -8114,16 +8114,16 @@ class WatchPage {
             : serverRecovery
                 ? recoveryCopy.hint
             : providerBlocked
-                ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
+                ? (globalThis.NorvaI18n?.t("ui_web_eea77d940feb", { defaultValue: "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later." }) ?? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later.")
                 : refreshScheduled
-                    ? 'Retrying automatically in 2 seconds…'
-                    : 'If the problem persists, use Retry below.';
+                    ? (globalThis.NorvaI18n?.t("ui_web_61abd551a4ec", { defaultValue: "Retrying automatically in 2 seconds…" }) ?? 'Retrying automatically in 2 seconds…')
+                    : (globalThis.NorvaI18n?.t("ui_web_5e719a93f85f", { defaultValue: "If the problem persists, use Retry below." }) ?? 'If the problem persists, use Retry below.');
         const refreshBtnLabel = playbackSuperseded || providerBusy
             ? conflictCopy.retry
-            : serverRecovery ? recoveryCopy.retry : ((providerBlocked) ? 'Retry' : 'Retry now');
+            : serverRecovery ? recoveryCopy.retry : ((providerBlocked) ? (globalThis.NorvaI18n?.t("ui_web_942087cc2d41", { defaultValue: "Retry" }) ?? 'Retry') : (globalThis.NorvaI18n?.t("ui_web_5148c3e20576", { defaultValue: "Retry now" }) ?? 'Retry now'));
         const errorTitle = playbackSuperseded || providerBusy
             ? conflictCopy.title
-            : serverRecovery ? recoveryCopy.title : 'Unable to play this title';
+            : serverRecovery ? recoveryCopy.title : (globalThis.NorvaI18n?.t("ui_web_863453ecda89", { defaultValue: "Unable to play this title" }) ?? 'Unable to play this title');
         const errorMessage = serverRecovery ? recoveryCopy.message : friendly;
 
         errorEl.innerHTML = `
@@ -8603,7 +8603,7 @@ class WatchPage {
 
                 this.resetObservedTrackPersistenceState();
                 this.versionIndex = nextIndex;
-                this.updateTranscodeStatus('transcoding', `Switched: ${next.label}`);
+                this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8f3305d730d5", {defaultValue: "Switched: {{p0}}", p0:(next.label)}) : `Switched: ${next.label}`));
                 if (this.subtitleEl) {
                     this.subtitleEl.textContent = next.label || '';
                 }
@@ -9154,7 +9154,7 @@ class WatchPage {
         return {
             source: 'none',
             index: -1,
-            label: probeTracks[0].label || 'Audio track',
+            label: probeTracks[0].label || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'),
             active: true,
         };
     }
@@ -9170,12 +9170,12 @@ class WatchPage {
             const language = this.getLanguageDisplayName(
                 candidate?.language || candidate?.renditionLanguage,
             );
-            parts.push(language || 'Unknown language');
+            parts.push(language || (globalThis.NorvaI18n?.t("ui_web_1315cf5d5d8a", { defaultValue: "Unknown language" }) ?? 'Unknown language'));
             const codec = candidate?.codec || candidate?.renditionCodec;
             if (codec) parts.push(String(codec).toUpperCase());
             const channels = Number(candidate?.channels ?? candidate?.outputChannels);
             if (Number.isFinite(channels) && channels > 0) parts.push(`${channels}ch`);
-            return parts.length ? parts.join(' - ') : `Audio ${fallbackIndex + 1}`;
+            return parts.length ? parts.join(' - ') : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_00d0b35b71f0", {defaultValue: "Audio {{p0}}", p0:(fallbackIndex + 1)}) : `Audio ${fallbackIndex + 1}`);
         };
 
         const tracks = Array.isArray(allTracks) ? allTracks : [];
@@ -9184,7 +9184,7 @@ class WatchPage {
         const duplicateCount = bases.filter((candidate) => candidate === base).length;
         if (duplicateCount <= 1) return base;
         const occurrence = bases.slice(0, index + 1).filter((candidate) => candidate === base).length;
-        return `${base} - Track ${occurrence}`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4e4404ed9769", {defaultValue: "{{p0}} - Track {{p1}}", p0:(base),p1:(occurrence)}) : `${base} - Track ${occurrence}`);
     }
 
     handleGatewayHlsAudioTrackSwitched(activeHls, playbackAttemptId, data = {}) {
@@ -9421,7 +9421,7 @@ class WatchPage {
         return [{
             source: 'none',
             index: -1,
-            label: 'Audio tracks loading',
+            label: (globalThis.NorvaI18n?.t("ui_web_64465840f383", { defaultValue: "Audio tracks loading" }) ?? 'Audio tracks loading'),
             active: false,
             pending: true,
         }];
@@ -9437,7 +9437,7 @@ class WatchPage {
             streamIndex: track.index,
             label: this.getTrackLabel(
                 track,
-                this.audioTracks.length === 1 ? 'Audio track' : `Audio track ${index + 1}`,
+                this.audioTracks.length === 1 ? (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track') : `Audio track ${index + 1}`,
                 'audio'
             ),
             active: Number(track.index) === Number(selected?.index)
@@ -9843,12 +9843,12 @@ class WatchPage {
                 );
                 if (orig && orig !== 'und') {
                     const display = this.getLanguageDisplayName(orig);
-                    if (display) return `${display} · Provider label`;
+                    if (display) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38fc9a457587", {defaultValue: "{{p0}} · Provider label", p0:(display)}) : `${display} · Provider label`);
                 }
-                return 'Original version · Provider label';
+                return (globalThis.NorvaI18n?.t("ui_web_6b9188d3e5f8", { defaultValue: "Original version · Provider label" }) ?? 'Original version · Provider label');
             }
             const display = this.getLanguageDisplayName(audioSig.language);
-            return display ? `${display} · Provider label` : null;
+            return display ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38fc9a457587", {defaultValue: "{{p0}} · Provider label", p0:(display)}) : `${display} · Provider label`) : null;
         } catch (_) {
             return null;
         }
@@ -9858,7 +9858,7 @@ class WatchPage {
         if (!a) {
             return this.contentAudioLanguageLabel() ||
                 this.playingAudioVersionLabel() ||
-                'Audio track';
+                (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track');
         }
         const parts = [];
         // PRIMARY: the real per-track language from get_vod_info. When the provider
@@ -9876,7 +9876,7 @@ class WatchPage {
         const ch = this.formatChannelLayout(a.channelLayout, a.channels);
         if (ch) parts.push(ch);
         if (a.bitRate) parts.push(`${Math.round(a.bitRate / 1000)} kbps`);
-        return parts.length ? parts.join(' · ') : 'Audio track';
+        return parts.length ? parts.join(' · ') : (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track');
     }
 
     getVisibleAudioTracks() {
@@ -9900,7 +9900,7 @@ class WatchPage {
         const pendingGatewayTracks = this.getPendingGatewayAudioTracks();
         if (pendingGatewayTracks.length) return pendingGatewayTracks;
         if (this.isGatewayAudioRenditionFailClosed()) {
-            return [{ source: 'none', index: -1, label: 'Audio tracks unavailable', active: true }];
+            return [{ source: 'none', index: -1, label: (globalThis.NorvaI18n?.t("ui_web_55c7c3b7088e", { defaultValue: "Audio tracks unavailable" }) ?? 'Audio tracks unavailable'), active: true }];
         }
 
         const nativeTracks = this.getNativeAudioTracks();
@@ -9922,7 +9922,7 @@ class WatchPage {
         // switchable track list. Show the title's detected language (matches the card
         // badge + the native mobile player) instead of a meaningless "Default".
         const contentLabel = this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
-        return [{ source: 'none', index: -1, label: contentLabel || 'Audio track', active: true }];
+        return [{ source: 'none', index: -1, label: contentLabel || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'), active: true }];
     }
 
     // Persist only COMPLETE ordered maps returned by a trusted file-scoped
@@ -10059,10 +10059,10 @@ class WatchPage {
             const nextState = pending ? 'pending' : (unavailable ? 'unavailable' : 'ready');
             this.audioStatus.dataset.state = nextState;
             this.audioStatus.textContent = pending
-                ? 'Checking audio tracks…'
+                ? (globalThis.NorvaI18n?.t("ui_web_1dd3dcd41013", { defaultValue: "Checking audio tracks…" }) ?? 'Checking audio tracks…')
                 : (unavailable
-                    ? 'Audio tracks unavailable.'
-                    : (previousState === 'pending' ? 'Audio tracks ready.' : ''));
+                    ? (globalThis.NorvaI18n?.t("ui_web_4f3a2c197dec", { defaultValue: "Audio tracks unavailable." }) ?? 'Audio tracks unavailable.')
+                    : (previousState === 'pending' ? (globalThis.NorvaI18n?.t("ui_web_dc24e45cf864", { defaultValue: "Audio tracks ready." }) ?? 'Audio tracks ready.') : ''));
         }
         this.audioList.innerHTML = tracks.map(track => {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
@@ -10080,7 +10080,7 @@ class WatchPage {
                     btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
                 ).catch(error => {
                     console.error('[WatchPage] Audio selection failed:', error);
-                    this.handlePlaybackFailure('Failed to switch audio track.').catch(() => { });
+                    this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_010cd3912663", { defaultValue: "Failed to switch audio track." }) ?? 'Failed to switch audio track.')).catch(() => { });
                 });
             });
         });
@@ -10316,7 +10316,7 @@ class WatchPage {
         console.log(`[WatchPage] Restarting transcode with audio track ${selected.index}: ${audioLabel}`);
         this.hidePlaybackError();
         this.showLoading();
-        this.updateTranscodeStatus('transcoding', `Audio: ${audioLabel}`);
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(audioLabel)}) : `Audio: ${audioLabel}`));
 
         if (this.hls) {
             this.hls.destroy();
@@ -10385,7 +10385,7 @@ class WatchPage {
         console.log(`[WatchPage] Restarting Gateway with audio track ${selected.index}: ${audioLabel}`);
         this.hidePlaybackError();
         this.showLoading();
-        this.updateTranscodeStatus('transcoding', `Audio: ${audioLabel}`);
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(audioLabel)}) : `Audio: ${audioLabel}`));
         this.trackPlaybackPosition({ position: targetPosition, force: true });
         this.saveResumeSnapshotThrottled(true);
 
@@ -10450,7 +10450,7 @@ class WatchPage {
                 failedAt: Date.now(),
                 failureCode: 'missing_playback_url',
             });
-            await this.handlePlaybackFailure('Failed to switch audio track.');
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_010cd3912663", { defaultValue: "Failed to switch audio track." }) ?? 'Failed to switch audio track.'));
             return false;
         }
 
@@ -10475,7 +10475,7 @@ class WatchPage {
                     ? 'audio_map_mismatch'
                     : 'audio_map_unverified',
             });
-            await this.handlePlaybackFailure('The selected audio track could not be activated.');
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_b57e2339947b", { defaultValue: "The selected audio track could not be activated." }) ?? 'The selected audio track could not be activated.'));
             return false;
         }
 
@@ -10602,13 +10602,13 @@ class WatchPage {
         this._subtitleStatusTimer = null;
         this._subtitleSwitchFeedbackState = state;
 
-        const safeLabel = String(label || 'Selected').trim();
+        const safeLabel = String(label || (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected')).trim();
         const messages = {
-            applying: `Applying ${safeLabel} subtitles…`,
-            ready: `${safeLabel} subtitles on`,
-            off: 'Subtitles off',
-            deferred: `${safeLabel} is not prepared for this playback; video continues unchanged`,
-            error: 'Subtitles could not be displayed',
+            applying: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_7158e33e3afc", {defaultValue: "Applying {{p0}} subtitles…", p0:(safeLabel)}) : `Applying ${safeLabel} subtitles…`),
+            ready: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4afd56d99ebb", {defaultValue: "{{p0}} subtitles on", p0:(safeLabel)}) : `${safeLabel} subtitles on`),
+            off: (globalThis.NorvaI18n?.t("ui_web_6a5216300cb9", { defaultValue: "Subtitles off" }) ?? 'Subtitles off'),
+            deferred: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4872b443110b", {defaultValue: "{{p0}} is not prepared for this playback; video continues unchanged", p0:(safeLabel)}) : `${safeLabel} is not prepared for this playback; video continues unchanged`),
+            error: (globalThis.NorvaI18n?.t("ui_web_893cc8a2758a", { defaultValue: "Subtitles could not be displayed" }) ?? 'Subtitles could not be displayed'),
         };
         status.textContent = messages[state] || '';
         status.classList.remove('hidden', 'is-applying', 'is-ready', 'is-error');
@@ -10640,7 +10640,7 @@ class WatchPage {
     }
 
     subtitleTrackLabel(track = this.getSelectedSubtitleTrack()) {
-        if (!track) return 'Selected';
+        if (!track) return (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected');
         const tracks = this.getExtractableSubtitleTracks();
         return this.getSubtitleMenuLabel(track, tracks, tracks.indexOf(track), 'Selected');
     }
@@ -10758,8 +10758,8 @@ class WatchPage {
         this.hidePlaybackError();
         this.showLoading();
         this.updateTranscodeStatus('transcoding', preference?.source === 'probe'
-            ? 'Subtitles: selected track'
-            : 'Subtitles off');
+            ? (globalThis.NorvaI18n?.t("ui_web_5782bd6ac28c", { defaultValue: "Subtitles: selected track" }) ?? 'Subtitles: selected track')
+            : (globalThis.NorvaI18n?.t("ui_web_6a5216300cb9", { defaultValue: "Subtitles off" }) ?? 'Subtitles off'));
         if (this.hls) {
             this.hls.destroy();
             this.hls = null;
@@ -10783,7 +10783,7 @@ class WatchPage {
             return false;
         }
         if (!playlistUrl) {
-            await this.handlePlaybackFailure('Failed to restart playback with the selected subtitles.');
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_e78f95163771", { defaultValue: "Failed to restart playback with the selected subtitles." }) ?? 'Failed to restart playback with the selected subtitles.'));
             return false;
         }
         this.playHlsOrDirect(playlistUrl, { autoplay });
@@ -10849,7 +10849,7 @@ class WatchPage {
             .toLowerCase();
         if (sample.length < 40) return null;
 
-        if (/[\u0600-\u06ff]/.test(sample)) return 'ar';
+        if (/[\u0600-\u06ff]/.test(sample)) return ('ar');
 
         const scores = {
             fr: 0,
@@ -10899,7 +10899,7 @@ class WatchPage {
         const sourceId = this.getTelemetrySourceId?.() || this.content?.sourceId || this.content?.source_id || 'local';
         const itemId = this.getTelemetryItemId?.() || this.content?.id || this.content?.stream_id || 'unknown';
         const trackId = streamIndex === null || streamIndex === undefined ? 'default' : String(streamIndex);
-        return `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8ef7892473ba", {defaultValue: "norva-subtitle-offset:{{p0}}:{{p1}}:{{p2}}", p0:(sourceId),p1:(itemId),p2:(trackId)}) : `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`);
     }
 
     normalizeSubtitleOffset(value) {
@@ -11594,10 +11594,10 @@ class WatchPage {
 
     getBurnedSubtitleMessage() {
         const lang = this.detectBurnedSubtitleLanguage();
-        if (lang === undefined) return 'No subtitle track in this stream.';
-        if (lang === 'und') return 'Burned-in subtitles — always on, can’t be turned off.';
+        if (lang === undefined) return (globalThis.NorvaI18n?.t("ui_web_cca75acfd11c", { defaultValue: "No subtitle track in this stream." }) ?? 'No subtitle track in this stream.');
+        if (lang === 'und') return (globalThis.NorvaI18n?.t("ui_web_214313ff015c", { defaultValue: "Burned-in subtitles — always on, can’t be turned off." }) ?? 'Burned-in subtitles — always on, can’t be turned off.');
         const name = this.getLanguageDisplayName(lang) || lang.toUpperCase();
-        return `Burned-in subtitles (${name}) — always on, can’t be turned off.`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_567707f74907", {defaultValue: "Burned-in subtitles ({{p0}}) — always on, can’t be turned off.", p0:(name)}) : `Burned-in subtitles (${name}) — always on, can’t be turned off.`);
     }
 
     // ============================================================
@@ -11725,7 +11725,7 @@ class WatchPage {
             const base = `OCR${tag}`;
             const state = this._ocrStateFor(idx);
             if (state === 'processing') {
-                return `<button class="captions-option locked" data-source="ocr" data-index="-1" data-stream-index="${idx}" disabled aria-disabled="true" title="Reading the image subtitles with OCR in the background — you can keep watching.">⏳ ${this.escapeHtml(base + ' — generating')}</button>`;
+                return `<button class="captions-option locked" data-source="ocr" data-index="-1" data-stream-index="${idx}" disabled aria-disabled="true" title="Reading the image subtitles with OCR in the background — you can keep watching." data-i18n-title="ui_web_b1930b310d06">⏳ ${this.escapeHtml(base + ' — generating')}</button>`;
             }
             if (state === 'failed') {
                 return `<button class="captions-option" data-source="ocr" data-index="-1" data-stream-index="${idx}">⚠️ ${this.escapeHtml(base + ' failed — retry')}</button>`;
@@ -11825,23 +11825,23 @@ class WatchPage {
             const head = `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml(this._aiProcessingTooltip())}">${this._aiProcessingLabelHtml()}</button>`;
             const on = this._aiNotifyOptedIn;
             // Poll expired (job still alive server-side, we just stop hammering): push email hard.
-            const notifyLabel = on ? "We'll email you when it's ready" : (this._aiPollExpired ? 'Longer than usual — email me when ready' : 'Notify me by email when ready');
-            const notify = `<button class="captions-option ${on ? 'active' : ''}" data-action="ai-notify" type="button" title="${this.escapeHtml(on ? 'You\'ll get an email the moment your AI subtitles finish.' : 'Get an email when your AI subtitles finish — no need to wait here.')}">${on ? '🔔' : '🔕'} ${this.escapeHtml(notifyLabel)}</button>`;
+            const notifyLabel = on ? (globalThis.NorvaI18n?.t("ui_web_c97fcf769a9a", { defaultValue: "We'll email you when it's ready" }) ?? "We'll email you when it's ready") : (this._aiPollExpired ? (globalThis.NorvaI18n?.t("ui_web_37470b728b3c", { defaultValue: "Longer than usual — email me when ready" }) ?? 'Longer than usual — email me when ready') : (globalThis.NorvaI18n?.t("ui_web_c72bc122e09b", { defaultValue: "Notify me by email when ready" }) ?? 'Notify me by email when ready'));
+            const notify = `<button class="captions-option ${on ? 'active' : ''}" data-action="ai-notify" type="button" title="${this.escapeHtml(on ? (globalThis.NorvaI18n?.t("ui_web_e44ec0e1a5cc", { defaultValue: "You'll get an email the moment your AI subtitles finish." }) ?? 'You\'ll get an email the moment your AI subtitles finish.') : (globalThis.NorvaI18n?.t("ui_web_2f2b55f3e9d5", { defaultValue: "Get an email when your AI subtitles finish — no need to wait here." }) ?? 'Get an email when your AI subtitles finish — no need to wait here.'))}">${on ? '🔔' : '🔕'} ${this.escapeHtml(notifyLabel)}</button>`;
             return head + notify;
         }
         if (this.aiSubtitleState === 'failed') {
             // Daily cap is not a failure to retry: a retry re-POSTs and re-429s until tomorrow —
             // "retry" would be a promise of guaranteed failure. Locked, honest, terminal for today.
             if (this._aiIsDailyLimit()) {
-                return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml('You reached today\'s AI subtitle limit. Already-generated subtitles keep working — new generations resume tomorrow.')}">⏳ ${this.escapeHtml('Daily AI subtitle limit reached — try again tomorrow')}</button>`;
+                return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_df60263c8286", { defaultValue: "You reached today's AI subtitle limit. Already-generated subtitles keep working — new generations resume tomorrow." }) ?? 'You reached today\'s AI subtitle limit. Already-generated subtitles keep working — new generations resume tomorrow.'))}">⏳ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_60dbe6081c30", { defaultValue: "Daily AI subtitle limit reached — try again tomorrow" }) ?? 'Daily AI subtitle limit reached — try again tomorrow'))}</button>`;
             }
             const reason = this._aiFailureShort();
             const title = this._aiLastError ? ` title="${this.escapeHtml(this._aiLastError)}"` : '';
-            return `<button class="captions-option" data-source="ai" data-index="-1"${title}>⚠️ ${this.escapeHtml(reason ? `AI subtitles failed (${reason}) — retry` : 'AI subtitles failed — retry')}</button>`;
+            return `<button class="captions-option" data-source="ai" data-index="-1"${title}>⚠️ ${this.escapeHtml(reason ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_e64e5cce6fdd", {defaultValue: "AI subtitles failed ({{p0}}) — retry", p0:(reason)}) : `AI subtitles failed (${reason}) — retry`) : (globalThis.NorvaI18n?.t("ui_web_2b2c1a7e3b3f", { defaultValue: "AI subtitles failed — retry" }) ?? 'AI subtitles failed — retry'))}</button>`;
         }
         if (this.aiSubtitleState === 'empty') {
             // Terminal: the audio was transcribed but yielded no dialogue (silence / music only).
-            return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="The audio was transcribed but no speech was found">${this.escapeHtml('AI subtitles — no speech detected')}</button>`;
+            return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="The audio was transcribed but no speech was found" data-i18n-title="ui_web_d2b89e6ac0c1">${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_214cf68359cb", { defaultValue: "AI subtitles — no speech detected" }) ?? 'AI subtitles — no speech detected'))}</button>`;
         }
         const srcLang = this.normalizeTrackLanguage(this.aiSubtitleLang);
         // The transcript row is "active" only when the SOURCE track shows (a translation showing
@@ -11853,8 +11853,8 @@ class WatchPage {
             // is missing from "Translate to" (it IS the original).
             const srcName = (srcLang && srcLang !== 'und') ? this._langDisplayName(srcLang) : '';
             const readyLabel = transcriptActive
-                ? (srcName ? `AI subtitles — ${srcName} (original)` : 'AI subtitles (original)')
-                : (srcName ? `AI subtitles — show original (${srcName})` : 'AI subtitles — show original');
+                ? (srcName ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_965a7462fa5d", {defaultValue: "AI subtitles — {{p0}} (original)", p0:(srcName)}) : `AI subtitles — ${srcName} (original)`) : (globalThis.NorvaI18n?.t("ui_web_57c105f5d0ea", { defaultValue: "AI subtitles (original)" }) ?? 'AI subtitles (original)'))
+                : (srcName ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_87b47db8bdfa", {defaultValue: "AI subtitles — show original ({{p0}})", p0:(srcName)}) : `AI subtitles — show original (${srcName})`) : (globalThis.NorvaI18n?.t("ui_web_8fe4a47ccaf9", { defaultValue: "AI subtitles — show original" }) ?? 'AI subtitles — show original'));
             let html = `<button class="captions-option ${transcriptActive ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(readyLabel)}</button>`;
             html += this._aiTranslateRowsHtml();
             return html;
@@ -11863,12 +11863,12 @@ class WatchPage {
         // translation target. The choice rides the whole chain (transcript → auto-translation).
         const targets = (this._aiTranslateTargets || []).filter(Boolean);
         const rows = [
-            `<button class="captions-option" data-action="ai-generate" data-lang="src">🎙 ${this.escapeHtml('Original (spoken language)')}</button>`,
-            ...targets.map((lang) => `<button class="captions-option" data-action="ai-generate" data-lang="${this.escapeHtml(lang)}" title="${this.escapeHtml('Transcribes the audio, then auto-translates — works even if you close the tab.')}">🌐 ${this.escapeHtml(this._langDisplayName(lang))}</button>`),
+            `<button class="captions-option" data-action="ai-generate" data-lang="src">🎙 ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_4c7e7770c359", { defaultValue: "Original (spoken language)" }) ?? 'Original (spoken language)'))}</button>`,
+            ...targets.map((lang) => `<button class="captions-option" data-action="ai-generate" data-lang="${this.escapeHtml(lang)}" title="${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_b0380f85d773", { defaultValue: "Transcribes the audio, then auto-translates — works even if you close the tab." }) ?? 'Transcribes the audio, then auto-translates — works even if you close the tab.'))}">🌐 ${this.escapeHtml(this._langDisplayName(lang))}</button>`),
         ].join('');
         // With real text tracks above, the AI section is the secondary option for a language
         // the file doesn't carry — not the headline act.
-        const subhead = hasTextTracks ? 'AI subtitles — more languages' : 'Generate AI subtitles';
+        const subhead = hasTextTracks ? (globalThis.NorvaI18n?.t("ui_web_39694411608a", { defaultValue: "AI subtitles — more languages" }) ?? 'AI subtitles — more languages') : (globalThis.NorvaI18n?.t("ui_web_20b52aee0458", { defaultValue: "Generate AI subtitles" }) ?? 'Generate AI subtitles');
         return `<div class="captions-subhead">✨ ${this.escapeHtml(subhead)}</div>${rows}`;
     }
 
@@ -11877,31 +11877,31 @@ class WatchPage {
     _aiProcessingLabelHtml() {
         const stage = String(this._aiStage || '');
         const pos = Number(this._aiQueuePos);
-        if (this._aiPollExpired) return `⏳ ${this.escapeHtml('Still queued — enable email below, we\'ll let you know')}`;
+        if (this._aiPollExpired) return `⏳ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_8b56d09b5ff6", { defaultValue: "Still queued — enable email below, we'll let you know" }) ?? 'Still queued — enable email below, we\'ll let you know'))}`;
         // Optimistic pre-network state: the click was registered, the cache lookup is in flight.
-        if (stage === 'checking') return `✨ ${this.escapeHtml('Checking for existing subtitles…')}`;
-        if (stage === 'enqueueing') return `✨ ${this.escapeHtml('Starting AI subtitles…')}`;
+        if (stage === 'checking') return `✨ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_6fdbe97f0e57", { defaultValue: "Checking for existing subtitles…" }) ?? 'Checking for existing subtitles…'))}`;
+        if (stage === 'enqueueing') return `✨ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_14d27018bf31", { defaultValue: "Starting AI subtitles…" }) ?? 'Starting AI subtitles…'))}`;
         if (stage === 'deferred') {
             return this._aiDeferredByYou
-                ? `⏸ ${this.escapeHtml('Waiting for your playback to stop (your provider allows one connection)')}`
-                : `⏸ ${this.escapeHtml('Waiting for the provider slot to free up')}`;
+                ? `⏸ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_b22268213f7d", { defaultValue: "Waiting for your playback to stop (your provider allows one connection)" }) ?? 'Waiting for your playback to stop (your provider allows one connection)'))}`
+                : `⏸ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_9d23e4953cae", { defaultValue: "Waiting for the provider slot to free up" }) ?? 'Waiting for the provider slot to free up'))}`;
         }
-        if (stage === 'extracting') return `🎙 ${this.escapeHtml('Extracting the audio…')}`;
+        if (stage === 'extracting') return `🎙 ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_713f243f106c", { defaultValue: "Extracting the audio…" }) ?? 'Extracting the audio…'))}`;
         if (stage === 'transcribing') {
             this._ensureAiEta();
             const eta = this._aiEtaText();
-            const partial = this._aiPartialCues > 0 ? ` · ${this.escapeHtml('partial subtitles already showing')}` : '';
-            return `✍️ ${this.escapeHtml('Transcribing…')}${eta ? ` <span data-ai-countdown>${this.escapeHtml(eta)}</span>` : ''}${partial}`;
+            const partial = this._aiPartialCues > 0 ? ` · ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_aa9af6e014ea", { defaultValue: "partial subtitles already showing" }) ?? 'partial subtitles already showing'))}` : '';
+            return `✍️ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_47c6addbf1cc", { defaultValue: "Transcribing…" }) ?? 'Transcribing…'))}${eta ? ` <span data-ai-countdown>${this.escapeHtml(eta)}</span>` : ''}${partial}`;
         }
         const posTxt = Number.isFinite(pos) && pos > 0 ? ` (position ${pos})` : '';
-        return `⏳ ${this.escapeHtml(`Queued${posTxt}…`)}`;
+        return `⏳ ${this.escapeHtml((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f22525537d33", {defaultValue: "Queued{{p0}}…", p0:(posTxt)}) : `Queued${posTxt}…`))}`;
     }
 
     _aiProcessingTooltip() {
         if (String(this._aiStage || '') === 'deferred' && this._aiDeferredByYou) {
-            return 'Your provider allows a single connection: the transcription starts as soon as your playback stops. Or close the tab and enable the email — we\'ll notify you.';
+            return (globalThis.NorvaI18n?.t("ui_web_7aec2c2ed221", { defaultValue: "Your provider allows a single connection: the transcription starts as soon as your playback stops. Or close the tab and enable the email — we'll notify you." }) ?? 'Your provider allows a single connection: the transcription starts as soon as your playback stops. Or close the tab and enable the email — we\'ll notify you.');
         }
-        return 'Transcribing the audio with AI in the background. Closing the tab is fine — enable the email to be notified.';
+        return (globalThis.NorvaI18n?.t("ui_web_ace00d25c084", { defaultValue: "Transcribing the audio with AI in the background. Closing the tab is fine — enable the email to be notified." }) ?? 'Transcribing the audio with AI in the background. Closing the tab is fine — enable the email to be notified.');
     }
 
     // The edge's daily-cap 429 must never read as "provider refused the connection".
@@ -11914,12 +11914,12 @@ class WatchPage {
     _aiFailureShort() {
         const e = String(this._aiLastError || '').toLowerCase();
         if (!e) return '';
-        if (this._aiIsDailyLimit()) return 'daily limit reached';
-        if (e.includes('unavailable on this provider')) return 'not available on this provider';
-        if (e.includes('timeout') || e.includes('killed')) return 'transcription took too long';
-        if (e.includes('401') || e.includes('403') || e.includes('429') || e.includes('unauthorized') || e.includes('forbidden')) return 'provider refused the connection';
-        if (e.includes('extraction')) return 'audio extraction failed';
-        if (e.includes('deferred too long')) return 'provider slot stayed busy';
+        if (this._aiIsDailyLimit()) return (globalThis.NorvaI18n?.t("ui_web_57be39080300", { defaultValue: "daily limit reached" }) ?? 'daily limit reached');
+        if (e.includes('unavailable on this provider')) return (globalThis.NorvaI18n?.t("ui_web_ab60e5942528", { defaultValue: "not available on this provider" }) ?? 'not available on this provider');
+        if (e.includes('timeout') || e.includes('killed')) return (globalThis.NorvaI18n?.t("ui_web_7886a3b2696e", { defaultValue: "transcription took too long" }) ?? 'transcription took too long');
+        if (e.includes('401') || e.includes('403') || e.includes('429') || e.includes('unauthorized') || e.includes('forbidden')) return (globalThis.NorvaI18n?.t("ui_web_4bc1fe90c54e", { defaultValue: "provider refused the connection" }) ?? 'provider refused the connection');
+        if (e.includes('extraction')) return (globalThis.NorvaI18n?.t("ui_web_2984e93cee46", { defaultValue: "audio extraction failed" }) ?? 'audio extraction failed');
+        if (e.includes('deferred too long')) return (globalThis.NorvaI18n?.t("ui_web_43237a5ae175", { defaultValue: "provider slot stayed busy" }) ?? 'provider slot stayed busy');
         return '';
     }
 
@@ -11933,7 +11933,7 @@ class WatchPage {
             const st = (this._translations.get(lang) || {}).state || 'idle';
             const name = this.escapeHtml(this._langDisplayName(lang));
             if (st === 'processing') {
-                return `<button class="captions-option locked" data-action="ai-translate" data-lang="${lang}" disabled aria-disabled="true" title="Translating on the server — this is quick">🌐 ${name} — ${this.escapeHtml('translating…')}</button>`;
+                return `<button class="captions-option locked" data-action="ai-translate" data-lang="${lang}" disabled aria-disabled="true" title="Translating on the server — this is quick" data-i18n-title="ui_web_b90caf9824f8">🌐 ${name} — ${this.escapeHtml('translating…')}</button>`;
             }
             if (st === 'failed') {
                 return `<button class="captions-option" data-action="ai-translate" data-lang="${lang}">🌐 ${name} — ${this.escapeHtml('retry')}</button>`;
@@ -11941,7 +11941,7 @@ class WatchPage {
             const active = this._aiActiveLang === lang;
             return `<button class="captions-option ${active ? 'active' : ''}" data-action="ai-translate" data-lang="${lang}">🌐 ${name}</button>`;
         }).join('');
-        return `<div class="captions-subhead">${this.escapeHtml('Translate to')}</div>${rows}`;
+        return `<div class="captions-subhead">${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_1944d5ab19cd", { defaultValue: "Translate to" }) ?? 'Translate to'))}</div>${rows}`;
     }
 
     _langDisplayName(code) {
@@ -11981,10 +11981,10 @@ class WatchPage {
     _aiEtaText() {
         if (!this._aiEtaTargetMs) return '';
         const remMs = this._aiEtaTargetMs - Date.now();
-        if (remMs <= 0) return 'longer than usual — hang on…';
+        if (remMs <= 0) return (globalThis.NorvaI18n?.t("ui_web_87defe1c2a52", { defaultValue: "longer than usual — hang on…" }) ?? 'longer than usual — hang on…');
         const t = Math.round(remMs / 1000);
         const m = Math.floor(t / 60), s = t % 60;
-        return `~${m}:${String(s).padStart(2, '0')} left`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_73fe06b245eb", {defaultValue: "~{{p0}}:{{p1}} left", p0:(m),p1:(String(s).padStart(2, '0'))}) : `~${m}:${String(s).padStart(2, '0')} left`);
     }
 
     // Tick the countdown text in place (no full menu rebuild — that would churn the open popover and
@@ -12658,7 +12658,7 @@ class WatchPage {
                     source: 'hls',
                     index,
                     ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
-                    label: track.name || track.lang || `Subtitle ${index + 1}`,
+                    label: track.name || track.lang || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(index + 1)}) : `Subtitle ${index + 1}`),
                     active
                 };
             });
@@ -12677,12 +12677,17 @@ class WatchPage {
                         source: 'unprepared-hls',
                         index,
                         streamIndex: track.index,
-                        label: `${this.getSubtitleMenuLabel(
+                        label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9ccbf9fc8b91", {defaultValue: "{{p0}} · Load", p0:(this.getSubtitleMenuLabel(
                             track,
                             probeSubtitleTracks,
                             index,
                             `Subtitles ${index + 1}`,
-                        )} · Load`,
+                        ))}) : `${this.getSubtitleMenuLabel(
+                            track,
+                            probeSubtitleTracks,
+                            index,
+                            `Subtitles ${index + 1}`,
+                        )} · Load`),
                         active: false,
                         disabled: false,
                         requiresRestart: true,
@@ -12703,12 +12708,17 @@ class WatchPage {
                 source: 'unprepared-hls',
                 index,
                 streamIndex: track.index,
-                label: `${this.getSubtitleMenuLabel(
+                label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4b17a7a9a0ee", {defaultValue: "{{p0}} · Preparing", p0:(this.getSubtitleMenuLabel(
                     track,
                     probeSubtitleTracks,
                     index,
                     `Subtitles ${index + 1}`,
-                )} · Preparing`,
+                ))}) : `${this.getSubtitleMenuLabel(
+                    track,
+                    probeSubtitleTracks,
+                    index,
+                    `Subtitles ${index + 1}`,
+                )} · Preparing`),
                 active: false,
                 disabled: true,
             }));
@@ -12720,7 +12730,7 @@ class WatchPage {
                     source: 'probe',
                     index,
                     streamIndex: track.index,
-                    label: this.getSubtitleMenuLabel(track, probeSubtitleTracks, index, probeSubtitleTracks.length > 1 ? `Subtitles ${index + 1}` : 'Subtitles'),
+                    label: this.getSubtitleMenuLabel(track, probeSubtitleTracks, index, probeSubtitleTracks.length > 1 ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_182da8bf4542", {defaultValue: "Subtitles {{p0}}", p0:(index + 1)}) : `Subtitles ${index + 1}`) : (globalThis.NorvaI18n?.t("ui_web_0ee695bdeb26", { defaultValue: "Subtitles" }) ?? 'Subtitles')),
                     active
                 };
             });
@@ -12731,7 +12741,7 @@ class WatchPage {
                 // have their own menu rows, so listing them here too would double them up.
                 if (this._isManagedTextTrack(track)) continue;
                 if (track.kind === 'subtitles' || track.kind === 'captions') {
-                    const label = track.label || track.language || `Subtitle ${i + 1}`;
+                    const label = track.label || track.language || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(i + 1)}) : `Subtitle ${i + 1}`);
                     const active = track.mode === 'showing';
                     anyActive = anyActive || active;
                     options.push({
@@ -12753,7 +12763,7 @@ class WatchPage {
                     source: 'hls',
                     index,
                     ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
-                    label: track.name || track.lang || `Subtitle ${index + 1}`,
+                    label: track.name || track.lang || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(index + 1)}) : `Subtitle ${index + 1}`),
                     active
                 };
             });
@@ -12784,15 +12794,15 @@ class WatchPage {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
             const pendingClass = track.disabled ? 'pending' : (track.requiresRestart ? 'loadable' : '');
             const disabledAttr = track.disabled
-                ? ' disabled aria-disabled="true" title="Not prepared in the current playback session"'
-                : (track.requiresRestart ? ' title="Loads at the current position"' : '');
+                ? (globalThis.NorvaI18n?.t("ui_web_8b82f8f9d5b0", { defaultValue: " disabled aria-disabled=\"true\" title=\"Not prepared in the current playback session\"" }) ?? ' disabled aria-disabled="true" title="Not prepared in the current playback session"')
+                : (track.requiresRestart ? (globalThis.NorvaI18n?.t("ui_web_5fce929fc1a8", { defaultValue: " title=\"Loads at the current position\"" }) ?? ' title="Loads at the current position"') : '');
             return `<button class="captions-option ${track.active ? 'active' : pendingClass}" data-source="${track.source}" data-index="${track.index}"${streamAttr}${disabledAttr}>${this.escapeHtml(track.label)}</button>`;
         }).join('');
         // Burned-in: the off-row becomes a locked entry (can't be turned off); otherwise
         // the usual "Off" + "no track / burned message" applies.
         const headerHtml = burned
-            ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : 'Burned-in subtitles')}</button>`
-            : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>`;
+            ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on" data-i18n-title="ui_web_666f633cffda">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : (globalThis.NorvaI18n?.t("ui_web_13988d6f9aef", { defaultValue: "Burned-in subtitles" }) ?? 'Burned-in subtitles'))}</button>`
+            : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1" data-i18n="ui_web_ca7981b46ecf">Off</button>`;
         const aiHtml = aiAvailable ? this._aiSubtitleMenuHtml(options.length > 0) : '';
         // Phase 4: PGS image tracks get an "OCR → text" row each (offered alongside any text/AI rows).
         const ocrTracks = this.getOcrableSubtitleTracks();
@@ -12800,13 +12810,13 @@ class WatchPage {
         // When AI/OCR subtitles are on offer, the "no track" message would contradict the rows, so
         // suppress it (the AI/OCR rows + their own title text carry the message instead).
         const emptyHtml = burned
-            ? `<div class="captions-empty">${this.escapeHtml('Always on — subtitles are part of the picture, they can’t be turned off.')}</div>`
+            ? `<div class="captions-empty">${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_f54b5219a064", { defaultValue: "Always on — subtitles are part of the picture, they can’t be turned off." }) ?? 'Always on — subtitles are part of the picture, they can’t be turned off.'))}</div>`
             : (!options.length && !aiAvailable && !ocrTracks.length
                 ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
                 : '');
         const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
-            ? `<div class="captions-offset" aria-label="Subtitle sync">
-                <div class="captions-offset-label">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
+            ? `<div class="captions-offset" aria-label="Subtitle sync" data-i18n-aria-label="ui_web_7c00519e5d03">
+                <div class="captions-offset-label" data-i18n="ui_web_d54102038298" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(this.formatSubtitleOffset())}) || "{}")}">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
                 <div class="captions-offset-controls">
                   <button type="button" class="captions-offset-btn" data-offset-delta="-0.5">-0.5s</button>
                   <button type="button" class="captions-offset-btn" data-offset-delta="0.5">+0.5s</button>
@@ -12816,21 +12826,21 @@ class WatchPage {
 
         const subStyle = this.getSubtitleStyle();
         const styleHtml = `
-            <div class="captions-style" aria-label="Subtitle appearance">
-                <div class="captions-offset-label">Appearance</div>
+            <div class="captions-style" aria-label="Subtitle appearance" data-i18n-aria-label="ui_web_f6ca17751586">
+                <div class="captions-offset-label" data-i18n="ui_web_3907fa7f8072">Appearance</div>
                 <div class="captions-style-row">
-                    <span class="captions-style-name">Size · ${Math.round(subStyle.scale * 100)}%</span>
+                    <span class="captions-style-name" data-i18n="ui_web_9e319ad01588" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(Math.round(subStyle.scale * 100))}) || "{}")}">Size · ${Math.round(subStyle.scale * 100)}%</span>
                     <span class="captions-offset-controls">
                         <button type="button" class="captions-offset-btn" data-style-action="scale-down">A−</button>
                         <button type="button" class="captions-offset-btn" data-style-action="scale-up">A+</button>
                     </span>
                 </div>
                 <div class="captions-style-row">
-                    <span class="captions-style-name">Background</span>
+                    <span class="captions-style-name" data-i18n="ui_web_ea2b8a878841">Background</span>
                     <button type="button" class="captions-offset-btn" data-style-action="bg">${this.escapeHtml(subStyle.bgLabel)}</button>
                 </div>
                 <div class="captions-style-row">
-                    <span class="captions-style-name">Color</span>
+                    <span class="captions-style-name" data-i18n="ui_web_6b73191a0a4b">Color</span>
                     <button type="button" class="captions-offset-btn" data-style-action="color">${this.escapeHtml(subStyle.colorLabel)}</button>
                 </div>
             </div>`;
@@ -13097,13 +13107,13 @@ class WatchPage {
         } else if (selectedIsOff) {
             this.setSubtitleSwitchFeedback('off');
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
-            this.setSubtitleSwitchFeedback('ready', tracks[index]?.label || 'Selected');
+            this.setSubtitleSwitchFeedback('ready', tracks[index]?.label || (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected'));
         } else if (source === 'hls' && this.hls && index >= 0) {
             this.setSubtitleSwitchFeedback(
                 'ready',
                 this.hls.subtitleTracks?.[index]?.name
                     || this.hls.subtitleTracks?.[index]?.lang
-                    || 'Selected',
+                    || (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected'),
             );
         }
         if (playbackPreferences) this.saveResumeSnapshotThrottled(true);
@@ -13264,7 +13274,7 @@ class WatchPage {
 
         // Update play button text
         if (this.playBtnText) {
-            this.playBtnText.textContent = this.resumeTime > 0 ? 'Resume' : 'Play';
+            this.playBtnText.textContent = this.resumeTime > 0 ? (globalThis.NorvaI18n?.t("ui_web_d640c7421da0", { defaultValue: "Resume" }) ?? 'Resume') : (globalThis.NorvaI18n?.t("ui_web_436e61016e26", { defaultValue: "Play" }) ?? 'Play');
         }
     }
 
@@ -13425,8 +13435,8 @@ class WatchPage {
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                             <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
                         </svg>
-                        <span class="watch-season-name">Season ${seasonNum}</span>
-                        <span class="watch-season-count">${episodes.length} episodes</span>
+                        <span class="watch-season-name" data-i18n="ui_web_883c5a88c0bf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(seasonNum)}) || "{}")}">Season ${seasonNum}</span>
+                        <span class="watch-season-count" data-i18n="ui_web_6c182c7f810a" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p2":(episodes.length)}) || "{}")}">${episodes.length} episodes</span>
                     </div>
                     <div class="watch-episode-list">
                         ${episodes.map(ep => {
@@ -13439,7 +13449,7 @@ class WatchPage {
                                      data-episode="${ep.episode_num}"
                                      data-container="${ep.container_extension || 'mp4'}">
                                     <span class="watch-episode-num">E${ep.episode_num}</span>
-                                    <span class="watch-episode-title">${ep.title || `Episode ${ep.episode_num}`}</span>
+                                    <span class="watch-episode-title">${ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`)}</span>
                                     <span class="watch-episode-duration">${ep.duration || ''}</span>
                                 </div>
                             `;
@@ -13513,7 +13523,7 @@ class WatchPage {
                     audioSeriesId: seriesId
                 };
             playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
-            const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || `Episode ${episodeNum}`;
+            const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(episodeNum)}) : `Episode ${episodeNum}`);
             const content = {
                 type: 'series',
                 id: episodeId,
@@ -13612,7 +13622,7 @@ class WatchPage {
             btn.id = 'watch-skip-intro';
             btn.type = 'button';
             btn.className = 'watch-skip-intro hidden';
-            btn.textContent = 'Skip intro';
+            btn.textContent = (globalThis.NorvaI18n?.t("ui_web_5ee6bb693d75", { defaultValue: "Skip intro" }) ?? 'Skip intro');
             btn.addEventListener('click', () => this.skipIntro());
             document.querySelector('.watch-video-section')?.appendChild(btn);
         }
@@ -13738,7 +13748,7 @@ class WatchPage {
         const autoCountdown = options.autoCountdown !== false;
         this.nextEpisodePanel.classList.toggle('no-countdown', !autoCountdown);
         this.nextEpisodePanel.setAttribute('aria-hidden', 'false');
-        this.nextEpisodeTitle.textContent = `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || `Episode ${nextEp.episode_num}`}`;
+        this.nextEpisodeTitle.textContent = `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(nextEp.episode_num)}) : `Episode ${nextEp.episode_num}`)}`;
         // Richer panel (Netflix parity): a still, a one-line synopsis, and the
         // Cancel button reads "Watch Credits" so dismissing is an explicit choice.
         if (this.nextEpisodeStill) {
@@ -13781,7 +13791,7 @@ class WatchPage {
         if (!this.nextCountdown) return;
         if (!show) {
             this.nextCountdown.hidden = true;
-            this.nextCountdown.setAttribute('aria-label', 'Autoplay disabled');
+            this.nextCountdown.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_8f7fcea6e1de", { defaultValue: "Autoplay disabled" }) ?? 'Autoplay disabled'));
             return;
         }
         this.nextCountdown.hidden = false;
@@ -13793,8 +13803,8 @@ class WatchPage {
         const label = this.nextCountdown.querySelector('.next-countdown-label');
         if (num) num.textContent = String(remaining);
         else this.nextCountdown.textContent = String(remaining);
-        if (label) label.textContent = remaining === 1 ? 'sec' : 'secs';
-        this.nextCountdown.setAttribute('aria-label', `Playing next episode in ${remaining} seconds`);
+        if (label) label.textContent = remaining === 1 ? (globalThis.NorvaI18n?.t("ui_web_add93534eeb4", { defaultValue: "sec" }) ?? 'sec') : (globalThis.NorvaI18n?.t("ui_web_e6c5669ee730", { defaultValue: "secs" }) ?? 'secs');
+        this.nextCountdown.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_40db998bf899", {defaultValue: "Playing next episode in {{p0}} seconds", p0:(remaining)}) : `Playing next episode in ${remaining} seconds`));
     }
 
     async playNextEpisode(options = {}) {
@@ -13836,9 +13846,9 @@ class WatchPage {
         overlay.className = 'watch-still-watching';
         overlay.innerHTML = `
             <div class="still-watching-box">
-                <h3>Are you still watching?</h3>
-                <p>Playback paused after a few episodes.</p>
-                <button type="button" class="btn btn-primary" id="still-watching-continue">Continue Watching</button>
+                <h3 data-i18n="ui_web_2392dacee0f8">Are you still watching?</h3>
+                <p data-i18n="ui_web_12307689b91f">Playback paused after a few episodes.</p>
+                <button type="button" class="btn btn-primary" id="still-watching-continue" data-i18n="ui_web_34d8eb01e1bf">Continue Watching</button>
             </div>`;
         const section = document.querySelector('.watch-video-section') || document.getElementById('page-watch');
         section?.appendChild(overlay);
@@ -13923,7 +13933,7 @@ class WatchPage {
             });
         } catch (e) {
             console.error('Error playing episode:', e);
-            this.showPlaybackError('This episode could not be started. Please try again.', { immediate: true });
+            this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_9e347c3cb779", { defaultValue: "This episode could not be started. Please try again." }) ?? 'This episode could not be started. Please try again.'), { immediate: true });
         }
     }
 
@@ -13965,24 +13975,24 @@ class WatchPage {
     renderEpisodesMenu() {
         if (!this.episodesNavList) return;
         const eps = this.seriesInfo?.episodes;
-        if (!eps) { this.episodesNavList.innerHTML = '<div class="captions-menu-empty">No episodes</div>'; return; }
+        if (!eps) { this.episodesNavList.innerHTML = '<div class="captions-menu-empty" data-i18n="ui_web_eca73b91d505">No episodes</div>'; return; }
         const seasons = Object.keys(eps).sort((a, b) => parseInt(a) - parseInt(b));
         const esc = (s) => MediaUtils.escapeHtml ? MediaUtils.escapeHtml(String(s ?? '')) : String(s ?? '');
         let html = '';
         for (const season of seasons) {
             const list = eps[season] || [];
             if (!list.length) continue;
-            if (seasons.length > 1) html += `<div class="watch-ep-season">Season ${esc(season)}</div>`;
+            if (seasons.length > 1) html += `<div class="watch-ep-season" data-i18n="ui_web_9e42662ef1b7" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(esc(season))}) || "{}")}">Season ${esc(season)}</div>`;
             for (const ep of list) {
                 const isCurrent = String(season) === String(this.currentSeason)
                     && parseInt(ep.episode_num) === parseInt(this.currentEpisode);
                 html += `<button class="watch-ep-option${isCurrent ? ' active' : ''}" data-season="${esc(season)}" data-ep="${esc(ep.episode_num)}">
                     <span class="watch-ep-num">${esc(ep.episode_num)}</span>
-                    <span class="watch-ep-title">${esc(ep.title || `Episode ${ep.episode_num}`)}</span>
+                    <span class="watch-ep-title">${esc(ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`))}</span>
                 </button>`;
             }
         }
-        this.episodesNavList.innerHTML = html || '<div class="captions-menu-empty">No episodes</div>';
+        this.episodesNavList.innerHTML = html || '<div class="captions-menu-empty" data-i18n="ui_web_eca73b91d505">No episodes</div>';
         this.episodesNavList.querySelectorAll('.watch-ep-option').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const season = btn.dataset.season;

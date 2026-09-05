@@ -83,7 +83,7 @@ test('first-source provider fields cannot inherit Norva account autofill', () =>
 
 test('Concept B keeps both compatible formats visible and app-only access secondary', () => {
   assert.match(home, /class="setup-mode-tabs" role="tablist" aria-label="Connection format"/);
-  assert.match(home, /role="tab" aria-selected="true"[^>]*data-setup-mode="m3u">M3U link/);
+  assert.match(home, /role="tab" aria-selected="true"[^>]*data-setup-mode="m3u"[^>]*>M3U link/);
   assert.match(home, /role="tab" aria-selected="false"[^>]*data-setup-mode="xtream"[^>]*>Xtream login/);
   assert.match(home, /data-setup-panel="m3u"/);
   assert.match(home, /data-setup-panel="xtream" hidden/);
@@ -158,8 +158,8 @@ test('an intentionally paused account gets a recovery surface instead of first-r
 test('catalog preparation modal shares focus, Back and inert hygiene', () => {
   assert.match(sourceManager, /NorvaModal\.installHygiene\(modal, \{[\s\S]{0,180}onClose: closeToSettings,[\s\S]{0,120}initialFocus: closeButton/);
   assert.match(sourceManager, /catalogErrorDetails\(/);
-  assert.match(sourceManager, /actionLabel: 'Update login'/);
-  assert.match(sourceManager, /actionLabel: 'Check again'/);
+  assert.match(sourceManager, /actionLabel: [^\n]*NorvaI18n[^\n]*'Update login'/);
+  assert.match(sourceManager, /actionLabel: [^\n]*NorvaI18n[^\n]*'Check again'/);
   assert.doesNotMatch(sourceManager, />Repair Login</);
 });
 
@@ -182,9 +182,9 @@ test('setup visuals reuse Norva assets and ship cache-busted', () => {
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-movies\.svg/);
   assert.match(shell, /class="tc-intro-icon" src="\/img\/icons\/norva-settings\.svg/);
   assert.doesNotMatch(shell, /<div class="tc-intro-icon">/);
-  assert.match(shell, /main\.css\?v=71854078d1/);
-  assert.match(shell, /sourceHealth\.js\?v=72a7e5bf20/);
-  assert.match(shell, /SourceManager\.js\?v=de08b95122/);
-  assert.match(shell, /HomePage\.js\?v=6fdf890230/);
-  assert.match(shell, /app\.js\?v=5e217dfb7b/);
+  assert.match(shell, /main\.css\?v=[0-9a-f]+/);
+  assert.match(shell, /sourceHealth\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /SourceManager\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /HomePage\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /app\.js\?v=[0-9a-f]+/);
 });

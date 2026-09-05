@@ -910,7 +910,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("Connect this TV to your Norva Account. Pairing is the easiest way to attach this screen to your household.");
+        hint.setText(getString(R.string.native_pair_hint));
         hint.setTextColor(Color.parseColor("#a1a1aa"));
         hint.setTextSize(16);
         hint.setPadding(0, 0, 0, dp(24));
@@ -977,7 +977,7 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 String url = normalizeUrl(urlInput.getText().toString());
                 if (url == null) {
-                    statusText.setText("Invalid address. Use http://IP:PORT");
+                    statusText.setText(getString(R.string.native_address_invalid));
                     return;
                 }
                 prefs().edit().putString(PREF_SERVER_URL, url).putString(PREF_MODE, "server").apply();
@@ -997,7 +997,7 @@ public class MainActivity extends Activity {
         advancedPanel.addView(orLabel);
 
         TextView standaloneHint = new TextView(this);
-        standaloneHint.setText("Standalone: run Norva entirely on this TV. Use this when you do not want an account on this device. Playback uses the TV native decoder.");
+        standaloneHint.setText(getString(R.string.native_standalone_hint));
         standaloneHint.setTextColor(Color.parseColor("#a1a1aa"));
         standaloneHint.setTextSize(14);
         standaloneHint.setPadding(0, 0, 0, dp(12));
@@ -1021,7 +1021,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(statusText);
 
         TextView tip = new TextView(this);
-        tip.setText("Advanced connection options: press MENU, or press BACK from Home and pick \"Connection settings\".");
+        tip.setText(getString(R.string.native_connection_tip));
         tip.setTextColor(Color.parseColor("#71717a"));
         tip.setTextSize(13);
         tip.setPadding(0, dp(24), 0, 0);
@@ -1148,7 +1148,7 @@ public class MainActivity extends Activity {
         try {
             LocalServer.get(this).start();
         } catch (Exception e) {
-            showSetup("Could not start the embedded server: " + e.getMessage());
+            showSetup(getString(R.string.native_setup_failed));
             return;
         }
         setBridgeMode(false, true);
@@ -2170,9 +2170,7 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.GONE);
         if (errorText != null) {
-            errorText.setText(detail == null || detail.isEmpty()
-                    ? "Please check your internet connection and try again."
-                    : "Please check your internet connection and try again.\n\n" + detail);
+            errorText.setText(R.string.ui_check_connection);
         }
         if (errorPanel != null) {
             errorPanel.bringToFront();
@@ -2358,6 +2356,7 @@ public class MainActivity extends Activity {
         if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT
                 || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             int delta = keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
+            if (exitActions.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) delta = -delta;
             int next = PartnersTvContract.nextHorizontalIndex(
                     index, exitActions.getChildCount(), delta);
             exitActions.getChildAt(next).requestFocus();

@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#080B12">
-    <title>Pair with Norva</title>
+    <title data-i18n="ui_web_59c5112c984e">Pair with Norva</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <script>
         (function () {
@@ -520,12 +521,14 @@
                 min-height: 100dvh;
                 height: auto;
                 overflow: visible;
+                grid-template-rows: auto auto auto;
                 padding: max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
             }
             html:not(.tv-pairing-mode) .code { font-size: clamp(28px, 9vw, 48px); }
             html:not(.tv-pairing-mode) .code-row { flex-direction: column; align-items: flex-start; }
             html:not(.tv-pairing-mode) .timer { padding-left: 0; border-left: 0; }
-            html:not(.tv-pairing-mode) .pair-top { align-items: flex-start; }
+            html:not(.tv-pairing-mode) .pair-top { align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+            html:not(.tv-pairing-mode) .status { max-width: 100%; min-width: 0; border-radius: 16px; text-align: start; overflow-wrap: anywhere; }
             html:not(.tv-pairing-mode) .pair-brand-copy { display: block; }
             html:not(.tv-pairing-mode) .pair-brand-mode { display: block; margin-top: 3px; }
             html:not(.tv-pairing-mode) .pair-main { grid-template-columns: 1fr; gap: 32px; }
@@ -533,7 +536,7 @@
             html:not(.tv-pairing-mode) .pair-title { font-size: clamp(42px, 11vw, 60px); }
             html:not(.tv-pairing-mode) .pair-subtitle { font-size: 16px; }
             html:not(.tv-pairing-mode) .steps { grid-template-columns: 1fr; }
-            html:not(.tv-pairing-mode) .qr-panel { border-left: 0; border-top: 1px solid var(--color-border); padding: 32px 0 0; }
+            html:not(.tv-pairing-mode) .qr-panel { height: auto; max-height: none; border-left: 0; border-top: 1px solid var(--color-border); padding: 32px 0 0; }
             html:not(.tv-pairing-mode) .pair-footer { align-items: stretch; flex-direction: column; }
             html:not(.tv-pairing-mode) .actions { width: 100%; flex-direction: column; }
         }
@@ -548,18 +551,19 @@
     </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
-    <div class="pair-launch-screen" id="pair-launch-screen" role="status" aria-live="polite" aria-label="Norva is loading">
+    <div class="pair-launch-screen" id="pair-launch-screen" role="status" aria-live="polite" aria-label="Norva is loading" data-i18n-aria-label="ui_web_f32f7d0efdcf">
         <div class="pair-launch-orb" aria-hidden="true">
             <span></span><span></span><span></span>
             <img src="/img/norva-app-icon.png" alt="">
         </div>
         <div class="pair-launch-copy">
             <p class="pair-launch-kicker">Norva TV</p>
-            <h1>Preparing your cinema</h1>
-            <p>Checking whether this TV is already connected.</p>
+            <h1 data-i18n="ui_web_fa3e38841bd6">Preparing your cinema</h1>
+            <p data-i18n="ui_web_b1ed6fa8e674">Checking whether this TV is already connected.</p>
         </div>
         <div class="pair-launch-progress" aria-hidden="true"><span></span></div>
     </div>
@@ -569,58 +573,58 @@
                 <img src="/img/norva-app-icon-96.png?v=1" alt="Norva">
                 <div class="pair-brand-copy">
                     <span class="pair-brand-name">Norva</span>
-                    <span class="pair-brand-mode">TV setup</span>
+                    <span class="pair-brand-mode" data-i18n="ui_web_4e9ebc48718a">TV setup</span>
                 </div>
             </div>
-            <div class="status loading" id="status" role="status" aria-live="polite" aria-atomic="true">Creating secure pairing code</div>
+            <div class="status loading" id="status" role="status" aria-live="polite" aria-atomic="true" data-i18n="ui_web_dd96740ef953">Creating secure pairing code</div>
         </header>
 
         <div class="pair-main">
             <section class="pair-copy">
-                <p class="eyebrow">One minute setup</p>
-                <h1 class="pair-title" id="page-title"><span>Connect this TV</span><span>to your account.</span></h1>
-                <p class="pair-subtitle" id="page-subtitle">Scan the QR code with your phone, or enter the pairing code in Norva. Your library and profiles will appear here automatically.</p>
+                <p class="eyebrow" data-i18n="ui_web_0d964221bd5a">One minute setup</p>
+                <h1 class="pair-title" id="page-title"><span data-i18n="ui_web_8474b0da398b">Connect this TV</span><span data-i18n="ui_web_f8f5f12405e7">to your account.</span></h1>
+                <p class="pair-subtitle" id="page-subtitle" data-i18n="ui_web_f3a6b86fbd75">Scan the QR code with your phone, or enter the pairing code in Norva. Your library and profiles will appear here automatically.</p>
 
-                <p class="code-label">Pairing code</p>
+                <p class="code-label" data-i18n="ui_web_1c5ea2f7ed52">Pairing code</p>
                 <div class="code-row">
-                    <div class="code" id="code" aria-label="Pairing code loading">... ...</div>
-                    <div class="timer" id="timer">Creating code...</div>
+                    <div class="code" id="code" aria-label="Pairing code loading" data-i18n-aria-label="ui_web_5e40c432d0b5">... ...</div>
+                    <div class="timer" id="timer" data-i18n="ui_web_45bbaf30c626">Creating code...</div>
                 </div>
 
-                <section class="steps" aria-label="Pairing steps">
-                    <div class="step"><div class="step-number" aria-hidden="true">1</div><div><strong>Open Norva</strong><span>On your phone or tablet</span></div></div>
-                    <div class="step"><div class="step-number" aria-hidden="true">2</div><div><strong>Scan or enter</strong><span>Use the code shown here</span></div></div>
-                    <div class="step"><div class="step-number" aria-hidden="true">3</div><div><strong>Approve this TV</strong><span>Watching starts automatically</span></div></div>
+                <section class="steps" aria-label="Pairing steps" data-i18n-aria-label="ui_web_6cfdb24d099f">
+                    <div class="step"><div class="step-number" aria-hidden="true">1</div><div><strong data-i18n="ui_web_58b4fd1126eb">Open Norva</strong><span data-i18n="ui_web_175d47fc0246">On your phone or tablet</span></div></div>
+                    <div class="step"><div class="step-number" aria-hidden="true">2</div><div><strong data-i18n="ui_web_67ed917d1474">Scan or enter</strong><span data-i18n="ui_web_9745f98459de">Use the code shown here</span></div></div>
+                    <div class="step"><div class="step-number" aria-hidden="true">3</div><div><strong data-i18n="ui_web_355b47a91262">Approve this TV</strong><span data-i18n="ui_web_07cd01f2b5dc">Watching starts automatically</span></div></div>
                 </section>
             </section>
 
             <aside class="qr-panel" id="qr-panel" aria-labelledby="qr-caption">
                 <div class="qr-shell" id="qr-shell">
                     <div class="qr" id="qr" aria-hidden="true"></div>
-                    <span class="qr-loading" id="qr-state-label" aria-hidden="true">Creating QR...</span>
+                    <span class="qr-loading" id="qr-state-label" aria-hidden="true" data-i18n="ui_web_b12f792f3453">Creating QR...</span>
                 </div>
                 <div class="qr-fallback" id="qr-fallback" hidden>
-                    <strong id="qr-fallback-title">Enter the code in Norva</strong>
-                    <span>No camera is required. Open Norva Account on your phone and use the pairing code.</span>
+                    <strong id="qr-fallback-title" data-i18n="ui_web_ec556da5f8d3">Enter the code in Norva</strong>
+                    <span data-i18n="ui_web_cfc83c22760c">No camera is required. Open Norva Account on your phone and use the pairing code.</span>
                     <span class="url" id="pair-url"></span>
                 </div>
                 <div class="qr-guidance" id="qr-guidance">
-                    <div class="qr-caption" id="qr-caption">Scan with your phone camera</div>
-                    <div class="scan-copy">No TV keyboard needed.<br>Approval happens on your phone.</div>
+                    <div class="qr-caption" id="qr-caption" data-i18n="ui_web_2d542a8d9d57">Scan with your phone camera</div>
+                    <div class="scan-copy"><norva-i18n data-i18n="ui_web_595e254343bc">No TV keyboard needed.</norva-i18n><br><norva-i18n data-i18n="ui_web_8d425f983621">Approval happens on your phone.</norva-i18n></div>
                 </div>
             </aside>
         </div>
 
         <footer class="pair-footer">
-            <div class="pair-helper"><img src="/img/icons/norva-check-circle-simple.svg?v=1" alt="">Code is temporary and works only for this TV.</div>
+            <div class="pair-helper"><img src="/img/icons/norva-check-circle-simple.svg?v=1" alt=""><norva-i18n data-i18n="ui_web_8e46e169e29e">Code is temporary and works only for this TV.</norva-i18n></div>
             <div class="actions">
-                <button class="btn" id="restart-button" type="button"><img src="/img/icons/norva-refresh-simple.svg?v=1" alt="">New code</button>
-                <a class="btn primary" id="account-link" href="/cloud.html" aria-label="Pair manually on this TV"><img src="/img/icons/norva-account.svg?v=1" alt="">Pair on this TV</a>
+                <button class="btn" id="restart-button" type="button"><img src="/img/icons/norva-refresh-simple.svg?v=1" alt=""><norva-i18n data-i18n="ui_web_3edce074d607">New code</norva-i18n></button>
+                <a class="btn primary" id="account-link" href="/cloud.html" aria-label="Pair manually on this TV" data-i18n-aria-label="ui_web_97dbfbd7d17e"><img src="/img/icons/norva-account.svg?v=1" alt=""><norva-i18n data-i18n="ui_web_ffb442604607">Pair on this TV</norva-i18n></a>
             </div>
         </footer>
     </main>
 
-    <script src="/js/cloudApi.js?v=50"></script>
+    <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
     <script src="/js/vendor/qrcode.js?v=1"></script>
     <script>
         const params = new URLSearchParams(location.search);
@@ -750,7 +754,7 @@
                 autoRegenCount += 1;
                 startPairing();
             } else {
-                setStatus('error', 'Pairing paused to save power. Select “New code” to continue.');
+                setStatus('error', (globalThis.NorvaI18n?.t("ui_web_5b916f35b92a", { defaultValue: "Pairing paused to save power. Select “New code” to continue." }) ?? 'Pairing paused to save power. Select “New code” to continue.'));
                 timerEl.textContent = '';
             }
         }
@@ -816,13 +820,13 @@
             pollFailStreak = 0;
             clearInterval(commandHandle);
             codeEl.textContent = '... ...';
-            codeEl.setAttribute('aria-label', 'Pairing code loading');
+            codeEl.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_5e40c432d0b5", { defaultValue: "Pairing code loading" }) ?? 'Pairing code loading'));
             pairUrlEl.textContent = '';
             if (qrEl) qrEl.innerHTML = '';
             setQrState('loading');
-            qrStateLabelEl.textContent = 'Creating QR...';
-            timerEl.textContent = 'Creating code...';
-            setStatus('loading', 'Creating secure pairing code');
+            qrStateLabelEl.textContent = (globalThis.NorvaI18n?.t("ui_web_b12f792f3453", { defaultValue: "Creating QR..." }) ?? 'Creating QR...');
+            timerEl.textContent = (globalThis.NorvaI18n?.t("ui_web_45bbaf30c626", { defaultValue: "Creating code..." }) ?? 'Creating code...');
+            setStatus('loading', (globalThis.NorvaI18n?.t("ui_web_dd96740ef953", { defaultValue: "Creating secure pairing code" }) ?? 'Creating secure pairing code'));
 
             try {
                 const deviceType = params.get('device') || inferDeviceType();
@@ -841,18 +845,18 @@
                 const pairPath = '/app.html?pair=' + encodeURIComponent(currentCode) + '#home';
                 const pairUrl = location.origin + pairPath;
                 codeEl.textContent = formatDisplayCode(currentCode);
-                codeEl.setAttribute('aria-label', 'Pairing code ' + currentCode.split('').join(' '));
+                codeEl.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_1c5ea2f7ed52", { defaultValue: "Pairing code " }) ?? 'Pairing code ') + currentCode.split('').join(' '));
                 pairUrlEl.textContent = pairUrl;
                 accountLink.href = pairPath;
                 renderQr(pairUrl);
-                setStatus('pending', 'Waiting for your phone');
+                setStatus('pending', (globalThis.NorvaI18n?.t("ui_web_3c14e09def25", { defaultValue: "Waiting for your phone" }) ?? 'Waiting for your phone'));
                 updateTimer();
                 pollHandle = setInterval(pollPairing, 2500);
                 timerHandle = setInterval(updateTimer, 1000);
             } catch (error) {
-                qrStateLabelEl.textContent = 'QR unavailable';
-                timerEl.textContent = 'Select New code to retry';
-                setStatus('error', 'Unable to create a pairing code. Check your connection and try again.');
+                qrStateLabelEl.textContent = (globalThis.NorvaI18n?.t("ui_web_b312670d6ec6", { defaultValue: "QR unavailable" }) ?? 'QR unavailable');
+                timerEl.textContent = (globalThis.NorvaI18n?.t("ui_web_5ee58f803625", { defaultValue: "Select New code to retry" }) ?? 'Select New code to retry');
+                setStatus('error', (globalThis.NorvaI18n?.t("ui_web_fc06deb40f80", { defaultValue: "Unable to create a pairing code. Check your connection and try again." }) ?? 'Unable to create a pairing code. Check your connection and try again.'));
             }
         }
 
@@ -866,8 +870,8 @@
                     clearInterval(timerHandle);
                     if (result.deviceToken) NorvaCloud.setDeviceToken(result.deviceToken);
                     if (result.approvedDeviceId) localStorage.setItem('norva-cloud-device-id', result.approvedDeviceId);
-                    setStatus('success', 'This screen is paired with your Norva Account.');
-                    timerEl.textContent = 'Connected';
+                    setStatus('success', (globalThis.NorvaI18n?.t("ui_web_8be469770e73", { defaultValue: "This screen is paired with your Norva Account." }) ?? 'This screen is paired with your Norva Account.'));
+                    timerEl.textContent = (globalThis.NorvaI18n?.t("ui_web_22965568d22a", { defaultValue: "Connected" }) ?? 'Connected');
                     startCommandLoop();
                     setTimeout(() => location.replace(returnTo), 900);
                 } else if (result.status === 'expired' || result.status === 'not_found') {
@@ -876,7 +880,7 @@
                     handleExpiry();
                 } else if (statusEl.classList.contains('error')) {
                     // Still pending after a transient blip — clear the stale red message.
-                    setStatus('pending', 'Waiting for your phone');
+                    setStatus('pending', (globalThis.NorvaI18n?.t("ui_web_3c14e09def25", { defaultValue: "Waiting for your phone" }) ?? 'Waiting for your phone'));
                 }
             } catch (error) {
                 // A single dropped poll (Wi-Fi hiccup) must not paint a permanent red
@@ -884,7 +888,7 @@
                 // Only surface it after several consecutive failures; a later success
                 // silently clears it (pollFailStreak resets above).
                 if (++pollFailStreak >= 4) {
-                    setStatus('error', 'Pairing check failed — retrying…');
+                    setStatus('error', (globalThis.NorvaI18n?.t("ui_web_9b53bcbabe03", { defaultValue: "Pairing check failed — retrying…" }) ?? 'Pairing check failed — retrying…'));
                 }
             }
         }
@@ -908,7 +912,7 @@
                 if (error.status === 401) {
                     NorvaCloud.setDeviceToken('');
                     clearInterval(commandHandle);
-                    setStatus('error', 'This device token was revoked. Create a new pairing code.');
+                    setStatus('error', (globalThis.NorvaI18n?.t("ui_web_24e2f4667584", { defaultValue: "This device token was revoked. Create a new pairing code." }) ?? 'This device token was revoked. Create a new pairing code.'));
                 }
             }
         }
@@ -950,7 +954,7 @@
             const seconds = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
             const minutes = Math.floor(seconds / 60);
             const rest = String(seconds % 60).padStart(2, '0');
-            timerEl.textContent = seconds ? `Refreshes in ${String(minutes).padStart(2, '0')}:${rest}` : 'Refreshing code...';
+            timerEl.textContent = seconds ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0b502e580092", {defaultValue: "Refreshes in {{p0}}:{{p1}}", p0:(String(minutes).padStart(2, '0')),p1:(rest)}) : `Refreshes in ${String(minutes).padStart(2, '0')}:${rest}`) : (globalThis.NorvaI18n?.t("ui_web_4455c40cf16b", { defaultValue: "Refreshing code..." }) ?? 'Refreshing code...');
             if (!seconds) handleExpiry();
         }
 

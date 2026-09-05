@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Approve pairing - Norva</title>
+  <title data-i18n="ui_web_c70fd31c2da8">Approve pairing - Norva</title>
   <script>
     (function () {
       try {
@@ -174,7 +175,8 @@
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
 <div class="page">
@@ -185,32 +187,32 @@
 
   <!-- Main approval card -->
   <div class="card" id="card-approve">
-    <h1>Approve pairing</h1>
-    <p class="subtitle">A screen wants to join your Norva ecosystem.</p>
+    <h1 data-i18n="ui_web_789c7a6a8189">Approve pairing</h1>
+    <p class="subtitle" data-i18n="ui_web_8d6bebd35cc7">A screen wants to join your Norva ecosystem.</p>
 
-    <div class="code-label">Pairing code</div>
+    <div class="code-label" data-i18n="ui_web_1c5ea2f7ed52">Pairing code</div>
     <div class="pair-code" id="display-code">——</div>
 
     <div class="device-row">
-      <span>Device</span>
-      <span class="val" id="display-device">Unknown</span>
+      <span data-i18n="ui_web_6ba0bdeccb42">Device</span>
+      <span class="val" id="display-device" data-i18n="ui_web_b764cdc0eab7">Unknown</span>
     </div>
     <div class="device-row">
-      <span>Hub</span>
+      <span data-i18n="ui_web_d87c9ca31f37">Hub</span>
       <span class="val" id="display-hub">—</span>
     </div>
 
-    <p class="login-note" id="login-note" style="display:none">
-      You are not signed in. <a href="/login.html" id="login-link">Sign in</a> to approve this pairing.
-    </p>
+    <p class="login-note" id="login-note" style="display:none"><norva-i18n data-i18n="ui_web_f98ef69eefc2">
+      You are not signed in. </norva-i18n><a href="/login.html" id="login-link" data-i18n="ui_web_bfd402b2f6f3">Sign in</a><norva-i18n data-i18n="ui_web_dc1fe0ff003c"> to approve this pairing.
+    </norva-i18n></p>
 
-    <button class="btn btn-primary" id="btn-approve">Approve screen</button>
-    <button class="btn btn-ghost"   id="btn-deny">Deny</button>
+    <button class="btn btn-primary" id="btn-approve" data-i18n="ui_web_0836d3b0c851">Approve screen</button>
+    <button class="btn btn-ghost"   id="btn-deny" data-i18n="ui_web_05a2d7332eb9">Deny</button>
 
     <div class="status" id="status-msg"></div>
 
-    <p class="user-note" id="user-note" style="display:none">
-      Approving as <strong id="display-user"></strong>
+    <p class="user-note" id="user-note" style="display:none"><norva-i18n data-i18n="ui_web_b6d44e883ee7">
+      Approving as </norva-i18n><strong id="display-user"></strong>
     </p>
   </div>
 </div>
@@ -261,14 +263,14 @@
   }
 
   if (!code) {
-    setStatus('error', 'No pairing code found in URL. Please scan the QR code again.');
+    setStatus('error', (globalThis.NorvaI18n?.t("ui_web_7de838fd0697", { defaultValue: "No pairing code found in URL. Please scan the QR code again." }) ?? 'No pairing code found in URL. Please scan the QR code again.'));
     document.getElementById('btn-approve').disabled = true;
   }
 
   // ---- Approve ----
   document.getElementById('btn-approve').addEventListener('click', async () => {
     if (!code) return;
-    setStatus('info', '<span class="spinner"></span>Approving pairing…');
+    setStatus('info', '<span class="spinner"></span><norva-i18n data-i18n="ui_web_3e91f16ab984">Approving pairing…</norva-i18n>');
     document.getElementById('btn-approve').disabled = true;
     document.getElementById('btn-deny').disabled    = true;
 
@@ -294,7 +296,7 @@
         localStorage.setItem('hubToken', json.token);
       }
 
-      setStatus('success', 'Pairing approved! The device is now connected.');
+      setStatus('success', (globalThis.NorvaI18n?.t("ui_web_4acd0e00d754", { defaultValue: "Pairing approved! The device is now connected." }) ?? 'Pairing approved! The device is now connected.'));
 
       // Optional: redirect to hub home after a short delay
       setTimeout(() => {
@@ -302,7 +304,7 @@
       }, 2000);
 
     } catch (err) {
-      setStatus('error', 'Pairing could not be completed. Check the code and try again.');
+      setStatus('error', (globalThis.NorvaI18n?.t("ui_web_9a1ce55b3c10", { defaultValue: "Pairing could not be completed. Check the code and try again." }) ?? 'Pairing could not be completed. Check the code and try again.'));
       document.getElementById('btn-approve').disabled = false;
       document.getElementById('btn-deny').disabled    = false;
     }
@@ -312,7 +314,7 @@
   document.getElementById('btn-deny').addEventListener('click', async () => {
     document.getElementById('btn-approve').disabled = true;
     document.getElementById('btn-deny').disabled    = true;
-    setStatus('info', 'Denying pairing request…');
+    setStatus('info', (globalThis.NorvaI18n?.t("ui_web_2b7e7c8280ae", { defaultValue: "Denying pairing request…" }) ?? 'Denying pairing request…'));
 
     try {
       await fetch('/api/pair/deny', {
@@ -327,7 +329,7 @@
       // Best-effort — ignore network errors on deny
     }
 
-    setStatus('error', 'Pairing denied.');
+    setStatus('error', (globalThis.NorvaI18n?.t("ui_web_79ebaa4ef0eb", { defaultValue: "Pairing denied." }) ?? 'Pairing denied.'));
     setTimeout(() => { location.href = '/'; }, 1500);
   });
 

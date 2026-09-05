@@ -2863,7 +2863,7 @@ const API = {
                 window.location.href = hub ? `${hub}/login.html` : '/login.html';
                 return;
             }
-            const message = result.details || result.message || result.error || `Server responded with ${response.status}`;
+            const message = result.details || result.message || result.error || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5667176d5dff", {defaultValue: "Server responded with {{p0}}", p0:(response.status)}) : `Server responded with ${response.status}`);
             const error = new Error(message);
             error.status = response.status;
             error.payload = result;

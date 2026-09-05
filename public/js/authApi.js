@@ -73,7 +73,7 @@
 
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const message = payload.msg || payload.message || payload.error_description || payload.error || `Supabase Auth ${response.status}`;
+            const message = payload.msg || payload.message || payload.error_description || payload.error || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_740dd20051ad", {defaultValue: "Supabase Auth {{p0}}", p0:(response.status)}) : `Supabase Auth ${response.status}`);
             const error = new Error(message);
             error.status = response.status;
             error.payload = payload;
@@ -773,7 +773,7 @@
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, 48);
-        return clean || `Authenticator ${index + 1}`;
+        return clean || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38a43fad3c7c", {defaultValue: "Authenticator {{p0}}", p0:(index + 1)}) : `Authenticator ${index + 1}`);
     }
 
     /**

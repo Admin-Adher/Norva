@@ -1,3 +1,4 @@
+const visibleUiMarkup = require('./helpers/visible-ui-markup.cjs');
 'use strict';
 
 const test = require('node:test');
@@ -198,24 +199,24 @@ test('Identity rendering deduplicates recent unresolved sources and reports exac
 
   assert.equal(elements['id-intake-count'].textContent, '2');
   assert.equal((elements['admin-identity-intake'].innerHTML.match(/class="id-intake-row/g) || []).length, 2);
-  assert.match(elements['admin-identity-intake'].innerHTML, /Source en attente/);
-  assert.match(elements['admin-identity-intake'].innerHTML, /Provisoire · 1\/32 signaux/);
-  assert.match(elements['admin-identity-intake'].innerHTML, /Recalculer les signaux/);
-  assert.match(elements['admin-identity-intake'].innerHTML, /Voir dans Providers/);
-  assert.doesNotMatch(elements['admin-identity-intake'].innerHTML, /<img src=x/);
-  assert.match(elements['admin-identity-intake'].innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.match(elements['admin-identities'].innerHTML, /Panel vérifié/);
-  assert.match(elements['admin-identities'].innerHTML, /<b>1<\/b> source\(s\) vérifiée\(s\)/);
-  assert.match(elements['id-integrity-status'].innerHTML, /1 source supprimée exclue/);
-  assert.doesNotMatch(elements['admin-identities'].innerHTML + elements['admin-identity-intake'].innerHTML, /Source supprimée fantôme/);
+  assert.match(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /Source en attente/);
+  assert.match(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /Provisoire · 1\/32 signaux/);
+  assert.match(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /Recalculer les signaux/);
+  assert.match(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /Voir dans Providers/);
+  assert.doesNotMatch(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /<img src=x/);
+  assert.match(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(visibleUiMarkup(elements['admin-identities'].innerHTML), /Panel vérifié/);
+  assert.match(visibleUiMarkup(elements['admin-identities'].innerHTML), /<b>1<\/b> source\(s\) vérifiée\(s\)/);
+  assert.match(visibleUiMarkup(elements['id-integrity-status'].innerHTML), /1 source supprimée exclue/);
+  assert.doesNotMatch(visibleUiMarkup(elements['admin-identities'].innerHTML + elements['admin-identity-intake'].innerHTML), /Source supprimée fantôme/);
 
   page._identityLegacyFallback = true;
   page._identityRecentSources = [];
   page._identityUnresolvedSources = [];
   page._renderIdentityIntake('');
   assert.equal(elements['id-intake-count'].textContent, '—');
-  assert.match(elements['admin-identity-intake'].innerHTML, /File temporairement indisponible/);
-  assert.doesNotMatch(elements['admin-identity-intake'].innerHTML, /File de rattachement à jour/);
+  assert.match(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /File temporairement indisponible/);
+  assert.doesNotMatch(visibleUiMarkup(elements['admin-identity-intake'].innerHTML), /File de rattachement à jour/);
 });
 
 test('Identity loader prefers v3 and falls back through v2 only when PostgREST has not loaded it yet', async () => {

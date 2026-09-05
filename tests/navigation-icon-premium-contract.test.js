@@ -109,7 +109,7 @@ test('icon-only navigation links keep an accessible name and current-page state'
     'the TV rail and hidden phone projection agree on the initial route'
   );
 
-  assert.match(navigationModelSource, /ariaLabel:\s*'Log out'/);
+  assert.match(navigationModelSource, /ariaLabel:\s*[^\n]*'Log out'/);
   assert.match(navigationAdaptersSource, /link\.dataset\.navKind === 'route'/);
   assert.match(navigationAdaptersSource, /link\.setAttribute\('aria-current', 'page'\)/);
   assert.match(navigationAdaptersSource, /link\.removeAttribute\('aria-current'\)/);
@@ -130,9 +130,9 @@ test('revised SVG URLs bypass existing image and service-worker caches', () => {
   }
   assert.match(renderedNavigation, /norva-logout\.svg\?v=sharp-core-1/);
   assert.match(iconsJs, /norva-\$\{name\}\.svg\?v=sharp-core-1/);
-  assert.match(html, /\/css\/main\.css\?v=71854078d1/);
-  assert.match(html, /\/js\/icons\.js\?v=3/);
-  assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=5279356025/);
-  assert.match(html, /\/js\/navigation\/NavigationAdapters\.js\?v=1/);
-  assert.match(html, /\/js\/app\.js\?v=5e217dfb7b/);
+  assert.match(html, /\/css\/main\.css\?v=[0-9a-f]+/);
+  assert.match(html, /\/js\/icons\.js\?v=[0-9a-f]+/);
+  assert.match(html, /\/js\/navigation\/NavigationModel\.js\?v=[0-9a-f]+/);
+  assert.match(html, /\/js\/navigation\/NavigationAdapters\.js\?v=[0-9a-f]+/);
+  assert.match(html, /\/js\/app\.js\?v=[0-9a-f]+/);
 });

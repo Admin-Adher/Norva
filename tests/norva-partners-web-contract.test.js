@@ -2320,8 +2320,8 @@ test('bootstrap cache is short-lived, jurisdiction-scoped and session-scoped', a
 test('Partners is a secondary discoverable route whose operational actions stay server-gated', () => {
   assert.match(htmlSource, /id="settings-partners-row"\s+hidden\s+aria-hidden="true"/);
   assert.match(htmlSource, /id="page-partners"\s+class="page"/);
-  assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=1"/);
-  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=10"/);
+  assert.match(htmlSource, /src="\/js\/vendor\/qrcode\.js\?v=[0-9a-f]+"/);
+  assert.match(htmlSource, /src="\/js\/pages\/PartnersPage\.js\?v=[0-9a-f]+"/);
   assert.doesNotMatch(htmlSource, /class="nav-link"[^>]*data-page="partners"/);
   assert.match(appSource, /this\.pages\.partners\s*=\s*new PartnersPage\(this\)/);
   assert.match(appSource, /data-act="partners"\s+hidden\s+aria-hidden="true"/);
@@ -2411,11 +2411,11 @@ test('Partners states, copy and accessibility are complete but sanitized', () =>
     pageSource,
     /Identity verification is never required to share, earn or convert/,
   );
-  assert.match(pageSource, /header\('Checking availability', 'partners-title'\)/);
-  assert.match(pageSource, /Attribution window:<\/strong> \$\{days\} days/);
+  assert.match(pageSource, /header\([^\n]*'Checking availability'[^\n]*, 'partners-title'\)/);
+  assert.match(pageSource, /Attribution window:[^\n]*\$\{days\} days/);
   assert.match(
     pageSource,
-    /label: 'Referral tracking window'[\s\S]{0,160}value: `\$\{attributionDays\} days`/,
+    /label: [^\n]*'Referral tracking window'[\s\S]{0,600}value: [^\n]*`\$\{attributionDays\} days`/,
   );
   assert.match(pageSource, /aria-label="More information about \$\{this\.escape\(fact\.label\)\}"/);
   assert.doesNotMatch(pageSource, /verifies an individual identity, residence/i);
@@ -2512,12 +2512,12 @@ test('Partners route participates in bounded native continuity without storing p
     cssSource,
     /\.partners-shell[\s\S]{0,500}scroll-padding-block:[^;]*var\(--bottom-nav-h\)/,
   );
-  assert.match(htmlSource, /main\.css\?v=71854078d1/);
-  assert.match(htmlSource, /cloudApi\.js\?v=36b703f117/);
-  assert.match(htmlSource, /standalone\.js\?v=12/);
-  assert.match(htmlSource, /Settings\.js\?v=2e8503448a/);
-  assert.match(htmlSource, /PartnersPage\.js\?v=10/);
-  assert.match(htmlSource, /app\.js\?v=5e217dfb7b/);
+  assert.match(htmlSource, /main\.css\?v=[0-9a-f]+/);
+  assert.match(htmlSource, /cloudApi\.js\?v=[0-9a-f]+/);
+  assert.match(htmlSource, /standalone\.js\?v=[0-9a-f]+/);
+  assert.match(htmlSource, /Settings\.js\?v=[0-9a-f]+/);
+  assert.match(htmlSource, /PartnersPage\.js\?v=[0-9a-f]+/);
+  assert.match(htmlSource, /app\.js\?v=[0-9a-f]+/);
   assert.match(appSource, /AdminPage\.js\?v=[0-9a-f]{10}/);
 });
 

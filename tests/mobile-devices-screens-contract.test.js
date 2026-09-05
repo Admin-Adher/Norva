@@ -79,7 +79,7 @@ test('device management is compact, explicit and destructive actions require con
   assert.match(moduleSource, /Send a link/);
   assert.match(moduleSource, /Remove screen/);
   assert.match(moduleSource, /NorvaModal\?\.confirm/);
-  assert.match(moduleSource, /cancelLabel: 'Keep screen'/);
+  assert.match(moduleSource, /cancelLabel: [^\n]*'Keep screen'/);
   assert.match(moduleSource, /aria-busy/);
   assert.match(moduleSource, /aria-expanded="false"/);
   assert.match(moduleSource, /event\.key === 'Escape'/);

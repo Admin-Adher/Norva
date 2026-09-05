@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Norva — Privacy Policy</title>
+  <title data-i18n="ui_web_a13587f00199">Norva — Privacy Policy</title>
   <meta name="description" content="How Norva collects, uses, stores and deletes your data.">
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
@@ -29,7 +30,7 @@
     ul { padding-left: 22px; }
     a { color: var(--accent); }
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 16px 0; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    table { width: 100%; table-layout: fixed; overflow-wrap: anywhere; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
     th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { color: var(--text); }
     td { color: var(--muted); }
@@ -38,63 +39,64 @@
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=3"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
   <main>
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
-    <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: 30 August 2026</p>
+    <h1 data-i18n="ui_web_506ff3946215">Privacy Policy</h1>
+    <p class="updated" data-i18n="ui_web_91e826685e14">Last updated: 30 August 2026</p>
 
-    <p>This Privacy Policy explains how Norva (“Norva”, “we”, “us”) collects, uses, stores and
+    <p data-i18n="ui_web_23c9e66f44a4">This Privacy Policy explains how Norva (“Norva”, “we”, “us”) collects, uses, stores and
       deletes information when you use the Norva apps (Android phone/tablet and Android TV) and the
       Norva web app at norva.tv (together, the “Service”).</p>
 
     <div class="card">
-      <p><strong>Norva is a media player, not a content provider.</strong> Norva does not supply,
+      <p><strong data-i18n="ui_web_d76df671f07f">Norva is a media player, not a content provider.</strong><norva-i18n data-i18n="ui_web_224a1cb0956e"> Norva does not supply,
       sell or host any channels, movies, series or streams. You connect a compatible media source
       that you own and are authorized to use. Any credentials or playlist links you add are used
-      only to connect the Service to <em>your</em> source on your behalf.</p>
+      only to connect the Service to </norva-i18n><em data-i18n="ui_web_4d040d3f6466">your</em><norva-i18n data-i18n="ui_web_0f3bfe3184cd"> source on your behalf.</norva-i18n></p>
     </div>
 
-    <h2>1. Information we collect</h2>
+    <h2 data-i18n="ui_web_331e44fd15c9">1. Information we collect</h2>
     <table>
       <tbody>
-      <tr><th>Category</th><th>Examples</th><th>Why</th></tr>
-      <tr><td>Account</td><td>Email address, display name, password (stored hashed by our auth provider)</td><td>Create and secure your account, sign you in</td></tr>
-      <tr><td>Media source settings</td><td>Provider host/username/password (Xtream), playlist (M3U) and TV-guide (EPG) URLs you choose to add</td><td>Connect the Service to the source you are authorized to use</td></tr>
-      <tr><td>Usage &amp; preferences</td><td>Watch history and playback progress, favorites, audio/subtitle/genre preferences</td><td>Resume playback across your devices and personalize the experience</td></tr>
-      <tr><td>Devices &amp; pairing</td><td>Trusted-device records, device tokens, pairing codes</td><td>Let your TV and phone share one account and sync playback</td></tr>
-      <tr><td>Sign-up context</td><td>Whether sign-up was completed in a web browser or the Android mobile app, the Norva journey used (account, subscription or TV pairing), sign-in method, and an approximate country/region/city supplied by Cloudflare at the network edge and handed on by the Norva client. This is an indicative analytics signal, not proof of residence. Norva does not retain the raw IP address in this record.</td><td>Understand onboarding, provide support and improve the multi-device experience</td></tr>
-      <tr><td>Entitlement / subscription</td><td>Subscription status and the store/provider that granted it (e.g. Google Play, Apple, Stripe)</td><td>Verify Norva access; we do <em>not</em> store card numbers</td></tr>
-      <tr id="partners"><td>Norva Partners membership, referral &amp; access credit</td><td>Partner membership status, accepted programme terms, opaque referral code and claim, pseudonymized attribution, commission and counter-entry ledger, server-issued access-credit quote, redemption and Norva access-grant status. In the referring partner's private dashboard, Norva may derive a partially hidden email recognition hint from an attributed account; the full address is never displayed to that partner and the hint is not stored as a separate contact record. These core records do not require or contain a Didit identity result.</td><td>Join the programme, attribute valid referrals, help a partner recognise someone they already know without providing a contact directory, calculate and mature commissions, prevent abuse and convert available commission into Norva access</td></tr>
-      <tr><td>Optional Partner cash payout</td><td>Only after Norva's server confirms that your account is in the current cash cohort and you choose a cash transfer: your explicit payout country; the minimum normalized Didit identity, age, country and capacity result; hashed transaction references; exact amount paid, tax and currency/exponent; payout status; required tax-profile fields; and tokenized payout-provider references. An account outside that cohort is not asked for payout country, KYC, tax or banking information. Norva does not store identity-document images, biometric captures, a full KYC response, raw Google Play purchase token, buyer address, bank credentials or card number.</td><td>Assess cash-payout readiness, reconcile and pay valid individual commissions, and meet applicable tax, accounting and transfer obligations</td></tr>
-      <tr><td>Partners operations analytics</td><td>Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td>Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
-      <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
-      <tr><td>Analytics &amp; advertising (optional)</td><td>After consent: cookies or local consent state, random SDK identifiers, app/version/device/screen context, performance and diagnostic signals, taps, gestures, scrolling and privacy-masked session-replay events processed by Google Analytics, Microsoft Clarity, Google Ads and Meta Pixel where applicable. Android mobile and Android TV use separate Clarity projects. Native WebView capture keeps layout and interaction geometry while masking its text and images, and native provider-login and playback views are also masked. Norva does not send media-source credentials, provider names, media titles or account identifiers to Clarity.</td><td>Understand friction across web, Android mobile and Android TV, improve the experience and measure how our ads perform</td></tr>
-      <tr><td>Google Ads API administration (operator only)</td><td>Google Ads customer and account identifiers; campaign, ad-group, ad, keyword, asset, budget, bid, schedule and targeting configuration; search terms; performance, conversion, policy and recommendation data; OAuth authorization metadata; and local mutation-audit metadata.</td><td>Allow Norva's authorized operator to report on and manage Norva's own advertising account</td></tr>
-      <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
+      <tr><th data-i18n="ui_web_292c06f0045a">Category</th><th data-i18n="ui_web_e68ee04dff59">Examples</th><th data-i18n="ui_web_d3ae14a50bfe">Why</th></tr>
+      <tr><td data-i18n="ui_web_7e1b0d5641f2">Account</td><td data-i18n="ui_web_0e1a19cbf258">Email address, display name, password (stored hashed by our auth provider)</td><td data-i18n="ui_web_4f142ae717d4">Create and secure your account, sign you in</td></tr>
+      <tr><td data-i18n="ui_web_fba2fc89912e">Media source settings</td><td data-i18n="ui_web_68539a5af3a2">Provider host/username/password (Xtream), playlist (M3U) and TV-guide (EPG) URLs you choose to add</td><td data-i18n="ui_web_be9ecc141ee2">Connect the Service to the source you are authorized to use</td></tr>
+      <tr><td data-i18n="ui_web_29a649614c7b">Usage &amp; preferences</td><td data-i18n="ui_web_54335b02cfc2">Watch history and playback progress, favorites, audio/subtitle/genre preferences</td><td data-i18n="ui_web_70c7e08ee680">Resume playback across your devices and personalize the experience</td></tr>
+      <tr><td data-i18n="ui_web_7aa93c9e65c9">Devices &amp; pairing</td><td data-i18n="ui_web_b715000c3887">Trusted-device records, device tokens, pairing codes</td><td data-i18n="ui_web_bb344bdd14e2">Let your TV and phone share one account and sync playback</td></tr>
+      <tr><td data-i18n="ui_web_86d22f10df58">Sign-up context</td><td data-i18n="ui_web_41058f2c135f">Whether sign-up was completed in a web browser or the Android mobile app, the Norva journey used (account, subscription or TV pairing), sign-in method, and an approximate country/region/city supplied by Cloudflare at the network edge and handed on by the Norva client. This is an indicative analytics signal, not proof of residence. Norva does not retain the raw IP address in this record.</td><td data-i18n="ui_web_8f16afc1a26b">Understand onboarding, provide support and improve the multi-device experience</td></tr>
+      <tr><td data-i18n="ui_web_8571d421f2dc">Entitlement / subscription</td><td data-i18n="ui_web_541e32bd727f">Subscription status and the store/provider that granted it (e.g. Google Play, Apple, Stripe)</td><td><norva-i18n data-i18n="ui_web_8e05fcf01557">Verify Norva access; we do </norva-i18n><em data-i18n="ui_web_254bb97b57f1">not</em><norva-i18n data-i18n="ui_web_72f7d07467e8"> store card numbers</norva-i18n></td></tr>
+      <tr id="partners"><td data-i18n="ui_web_e6097f5ebd2c">Norva Partners membership, referral &amp; access credit</td><td data-i18n="ui_web_ea32e3c971c5">Partner membership status, accepted programme terms, opaque referral code and claim, pseudonymized attribution, commission and counter-entry ledger, server-issued access-credit quote, redemption and Norva access-grant status. In the referring partner's private dashboard, Norva may derive a partially hidden email recognition hint from an attributed account; the full address is never displayed to that partner and the hint is not stored as a separate contact record. These core records do not require or contain a Didit identity result.</td><td data-i18n="ui_web_bfc51078e776">Join the programme, attribute valid referrals, help a partner recognise someone they already know without providing a contact directory, calculate and mature commissions, prevent abuse and convert available commission into Norva access</td></tr>
+      <tr><td data-i18n="ui_web_df8f93123164">Optional Partner cash payout</td><td data-i18n="ui_web_93070da9d359">Only after Norva's server confirms that your account is in the current cash cohort and you choose a cash transfer: your explicit payout country; the minimum normalized Didit identity, age, country and capacity result; hashed transaction references; exact amount paid, tax and currency/exponent; payout status; required tax-profile fields; and tokenized payout-provider references. An account outside that cohort is not asked for payout country, KYC, tax or banking information. Norva does not store identity-document images, biometric captures, a full KYC response, raw Google Play purchase token, buyer address, bank credentials or card number.</td><td data-i18n="ui_web_9d7a4f1ff1b9">Assess cash-payout readiness, reconcile and pay valid individual commissions, and meet applicable tax, accounting and transfer obligations</td></tr>
+      <tr><td data-i18n="ui_web_227083c1080a">Partners operations analytics</td><td data-i18n="ui_web_361c429188f1">Aggregated counts and financial totals by day, payment rail and currency, including referral claims, attributions, verification outcomes, holds, refunds, chargebacks and commission processing. These aggregates exclude names, emails, public referral codes, payment identifiers and raw KYC or payment-provider payloads.</td><td data-i18n="ui_web_653029836c7a">Monitor the programme, reconcile its ledger and detect operational or fraud-control failures without exposing individual records</td></tr>
+      <tr><td data-i18n="ui_web_e851504f43bf">Technical</td><td data-i18n="ui_web_3b2d0c9cad4e">IP address, app version, device/model, basic logs and crash data</td><td data-i18n="ui_web_7bf23da3fea6">Deliver streams from your network, secure the Service, fix bugs</td></tr>
+      <tr><td data-i18n="ui_web_472752eddfc0">Analytics &amp; advertising (optional)</td><td data-i18n="ui_web_2edbcbabe572">After consent: cookies or local consent state, random SDK identifiers, app/version/device/screen context, performance and diagnostic signals, taps, gestures, scrolling and privacy-masked session-replay events processed by Google Analytics, Microsoft Clarity, Google Ads and Meta Pixel where applicable. Android mobile and Android TV use separate Clarity projects. Native WebView capture keeps layout and interaction geometry while masking its text and images, and native provider-login and playback views are also masked. Norva does not send media-source credentials, provider names, media titles or account identifiers to Clarity.</td><td data-i18n="ui_web_2ff524e6c02f">Understand friction across web, Android mobile and Android TV, improve the experience and measure how our ads perform</td></tr>
+      <tr><td data-i18n="ui_web_62d1cef4b18c">Google Ads API administration (operator only)</td><td data-i18n="ui_web_41c9682a3d10">Google Ads customer and account identifiers; campaign, ad-group, ad, keyword, asset, budget, bid, schedule and targeting configuration; search terms; performance, conversion, policy and recommendation data; OAuth authorization metadata; and local mutation-audit metadata.</td><td data-i18n="ui_web_5b1aa62febcf">Allow Norva's authorized operator to report on and manage Norva's own advertising account</td></tr>
+      <tr><td data-i18n="ui_web_c4f6af720133">Downloads (on device)</td><td data-i18n="ui_web_c2a1f7bd3c52">Media you download is encrypted and stored only on your device</td><td data-i18n="ui_web_f84897f5e42a">Offline viewing; this content is not uploaded to us</td></tr>
       </tbody>
     </table>
 
-    <h2>2. How we use information</h2>
+    <h2 data-i18n="ui_web_4cb9675ad158">2. How we use information</h2>
     <ul>
-      <li>To provide, maintain and secure the Service and your account.</li>
-      <li>To connect the Service to the compatible source you choose to add.</li>
-      <li>To sync playback progress, history and preferences across your devices.</li>
-      <li>To verify your Norva access/subscription status.</li>
-      <li>When you choose to join Norva Partners, to create and operate your membership and link, attribute valid referrals, provide the referring partner with a strictly masked recognition hint, calculate and mature commissions, prevent fraud and let you convert available commission into Norva access.</li>
-      <li>Only after the server confirms cash-pilot eligibility and you choose a cash payout, to collect your explicit payout country, verify the individual payout requirements, collect the applicable tax profile, validate a supported corridor and administer the transfer.</li>
-      <li>To understand which Norva sign-up journey and device type were used and improve onboarding.</li>
-      <li>To diagnose problems and improve reliability.</li>
-      <li>With your consent, to measure audience and product friction on web, Android mobile and Android TV, and advertising performance where advertising measurement applies.</li>
-      <li>For Norva's authorized operator only, to analyze and manage Norva's own Google Ads account through Google OAuth and the Google Ads API.</li>
+      <li data-i18n="ui_web_9aed2a67baaf">To provide, maintain and secure the Service and your account.</li>
+      <li data-i18n="ui_web_a72762df16cf">To connect the Service to the compatible source you choose to add.</li>
+      <li data-i18n="ui_web_fafb348dc18e">To sync playback progress, history and preferences across your devices.</li>
+      <li data-i18n="ui_web_5c0e2c3c6dc2">To verify your Norva access/subscription status.</li>
+      <li data-i18n="ui_web_9a601212e872">When you choose to join Norva Partners, to create and operate your membership and link, attribute valid referrals, provide the referring partner with a strictly masked recognition hint, calculate and mature commissions, prevent fraud and let you convert available commission into Norva access.</li>
+      <li data-i18n="ui_web_717c64da5c86">Only after the server confirms cash-pilot eligibility and you choose a cash payout, to collect your explicit payout country, verify the individual payout requirements, collect the applicable tax profile, validate a supported corridor and administer the transfer.</li>
+      <li data-i18n="ui_web_773e3874c716">To understand which Norva sign-up journey and device type were used and improve onboarding.</li>
+      <li data-i18n="ui_web_17da63c879b2">To diagnose problems and improve reliability.</li>
+      <li data-i18n="ui_web_91906c178eb6">With your consent, to measure audience and product friction on web, Android mobile and Android TV, and advertising performance where advertising measurement applies.</li>
+      <li data-i18n="ui_web_37eb31ccc767">For Norva's authorized operator only, to analyze and manage Norva's own Google Ads account through Google OAuth and the Google Ads API.</li>
     </ul>
-    <p>We do <strong>not</strong> sell your personal information. With your consent, we use analytics
+    <p><norva-i18n data-i18n="ui_web_461d939acca8">We do </norva-i18n><strong data-i18n="ui_web_254bb97b57f1">not</strong><norva-i18n data-i18n="ui_web_96573962144a"> sell your personal information. With your consent, we use analytics
       and advertising cookies on the web app to measure usage and how our ads perform — see
-      <a href="#cookies">Cookies, analytics &amp; advertising</a> below. You can decline or withdraw
-      this at any time.</p>
-    <p>Our legal bases depend on the purpose: performance of our contract for account, playback,
+      </norva-i18n><a href="#cookies" data-i18n="ui_web_9ca1be597d1e">Cookies, analytics &amp; advertising</a><norva-i18n data-i18n="ui_web_7ba2f4de5b02"> below. You can decline or withdraw
+      this at any time.</norva-i18n></p>
+    <p data-i18n="ui_web_e3f7fe345570">Our legal bases depend on the purpose: performance of our contract for account, playback,
       subscription and the optional Partners agreement; compliance with tax, accounting and other
       applicable legal obligations; and our legitimate interests in service security, fraud
       prevention, support and reliability, balanced against your rights. Optional analytics and
@@ -109,7 +111,7 @@
       lawfulness of earlier processing. Withdrawal does not itself erase an already completed
       verification or records that must be kept for a legal claim, tax, accounting or anti-fraud
       obligation; those records remain subject to the retention limits in section 5.</p>
-    <p>Didit uses automated systems to assess document integrity, liveness, face match and fraud
+    <p data-i18n="ui_web_4a0ba624bf83">Didit uses automated systems to assess document integrity, liveness, face match and fraud
       signals. Norva then applies the programme's configured age, country, legal-capacity and account
       rules to the normalized result. An unsuccessful result can prevent cash-payout readiness and a
       transfer, but it cannot prevent Partners membership, a referral link, attribution, commission
@@ -121,7 +123,7 @@
       make a fresh verification available. This description explains the actual workflow and does not
       predetermine whether any particular data-protection-law provision on solely automated decisions
       applies to an individual case.</p>
-    <p>An access-credit redemption records an irreversible conversion of available commission into a
+    <p data-i18n="ui_web_b2ab1e4deb83">An access-credit redemption records an irreversible conversion of available commission into a
       Norva-only access entitlement at the server-issued quote. The entitlement cannot be transferred,
       used to pay another person or redeemed for cash, and Norva does not present it as a bank/payment
       account or general-purpose payment instrument. This factual description does not predetermine
@@ -129,95 +131,95 @@
       chargeback, reversal, duplicate correction or recovery due so that Norva does not silently alter
       the financial history. Access-credit records contain no biometric data or payout destination.</p>
 
-    <h2 id="cookies">3. Cookies, analytics &amp; advertising</h2>
-    <p>The first-party sign-up context described in section 1 is an operational account record,
+    <h2 id="cookies" data-i18n="ui_web_b39ed55920a6">3. Cookies, analytics &amp; advertising</h2>
+    <p data-i18n="ui_web_9bc9801f77bd">The first-party sign-up context described in section 1 is an operational account record,
       not a Google Analytics, Microsoft Clarity, Google Ads or Meta cookie. It remains available when optional
       analytics cookies are declined, and is kept separate from billing country and your chosen
       catalogue region.</p>
-    <p>On the Norva web app and Android applications we use consent-controlled analytics technologies.
-      They are <strong>not initialized until you accept them</strong>: a consent banner appears on your
-      first visit or installation, and nothing is sent to these analytics providers unless you choose “Accept”.</p>
+    <p><norva-i18n data-i18n="ui_web_a1dce01b2646">On the Norva web app and Android applications we use consent-controlled analytics technologies.
+      They are </norva-i18n><strong data-i18n="ui_web_e381d60d512e">not initialized until you accept them</strong><norva-i18n data-i18n="ui_web_d93949ff79fc">: a consent banner appears on your
+      first visit or installation, and nothing is sent to these analytics providers unless you choose “Accept”.</norva-i18n></p>
     <ul>
-      <li><strong>Strictly necessary</strong> — needed for the site to work (sign-in, security and
-        remembering your consent choice). Always active; no marketing use.</li>
-      <li><strong>Analytics</strong> — <strong>Google Analytics 4</strong>, to understand aggregate
-        use, and <strong>Microsoft Clarity</strong>, for privacy-masked session replay, heatmaps,
+      <li><strong data-i18n="ui_web_1815beefcae4">Strictly necessary</strong><norva-i18n data-i18n="ui_web_cb62665d5870"> — needed for the site to work (sign-in, security and
+        remembering your consent choice). Always active; no marketing use.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_94c116ee118a">Analytics</strong> — <strong data-i18n="ui_web_de7060f15e34">Google Analytics 4</strong><norva-i18n data-i18n="ui_web_5c73065190e2">, to understand aggregate
+        use, and </norva-i18n><strong data-i18n="ui_web_d4b7f6f207bc">Microsoft Clarity</strong><norva-i18n data-i18n="ui_web_e23c857db19f">, for privacy-masked session replay, heatmaps,
         interaction diagnostics and performance signals. The public web landing, Android mobile and
         Android TV use separate Clarity projects so their journeys can be compared without merging
         platform data. Native session replay masks WebView text and images plus credential-entry and playback views;
-        custom events use a closed, identifier-free vocabulary.</li>
-      <li><strong>Advertising</strong> — <strong>Google Ads</strong> and <strong>Meta Pixel</strong>,
-        to measure how our ads perform (for example a sign-up or purchase that follows an ad).</li>
+        custom events use a closed, identifier-free vocabulary.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_7c50f8a38a76">Advertising</strong> — <strong data-i18n="ui_web_746b549f5062">Google Ads</strong><norva-i18n data-i18n="ui_web_6201111b83a0"> and </norva-i18n><strong data-i18n="ui_web_a45e703ddaf1">Meta Pixel</strong><norva-i18n data-i18n="ui_web_6fee7c89d96c">,
+        to measure how our ads perform (for example a sign-up or purchase that follows an ad).</norva-i18n></li>
     </ul>
-    <p>You can change or withdraw your choice at any time from <strong>Settings → Privacy &amp; legal
-      → Manage cookies</strong>, which reopens the consent banner. If you decline, these analytics and
+    <p><norva-i18n data-i18n="ui_web_401932eba964">You can change or withdraw your choice at any time from </norva-i18n><strong data-i18n="ui_web_8849b018776f">Settings → Privacy &amp; legal
+      → Manage cookies</strong><norva-i18n data-i18n="ui_web_36d510eebe4d">, which reopens the consent banner. If you decline, these analytics and
       advertising tools are not loaded. These providers process data under their own policies:
-      <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google</a>,
-      <a href="https://privacy.microsoft.com/privacystatement" target="_blank" rel="noopener">Microsoft</a> and
-      <a href="https://www.facebook.com/privacy/policy" target="_blank" rel="noopener">Meta</a>.</p>
+      </norva-i18n><a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google</a>,
+      <a href="https://privacy.microsoft.com/privacystatement" target="_blank" rel="noopener" data-i18n="ui_web_c7bac46904be">Microsoft</a><norva-i18n data-i18n="ui_web_6201111b83a0"> and
+      </norva-i18n><a href="https://www.facebook.com/privacy/policy" target="_blank" rel="noopener" data-i18n="ui_web_4f749de7c24f">Meta</a>.</p>
 
-    <h2 id="google-ads-api">3A. Internal Google Ads API integration</h2>
-    <p>Norva uses a private, operator-only integration to administer Norva's own Google Ads account.
+    <h2 id="google-ads-api" data-i18n="ui_web_0770e76bbd2a">3A. Internal Google Ads API integration</h2>
+    <p data-i18n="ui_web_61a678dfd4c7">Norva uses a private, operator-only integration to administer Norva's own Google Ads account.
       This integration is not part of the consumer Service, is not offered to clients or the public,
       and does not allow third parties to connect their Google Ads accounts. The authorized operator
       grants access through Google's OAuth consent flow.</p>
-    <p>The Google Ads API provides a single OAuth scope for both reading and changing Google Ads data.
+    <p data-i18n="ui_web_aea7637cd2a0">The Google Ads API provides a single OAuth scope for both reading and changing Google Ads data.
       Norva therefore enforces least privilege in the local tool: the routine profile is read-only,
       while the control profile is disabled by default and requires an explicit preview and approval
       before a change can be applied. The integration may read the data listed in section 1 and may
       create or update campaigns, ads, keywords, targeting, bids, budgets, schedules, assets and
       conversion settings only when the authorized operator specifically requests and confirms the change.</p>
-    <p>OAuth client configuration and the refresh token are stored outside Norva's source repository in
+    <p data-i18n="ui_web_7ac798c7545b">OAuth client configuration and the refresh token are stored outside Norva's source repository in
       a user-private directory on the operator's Windows workstation. The local MCP server has no public
       listening endpoint and does not maintain a customer database. Requested Google Ads API results are
       returned to OpenAI Codex Desktop for the operator's requested task and may appear in that operator's
       Codex task history under the applicable OpenAI service terms and account data controls. Local audit
       logs contain mutation metadata but not OAuth client secrets, refresh tokens or user passwords.</p>
-    <p>Norva does not sell Google Ads API data, expose it to clients or the public, or use it to build a
+    <p><norva-i18n data-i18n="ui_web_6611216142bb">Norva does not sell Google Ads API data, expose it to clients or the public, or use it to build a
       third-party advertising profile. The operator can revoke the OAuth grant in the Google Account,
       delete the local token and audit files, and reauthorize the integration when required. Norva's use
       of information received from the Google Ads API adheres to the
-      <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>,
-      including the Limited Use requirements.</p>
+      </norva-i18n><a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener" data-i18n="ui_web_1fd7fd2453f4">Google API Services User Data Policy</a><norva-i18n data-i18n="ui_web_8341d10d5e43">,
+      including the Limited Use requirements.</norva-i18n></p>
 
-    <h2>4. Sharing and processors</h2>
-    <p>We share data only with providers used to operate the Service or, where applicable, to
+    <h2 data-i18n="ui_web_9adf2d59a06e">4. Sharing and processors</h2>
+    <p data-i18n="ui_web_4b5ca68360d3">We share data only with providers used to operate the Service or, where applicable, to
       measure analytics and advertising after consent:</p>
     <ul>
-      <li><strong>Hetzner</strong> — hosting of Norva's self-hosted application,
+      <li><strong data-i18n="ui_web_6d6dc68f9728">Hetzner</strong><norva-i18n data-i18n="ui_web_6c5f660c488a"> — hosting of Norva's self-hosted application,
         authentication, database and operational services on infrastructure located in the
         European Union. Norva operates the Supabase software on this infrastructure; Supabase
-        does not host this Norva deployment.</li>
-      <li><strong>Cloudflare</strong> — DNS, security, web hosting and content delivery, including
-        the approximate network-edge location signal described in section 1.</li>
-      <li><strong>Resend</strong> — transactional and security email delivery, including
+        does not host this Norva deployment.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_f9191531404c">Cloudflare</strong><norva-i18n data-i18n="ui_web_adeebefebf81"> — DNS, security, web hosting and content delivery, including
+        the approximate network-edge location signal described in section 1.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_1f94843777ae">Resend</strong><norva-i18n data-i18n="ui_web_3c4429e5bb1e"> — transactional and security email delivery, including
         authentication messages, support communications and Norva Partners access-review
         decisions. Resend receives the destination email address, the minimum message content and
-        delivery metadata needed to send and troubleshoot those messages.</li>
-      <li><strong>Didit</strong> — hosted individual identity, age, country and capacity verification only when a Norva Partner chooses a cash payout and that payout-verification provider is enabled for the jurisdiction. Didit is not used to join, create a referral link, attribute referrals, accrue or mature commission, or convert available commission into Norva access. Didit acts as Norva's processor for the checks Norva configures and also describes itself as an independent controller for limited security, abuse-prevention, legal-compliance, audit-logging and legal-claims purposes. Before redirecting you, Norva links the <a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer">Didit Verification Privacy Notice</a> and <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">Didit End User Terms for Identity Verification</a> and requests explicit confirmation for document, selfie, liveness and face-match capture. Verification data may be processed outside the country where the flow starts; where required, Didit states that it uses safeguards such as adequacy decisions, standard contractual clauses or another recognized transfer mechanism. Norva retains only the minimum normalized outcome and provider reference needed for payout audit and does not copy identity-document images or biometric captures into the Norva database.</li>
-      <li><strong>Telegram</strong> — delivery of operational new-sign-up notifications to a
+        delivery metadata needed to send and troubleshoot those messages.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_d65efce9a5bb">Didit</strong><norva-i18n data-i18n="ui_web_5caf2ffcc44f"> — hosted individual identity, age, country and capacity verification only when a Norva Partner chooses a cash payout and that payout-verification provider is enabled for the jurisdiction. Didit is not used to join, create a referral link, attribute referrals, accrue or mature commission, or convert available commission into Norva access. Didit acts as Norva's processor for the checks Norva configures and also describes itself as an independent controller for limited security, abuse-prevention, legal-compliance, audit-logging and legal-claims purposes. Before redirecting you, Norva links the </norva-i18n><a href="https://didit.me/terms/verification-privacy-notice/" target="_blank" rel="noopener noreferrer" data-i18n="ui_web_03edc68d9904">Didit Verification Privacy Notice</a><norva-i18n data-i18n="ui_web_6201111b83a0"> and </norva-i18n><a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer" data-i18n="ui_web_389b8be9b25d">Didit End User Terms for Identity Verification</a><norva-i18n data-i18n="ui_web_ab983f0f796e"> and requests explicit confirmation for document, selfie, liveness and face-match capture. Verification data may be processed outside the country where the flow starts; where required, Didit states that it uses safeguards such as adequacy decisions, standard contractual clauses or another recognized transfer mechanism. Norva retains only the minimum normalized outcome and provider reference needed for payout audit and does not copy identity-document images or biometric captures into the Norva database.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_acdd1e734125">Telegram</strong><norva-i18n data-i18n="ui_web_9af5b66a4f0d"> — delivery of operational new-sign-up notifications to a
         restricted administrator chat. These notifications may include a display name, masked email,
         sign-in method, whether sign-up used the web browser or Android mobile app, the Norva journey
         used, approximate region/country, and an Admin link whose destination may contain an internal
         account identifier. They do not include the raw IP address or city. Norva marks messages as
         protected against forwarding and saving where supported by Telegram, but this cannot prevent
-        screenshots or manual copying and does not delete a delivered message.</li>
-      <li><strong>Google</strong> (Analytics, Ads), <strong>Microsoft</strong> (Clarity) and
-        <strong>Meta</strong> (Pixel) — audience measurement, privacy-masked web interaction analysis
-        and advertising performance, only after you consent (see section 3).</li>
-      <li><strong>Google Ads API</strong> — OAuth authorization and the advertising account data needed
-        for Norva's internal reporting and operator-approved campaign management described in section 3A.</li>
-      <li><strong>OpenAI Codex Desktop</strong> — the operator interface and MCP host used for the
+        screenshots or manual copying and does not delete a delivered message.</norva-i18n></li>
+      <li><strong>Google</strong><norva-i18n data-i18n="ui_web_46224cc09b76"> (Analytics, Ads), </norva-i18n><strong data-i18n="ui_web_c7bac46904be">Microsoft</strong><norva-i18n data-i18n="ui_web_0451d6b1c4c6"> (Clarity) and
+        </norva-i18n><strong data-i18n="ui_web_4f749de7c24f">Meta</strong><norva-i18n data-i18n="ui_web_fc9014b3f6e9"> (Pixel) — audience measurement, privacy-masked web interaction analysis
+        and advertising performance, only after you consent (see section 3).</norva-i18n></li>
+      <li><strong data-i18n="ui_web_33517beef304">Google Ads API</strong><norva-i18n data-i18n="ui_web_d78696b05695"> — OAuth authorization and the advertising account data needed
+        for Norva's internal reporting and operator-approved campaign management described in section 3A.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_ee59f13bd7bb">OpenAI Codex Desktop</strong><norva-i18n data-i18n="ui_web_fbc701286a77"> — the operator interface and MCP host used for the
         internal Google Ads workflow. It receives the requested Google Ads API results and operator
         instructions needed for the task; processing and task-history retention follow the applicable
-        OpenAI service terms and the operator's account data controls.</li>
-      <li><strong>Google Play</strong> — Android subscription entitlement and, only for an
+        OpenAI service terms and the operator's account data controls.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_027b1684683a">Google Play</strong><norva-i18n data-i18n="ui_web_8209fd5df07c"> — Android subscription entitlement and, only for an
         attributed Partners account, the Orders API fields needed to record the exact paid total,
         tax, currency and refund state. Norva hashes transaction references and does not copy the
-        raw purchase token or buyer address into the Partners ledger.</li>
-      <li><strong>RevenueCat</strong> — delivery and normalization of subscription lifecycle
-        events used to maintain entitlement and initiate server-side financial reconciliation.</li>
-      <li><strong>Revolut</strong> — web subscription checkout and authoritative settled,
+        raw purchase token or buyer address into the Partners ledger.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_6ce9c87398a7">RevenueCat</strong><norva-i18n data-i18n="ui_web_f084fed61bdd"> — delivery and normalization of subscription lifecycle
+        events used to maintain entitlement and initiate server-side financial reconciliation.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_dd53271a2e06">Revolut</strong><norva-i18n data-i18n="ui_web_e0022f0f402b"> — web subscription checkout and authoritative settled,
         refund and chargeback events where that payment rail is used; Revolut Business also
         executes individual Norva Partners payouts in supported corridors. Under the initial
         manual workflow, Norva keeps the unique payout reference, exact amount/currency, masked
@@ -225,38 +227,38 @@
         hash, opaque transaction identifier and hashes, and normalized statement status needed for
         reconciliation. The keyed fingerprint is produced outside the database and cannot reveal
         the underlying bank details by itself. Norva does not retain the raw bank statement or
-        unrelated statement transactions.</li>
-      <li>Your <strong>media source</strong> — when you ask the Service to connect, requests are made
-        to the host you configured. You are responsible for that source and its terms.</li>
+        unrelated statement transactions.</norva-i18n></li>
+      <li><norva-i18n data-i18n="ui_web_a204943256ea">Your </norva-i18n><strong data-i18n="ui_web_1141176a0d19">media source</strong><norva-i18n data-i18n="ui_web_d124c1bd129c"> — when you ask the Service to connect, requests are made
+        to the host you configured. You are responsible for that source and its terms.</norva-i18n></li>
     </ul>
-    <p>We may disclose information if required by law or to protect the rights, safety and security
+    <p data-i18n="ui_web_a75e8a2ddf46">We may disclose information if required by law or to protect the rights, safety and security
       of users and the Service.</p>
-    <p>Revolut Business is the initial individual payout provider for supported Norva Partners
+    <p data-i18n="ui_web_ee3c48bb96b7">Revolut Business is the initial individual payout provider for supported Norva Partners
       corridors. Availability remains jurisdiction- and currency-specific and is shown before a
       payout profile can become active. Beneficiary details are managed in Revolut; Norva stores
       the provider token, masked destination and opaque transfer identifier needed to prepare and
       reconcile the payout, but not the beneficiary's full bank-account details.</p>
 
-    <h2>5. Data retention</h2>
-    <p>We keep account and usage data while your account is active. When you delete your account (see
+    <h2 data-i18n="ui_web_aa2947fe6e6f">5. Data retention</h2>
+    <p data-i18n="ui_web_202a69571eed">We keep account and usage data while your account is active. When you delete your account (see
       below) we delete or anonymize your personal data, except where we must retain limited records
       to comply with legal obligations. Downloaded media lives only on your device and is removed
       when you delete it or uninstall the app.</p>
-    <p>If a Partners payout, return, recovery or required financial review is still open, account
+    <p data-i18n="ui_web_d0f9b9c9e698">If a Partners payout, return, recovery or required financial review is still open, account
       deletion is placed in a temporary financial-closure state instead of discarding or
       anonymizing the records needed to resolve it. Norva does not expose the amount in the public
       deletion response. The user is directed to Support, and deletion can complete once the
       account-specific financial obligations are resolved.</p>
-    <p>For sign-up context, city and region stop being available to administrators at 90 days and
+    <p data-i18n="ui_web_44a2a2c00cfc">For sign-up context, city and region stop being available to administrators at 90 days and
       are physically erased by a retention job within the following 15 minutes. Country and
       product-origin fields may remain while the account is active so we can compare onboarding
       trends over time; they are deleted with the account.</p>
-    <p>Deleting your Norva account does not automatically or retroactively remove a sign-up
+    <p data-i18n="ui_web_aa7c8c01d8aa">Deleting your Norva account does not automatically or retroactively remove a sign-up
       notification that has already been delivered to the restricted Telegram administrator chat.
       Telegram-side retention depends on that chat's settings. Norva recommends a short automatic
       deletion period and restricted chat membership, but does not claim that a delivered message
       is erased by the account-deletion flow.</p>
-    <p>Partners referral claims expire if they are not consumed within the published attribution
+    <p data-i18n="ui_web_3ea98a7abb6d">Partners referral claims expire if they are not consumed within the published attribution
       window. Attribution, commission, access-credit redemption, grant, reversal and payout records may be retained for the period
       required by tax, accounting, anti-fraud and dispute-resolution law even after a Norva account
       is closed. For users who choose a cash payout, KYC provider references and normalized outcomes
@@ -269,66 +271,66 @@
       private approval record, subject only to a documented applicable legal hold. Norva reassesses
       this period before any broader
       release.</p>
-    <p>For the internal Google Ads API integration, OAuth client configuration and the refresh token
+    <p data-i18n="ui_web_15e82cbbb23a">For the internal Google Ads API integration, OAuth client configuration and the refresh token
       remain on the authorized operator's workstation until they are replaced, revoked or deleted.
       Local mutation-audit metadata is retained for security, accountability and incident review until
       the operator deletes it. The MCP server does not copy Google Ads data into Norva's customer database;
       any Google Ads information present in Codex task history is governed by the operator's applicable
       OpenAI service terms and account data controls.</p>
 
-    <h2>6. Your rights &amp; deleting your account</h2>
-    <p>You can access or update your information in the app, and you can request deletion of your
+    <h2 data-i18n="ui_web_2adafbce6091">6. Your rights &amp; deleting your account</h2>
+    <p data-i18n="ui_web_3e61d26d0e0a">You can access or update your information in the app, and you can request deletion of your
       account and associated data at any time:</p>
     <ul>
-      <li><strong>In the app:</strong> Settings → Account → Delete account.</li>
-      <li><strong>On the web:</strong> <a href="/delete-account.html">norva.tv/delete-account.html</a>.</li>
+      <li><strong data-i18n="ui_web_1e6a11396127">In the app:</strong><norva-i18n data-i18n="ui_web_aa37c9a5f1cb"> Settings → Account → Delete account.</norva-i18n></li>
+      <li><strong data-i18n="ui_web_1f21c881cdf2">On the web:</strong> <a href="/delete-account.html" data-i18n="ui_web_98366b3441c9">norva.tv/delete-account.html</a>.</li>
     </ul>
-    <p>Depending on where you live, you may also have rights to access, correct, port or restrict
+    <p data-i18n="ui_web_26443d461faf">Depending on where you live, you may also have rights to access, correct, port or restrict
       processing of your data. To exercise them, contact us using the details below.</p>
 
-    <h2>7. Security</h2>
-    <p>Traffic to Norva’s cloud is encrypted in transit (HTTPS). Passwords are stored hashed by our
+    <h2 data-i18n="ui_web_65b9245af385">7. Security</h2>
+    <p data-i18n="ui_web_ff993b83b82e">Traffic to Norva’s cloud is encrypted in transit (HTTPS). Passwords are stored hashed by our
       auth provider. Offline downloads are encrypted on your device with a hardware-backed key where
       available. No system is perfectly secure, but we work to protect your data.</p>
-    <p>The internal Google Ads API integration uses HTTPS to reach Google and local stdio between Codex
+    <p data-i18n="ui_web_a21f0ae2e6a6">The internal Google Ads API integration uses HTTPS to reach Google and local stdio between Codex
       Desktop and the MCP server. Credential files are excluded from source control and restricted to
       the signed-in Windows user, SYSTEM and local Administrators. The operator can disable the control
       profile and revoke or replace OAuth credentials if compromise is suspected.</p>
 
-    <h2>8. Children</h2>
-    <p>Norva is not directed to children under 13 (or the minimum age in your country) and we do not
+    <h2 data-i18n="ui_web_8d4053c60290">8. Children</h2>
+    <p data-i18n="ui_web_40a69c58d481">Norva is not directed to children under 13 (or the minimum age in your country) and we do not
       knowingly collect their personal data.</p>
 
-    <h2>9. International transfers</h2>
-    <p>Your data may be processed in countries other than your own by the providers listed above,
+    <h2 data-i18n="ui_web_24e30990d30b">9. International transfers</h2>
+    <p data-i18n="ui_web_ed380e39903f">Your data may be processed in countries other than your own by the providers listed above,
       with appropriate safeguards in place.</p>
 
-    <h2>10. Changes</h2>
-    <p>We may update this policy. We will revise the “Last updated” date and, for material changes,
+    <h2 data-i18n="ui_web_f4c519e12d48">10. Changes</h2>
+    <p data-i18n="ui_web_0a7b6b30e6ed">We may update this policy. We will revise the “Last updated” date and, for material changes,
       provide a more prominent notice.</p>
 
-    <h2>11. Contact &amp; data controller</h2>
-    <p><strong>Data controller / operator:</strong> <strong>Norva</strong>, a French simplified
-      joint-stock company with a sole shareholder (<em>société par actions simplifiée
-      unipersonnelle</em>, SASU), share capital EUR&nbsp;100, registered with the Paris Trade and
-      Companies Register under SIREN <strong>108&nbsp;055&nbsp;237</strong>, SIRET
-      <strong>108&nbsp;055&nbsp;237&nbsp;00011</strong>, registered office
-      <strong>270 rue de Vaugirard, 75015 Paris, France</strong>, represented by its President,
-      Adrien Hernandez.<br>
-      Email: <a href="mailto:support@norva.tv">support@norva.tv</a><br>
-      Full legal notice: <a href="/mentions-legales.html">mentions légales</a>.</p>
-    <p>Norva has not officially designated a Data Protection Officer (DPO). Privacy and data-subject
+    <h2 data-i18n="ui_web_d806f403bd90">11. Contact &amp; data controller</h2>
+    <p><strong data-i18n="ui_web_095805942abb">Data controller / operator:</strong> <strong>Norva</strong><norva-i18n data-i18n="ui_web_a16cfb78fcff">, a French simplified
+      joint-stock company with a sole shareholder (</norva-i18n><em data-i18n="ui_web_efabb6e9fa82">société par actions simplifiée
+      unipersonnelle</em><norva-i18n data-i18n="ui_web_7f43c6a195e9">, SASU), share capital EUR&nbsp;100, registered with the Paris Trade and
+      Companies Register under SIREN </norva-i18n><strong>108&nbsp;055&nbsp;237</strong><norva-i18n data-i18n="ui_web_cc0c84d67641">, SIRET
+      </norva-i18n><strong>108&nbsp;055&nbsp;237&nbsp;00011</strong><norva-i18n data-i18n="ui_web_04d65f075bc0">, registered office
+      </norva-i18n><strong data-i18n="ui_web_92751a80fdfe">270 rue de Vaugirard, 75015 Paris, France</strong><norva-i18n data-i18n="ui_web_791f1508e98e">, represented by its President,
+      Adrien Hernandez.</norva-i18n><br><norva-i18n data-i18n="ui_web_17507dcf8457">
+      Email: </norva-i18n><a href="mailto:support@norva.tv" data-i18n="ui_web_35013c96f7cf">support@norva.tv</a><br><norva-i18n data-i18n="ui_web_18adc38ccb17">
+      Full legal notice: </norva-i18n><a href="/mentions-legales.html" data-i18n="ui_web_802e9409ad7b">mentions légales</a>.</p>
+    <p data-i18n="ui_web_c7fcfe0ed82f">Norva has not officially designated a Data Protection Officer (DPO). Privacy and data-subject
       requests may be sent to the contact above; this statement does not limit any right to contact a
       competent supervisory authority.</p>
-    <p>If you are in the EEA/UK, you may lodge a complaint with your local data-protection authority.
-      In France this is the <a href="https://www.cnil.fr" target="_blank" rel="noopener">CNIL</a>.</p>
+    <p><norva-i18n data-i18n="ui_web_0ed9b60f79b0">If you are in the EEA/UK, you may lodge a complaint with your local data-protection authority.
+      In France this is the </norva-i18n><a href="https://www.cnil.fr" target="_blank" rel="noopener" data-i18n="ui_web_c28a75847bf2">CNIL</a>.</p>
 
     <footer>
-      <a href="/terms.html">Terms of Service</a>
-      <a href="/partners-terms.html">Partners Terms</a>
-      <a href="/mentions-legales.html">Legal notice</a>
-      <a href="/delete-account.html">Delete account</a>
-      <a href="/">Home</a>
+      <a href="/terms.html" data-i18n="ui_web_4afa55bf7aec">Terms of Service</a>
+      <a href="/partners-terms.html" data-i18n="ui_web_34ee4f762a64">Partners Terms</a>
+      <a href="/mentions-legales.html" data-i18n="ui_web_1011b3a811f0">Legal notice</a>
+      <a href="/delete-account.html" data-i18n="ui_web_a2e20a335700">Delete account</a>
+      <a href="/" data-i18n="ui_web_3a78695388b3">Home</a>
     </footer>
   </main>
 </body>

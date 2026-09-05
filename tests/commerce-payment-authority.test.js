@@ -65,16 +65,16 @@ test('card updates suppress plan pricing and every promotional surface', () => {
 
   assert.match(cardUpdate, /clearCheckoutPromotion\(\)/);
   assert.match(cardUpdate, /commercialTerms\.hidden = true/);
-  assert.match(cardUpdate, /summaryKicker\.textContent = 'PAYMENT METHOD'/);
-  assert.match(cardUpdate, /sumPlan\.textContent = 'Secure card update'/);
-  assert.match(cardUpdate, /sumTag\.textContent = 'No plan change/);
+  assert.match(cardUpdate, /summaryKicker\.textContent = [^;\r\n]*'PAYMENT METHOD'/);
+  assert.match(cardUpdate, /sumPlan\.textContent = [^;\r\n]*'Secure card update'/);
+  assert.match(cardUpdate, /sumTag\.textContent = [^\n]*'No plan change/);
 });
 
 test('the checkout price suffix stays compact in every checkout kind', () => {
   const checkout = read('public/checkout-revolut.html');
   assert.doesNotMatch(checkout, /sumPer\.textContent\s*=.*after your/,
     'trial explanations belong in the schedule and commitment, not the price column');
-  assert.match(checkout, /if \(sumPer\) sumPer\.textContent = period === 'annual' \? '\/yr' : '\/mo'/);
+  assert.match(checkout, /if \(sumPer\) sumPer\.textContent = period === [^;\r\n]*'annual' \? '\/yr' : '\/mo'/);
 });
 
 test('subscription removes every expired promotion before painting catalog prices', () => {

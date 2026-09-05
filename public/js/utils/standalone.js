@@ -717,11 +717,11 @@
             console.warn('[Native] Fresh playback recovery exhausted:', reason || 'unknown');
             try {
                 window.app?.player?.showError?.(
-                    'Playback was interrupted by the provider.<br>Please press Play to try again.'
+                    '<norva-i18n data-i18n="ui_web_edb7bc6e6cc7">Playback was interrupted by the provider.</norva-i18n><br><norva-i18n data-i18n="ui_web_628d1b0c800f">Please press Play to try again.</norva-i18n>'
                 );
             } catch (_) { /* the VOD route has no live player error surface */ }
             try {
-                window.app?.showToast?.('Playback interrupted. Press Play to try again.', {
+                window.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_deb3e7b9dd76", { defaultValue: "Playback interrupted. Press Play to try again." }) ?? 'Playback interrupted. Press Play to try again.'), {
                     type: 'error',
                     duration: 8000
                 });
@@ -1084,7 +1084,7 @@
             const CG = window.ChannelGrouping;
             const qLabel = (m) => {
                 try { const p = CG && CG.parseName && CG.parseName(m.name || ''); const q = p && CG.qualityLabel && CG.qualityLabel(p); if (q) return q; } catch (_) { /* fall through */ }
-                return m.name || 'Variant';
+                return m.name || (globalThis.NorvaI18n?.t("ui_web_3f19fe84a2de", { defaultValue: "Variant" }) ?? 'Variant');
             };
             const rank = (l) => l.startsWith('4K') ? 0 : (l.startsWith('FHD') || l.startsWith('Super HD')) ? 1 : l.startsWith('HD') ? 2 : l.startsWith('SD') ? 3 : 2;
             const seen = Object.create(null);

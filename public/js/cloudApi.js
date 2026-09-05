@@ -84,12 +84,12 @@
     const CONTENT_REGIONS = REGIONS_DATA
         ? REGIONS_DATA.list().map((r) => ({ key: r.code, label: r.name, flag: r.flag, kind: r.kind }))
         : [
-            { key: 'FR', label: 'France' },
-            { key: 'US', label: 'United States' },
-            { key: 'IN', label: 'India' },
-            { key: 'MAGHREB', label: 'Maghreb' },
-            { key: 'LUSOPHONE', label: 'Lusophone' },
-            { key: 'INTERNATIONAL', label: 'International' }
+            { key: 'FR', label: (globalThis.NorvaI18n?.t("ui_web_7a1ca4ef7515", { defaultValue: "France" }) ?? 'France') },
+            { key: 'US', label: (globalThis.NorvaI18n?.t("ui_web_49dca65f362f", { defaultValue: "United States" }) ?? 'United States') },
+            { key: 'IN', label: (globalThis.NorvaI18n?.t("ui_web_abd149214539", { defaultValue: "India" }) ?? 'India') },
+            { key: 'MAGHREB', label: (globalThis.NorvaI18n?.t("ui_web_50738e586c59", { defaultValue: "Maghreb" }) ?? 'Maghreb') },
+            { key: 'LUSOPHONE', label: (globalThis.NorvaI18n?.t("ui_web_4138cb274155", { defaultValue: "Lusophone" }) ?? 'Lusophone') },
+            { key: 'INTERNATIONAL', label: (globalThis.NorvaI18n?.t("ui_web_93202df2ec70", { defaultValue: "International" }) ?? 'International') }
         ];
     const CONTENT_REGION_LABELS = CONTENT_REGIONS.reduce((labels, region) => {
         labels[region.key] = region.label;
@@ -243,7 +243,7 @@
 
     function contentRegionLabel(region) {
         const normalized = normalizeContentRegion(region);
-        return CONTENT_REGION_LABELS[normalized] || normalized || 'International';
+        return CONTENT_REGION_LABELS[normalized] || normalized || (globalThis.NorvaI18n?.t("ui_web_93202df2ec70", { defaultValue: "International" }) ?? 'International');
     }
 
     function inferContentRegionFromLocale() {
@@ -468,7 +468,7 @@
         // openModal() so the D-pad is trapped inside and Back/Escape dismisses it.
         prompt.setAttribute('role', 'dialog');
         prompt.setAttribute('aria-modal', 'true');
-        prompt.setAttribute('aria-label', `Organize Norva for ${label}`);
+        prompt.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_65d8fb144873", {defaultValue: "Organize Norva for {{p0}}", p0:(label)}) : `Organize Norva for ${label}`));
         // A dimmed full-screen backdrop makes this "one thing at a time": it covers
         // the onboarding form, the trial pill and everything else, so nothing can
         // visually collide with the prompt. Mobile gets a bottom sheet (thumb-reachable,
@@ -514,18 +514,18 @@
         const btnBase = 'min-height:44px;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer';
         prompt.innerHTML = `
             ${isTv ? '' : '<div aria-hidden="true" style="width:40px;height:4px;border-radius:999px;background:var(--color-border,#334155);margin:-6px auto 14px"></div>'}
-            <button type="button" aria-label="Close" data-region-close class="modal-close" style="float:right;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;color:var(--color-text-secondary,#94a3b8);font-size:24px;line-height:1;cursor:pointer;margin:-8px -8px 0 0">&times;</button>
-            <strong style="display:block;font-size:${isTv ? 20 : 16}px;margin:0 40px 8px 0">Organize Norva for ${escapeHtml(label)}?</strong>
-            <span style="display:block;color:var(--color-text-secondary,#aeb8cc);margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
+            <button type="button" aria-label="Close" data-region-close class="modal-close" style="float:right;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;color:var(--color-text-secondary,#94a3b8);font-size:24px;line-height:1;cursor:pointer;margin:-8px -8px 0 0" data-i18n-aria-label="ui_web_7d9eb7acb13e">&times;</button>
+            <strong style="display:block;font-size:${isTv ? 20 : 16}px;margin:0 40px 8px 0" data-i18n="ui_web_25ba1e177c7f" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p2":(label)}) || "{}")}">Organize Norva for ${escapeHtml(label)}?</strong>
+            <span style="display:block;color:var(--color-text-secondary,#aeb8cc);margin-bottom:14px" data-i18n="ui_web_e55353011f8d">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
             <div data-region-actions style="display:flex;gap:10px;flex-wrap:wrap">
-                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase}">Yes</button>
-                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid var(--color-border,#334155);background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#dbe7ff);${btnBase}">Choose another region</button>
+                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase}" data-i18n="ui_web_85a39ab345d6">Yes</button>
+                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid var(--color-border,#334155);background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#dbe7ff);${btnBase}" data-i18n="ui_web_cec61e496bb7">Choose another region</button>
             </div>
             <div data-region-picker style="display:none;gap:10px;flex-wrap:wrap;margin-top:2px">
-                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;min-height:44px;border:1px solid var(--color-border,#334155);border-radius:10px;background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#f8fafc);padding:10px 12px;font-weight:700;cursor:pointer">
+                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;min-height:44px;border:1px solid var(--color-border,#334155);border-radius:10px;background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#f8fafc);padding:10px 12px;font-weight:700;cursor:pointer" data-i18n-aria-label="ui_web_0a084642de84">
                     ${CONTENT_REGIONS.map((r) => `<option value="${escapeHtml(r.key)}">${r.flag ? escapeHtml(r.flag) + ' ' : ''}${escapeHtml(r.label)}</option>`).join('')}
                 </select>
-                <button type="button" data-region-apply style="flex:0 0 auto;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase};padding:10px 16px">Confirm</button>
+                <button type="button" data-region-apply style="flex:0 0 auto;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase};padding:10px 16px" data-i18n="ui_web_eebdd24a77d9">Confirm</button>
             </div>
         `;
 
@@ -1212,14 +1212,14 @@
         try {
             if (response.headers.get('x-norva-profile-fallback') === 'locked' && !requestToBase._profileFallbackToasted) {
                 requestToBase._profileFallbackToasted = true;
-                window.NorvaModal?.toast?.('This profile is locked by your current plan — showing the main profile instead.', { tone: 'warn' });
+                window.NorvaModal?.toast?.((globalThis.NorvaI18n?.t("ui_web_89a9b2abd522", { defaultValue: "This profile is locked by your current plan — showing the main profile instead." }) ?? 'This profile is locked by your current plan — showing the main profile instead.'), { tone: 'warn' });
             }
         } catch (_) { /* purely informative */ }
 
         NorvaTrace.log('net ← ' + _trLabel, response.status + ' (' + Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0) - _trT0) + 'ms)' + (_trRefreshed ? ' [after 401→refresh]' : ''));
 
         if (!response.ok) {
-            const baseMessage = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const baseMessage = payload.error || payload.message || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3926a74b94bc", {defaultValue: "Norva responded with {{p0}}", p0:(response.status)}) : `Norva responded with ${response.status}`);
             const detail = extractUpstreamDetail(payload.details);
             const message = detail && !baseMessage.includes(detail)
                 ? `${baseMessage} — ${detail}`.slice(0, 400)
