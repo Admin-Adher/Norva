@@ -42,7 +42,9 @@ test('M3U handoff persists its cursor before releasing provider transport', () =
   assert.match(branch, /return \{ sourceId, status: "syncing", started: true/);
 
   const persist = section(worker, 'async function persistM3uFinalizeHandoff(', '\n// Forward-date the finalize');
-  assert.match(persist, /finalizeCursor:\s*\{ phase: "live", offset: 0, afterId: "" \}/);
+  assert.match(persist, /finalizeCursor:\s*\{ phase: hasVod \? "titles" : "live", offset: 0, afterId: "" \}/);
+  assert.match(persist, /const hasVod = Number\(counts.movies \|\| 0\) > 0 \|\| Number\(counts.series \|\| 0\) > 0/);
+  assert.match(persist, /moviesReady: false, seriesReady: false, browseReady: false/);
   assert.match(persist, /contentSignature:\s*input\.contentSignature/);
   assert.match(persist, /\.eq\("user_id", userId\)/);
 });

@@ -3371,10 +3371,14 @@ async function persistM3uFinalizeHandoff(
   if (!source) throw new HttpError(404, "Source not found");
 
   const hint = recordOrEmpty(source.config_hint);
-  const progress = mergeSyncProgress(recordOrEmpty(hint.syncProgress), {
+  const previousProgress = recordOrEmpty(hint.syncProgress);
+  const counts = recordOrEmpty(previousProgress.counts);
+  const hasVod = Number(counts.movies || 0) > 0 || Number(counts.series || 0) > 0;
+  const progress = mergeSyncProgress(previousProgress, {
     status: "syncing",
     stage: "finalizing",
     percent: 86,
+    ...(hasVod ? { moviesReady: false, seriesReady: false, browseReady: false } : {}),
     updatedAt: input.handoffAt,
     steps: { finalize: { status: "running" } },
   });
@@ -3387,7 +3391,7 @@ async function persistM3uFinalizeHandoff(
         ...hint,
         contentSignature: input.contentSignature,
         syncProgress: progress,
-        finalizeCursor: { phase: "live", offset: 0, afterId: "" },
+        finalizeCursor: { phase: hasVod ? "titles" : "live", offset: 0, afterId: "" },
       }),
     })
     .eq("id", sourceId)
@@ -3660,13 +3664,16 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // rows in live-materialization.ts. Generation guards are intentionally
       // expensive per row, so keep the whole slice inside the 90-second Edge budget.
       const LIVE_CHUNK = 10;
+      // Selection entries have already been normalized by the bounded registry.
+      // Keep its slice within the existing 100-row materialization write budget.
+      const liveChunkLimit = config.playlistUrl === DISCOVERY_PLAYLIST_URL ? 100 : LIVE_CHUNK;
       if (batchOffset === 0) {
         await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot);
         if (!cleared.complete) {
           return {
             sourceId, status: "syncing", phase: "live",
-            nextPhase: "live", nextOffset: 0, limit: LIVE_CHUNK, totalVod, ...result,
+            nextPhase: "live", nextOffset: 0, limit: liveChunkLimit, totalVod, ...result,
             liveCatalog: {
               rawLive: counts.live,
               clearing: true,
@@ -3693,7 +3700,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // compute limit). Walk live rows by offset, clearing once at the start;
       // channels/variants merge across chunks by their logical/stream keys.
       const liveChunk = await loadSourceItems(sourceId, userId, db, accessSnapshot, {
-        itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK,
+        itemTypes: ["live"], offset: batchOffset, limit: liveChunkLimit,
       });
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       if (!liveChunk.length) {
@@ -3726,7 +3733,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       });
       return {
         sourceId, status: "syncing", phase: "live",
-        nextPhase: "live", nextOffset, limit: LIVE_CHUNK, totalVod, liveReady: true, ...result,
+        nextPhase: "live", nextOffset, limit: liveChunkLimit, totalVod, liveReady: true, ...result,
         liveCatalog: { ...mat, rawLive: counts.live, offset: nextOffset },
       };
     }
