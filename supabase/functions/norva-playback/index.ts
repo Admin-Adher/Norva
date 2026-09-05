@@ -1,4 +1,5 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
+import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
@@ -2145,6 +2146,15 @@ async function createPlaybackSessionCore(
   assertHttpUrl(targetUrl);
 
   const clientMode = choosePlaybackMode(requestedMode, body);
+  const serverDirectPublicHls = shouldUseSelectionLiveDirect({
+    delivery: "selectionLiveDelivery" in resolved ? resolved.selectionLiveDelivery : null,
+    targetUrl,
+    itemType,
+    clientMode,
+    body,
+    clientMetadata,
+    playbackHint: requestedPlaybackHint,
+  });
   const authoritativeVodTier = itemType === "movie"
     ? authoritativeVodGatewayTier(resolved.playbackHint, resolvedContainerObservation)
     : null;
@@ -2166,7 +2176,9 @@ async function createPlaybackSessionCore(
   const serverPromotedRelay = clientMode === "relay" &&
     !browserNativeMp4 &&
     (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode");
-  const mode = serverDemotedAutomaticMp4
+  const mode = serverDirectPublicHls
+    ? "direct"
+    : serverDemotedAutomaticMp4
     ? "relay"
     : serverPromotedRelay
     ? "transcode"
@@ -2442,13 +2454,14 @@ async function createPlaybackSessionCore(
   if (startupWaitMs) await sleep(startupWaitMs);
 
   if (mode === "direct") {
-    // Native playback gets exactly one transport. A hidden gateway fallback
+    // Direct playback gets exactly one transport. A hidden gateway fallback
     // would turn one provider refusal into a second concurrent connection and
     // obscure the original HTTP/network cause.
     return {
       session: publicPlaybackSession(session),
       playback: {
         mode,
+        ...(serverDirectPublicHls ? { transport: "public-hls-direct" } : {}),
         url: targetUrl,
         fallbackUrl: null,
         fallbackExpiresAt: null,
@@ -6817,10 +6830,14 @@ async function resolvePlaybackTarget(
     // encode a provider account identity. Scope their breaker/claim key to the
     // authenticated owner and owned source instead of deriving a global key
     // from an opaque catalogue URL.
+    const targetUrl = await resolveDiscoveryTarget({
+      sourceId, userId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
+    }).catch(() => { throw new HttpError(502, "Selection programme is temporarily unavailable"); });
     return {
-      targetUrl: await resolveDiscoveryTarget({
-        sourceId, userId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
-      }).catch(() => { throw new HttpError(502, "Selection programme is temporarily unavailable"); }),
+      targetUrl,
+      selectionLiveDelivery: await resolveSelectionLiveDelivery({
+        sourceId, userId, itemType, itemId, ownedItem, targetUrl,
+      }),
       playbackHint: storedPlaybackHint,
       providerAccountScope: `user-source:${userId}:${sourceId}`,
       itemCas,

@@ -1,7 +1,7 @@
 {
   "public/css/i18n.css": "9d49bdc112",
   "public/css/main.css": "0e1a52b7bb",
-  "public/js/api.js": "9b45589740",
+  "public/js/api.js": "24587be032",
   "public/js/app.js": "3c99fb68cb",
   "public/js/authApi.js": "be61dee633",
   "public/js/blog-index.js": "e94052a643",
@@ -16,7 +16,7 @@
   "public/js/components/RegionPicker.js": "6fa2be2f73",
   "public/js/components/SourceManager.js": "d9183f8fc6",
   "public/js/components/TitleRatingControl.js": "fde4ab57a7",
-  "public/js/components/VideoPlayer.js": "cd206e2a14",
+  "public/js/components/VideoPlayer.js": "9bc1b0274b",
   "public/js/consent-banner.js": "4869a8b3ef",
   "public/js/i18n.js": "4295c85fb3",
   "public/js/landing.js": "2970322ec7",

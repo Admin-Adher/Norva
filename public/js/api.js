@@ -2292,6 +2292,8 @@ const CloudAdapter = (() => {
                         ? { mediaCacheReadPolicy: 'bypass-once' }
                         : {}),
                     gatewayAutoMode: mode === 'transcode' && !forcedMode,
+                    publicHlsDirectSessionGuard: type === 'live' && !nativePlayer
+                        && window.app?.player?.supportsPublicHlsDirectSessionGuard === true,
                     seekOffset: playbackHint.seekOffset,
                     clientMetadata: _cloudClientTelemetryMetadata(),
                     corsSafe: false,

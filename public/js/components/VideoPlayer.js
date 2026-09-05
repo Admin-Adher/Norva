@@ -1403,6 +1403,73 @@ class VideoPlayer {
         this.activeCloudPlaybackSessionIds.add(id);
     }
 
+    get supportsPublicHlsDirectSessionGuard() { return true; }
+
+    stopPublicHlsDirectSessionGuard() {
+        const guard = this._publicHlsDirectSessionGuard;
+        this._publicHlsDirectSessionGuard = null;
+        if (!guard) return;
+        clearTimeout(guard.timer);
+        clearTimeout(guard.deadlineTimer);
+    }
+
+    startPublicHlsDirectSessionGuard(payload, requestSeq = this._playRequestSeq) {
+        this.stopPublicHlsDirectSessionGuard();
+        // Only the server's nested transport decision authorizes this lane.
+        // Personal direct URLs, native playback and caller hints are unaffected.
+        const playback = payload?.playback;
+        const sessionId = this.currentCloudPlaybackSessionId;
+        if (playback?.mode !== 'direct' || playback?.transport !== 'public-hls-direct'
+            || !sessionId || (payload?.sessionId || payload?.session?.id) !== sessionId
+            || this.isStalePlayRequest(requestSeq)) return;
+        const guard = { sessionId, requestSeq, deadline: Date.now() + 30000, timer: null, deadlineTimer: null };
+        this._publicHlsDirectSessionGuard = guard;
+        const isCurrent = () => this._publicHlsDirectSessionGuard === guard
+            && this.currentCloudPlaybackSessionId === sessionId
+            && !this.isStalePlayRequest(requestSeq);
+        const terminate = () => {
+            if (!isCurrent()) return;
+            // Invalidate delayed startup work before synchronously clearing media.
+            ++this._playRequestSeq;
+            this.stopPublicHlsDirectSessionGuard();
+            void this.stop();
+            this.showError((globalThis.NorvaI18n?.t("ui_web_fb8c8c2687f1", { defaultValue: "Failed to play channel" }) ?? 'Failed to play channel'));
+        };
+        const armDeadline = () => {
+            clearTimeout(guard.deadlineTimer);
+            guard.deadlineTimer = setTimeout(terminate, Math.max(0, guard.deadline - Date.now()));
+        };
+        const pulse = async () => {
+            if (!isCurrent()) return;
+            if (Date.now() >= guard.deadline) { terminate(); return; }
+            const cloud = window.NorvaCloud;
+            const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+            try {
+                if (typeof api?.heartbeatSession !== 'function') { terminate(); return; }
+                await api.heartbeatSession(sessionId);
+                if (!isCurrent()) return;
+                if (Date.now() >= guard.deadline) { terminate(); return; }
+                guard.deadline = Date.now() + 30000;
+                armDeadline();
+            } catch (error) {
+                if (!isCurrent()) return;
+                const status = Number(error?.status);
+                const superseded = /PLAYBACK_SUPERSEDED/.test(String(error?.code || '')
+                    + String(error?.payload?.code || '') + String(error?.payload?.details?.code || '')
+                    + String(error?.message || ''));
+                if ([401, 403, 404, 410].includes(status) || (status === 409 && superseded)) {
+                    terminate();
+                    return;
+                }
+                // Network/server failures never create another playback session.
+                // The independent deadline also bounds a heartbeat that never settles.
+            }
+            if (isCurrent()) guard.timer = setTimeout(() => { void pulse(); }, 10000 + Math.floor(Math.random() * 2000));
+        };
+        armDeadline();
+        void pulse();
+    }
+
     async expireDetachedCloudPlaybackSession(sessionId) {
         const id = sessionId ? String(sessionId).trim() : '';
         if (!id) return { released: true };
@@ -1431,6 +1498,7 @@ class VideoPlayer {
     }
 
     async stopCloudPlaybackSessions(options = {}) {
+        this.stopPublicHlsDirectSessionGuard();
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         if (this.currentCloudPlaybackSessionId) {
             sessionIds.add(this.currentCloudPlaybackSessionId);
@@ -1472,6 +1540,7 @@ class VideoPlayer {
      * Play a channel
      */
     async play(channel, streamUrl, playback = null) {
+        this.stopPublicHlsDirectSessionGuard();
         const requestSeq = ++this._playRequestSeq;
         const resolvedStreamUrl = [streamUrl, playback?.url, playback?.streamUrl]
             .find((candidate) => typeof candidate === 'string' && candidate.trim())
@@ -1491,7 +1560,7 @@ class VideoPlayer {
                 await this.expireDetachedCloudPlaybackSession(detachedSessionId);
                 throw new Error('Live playback URL unavailable');
             }
-            return this._playInternal(channel, resolvedStreamUrl, requestSeq);
+            return this._playInternal(channel, resolvedStreamUrl, requestSeq, playback);
         });
         this._playQueue = task.catch(() => { });
         return task;
@@ -1501,7 +1570,7 @@ class VideoPlayer {
         return requestSeq !== this._playRequestSeq;
     }
 
-    async _playInternal(channel, streamUrl, requestSeq = this._playRequestSeq) {
+    async _playInternal(channel, streamUrl, requestSeq = this._playRequestSeq, playback = null) {
         const selectionSeq = channel?._norvaSelection?.selectSeq ?? null;
         if (selectionSeq !== null && selectionSeq !== this._liveSelectionSeq) {
             this._liveSelectionSeq = selectionSeq;
@@ -1558,6 +1627,9 @@ class VideoPlayer {
             // The hls.js runtime is vendored + lazy: make sure it's there before any
             // Hls.* decision below (falls through to native/transcode paths if not).
             try { if (typeof Hls === 'undefined' && window.ensureHls) await window.ensureHls(); } catch (_) { /* guarded below */ }
+            if (this.isStalePlayRequest(requestSeq)) return;
+            this.startPublicHlsDirectSessionGuard(playback, requestSeq);
+            if (this.isStalePlayRequest(requestSeq)) return;
             this.resetGatewayHlsRetries();
             if (this.shouldAutoFallbackVariants()) this.armCurrentVariantFallback();
             // Relay-HLS live URLs are /relay/<token> (no ".m3u8" in the path) but
@@ -2412,6 +2484,7 @@ class VideoPlayer {
     handlePlaybackError(reason = '') {
         if (this._clearingMedia || (this._playbackStatusOkReported && this.hasCurrentMedia())) return;
         if (!this.currentUrl || /empty src/i.test(String(reason))) return;
+        this.stopPublicHlsDirectSessionGuard();
         if (this.tryCurrentVariantFallback(reason)) return;
 
         // Record EVERY live failure once per play attempt so codec-broken channels
@@ -2868,7 +2941,7 @@ class VideoPlayer {
                     ch._norvaVariantFallbackOperationSeq = automaticOperationSeq;
                 }
             }
-            await this.play(ch, url);
+            await this.play(ch, url, res);
             const switchSeq = this._variantSwitchSeq;
             if (this.shouldAutoFallbackVariants()) this._armVariantFallback(variant, switchSeq);
         } catch (e) {
@@ -3169,6 +3242,7 @@ class VideoPlayer {
      * Stop playback
      */
     stop(options = {}) {
+        this.stopPublicHlsDirectSessionGuard();
         if (!options.preserveVariantFallback) {
             ++this._variantFallbackOperationSeq;
             this._variantFallbackInFlight = null;
@@ -3229,6 +3303,7 @@ class VideoPlayer {
     // leaving the channel broken until a page refresh. Killing the old player and
     // releasing its session BEFORE creating the new one removes that race.
     async prepareLiveSwitch(options = {}) {
+        this.stopPublicHlsDirectSessionGuard();
         if (!options.preserveVariantFallback) {
             ++this._variantFallbackOperationSeq;
             this._variantFallbackInFlight = null;
@@ -3304,6 +3379,7 @@ class VideoPlayer {
             window.app?.channelList?.failPendingPlaybackSelection?.(pendingSeq);
             this.clearPendingChannel(pendingSeq);
         }
+        this.stopPublicHlsDirectSessionGuard();
         // Replace the spinner with the message (a failed channel must not spin forever).
         this._hideChannelSplash();
         this.loadingSpinner?.classList.remove('show');
