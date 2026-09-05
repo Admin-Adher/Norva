@@ -815,7 +815,10 @@ const CloudAdapter = (() => {
         const categoryId = String(item.parent_external_id || metadata.categoryId || metadata.group || 'uncategorized');
         const title = item.title || item.name || 'Norva';
         const poster = item.poster_url || item.posterUrl || item.cover || item.stream_icon || '';
-        const container = playbackHint.container || metadata.container || defaultProviderContainerForType(itemType);
+        const defaultVariant = item.default_variant || item.defaultVariant || {};
+        const container = playbackHint.container || item.container_extension || item.containerExtension
+            || defaultVariant.container_extension || defaultVariant.containerExtension
+            || metadata.container || metadata.containerExtension || defaultProviderContainerForType(itemType);
         const base = {
             ...item,
             sourceId,

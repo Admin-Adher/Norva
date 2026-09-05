@@ -5579,8 +5579,10 @@ class WatchPage {
         }
         settings = this.getCloudSafeSettings(settings);
 
-        // Detect stream type
-        const looksLikeHls = url.includes('.m3u8') || url.includes('m3u8');
+        // Signed relay URLs hide the provider suffix. Retain the selected
+        // catalogue format so HLS still reaches hls.js instead of native MP4.
+        const selectedContainer = String(this.containerExtension || this.content?.containerExtension || '').toLowerCase();
+        const looksLikeHls = url.includes('m3u8') || selectedContainer === 'm3u8';
         const isGatewaySessionUrl = this._gatewayAudioRenditionRequired;
         const isRawTs = url.includes('.ts') && !url.includes('.m3u8');
         const isDirectVideo = url.includes('.mp4') || url.includes('.mkv') || url.includes('.avi');
