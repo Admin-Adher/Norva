@@ -26,7 +26,7 @@ test('selection retries reuse one source identity without sharing it across acco
 
 test('published playlist exactly matches the reviewed registry', async () => {
   const { DISCOVERY_FILMS, discoveryPlaylist } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
-  assert.equal(fs.readFileSync('public/catalog/discovery.m3u', 'utf8'), discoveryPlaylist());
+  assert.equal(fs.readFileSync('public/catalog/discovery.m3u', 'utf8').replace(/\r\n/g, '\n'), discoveryPlaylist());
   const credits = fs.readFileSync('public/catalog/credits.html', 'utf8');
   for (const film of DISCOVERY_FILMS) {
     assert.ok(credits.includes(film.rights));
