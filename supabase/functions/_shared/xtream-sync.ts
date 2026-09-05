@@ -1309,7 +1309,11 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       .eq("id", sourceId)
       .eq("user_id", userId);
     // Persistent failure (non-transient / continuation budget exhausted) → notify once.
-    await enqueueImportNotification(db, userId, sourceId, "import_failed", { error: message });
+    await enqueueImportNotification(db, userId, sourceId, "import_failed", {
+      error: message,
+      // Non-terminal does not prove that a retry was durably scheduled.
+      failureDisposition: terminal ? "action_required" : "unknown",
+    });
   }
 }
 

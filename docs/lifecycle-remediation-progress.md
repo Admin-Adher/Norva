@@ -45,3 +45,26 @@ The first server-only telemetry increment is deployed on both `norva-edge-functi
 - USB phone: Android app `1.3.17`, versionCode `30`, notification permission granted. This is not a delivery or deep-link test.
 
 Still required: identify the controlled account currently signed into that phone before sending; the browser currently has Play Console, Google Ads and Clarity only. No customer identity is inferred from the device model or FCM counts. Shared browser validation and all other acceptance gates above remain open.
+
+## Second increment — import failure guidance (local, not deployed)
+
+The Xtream failure producer records a bounded `failureDisposition` on its event: terminal failures require action; nonterminal failures remain unknown because nonterminal alone does not prove a durable retry. The digest reads only that disposition from its already-claimed event IDs, scoped to the user and failure kind. Legacy events are unknown. Raw provider errors/credentials are not selected for copy generation.
+
+Email HTML/plain text now distinguish action-required from unknown, remove unconditional retry promises, explain M3U versus Xtream, and warn against emailing private URLs/passwords. Push no longer says "We're on it". Exact email payload freezing and idempotency remain unchanged, so already-frozen messages are deliberately not rewritten.
+
+Verification: 26 tests passed across template, locale, outbox contract and visibility suites; a subsequent added status test also passed (3/3 guidance suite), covering 401/403/404 versus 408/429/503. Most outbox tests are structural, not real provider delivery proof. Node syntax checks pass for the two Edge entry modules changed. Initial test execution lacked esbuild in the isolated checkout; tests then used the existing original checkout dependency via process-local NODE_PATH without changing that checkout.
+
+Before incremental deployment: verify the bounded JSON projection against the actual PostgREST API without claiming jobs/sending, review exact production baselines for all three files, stage the scoped overlay and validate worker startup. This increment still uses the generic Open Norva action; targeted import deep-link and device behavior remain a separate open requirement. Welcome eligibility, timezone safety and +24h email fallback remain unimplemented.
+
+### Second increment production verification — 2026-09-05
+
+The above predeployment checks are now completed. The PostgREST projection returned HTTP 200 with `limit=0` (no event values fetched). The reviewed three-file overlay was deployed sequentially on both Edge replicas from `/home/adrien/.norva/import-guidance-20260905-r1`, preserving the previous telemetry correction and all unrelated running files. Both readiness checks passed. Direct GET probes to `norva-import-notify` returned its expected HTTP 405 JSON on both replicas, proving entry-module loading without invoking the digest or claiming messages.
+
+Verified SHA256:
+- `_shared/import-email.ts`: `63d0832c73292cdd4bb1a5427e77e35bd634fbe237edde1c92f7b2672e0e10b6`
+- `_shared/xtream-sync.ts`: `d61ee2ea4872d16a0c06951cf6f5b19bed2ab4d9ca4803d63b20ff381b370545`
+- `norva-import-notify/index.ts`: `e206d7cc9571c773210730ba630b019ec5a2eb0b64222a0724725aed92c27467`
+
+No operator-triggered email/push was sent. Existing transactional cron behavior is unchanged and future import failures can use the new copy. Behavioral runtime remains stopped in internal-test mode. Provider delivery, real receipt and deep-link tests remain unproven.
+
+The user identified their connected admin account for the internal test. Read-only verification found exactly one confirmed account and five Android tokens, of which only one has granted permission, version 1.3.17 and Europe/Paris timezone (last seen 2026-09-05 07:26 UTC). The other four have unknown permission/version and must not be targeted. Account identifiers and tokens are intentionally omitted from this evidence document. The production lifecycle engine requires fresh post-activation cohorts; do not fabricate events or bypass its gate to treat this existing admin as a full journey test.

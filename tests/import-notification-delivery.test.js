@@ -134,7 +134,13 @@ test('sender resolves current auth email and uses a stable Resend idempotency ke
   assert.match(digest, /p_recipient_email: email/);
   assert.match(digest, /fail_postal_import_notification_delivery/);
   assert.match(digest, /skip_import_notification_delivery/);
-  assert.doesNotMatch(digest, /\.from\("cloud_import_notifications"\)\s*\.select/);
+  // Queue selection remains leased by RPC. The only direct read enriches the
+  // already-claimed IDs with a bounded failure disposition, never a new queue scan.
+  assert.doesNotMatch(digest.slice(0, digest.indexOf('claim_import_notification_deliveries')), /\.from\("cloud_import_notifications"\)/);
+  const eventReads = [...digest.matchAll(/\.from\("cloud_import_notifications"\)([\s\S]*?);/g)];
+  assert.equal(eventReads.length, 1);
+  assert.match(eventReads[0][1], /\.select\("source_id,failure_disposition:payload->>failureDisposition"\)/);
+  assert.match(eventReads[0][1], /\.in\("id", claim.notification_ids\)\.eq\("user_id", userId\)\.eq\("kind", "import_failed"\)/);
   assert.doesNotMatch(digest, /update\(\{ status: "sent"/);
   assert.doesNotMatch(digest, /!email \|\| !RESEND_API_KEY/);
 });

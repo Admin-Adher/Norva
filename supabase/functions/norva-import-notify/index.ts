@@ -80,7 +80,7 @@ function firstNameOf(user: { user_metadata?: Record<string, unknown>; email?: st
   return null;
 }
 
-async function providerStats(db: SupabaseClient, sourceIds: string[], withCounts: boolean): Promise<ProviderStat[]> {
+async function providerStats(db: SupabaseClient, sourceIds: string[], withCounts: boolean, failureBySource = new Map<string, "action_required" | "unknown">()): Promise<ProviderStat[]> {
   const out: ProviderStat[] = [];
   for (const sourceId of sourceIds) {
     const { data: src } = await db.from("cloud_catalog_visible_sources").select("display_name").eq("id", sourceId).maybeSingle();
@@ -88,7 +88,7 @@ async function providerStats(db: SupabaseClient, sourceIds: string[], withCounts
     // source must not leak through a digest even if an old worker enqueued it.
     if (!src) continue;
     const name = String((src as { display_name?: string } | null)?.display_name ?? "Your provider");
-    const stat: ProviderStat = { name };
+    const stat: ProviderStat = { name, failureDisposition: failureBySource.get(sourceId) };
     if (withCounts) {
       for (const [key, type] of [["movies", "movie"], ["series", "series"]] as const) {
         const { count } = await db.from("cloud_catalog_visible_media_items").select("id", { count: "exact", head: true })
@@ -237,7 +237,9 @@ function pushTextFor(kind: string, providers: ProviderStat[]): { title: string; 
     ].filter(Boolean).join(" · ");
     return { title: many ? "Your catalogs are ready 🎬" : `${p0.name} is ready 🎬`, body: stats || "Your catalog is ready to watch." };
   }
-  return { title: "Import issue", body: `We hit a snag importing ${providers.map((p) => p.name).join(", ")}. We're on it.` };
+  return { title: "Check your import", body: providers.some((p) => p.failureDisposition === "action_required")
+    ? "Your import needs attention. Open Norva and check your provider access."
+    : "Open Norva to check your import status and the next step." };
 }
 
 // Send an FCM push to all of a user's registered devices (best-effort). Dead tokens (UNREGISTERED) are
@@ -351,7 +353,19 @@ async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
       }
 
       const sourceIds = [...new Set(claim.source_ids.map(String).filter(Boolean))];
-      const providers = await providerStats(db, sourceIds, claim.kind === "import_completed");
+      const failureBySource = new Map<string, "action_required" | "unknown">();
+      if (claim.kind === "import_failed") {
+        // Read only bounded disposition from the claimed immutable events, not
+        // credentials, raw errors or a later source state. Legacy events remain unknown.
+        const { data: failures, error: failureError } = await db.from("cloud_import_notifications")
+          .select("source_id,failure_disposition:payload->>failureDisposition")
+          .in("id", claim.notification_ids).eq("user_id", userId).eq("kind", "import_failed");
+        if (failureError) throw new Error("Unable to load import failure disposition");
+        for (const failure of failures ?? []) {
+          failureBySource.set(String(failure.source_id), failure.failure_disposition === "action_required" ? "action_required" : "unknown");
+        }
+      }
+      const providers = await providerStats(db, sourceIds, claim.kind === "import_completed", failureBySource);
       if (providers.length === 0) {
         await skipDelivery(claim, "source is no longer catalog-visible", email);
         continue;

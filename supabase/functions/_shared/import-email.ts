@@ -11,6 +11,7 @@ export interface ProviderStat {
   movies?: number;
   series?: number;
   channels?: number;
+  failureDisposition?: "action_required" | "unknown";
 }
 
 export interface EmailTag {
@@ -272,16 +273,23 @@ Questions? ${SUPPORT_EMAIL}
 
 export function renderImportFailed(firstName: string | null, providers: ProviderStat[]): RenderedImportEmail {
   const many = providers.length > 1;
+  const actionRequired = providers.some((provider) => provider.failureDisposition === "action_required");
+  const guidance = actionRequired
+    ? "At least one import has stopped and needs your attention. Check your provider access before trying again."
+    : "Open Norva to check the import status before trying again. We cannot confirm that an automatic retry is scheduled.";
+  const help = "For M3U, use the full playlist URL supplied by your provider. For Xtream, check the server URL, username and password. A website address or an app-only login may not be enough. Never email us your password or private playlist URL.";
   const subject = many ? "We hit a snag with some imports — Norva" : `We hit a snag importing ${textValue(providers[0]?.name, "your provider")} — Norva`;
   const text = `${greetText(firstName)}
 
-We ran into a problem importing your ${providerNamesText(providers)} ${many ? "catalogs" : "catalog"}. We retry automatically, so there is nothing you need to do right now. If the issue persists, our support team is ready to help.
+We ran into a problem importing your ${providerNamesText(providers)} ${many ? "catalogs" : "catalog"}. ${guidance}
 
 ${providerStatsText(providers)}
 
+${help}
+
+Open Norva: ${OPEN_URL}
 Contact support: ${SUPPORT_EMAIL}
 
-Sometimes a provider is temporarily unavailable; Norva retries automatically.
 © Norva`;
   return {
     subject,
@@ -289,13 +297,13 @@ Sometimes a provider is temporarily unavailable; Norva retries automatically.
     tags: tags("import_failed"),
     html: shell({
       title: subject,
-      preheader: "Norva will retry this catalog import automatically; no action is needed.",
+      preheader: actionRequired ? "Check your provider access to continue your import." : "Check your import status in Norva.",
       heading: "We hit a snag",
-      intro: `${greetHtml(firstName)}<br><br>We ran into a problem importing your ${providerNamesHtml(providers)} ${many ? "catalogs" : "catalog"}. We retry automatically, so there is nothing you need to do right now. If the issue persists, our support team is ready to help.`,
+      intro: `${greetHtml(firstName)}<br><br>We ran into a problem importing your ${providerNamesHtml(providers)} ${many ? "catalogs" : "catalog"}. ${esc(guidance)}`,
       providers,
       withStats: false,
-      cta: { label: "Contact support", url: SUPPORT_URL },
-      note: "Sometimes a provider is temporarily unavailable; Norva retries automatically.",
+      cta: { label: "Open Norva", url: OPEN_URL },
+      note: `${help} Need help? ${SUPPORT_EMAIL}`,
     }),
   };
 }
