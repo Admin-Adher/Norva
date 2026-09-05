@@ -14034,7 +14034,10 @@ function startFfmpeg(session) {
     ] : [
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_at_eof', '1',
+        // An HLS response is finite even when the channel is live. Reopening
+        // a completed playlist/segment can trap the demuxer in EOF reconnects
+        // until startup times out. Let HLS manage its own playlist reloads.
+        '-reconnect_at_eof', isLiveHlsSession(session) ? '0' : '1',
         // Deliberately no -reconnect_on_http_error: provider/account 4xx is
         // terminal and must never create a retry cascade on a mono-slot account.
         '-reconnect_delay_max', '5',
@@ -14510,6 +14513,19 @@ function isInsufficientInputProbeFailure(session) {
         || text.includes('could not find codec parameters')
         || text.includes('does not contain any stream')
         || text.includes('invalid data found when processing input');
+}
+
+function isLiveHlsSession(session) {
+    if (!session || !isLiveSession(session)) return false;
+    const hint = asRecord(session.playbackHint);
+    const profile = asRecord(session.codecProfile);
+    if ([hint.container, profile.container].some((value) =>
+        ['m3u8', 'hls'].includes(normalizeCodecToken(value)))) return true;
+    try {
+        return path.extname(new URL(session.sourceUrl).pathname).toLowerCase() === '.m3u8';
+    } catch (_) {
+        return false;
+    }
 }
 
 function isLiveSession(session) {

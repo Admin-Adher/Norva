@@ -349,7 +349,7 @@ function startRetryHarness(overrides = {}) {
     const insufficientSource = sourceBetween(
         source,
         'function isInsufficientInputProbeFailure(',
-        '\nfunction isLiveSession(',
+        '\nfunction isLiveHlsSession(',
     ).trim();
     const isInsufficientInputProbeFailure = vm.runInNewContext(`(${insufficientSource})`);
     return vm.runInNewContext(`(() => { ${retrySource}; return startSessionWithProviderRetry; })()`, {

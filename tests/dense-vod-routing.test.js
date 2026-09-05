@@ -338,7 +338,7 @@ test('known-file FFmpeg fast path keeps a full-probe fallback for demux discover
     const source = read('services/media-gateway/src/index.js').replace(/\r\n/g, '\n');
     const isInsufficientInputProbeFailure = loadGatewayFunction(
         'isInsufficientInputProbeFailure',
-        'isLiveSession'
+        'isLiveHlsSession'
     );
 
     assert.strictEqual(isInsufficientInputProbeFailure({
