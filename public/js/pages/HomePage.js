@@ -3327,7 +3327,10 @@ class HomePage {
             const isCurrent = () => intentToken == null
                 || page.isFicheIntentCurrent?.(intentToken) !== false;
             if (!isCurrent()) return;
-            if (this._isSkinnyRailItem(item)) {
+            // Curated M3U rails may omit detail metadata even when they include
+            // a playback variant. Resolve the owned raw item before opening it.
+            if (this._isSkinnyRailItem(item)
+                || String(item.item_id ?? item.itemId ?? item.stream_id ?? '').startsWith('norva-discovery:')) {
                 const data = item.data || {};
                 const mapped = {
                     stream_id: item.item_id ?? item.itemId ?? item.stream_id,

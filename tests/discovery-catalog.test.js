@@ -3,6 +3,25 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+test('a curated home rail resolves the full owned film even when it has a playback variant', async () => {
+  const callbacks = [];
+  const context = vm.createContext({ window: {}, setTimeout: callback => callbacks.push(callback) });
+  vm.runInContext(fs.readFileSync('public/js/pages/HomePage.js', 'utf8') + '\nthis.TestHomePage = HomePage;', context);
+  let resolved;
+  const page = Object.create(context.TestHomePage.prototype);
+  page.buildHomeMediaGroup = () => ({ items: [] });
+  page.displayTitle = item => item.title;
+  page.app = { navigateTo() {}, pages: { movies: {
+    beginFicheIntent: () => 1, isFicheIntentCurrent: () => true,
+    openByItem: async item => { resolved = item; return true; },
+    showMovieDetails: () => { throw Error('Must not use incomplete rail metadata'); },
+  } } };
+  page.navigateToMovie({ item_id: 'norva-discovery:sintel', source_id: 'owned-source', title: 'Sintel', variants: [{}] });
+  await callbacks[0]();
+  assert.equal(resolved.stream_id, 'norva-discovery:sintel');
+  assert.equal(resolved.sourceId, 'owned-source');
+});
+
 test('movie details retain the synopsis and attribution of a raw M3U film', () => {
   const context = vm.createContext({ window: {} });
   vm.runInContext(fs.readFileSync('public/js/pages/MoviesPage.js', 'utf8') + '\nthis.TestMoviesPage = MoviesPage;', context);
