@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const vm = require('node:vm');
+
+test('movie details retain the synopsis and attribution of a raw M3U film', () => {
+  const context = vm.createContext({ window: {} });
+  vm.runInContext(fs.readFileSync('public/js/pages/MoviesPage.js', 'utf8') + '\nthis.TestMoviesPage = MoviesPage;', context);
+  const overview = 'A film synopsis. Blender Foundation · CC BY 3.0';
+  assert.equal(context.TestMoviesPage.prototype.getMovieOverview({ metadata: { plot: overview } }), overview);
+  assert.equal(context.TestMoviesPage.prototype.getMovieOverview({ data: { plot: overview } }), overview);
+  assert.equal(context.TestMoviesPage.prototype.getMovieOverview({ titleId: 'title', overview: 'Localized synopsis', metadata: { plot: overview } }), 'Localized synopsis');
+});
 
 test('curated films are VOD only for the exact selection URL and retain attribution', async () => {
   const { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, discoveryMovieFields } = await import('../supabase/functions/_shared/discovery-catalog.mjs');

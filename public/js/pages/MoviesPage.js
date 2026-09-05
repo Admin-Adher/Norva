@@ -2213,7 +2213,11 @@ class MoviesPage {
             || movie?.description
             || movie?.plot
             || movie?.data?.overview
-            || movie?.data?.description;
+            || movie?.data?.description
+            || movie?.data?.plot
+            || movie?.metadata?.overview
+            || movie?.metadata?.description
+            || movie?.metadata?.plot;
         return (hasCatalogTitle ? localized : movie?.tmdb?.overview)
             || movie?.tmdb?.overview
             || localized
