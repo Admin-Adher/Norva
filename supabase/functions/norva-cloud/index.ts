@@ -6582,7 +6582,8 @@ async function registerPushToken(req: Request, userId: string, db: SupabaseClien
   const permissionState = ["unknown", "prompt", "granted", "denied"].includes(permissionRaw)
     ? permissionRaw
     : "unknown";
-  const timezone = stringOr(body.timezone, "UTC").slice(0, 64);
+  // Missing device metadata is unknown, not evidence that the user is in UTC.
+  const timezone = stringOr(body.timezone, "").slice(0, 64);
   const locale = stringOrNull(body.locale)?.slice(0, 35) ?? null;
   const appVersion = stringOrNull(body.appVersion ?? body.app_version)?.slice(0, 40) ?? null;
   const { data, error } = await db.rpc("norva_register_push_token", {
