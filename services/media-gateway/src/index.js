@@ -14530,7 +14530,10 @@ function isLiveHlsSession(session) {
 
 function isLiveSession(session) {
     const hint = asRecord(session.playbackHint);
-    const type = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
+    // The authenticated catalogue identity also classifies M3U entries whose
+    // provider URL is opaque and whose stored hint only carries a container.
+    const identity = asRecord(session.playbackIdentity);
+    const type = String(identity.itemType || hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
     if (type === 'live' || type === 'channel') return true;
     // Provider URL suffixes are frequently inaccurate (for example a finite
     // movie delivered from a `.ts` endpoint). An authenticated, server-owned

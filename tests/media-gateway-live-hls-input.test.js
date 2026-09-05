@@ -35,6 +35,7 @@ test('live HLS honors completed HTTP responses for named and opaque playlist URL
     for (const session of [
         { sourceUrl: 'https://example.test/direct.M3U8?token=test', playbackHint: { streamType: 'live' } },
         { sourceUrl: 'https://example.test/opaque', playbackHint: { streamType: 'live', container: 'm3u8' } },
+        { sourceUrl: 'https://example.test/opaque', playbackIdentity: { itemType: 'live' }, playbackHint: { container: 'm3u8' } },
         { sourceUrl: 'https://example.test/opaque', playbackHint: { item_type: 'channel' }, codecProfile: { container: 'hls' } },
         { sourceUrl: 'https://example.test/live.m3u8', playbackHint: {} },
     ]) {
@@ -52,6 +53,7 @@ test('continuous TS live and explicit VOD preserve their existing input policy',
         { sourceUrl: 'https://example.test/live.ts', playbackHint: { streamType: 'live', container: 'ts' } },
         { sourceUrl: 'https://example.test/opaque', playbackHint: { streamType: 'live' } },
         { sourceUrl: 'https://example.test/movie.m3u8', playbackHint: { streamType: 'movie', container: 'm3u8' } },
+        { sourceUrl: 'https://example.test/movie.m3u8', playbackIdentity: { itemType: 'movie' }, playbackHint: { streamType: 'live', container: 'm3u8' } },
         { sourceUrl: 'https://example.test/file.mp4', playbackHint: { streamType: 'movie', container: 'mp4' } },
         { sourceUrl: 'invalid', playbackHint: { streamType: 'live' } },
     ]) assert.equal(option(inputArgs(session), '-reconnect_at_eof'), '1');
