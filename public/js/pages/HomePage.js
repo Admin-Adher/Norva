@@ -1303,7 +1303,7 @@ class HomePage {
                     </form>
                     ${this.app?.currentUser?.cloud ? `<section class="setup-discovery" aria-labelledby="home-discovery-title">
                         <h2 id="home-discovery-title" data-i18n="ui_discovery_title">No catalogue? Start with our selection.</h2>
-                        <p data-i18n="ui_discovery_description">Enjoy Norva with a selection of short films, without adding a provider.</p>
+                        <p data-i18n="ui_discovery_description">Enjoy Norva with films and live TV from several sources, without adding a provider.</p>
                         <button type="button" class="btn btn-secondary" id="home-discovery-start" data-i18n="ui_discovery_continue">Continue with this selection</button>
                         <p class="setup-discovery-terms" data-i18n="ui_discovery_terms">Included in your 7-day trial, then in your Norva subscription.</p>
                         <a href="/catalog/credits.html" target="_blank" rel="noopener" data-i18n="ui_discovery_credits">Films, sources and credits</a>

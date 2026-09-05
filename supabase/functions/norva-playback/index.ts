@@ -1,3 +1,4 @@
+import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
@@ -6817,7 +6818,9 @@ async function resolvePlaybackTarget(
     // authenticated owner and owned source instead of deriving a global key
     // from an opaque catalogue URL.
     return {
-      targetUrl: hint.targetUrl,
+      targetUrl: await resolveDiscoveryTarget({
+        sourceId, userId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
+      }).catch(() => { throw new HttpError(502, "Selection programme is temporarily unavailable"); }),
       playbackHint: storedPlaybackHint,
       providerAccountScope: `user-source:${userId}:${sourceId}`,
       itemCas,

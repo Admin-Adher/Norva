@@ -67,7 +67,7 @@
     <string name="ui_selection_kept" formatted="false">· বর্তমান নির্বাচন রাখা হয়েছে</string>
     <string name="ui_trial_days_left" formatted="false">আর {{days}} দিন বাকি</string>
     <string name="ui_discovery_title" formatted="false">ক্যাটালগ নেই? আমাদের বাছাই দিয়ে শুরু করুন।</string>
-    <string name="ui_discovery_description" formatted="false">কোনো প্রদানকারী যোগ না করেই বাছাই করা স্বল্পদৈর্ঘ্য চলচ্চিত্র দিয়ে Norva উপভোগ করুন।</string>
+    <string name="ui_discovery_description" formatted="false">কোনও প্রদানকারী যোগ না করে, বিভিন্ন উৎসের সিনেমা ও লাইভ টিভি দিয়ে Norva উপভোগ করুন।</string>
     <string name="ui_discovery_continue" formatted="false">এই বাছাই নিয়ে এগিয়ে যান</string>
     <string name="ui_discovery_terms" formatted="false">আপনার ৭ দিনের ট্রায়ালে, তারপর Norva সাবস্ক্রিপশনে অন্তর্ভুক্ত।</string>
     <string name="ui_discovery_credits" formatted="false">চলচ্চিত্র, উৎস ও কৃতিত্ব</string>

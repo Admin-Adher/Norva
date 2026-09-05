@@ -67,7 +67,7 @@
     <string name="ui_selection_kept" formatted="false">· pilihan saat ini dipertahankan</string>
     <string name="ui_trial_days_left" formatted="false">Sisa {{days}} hari</string>
     <string name="ui_discovery_title" formatted="false">Belum punya katalog? Mulai dengan pilihan kami.</string>
-    <string name="ui_discovery_description" formatted="false">Nikmati Norva dengan pilihan film pendek tanpa menambahkan penyedia.</string>
+    <string name="ui_discovery_description" formatted="false">Nikmati Norva dengan film dan TV langsung dari beberapa sumber, tanpa menambahkan penyedia.</string>
     <string name="ui_discovery_continue" formatted="false">Lanjutkan dengan pilihan ini</string>
     <string name="ui_discovery_terms" formatted="false">Termasuk dalam uji coba 7 hari, lalu dalam langganan Norva Anda.</string>
     <string name="ui_discovery_credits" formatted="false">Film, sumber, dan kredit</string>

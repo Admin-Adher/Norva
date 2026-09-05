@@ -1,5 +1,6 @@
+import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { discoveryMovieFields } from "../_shared/discovery-catalog.mjs";
+import { DISCOVERY_PLAYLIST_URL } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   buildLiveMaterializationPlan,
@@ -4299,10 +4300,12 @@ async function syncM3uSource(
     steps: { connect: { status: "running" } },
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  const playlist = await fetchM3uItems(playlistUrl, 60_000, {
-    maxBytes: 128 * 1024 * 1024,
-    maxItems: 100_000,
-  });
+  const playlist = playlistUrl === DISCOVERY_PLAYLIST_URL
+    ? await fetchDiscoverySelection({ heartbeat })
+    : await fetchM3uItems(playlistUrl, 60_000, {
+      maxBytes: 128 * 1024 * 1024,
+      maxItems: 100_000,
+    });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   await reportProgress({
     stage: "discovered",
@@ -4332,7 +4335,7 @@ async function syncM3uSource(
       metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
       playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
       available: true,
-      ...discoveryMovieFields(playlistUrl, item.url),
+      ...discoveryCatalogFields(playlistUrl, item),
     })));
     rows.push(...chunk);
   }
@@ -4356,6 +4359,7 @@ async function syncM3uSource(
       contentSignature,
       changed,
       detectOnly: true,
+      discoverySources: "sources" in playlist ? playlist.sources : undefined,
       importTruncated: playlist.truncated || undefined,
       importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
     };
@@ -4375,6 +4379,7 @@ async function syncM3uSource(
       total: rows.length,
       contentSignature,
       skipped: true,
+      discoverySources: "sources" in playlist ? playlist.sources : undefined,
       importTruncated: playlist.truncated || undefined,
       importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
     };
@@ -4416,6 +4421,7 @@ async function syncM3uSource(
     finalizePending: true,
     liveCatalog: { rawLive: liveCount, pending: true },
     contentSignature,
+    discoverySources: "sources" in playlist ? playlist.sources : undefined,
     importTruncated: playlist.truncated || undefined,
     importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
   };

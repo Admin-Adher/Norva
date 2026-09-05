@@ -67,7 +67,7 @@
     <string name="ui_selection_kept" formatted="false">· pinanatili ang kasalukuyang pinili</string>
     <string name="ui_trial_days_left" formatted="false">{{days}} araw na lang</string>
     <string name="ui_discovery_title" formatted="false">Walang katalogo? Magsimula sa aming mga pinili.</string>
-    <string name="ui_discovery_description" formatted="false">Tangkilikin ang Norva sa mga piling maikling pelikula nang hindi nagdaragdag ng provider.</string>
+    <string name="ui_discovery_description" formatted="false">Mag-enjoy sa Norva gamit ang mga pelikula at live TV mula sa iba’t ibang source, nang hindi nagdadagdag ng provider.</string>
     <string name="ui_discovery_continue" formatted="false">Magpatuloy sa mga piniling ito</string>
     <string name="ui_discovery_terms" formatted="false">Kasama sa iyong 7-araw na pagsubok, pagkatapos ay sa iyong subscription sa Norva.</string>
     <string name="ui_discovery_credits" formatted="false">Mga pelikula, pinagmulan at pagkilala</string>

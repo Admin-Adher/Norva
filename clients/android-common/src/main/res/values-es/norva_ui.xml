@@ -67,7 +67,7 @@
     <string name="ui_selection_kept" formatted="false">· selección actual conservada</string>
     <string name="ui_trial_days_left" formatted="false">Quedan {{days}} días</string>
     <string name="ui_discovery_title" formatted="false">¿Sin catálogo? Empieza con nuestra selección.</string>
-    <string name="ui_discovery_description" formatted="false">Disfruta de Norva con una selección de cortometrajes, sin añadir un proveedor.</string>
+    <string name="ui_discovery_description" formatted="false">Disfruta de Norva con películas y TV en directo de varias fuentes, sin añadir un proveedor.</string>
     <string name="ui_discovery_continue" formatted="false">Continuar con esta selección</string>
     <string name="ui_discovery_terms" formatted="false">Incluido en tus 7 días de prueba y después en tu suscripción a Norva.</string>
     <string name="ui_discovery_credits" formatted="false">Películas, fuentes y créditos</string>

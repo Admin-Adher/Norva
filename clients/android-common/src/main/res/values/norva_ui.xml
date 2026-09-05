@@ -67,7 +67,7 @@
     <string name="ui_selection_kept" formatted="false">· current selection kept</string>
     <string name="ui_trial_days_left" formatted="false">{{days}} days left</string>
     <string name="ui_discovery_title" formatted="false">No catalogue? Start with our selection.</string>
-    <string name="ui_discovery_description" formatted="false">Enjoy Norva with a selection of short films, without adding a provider.</string>
+    <string name="ui_discovery_description" formatted="false">Enjoy Norva with films and live TV from several sources, without adding a provider.</string>
     <string name="ui_discovery_continue" formatted="false">Continue with this selection</string>
     <string name="ui_discovery_terms" formatted="false">Included in your 7-day trial, then in your Norva subscription.</string>
     <string name="ui_discovery_credits" formatted="false">Films, sources and credits</string>

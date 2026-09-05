@@ -67,7 +67,7 @@
     <string name="ui_selection_kept" formatted="false">· mevcut seçim korundu</string>
     <string name="ui_trial_days_left" formatted="false">{{days}} gün kaldı</string>
     <string name="ui_discovery_title" formatted="false">Kataloğunuz yok mu? Seçkimizle başlayın.</string>
-    <string name="ui_discovery_description" formatted="false">Sağlayıcı eklemeden kısa film seçkisiyle Norva\'nın keyfini çıkarın.</string>
+    <string name="ui_discovery_description" formatted="false">Sağlayıcı eklemeden, çeşitli kaynaklardan filmler ve canlı TV ile Norva’nın keyfini çıkarın.</string>
     <string name="ui_discovery_continue" formatted="false">Bu seçkiyle devam et</string>
     <string name="ui_discovery_terms" formatted="false">7 günlük denemenize, ardından Norva aboneliğinize dahildir.</string>
     <string name="ui_discovery_credits" formatted="false">Filmler, kaynaklar ve katkıda bulunanlar</string>
