@@ -35,6 +35,27 @@ test('both reviewed Plex parts keep the complete refreshed target and stable acc
     assert.equal(JSON.stringify(input), before);
   }
 });
+test('a reviewed channel may use another owned regional part without changing region during token refresh', async () => {
+  const { input, resolver } = await setup();
+  const part = '697140a85d851f5e69414688-66be944f8711311880995280';
+  const key = `https://epg.provider.plex.tv/library/parts/${part}/`;
+  input.ownedItem.metadata.tvgId = part;
+  input.ownedItem.metadata.discoveryMediaKey = key;
+  input.itemId = `norva-discovery:live:${sha(`live:${key}`)}`;
+  input.ownedItem.playback_hint.targetUrl = key + '?X-Plex-Token=old';
+  input.targetUrl = key + '?X-Plex-Token=new';
+  assert.ok(await resolver(input));
+  input.targetUrl = input.targetUrl.replace('697140a85d851f5e69414688', '6430aa45fc3be5947780904e');
+  assert.equal(await resolver(input), null, 'a refreshed reference cannot switch its regional part');
+  const other = structuredClone(input);
+  const unreviewedPart = '697140a85d851f5e69414688-ffffffffffffffffffffffff';
+  const otherKey = `https://epg.provider.plex.tv/library/parts/${unreviewedPart}/`;
+  other.ownedItem.metadata.tvgId = unreviewedPart;
+  other.ownedItem.metadata.discoveryMediaKey = otherKey;
+  other.itemId = `norva-discovery:live:${sha(`live:${otherKey}`)}`;
+  other.ownedItem.playback_hint.targetUrl = other.targetUrl = otherKey + '?X-Plex-Token=token';
+  assert.equal(await resolver(other), null, 'other Plex programmes remain outside this trial');
+});
 test('ownership, Selection identity, persisted part, feed and attribution must all agree', async () => {
   const { input, resolver, resolveSelectionLiveDelivery } = await setup();
   assert.equal(await resolveSelectionLiveDelivery(input), null, 'production owner pin is active');
