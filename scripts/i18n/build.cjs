@@ -62,4 +62,15 @@ for (const file of htmlFiles()) {
         fs.writeFileSync(full, next);
     }
 }
+// Keep the reviewed UI asset inventory reproducible after ordinary feature merges.
+const manifestPath = path.join(root, 'i18n/asset-manifest.json');
+if (fs.existsSync(manifestPath)) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    for (const file of Object.keys(manifest)) {
+        manifest[file] = crypto.createHash('sha256')
+            .update(fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n'))
+            .digest('hex').slice(0, 10);
+    }
+    write('i18n/asset-manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+}
 console.log(`Built ${(Object.keys(messages).length + Object.keys(catalog).length)} messages in ${locales.length} languages for web and Android.`);
