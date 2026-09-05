@@ -42,6 +42,12 @@ publisher target. Client hints cannot authorize a new public source. Private
 M3U/Xtream sources and explicit conversion requests retain their existing
 route. Old clients without the session guard retain their existing route too.
 
+The two reviewed Xumo channels use one independent provider identity scoped to
+the owner and Selection. A failure in an unrelated aggregated provider must not
+open Xumo's circuit. This identity is the same in direct, native and forced
+gateway modes. Existing ownership, device, generation, entitlement limits and
+session replacement checks still run; no circuit is cleared or disabled.
+
 The public URL itself is not a Norva access credential. Norva controls access
 to its app and stops the managed player when its session is rejected; it cannot
 revoke a publisher's publicly accessible URL. No Norva token or cookie is added

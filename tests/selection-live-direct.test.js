@@ -160,7 +160,7 @@ test('request hints, forged descriptors and JSON copies cannot assert delivery a
 
 test('the actual Edge resolver trusts the visible owner row, never a global mirror or request-hint descriptor', async () => {
   const { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } = await policy;
-  const [input] = await fixture;
+  let [input] = await fixture;
   const calls = [];
   let owned = input.ownedItem;
   const context = vm.createContext({
@@ -186,14 +186,23 @@ test('the actual Edge resolver trusts the visible owner row, never a global mirr
     { selectionLiveDelivery: { transport: 'public-hls-direct' }, targetUrl: input.targetUrl });
   const valid = await resolve();
   assert.equal(shouldUseSelectionLiveDirect(decision(input, valid.selectionLiveDelivery)), true);
+  assert.equal(valid.providerAccountScope, `user-source:${input.userId}:${input.sourceId}:public-feed:xumo-curated`);
   assert.equal(valid.playbackHint.selectionLiveDelivery, undefined);
   assert.deepEqual(calls.find(call => call.table === 'cloud_catalog_visible_media_items').filters,
     [['source_id', input.sourceId], ['user_id', input.userId], ['item_type', 'live'], ['external_id', input.itemId]]);
+  const xumoScope = valid.providerAccountScope;
+  for (const candidate of await fixture) {
+    input = candidate; owned = candidate.ownedItem;
+    const otherChannel = await resolve();
+    assert.equal(otherChannel.providerAccountScope, xumoScope, 'both channels keep the same provider takeover boundary');
+    assert.ok(otherChannel.selectionLiveDelivery);
+  }
   for (const unowned of [null, { ...input.ownedItem, metadata: {} }]) {
     owned = unowned;
     const result = await resolve();
     assert.equal(result.targetUrl, input.targetUrl);
     assert.equal(result.selectionLiveDelivery, null);
+    assert.equal(result.providerAccountScope, `user-source:${input.userId}:${input.sourceId}`);
   }
 });
 

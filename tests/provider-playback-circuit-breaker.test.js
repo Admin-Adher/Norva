@@ -338,7 +338,7 @@ test('session creation derives the global account hash only from an owned server
   assert.doesNotMatch(create, /body\.targetUrl|body\.target_url/);
   assert.match(resolve, /hint\.sourceType === "xtream"/);
   assert.match(resolve, /loadSourceConfig\(sourceId, userId, db\)/);
-  assert.match(resolve, /providerAccountScope:\s*`user-source:\$\{userId\}:\$\{sourceId\}`/);
+  assert.match(resolve, /providerAccountScope:\s*selectionLiveDelivery\s*\? `user-source:\$\{userId\}:\$\{sourceId\}:public-feed:xumo-curated`\s*: `user-source:\$\{userId\}:\$\{sourceId\}`/);
   assert.match(create, /"providerAccountScope" in resolved[\s\S]{0,200}sha256Hex\(providerAccountScope\)/);
   assert.ok(
     resolve.indexOf('if (hint.sourceType === "xtream")') < resolve.indexOf('if (typeof hint.targetUrl === "string")'),

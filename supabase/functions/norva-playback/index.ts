@@ -6833,13 +6833,20 @@ async function resolvePlaybackTarget(
     const targetUrl = await resolveDiscoveryTarget({
       sourceId, userId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
     }).catch(() => { throw new HttpError(502, "Selection programme is temporarily unavailable"); });
+    const selectionLiveDelivery = await resolveSelectionLiveDelivery({
+      sourceId, userId, itemType, itemId, ownedItem, targetUrl,
+    });
     return {
       targetUrl,
-      selectionLiveDelivery: await resolveSelectionLiveDelivery({
-        sourceId, userId, itemType, itemId, ownedItem, targetUrl,
-      }),
+      selectionLiveDelivery,
       playbackHint: storedPlaybackHint,
-      providerAccountScope: `user-source:${userId}:${sourceId}`,
+      // These verified public Xumo channels are an independent provider inside
+      // the aggregated Selection. A refused IPTV-org link must not open their
+      // circuit. Keep both Xumo channels in one owner-scoped identity in every
+      // mode so normal replacement/takeover and entitlement admission remain.
+      providerAccountScope: selectionLiveDelivery
+        ? `user-source:${userId}:${sourceId}:public-feed:xumo-curated`
+        : `user-source:${userId}:${sourceId}`,
       itemCas,
       containerObservation,
     };
