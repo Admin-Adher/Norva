@@ -5,6 +5,15 @@ const canonical = 'https://norva.tv/catalog/discovery.m3u';
 const result = items => ({ response: { ok: true }, headerDetected: true, items, bytesRead: 100, truncated: false });
 const entry = (url, title = 'Programme') => ({ url, title, tvgId: 'same-id', logo: '', group: 'Cinema' });
 
+test('M3U titles preserve commas and never include the tail of quoted names or artwork URLs', async () => {
+  const { readM3uPlaylistStream } = await import('../supabase/functions/_shared/m3u-playlist-stream.mjs');
+  const data = '#EXTM3U\n#EXTINF:-1 tvg-name="10,000 Days",10,000 Days\nhttps://media.example/1\n'
+    + '#EXTINF:-1 tvg-logo="https://art.example/4,380,562.jpg",Nosferatu\nhttps://media.example/2\n';
+  const playlist = await readM3uPlaylistStream(new Response(data).body);
+  assert.deepEqual(playlist.items.map(item => item.title), ['10,000 Days', 'Nosferatu']);
+  assert.equal(playlist.items[1].logo, 'https://art.example/4,380,562.jpg');
+});
+
 test('selection imports VOD and live in separate sections, deduplicating shared URLs without colliding tvg-ids', async () => {
   const { fetchDiscoverySelection, discoveryCatalogFields } = await import(modulePath);
   const feeds = [

@@ -659,7 +659,11 @@ function normalizeKey(value: string) {
 }
 
 function makeLogicalId(key: string) {
-  return `lc_${btoa(key).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`;
+  // Preserve existing Latin-1 identities. International category names can
+  // contain other scripts; btoa rejects those instead of building the channel.
+  const unicode = /[^\u0000-\u00ff]/.test(key);
+  const bytes = unicode ? Array.from(new TextEncoder().encode(key), byte => String.fromCharCode(byte)).join('') : key;
+  return `lc_${unicode ? 'u8_' : ''}${btoa(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")}`;
 }
 
 function recordOrEmpty(value: unknown): JsonRecord {

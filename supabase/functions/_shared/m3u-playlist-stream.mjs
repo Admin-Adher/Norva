@@ -15,6 +15,15 @@ function attribute(value, name) {
   return match?.[1]?.trim() ?? "";
 }
 
+function entryTitle(line) {
+  let quoted = false;
+  for (let index = 0; index < line.length; index++) {
+    if (line[index] === '"') quoted = !quoted;
+    if (line[index] === ',' && !quoted) return line.slice(index + 1).trim();
+  }
+  return 'Norva channel';
+}
+
 /**
  * A strict, cheap validation for the beginning of an extended M3U document.
  * A UTF-8 BOM and leading whitespace are accepted, but an HTML page that only
@@ -69,9 +78,7 @@ export async function readM3uPlaylistStream(stream, options = {}) {
     }
     if (/^#EXTINF\b/i.test(line)) {
       pending = {
-        title: line.includes(",")
-          ? line.slice(line.indexOf(",") + 1).trim()
-          : "Norva channel",
+        title: entryTitle(line),
         tvgId: attribute(line, "tvg-id") || attribute(line, "tvg-name"),
         logo: attribute(line, "tvg-logo"),
         group: attribute(line, "group-title"),
