@@ -4372,7 +4372,12 @@ async function syncM3uSource(
     };
   }
 
-  if (!opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature)) {
+  const unchangedSignature = !opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature);
+  // A previous rebuild can die after a committed delete batch. Its old feed
+  // signature is not proof that the active Selection still contains every row.
+  const persistedSelectionComplete = !unchangedSignature || playlistUrl !== DISCOVERY_PLAYLIST_URL
+    || await countRowsInTable("cloud_media_items", sourceId, userId, db, expectedSnapshot) === rows.length;
+  if (unchangedSignature && persistedSelectionComplete) {
     await reportProgress({
       stage: "unchanged",
       percent: 100,
@@ -4412,6 +4417,7 @@ async function syncM3uSource(
     db,
     expectedSnapshot,
     heartbeat,
+    playlistUrl === DISCOVERY_PLAYLIST_URL,
   );
   await reportProgress({
     stage: "finalizing",
@@ -4441,10 +4447,12 @@ async function replaceSourceItems(
   db: SupabaseClient,
   expectedSnapshot: CatalogAccessSnapshot,
   heartbeat: () => Promise<void> = async () => {},
+  preserveUntilSaved = false,
 ): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
+  const catalogVersion = preserveUntilSaved ? Date.now() : null;
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  for (let guard = 0; guard < 100; guard += 1) {
+  for (let guard = 0; !preserveUntilSaved && guard < 100; guard += 1) {
     await heartbeat();
     const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
       p_source_id: sourceId,
@@ -4460,7 +4468,9 @@ async function replaceSourceItems(
   for (let index = 0; index < rows.length; index += 500) {
     await heartbeat();
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), expectedSnapshot);
+    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
+      preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
+    ), expectedSnapshot);
     if (!chunk.length) continue;
     const { data, error } = await db
       .from("cloud_media_items")
@@ -4468,6 +4478,22 @@ async function replaceSourceItems(
       .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     if (error) throwDb(error, "Unable to save cloud catalog items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
+  }
+  // Selection rows keep their IDs and remain playable throughout the refresh.
+  // Remove only obsolete rows, and only after every replacement was persisted.
+  if (preserveUntilSaved) {
+    for (let guard = 0; guard < 600; guard += 1) {
+      await heartbeat();
+      const { data, error } = await db.rpc("norva_prune_stale_catalog_generation_items", {
+        p_source_id: sourceId, p_user_id: userId,
+        ...catalogGenerationRpcFence(expectedSnapshot),
+        p_catalog_version: catalogVersion, p_limit: 100,
+      });
+      if (error) throwDb(error, "Unable to prune obsolete Selection items");
+      const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
+      if (removed < 100) break;
+      if (guard === 599) throw new Error("Selection prune exceeded its bounded batch budget");
+    }
   }
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return savedRows;

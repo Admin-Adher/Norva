@@ -3518,6 +3518,7 @@ async function syncM3uSource(
     db,
     generation,
     heartbeat,
+    playlistUrl === DISCOVERY_PLAYLIST_URL,
   );
   await reportProgress({
     stage: "finalizing",
@@ -3553,13 +3554,17 @@ async function replaceSourceItems(
   db: SupabaseClient,
   generation: ActiveCatalogGeneration,
   heartbeat: () => Promise<void> = async () => {},
+  preserveUntilSaved = false,
 ): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
+  const catalogVersion = preserveUntilSaved ? Date.now() : null;
   await heartbeat();
-  await clearCatalogGenerationMediaItems(db, sourceId, userId, generation, heartbeat);
+  if (!preserveUntilSaved) await clearCatalogGenerationMediaItems(db, sourceId, userId, generation, heartbeat);
   for (let index = 0; index < rows.length; index += 500) {
     await heartbeat();
-    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), generation);
+    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
+      preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
+    ), generation);
     if (!chunk.length) continue;
     const { data, error } = await db
       .from("cloud_media_items")
@@ -3567,6 +3572,20 @@ async function replaceSourceItems(
       .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
+  }
+  if (preserveUntilSaved) {
+    for (let guard = 0; guard < 600; guard += 1) {
+      await heartbeat();
+      const { data, error } = await db.rpc("norva_prune_stale_catalog_generation_items", {
+        p_source_id: sourceId, p_user_id: userId,
+        ...catalogGenerationRpcFence(generation),
+        p_catalog_version: catalogVersion, p_limit: 100,
+      });
+      if (error) throwDb(error, "Unable to prune obsolete Selection items");
+      const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
+      if (removed < 100) break;
+      if (guard === 599) throw new Error("Selection prune exceeded its bounded batch budget");
+    }
   }
   return savedRows;
 }
