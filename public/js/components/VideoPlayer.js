@@ -242,6 +242,18 @@ class VideoPlayer {
         };
     }
 
+    getPlaybackHlsConfig(playback, url) {
+        const config = this.getHlsConfig();
+        if (this.isServerPublicHlsPlayback(playback, url)) {
+            // Public playlists can deliberately start at the back of their live
+            // window. Keep buffered content continuous instead of skipping it
+            // when the gateway's latency threshold is crossed. Hls.js still
+            // recovers when playback falls outside the window without data.
+            config.liveMaxLatencyDurationCount = Infinity;
+        }
+        return config;
+    }
+
     async sniffStreamKind(url) {
         try {
             const res = await fetch(`/api/probe/sniff?url=${encodeURIComponent(url)}&timeout=2500`);
@@ -1891,7 +1903,7 @@ class VideoPlayer {
                 // The HLS init logic is quite complex with error handling
                 // I'll inline the Hls init here as per original but mindful of proxy vs local
 
-                this.hls = new Hls(this.getHlsConfig());
+                this.hls = new Hls(this.getPlaybackHlsConfig(playback, finalUrl));
                 this.hls.loadSource(finalUrl);
                 this.hls.attachMedia(this.video);
 

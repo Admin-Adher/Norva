@@ -61,6 +61,7 @@ function prepareStartup(h) {
     class Hls {
       static isSupported() { return true; }
       static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error', FRAG_CHANGED: 'fragment' };
+      constructor(config) { h.events.push(['config', config]); }
       loadSource(url) { h.events.push(['source', url]); }
       attachMedia() { h.events.push('attach'); }
       on() {}
@@ -240,6 +241,7 @@ test('an extensionless server-marked public HLS URL reaches hls.js intact and ke
     await h.player.play({ cloudPlaybackSessionId: 'b' }, url, marked);
     assert.equal(h.events.includes('attach'), true);
     assert.deepEqual(h.events.filter(e => Array.isArray(e) && e[0] === 'source'), [['source', url]]);
+    assert.equal(h.events.find(e => Array.isArray(e) && e[0] === 'config')[1].liveMaxLatencyDurationCount, Infinity);
     assert.deepEqual(h.calls.map(call => call.id), ['b']);
     assert.equal(h.errors.length, 0);
     await h.player.stop();
@@ -260,6 +262,47 @@ test('HLS type authority cannot come from caller hints, another session or a cha
     assert.equal(h.player.isServerPublicHlsPlayback(marked, url + '/other'), false);
     h.player.currentCloudPlaybackSessionId = null;
     assert.equal(h.player.isServerPublicHlsPlayback(marked, url), false);
+});
+
+test('only the exact public HLS session changes latency policy and the next gateway play restores its own policy', async () => {
+    const h = harness(), url = 'https://publisher.example/live.m3u8';
+    const marked = payload('a');
+    marked.playback.url = url;
+    assert.equal(h.player.getPlaybackHlsConfig(marked, url).liveMaxLatencyDurationCount, Infinity);
+    for (const value of [null, { sessionId: 'a', transport: 'public-hls-direct', url },
+        { ...marked, sessionId: 'other' }, { ...marked, playback: { ...marked.playback, mode: 'relay' } },
+        { ...marked, playback: { ...marked.playback, url: url + '/other' } }]) {
+        assert.equal(h.player.getPlaybackHlsConfig(value, url).liveMaxLatencyDurationCount, 8);
+    }
+    assert.equal(h.player.getHlsConfig().liveMaxLatencyDurationCount, 8);
+    prepareStartup(h)();
+    h.player.getHlsConfig = h.window.VideoPlayer.prototype.getHlsConfig;
+    const first = payload('b'); first.playback.url = url;
+    await h.player.play({ cloudPlaybackSessionId: 'b' }, url, first);
+    await h.player.play({ cloudPlaybackSessionId: 'c' }, 'https://gateway.example/live.m3u8',
+        { sessionId: 'c', playback: { mode: 'transcode', url: 'https://gateway.example/live.m3u8' } });
+    assert.deepEqual(h.events.filter(e => Array.isArray(e) && e[0] === 'config').map(e => e[1].liveMaxLatencyDurationCount), [Infinity, 8]);
+    await h.player.stop();
+});
+
+test('vendored HLS preserves ready public content across the observed TV5 threshold but still recovers an empty expired window', () => {
+    const bundle = fs.readFileSync(path.join(__dirname, '../public/js/vendor/hls-1.5.7.min.js'), 'utf8');
+    const match = bundle.match(/r\.synchronizeToLiveEdge=(function\(t\)\{.*?\}),r\.alignPlaylists=/s);
+    assert.ok(match, 'exercise the actual bundled synchronization algorithm');
+    const synchronize = vm.runInNewContext(`(${match[1]})`);
+    const h = harness(), url = 'https://publisher.example/live.m3u8';
+    const marked = payload('a'); marked.playback.url = url;
+    for (const scenario of [
+        { public: false, ready: 4, expected: 68.000399 },
+        { public: true, ready: 4, expected: 33.364598 },
+        { public: true, ready: 1, expected: 68.000399 },
+    ]) {
+        const media = { currentTime: 33.364598, duration: 90, readyState: scenario.ready };
+        const controller = { config: { ...h.player.getPlaybackHlsConfig(scenario.public ? marked : null, url), maxFragLookUpTolerance: .25 },
+            media, hls: { liveSyncPosition: 68.000399 }, loadedmetadata: true, warn() {} };
+        synchronize.call(controller, { type: 'EVENT', live: true, fragments: [{ start: 36 }], edge: 90, targetduration: 7 });
+        assert.equal(media.currentTime, scenario.expected, JSON.stringify(scenario));
+    }
 });
 
 test('terminal playback errors cancel the monitor while an outgoing stale overlay cannot cancel its replacement', async () => {
