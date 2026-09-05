@@ -113,8 +113,8 @@
     <string name="downloads_overview_attention_caption">Seus vídeos baixados permanecem disponíveis enquanto você corrige o item abaixo.</string>
     <string name="downloads_overview_empty_caption">Salve um filme ou episódio antes de ficar off-line.</string>
     <plurals name="downloads_overview_saved_titles">
-        <item quantity="one">%1$d vídeo baixado está pronto para ser assistido sem conexão.</item>
         <item quantity="many">%1$d vídeos baixados estão prontos para serem assistidos sem conexão.</item>
+        <item quantity="one">%1$d vídeo baixado está pronto para ser assistido sem conexão.</item>
         <item quantity="other">%1$d vídeos baixados estão prontos para serem assistidos sem conexão.</item>
     </plurals>
     <string name="downloads_ready">Pronto</string>
@@ -154,34 +154,34 @@
     <string name="downloads_loading">Carregando sua biblioteca off-line…</string>
     <string name="downloads_empty">Ainda não há downloads.\nToque em Baixar um filme ou episódio para assisti-lo off-line.</string>
     <plurals name="downloads_summary_titles">
-        <item quantity="one">%1$d título · %2$s de armazenamento usado · %3$s de armazenamento disponível</item>
         <item quantity="many">%1$d títulos · %2$s de armazenamento usado · %3$s de armazenamento disponível</item>
+        <item quantity="one">%1$d título · %2$s de armazenamento usado · %3$s de armazenamento disponível</item>
         <item quantity="other">%1$d títulos · %2$s de armazenamento usado · %3$s de armazenamento disponível</item>
     </plurals>
     <string name="downloads_active">Baixando %1$s — %2$d%%</string>
     <plurals name="downloads_active_with_queue">
-        <item quantity="one">Baixando %1$s — %2$d%% · %3$d na fila</item>
         <item quantity="many">Baixando %1$s — %2$d%% · %3$d na fila</item>
+        <item quantity="one">Baixando %1$s — %2$d%% · %3$d na fila</item>
         <item quantity="other">Baixando %1$s — %2$d%% · %3$d na fila</item>
     </plurals>
     <plurals name="downloads_in_queue">
-        <item quantity="one">%1$d na fila</item>
         <item quantity="many">%1$d na fila</item>
+        <item quantity="one">%1$d na fila</item>
         <item quantity="other">%1$d na fila</item>
     </plurals>
     <string name="downloads_queue_waiting_wifi">%1$s · aguardando Wi-Fi</string>
     <string name="downloads_refresh_failed">Os downloads não puderam ser atualizados. Tente novamente.</string>
     <plurals name="downloads_a11y_progress">
-        <item quantity="one">%1$s baixar %2$d por cento</item>
         <item quantity="many">%1$s baixar %2$d por cento</item>
+        <item quantity="one">%1$s baixar %2$d por cento</item>
         <item quantity="other">%1$s baixar %2$d por cento</item>
     </plurals>
     <string name="downloads_a11y_ready_offline">%1$s está pronto off-line</string>
     <string name="downloads_a11y_failed">Falha no download de %1$s. Verifique sua conexão e tente novamente.</string>
     <string name="downloads_fallback_title">Título</string>
     <plurals name="downloads_progress_description">
-        <item quantity="one">Download %1$s, porcentagem %2$d</item>
         <item quantity="many">Download %1$s, porcentagem %2$d</item>
+        <item quantity="one">Download %1$s, porcentagem %2$d</item>
         <item quantity="other">Download %1$s, porcentagem %2$d</item>
     </plurals>
     <string name="downloads_active_transfer">Transferência ativa</string>
@@ -193,18 +193,18 @@
     <string name="downloads_needs_attention">Precisa de atenção</string>
     <string name="downloads_attention_label">AÇÃO NECESSÁRIA</string>
     <plurals name="downloads_queue_count">
-        <item quantity="one">%1$d título na fila de download</item>
         <item quantity="many">%1$d títulos na fila de download</item>
+        <item quantity="one">%1$d título na fila de download</item>
         <item quantity="other">%1$d títulos na fila de download</item>
     </plurals>
     <plurals name="downloads_ready_count">
-        <item quantity="one">%1$d vídeo baixado</item>
         <item quantity="many">%1$d vídeos baixados</item>
+        <item quantity="one">%1$d vídeo baixado</item>
         <item quantity="other">%1$d vídeos baixados</item>
     </plurals>
     <plurals name="downloads_attention_count">
-        <item quantity="one">%1$d item a ser revisado</item>
         <item quantity="many">Itens %1$d a serem revisados</item>
+        <item quantity="one">%1$d item a ser revisado</item>
         <item quantity="other">Itens %1$d a serem revisados</item>
     </plurals>
     <string name="downloads_state_downloading">BAIXANDO</string>
@@ -213,13 +213,13 @@
     <string name="downloads_state_waiting_wifi">ESPERANDO WI-FI</string>
     <string name="downloads_paused_overview">%1$s pausado — %2$d%%</string>
     <plurals name="downloads_paused_with_pending">
-        <item quantity="one">%1$s · %2$d título na fila de download</item>
         <item quantity="many">%1$s · %2$d títulos na fila de download</item>
+        <item quantity="one">%1$s · %2$d título na fila de download</item>
         <item quantity="other">%1$s · %2$d títulos na fila de download</item>
     </plurals>
     <plurals name="downloads_episode_count">
-        <item quantity="one">Episódio %1$d</item>
         <item quantity="many">Episódios %1$d</item>
+        <item quantity="one">Episódio %1$d</item>
         <item quantity="other">Episódios %1$d</item>
     </plurals>
     <string name="downloads_season_number">Temporada %1$d</string>
@@ -290,14 +290,14 @@
     <string name="downloads_confirm_cancel_message">Cancelar e remover “%1$s”? Isso libera o armazenamento que ele usa.</string>
     <string name="downloads_confirm_delete_all_title">Excluir todos os downloads?</string>
     <plurals name="downloads_confirm_delete_all_message">
-        <item quantity="one">Remover o download do %1$d e liberar seu armazenamento?</item>
         <item quantity="many">Remover todos os downloads do %1$d e liberar seu armazenamento?</item>
+        <item quantity="one">Remover o download do %1$d e liberar seu armazenamento?</item>
         <item quantity="other">Remover todos os downloads do %1$d e liberar seu armazenamento?</item>
     </plurals>
     <string name="downloads_confirm_delete_series_title">Excluir downloads de séries?</string>
     <plurals name="downloads_confirm_delete_series_message">
-        <item quantity="one">Excluir o episódio salvo de “%1$s”? Isso libera o armazenamento que ele usa.</item>
         <item quantity="many">Excluir todos os episódios salvos de “%1$s” em %2$d? Isso libera o armazenamento que eles usam.</item>
+        <item quantity="one">Excluir o episódio salvo de “%1$s”? Isso libera o armazenamento que ele usa.</item>
         <item quantity="other">Excluir todos os episódios salvos de “%1$s” em %2$d? Isso libera o armazenamento que eles usam.</item>
     </plurals>
     <string name="downloads_size_zero">0MB</string>

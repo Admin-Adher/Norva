@@ -113,12 +113,12 @@
     <string name="downloads_overview_attention_caption">تظل مقاطع الفيديو التي تم تنزيلها متاحة أثناء إصلاح العنصر أدناه.</string>
     <string name="downloads_overview_empty_caption">احفظ فيلمًا أو حلقة قبل أن تصبح غير متصل بالإنترنت.</string>
     <plurals name="downloads_overview_saved_titles">
-        <item quantity="zero">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
-        <item quantity="one">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
-        <item quantity="two">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
         <item quantity="few">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
         <item quantity="many">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
+        <item quantity="one">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
         <item quantity="other">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
+        <item quantity="two">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
+        <item quantity="zero">فيديوهات جاهزة للمشاهدة دون اتصال: %1$d</item>
     </plurals>
     <string name="downloads_ready">جاهز</string>
     <string name="downloads_moving">قيد التنفيذ</string>
@@ -157,50 +157,50 @@
     <string name="downloads_loading">جارٍ تحميل مكتبتك غير المتصلة بالإنترنت…</string>
     <string name="downloads_empty">لا توجد تنزيلات حتى الآن.\nانقر فوق تنزيل فيلم أو حلقة لمشاهدتها في وضع عدم الاتصال.</string>
     <plurals name="downloads_summary_titles">
-        <item quantity="zero">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
-        <item quantity="one">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
-        <item quantity="two">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
         <item quantity="few">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
         <item quantity="many">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
+        <item quantity="one">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
         <item quantity="other">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
+        <item quantity="two">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
+        <item quantity="zero">فيديوهات: %1$d · مساحة مستخدمة: %2$s · مساحة متاحة: %3$s</item>
     </plurals>
     <string name="downloads_active">جارٍ تنزيل %1$s — %2$d%%</string>
     <plurals name="downloads_active_with_queue">
-        <item quantity="zero">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
-        <item quantity="one">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
-        <item quantity="two">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
         <item quantity="few">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
         <item quantity="many">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
+        <item quantity="one">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
         <item quantity="other">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
+        <item quantity="two">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
+        <item quantity="zero">تنزيل %1$s — %2$d%% · %3$d في قائمة الانتظار</item>
     </plurals>
     <plurals name="downloads_in_queue">
-        <item quantity="zero">%1$d في قائمة الانتظار</item>
-        <item quantity="one">%1$d في قائمة الانتظار</item>
-        <item quantity="two">%1$d في قائمة الانتظار</item>
         <item quantity="few">%1$d في قائمة الانتظار</item>
         <item quantity="many">%1$d في قائمة الانتظار</item>
+        <item quantity="one">%1$d في قائمة الانتظار</item>
         <item quantity="other">%1$d في قائمة الانتظار</item>
+        <item quantity="two">%1$d في قائمة الانتظار</item>
+        <item quantity="zero">%1$d في قائمة الانتظار</item>
     </plurals>
     <string name="downloads_queue_waiting_wifi">%1$s · في انتظار اتصال Wi-Fi</string>
     <string name="downloads_refresh_failed">لا يمكن تحديث التنزيلات. حاول ثانية.</string>
     <plurals name="downloads_a11y_progress">
-        <item quantity="zero">%1$s تنزيل %2$d في المئة</item>
-        <item quantity="one">%1$s تنزيل %2$d في المئة</item>
-        <item quantity="two">%1$s تنزيل %2$d في المئة</item>
         <item quantity="few">%1$s تنزيل %2$d في المئة</item>
         <item quantity="many">%1$s تنزيل %2$d في المئة</item>
+        <item quantity="one">%1$s تنزيل %2$d في المئة</item>
         <item quantity="other">%1$s تنزيل %2$d في المئة</item>
+        <item quantity="two">%1$s تنزيل %2$d في المئة</item>
+        <item quantity="zero">%1$s تنزيل %2$d في المئة</item>
     </plurals>
     <string name="downloads_a11y_ready_offline">%1$s جاهز حاليا</string>
     <string name="downloads_a11y_failed">فشل تنزيل %1$s. تحقق من اتصالك وحاول مرة أخرى.</string>
     <string name="downloads_fallback_title">العنوان</string>
     <plurals name="downloads_progress_description">
-        <item quantity="zero">تنزيل %1$s، %2$d بالمائة</item>
-        <item quantity="one">تنزيل %1$s، %2$d بالمائة</item>
-        <item quantity="two">تنزيل %1$s، %2$d بالمائة</item>
         <item quantity="few">تنزيل %1$s، %2$d بالمائة</item>
         <item quantity="many">تنزيل %1$s، %2$d بالمائة</item>
+        <item quantity="one">تنزيل %1$s، %2$d بالمائة</item>
         <item quantity="other">تنزيل %1$s، %2$d بالمائة</item>
+        <item quantity="two">تنزيل %1$s، %2$d بالمائة</item>
+        <item quantity="zero">تنزيل %1$s، %2$d بالمائة</item>
     </plurals>
     <string name="downloads_active_transfer">نقل نشط</string>
     <string name="downloads_first_in_queue">الأول في قائمة الانتظار</string>
@@ -211,28 +211,28 @@
     <string name="downloads_needs_attention">يحتاج إلى اهتمام</string>
     <string name="downloads_attention_label">مطلوب اتخاذ إجراء</string>
     <plurals name="downloads_queue_count">
-        <item quantity="zero">فيديوهات في قائمة التنزيل: %1$d</item>
-        <item quantity="one">فيديوهات في قائمة التنزيل: %1$d</item>
-        <item quantity="two">فيديوهات في قائمة التنزيل: %1$d</item>
         <item quantity="few">فيديوهات في قائمة التنزيل: %1$d</item>
         <item quantity="many">فيديوهات في قائمة التنزيل: %1$d</item>
+        <item quantity="one">فيديوهات في قائمة التنزيل: %1$d</item>
         <item quantity="other">فيديوهات في قائمة التنزيل: %1$d</item>
+        <item quantity="two">فيديوهات في قائمة التنزيل: %1$d</item>
+        <item quantity="zero">فيديوهات في قائمة التنزيل: %1$d</item>
     </plurals>
     <plurals name="downloads_ready_count">
-        <item quantity="zero">فيديوهات محفوظة: %1$d</item>
-        <item quantity="one">فيديوهات محفوظة: %1$d</item>
-        <item quantity="two">فيديوهات محفوظة: %1$d</item>
         <item quantity="few">فيديوهات محفوظة: %1$d</item>
         <item quantity="many">فيديوهات محفوظة: %1$d</item>
+        <item quantity="one">فيديوهات محفوظة: %1$d</item>
         <item quantity="other">فيديوهات محفوظة: %1$d</item>
+        <item quantity="two">فيديوهات محفوظة: %1$d</item>
+        <item quantity="zero">فيديوهات محفوظة: %1$d</item>
     </plurals>
     <plurals name="downloads_attention_count">
-        <item quantity="zero">عناصر تحتاج إلى مراجعة: %1$d</item>
-        <item quantity="one">عناصر تحتاج إلى مراجعة: %1$d</item>
-        <item quantity="two">عناصر تحتاج إلى مراجعة: %1$d</item>
         <item quantity="few">عناصر تحتاج إلى مراجعة: %1$d</item>
         <item quantity="many">عناصر تحتاج إلى مراجعة: %1$d</item>
+        <item quantity="one">عناصر تحتاج إلى مراجعة: %1$d</item>
         <item quantity="other">عناصر تحتاج إلى مراجعة: %1$d</item>
+        <item quantity="two">عناصر تحتاج إلى مراجعة: %1$d</item>
+        <item quantity="zero">عناصر تحتاج إلى مراجعة: %1$d</item>
     </plurals>
     <string name="downloads_state_downloading">جارٍ التنزيل</string>
     <string name="downloads_state_paused">متوقف مؤقتًا</string>
@@ -240,20 +240,20 @@
     <string name="downloads_state_waiting_wifi">في انتظار خدمة الواي فاي</string>
     <string name="downloads_paused_overview">متوقف مؤقتًا %1$s — %2$d%%</string>
     <plurals name="downloads_paused_with_pending">
-        <item quantity="zero">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
-        <item quantity="one">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
-        <item quantity="two">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
         <item quantity="few">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
         <item quantity="many">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
+        <item quantity="one">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
         <item quantity="other">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
+        <item quantity="two">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
+        <item quantity="zero">%1$s · فيديوهات في قائمة التنزيل: %2$d</item>
     </plurals>
     <plurals name="downloads_episode_count">
-        <item quantity="zero">عدد الحلقات: %1$d</item>
-        <item quantity="one">عدد الحلقات: %1$d</item>
-        <item quantity="two">عدد الحلقات: %1$d</item>
         <item quantity="few">عدد الحلقات: %1$d</item>
         <item quantity="many">عدد الحلقات: %1$d</item>
+        <item quantity="one">عدد الحلقات: %1$d</item>
         <item quantity="other">عدد الحلقات: %1$d</item>
+        <item quantity="two">عدد الحلقات: %1$d</item>
+        <item quantity="zero">عدد الحلقات: %1$d</item>
     </plurals>
     <string name="downloads_season_number">الموسم %1$d</string>
     <string name="downloads_episodes">الحلقات</string>
@@ -323,21 +323,21 @@
     <string name="downloads_confirm_cancel_message">هل تريد إلغاء وإزالة \"%1$s\"؟ يؤدي هذا إلى تحرير مساحة التخزين التي يستخدمها.</string>
     <string name="downloads_confirm_delete_all_title">هل تريد حذف جميع التنزيلات؟</string>
     <plurals name="downloads_confirm_delete_all_message">
-        <item quantity="zero">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
-        <item quantity="one">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
-        <item quantity="two">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
         <item quantity="few">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
         <item quantity="many">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
+        <item quantity="one">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
         <item quantity="other">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
+        <item quantity="two">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
+        <item quantity="zero">هل تريد حذف التنزيلات المحددة (%1$d) وتحرير المساحة التي تستخدمها؟</item>
     </plurals>
     <string name="downloads_confirm_delete_series_title">هل تريد حذف تنزيلات المسلسل؟</string>
     <plurals name="downloads_confirm_delete_series_message">
-        <item quantity="zero">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
-        <item quantity="one">هل تريد حذف الحلقة المحفوظة من \"%1$s\"؟ يؤدي هذا إلى تحرير مساحة التخزين التي يستخدمها.</item>
-        <item quantity="two">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
         <item quantity="few">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
         <item quantity="many">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
+        <item quantity="one">هل تريد حذف الحلقة المحفوظة من \"%1$s\"؟ يؤدي هذا إلى تحرير مساحة التخزين التي يستخدمها.</item>
         <item quantity="other">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
+        <item quantity="two">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
+        <item quantity="zero">هل تريد حذف جميع الحلقات المحفوظة البالغ عددها %2$d من \"%1$s\"؟ وهذا يحرر مساحة التخزين التي يستخدمونها.</item>
     </plurals>
     <string name="downloads_size_zero">0 ميجابايت</string>
     <string name="downloads_size_mb">%1$s ميجابايت</string>
