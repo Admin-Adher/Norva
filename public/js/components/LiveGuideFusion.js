@@ -1262,6 +1262,10 @@ class LiveGuideFusion {
         const isPlaying = playing
             && String(playing.id) === String(channel.id)
             && String(playing.sourceId) === String(channel.sourceId);
+        const pending = list._pendingPlaybackSelection?.requestedChannel || list._pendingPlaybackSelection?.channel;
+        const isPending = pending
+            && String(pending.id) === String(channel.id)
+            && String(pending.sourceId) === String(channel.sourceId);
         const upNext = this.getUpcoming(channel, 2);
         const tv = this._isTvMode();
         // Quality pills (8K/UHD/4K/FHD/HD) parsed from the channel name, + the group,
@@ -1302,9 +1306,9 @@ class LiveGuideFusion {
                     </ul>` : ''}
                 </div>
                 <div class="live-guide-preview-actions">
-                    <button type="button" class="lg-btn lg-btn-primary ${isPlaying ? 'is-playing' : ''}" data-action="watch">
-                        <svg class="lg-btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-                        <span>${isPlaying ? (globalThis.NorvaI18n?.t("ui_web_deaf6f9d23bc", { defaultValue: "Playing" }) ?? 'Playing') : (globalThis.NorvaI18n?.t("ui_web_a71e75732446", { defaultValue: "Watch" }) ?? 'Watch')}</span>
+                    <button type="button" class="lg-btn lg-btn-primary ${isPlaying && !isPending ? 'is-playing' : ''}" data-action="watch" aria-busy="${isPending ? 'true' : 'false'}">
+                        ${isPending ? '<span class="lg-btn-loading" aria-hidden="true"></span>' : '<svg class="lg-btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>'}
+                        <span>${isPending ? (globalThis.NorvaI18n?.t("ui_web_ba3bbbe10d8b", { defaultValue: "Loading…" }) ?? 'Loading…') : isPlaying ? (globalThis.NorvaI18n?.t("ui_web_deaf6f9d23bc", { defaultValue: "Playing" }) ?? 'Playing') : (globalThis.NorvaI18n?.t("ui_web_a71e75732446", { defaultValue: "Watch" }) ?? 'Watch')}</span>
                     </button>
                     ${(tv || document.body.classList.contains('norva-phone-apk')) ? '' : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? (globalThis.NorvaI18n?.t("ui_web_387cb11365d5", { defaultValue: "Restore the split view" }) ?? 'Restore the split view') : (globalThis.NorvaI18n?.t("ui_web_8492d6554b0b", { defaultValue: "Cinema mode — enlarge the player, compact the guide" }) ?? 'Cinema mode — enlarge the player, compact the guide')}">${this._cinema ? (globalThis.NorvaI18n?.t("ui_web_014c182ee0a9", { defaultValue: "Exit cinema" }) ?? 'Exit cinema') : (globalThis.NorvaI18n?.t("ui_web_89ec0bb81771", { defaultValue: "Cinema" }) ?? 'Cinema')}</button>
                            <button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen" data-i18n-title="ui_web_c461dbb2bab7" data-i18n-aria-label="ui_web_c461dbb2bab7" data-i18n="ui_web_c461dbb2bab7">Fullscreen</button>`}

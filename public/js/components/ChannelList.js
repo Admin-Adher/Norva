@@ -2240,6 +2240,8 @@ class ChannelList {
 
     pauseLiveHydration() {
         this.liveHydrationRunId += 1;
+        const pendingSeq = this._pendingPlaybackSelection?.selectSeq;
+        if (pendingSeq != null) this.failPendingPlaybackSelection(pendingSeq, { clearCommitted: false });
         // Leaving Live invalidates both a Home-favorite lookup that has not resolved
         // yet and a selectChannel resolver already queued behind the anti-hammer
         // debounce. Returning to Live must never launch that abandoned intent.
@@ -3612,6 +3614,7 @@ class ChannelList {
         activeItem?.classList.add('active', 'nav-active');
 
         this._pendingPlaybackSelection = null;
+        window.app?.player?.clearPendingChannel?.(context.selectSeq);
         window.app?.liveGuideFusion?.setActiveChannel?.(channel);
         try { window.app?.liveGuideFusion?.updateHighlights?.(); } catch (_) { }
         return true;
@@ -3620,6 +3623,7 @@ class ChannelList {
     failPendingPlaybackSelection(selectSeq, options = {}) {
         if (this._pendingPlaybackSelection?.selectSeq !== selectSeq) return false;
         this._pendingPlaybackSelection = null;
+        window.app?.player?.clearPendingChannel?.(selectSeq);
         this.container?.querySelectorAll('.channel-item.pending').forEach(el => {
             el.classList.remove('pending', 'nav-active');
             el.removeAttribute('aria-busy');
@@ -3634,9 +3638,13 @@ class ChannelList {
         } else {
             const committedItem = (this.currentRenderId && this.container?.querySelector(`[data-render-id="${this.currentRenderId}"]`))
                 || (this.currentChannel?.id != null && this.container?.querySelector(`[data-channel-id="${this.currentChannel.id}"]`));
-            committedItem?.classList.add('active', 'nav-active');
+            if (committedItem) committedItem.classList.add('active', 'nav-active');
         }
-        try { window.app?.liveGuideFusion?.updateHighlights?.(); } catch (_) { }
+        try {
+            const guide = window.app?.liveGuideFusion;
+            guide?.refreshPreview?.(guide.currentChannel);
+            guide?.updateHighlights?.();
+        } catch (_) { }
         return true;
     }
 
@@ -3690,6 +3698,9 @@ class ChannelList {
         // Stamp the zap start (user click) so the player can measure the full
         // perceived switch latency (click -> first frame) in telemetry.
         try { if (window.app?.player) window.app.player._liveZapStartedAt = Date.now(); } catch (_) {}
+        // Paint intent before queued provider resolution. This changes only the
+        // loading surface; playing state still waits for a real decoded frame.
+        window.app?.player?.showPendingChannel?.(channel, selectSeq);
 
         const pendingRenderId = dataset.renderId || null;
         // Preview follows the user's intent immediately; "playing" only commits
@@ -3699,7 +3710,10 @@ class ChannelList {
         // Flat search/zero-state results: refresh the highlight only —
         // the group expansion / focus-mode logic below doesn't apply
         if (this.searchMode || this.zeroState) {
-            this.container.querySelectorAll('.channel-item.pending').forEach(el => el.classList.remove('pending'));
+            this.container.querySelectorAll('.channel-item.pending').forEach(el => {
+                el.classList.remove('pending', 'nav-active');
+                el.removeAttribute('aria-busy');
+            });
             const pendingItem = this.container.querySelector(`[data-render-id="${pendingRenderId}"]`);
             pendingItem?.classList.add('pending', 'nav-active');
             pendingItem?.setAttribute('aria-busy', 'true');

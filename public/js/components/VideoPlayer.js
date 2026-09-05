@@ -374,6 +374,14 @@ class VideoPlayer {
         this._switchSplash = document.getElementById('channel-switch-splash');
         this._switchSplashLogo = document.getElementById('channel-switch-logo');
         this._switchSplashName = document.getElementById('channel-switch-name');
+        if (this._switchSplash) {
+            this._switchSplash.setAttribute('role', 'status');
+            this._switchSplash.setAttribute('aria-live', 'polite');
+            this._switchSplash.setAttribute('aria-atomic', 'true');
+            this._switchSplashLoading = document.createElement('div');
+            this._switchSplashLoading.className = 'css-loading';
+            this._switchSplash.appendChild(this._switchSplashLoading);
+        }
 
         // One-hand channel zap (live only). The channel list owns the actual switch
         // (and its 300ms anti-hammer debounce), so a fast tap-tap opens one session.
@@ -2062,25 +2070,44 @@ class VideoPlayer {
         this._nextChannelBtn?.classList.toggle('hidden', !show);
     }
 
-    // Paint the target channel's logo + name over the black video during a switch,
-    // so zapping never shows a bare black box. Hidden on the first usable frame
-    // (markPlaybackUsable) or on error; a 12s backstop guarantees it can't linger.
-    _showChannelSplash(channel) {
+    showPendingChannel(channel, selectSeq) {
+        this._pendingLiveSelection = { selectSeq };
+        this.container?.classList.add('is-channel-pending');
+        this.overlay?.classList.add('hidden');
+        this._showChannelSplash(channel, selectSeq);
+    }
+
+    clearPendingChannel(selectSeq) {
+        if (this._pendingLiveSelection?.selectSeq !== selectSeq) return false;
+        this._pendingLiveSelection = null;
+        this.container?.classList.remove('is-channel-pending');
+        this._hideChannelSplash();
+        return true;
+    }
+
+    // A pending user selection owns this surface until its first frame, error or
+    // cancellation. An older resolver/frame must not overwrite its loading state.
+    _showChannelSplash(channel, selectSeq = channel?._norvaSelection?.selectSeq) {
         if (!this._switchSplash || !channel) return;
+        if (this._pendingLiveSelection && this._pendingLiveSelection.selectSeq !== selectSeq) return;
         const logo = channel.tvgLogo || channel.stream_icon || channel.poster_url || channel.logo || '';
         if (this._switchSplashLogo) {
             if (logo) { this._switchSplashLogo.src = logo; this._switchSplashLogo.style.display = ''; }
             else { this._switchSplashLogo.removeAttribute('src'); this._switchSplashLogo.style.display = 'none'; }
         }
         if (this._switchSplashName) this._switchSplashName.textContent = channel.name || channel.title || '';
+        if (this._switchSplashLoading) this._switchSplashLoading.textContent = (globalThis.NorvaI18n?.t("ui_web_ba3bbbe10d8b", { defaultValue: "Loading…" }) ?? 'Loading…');
         this._switchSplash.classList.remove('hidden');
+        this._switchSplash.setAttribute('aria-hidden', 'false');
         clearTimeout(this._switchSplashTimer);
-        this._switchSplashTimer = setTimeout(() => this._hideChannelSplash(), 12000);
+        if (!this._pendingLiveSelection) this._switchSplashTimer = setTimeout(() => this._hideChannelSplash(), 12000);
     }
 
     _hideChannelSplash() {
+        if (this._pendingLiveSelection) return;
         clearTimeout(this._switchSplashTimer);
         this._switchSplash?.classList.add('hidden');
+        this._switchSplash?.setAttribute('aria-hidden', 'true');
     }
 
     // Furthest live position the player can reach right now (the live edge),
@@ -3169,8 +3196,9 @@ class VideoPlayer {
             this.stopCloudPlaybackSessions()
         ]);
 
-        // Reset UI to idle state
-        this.overlay.classList.remove('hidden'); // Show "Select a channel"
+        // Internal teardown must not cover a pending channel with the idle message.
+        if (this._pendingLiveSelection) this.overlay.classList.add('hidden');
+        else this.overlay.classList.remove('hidden');
         this.controlsOverlay?.classList.add('hidden'); // Hide controls
         this.loadingSpinner?.classList.remove('show');
         this.nowPlaying.classList.add('hidden');
@@ -3264,6 +3292,12 @@ class VideoPlayer {
      * Show error overlay
      */
     showError(message) {
+        const pendingSeq = this._pendingLiveSelection?.selectSeq;
+        if (pendingSeq != null) {
+            if (this.currentChannel?._norvaSelection?.selectSeq !== pendingSeq) return;
+            window.app?.channelList?.failPendingPlaybackSelection?.(pendingSeq);
+            this.clearPendingChannel(pendingSeq);
+        }
         // Replace the spinner with the message (a failed channel must not spin forever).
         this._hideChannelSplash();
         this.loadingSpinner?.classList.remove('show');

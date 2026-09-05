@@ -321,14 +321,6 @@
       "refreshOnPlay": true
     },
     {
-      "id": "samsungtvplus",
-      "name": "Samsung TV Plus",
-      "kind": "live",
-      "url": "https://raw.githubusercontent.com/insa-ship-it/app-m3u-generator/main/playlists/samsungtvplus_all.m3u",
-      "website": "https://github.com/insa-ship-it/app-m3u-generator",
-      "refreshOnPlay": false
-    },
-    {
       "id": "roku",
       "name": "Roku",
       "kind": "live",
@@ -346,6 +338,12 @@
     }
   ],
   "research": [
+    {
+      "name": "Samsung TV Plus",
+      "website": "https://github.com/insa-ship-it/app-m3u-generator",
+      "status": "Removed from Selection",
+      "detail": "Removed after playback checks. Samsung delivery URLs are also excluded from the aggregate playlists in Norva Selection."
+    },
     {
       "name": "m3u8-xtream-playlist",
       "website": "https://github.com/m3u8-xtream/m3u8-xtream-playlist",

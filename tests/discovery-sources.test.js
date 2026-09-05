@@ -70,6 +70,61 @@ test('credential-bearing and private links are rejected; Pluto identity is restr
   assert.equal(discoveryMediaKey({ id: 'pluto-vod-fr' }, 'https://evil.example/v2/stitch/hls/episode/6389ff50753d2100141e055d/master.m3u8'), null);
 });
 
+test('Samsung is removed from Selection and its delivery URLs cannot return through aggregate feeds', async () => {
+  const { DISCOVERY_SOURCES, discoveryMediaKey, isSamsungTvPlusUrl } = await import(modulePath);
+  assert.ok(!DISCOVERY_SOURCES.some(feed => feed.id === 'samsungtvplus'));
+  const samsungUrls = [
+    'https://jmp2.uk/stvp-FRAJ4000015CZ.m3u8',
+    'https://jmp2.uk/stvp-FRAJ4000015CZ',
+    'http://JMP2.UK/stvp-FRAJ4000015CZ?device=browser',
+    'https://samsung.wurl.tv/playlist.m3u8',
+    'https://travelxp-4k.samsung.wurl.tv/playlist.m3u8',
+    'https://amg00106-france24-france24-samsunguk-qvpp8.amagi.tv/playlist.m3u8',
+    'https://delivery.amagi.tv/linear/samsung-fr/channel/master.m3u8',
+    'https://delivery.amagi.tv/linear/samsungus/channel/master.m3u8',
+  ];
+  for (const url of samsungUrls) {
+    assert.equal(isSamsungTvPlusUrl(url), true, url);
+    for (const id of ['iptv-org', 'iptv-org-movies', 'free-tv']) {
+      assert.equal(discoveryMediaKey({ id }, url), null, `${id}: ${url}`);
+    }
+  }
+  assert.equal(discoveryMediaKey({ id: 'samsungtvplus' }, 'https://other-cdn.example/channel.m3u8'), null);
+});
+
+test('Samsung exclusion uses provider boundaries and preserves alternate providers and personal playlists', async () => {
+  const { fetchDiscoverySelection, discoveryCatalogFields, isSamsungTvPlusUrl } = await import(modulePath);
+  const { readM3uPlaylistStream } = await import('../supabase/functions/_shared/m3u-playlist-stream.mjs');
+  const retained = [
+    'https://jmp2.uk/rok-example',
+    'https://jmp2.uk/plu-example',
+    'https://jmp2.uk/channel?source=stvp-samsung',
+    'https://jmp2.uk.evil.example/stvp-example',
+    'https://samsung.wurl.tv.evil.example/playlist.m3u8',
+    'https://notsamsung.wurl.tv/playlist.m3u8',
+    'https://france24-vidaa.amagi.tv/playlist.m3u8',
+    'https://france24-roku.amagi.tv/playlist.m3u8?samsung=1',
+    'https://notsamsung.amagi.tv/playlist.m3u8',
+    'https://samsunguk.amagi.tv.evil.example/playlist.m3u8',
+    'https://media.example/samsung/channel.m3u8',
+  ];
+  for (const url of retained) assert.equal(isSamsungTvPlusUrl(url), false, url);
+  assert.equal(isSamsungTvPlusUrl('not a URL'), false);
+  const excluded = 'https://jmp2.uk/stvp-FRAJ4000015CZ';
+  const playlist = await fetchDiscoverySelection({
+    feeds: [{ id: 'free-tv', kind: 'live', name: 'Free-TV', url: 'aggregate' }],
+    fetchPlaylist: async () => result([entry(excluded, 'France 24'), ...retained.map(url => entry(url, 'France 24'))]),
+  });
+  const live = playlist.items.filter(item => discoveryCatalogFields(canonical, item).item_type === 'live');
+  assert.deepEqual(live.map(item => item.url), retained);
+  assert.equal(playlist.sources[0].rejected, 1);
+  assert.equal(playlist.sources[0].included, retained.length);
+
+  const personal = await readM3uPlaylistStream(new Response(`#EXTM3U\n#EXTINF:-1,France 24\n${excluded}\n`).body);
+  assert.equal(personal.items[0].url, excluded);
+  assert.deepEqual(discoveryCatalogFields('https://user.example/playlist.m3u', personal.items[0]), {});
+});
+
 test('expiring playback URLs refresh only for the owned selection and exact persisted media identity', async () => {
   const { resolveDiscoveryTarget, discoveryMediaKey } = await import(modulePath);
   const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');

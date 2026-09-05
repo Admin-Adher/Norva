@@ -15,14 +15,14 @@ export const DISCOVERY_SOURCES = Object.freeze([
   { id: 'iptv-org', name: 'IPTV-org', kind: 'live', url: 'https://iptv-org.github.io/iptv/index.m3u', website: 'https://github.com/iptv-org/iptv' },
   { id: 'iptv-org-movies', name: 'IPTV-org Movies', kind: 'live', url: 'https://iptv-org.github.io/iptv/categories/movies.m3u', website: 'https://github.com/iptv-org/iptv' },
   { id: 'free-tv', name: 'Free-TV', kind: 'live', url: `${github}Free-TV/IPTV/master/playlist.m3u8`, website: 'https://github.com/Free-TV/IPTV' },
-  ...[['plutotv', 'Pluto TV'], ['plex', 'Plex'], ['samsungtvplus', 'Samsung TV Plus'], ['roku', 'Roku'], ['tubi', 'Tubi']].map(([id, name]) => ({
+  ...[['plutotv', 'Pluto TV'], ['plex', 'Plex'], ['roku', 'Roku'], ['tubi', 'Tubi']].map(([id, name]) => ({
     id, name, kind: 'live', url: `${fast}${id}_all.m3u`, website: 'https://github.com/insa-ship-it/app-m3u-generator', refreshOnPlay: id === 'plex',
   })),
 ].map(Object.freeze));
 
-// These previously researched projects are retained in the source directory.
-// They do not expose a functioning, directly importable programme playlist.
+// Previously researched or retired sources remain documented outside the active feeds.
 export const DISCOVERY_RESEARCH = Object.freeze([
+  { name: 'Samsung TV Plus', website: 'https://github.com/insa-ship-it/app-m3u-generator', status: 'Removed from Selection', detail: 'Removed after playback checks. Samsung delivery URLs are also excluded from the aggregate playlists in Norva Selection.' },
   { name: 'm3u8-xtream-playlist', website: 'https://github.com/m3u8-xtream/m3u8-xtream-playlist', status: 'Unavailable', detail: 'The movies and series endpoint does not resolve. Its public TV links are already covered by IPTV-org.' },
   { name: 'Movies Deluxe', website: 'https://github.com/select/movies-deluxe', status: 'Requires a connector', detail: '26,700 records referencing Archive.org and YouTube pages, including clips and incorrect matches; these are not direct media URLs.' },
   { name: 'PublicDomainM3U series', website: 'https://github.com/OnlineM3U/publicdomainm3u', status: 'Requires a series adapter', detail: 'One episode. The films playlist is included above.' },
@@ -45,9 +45,22 @@ function safeMediaUrl(raw) {
   } catch { return null; }
 }
 
+// Selection curation only: retain the same channels when another provider serves them.
+// Check delivery hosts and paths, not programme names or arbitrary query parameters.
+export function isSamsungTvPlusUrl(raw) {
+  let url;
+  try { url = new URL(raw); } catch { return false; }
+  if (!['https:', 'http:'].includes(url.protocol)) return false;
+  const host = url.hostname;
+  if (host === 'jmp2.uk') return /^\/stvp-/i.test(url.pathname);
+  if (host === 'samsung.wurl.tv' || host.endsWith('.samsung.wurl.tv')) return true;
+  return (host === 'amagi.tv' || host.endsWith('.amagi.tv'))
+    && /(?:^|[./_-])samsung(?:[a-z]{2})?(?=$|[./_-])/i.test(`${host}${url.pathname}`);
+}
+
 export function discoveryMediaKey(feed, raw) {
   const url = safeMediaUrl(raw);
-  if (!url) return null;
+  if (!url || feed.id === 'samsungtvplus' || isSamsungTvPlusUrl(url)) return null;
   if (feed.id.startsWith('pluto-vod-')) {
     const episode = url.pathname.match(/^\/v2\/stitch\/hls\/episode\/([a-f0-9]{24})\/master\.m3u8$/i)?.[1];
     return url.hostname.endsWith('.pluto.tv') && episode ? `pluto-vod:${episode}` : null;

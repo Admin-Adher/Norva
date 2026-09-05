@@ -960,6 +960,11 @@ h4 {
   border-inline-start: 3px solid var(--color-accent);
 }
 
+.channel-item.pending {
+  background: var(--color-accent-dim);
+  border-inline-start: 3px dashed var(--color-accent);
+}
+
 .channel-item.hidden {
   opacity: 0.5;
 }
@@ -7767,7 +7772,7 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: #05070d;
+  background: var(--color-bg-primary);
   pointer-events: none;
 }
 
@@ -7785,8 +7790,40 @@ kbd {
   padding: 0 24px;
   font-size: 1.1rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-text-primary);
   text-align: center;
+}
+
+.channel-switch-splash .css-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.video-container.is-channel-pending .watch-top-bar,
+.video-container.is-channel-pending #player-loading,
+.video-container.is-channel-pending .watch-center-play {
+  visibility: hidden;
+}
+
+.channel-switch-splash .css-loading::before,
+.lg-btn-loading {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 2px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-switch-splash .css-loading::before,
+  .lg-btn-loading { animation: none; }
 }
 
 /* Mobile Settings IA: lead with Account + Playback, and collapse the IPTV-technical
