@@ -1405,6 +1405,14 @@ class VideoPlayer {
 
     get supportsPublicHlsDirectSessionGuard() { return true; }
 
+    isServerPublicHlsPlayback(payload, url) {
+        const playback = payload?.playback;
+        const sessionId = this.currentCloudPlaybackSessionId;
+        return Boolean(sessionId && (payload?.sessionId || payload?.session?.id) === sessionId
+            && playback?.mode === 'direct' && playback?.transport === 'public-hls-direct'
+            && typeof url === 'string' && url && playback.url === url);
+    }
+
     stopPublicHlsDirectSessionGuard() {
         const guard = this._publicHlsDirectSessionGuard;
         this._publicHlsDirectSessionGuard = null;
@@ -1635,7 +1643,8 @@ class VideoPlayer {
             // Relay-HLS live URLs are /relay/<token> (no ".m3u8" in the path) but
             // serve the provider's HLS playlist — treat them as HLS too. (This is
             // the live-only player, so a relay URL here is always live HLS.)
-            const initialLooksLikeHls = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8') || this.isRelayPlaybackUrl(streamUrl);
+            const initialLooksLikeHls = this.isServerPublicHlsPlayback(playback, streamUrl)
+                || streamUrl.includes('.m3u8') || streamUrl.includes('m3u8') || this.isRelayPlaybackUrl(streamUrl);
             // On the web there's no local FFmpeg, so /api/probe(/sniff)/transcode
             // don't exist and the URL is already a ready gateway HLS — skip those
             // round-trips entirely and play it directly.
@@ -1829,7 +1838,8 @@ class VideoPlayer {
 
             // Detect if this is likely an HLS stream (has .m3u8 in URL, or is a
             // relay-HLS live URL — /relay/<token> serving the provider's playlist).
-            const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8') || this.isRelayPlaybackUrl(finalUrl);
+            const looksLikeHls = this.isServerPublicHlsPlayback(playback, finalUrl)
+                || finalUrl.includes('.m3u8') || finalUrl.includes('m3u8') || this.isRelayPlaybackUrl(finalUrl);
 
             // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
             // This includes .ts files AND extension-less URLs that might be TS streams

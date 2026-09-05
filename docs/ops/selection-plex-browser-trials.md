@@ -6,7 +6,7 @@ Plex's public master currently contains 5,014-character rendition URLs. The depl
 
 The resolver accepts a refreshed Plex token only when the persisted target, refreshed target, stable media key, external ID, Plex part, source attribution and deterministic owned Selection source all agree. Both targets must use the exact HTTPS Plex endpoint, canonical paths and exactly one `X-Plex-Token` parameter. Other URL changes fail closed. The complete refreshed URL is passed to the browser; nested playlist URLs retain their provider parameters.
 
-Explicit conversion, track or quality selection, native clients and other owners retain their existing route. The seven earlier browser trials and the two curated Xumo routes are unchanged. This patch does not alter the catalogue, importer, playback entry point, player, proxy configuration or gateway image. No publication gate or catalogue quarantine is included.
+Explicit conversion, track or quality selection, native clients and other owners retain their existing route. The seven earlier browser trials and the two curated Xumo routes are unchanged. The live player also recognizes an extensionless URL as HLS when the server's nested `public-hls-direct` decision matches the exact URL and active session. Caller hints do not establish that type. This patch does not alter the catalogue, importer, playback entry point, proxy configuration or gateway image. No publication gate or catalogue quarantine is included.
 
 ## Verification and rollout
 

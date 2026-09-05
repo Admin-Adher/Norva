@@ -228,7 +228,38 @@ test('internal predecessor teardown preserves a valid startup and starts its pub
   assert.deepEqual(h.calls.map(call => call.id), ['b']);
   assert.equal(h.errors.length, 0);
   assert.equal(h.player._playRequestSeq, 2);
-  await h.player.stop();
+    await h.player.stop();
+});
+
+test('an extensionless server-marked public HLS URL reaches hls.js intact and keeps its session monitor', async () => {
+    const h = harness();
+    prepareStartup(h)();
+    const url = 'https://epg.provider.plex.tv/library/parts/synthetic/?X-Plex-Token=SYNTHETIC';
+    const marked = payload('b');
+    marked.playback.url = url;
+    await h.player.play({ cloudPlaybackSessionId: 'b' }, url, marked);
+    assert.equal(h.events.includes('attach'), true);
+    assert.deepEqual(h.events.filter(e => Array.isArray(e) && e[0] === 'source'), [['source', url]]);
+    assert.deepEqual(h.calls.map(call => call.id), ['b']);
+    assert.equal(h.errors.length, 0);
+    await h.player.stop();
+});
+
+test('HLS type authority cannot come from caller hints, another session or a changed URL', () => {
+    const h = harness();
+    const url = 'https://publisher.example/extensionless';
+    const marked = payload('a');
+    marked.playback.url = url;
+    assert.equal(h.player.isServerPublicHlsPlayback(marked, url), true);
+    for (const candidate of [null, { sessionId: 'a', transport: 'public-hls-direct', url },
+        { ...marked, sessionId: 'other' }, { ...marked, playback: { ...marked.playback, mode: 'relay' } },
+        { ...marked, playback: { ...marked.playback, transport: undefined } },
+        { ...marked, playback: { ...marked.playback, url: url + '/other' } }]) {
+        assert.equal(h.player.isServerPublicHlsPlayback(candidate, url), false);
+    }
+    assert.equal(h.player.isServerPublicHlsPlayback(marked, url + '/other'), false);
+    h.player.currentCloudPlaybackSessionId = null;
+    assert.equal(h.player.isServerPublicHlsPlayback(marked, url), false);
 });
 
 test('terminal playback errors cancel the monitor while an outgoing stale overlay cannot cancel its replacement', async () => {
