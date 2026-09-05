@@ -279,5 +279,16 @@
   },
   "ui_web_c3966db7bed1": {
     "bn": "{{p0}}টি স্ক্রিনে আপনার সহায়তা প্রয়োজন।"
+  },
+  "ui_web_1617c770469f": {
+    "fr": "Reprenez la lecture où que vous soyez",
+    "pt-BR": "Continue assistindo onde estiver",
+    "es": "Sigue viendo estés donde estés",
+    "hi": "आप जहाँ भी हों, देखना जारी रखें",
+    "tr": "Nerede olursanız olun izlemeye devam edin",
+    "bn": "আপনি যেখানেই থাকুন, দেখা চালিয়ে যান",
+    "ar": "تابع المشاهدة أينما كنت",
+    "id": "Lanjutkan menonton di mana pun Anda berada",
+    "fil": "Magpatuloy sa panonood saan ka man naroroon"
   }
 }

@@ -1,6 +1,6 @@
 # Norva interface localization
 
-Release candidate validated on 2026-09-05, isolated in Norva-i18n-publish-20260905.
+Validated and published to the web on 2026-09-05. Android production releases 31 submitted to Google Play; Google review remains external. Work isolated in Norva-i18n-publish-20260905.
 
 ## Languages and preference
 
@@ -12,7 +12,7 @@ Audio, subtitles and content-region preferences remain independent.
 
 ## Coverage
 
-- 7,074 web messages and 65 shared messages: all ten locale values present,
+- 7,074 web messages and 73 shared messages: all ten locale values present,
   with no missing or duplicated interpolation parameters.
 - 320 native source messages, generating 3,240 translated Android resource entries,
   including locale-specific plural categories. No MissingTranslation baseline.
@@ -38,7 +38,7 @@ Local evidence is under output/i18n/ (ignored, no credentials):
 | Check | Result | Evidence |
 | --- | --- | --- |
 | Complete regression suite | 3,549 passed, 0 failed, 8 skipped | release-tests-final.log |
-| Strict catalog/build reproducibility | 7,139 messages, ten languages | release-check.log |
+| Strict catalog/build reproducibility | 7,147 messages, ten languages | release-check.log |
 | Public routes | 56 checks: 14 routes, French/Arabic, 390/1280 px; no overflow | release-journeys.json |
 | Actual browser bundle | Ten languages, RTL, escaping, state transitions, retained DOM actions | release-browser-runtime.log |
 | Playback/source/financial labels | Actual page methods, ten languages, local fixtures | release-journeys.json |
@@ -69,6 +69,12 @@ wide quota or an invoice; the full-account upgrade was not activated by the agen
 The earlier evaluated local model was rejected and its outputs are not in the release.
 
 ## Publication
+
+- Web deployment verified: Git main 4e919257, Cloudflare run 33954860592, 3,553 tests passed / 0 failed / 7 skipped. Six served assets matched local SHA-256 values.
+- Live browser: all ten languages switched, Filipino preference persisted after reload; Arabic mobile account screen had no horizontal overflow.
+- Phone 1.3.18 (31) and TV 3.8.18-hybrid (31): signed bundles from run 33954616434 accepted by Play and submitted for full production rollout. No supported devices lost. Managed publishing is disabled, so approved releases publish automatically.
+- Play review and quick automated checks are still in progress; submission is not yet public availability. Phone listing translations already under review were preserved in the restarted review.
+- Android bundles were built from 38840bab. Later Git changes concern validation scripts/tests, integrity metadata and web account copy; no native implementation changes.
 
 Target versions: phone 1.3.18 (31), TV 3.8.18-hybrid (31).
 Main triggers the Cloudflare deployment and Android build workflows. The Android
