@@ -1,4 +1,5 @@
 import { discoverySourceId } from './discovery-catalog.mjs';
+import { SELECTION_LIVE_DIRECT_CANARIES } from './selection-live-direct-canaries.mjs';
 
 // Reviewed public H.264/AAC HLS with browser CORS, 2026-09-05. The complete
 // imported media identity pins the provider's advertising parameters as well as
@@ -16,36 +17,99 @@ const PUBLIC_HLS_CHANNELS = Object.freeze({
   }),
 });
 const verifiedDeliveries = new WeakSet();
+const canaryDeliveries = new WeakSet();
 const record = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const token = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
 const enabled = value => value === true || value === 1 || value === '1' || value === 'true';
+const digestPattern = /^[a-f0-9]{64}$/;
+const canaryFields = ['feedId', 'discoverySource', 'tvgId', 'externalId', 'targetUrlSha256',
+  'origin', 'pathname', 'ownerUserIdSha256'];
+const streamSelectionFields = ['videoStreamIndex', 'video_stream_index', 'audioStreamIndex', 'audio_stream_index',
+  'subtitleStreamIndex', 'subtitle_stream_index', 'videoTrackIndex', 'video_track_index',
+  'audioTrackIndex', 'audio_track_index', 'subtitleTrackIndex', 'subtitle_track_index'];
 
-export async function resolveSelectionLiveDelivery({ sourceId, userId, itemType, itemId, ownedItem, targetUrl }) {
-  if (itemType !== 'live' || typeof userId !== 'string' || !userId || !ownedItem) return null;
-  const metadata = record(ownedItem.metadata);
-  const hint = record(ownedItem.playback_hint);
-  const channel = typeof metadata.tvgId === 'string' && Object.hasOwn(PUBLIC_HLS_CHANNELS, metadata.tvgId)
-    ? PUBLIC_HLS_CHANNELS[metadata.tvgId] : null;
-  if (!channel || metadata.discoveryFeed !== 'xumo-curated' ||
-      metadata.discoverySource !== 'https://play.xumo.com/' ||
-      itemId !== channel.itemId || hint.sourceType !== 'm3u' ||
-      hint.container !== 'm3u8' || hint.targetUrl !== targetUrl ||
-      sourceId !== await discoverySourceId(userId)) return null;
-
-  let url;
-  try { url = new URL(targetUrl); } catch { return null; }
-  if (url.origin !== channel.origin || url.pathname !== channel.pathname ||
-      url.username || url.password || url.hash || metadata.discoveryMediaKey !== url.href) return null;
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`live:${url.href}`));
-  const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-  if (`norva-discovery:live:${hash}` !== channel.itemId) return null;
-
-  // This descriptor stays outside playback hints. A client/global-catalogue
-  // lookalike, including a JSON copy, cannot become routing authority.
-  const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: metadata.tvgId, targetUrl });
-  verifiedDeliveries.add(delivery);
-  return delivery;
+function hasExplicitCanarySelection(hint) {
+  if (streamSelectionFields.some(key => {
+    const index = Number.parseFloat(String(hint[key]));
+    return Number.isFinite(index) && index >= 0;
+  })) return true;
+  return ['quality', 'resolution', 'rendition', 'preferredQuality', 'preferred_quality'].some(key => {
+    const value = hint[key];
+    return value != null && !['', 'auto', '-1'].includes(String(value).trim().toLowerCase());
+  });
 }
+
+async function sha256(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function canarySnapshot(manifest) {
+  if (manifest?.schemaVersion !== 1 || !Array.isArray(manifest.entries) || manifest.entries.length > 16) return [];
+  const entries = manifest.entries.filter(value => {
+    const entry = record(value);
+    if (Object.keys(entry).length !== canaryFields.length || !canaryFields.every(key => Object.hasOwn(entry, key))
+      || !canaryFields.every(key => typeof entry[key] === 'string')
+      || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(entry.feedId)
+      || typeof entry.tvgId !== 'string' || !entry.tvgId.trim() || entry.tvgId.length > 160
+      || !/^norva-discovery:live:[a-f0-9]{64}$/.test(entry.externalId)
+      || !digestPattern.test(entry.targetUrlSha256) || !digestPattern.test(entry.ownerUserIdSha256)
+      || typeof entry.pathname !== 'string' || !entry.pathname.startsWith('/') || !entry.pathname.endsWith('.m3u8')) return false;
+    try {
+      const source = new URL(entry.discoverySource), origin = new URL(entry.origin);
+      return source.protocol === 'https:' && !source.username && !source.password && !source.hash
+        && typeof entry.discoverySource === 'string' && source.href === entry.discoverySource
+        && origin.protocol === 'https:' && origin.origin === entry.origin;
+    } catch { return false; }
+  }).map(entry => Object.freeze(Object.fromEntries(canaryFields.map(key => [key, entry[key]]))));
+  // Repeated owner/item coordinates are ambiguous, even if their pins differ.
+  const key = entry => `${entry.ownerUserIdSha256}:${entry.externalId}`;
+  return Object.freeze(entries.filter(entry => entries.filter(other => key(other) === key(entry)).length === 1));
+}
+
+// Injection is for server wiring and isolated tests, never a request field.
+// Snapshot the manifest once: mutating a caller's object cannot grant a lane.
+export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES } = {}) {
+  const canaries = canarySnapshot(canaryManifest);
+  return async function resolveSelectionLiveDelivery({ sourceId, userId, itemType, itemId, ownedItem, targetUrl }) {
+    if (itemType !== 'live' || typeof userId !== 'string' || !userId || !ownedItem) return null;
+    const metadata = record(ownedItem.metadata);
+    const hint = record(ownedItem.playback_hint);
+    const channel = typeof metadata.tvgId === 'string' && Object.hasOwn(PUBLIC_HLS_CHANNELS, metadata.tvgId)
+      ? PUBLIC_HLS_CHANNELS[metadata.tvgId] : null;
+    if (!channel && !canaries.length) return null;
+    if (hint.sourceType !== 'm3u' ||
+        hint.container !== 'm3u8' || hint.targetUrl !== targetUrl ||
+        sourceId !== await discoverySourceId(userId)) return null;
+
+    let url;
+    try { url = new URL(targetUrl); } catch { return null; }
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || metadata.discoveryMediaKey !== url.href) return null;
+    const externalId = `norva-discovery:live:${await sha256(`live:${url.href}`)}`;
+    const reviewedXumo = channel && metadata.discoveryFeed === 'xumo-curated'
+      && metadata.discoverySource === 'https://play.xumo.com/' && itemId === channel.itemId
+      && url.origin === channel.origin && url.pathname === channel.pathname && externalId === channel.itemId;
+    if (!reviewedXumo) {
+      if (!canaries.length || targetUrl !== url.href || externalId !== itemId || hasExplicitCanarySelection(hint)) return null;
+      const [ownerHash, urlHash] = await Promise.all([sha256(userId), sha256(url.href)]);
+      if (!canaries.some(entry => entry.ownerUserIdSha256 === ownerHash && entry.externalId === itemId
+        && entry.targetUrlSha256 === urlHash && entry.origin === url.origin && entry.pathname === url.pathname
+        && entry.feedId === metadata.discoveryFeed && entry.discoverySource === metadata.discoverySource
+        && entry.tvgId === metadata.tvgId)) return null;
+    }
+
+    // This descriptor stays outside playback hints. A client/global-catalogue
+    // lookalike, including a JSON copy, cannot become routing authority.
+    const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: metadata.tvgId, targetUrl,
+      providerAccountScopeSuffix: reviewedXumo ? 'public-feed:xumo-curated'
+        : `public-media:${externalId.slice('norva-discovery:live:'.length)}` });
+    verifiedDeliveries.add(delivery);
+    if (!reviewedXumo) canaryDeliveries.add(delivery);
+    return delivery;
+  };
+}
+
+export const resolveSelectionLiveDelivery = createSelectionLiveDeliveryResolver();
 
 export function shouldUseSelectionLiveDirect({ delivery, targetUrl, itemType, clientMode, body, clientMetadata, playbackHint }) {
   if (!verifiedDeliveries.has(delivery) || delivery.targetUrl !== targetUrl ||
@@ -58,6 +122,9 @@ export function shouldUseSelectionLiveDirect({ delivery, targetUrl, itemType, cl
   // not an explicit conversion request. Preserve explicit modes and all force
   // conversion hints (including either client alias) instead.
   for (const hint of [body, record(body.playbackHint), record(body.playback_hint), record(playbackHint)]) {
+    // A direct canary must not silently ignore a requested track or quality.
+    // Keep its scope private so request hints cannot impersonate a canary.
+    if (canaryDeliveries.has(delivery) && hasExplicitCanarySelection(hint)) return false;
     const mode = token(hint.gatewayMode ?? hint.gateway_mode);
     if ((mode && mode !== 'remux') ||
         enabled(hint.liveForceTranscode ?? hint.live_force_transcode) ||

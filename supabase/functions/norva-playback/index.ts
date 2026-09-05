@@ -6840,12 +6840,12 @@ async function resolvePlaybackTarget(
       targetUrl,
       selectionLiveDelivery,
       playbackHint: storedPlaybackHint,
-      // These verified public Xumo channels are an independent provider inside
-      // the aggregated Selection. A refused IPTV-org link must not open their
-      // circuit. Keep both Xumo channels in one owner-scoped identity in every
-      // mode so normal replacement/takeover and entitlement admission remain.
+      // The server-verified descriptor retains Xumo's shared feed boundary.
+      // Test canaries use an exact public-media boundary so one unrelated
+      // channel cannot open their circuit. Owner/source isolation and normal
+      // replacement/takeover remain; no scope suffix comes from request hints.
       providerAccountScope: selectionLiveDelivery
-        ? `user-source:${userId}:${sourceId}:public-feed:xumo-curated`
+        ? `user-source:${userId}:${sourceId}:${selectionLiveDelivery.providerAccountScopeSuffix}`
         : `user-source:${userId}:${sourceId}`,
       itemCas,
       containerObservation,

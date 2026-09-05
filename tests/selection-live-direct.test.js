@@ -158,6 +158,18 @@ test('request hints, forged descriptors and JSON copies cannot assert delivery a
   }
 });
 
+test('new canary track and quality guards do not alter the two existing curated Xumo lanes', async () => {
+  const { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } = await policy;
+  for (const input of await fixture) {
+    const delivery = await resolveSelectionLiveDelivery(input);
+    const base = decision(input, delivery);
+    for (const selection of [{ audioStreamIndex: 0 }, { subtitle_stream_index: '1' },
+      { videoTrackIndex: 0 }, { quality: '720p' }, { resolution: '1280x720' }]) {
+      assert.equal(shouldUseSelectionLiveDirect({ ...base, body: { ...base.body, ...selection } }), true);
+    }
+  }
+});
+
 test('the actual Edge resolver trusts the visible owner row, never a global mirror or request-hint descriptor', async () => {
   const { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } = await policy;
   let [input] = await fixture;
