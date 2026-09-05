@@ -3487,7 +3487,17 @@ class ChannelList {
             }
 
             const candidate = candidates[index];
+            const selectedHint = candidate.currentVariant?.playback_hint
+                || candidate.currentVariant?.playbackHint
+                || candidate.playback_hint || candidate.playbackHint || {};
+            // M3U contains the actual media target. Older logical projections
+            // applied Xtream's synthetic TS default to its stored HLS hint.
+            const m3uContainer = selectedHint.sourceType === 'm3u' ? selectedHint.container : null;
             const providerContainer =
+                m3uContainer ||
+                candidate.currentVariant?.container_extension ||
+                candidate.currentVariant?.containerExtension ||
+                candidate.currentVariant?.container ||
                 candidate.container_extension ||
                 candidate.containerExtension ||
                 candidate.container ||

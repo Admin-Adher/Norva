@@ -279,6 +279,60 @@ test('initial live resolution is bounded to three total variants', async () => {
   assert.equal(drains, 2);
 });
 
+test('live resolution preserves the selected variant container across a mixed-format fallback', async () => {
+  const attempts = [];
+  const variants = [
+    { sourceId: 'selection', streamId: 'hls-channel', container: 'ts', playback_hint: { sourceType: 'm3u', container: 'm3u8' }, channel: {} },
+    { sourceId: 'selection', streamId: 'ts-channel', container_extension: 'ts', channel: {} },
+  ];
+  const window = { ChannelGrouping: { fallbackOrder: () => variants.slice(1), recordVariantOutcome() {} } };
+  const API = { proxy: { xtream: { async getStreamUrl(_source, streamId, type, container) {
+    attempts.push({ streamId, type, container });
+    if (attempts.length === 1) throw Object.assign(new Error('stream unavailable'), { status: 502 });
+    return { url: 'https://example.test/play.m3u8', sessionId: 'selected-session' };
+  } } } };
+  const { ChannelList } = loadChannelListClass({ window, API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 11, _forceTranscode: new Set() });
+  const channel = {
+    id: 'logical-channel', sourceId: 'selection', sourceType: 'm3u', cloudSourceId: 'owned-source',
+    streamId: 'hls-channel', container_extension: 'ts', currentVariant: variants[0],
+    qualityGroup: { name: 'Public channel', variants },
+  };
+  const resolved = await list.resolveInitialLiveStream(channel, { selectSeq: 11, switchPlayer: { async prepareLiveSwitch() {} } });
+  assert.deepEqual(attempts, [
+    { streamId: 'hls-channel', type: 'live', container: 'm3u8' },
+    { streamId: 'ts-channel', type: 'live', container: 'ts' },
+  ]);
+  assert.equal(resolved.channel.streamId, 'ts-channel');
+});
+
+test('a lone cloud M3U variant retains its HLS format without a quality group', async () => {
+  const attempts = [];
+  const API = { proxy: { xtream: { async getStreamUrl(_source, _stream, _type, container) {
+    attempts.push(container);
+    return { url: 'https://example.test/play.m3u8', sessionId: 'selected-session' };
+  } } } };
+  const { ChannelList } = loadChannelListClass({ API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 11, _forceTranscode: new Set() });
+  await list.resolveInitialLiveStream({ sourceId: 'selection', streamId: 'opaque-hls', currentVariant: { containerExtension: 'ts', playbackHint: { sourceType: 'm3u', container: 'm3u8' } } }, { selectSeq: 11 });
+  assert.deepEqual(attempts, ['m3u8']);
+});
+
+test('Xtream keeps its synthetic TS default when the stored HLS hint was not explicit', async () => {
+  const attempts = [];
+  const API = { proxy: { xtream: { async getStreamUrl(_source, _stream, _type, container) {
+    attempts.push(container);
+    return { url: 'https://example.test/play.m3u8', sessionId: 'selected-session' };
+  } } } };
+  const { ChannelList } = loadChannelListClass({ API });
+  const list = Object.create(ChannelList.prototype);
+  Object.assign(list, { _selectRequestSeq: 11, _forceTranscode: new Set() });
+  await list.resolveInitialLiveStream({ sourceId: 'provider', streamId: 'channel', currentVariant: { container: 'ts', playback_hint: { sourceType: 'xtream', container: 'm3u8' } } }, { selectSeq: 11 });
+  assert.deepEqual(attempts, ['ts']);
+});
+
 test('initial live resolution never retries a shared provider slot failure', async () => {
   const attempts = [];
   const variants = [
