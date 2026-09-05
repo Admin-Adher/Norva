@@ -957,7 +957,9 @@ async function rewriteHlsPlaylist(playlist, baseUrl, claims, env, request) {
       continue;
     }
 
-    if (line.startsWith("#EXT-X-KEY") || line.startsWith("#EXT-X-MAP")) {
+    // Rendition URIs may be relative to the upstream master. Leaving audio or
+    // subtitles untouched resolves them against the opaque relay token instead.
+    if (/^#EXT-X-(?:KEY|MAP|MEDIA|I-FRAME-STREAM-INF|SESSION-KEY):/.test(line)) {
       rewritten.push(await rewriteUriAttribute(line, baseUrl, claims, env, request));
       continue;
     }

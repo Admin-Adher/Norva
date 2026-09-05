@@ -8,6 +8,23 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const api = read('public/js/api.js');
 const watch = read('public/js/pages/WatchPage.js');
 
+test('a complete direct HLS VOD exposes its duration without confusing a growing Gateway window', () => {
+  const context = { window: {} };
+  vm.runInNewContext(watch, context);
+  const page = Object.create(context.window.WatchPage.prototype);
+  Object.assign(page, { contentType: 'movie', currentPlaybackMode: 'direct-hls',
+    video: { duration: 12 }, hls: { currentLevel: 0,
+      levels: [{ details: { live: false, totalduration: 5850.167 } }] } });
+  assert.equal(page.getDisplayDuration(), 5850.167);
+  page.hls.levels[0].details.live = true;
+  assert.equal(page.getDisplayDuration(), null);
+  page.hls.levels[0].details.live = false;
+  page.currentPlaybackMode = 'gateway-session';
+  assert.equal(page.getDisplayDuration(), null);
+  page.durationHint = 7200;
+  assert.equal(page.getDisplayDuration(), 7200);
+});
+
 test('catalogue normalization retains the selected HLS variant container', () => {
   const start = api.indexOf('    function normalizeMediaItem(');
   const end = api.indexOf('    function categoriesFromMediaItems(', start);

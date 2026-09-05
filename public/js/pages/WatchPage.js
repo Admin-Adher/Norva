@@ -7233,7 +7233,15 @@ class WatchPage {
             return probeDuration;
         }
 
-        if (this.isVodContent() && ['gateway-session', 'direct-hls'].includes(this.currentPlaybackMode) && !probeDuration) {
+        if (this.isVodContent() && this.currentPlaybackMode === 'direct-hls' && !probeDuration) {
+            // A completed upstream VOD manifest declares the full film duration.
+            // Growing live/Gateway windows still cannot stand in for that total.
+            const level = this.hls?.currentLevel;
+            const details = this.hls?.levels?.[Number.isInteger(level) && level >= 0 ? level : 0]?.details;
+            return details?.live === false ? this.normalizeDuration(details.totalduration) : null;
+        }
+
+        if (this.isVodContent() && this.currentPlaybackMode === 'gateway-session' && !probeDuration) {
             return null;
         }
 
