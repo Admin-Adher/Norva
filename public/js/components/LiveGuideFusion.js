@@ -63,7 +63,7 @@ class LiveGuideFusion {
             }
             if (action === 'reload-live') {
                 const btn = event.target.closest('[data-action="reload-live"]');
-                if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+                if (btn) { btn.disabled = true; btn.textContent = (globalThis.NorvaI18n?.t("ui_web_ba3bbbe10d8b", { defaultValue: "Loading…" }) ?? 'Loading…'); }
                 this.app.channelList?.reloadLive?.();
                 return;
             }
@@ -333,9 +333,9 @@ class LiveGuideFusion {
         const hasFavorites = channels.some(channel => this.app.channelList.isFavorite(channel.sourceId, channel.id));
 
         if (hasFavorites) {
-            groups.push({ id: 'Favorites', name: 'Favorites' });
+            groups.push({ id: 'Favorites', name: (globalThis.NorvaI18n?.t('ui_web_7a1f2a83aca9', { defaultValue: "Favorites" }) ?? 'Favorites') });
         }
-        groups.push({ id: '', name: 'All channels' });
+        groups.push({ id: '', name: (globalThis.NorvaI18n?.t('ui_web_4b33d5e03e53', { defaultValue: "All channels" }) ?? 'All channels') });
 
         for (const channel of channels) {
             const group = channel.groupTitle || 'Uncategorized';
@@ -529,7 +529,7 @@ class LiveGuideFusion {
         };
         const isPending = this.isPendingFamily(family);
         const badge = isPending
-            ? { label: 'SCAN', className: 'pending', title: 'Checking variants' }
+            ? { label: (globalThis.NorvaI18n?.t("ui_web_7a1580c49e45", { defaultValue: "SCAN" }) ?? 'SCAN'), className: 'pending', title: (globalThis.NorvaI18n?.t("ui_web_215306a5a33d", { defaultValue: "Checking variants" }) ?? 'Checking variants') }
             : this.getFamilyBadge(family);
 
         this.container.querySelectorAll('.live-guide-row').forEach(row => {
@@ -574,7 +574,7 @@ class LiveGuideFusion {
             return {
                 label: total > 1 ? `OK ${healthyCount}/${total}` : 'OK',
                 className: 'ok',
-                title: `${healthyCount} working variant${healthyCount > 1 ? 's' : ''}`
+                title: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a95498185484", {defaultValue: "{{p0}} working variant{{p1}}", p0:(healthyCount),p1:(healthyCount > 1 ? 's' : '')}) : `${healthyCount} working variant${healthyCount > 1 ? 's' : ''}`)
             };
         }
 
@@ -582,14 +582,14 @@ class LiveGuideFusion {
             return {
                 label: total > 1 ? `${total} DOWN` : 'DOWN',
                 className: 'problem',
-                title: `${total} variant${total > 1 ? 's' : ''} tested, none working`
+                title: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_72ffff0fcda2", {defaultValue: "{{p0}} variant{{p1}} tested, none working", p0:(total),p1:(total > 1 ? 's' : '')}) : `${total} variant${total > 1 ? 's' : ''} tested, none working`)
             };
         }
 
         return {
             label: `${total - problematicCount}/${total}`,
             className: 'pending',
-            title: 'Variants partially tested'
+            title: (globalThis.NorvaI18n?.t("ui_web_8452ee024b05", { defaultValue: "Variants partially tested" }) ?? 'Variants partially tested')
         };
     }
 
@@ -632,8 +632,8 @@ class LiveGuideFusion {
         if (!problematic.length) return;
 
         const scopeLabel = this.activeGroup === 'Favorites'
-            ? 'Favorites'
-            : (this.activeGroup || 'All channels');
+            ? (globalThis.NorvaI18n?.t("ui_web_7a1f2a83aca9", { defaultValue: "Favorites" }) ?? 'Favorites')
+            : (this.activeGroup || (globalThis.NorvaI18n?.t("ui_web_4b33d5e03e53", { defaultValue: "All channels" }) ?? 'All channels'));
 
         this.app.channelList.refreshPlaybackForChannels(problematic, {
             label: scopeLabel,
@@ -854,7 +854,7 @@ class LiveGuideFusion {
 
     formatTime(value) {
         if (!value) return '';
-        return new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return new Date(value).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
     getProgress(program) {
@@ -901,13 +901,13 @@ class LiveGuideFusion {
                 <span class="live-guide-search-wrap">
                     <input type="text" class="live-guide-search" placeholder="Search channels…"
                            value="${q}" autocomplete="off" autocapitalize="none" spellcheck="false"
-                           aria-label="Search channels">
-                    ${q ? '<button type="button" class="live-guide-search-clear" title="Clear" aria-label="Clear search">&times;</button>' : ''}
+                           aria-label="Search channels" data-i18n-placeholder="ui_web_951a34ca584e" data-i18n-aria-label="ui_web_7fbc58c98558">
+                    ${q ? '<button type="button" class="live-guide-search-clear" title="Clear" aria-label="Clear search" data-i18n-title="ui_web_83b12c2216ef" data-i18n-aria-label="ui_web_3b7ea51793e9">&times;</button>' : ''}
                 </span>
                 ${this.renderSourcePicker()}
                 <button type="button" class="live-guide-hidebroken ${hideBroken ? 'is-active' : ''}"
                         aria-pressed="${hideBroken ? 'true' : 'false'}"
-                        title="Hide channels that failed the health scan (unreachable / broken streams)">Hide unavailable</button>
+                        title="Hide channels that failed the health scan (unreachable / broken streams)" data-i18n-title="ui_web_ffaf9c11717c" data-i18n="ui_web_d65b28a523c0">Hide unavailable</button>
             </div>
         `;
     }
@@ -921,13 +921,13 @@ class LiveGuideFusion {
         const selected = Array.from(sel.querySelectorAll('option'))
             .find(option => option.value === sel.value)
             || sel.querySelector('option');
-        const label = selected?.textContent?.trim() || 'All Sources';
+        const label = selected?.textContent?.trim() || (globalThis.NorvaI18n?.t("ui_web_b877e9212b41", { defaultValue: "All Sources" }) ?? 'All Sources');
         return `
             <button type="button" class="live-guide-source-trigger"
                     data-action="open-source-sheet"
                     aria-haspopup="dialog" aria-expanded="false"
-                    aria-label="Source, ${this.escapeHtml(label)}">
-                <span>Source</span>
+                    aria-label="Source, ${this.escapeHtml(label)}" data-i18n-aria-label="ui_web_2fe09b039bc7" data-i18n-aria-label-args="${(globalThis.NorvaI18n?.args?.({"p0":(label)}) || "{}")}">
+                <span data-i18n="ui_web_0e570ca6fabe">Source</span>
                 <strong>${this.escapeHtml(label)}</strong>
                 <span class="live-guide-source-icon" aria-hidden="true">${Icons.chevronDown}</span>
             </button>
@@ -964,27 +964,27 @@ class LiveGuideFusion {
         const headingWrap = document.createElement('div');
         const kicker = document.createElement('span');
         kicker.className = 'live-source-sheet-kicker';
-        kicker.textContent = 'Live TV';
+        kicker.textContent = (globalThis.NorvaI18n?.t("ui_web_d451ef69d283", { defaultValue: "Live TV" }) ?? 'Live TV');
         const heading = document.createElement('h2');
         heading.id = 'live-source-sheet-title';
-        heading.textContent = 'Choose a source';
+        heading.textContent = (globalThis.NorvaI18n?.t("ui_web_de8133e1a512", { defaultValue: "Choose a source" }) ?? 'Choose a source');
         headingWrap.append(kicker, heading);
 
         const closeButton = document.createElement('button');
         closeButton.type = 'button';
         closeButton.className = 'modal-close live-source-close';
-        closeButton.setAttribute('aria-label', 'Close source chooser');
-        closeButton.textContent = 'Done';
+        closeButton.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_5e5acf18d917", { defaultValue: "Close source chooser" }) ?? 'Close source chooser'));
+        closeButton.textContent = (globalThis.NorvaI18n?.t("ui_web_11a6767d5674", { defaultValue: "Done" }) ?? 'Done');
         header.append(headingWrap, closeButton);
 
         const helper = document.createElement('p');
         helper.className = 'live-source-sheet-help';
-        helper.textContent = 'Show every connected service, or focus the guide on one source.';
+        helper.textContent = (globalThis.NorvaI18n?.t("ui_web_bfe25ae72384", { defaultValue: "Show every connected service, or focus the guide on one source." }) ?? 'Show every connected service, or focus the guide on one source.');
 
         const list = document.createElement('div');
         list.className = 'live-source-options';
         list.setAttribute('role', 'listbox');
-        list.setAttribute('aria-label', 'Live TV source');
+        list.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_550f31dcda96", { defaultValue: "Live TV source" }) ?? 'Live TV source'));
 
         options.forEach(option => {
             const item = document.createElement('button');
@@ -997,7 +997,7 @@ class LiveGuideFusion {
             const copy = document.createElement('span');
             copy.className = 'live-source-option-copy';
             const title = document.createElement('strong');
-            title.textContent = option.textContent?.trim() || 'All Sources';
+            title.textContent = option.textContent?.trim() || (globalThis.NorvaI18n?.t("ui_web_b877e9212b41", { defaultValue: "All Sources" }) ?? 'All Sources');
             copy.appendChild(title);
             const group = option.closest('optgroup')?.label;
             if (group) {
@@ -1093,7 +1093,7 @@ class LiveGuideFusion {
             const item = event.target.closest('.live-source-option');
             if (!item) return;
             const value = item.dataset.sourceValue || '';
-            const title = item.querySelector('strong')?.textContent || 'All Sources';
+            const title = item.querySelector('strong')?.textContent || (globalThis.NorvaI18n?.t("ui_web_b877e9212b41", { defaultValue: "All Sources" }) ?? 'All Sources');
             close({ restoreFocus: false });
             sel.value = value;
             sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1101,7 +1101,7 @@ class LiveGuideFusion {
                 const currentTrigger = this.container?.querySelector('.live-guide-source-trigger');
                 currentTrigger?.focus({ preventScroll: true });
                 const announcement = this.container?.querySelector('.live-guide-source-announcement');
-                if (announcement) announcement.textContent = `${title} selected`;
+                if (announcement) announcement.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38174a4950f6", {defaultValue: "{{p0}} selected", p0:(title)}) : `${title} selected`);
             }, 0);
         });
         document.addEventListener('keydown', onKey, true);
@@ -1230,10 +1230,10 @@ class LiveGuideFusion {
         if (btn) {
             btn.classList.toggle('is-active', !!this._cinema);
             btn.setAttribute('aria-pressed', this._cinema ? 'true' : 'false');
-            btn.textContent = this._cinema ? 'Exit cinema' : 'Cinema';
+            btn.textContent = this._cinema ? (globalThis.NorvaI18n?.t("ui_web_014c182ee0a9", { defaultValue: "Exit cinema" }) ?? 'Exit cinema') : (globalThis.NorvaI18n?.t("ui_web_89ec0bb81771", { defaultValue: "Cinema" }) ?? 'Cinema');
             btn.title = this._cinema
-                ? 'Restore the split view'
-                : 'Cinema mode — enlarge the player, compact the guide';
+                ? (globalThis.NorvaI18n?.t("ui_web_387cb11365d5", { defaultValue: "Restore the split view" }) ?? 'Restore the split view')
+                : (globalThis.NorvaI18n?.t("ui_web_8492d6554b0b", { defaultValue: "Cinema mode — enlarge the player, compact the guide" }) ?? 'Cinema mode — enlarge the player, compact the guide');
         }
     }
 
@@ -1242,15 +1242,15 @@ class LiveGuideFusion {
             return `
             <div class="live-guide-preview is-empty">
                 <div class="live-guide-preview-copy">
-                    <div class="live-guide-preview-title">No channel selected</div>
-                    <div class="live-guide-preview-channel">Tap a channel to preview</div>
+                    <div class="live-guide-preview-title" data-i18n="ui_web_d1d465bf6593">No channel selected</div>
+                    <div class="live-guide-preview-channel" data-i18n="ui_web_0c7e3b9ad48f">Tap a channel to preview</div>
                 </div>
             </div>`;
         }
 
         const program = this.getProgramAt(channel, new Date());
         const progress = this.getProgress(program);
-        const title = program?.title || 'No guide info';
+        const title = program?.title || (globalThis.NorvaI18n?.t("ui_web_a19388453c5e", { defaultValue: "No guide info" }) ?? 'No guide info');
         const start = program?.start ? this.formatTime(program.start) : '--:--';
         const stop = program?.stop ? this.formatTime(program.stop) : '--:--';
         const logo = this.getChannelLogoSrc(channel);
@@ -1283,33 +1283,33 @@ class LiveGuideFusion {
                 </div>
                 <div class="live-guide-preview-copy">
                     <div class="live-guide-preview-channel">
-                        ${this.escapeHtml(channel.name || 'No channel')}
+                        ${this.escapeHtml(channel.name || (globalThis.NorvaI18n?.t("ui_web_cbce2b0e7b41", { defaultValue: "No channel" }) ?? 'No channel'))}
                         ${!tv && group ? `<span>${this.escapeHtml(group)}</span>` : ''}
                     </div>
                     ${tv ? `<div class="live-guide-preview-badges">
                         ${qualityTags.map(t => `<span class="lg-badge">${t}</span>`).join('')}
                         ${group ? `<span class="lg-badge lg-badge-group">· ${this.escapeHtml(group)}</span>` : ''}
                     </div>` : ''}
-                    ${tv ? `<div class="live-guide-preview-onair">On air · ${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</div>` : ''}
+                    ${tv ? `<div class="live-guide-preview-onair" data-i18n="ui_web_f8c6e8cce2d9" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(start),"p1":(stop)}) || "{}")}">On air · ${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</div>` : ''}
                     <div class="live-guide-preview-title">${this.escapeHtml(title)}</div>
                     <div class="live-guide-preview-meta">
                         ${tv ? '' : `<span>${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</span>`}
                         <span class="live-guide-progress"><span style="width:${progress}%"></span></span>
-                        ${tv && minsLeft != null ? `<span class="lg-remaining">${minsLeft} min remaining</span>` : ''}
+                        ${tv && minsLeft != null ? `<span class="lg-remaining" data-i18n="ui_web_1187e8825b43" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(minsLeft)}) || "{}")}">${minsLeft} min remaining</span>` : ''}
                     </div>
                     ${upNext.length ? `<ul class="live-guide-upnext">
-                        ${upNext.map(p => `<li><span class="t">${this.escapeHtml(this.formatTime(p.start))}</span> ${this.escapeHtml(p.title || 'Programme')}</li>`).join('')}
+                        ${upNext.map(p => `<li><span class="t">${this.escapeHtml(this.formatTime(p.start))}</span> ${this.escapeHtml(p.title || (globalThis.NorvaI18n?.t("ui_web_30556a7a38a5", { defaultValue: "Programme" }) ?? 'Programme'))}</li>`).join('')}
                     </ul>` : ''}
                 </div>
                 <div class="live-guide-preview-actions">
                     <button type="button" class="lg-btn lg-btn-primary ${isPlaying ? 'is-playing' : ''}" data-action="watch">
                         <svg class="lg-btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-                        <span>${isPlaying ? 'Playing' : 'Watch'}</span>
+                        <span>${isPlaying ? (globalThis.NorvaI18n?.t("ui_web_deaf6f9d23bc", { defaultValue: "Playing" }) ?? 'Playing') : (globalThis.NorvaI18n?.t("ui_web_a71e75732446", { defaultValue: "Watch" }) ?? 'Watch')}</span>
                     </button>
-                    ${(tv || document.body.classList.contains('norva-phone-apk')) ? '' : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? 'Restore the split view' : 'Cinema mode — enlarge the player, compact the guide'}">${this._cinema ? 'Exit cinema' : 'Cinema'}</button>
-                           <button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`}
-                    <button type="button" class="lg-btn ${this._isTvMode() ? 'lg-btn-fav' : 'lg-btn-icon'} ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="${isFav ? 'In favorites' : 'Add to favorites'}">
-                        <span class="lg-btn-heart" aria-hidden="true">${isFav ? '♥' : '♡'}</span>${this._isTvMode() ? `<span>${isFav ? 'In favorites' : 'Add to favorites'}</span>` : ''}
+                    ${(tv || document.body.classList.contains('norva-phone-apk')) ? '' : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? (globalThis.NorvaI18n?.t("ui_web_387cb11365d5", { defaultValue: "Restore the split view" }) ?? 'Restore the split view') : (globalThis.NorvaI18n?.t("ui_web_8492d6554b0b", { defaultValue: "Cinema mode — enlarge the player, compact the guide" }) ?? 'Cinema mode — enlarge the player, compact the guide')}">${this._cinema ? (globalThis.NorvaI18n?.t("ui_web_014c182ee0a9", { defaultValue: "Exit cinema" }) ?? 'Exit cinema') : (globalThis.NorvaI18n?.t("ui_web_89ec0bb81771", { defaultValue: "Cinema" }) ?? 'Cinema')}</button>
+                           <button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen" data-i18n-title="ui_web_c461dbb2bab7" data-i18n-aria-label="ui_web_c461dbb2bab7" data-i18n="ui_web_c461dbb2bab7">Fullscreen</button>`}
+                    <button type="button" class="lg-btn ${this._isTvMode() ? 'lg-btn-fav' : 'lg-btn-icon'} ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="${isFav ? (globalThis.NorvaI18n?.t("ui_web_e34f671f3517", { defaultValue: "In favorites" }) ?? 'In favorites') : (globalThis.NorvaI18n?.t("ui_web_7f3c0782afd7", { defaultValue: "Add to favorites" }) ?? 'Add to favorites')}" data-i18n-title="ui_web_ea713ecd8537">
+                        <span class="lg-btn-heart" aria-hidden="true">${isFav ? '♥' : '♡'}</span>${this._isTvMode() ? `<span>${isFav ? (globalThis.NorvaI18n?.t("ui_web_e34f671f3517", { defaultValue: "In favorites" }) ?? 'In favorites') : (globalThis.NorvaI18n?.t("ui_web_7f3c0782afd7", { defaultValue: "Add to favorites" }) ?? 'Add to favorites')}</span>` : ''}
                     </button>
                 </div>
             </div>
@@ -1332,8 +1332,8 @@ class LiveGuideFusion {
         const families = this.buildFamilyRows(channels);
         if (!families.length) {
             const msg = (this.searchQuery || '').trim()
-                ? 'No channels match your search'
-                : 'No channels in this group';
+                ? (globalThis.NorvaI18n?.t("ui_web_4da30c70494a", { defaultValue: "No channels match your search" }) ?? 'No channels match your search')
+                : (globalThis.NorvaI18n?.t("ui_web_be8adbb92500", { defaultValue: "No channels in this group" }) ?? 'No channels in this group');
             return `<div class="live-guide-rows"><div class="live-guide-empty">${msg}</div></div>`;
         }
         // Render up to _rowLimit rows and let the viewer pull in the rest in chunks.
@@ -1350,7 +1350,7 @@ class LiveGuideFusion {
         const remaining = families.length - shown.length;
         const nextChunk = Math.min(this.BASE_ROW_LIMIT, remaining);
         const overflow = remaining > 0
-            ? `<button type="button" class="live-guide-more" data-action="show-more">Show ${nextChunk} more <span>· ${remaining} of ${families.length} left</span></button>`
+            ? `<button type="button" class="live-guide-more" data-action="show-more"><norva-i18n data-i18n="ui_web_666a71800bb1" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(nextChunk)}) || "{}")}">Show ${nextChunk} more </norva-i18n><span data-i18n="ui_web_0224dc46280d" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(remaining),"p2":(families.length)}) || "{}")}">· ${remaining} of ${families.length} left</span></button>`
             : '';
         return `
             <div class="live-guide-rows">
@@ -1366,7 +1366,7 @@ class LiveGuideFusion {
         const isPlaying = this.isFamilyActive(family) || isPending;
         const isSelected = this.isFamilySelected(family);
         const badge = isPending
-            ? { label: 'SCAN', className: 'pending', title: 'Checking variants' }
+            ? { label: (globalThis.NorvaI18n?.t("ui_web_7a1580c49e45", { defaultValue: "SCAN" }) ?? 'SCAN'), className: 'pending', title: (globalThis.NorvaI18n?.t("ui_web_215306a5a33d", { defaultValue: "Checking variants" }) ?? 'Checking variants') }
             : family.badge;
         const variantLabel = family.members.length > 1 ? `${family.members.length} variants` : '';
         const now = this.getProgramAt(channel, new Date());
@@ -1388,16 +1388,16 @@ class LiveGuideFusion {
                         <span class="live-guide-channel-name">${this.escapeHtml(family.label)}</span>
                         ${variantLabel ? `<span class="live-guide-variant-count">${this.escapeHtml(variantLabel)}</span>` : ''}
                         ${badge ? `<span class="live-guide-mode ${badge.className}" title="${this.escapeHtml(badge.title)}">${badge.label}</span>` : ''}
-                        ${isPlaying ? '<span class="live-guide-live-tag">LIVE</span>' : ''}
+                        ${isPlaying ? '<span class="live-guide-live-tag" data-i18n="ui_web_35e0d0360a0a">LIVE</span>' : ''}
                     </span>
                     <span class="live-guide-now">
-                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || 'No guide info')}</span>
+                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || (globalThis.NorvaI18n?.t("ui_web_a19388453c5e", { defaultValue: "No guide info" }) ?? 'No guide info'))}</span>
                         ${now ? `<span class="live-guide-progress"><span style="width:${progress}%"></span></span>` : ''}
                     </span>
-                    ${next ? `<span class="live-guide-next"><span class="live-guide-next-time">${this.escapeHtml(this.formatTime(next.start))}</span> ${this.escapeHtml(next.title || 'Programme')}</span>` : ''}
+                    ${next ? `<span class="live-guide-next"><span class="live-guide-next-time">${this.escapeHtml(this.formatTime(next.start))}</span> ${this.escapeHtml(next.title || (globalThis.NorvaI18n?.t("ui_web_30556a7a38a5", { defaultValue: "Programme" }) ?? 'Programme'))}</span>` : ''}
                 </span>
                 ${timeRange}
-                <button type="button" class="live-guide-play" title="Watch" aria-label="Watch">
+                <button type="button" class="live-guide-play" title="Watch" aria-label="Watch" data-i18n-title="ui_web_a71e75732446" data-i18n-aria-label="ui_web_a71e75732446">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                 </button>
             </div>
@@ -1417,9 +1417,9 @@ class LiveGuideFusion {
             return `<div class="live-guide-status is-loading" role="status" aria-live="polite">
                 <img class="live-guide-status-mark" src="/img/norva-app-icon.png" alt="">
                 <div class="live-guide-status-copy">
-                    <span class="live-guide-status-kicker">Live TV</span>
-                    <div class="live-guide-status-title">Preparing your channel guide</div>
-                    <div class="live-guide-status-msg">Loading channels from your connected sources. You can keep using the menu.</div>
+                    <span class="live-guide-status-kicker" data-i18n="ui_web_d451ef69d283">Live TV</span>
+                    <div class="live-guide-status-title" data-i18n="ui_web_d46419997e05">Preparing your channel guide</div>
+                    <div class="live-guide-status-msg" data-i18n="ui_web_964e19c3c88f">Loading channels from your connected sources. You can keep using the menu.</div>
                 </div>
                 <div class="live-guide-status-rows" aria-hidden="true">${'<i></i>'.repeat(5)}</div>
             </div>`;
@@ -1427,19 +1427,19 @@ class LiveGuideFusion {
         if (cl.loadError) {
             const sourceFailure = Boolean(cl.sourceDiscoveryError);
             return `<div class="live-guide-status is-error" role="alert">
-                <span class="live-guide-status-kicker">Live TV</span>
-                <div class="live-guide-status-title">${sourceFailure ? "Couldn't reach your sources" : "Couldn't load your channels"}</div>
+                <span class="live-guide-status-kicker" data-i18n="ui_web_d451ef69d283">Live TV</span>
+                <div class="live-guide-status-title">${sourceFailure ? (globalThis.NorvaI18n?.t("ui_web_d9c44d71420e", { defaultValue: "Couldn't reach your sources" }) ?? "Couldn't reach your sources") : (globalThis.NorvaI18n?.t("ui_web_56ed85ba9fe4", { defaultValue: "Couldn't load your channels" }) ?? "Couldn't load your channels")}</div>
                 <div class="live-guide-status-msg">${sourceFailure
-                    ? "Norva couldn't check your connected services. Nothing was changed, so try again when the connection returns."
-                    : 'Your sources are still connected. The channel list did not respond this time, so try the request again.'}</div>
-                <button type="button" class="lg-btn lg-btn-primary" data-action="reload-live">Try again</button>
+                    ? (globalThis.NorvaI18n?.t("ui_web_6e755e1c02dc", { defaultValue: "Norva couldn't check your connected services. Nothing was changed, so try again when the connection returns." }) ?? "Norva couldn't check your connected services. Nothing was changed, so try again when the connection returns.")
+                    : (globalThis.NorvaI18n?.t("ui_web_c21ce6e4dec4", { defaultValue: "Your sources are still connected. The channel list did not respond this time, so try the request again." }) ?? 'Your sources are still connected. The channel list did not respond this time, so try the request again.')}</div>
+                <button type="button" class="lg-btn lg-btn-primary" data-action="reload-live" data-i18n="ui_web_d8b8392e2c54">Try again</button>
             </div>`;
         }
         return `<div class="live-guide-status is-empty">
-            <span class="live-guide-status-kicker">Live TV</span>
-            <div class="live-guide-status-title">No channels yet</div>
-            <div class="live-guide-status-msg">No live channels are available in the current sources. A newly connected catalogue may still be preparing.</div>
-            <button type="button" class="lg-btn" data-action="reload-live">Refresh</button>
+            <span class="live-guide-status-kicker" data-i18n="ui_web_d451ef69d283">Live TV</span>
+            <div class="live-guide-status-title" data-i18n="ui_web_ed9be7c72eb6">No channels yet</div>
+            <div class="live-guide-status-msg" data-i18n="ui_web_83f9ef124106">No live channels are available in the current sources. A newly connected catalogue may still be preparing.</div>
+            <button type="button" class="lg-btn" data-action="reload-live" data-i18n="ui_web_0e9161011702">Refresh</button>
         </div>`;
     }
 
@@ -1521,7 +1521,7 @@ class LiveGuideFusion {
                 ${tv ? '' : this.renderGroups(groups)}
                 <div class="live-guide-main">
                     ${this.renderPreview(selectedChannel)}
-                    ${tv ? `<div class="lg-tv-listhead"><span class="lg-tv-listtitle">All channels</span><span class="lg-tv-count">${rowsChannels.length}</span></div>` : ''}
+                    ${tv ? `<div class="lg-tv-listhead"><span class="lg-tv-listtitle" data-i18n="ui_web_4b33d5e03e53">All channels</span><span class="lg-tv-count">${rowsChannels.length}</span></div>` : ''}
                     ${this.renderRows(rowsChannels)}
                 </div>
             </div>

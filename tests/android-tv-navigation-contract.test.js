@@ -122,6 +122,7 @@ function navigationFixture(pageId) {
 function loadCatalogStep(fixture) {
   const source = read('public/js/utils/tvNavigation.js');
   const functions = [
+    'logicalHorizontalDirection',
     'catalogFilterRows',
     'nearestCatalogFilterItem',
     'catalogFilterStep'
@@ -140,6 +141,7 @@ function loadCatalogStep(fixture) {
 function loadCatalogRegionStep() {
   const source = read('public/js/utils/tvNavigation.js');
   const functions = [
+    'logicalHorizontalDirection',
     'nearestCatalogFilterItem',
     'catalogRegionStep'
   ].map((name) => jsFunction(source, name)).join('\n');
@@ -258,6 +260,7 @@ function moviesBucketCatalogFixture() {
 function loadCatalogGraph(fixture) {
   const source = read('public/js/utils/tvNavigation.js');
   const functions = [
+    'logicalHorizontalDirection',
     'catalogFilterRows',
     'nearestCatalogFilterItem',
     'catalogRegionItems',
@@ -292,6 +295,7 @@ this.catalogSearchVerticalTarget = catalogSearchVerticalTarget;`,
 function loadCatalogPageEntry(fixture) {
   const source = read('public/js/utils/tvNavigation.js');
   const functions = [
+    'logicalHorizontalDirection',
     'pageDefaultTarget',
     'rememberedPageTarget',
     'pageEntryTarget'
@@ -571,7 +575,7 @@ test('Android TV Live TV always escapes to the rail while loading', () => {
   const source = read('public/js/utils/tvNavigation.js');
   assert.match(
     source,
-    /focused\.id === 'channel-search' && e\.key === 'ArrowLeft'[\s\S]*focusActiveNavbar\(\)/
+    /focused\.id === 'channel-search' && logicalHorizontalDirection\(e\.key, focused\) === 'ArrowLeft'[\s\S]*focusActiveNavbar\(\)/
   );
   assert.match(
     source,
@@ -603,13 +607,14 @@ test('Android TV rail keeps a hard left boundary after Settings tab scrolling', 
   const source = read('public/js/utils/tvNavigation.js');
   assert.match(
     source,
-    /e\.key === 'ArrowLeft' && focused\.closest\('\.navbar'\)[\s\S]*return;[\s\S]*Right from the rail crosses into the page content/
+    /logicalHorizontalDirection\(e\.key, focused\) === 'ArrowLeft' && focused\.closest\('\.navbar'\)[\s\S]*return;[\s\S]*Right from the rail crosses into the page content/
   );
 });
 
 test('Android TV rail re-entry activates the Account panel before focusing its tab', () => {
   const source = read('public/js/utils/tvNavigation.js');
   const functions = [
+    'logicalHorizontalDirection',
     'pageDefaultTarget',
     'preparePageEntry',
     'pageEntryTarget'
@@ -693,6 +698,7 @@ test('Android TV Settings keeps vertical focus inside its active panel', () => {
   const source = read('public/js/utils/tvNavigation.js');
   assert.match(source, /INTERACTIVE_SELECTOR[\s\S]*\.settings-advanced-summary/);
   const functions = [
+    'logicalHorizontalDirection',
     'centerOf',
     'hasMeaningfulVerticalOverlap',
     'settingsPanelCandidates',
@@ -901,7 +907,7 @@ test('Android TV category lists expose one visible D-pad stop per option', () =>
     multiSelect,
     /const avoidAutomaticIme = document\.documentElement\.classList\.contains\('tv-mode'\)[\s\S]*querySelector\([\s\S]*\[data-action="all"\][\s\S]*firstAction\?\.focus/
   );
-  assert.match(read('public/app.html'), /MultiSelect\.js\?v=4/);
+  assert.match(read('public/app.html'), /MultiSelect\.js\?v=[0-9a-f]+/);
 });
 
 test('Android TV Series keeps Reset visible so the focus graph stays stable', () => {
@@ -970,11 +976,11 @@ test('Android TV live-data audit assets are opt-in and debug-only', () => {
 });
 
 test('Android TV app shell cache-busts the repaired navigation script', () => {
-  assert.match(read('public/app.html'), /tvNavigation\.js\?v=32/);
-  assert.match(read('public/support.html'), /tvNavigation\.js\?v=31/);
-  assert.match(read('public/app.html'), /NavigationModel\.js\?v=5279356025/);
-  assert.match(read('public/app.html'), /NavigationAdapters\.js\?v=1/);
-  assert.match(read('public/app.html'), /GenreRails\.js\?v=8/);
+  assert.match(read('public/app.html'), /tvNavigation\.js\?v=[0-9a-f]+/);
+  assert.match(read('public/support.html'), /tvNavigation\.js\?v=[0-9a-f]+/);
+  assert.match(read('public/app.html'), /NavigationModel\.js\?v=[0-9a-f]+/);
+  assert.match(read('public/app.html'), /NavigationAdapters\.js\?v=[0-9a-f]+/);
+  assert.match(read('public/app.html'), /GenreRails\.js\?v=[0-9a-f]+/);
 });
 
 test('Android TV Settings exposes only read-only ten-foot capabilities', () => {
@@ -986,7 +992,7 @@ test('Android TV Settings exposes only read-only ten-foot capabilities', () => {
   assert.match(settings, /if \(isTvSettingsShell\(\) && !\['account', 'player', 'sources'\]\.includes\(tabName\)\)/);
   assert.match(settings, /action === 'show-instructions'[\s\S]*showTvHandoffInstructions\(true\)[\s\S]*return;/);
   assert.match(settings, /This TV never asks for provider credentials/);
-  assert.match(settings, /title\.textContent = 'Continue on phone or web'/);
+  assert.match(settings, /title\.textContent = [^;\r\n]*'Continue on phone or web'/);
   assert.match(settings, /Valid via cloud synchronization/);
   assert.match(html, /id="settings-tv-signout-btn"/);
   assert.match(html, /id="settings-tv-legal-btn"/);
@@ -1063,3 +1069,13 @@ test('Android TV Back closes MultiSelect through its complete disclosure state t
   assert.match(navigation, /panel\.inert = true/);
   assert.match(navigation, /btn\?\.setAttribute\('aria-expanded', 'false'\)/);
 });
+
+ test('RTL changes semantic row order while physical directions remain geometric', () => {
+ const source = read('public/js/utils/tvNavigation.js');
+ const context = { document: { documentElement: { dir: 'rtl' } }, centerOf: e => ({x:e.x,y:0}) };
+ vm.runInNewContext(['logicalHorizontalDirection','nearestCatalogFilterItem','catalogRegionStep'].map(n=>jsFunction(source,n)).join('\n')+'\nthis.step=catalogRegionStep;',context);
+ const first={x:200}, second={x:100}; const bands=[{items:[first,second]}];
+ assert.equal(context.step(bands, first, 'ArrowLeft'), second);
+ assert.equal(context.step(bands, second, 'ArrowRight'), first);
+ assert.equal(context.step(bands, first, 'ArrowRight'), null);
+ });

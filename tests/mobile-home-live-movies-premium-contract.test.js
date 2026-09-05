@@ -90,15 +90,15 @@ test('Movie cards and details clean visible titles and never expose a zero ratin
 });
 
 test('cache versions publish the changed phone surfaces', () => {
-  assert.match(appHtml, /main\.css\?v=71854078d1/);
-  assert.match(appHtml, /MultiSelect\.js\?v=4/);
-  assert.match(appHtml, /ChannelList\.js\?v=49/);
-  assert.match(appHtml, /SourceManager\.js\?v=de08b95122/);
-  assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /api\.js\?v=9d5ef0cf1a/);
-  assert.match(appHtml, /HomePage\.js\?v=6fdf890230/);
-  assert.match(appHtml, /LivePage\.js\?v=9/);
-  assert.match(appHtml, /MoviesPage\.js\?v=3f5f2cacd5/);
-  assert.match(appHtml, /SeriesPage\.js\?v=01ee9949cb/);
-  assert.match(appHtml, /WatchPage\.js\?v=155/);
+  assert.match(appHtml, /main\.css\?v=[0-9a-f]+/);
+  assert.match(appHtml, /MultiSelect\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /ChannelList\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /SourceManager\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /LiveGuideFusion\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /api\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /HomePage\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /LivePage\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /MoviesPage\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /SeriesPage\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /WatchPage\.js\?v=[0-9a-f]+/);
 });

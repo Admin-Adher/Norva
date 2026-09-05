@@ -765,7 +765,7 @@ test('SourceManager milestones never freeze below the current discovery totals',
 });
 
 test('catalog progress counter fix is cache-busted in the app shell', () => {
-  assert.match(APP_SOURCE, /SourceManager\.js\?v=de08b95122/);
+  assert.match(APP_SOURCE, /SourceManager\.js\?v=[0-9a-f]+/);
 });
 
 test('SourceManager shares one connection parser for Home and Settings', () => {

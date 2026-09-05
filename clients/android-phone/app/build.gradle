@@ -12,19 +12,15 @@ def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_FILE")
 def hasReleaseKeystore = releaseKeystorePath != null && new File(releaseKeystorePath).exists()
 
 android {
-    lint {
-        // Known legacy translations only; every other lint error remains blocking.
-        baseline = file("lint-i18n-baseline.xml")
-    }
-    namespace "tv.norva.phone"
+namespace "tv.norva.phone"
     compileSdk 36
 
     defaultConfig {
         applicationId "tv.norva.phone"
         minSdk 23
         targetSdk 36
-        versionCode 30
-        versionName "1.3.17"
+        versionCode 31
+        versionName "1.3.18"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
@@ -53,6 +49,7 @@ android {
             java.srcDir "../../android-common/src/test/java"
         }
         androidTest {
+            assets.srcDir "$buildDir/generated/i18nTestAssets"
             java.srcDir "../../android-common/src/androidTest/java"
             assets.srcDir "../../../public/webengine/media"
         }
@@ -81,6 +78,14 @@ android {
             }
         }
     }
+}
+
+def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
+    from("../../../public/js/i18n.js")
+    into("$buildDir/generated/i18nTestAssets/js")
+}
+tasks.configureEach { task ->
+    if (task.name.contains("AndroidTest") && (task.name.startsWith("merge") || task.name.contains("Lint") || task.name.startsWith("lint"))) task.dependsOn(copyI18nTestBundle)
 }
 
 dependencies {

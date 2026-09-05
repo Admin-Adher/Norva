@@ -289,7 +289,7 @@ class ChannelList {
         // Update toggle button
         if (this.toggleGroupsBtn) {
             this.toggleGroupsBtn.innerHTML = Icons.collapseAll;
-            this.toggleGroupsBtn.title = 'Collapse All';
+            this.toggleGroupsBtn.title = (globalThis.NorvaI18n?.t("ui_web_55988e28a4e8", { defaultValue: "Collapse All" }) ?? 'Collapse All');
         }
     }
 
@@ -307,7 +307,7 @@ class ChannelList {
         // Update toggle button
         if (this.toggleGroupsBtn) {
             this.toggleGroupsBtn.innerHTML = Icons.expandAll;
-            this.toggleGroupsBtn.title = 'Expand All';
+            this.toggleGroupsBtn.title = (globalThis.NorvaI18n?.t("ui_web_9f5b023a413a", { defaultValue: "Expand All" }) ?? 'Expand All');
         }
     }
 
@@ -907,7 +907,7 @@ class ChannelList {
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.escapeHtml(this.getDisplayProgramInfo(channel) || '')}</div>
             </div>
-            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
+            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
               ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
             </button>
           </div>
@@ -977,9 +977,9 @@ class ChannelList {
         if (this.sortedGroups.length === 0) {
             this.container.innerHTML = `
         <div class="empty-state">
-          <p>No channels loaded</p>
-          <p class="hint">Connect your TV service to start watching.</p>
-          <button type="button" class="btn btn-primary" id="live-empty-add-source">Add a source</button>
+          <p data-i18n="ui_web_c7d299b8427e">No channels loaded</p>
+          <p class="hint" data-i18n="ui_web_b6c30f7bda66">Connect your TV service to start watching.</p>
+          <button type="button" class="btn btn-primary" id="live-empty-add-source" data-i18n="ui_web_b3fb8f492462">Add a source</button>
         </div>
       `;
             this.container.querySelector('#live-empty-add-source')?.addEventListener('click', () => {
@@ -1094,7 +1094,7 @@ class ChannelList {
         <div class="channel-group">
           <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${groupName}">
             <span class="group-toggle">${Icons.chevronDown}</span>
-            <span class="group-name">${groupName}</span>
+            <span class="group-name" ${{"Favorites":"ui_web_7a1f2a83aca9","Main channels":"ui_web_272f38ca4d43","Regional channels":"ui_web_078491ba02e4","Multiplex & events":"ui_web_7fcc153efac4"}[groupName] ? 'data-i18n="' + {"Favorites":"ui_web_7a1f2a83aca9","Main channels":"ui_web_272f38ca4d43","Regional channels":"ui_web_078491ba02e4","Multiplex & events":"ui_web_7fcc153efac4"}[groupName] + '"' : ''}>${groupName}</span>
             <span class="group-count">${visibleChannels.length}</span>
           </div>
           <div class="group-channels">
@@ -1600,7 +1600,7 @@ class ChannelList {
                 || stream.groupTitle
                 || stream._displayGroupTitle
                 || stream._sourceGroupTitle
-                || 'Uncategorized';
+                || (globalThis.NorvaI18n?.t("ui_web_8d40d123b2e1", { defaultValue: "Uncategorized" }) ?? 'Uncategorized');
             const channel = {
                 ...stream,
                 id: stream.id || `${source.type}_${sourceId}_${streamId}`,
@@ -1731,7 +1731,7 @@ class ChannelList {
               <div class="channel-name">${title}</div>
               <div class="channel-program search-subtitle">${subtitle}</div>
             </div>
-            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
+            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
               ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
             </button>
           </div>`;
@@ -1749,7 +1749,7 @@ class ChannelList {
             const renderedCh = {
                 ...ch,
                 _renderId: `rid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                _renderGroup: 'Search'
+                _renderGroup: (globalThis.NorvaI18n?.t("ui_web_49c266baaaa7", { defaultValue: "Search" }) ?? 'Search')
             };
             this.renderedChannels.push(renderedCh);
             return renderedCh._renderId;
@@ -1761,20 +1761,20 @@ class ChannelList {
         html += `<div class="search-results-header">${headerParts.join(' · ')}</div>`;
 
         if (onNow.length) {
-            html += '<div class="search-section-label">On now</div>';
+            html += '<div class="search-section-label" data-i18n="ui_web_623070e65eb3">On now</div>';
             for (const entry of onNow) {
                 const rid = pushNav(entry.channel);
-                const subtitle = `${this.highlightMatch(entry.program.title, term)} <span class="search-epg-tag">EPG</span>`;
+                const subtitle = `${this.highlightMatch(entry.program.title, term)} <span class="search-epg-tag" data-i18n="ui_web_54c19a035723">EPG</span>`;
                 html += this.buildSearchResultHtml(entry.channel, rid, { subtitle, plainTitle: true });
             }
         }
 
         if (results.length) {
-            html += '<div class="search-section-label">Channels</div>';
+            html += '<div class="search-section-label" data-i18n="ui_web_4c8906cf76f5">Channels</div>';
             for (const result of results) {
                 const ch = result.channel;
                 const rid = pushNav(ch);
-                const bits = [this.escapeHtml(ch.groupTitle || 'Uncategorized')];
+                const bits = [this.escapeHtml(ch.groupTitle || (globalThis.NorvaI18n?.t("ui_web_8d40d123b2e1", { defaultValue: "Uncategorized" }) ?? 'Uncategorized'))];
                 const extraGroups = result.groups.size - 1;
                 if (extraGroups > 0) bits.push(`+${extraGroups} other group${extraGroups > 1 ? 's' : ''}`);
                 const nowTitle = this._epgNowByChannelKey?.get(`${ch.sourceId}:${ch.id}`);
@@ -1787,22 +1787,22 @@ class ChannelList {
             const firstWord = term.split(/\s+/)[0];
             html += `
               <div class="empty-state search-empty">
-                <p>No results for &ldquo;${this.escapeHtml(term)}&rdquo;</p>
+                <p data-i18n="ui_web_54f1bbfef6b7" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(term)}) || "{}")}">No results for &ldquo;${this.escapeHtml(term)}&rdquo;</p>
                 ${term.includes(' ')
-                    ? `<button class="btn btn-sm btn-ghost search-suggest" data-term="${this.escapeHtml(firstWord)}">Try &ldquo;${this.escapeHtml(firstWord)}&rdquo;</button>`
-                    : '<p class="hint">Try a shorter term, without prefixes like FR| or 4K</p>'}
+                    ? `<button class="btn btn-sm btn-ghost search-suggest" data-term="${this.escapeHtml(firstWord)}" data-i18n="ui_web_f5f75cad3185" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(firstWord)}) || "{}")}">Try &ldquo;${this.escapeHtml(firstWord)}&rdquo;</button>`
+                    : '<p class="hint" data-i18n="ui_web_69cc20314650">Try a shorter term, without prefixes like FR| or 4K</p>'}
               </div>`;
         }
 
         if (groups.length) {
-            html += '<div class="search-section-label">Matching groups</div><div class="search-group-chips">';
+            html += '<div class="search-section-label" data-i18n="ui_web_50f7480603c8">Matching groups</div><div class="search-group-chips">';
             for (const [name, count] of groups) {
                 html += `<button class="search-group-chip" data-group="${this.escapeHtml(name)}">${this.escapeHtml(name)}<span>${count}</span></button>`;
             }
             html += '</div>';
         }
 
-        html += '<div class="search-kbd-footer"><span>↑↓ navigate</span><span>↵ play</span><span>esc close</span></div>';
+        html += '<div class="search-kbd-footer"><span data-i18n="ui_web_a4a9901949e9">↑↓ navigate</span><span data-i18n="ui_web_2b3b68a58985">↵ play</span><span data-i18n="ui_web_4d1491547205">esc close</span></div>';
 
         this.container.innerHTML = `<div class="search-results">${html}</div>`;
         this.container.scrollTop = 0;
@@ -1851,7 +1851,7 @@ class ChannelList {
 
         let html = '';
         if (recents.length) {
-            html += '<div class="search-section-label">Recently watched</div>';
+            html += '<div class="search-section-label" data-i18n="ui_web_eb33c3964529">Recently watched</div>';
             recents.forEach(ch => {
                 html += this.buildSearchResultHtml(ch, pushNav(ch), {
                     subtitle: this.escapeHtml(ch.groupTitle || ''), plainTitle: true
@@ -1859,14 +1859,14 @@ class ChannelList {
             });
         }
         if (favs.length) {
-            html += '<div class="search-section-label">Favorites</div>';
+            html += '<div class="search-section-label" data-i18n="ui_web_7a1f2a83aca9">Favorites</div>';
             favs.forEach(ch => {
                 html += this.buildSearchResultHtml(ch, pushNav(ch), {
                     subtitle: this.escapeHtml(ch.groupTitle || ''), plainTitle: true
                 });
             });
         }
-        html += '<div class="search-kbd-footer"><span>type to search</span><span>↑↓ navigate</span><span>↵ play</span></div>';
+        html += '<div class="search-kbd-footer"><span data-i18n="ui_web_a3848c916cf8">type to search</span><span data-i18n="ui_web_a4a9901949e9">↑↓ navigate</span><span data-i18n="ui_web_2b3b68a58985">↵ play</span></div>';
 
         this.container.innerHTML = `<div class="search-results">${html}</div>`;
         this.container.scrollTop = 0;
@@ -2034,7 +2034,7 @@ class ChannelList {
         try {
             this.sources = await API.sources.getAll();
             console.log('[ChannelList] loadSources: Got', this.sources?.length || 0, 'sources');
-            this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
+            this.sourceSelect.innerHTML = '<option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>';
 
             const xtreamSources = this.sources.filter(s => s.type === 'xtream' && s.enabled);
             const m3uSources = this.sources.filter(s => s.type === 'm3u' && s.enabled);
@@ -2067,7 +2067,7 @@ class ChannelList {
             this.sources = [];
             this.sourceDiscoveryError = true;
             this.loadError = 'sources-unavailable';
-            this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
+            this.sourceSelect.innerHTML = '<option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>';
             window.app?.liveGuideFusion?.render();
         }
     }
@@ -2130,7 +2130,7 @@ class ChannelList {
             if (!this.isLiveLoadCurrent(loadRunId)) return;
             console.error('Error loading channels:', err);
             this.loadError = 'channels-unavailable';
-            this.container.innerHTML = '<div class="empty-state"><p>Channels could not be loaded</p><p class="hint">Try the request again.</p></div>';
+            this.container.innerHTML = '<div class="empty-state"><p data-i18n="ui_web_895b8dbc4ffa">Channels could not be loaded</p><p class="hint" data-i18n="ui_web_dfbbbde60d4d">Try the request again.</p></div>';
             // Surface the failure in the inline guide too (its render is gated on
             // channels, which stay empty here) so the phone/tablet shows Try again.
             window.app?.liveGuideFusion?.render();
@@ -2672,7 +2672,7 @@ class ChannelList {
 
         if (!this.isPendingChannelSelectionCurrent(selectionSeq)) return false;
         if (!channel) {
-            window.app?.showToast?.('This channel is temporarily unavailable');
+            window.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_d565dece5e82", { defaultValue: "This channel is temporarily unavailable" }) ?? 'This channel is temporarily unavailable'));
             return false;
         }
 
@@ -2698,7 +2698,7 @@ class ChannelList {
             const groupTitle = categoryById.get(String(stream.category_id))
                 || stream.category_name
                 || stream.groupTitle
-                || 'Uncategorized';
+                || (globalThis.NorvaI18n?.t("ui_web_8d40d123b2e1", { defaultValue: "Uncategorized" }) ?? 'Uncategorized');
             const channel = {
                 ...stream,
                 id: stream.id || `${sourceType}_${sourceId}_${streamId}`,
@@ -3054,7 +3054,7 @@ class ChannelList {
         while (progress && runId === this._playbackScanRunId) {
             if (requestedScope?.label && progress.scopeLabel && progress.scopeLabel !== requestedScope.label) {
                 if (this.scanStatusEl) {
-                    this.scanStatusEl.textContent = `Scan replaced: ${progress.scopeLabel}`;
+                    this.scanStatusEl.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b6ed9890f381", {defaultValue: "Scan replaced: {{p0}}", p0:(progress.scopeLabel)}) : `Scan replaced: ${progress.scopeLabel}`);
                 }
                 break;
             }
@@ -3074,7 +3074,7 @@ class ChannelList {
             if (this.scanStatusEl && runId === this._playbackScanRunId) {
                 const label = progress.scopeLabel ? `${progress.scopeLabel}: ` : '';
                 this.scanStatusEl.textContent =
-                    `${label}${progress.scanned || 0}/${progress.total || 0} scanned - ${progress.directHls || 0} Direct HLS / ${progress.transcodingAudio || 0} Transcoding / ${progress.broken || 0} HS`;
+                    (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9e81d1a983c6", {defaultValue: "{{p0}}{{p1}}/{{p2}} scanned - {{p3}} Direct HLS / {{p4}} Transcoding / {{p5}} HS", p0:(label),p1:(progress.scanned || 0),p2:(progress.total || 0),p3:(progress.directHls || 0),p4:(progress.transcodingAudio || 0),p5:(progress.broken || 0)}) : `${label}${progress.scanned || 0}/${progress.total || 0} scanned - ${progress.directHls || 0} Direct HLS / ${progress.transcodingAudio || 0} Transcoding / ${progress.broken || 0} HS`);
             }
 
             if (!progress.jobId || progress.status === 'complete' || progress.status === 'error') break;
@@ -3086,8 +3086,8 @@ class ChannelList {
         if (this.scanStatusEl && progress && runId === this._playbackScanRunId) {
             const label = progress.scopeLabel ? `${progress.scopeLabel}: ` : '';
             this.scanStatusEl.textContent = progress.status === 'complete'
-                ? `${label}${progress.directHls || 0} Direct HLS / ${progress.transcodingAudio || 0} Transcoding OK / ${progress.broken || 0} HS`
-                : 'Scan stopped';
+                ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4e65d36e5a55", {defaultValue: "{{p0}}{{p1}} Direct HLS / {{p2}} Transcoding OK / {{p3}} HS", p0:(label),p1:(progress.directHls || 0),p2:(progress.transcodingAudio || 0),p3:(progress.broken || 0)}) : `${label}${progress.directHls || 0} Direct HLS / ${progress.transcodingAudio || 0} Transcoding OK / ${progress.broken || 0} HS`)
+                : (globalThis.NorvaI18n?.t("ui_web_5c905bbf81b3", { defaultValue: "Scan stopped" }) ?? 'Scan stopped');
         }
         if (runId === this._playbackScanRunId) {
             window.dispatchEvent(new CustomEvent('playbackModeScanComplete', { detail: progress }));
@@ -3139,14 +3139,14 @@ class ChannelList {
                 btns.forEach(btn => {
                     btn.classList.remove('active');
                     btn.innerHTML = Icons.favoriteOutline;
-                    btn.title = 'Add to Favorites';
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                 });
             } else {
                 this.visibleFavorites.add(key);
                 btns.forEach(btn => {
                     btn.classList.add('active');
                     btn.innerHTML = Icons.favorite;
-                    btn.title = 'Remove from Favorites';
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
                 });
             }
 
@@ -3267,7 +3267,7 @@ class ChannelList {
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.getProgramInfo(channel) || ''}</div>
             </div>
-            <button class="favorite-btn active" title="Remove from Favorites">
+            <button class="favorite-btn active" title="Remove from Favorites" data-i18n-title="ui_web_33fb0dd35e91">
               ❤️
             </button>
         `;
@@ -3399,8 +3399,8 @@ class ChannelList {
         const upstreamStatus = Number(error?.upstreamStatus ?? payload.upstreamStatus);
         const status = Number(error?.status ?? payload.status);
         const code = String(error?.code || payload.code || payload.errorCode || '').trim();
-        if (Number.isFinite(upstreamStatus) && upstreamStatus > 0) return `upstream-${upstreamStatus}`;
-        if (Number.isFinite(status) && status > 0) return `http-${status}`;
+        if (Number.isFinite(upstreamStatus) && upstreamStatus > 0) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8287ede6f2b4", {defaultValue: "upstream-{{p0}}", p0:(upstreamStatus)}) : `upstream-${upstreamStatus}`);
+        if (Number.isFinite(status) && status > 0) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5c31b2d50627", {defaultValue: "http-{{p0}}", p0:(status)}) : `http-${status}`);
         return code.slice(0, 80) || 'resolve-failed';
     }
 
@@ -3882,8 +3882,8 @@ class ChannelList {
             // previous channel, so surface a clear message for the current failure.
             if (isCurrentSelection && window.app?.player?.showError) {
                 const msg = (err && err.liveProviderBackoff)
-                    ? 'The provider is momentarily saturated (one connection at a time).<br>Try again in a few seconds.'
-                    : "This channel isn't responding — the provider refused or timed out the connection (dead or unavailable channel).<br>Try another channel.";
+                    ? '<norva-i18n data-i18n="ui_web_0557194146de">The provider is momentarily saturated (one connection at a time).</norva-i18n><br><norva-i18n data-i18n="ui_web_3bee27d5eaac">Try again in a few seconds.</norva-i18n>'
+                    : '<norva-i18n data-i18n="ui_web_c0fafd706746">This channel isn\'t responding — the provider refused or timed out the connection (dead or unavailable channel).</norva-i18n><br><norva-i18n data-i18n="ui_web_79fef368337c">Try another channel.</norva-i18n>';
                 try { window.app.player.showError(msg); } catch (_) { /* best-effort */ }
             }
         });
@@ -3961,7 +3961,7 @@ class ChannelList {
     showEpgInfo(sourceId, channelId, streamId) {
         const channel = this.channels.find(c => c.id === channelId);
         if (!channel) {
-            alert('Channel not found');
+            alert((globalThis.NorvaI18n?.t("ui_web_7219971719b1", { defaultValue: "Channel not found" }) ?? 'Channel not found'));
             return;
         }
 
@@ -3971,10 +3971,10 @@ class ChannelList {
 
         if (!modal || !modalTitle || !modalBody) return;
 
-        modalTitle.textContent = `📋 ${channel.name} - EPG Info`;
+        modalTitle.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_50b3f51b3cbc", {defaultValue: "📋 {{p0}} - EPG Info", p0:(channel.name)}) : `📋 ${channel.name} - EPG Info`);
 
         // Get current and upcoming programs
-        let programsHtml = '<p class="no-programs">No EPG data available for this channel.</p>';
+        let programsHtml = '<p class="no-programs" data-i18n="ui_web_1c85a2b294e3">No EPG data available for this channel.</p>';
 
         if (window.app?.epgGuide) {
             const tvgKey = channel.tvgId || channel.name;
@@ -3986,8 +3986,8 @@ class ChannelList {
 
                 // Show current program
                 if (currentProgram) {
-                    const startTime = new Date(currentProgram.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    const endTime = new Date(currentProgram.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const startTime = new Date(currentProgram.start).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const endTime = new Date(currentProgram.end).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
                     programsHtml += `
                         <div class="epg-program current">
                             <div class="epg-program-time">${startTime} - ${endTime}</div>
@@ -4004,8 +4004,8 @@ class ChannelList {
                     .slice(0, 5);
 
                 upcoming.forEach(prog => {
-                    const startTime = new Date(prog.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    const endTime = new Date(prog.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const startTime = new Date(prog.start).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const endTime = new Date(prog.end).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
                     programsHtml += `
                         <div class="epg-program">
                             <div class="epg-program-time">${startTime} - ${endTime}</div>
@@ -4024,12 +4024,12 @@ class ChannelList {
                     <img class="channel-logo" src="${this.getChannelLogoSrc(channel)}"
                          onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'" />
                     <div class="channel-meta">
-                        <p><strong>Group:</strong> ${this.escapeHtml(channel.groupTitle || 'Uncategorized')}</p>
-                        <p><strong>Source:</strong> ${channel.sourceType}</p>
-                        ${channel.tvgId ? `<p><strong>TVG ID:</strong> ${this.escapeHtml(channel.tvgId)}</p>` : ''}
+                        <p><strong data-i18n="ui_web_aff83496e709">Group:</strong> ${this.escapeHtml(channel.groupTitle || (globalThis.NorvaI18n?.t("ui_web_8d40d123b2e1", { defaultValue: "Uncategorized" }) ?? 'Uncategorized'))}</p>
+                        <p><strong data-i18n="ui_web_c707ee4ecc24">Source:</strong> ${channel.sourceType}</p>
+                        ${channel.tvgId ? `<p><strong data-i18n="ui_web_ccb761848b1b">TVG ID:</strong> ${this.escapeHtml(channel.tvgId)}</p>` : ''}
                     </div>
                 </div>
-                <h4>Program Schedule</h4>
+                <h4 data-i18n="ui_web_d315f44f2fe9">Program Schedule</h4>
                 ${programsHtml}
             </div>
         `;
@@ -4060,11 +4060,11 @@ class ChannelList {
             if (isFavorite) {
                 btn.classList.add('active');
                 btn.innerHTML = '❤️';
-                btn.title = 'Remove from Favorites';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
             } else {
                 btn.classList.remove('active');
                 btn.innerHTML = '♡';
-                btn.title = 'Add to Favorites';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
             }
         });
 

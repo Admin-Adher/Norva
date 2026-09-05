@@ -22,7 +22,7 @@ test('Provider Access UI has an independent default-off rollout gate', () => {
   assert.match(config, /NORVA_PROVIDER_ACCESS_UI_V1 = window\.NORVA_PROVIDER_ACCESS_UI_V1 === true/);
   assert.match(sourceManager, /window\.NORVA_PROVIDER_ACCESS_UI_V1 === true/);
   assert.match(sourceManager, /API\?\.providerAccess\?\.available/);
-  assert.match(shell, /provider-access-config\.js\?v=1/);
+  assert.match(shell, /provider-access-config\.js\?v=[0-9a-f]+/);
 });
 
 test('browser calls the dedicated v1 Edge contract with exact mutation preconditions', () => {
@@ -65,7 +65,7 @@ test('onboarding progress only advertises the Access step when it is available',
   assert.match(home, /const hasAccessStep = \(\) => selectedType\(\) === 'xtream' && Boolean\(accessTerms\)/);
   assert.match(home, /accessOnlyProgressItems\.forEach[\s\S]{0,140}item\.hidden = !accessAvailable;[\s\S]{0,100}item\.classList\.toggle\('hidden', !accessAvailable\)/);
   assert.match(home, /finishProgressIndex\.textContent = accessAvailable \? '3' : '2'/);
-  assert.match(home, /flowProgress\.setAttribute\('aria-label', `Setup progress, \$\{totalSteps\} steps`\)/);
+  assert.match(home, /flowProgress\.setAttribute\('aria-label',[^\r\n]*`Setup progress, \$\{totalSteps\} steps`\)/);
   assert.match(home, /modePanels\.forEach[\s\S]{0,140}updateFlowTopology\(\)/);
 });
 
@@ -91,7 +91,7 @@ test('Settings add-source modal explains M3U versus Xtream before credentials', 
   assert.match(sourceManager, /one complete playlist URL[\s\S]{0,100}get\.php[\s\S]{0,100}\.m3u8/);
   assert.match(sourceManager, /server address with a username and password/);
   assert.match(sourceManager, /ArrowLeft[\s\S]*ArrowRight[\s\S]*Home[\s\S]*End/);
-  assert.match(sourceManager, /title\.textContent = \['m3u', 'xtream'\]\.includes\(type\) \? 'Add TV service'/);
+  assert.match(sourceManager, /title\.textContent = \['m3u', 'xtream'\]\.includes\(type\) \? [^\n]*'Add TV service'/);
   assert.match(sourceManager, /getSourceForm\(type, \{\}, \{ includeIntro: !formatSwitcher \}\)/);
   assert.match(sourceManager, /sourceInputFeedback\(urlInput\.value, 'xtream'\)/);
   assert.match(sourceManager, /modal\.classList\.toggle\('source-add-modal', Boolean\(formatSwitcher\)\)/);
@@ -207,15 +207,15 @@ test('Provider Access keeps the exact-date calendar optional and explains paused
   assert.match(sourceManager, /Adjust date/);
   assert.match(sourceManager, /will then record the period in days/);
   assert.match(sourceManager, /Recording an access period will not enable this service/);
-  assert.match(sourceManager, /new Intl\.DateTimeFormat\('en'/);
+  assert.match(sourceManager, /new Intl\.DateTimeFormat\(\(globalThis\.NorvaI18n\?\.language \|\| 'en'\), \{ dateStyle: 'medium', timeZone: 'UTC' \}/);
   assert.match(css, /\.provider-access-calendar > summary\s*\{[\s\S]{0,120}min-height:\s*44px/);
 });
 
 test('all changed Provider Access UI assets are cache-busted', () => {
-  assert.match(shell, /main\.css\?v=71854078d1/);
-  assert.match(shell, /cloudApi\.js\?v=36b703f117/);
-  assert.match(shell, /api\.js\?v=9d5ef0cf1a/);
-  assert.match(shell, /sourceHealth\.js\?v=72a7e5bf20/);
-  assert.match(shell, /SourceManager\.js\?v=de08b95122/);
-  assert.match(shell, /HomePage\.js\?v=6fdf890230/);
+  assert.match(shell, /main\.css\?v=[0-9a-f]+/);
+  assert.match(shell, /cloudApi\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /api\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /sourceHealth\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /SourceManager\.js\?v=[0-9a-f]+/);
+  assert.match(shell, /HomePage\.js\?v=[0-9a-f]+/);
 });

@@ -8,6 +8,10 @@
 
 const { escapeHtml, escapeAttr, jsonLd } = require('./format');
 
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const i18nAsset = asset => '/' + asset + '?v=' + crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname,'../../../public',asset),'utf8').replace(/\r\n/g,'\n')).digest('hex').slice(0,10);
 const SITE = 'https://norva.tv';
 const CSS_HREF = '/css/blog.css?v=1'; // hash:assets rewrites ?v= to a content hash at deploy
 const DEFAULT_OG = `${SITE}/img/devices/norva-device-tv.webp`;
@@ -16,6 +20,8 @@ const TRIAL_HREF = '/account.html?returnTo=%2Fapp%23home';
 const BYLINE = 'Norva Editorial Team';
 
 const commonHead = ({ title, description, canonical, robots, ogType, ogImage, jsonLdBlocks }) => `  <meta charset="UTF-8">
+  <script src="${i18nAsset('js/i18n.js')}"></script>
+  <link rel="stylesheet" href="${i18nAsset('css/i18n.css')}">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#05080f">
   <title>${escapeHtml(title)}</title>
@@ -41,30 +47,30 @@ ${jsonLdBlocks.map((b) => `  <script type="application/ld+json">\n${b}\n  </scri
   <script defer src="/js/marketing.js?v=1"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>`;
 
-const header = () => `  <a class="skip-link" href="#main-content">Skip to content</a>
+const header = () => `  <a class="skip-link" href="#main-content" data-i18n="ui_web_ac576a66d456">Skip to content</a>
   <header class="blog-nav">
-    <a class="brand" href="/" aria-label="Norva home">
+    <a class="brand" href="/" aria-label="Norva home" data-i18n-aria-label="ui_web_1a123bf0fced">
       <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
       <span>Norva</span>
     </a>
-    <nav class="nav-right" aria-label="Primary">
-      <a href="/blog/">Blog</a>
-      <a class="hide-sm" href="/#how-it-works">How it works</a>
-      <a class="cta" href="${TRIAL_HREF}" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    <nav class="nav-right" aria-label="Primary" data-i18n-aria-label="ui_web_efe10c80ec8a">
+      <a href="/blog/" data-i18n="ui_web_8c6bc099534a">Blog</a>
+      <a class="hide-sm" href="/#how-it-works" data-i18n="ui_web_9c870aa6e5e9">How it works</a>
+      <a class="cta" href="${TRIAL_HREF}" data-cta="blog-nav" data-auth-action data-i18n="ui_web_b1effd1ffed3">Start free trial</a>
     </nav>
   </header>`;
 
 const footer = () => `  <footer class="blog-footer">
     <div class="foot-inner">
-      <nav class="foot-links" aria-label="Footer">
-        <a href="/">Home</a>
-        <a href="/blog/">Blog</a>
-        <a href="/#features">Benefits</a>
-        <a href="/#pricing">Pricing</a>
-        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
-        <a href="/terms.html">Terms</a>
-        <a href="/privacy.html">Privacy</a>
-        <a href="/mentions-legales.html">Legal notice</a>
+      <nav class="foot-links" aria-label="Footer" data-i18n-aria-label="ui_web_26c87bb51e69">
+        <a href="/" data-i18n="ui_web_3a78695388b3">Home</a>
+        <a href="/blog/" data-i18n="ui_web_8c6bc099534a">Blog</a>
+        <a href="/#features" data-i18n="ui_web_d5b67bc930cd">Benefits</a>
+        <a href="/#pricing" data-i18n="ui_web_dfe95783edfe">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F" data-i18n="ui_web_be91940b79f4">Support</a>
+        <a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a>
+        <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a>
+        <a href="/mentions-legales.html" data-i18n="ui_web_1011b3a811f0">Legal notice</a>
       </nav>
       <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
     </div>
@@ -76,7 +82,7 @@ function breadcrumb(items) {
     if (last) return `<span aria-current="page">${escapeHtml(it.name)}</span>`;
     return `<a href="${escapeAttr(it.url)}">${escapeHtml(it.name)}</a>`;
   });
-  return `<nav class="breadcrumb" aria-label="Breadcrumb">${parts.join('<span class="sep">›</span>')}</nav>`;
+  return `<nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734">${parts.join('<span class="sep">›</span>')}</nav>`;
 }
 
 function breadcrumbJsonLd(items) {
@@ -128,8 +134,8 @@ function renderArticlePage(a) {
   // Table of contents from H2 headings (only when the article is long enough).
   const h2s = (a.headings || []).filter((h) => h.level === 2);
   const toc = h2s.length >= 3
-    ? `<nav class="toc" aria-label="On this page">
-      <strong>On this page</strong>
+    ? `<nav class="toc" aria-label="On this page" data-i18n-aria-label="ui_web_b5658fc8edda">
+      <strong data-i18n="ui_web_b5658fc8edda">On this page</strong>
       <ul>${h2s.map((h) => `<li><a href="#${escapeAttr(h.id)}">${escapeHtml(h.text)}</a></li>`).join('')}</ul>
     </nav>`
     : '';
@@ -138,7 +144,7 @@ function renderArticlePage(a) {
 
   const related = (a.related && a.related.length)
     ? `<section class="related">
-      <h2>Related reading</h2>
+      <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">
         ${a.related.map((r) => `<a class="card" href="/blog/${escapeAttr(r.slug)}/">
           ${r.cluster ? `<span class="tag">${escapeHtml(r.cluster)}</span>` : ''}
@@ -151,7 +157,7 @@ function renderArticlePage(a) {
 
   const sources = (a.sources && a.sources.length)
     ? `<section class="sources">
-      <h2>Sources</h2>
+      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
       <ul>${a.sources.map((s) => `<li><a href="${escapeAttr(s)}" target="_blank" rel="noopener">${escapeHtml(s)}</a></li>`).join('')}</ul>
     </section>`
     : '';
@@ -179,7 +185,7 @@ ${commonHead({
 ${header()}
   <main id="main-content">
     ${breadcrumb(crumbs)}
-    <article>
+    <article lang="en" dir="ltr">
       <div class="article-meta">
         ${a.cluster ? `<span class="tag">${escapeHtml(a.cluster)}</span>` : ''}
         <span>By ${escapeHtml(a.author && a.author.name ? a.author.name : BYLINE)}</span>
@@ -312,7 +318,7 @@ function renderIndexPage(articles) {
           <span class="hero-feature-scrim" aria-hidden="true"></span>
           <div class="hero-feature-copy">
             <div class="hero-feature-labels">
-              <span class="latest-label">Latest guide</span>
+              <span class="latest-label" data-i18n="ui_web_1f0a3e872f8c">Latest guide</span>
               ${featured.cluster ? `<span>${escapeHtml(featured.cluster)}</span>` : ''}
             </div>
             <h2>${escapeHtml(featured.title)}</h2>
@@ -320,13 +326,13 @@ function renderIndexPage(articles) {
           </div>
         </a>
       </article>`
-    : '<div class="hero-feature hero-feature-empty"><p>New guides are on the way.</p></div>';
+    : '<div class="hero-feature hero-feature-empty"><p data-i18n="ui_web_553a5c8b790b">New guides are on the way.</p></div>';
 
   const recentStories = recent.length
     ? `<section class="recent-section" aria-labelledby="recent-heading">
         <div class="section-heading compact-heading">
-          <div><span class="section-number" aria-hidden="true">01</span><h2 id="recent-heading">Recently published</h2></div>
-          <p>Fresh field notes from the Norva editorial desk.</p>
+          <div><span class="section-number" aria-hidden="true">01</span><h2 id="recent-heading" data-i18n="ui_web_5eda7c0bf89e">Recently published</h2></div>
+          <p data-i18n="ui_web_12e172074c67">Fresh field notes from the Norva editorial desk.</p>
         </div>
         <ol class="recent-list">
           ${recent.map((article, index) => `<li>
@@ -348,37 +354,37 @@ function renderIndexPage(articles) {
   const library = articles.length
     ? `<section class="library-section" id="library" aria-labelledby="library-heading">
         <div class="section-heading library-heading">
-          <div><span class="section-number" aria-hidden="true">02</span><h2 id="library-heading">Explore the full library</h2></div>
-          <p>Search by problem, workflow, device or topic.</p>
+          <div><span class="section-number" aria-hidden="true">02</span><h2 id="library-heading" data-i18n="ui_web_9fe4b2432b52">Explore the full library</h2></div>
+          <p data-i18n="ui_web_069c7140d8d4">Search by problem, workflow, device or topic.</p>
         </div>
         <form class="library-search" role="search" data-library-search>
-          <label for="blog-search">What do you want to solve?</label>
+          <label for="blog-search" data-i18n="ui_web_5d0331fea78f">What do you want to solve?</label>
           <div class="search-field">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"/></svg>
             <input id="blog-search" type="search" inputmode="search" autocomplete="off" placeholder="Try “subtitles”, “TV”, or “privacy”" aria-describedby="blog-search-hint" data-library-query>
-            <button type="button" class="search-clear" aria-label="Clear search" data-library-clear hidden>Clear</button>
+            <button type="button" class="search-clear" aria-label="Clear search" data-i18n-aria-label="ui_web_3b7ea51793e9" data-library-clear hidden data-i18n="ui_web_83b12c2216ef">Clear</button>
           </div>
-          <span id="blog-search-hint">Results update as you type. Choose a focus to narrow the library.</span>
+          <span id="blog-search-hint" data-i18n="ui_web_b3d0f7dc57f0">Results update as you type. Choose a focus to narrow the library.</span>
         </form>
-        <div class="topic-filters" aria-label="Filter guides by focus">
-          <button type="button" class="topic-chip is-active" data-topic-filter="all" aria-pressed="true">All guides</button>
+        <div class="topic-filters" aria-label="Filter guides by focus" data-i18n-aria-label="ui_web_88ee817a6507">
+          <button type="button" class="topic-chip is-active" data-topic-filter="all" aria-pressed="true" data-i18n="ui_web_0b5543efa44a">All guides</button>
           ${topicButtons}
         </div>
         <div class="library-status-row">
           <p class="library-status" role="status" aria-live="polite" data-library-status>${archiveCount} more guide${archiveCount === 1 ? '' : 's'} · newest first</p>
-          <button type="button" class="reset-filters" data-library-reset hidden>Reset filters</button>
+          <button type="button" class="reset-filters" data-library-reset hidden data-i18n="ui_web_10afa98480f2">Reset filters</button>
         </div>
         <div class="library-grid" data-library-grid>
           ${articles.map(renderLibraryCard).join('\n          ')}
         </div>
         <div class="no-results" data-library-empty hidden>
-          <h3>No guide matches that search yet.</h3>
-          <p>Try a device name, a shorter phrase, or browse all guides.</p>
-          <button type="button" data-library-empty-reset>Browse all guides</button>
+          <h3 data-i18n="ui_web_57fd1aa63698">No guide matches that search yet.</h3>
+          <p data-i18n="ui_web_0b7414a175e5">Try a device name, a shorter phrase, or browse all guides.</p>
+          <button type="button" data-library-empty-reset data-i18n="ui_web_86322e54d967">Browse all guides</button>
         </div>
-        <button type="button" class="load-more" data-library-more hidden>Show more guides</button>
+        <button type="button" class="load-more" data-library-more hidden data-i18n="ui_web_593fc2c41e47">Show more guides</button>
       </section>`
-    : '<p class="empty">Articles are on the way. Check back soon.</p>';
+    : '<p class="empty" data-i18n="ui_web_3133da40e003">Articles are on the way. Check back soon.</p>';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -401,12 +407,12 @@ ${header()}
     <div data-index-highlights>
       <section class="blog-hero" aria-labelledby="blog-title">
         <div class="blog-hero-copy">
-          <span class="eyebrow">Norva knowledge library</span>
-          <h1 class="page-title" id="blog-title">A practical operating manual for your <span>media library</span></h1>
+          <span class="eyebrow" data-i18n="ui_web_3b892c601a47">Norva knowledge library</span>
+          <h1 class="page-title" id="blog-title">A practical operating manual for your <span data-i18n="ui_web_9023afe1d1b1">media library</span></h1>
           <p>${escapeHtml(description)}</p>
-          <div class="hero-facts" aria-label="Blog publishing details">
+          <div class="hero-facts" aria-label="Blog publishing details" data-i18n-aria-label="ui_web_f3d010cd6d17">
             <span><strong>${articles.length}</strong> published guide${articles.length === 1 ? '' : 's'}</span>
-            <span>New every morning and evening</span>
+            <span data-i18n="ui_web_73dc02d4c5be">New every morning and evening</span>
           </div>
           <a class="hero-jump" href="#library">Explore the library ${arrowIcon}</a>
         </div>

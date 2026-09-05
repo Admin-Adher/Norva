@@ -22,6 +22,7 @@ ${source.slice(start, end)}
 http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (url.pathname === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(fixture); }
+    if (url.pathname === '/js/i18n.js' && process.argv.includes('--draft-runtime')) { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(fs.readFileSync(path.join(root,'../output/i18n/preview-runtime.js'))); }
     const file = path.resolve(root, '.' + decodeURIComponent(url.pathname));
     if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
         res.writeHead(404); return res.end();
@@ -29,4 +30,4 @@ http.createServer((req, res) => {
     const type = { '.css': 'text/css', '.js': 'text/javascript', '.html': 'text/html', '.svg': 'image/svg+xml' }[path.extname(file)] || 'application/octet-stream';
     res.setHeader('Content-Type', type + '; charset=utf-8');
     fs.createReadStream(file).pipe(res);
-}).listen(4179, '127.0.0.1', () => console.log('Language component preview: http://127.0.0.1:4179'));
+}).listen(Number(process.env.PORT) || 4179, '127.0.0.1', () => console.log('Language component preview ready'));

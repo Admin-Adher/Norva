@@ -30,7 +30,7 @@ test('account errors are classified and sign-out is cancel-first', () => {
   assert.doesNotMatch(account, /error_description'\)\s*\|\|/);
   assert.match(account, /function authErrorMessage\(error\)/);
   assert.match(account, /if \(!await confirmAccountSignOut\(out\)\) return/);
-  assert.match(account, /class="account-confirm-cancel secondary">Stay signed in</);
+  assert.match(account, /class="account-confirm-cancel secondary"[^>]*>Stay signed in</);
   assert.match(account, /dialog\.addEventListener\('cancel'/);
   assert.match(account, /opener\.focus\(\{ preventScroll: true \}\)/);
 });

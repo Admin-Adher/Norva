@@ -26,7 +26,7 @@ const MediaUtils = (() => {
         { re: /\b1440p?\b/i, label: '1440p', score: 4 },
         { re: /\b(fhd|1080p?)\b/i, label: '1080p', score: 3 },
         { re: /\b(hd|720p?)\b/i, label: '720p', score: 2 },
-        { re: /\b(sd|480p?|360p?)\b/i, label: 'SD', score: 1 }
+        { re: /\b(sd|480p?|360p?)\b/i, label: ('SD'), score: 1 }
     ];
 
     const LANGUAGE_LABELS = {
@@ -527,7 +527,7 @@ const MediaUtils = (() => {
         const title = cleanEpisodeReleaseName(raw, episodeLabel);
         const editorialTitle = title && !/^Episode\s*\d*$/i.test(title) ? title : '';
         if (coordinate) return editorialTitle ? `${coordinate} · ${editorialTitle}` : coordinate;
-        return editorialTitle || title || 'Episode';
+        return editorialTitle || title || (globalThis.NorvaI18n?.t("ui_web_b19c450b47d6", { defaultValue: "Episode" }) ?? 'Episode');
     }
 
     function parseVersionInfo(name) {
@@ -814,10 +814,10 @@ const MediaUtils = (() => {
             ? [...new Set(audioLanguages.map(c => String(c || '').toLowerCase().trim()).filter(Boolean))]
             : [];
         if (audio.length === 1) return languageDisplayFull(audio[0]);
-        if (audio.length >= 2 && audio.length <= 3) return `Multi: ${audio.map(languageDisplay).join('/')}`;
-        if (audio.length > 3) return 'Multi';
+        if (audio.length >= 2 && audio.length <= 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_18bb799e2409", {defaultValue: "Multi: {{p0}}", p0:(audio.map(languageDisplay).join('/'))}) : `Multi: ${audio.map(languageDisplay).join('/')}`);
+        if (audio.length > 3) return (globalThis.NorvaI18n?.t("ui_web_dea894b83045", { defaultValue: "Multi" }) ?? 'Multi');
         const version = Array.isArray(versionLanguages) ? versionLanguages.map(t => String(t || '').toLowerCase()) : [];
-        if (version.some(t => t === 'multi')) return 'Multi';
+        if (version.some(t => t === 'multi')) return (globalThis.NorvaI18n?.t("ui_web_dea894b83045", { defaultValue: "Multi" }) ?? 'Multi');
         if (version.some(t => /^(vf|vff|vfq|truefrench|french)$/.test(t))) return languageDisplayFull('fr');
         if (version.some(t => /^(en|eng|english)$/.test(t))) return languageDisplayFull('en');
         if (version.some(t => /^(es|spa|spanish)$/.test(t))) return languageDisplayFull('es');
@@ -1048,7 +1048,7 @@ const MediaUtils = (() => {
 
     function versionLanguageBadge(item, prefs = {}) {
         const validation = audioLanguageValidationStatus(item);
-        if (!hasDisplayableAudioLanguage(validation)) return 'Audio pending';
+        if (!hasDisplayableAudioLanguage(validation)) return (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending');
         const analysis = analyzeLanguageCompatibility(item, prefs);
         const candidates = [];
         let audioCandidate = '';
@@ -1056,8 +1056,8 @@ const MediaUtils = (() => {
         if (analysis.audio.requested) {
             if (analysis.audio.state === 'confirmed') {
                 audioCandidate = hasVerifiedAudioLanguage(validation)
-                    ? `Audio ${languageDisplay(analysis.audio.requested)} confirmed`
-                    : `Audio ${languageDisplay(analysis.audio.requested)}`;
+                    ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_91a6be117b0e", {defaultValue: "Audio {{p0}} confirmed", p0:(languageDisplay(analysis.audio.requested))}) : `Audio ${languageDisplay(analysis.audio.requested)} confirmed`)
+                    : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_00d0b35b71f0", {defaultValue: "Audio {{p0}}", p0:(languageDisplay(analysis.audio.requested))}) : `Audio ${languageDisplay(analysis.audio.requested)}`);
             }
             else if (analysis.audio.state === 'confirmed_absent') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} unavailable`;
         }
@@ -1082,7 +1082,7 @@ const MediaUtils = (() => {
             []
         );
         if (detected) return detected;
-        return 'Audio unknown';
+        return (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
     }
 
     /**
@@ -1226,7 +1226,7 @@ const MediaUtils = (() => {
         // release-name prefixes may describe a market/category, not the soundtrack.
         parts.push(versionLanguageBadge(item, {}));
         if (item.container_extension) parts.push(item.container_extension);
-        return parts.filter(Boolean).join(' - ') || 'Version';
+        return parts.filter(Boolean).join(' - ') || (globalThis.NorvaI18n?.t("ui_web_dd167905de0d", { defaultValue: "Version" }) ?? 'Version');
     }
 
     // === Filter persistence ===
@@ -1584,7 +1584,7 @@ const MediaUtils = (() => {
         ov.className = 'trailer-lightbox';
         ov.innerHTML = `
             <div class="trailer-lightbox-inner">
-                <button type="button" class="trailer-lightbox-close" aria-label="Close trailer">✕</button>
+                <button type="button" class="trailer-lightbox-close" aria-label="Close trailer" data-i18n-aria-label="ui_web_88c639ab68c1">✕</button>
                 <iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(youtubeKey)}?autoplay=1&rel=0&modestbranding=1"
                     title="${escapeHtml(title || 'Trailer')}"
                     allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
@@ -1661,10 +1661,10 @@ const MediaUtils = (() => {
     // fluidity as a colour dot. Market names reuse the app's languageDisplayFull (English,
     // consistent with the rest of the UI) plus a small map for the non-ISO IPTV tokens.
     const VERSION_TIERS = {
-        direct:          { key: 'direct',    label: 'Lecture directe', cls: 'tier-direct' },
-        remux:           { key: 'remux',     label: 'Remux',           cls: 'tier-remux' },
-        video_transcode: { key: 'transcode', label: 'Transcode',       cls: 'tier-transcode' },
-        transcode:       { key: 'transcode', label: 'Transcode',       cls: 'tier-transcode' }
+        direct:          { key: 'direct',    label: (globalThis.NorvaI18n?.t("ui_web_ce526b30553b", { defaultValue: "Lecture directe" }) ?? 'Lecture directe'), cls: 'tier-direct' },
+        remux:           { key: 'remux',     label: (globalThis.NorvaI18n?.t("ui_web_4f60ef573dea", { defaultValue: "Remux" }) ?? 'Remux'),           cls: 'tier-remux' },
+        video_transcode: { key: 'transcode', label: (globalThis.NorvaI18n?.t("ui_web_84c54b3249e6", { defaultValue: "Transcode" }) ?? 'Transcode'),       cls: 'tier-transcode' },
+        transcode:       { key: 'transcode', label: (globalThis.NorvaI18n?.t("ui_web_84c54b3249e6", { defaultValue: "Transcode" }) ?? 'Transcode'),       cls: 'tier-transcode' }
     };
 
     // Non-ISO market/platform tokens seen in the live catalogue that languageDisplayFull /
@@ -1749,7 +1749,7 @@ const MediaUtils = (() => {
         if (tok && MARKET_LABELS[tok]) return { label: MARKET_LABELS[tok] };
         const tag = parseLeadingRegionTag(src);
         if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
-            return { label: `${languageDisplayFull(tag.subLang)} subtitles`, kind: 'subtitle' };
+            return { label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8a46e84aa06f", {defaultValue: "{{p0}} subtitles", p0:(languageDisplayFull(tag.subLang))}) : `${languageDisplayFull(tag.subLang)} subtitles`), kind: 'subtitle' };
         }
         if (tag && tag.audioLang) {
             let label = languageDisplayFull(tag.audioLang);
@@ -1845,12 +1845,12 @@ const MediaUtils = (() => {
         const tracks = state.tracks || [];
         const langs = versionTrackLanguages(tracks);
         const count = tracks.length;
-        if (!count) return 'Audio unavailable';
-        if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : 'Audio';
+        if (!count) return (globalThis.NorvaI18n?.t("ui_web_e39189e8bd71", { defaultValue: "Audio unavailable" }) ?? 'Audio unavailable');
+        if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : (globalThis.NorvaI18n?.t("ui_web_bc1b88907d3b", { defaultValue: "Audio" }) ?? 'Audio');
         if (count <= 3 && langs.length === count) return langs.map(languageDisplay).join(' / ');
         // Large multi-audio files can expose dozens of tracks. Describe the
         // available language choice instead of implying the first track is primary.
-        if (langs.length > 3) return `${langs.length} audio languages`;
+        if (langs.length > 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
         const first = normalizeLanguagePreference(
             tracks[0] && (tracks[0].lang || tracks[0].language || tracks[0].iso_639_1 || tracks[0].iso639 || tracks[0].code || '')
         );
@@ -1858,35 +1858,35 @@ const MediaUtils = (() => {
             return `${languageDisplayFull(first)} +${count - 1}`;
         }
         if (langs.length === 1) return `${languageDisplayFull(langs[0])} +${Math.max(1, count - 1)}`;
-        return `${count} audios`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0302c460b29a", {defaultValue: "{{p0}} audios", p0:(count)}) : `${count} audios`);
     }
 
     function versionAudioLanguageHeadline(state) {
         if (!state.known) return '';
         const langs = state.languages || [];
-        if (!langs.length) return 'Audio unknown';
+        if (!langs.length) return (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
         if (langs.length === 1) return languageDisplayFull(langs[0]);
         if (langs.length <= 3) return langs.map(languageDisplay).join(' / ');
-        return `${langs.length} audio languages`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
     }
 
     function versionSubtitleLabel(item, state, languageState) {
         if (state.known && state.tracks.length) {
             const langs = versionTrackLanguages(state.tracks);
-            if (state.tracks.length > 3) return `${state.tracks.length} ST`;
-            if (langs.length === 1) return `ST ${languageDisplay(langs[0])}`;
-            if (langs.length >= 2 && langs.length <= 3) return `ST ${langs.map(languageDisplay).join('/')}`;
-            return `${state.tracks.length} ST`;
+            if (state.tracks.length > 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0a8030822f73", {defaultValue: "{{p0}} ST", p0:(state.tracks.length)}) : `${state.tracks.length} ST`);
+            if (langs.length === 1) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_eeb31fc3ce6f", {defaultValue: "ST {{p0}}", p0:(languageDisplay(langs[0]))}) : `ST ${languageDisplay(langs[0])}`);
+            if (langs.length >= 2 && langs.length <= 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_eeb31fc3ce6f", {defaultValue: "ST {{p0}}", p0:(langs.map(languageDisplay).join('/'))}) : `ST ${langs.map(languageDisplay).join('/')}`);
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0a8030822f73", {defaultValue: "{{p0}} ST", p0:(state.tracks.length)}) : `${state.tracks.length} ST`);
         }
         if (languageState.known && languageState.languages.length) {
             const langs = languageState.languages;
-            if (langs.length > 3) return `${langs.length} ST`;
-            if (langs.length === 1) return `ST ${languageDisplay(langs[0])}`;
-            return `ST ${langs.map(languageDisplay).join('/')}`;
+            if (langs.length > 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0a8030822f73", {defaultValue: "{{p0}} ST", p0:(langs.length)}) : `${langs.length} ST`);
+            if (langs.length === 1) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_eeb31fc3ce6f", {defaultValue: "ST {{p0}}", p0:(languageDisplay(langs[0]))}) : `ST ${languageDisplay(langs[0])}`);
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_eeb31fc3ce6f", {defaultValue: "ST {{p0}}", p0:(langs.map(languageDisplay).join('/'))}) : `ST ${langs.map(languageDisplay).join('/')}`);
         }
         const tag = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
         if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
-            return `ST ${languageDisplay(tag.subLang)} · burned-in`;
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_02fea12001f8", {defaultValue: "ST {{p0}} · burned-in", p0:(languageDisplay(tag.subLang))}) : `ST ${languageDisplay(tag.subLang)} · burned-in`);
         }
         return '';
     }
@@ -1936,8 +1936,8 @@ const MediaUtils = (() => {
         // exact observed soundtrack. Prefix/category/platform text is metadata,
         // never audio evidence; "Netflix" and "Arabic subtitles" are not audio.
         const headline = !hasDisplayableAudioLanguage(audioValidation)
-            ? 'Audio pending'
-            : observedAudio || 'Audio unknown';
+            ? (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending')
+            : observedAudio || (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
         const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== prefixAudioLabel
             ? marketLabel
             : '';

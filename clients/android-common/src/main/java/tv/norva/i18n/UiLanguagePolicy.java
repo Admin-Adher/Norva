@@ -20,6 +20,11 @@ public final class UiLanguagePolicy {
         }
     }
 
+    /** Import an Android 6-12 preference once, without replacing a system-owned choice. */
+    public static String legacyPreferenceToImport(String stored, boolean migrated, boolean systemHasChoice) {
+        return migrated || systemHasChoice ? "" : normalize(stored);
+    }
+
     public static String resolve(String preference, String[] deviceLanguages) {
         String explicit = normalize(preference);
         if (!explicit.isEmpty()) return explicit;

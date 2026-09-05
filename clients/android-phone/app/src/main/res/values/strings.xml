@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Norva</string>
+    <string name="app_name" translatable="false">Norva</string>
 
     <!-- Native Google Sign-In: the WEB OAuth client id (...apps.googleusercontent.com)
          from Google Cloud, used as the Credential Manager serverClientId. Leave empty
@@ -116,208 +116,211 @@
     <string name="player_pip_play_pause">Play or pause</string>
 
     <!-- Native Downloads library. -->
-    <string name="downloads_kicker" translatable="false">NORVA OFFLINE</string>
-    <string name="downloads_title" translatable="false">Downloads</string>
-    <string name="downloads_close" translatable="false">Close</string>
+    <string name="downloads_kicker">NORVA OFFLINE</string>
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_close">Close</string>
     <string name="downloads_close_glyph" translatable="false">×</string>
     <string name="downloads_play_glyph" translatable="false">▶</string>
     <string name="downloads_expand_glyph" translatable="false">⌄</string>
     <string name="downloads_collapse_glyph" translatable="false">⌃</string>
-    <string name="downloads_overview" translatable="false">OFFLINE OVERVIEW</string>
-    <string name="downloads_overview_checking" translatable="false">Checking your library</string>
-    <string name="downloads_overview_loading_caption" translatable="false">Looking for saved titles and active transfers…</string>
-    <string name="downloads_overview_ready" translatable="false">Ready when you are</string>
-    <string name="downloads_overview_moving" translatable="false">Preparing your next watch</string>
-    <string name="downloads_overview_attention" translatable="false">A download needs attention</string>
-    <string name="downloads_overview_empty" translatable="false">Build your offline library</string>
-    <string name="downloads_overview_moving_caption" translatable="false">Downloads continue safely in the background.</string>
-    <string name="downloads_overview_attention_caption" translatable="false">Your saved titles stay available while you fix the item below.</string>
-    <string name="downloads_overview_empty_caption" translatable="false">Save a movie or episode before you go offline.</string>
-    <plurals name="downloads_overview_saved_titles" translatable="false">
+    <string name="downloads_overview">OFFLINE OVERVIEW</string>
+    <string name="downloads_overview_checking">Checking your library</string>
+    <string name="downloads_overview_loading_caption">Looking for saved titles and active transfers…</string>
+    <string name="downloads_overview_ready">Ready when you are</string>
+    <string name="downloads_overview_moving">Preparing your next watch</string>
+    <string name="downloads_overview_attention">A download needs attention</string>
+    <string name="downloads_overview_empty">Build your offline library</string>
+    <string name="downloads_overview_moving_caption">Downloads continue safely in the background.</string>
+    <string name="downloads_overview_attention_caption">Your saved titles stay available while you fix the item below.</string>
+    <string name="downloads_overview_empty_caption">Save a movie or episode before you go offline.</string>
+    <plurals name="downloads_overview_saved_titles">
         <item quantity="one">%1$d saved title is ready to watch without a connection.</item>
         <item quantity="other">%1$d saved titles are ready to watch without a connection.</item>
     </plurals>
-    <string name="downloads_ready" translatable="false">Ready</string>
-    <string name="downloads_moving" translatable="false">Moving</string>
-    <string name="downloads_attention" translatable="false">Attention</string>
+    <string name="downloads_ready">Ready</string>
+    <string name="downloads_moving">Moving</string>
+    <string name="downloads_attention">Attention</string>
     <string name="downloads_metric_pending" translatable="false">—</string>
-    <string name="downloads_storage_used" translatable="false">%1$s used</string>
-    <string name="downloads_storage_free" translatable="false">%1$s free</string>
-    <string name="downloads_storage_description" translatable="false">Offline storage: %1$s used, %2$s free</string>
-    <string name="downloads_rules" translatable="false">Download rules</string>
-    <string name="downloads_rules_summary" translatable="false">%1$s · %2$s</string>
-    <string name="downloads_rules_wifi_only_on" translatable="false">Wi-Fi only</string>
-    <string name="downloads_rules_wifi_only_off" translatable="false">Mobile data allowed</string>
-    <string name="downloads_rules_smart_on" translatable="false">Smart downloads on</string>
-    <string name="downloads_rules_smart_off" translatable="false">Smart downloads off</string>
-    <string name="downloads_rules_description" translatable="false">Download rules. %1$s. %2$s. Double tap to %3$s</string>
-    <string name="downloads_rules_expanded" translatable="false">Download rules expanded</string>
-    <string name="downloads_rules_collapsed" translatable="false">Download rules collapsed</string>
-    <string name="downloads_wifi_only" translatable="false">Wi-Fi only</string>
-    <string name="downloads_wifi_only_subtitle" translatable="false">Only download over Wi-Fi — saves mobile data</string>
-    <string name="downloads_wifi_only_description" translatable="false">Only download over Wi-Fi; saves mobile data</string>
-    <string name="downloads_wifi_only_on" translatable="false">Wi-Fi only on</string>
-    <string name="downloads_wifi_only_off" translatable="false">Wi-Fi only off</string>
-    <string name="downloads_smart" translatable="false">Smart downloads</string>
-    <string name="downloads_smart_subtitle" translatable="false">When an episode finishes, queue the next one automatically</string>
-    <string name="downloads_smart_description" translatable="false">Queue the next episode automatically</string>
-    <string name="downloads_smart_on" translatable="false">Smart downloads on</string>
-    <string name="downloads_smart_off" translatable="false">Smart downloads off</string>
-    <string name="downloads_state_on" translatable="false">On</string>
-    <string name="downloads_state_off" translatable="false">Off</string>
-    <string name="downloads_toggle_description" translatable="false">%1$s. %2$s</string>
-    <string name="downloads_toggle_description_with_state" translatable="false">%1$s. %2$s. %3$s</string>
-    <string name="downloads_turn_on" translatable="false">Turn on %1$s</string>
-    <string name="downloads_turn_off" translatable="false">Turn off %1$s</string>
-    <string name="downloads_clear_all" translatable="false">Clear all</string>
-    <string name="downloads_clear_all_description" translatable="false">Clear all downloads</string>
-    <string name="downloads_clear_all_disabled_description" translatable="false">Clear all downloads. Disabled because there are no downloads</string>
-    <string name="downloads_loading" translatable="false">Loading your offline library…</string>
-    <string name="downloads_empty" translatable="false">No downloads yet.\nTap Download on a movie or episode to watch it offline.</string>
+    <string name="downloads_storage_used">%1$s used</string>
+    <string name="downloads_storage_free">%1$s free</string>
+    <string name="downloads_storage_description">Offline storage: %1$s used, %2$s free</string>
+    <string name="downloads_rules">Download rules</string>
+    <string name="downloads_rules_summary">%1$s · %2$s</string>
+    <string name="downloads_rules_wifi_only_on">Wi-Fi only</string>
+    <string name="downloads_rules_wifi_only_off">Mobile data allowed</string>
+    <string name="downloads_rules_smart_on">Smart downloads on</string>
+    <string name="downloads_rules_smart_off">Smart downloads off</string>
+    <string name="downloads_rules_description">Download rules. %1$s. %2$s. Double tap to %3$s</string>
+    <string name="downloads_rules_expanded">Download rules expanded</string>
+    <string name="downloads_rules_collapsed">Download rules collapsed</string>
+    <string name="downloads_wifi_only">Wi-Fi only</string>
+    <string name="downloads_wifi_only_subtitle">Only download over Wi-Fi — saves mobile data</string>
+    <string name="downloads_wifi_only_description">Only download over Wi-Fi; saves mobile data</string>
+    <string name="downloads_wifi_only_on">Wi-Fi only on</string>
+    <string name="downloads_wifi_only_off">Wi-Fi only off</string>
+    <string name="downloads_smart">Smart downloads</string>
+    <string name="downloads_smart_subtitle">When an episode finishes, queue the next one automatically</string>
+    <string name="downloads_smart_description">Queue the next episode automatically</string>
+    <string name="downloads_smart_on">Smart downloads on</string>
+    <string name="downloads_smart_off">Smart downloads off</string>
+    <string name="downloads_state_on">On</string>
+    <string name="downloads_state_off">Off</string>
+    <string name="downloads_toggle_description">%1$s. %2$s</string>
+    <string name="downloads_toggle_description_with_state">%1$s. %2$s. %3$s</string>
+    <string name="downloads_turn_on">Turn on %1$s</string>
+    <string name="downloads_turn_off">Turn off %1$s</string>
+    <string name="downloads_clear_all">Clear all</string>
+    <string name="downloads_clear_all_description">Clear all downloads</string>
+    <string name="downloads_clear_all_disabled_description">Clear all downloads. Disabled because there are no downloads</string>
+    <string name="downloads_loading">Loading your offline library…</string>
+    <string name="downloads_empty">No downloads yet.\nTap Download on a movie or episode to watch it offline.</string>
 
-    <plurals name="downloads_summary_titles" translatable="false">
+    <plurals name="downloads_summary_titles">
         <item quantity="one">%1$d title · %2$s used · %3$s free</item>
         <item quantity="other">%1$d titles · %2$s used · %3$s free</item>
     </plurals>
-    <string name="downloads_active" translatable="false">Downloading %1$s — %2$d%%</string>
-    <plurals name="downloads_active_with_queue" translatable="false">
+    <string name="downloads_active">Downloading %1$s — %2$d%%</string>
+    <plurals name="downloads_active_with_queue">
         <item quantity="one">Downloading %1$s — %2$d%% · %3$d in queue</item>
         <item quantity="other">Downloading %1$s — %2$d%% · %3$d in queue</item>
     </plurals>
-    <plurals name="downloads_in_queue" translatable="false">
+    <plurals name="downloads_in_queue">
         <item quantity="one">%1$d in queue</item>
         <item quantity="other">%1$d in queue</item>
     </plurals>
-    <string name="downloads_queue_waiting_wifi" translatable="false">%1$s · waiting for Wi-Fi</string>
-    <string name="downloads_refresh_failed" translatable="false">Downloads could not refresh. Try again.</string>
-    <plurals name="downloads_a11y_progress" translatable="false">
+    <string name="downloads_queue_waiting_wifi">%1$s · waiting for Wi-Fi</string>
+    <string name="downloads_refresh_failed">Downloads could not refresh. Try again.</string>
+    <plurals name="downloads_a11y_progress">
         <item quantity="one">%1$s download %2$d percent</item>
         <item quantity="other">%1$s download %2$d percent</item>
     </plurals>
-    <string name="downloads_a11y_ready_offline" translatable="false">%1$s is ready offline</string>
-    <string name="downloads_a11y_failed" translatable="false">%1$s download failed. Check your connection and try again.</string>
-    <string name="downloads_fallback_title" translatable="false">Title</string>
-    <plurals name="downloads_progress_description" translatable="false">
+    <string name="downloads_a11y_ready_offline">%1$s is ready offline</string>
+    <string name="downloads_a11y_failed">%1$s download failed. Check your connection and try again.</string>
+    <string name="downloads_fallback_title">Title</string>
+    <plurals name="downloads_progress_description">
         <item quantity="one">%1$s download, %2$d percent</item>
         <item quantity="other">%1$s download, %2$d percent</item>
     </plurals>
 
-    <string name="downloads_active_transfer" translatable="false">Active transfer</string>
-    <string name="downloads_first_in_queue" translatable="false">First in queue</string>
-    <string name="downloads_paused_focus" translatable="false">Paused — resume when you are ready</string>
-    <string name="downloads_waiting_wifi_focus" translatable="false">Waiting for Wi-Fi</string>
-    <string name="downloads_ordered_queue" translatable="false">Up next</string>
-    <string name="downloads_ready_offline" translatable="false">Ready offline</string>
-    <string name="downloads_needs_attention" translatable="false">Needs attention</string>
-    <string name="downloads_attention_label" translatable="false">ACTION NEEDED</string>
-    <plurals name="downloads_queue_count" translatable="false">
+    <string name="downloads_active_transfer">Active transfer</string>
+    <string name="downloads_first_in_queue">First in queue</string>
+    <string name="downloads_paused_focus">Paused — resume when you are ready</string>
+    <string name="downloads_waiting_wifi_focus">Waiting for Wi-Fi</string>
+    <string name="downloads_ordered_queue">Up next</string>
+    <string name="downloads_ready_offline">Ready offline</string>
+    <string name="downloads_needs_attention">Needs attention</string>
+    <string name="downloads_attention_label">ACTION NEEDED</string>
+    <plurals name="downloads_queue_count">
         <item quantity="one">%1$d title on deck</item>
         <item quantity="other">%1$d titles on deck</item>
     </plurals>
-    <plurals name="downloads_ready_count" translatable="false">
+    <plurals name="downloads_ready_count">
         <item quantity="one">%1$d saved title</item>
         <item quantity="other">%1$d saved titles</item>
     </plurals>
-    <plurals name="downloads_attention_count" translatable="false">
+    <plurals name="downloads_attention_count">
         <item quantity="one">%1$d item to review</item>
         <item quantity="other">%1$d items to review</item>
     </plurals>
-    <string name="downloads_state_downloading" translatable="false">DOWNLOADING</string>
-    <string name="downloads_state_paused" translatable="false">PAUSED</string>
-    <string name="downloads_state_queued" translatable="false">QUEUED</string>
-    <string name="downloads_state_waiting_wifi" translatable="false">WAITING FOR WI-FI</string>
-    <string name="downloads_paused_overview" translatable="false">Paused %1$s — %2$d%%</string>
-    <plurals name="downloads_paused_with_pending" translatable="false">
+    <string name="downloads_state_downloading">DOWNLOADING</string>
+    <string name="downloads_state_paused">PAUSED</string>
+    <string name="downloads_state_queued">QUEUED</string>
+    <string name="downloads_state_waiting_wifi">WAITING FOR WI-FI</string>
+    <string name="downloads_paused_overview">Paused %1$s — %2$d%%</string>
+    <plurals name="downloads_paused_with_pending">
         <item quantity="one">%1$s · %2$d title on deck</item>
         <item quantity="other">%1$s · %2$d titles on deck</item>
     </plurals>
 
-    <plurals name="downloads_episode_count" translatable="false">
+    <plurals name="downloads_episode_count">
         <item quantity="one">%1$d episode</item>
         <item quantity="other">%1$d episodes</item>
     </plurals>
-    <string name="downloads_season_number" translatable="false">Season %1$d</string>
-    <string name="downloads_episodes" translatable="false">Episodes</string>
-    <string name="downloads_episode" translatable="false">Episode</string>
-    <string name="downloads_episode_number" translatable="false">Episode %1$d</string>
-    <string name="downloads_episode_short_title" translatable="false">E%1$d · %2$s</string>
-    <string name="downloads_state_collapsed" translatable="false">Collapsed</string>
-    <string name="downloads_state_expanded" translatable="false">Expanded</string>
-    <string name="downloads_expand" translatable="false">expand</string>
-    <string name="downloads_collapse" translatable="false">collapse</string>
-    <string name="downloads_section_description" translatable="false">%1$s. %2$s. %3$s. Double tap to %4$s</string>
-    <string name="downloads_section_expanded" translatable="false">%1$s expanded</string>
-    <string name="downloads_section_collapsed" translatable="false">%1$s collapsed</string>
+    <string name="downloads_season_number">Season %1$d</string>
+    <string name="downloads_episodes">Episodes</string>
+    <string name="downloads_episode">Episode</string>
+    <string name="downloads_episode_number">Episode %1$d</string>
+    <string name="downloads_episode_short_title">E%1$d · %2$s</string>
+    <string name="downloads_state_collapsed">Collapsed</string>
+    <string name="downloads_state_expanded">Expanded</string>
+    <string name="downloads_expand">expand</string>
+    <string name="downloads_collapse">collapse</string>
+    <string name="downloads_section_description">%1$s. %2$s. %3$s. Double tap to %4$s</string>
+    <string name="downloads_section_expanded">%1$s expanded</string>
+    <string name="downloads_section_collapsed">%1$s collapsed</string>
 
-    <string name="downloads_action_play" translatable="false">Play</string>
-    <string name="downloads_action_delete" translatable="false">Delete</string>
-    <string name="downloads_action_pause" translatable="false">Pause</string>
-    <string name="downloads_action_cancel" translatable="false">Cancel</string>
-    <string name="downloads_action_resume" translatable="false">Resume</string>
-    <string name="downloads_action_mobile_data" translatable="false">Mobile data</string>
-    <string name="downloads_action_allow_mobile_data" translatable="false">Allow mobile data for</string>
-    <string name="downloads_action_move_earlier" translatable="false">Move earlier</string>
-    <string name="downloads_action_move_later" translatable="false">Move later</string>
-    <string name="downloads_action_retry" translatable="false">Retry</string>
-    <string name="downloads_action_manage" translatable="false">Manage</string>
-    <string name="downloads_action_done" translatable="false">Done</string>
-    <string name="downloads_action_for_title" translatable="false">%1$s %2$s</string>
-    <string name="downloads_action_cancel_download" translatable="false">Cancel download</string>
-    <string name="downloads_action_delete_all" translatable="false">Delete all</string>
-    <string name="downloads_action_keep" translatable="false">Keep</string>
-    <string name="downloads_action_keep_description" translatable="false">Keep downloads</string>
-    <string name="downloads_manage_show_description" translatable="false">Show delete controls for ready titles</string>
-    <string name="downloads_manage_hide_description" translatable="false">Hide delete controls for ready titles</string>
-    <string name="downloads_manage_shown" translatable="false">Delete controls shown</string>
-    <string name="downloads_manage_hidden" translatable="false">Delete controls hidden</string>
-    <string name="downloads_ready_gesture_hint" translatable="false">Tap to watch or open a series. Press and hold a title to manage it.</string>
-    <string name="downloads_ready_movie_description" translatable="false">Play %1$s. Press and hold to manage this movie.</string>
-    <string name="downloads_ready_series_description" translatable="false">Open %1$s, %2$d saved episodes. Press and hold to manage this series.</string>
-    <string name="downloads_ready_episode_description" translatable="false">Play %1$s. Press and hold to manage this episode.</string>
-    <string name="downloads_long_press_delete" translatable="false">Delete %1$s</string>
-    <string name="downloads_long_press_delete_series" translatable="false">Delete saved episodes of %1$s</string>
-    <string name="downloads_delete_series_description" translatable="false">Delete all saved episodes of %1$s</string>
-    <string name="downloads_series_details" translatable="false">SERIES DETAILS</string>
-    <string name="downloads_series_opened" translatable="false">%1$s episodes opened</string>
-    <string name="downloads_close_series" translatable="false">Close series episodes</string>
+    <string name="downloads_action_play">Play</string>
+    <string name="downloads_action_delete">Delete</string>
+    <string name="downloads_action_pause">Pause</string>
+    <string name="downloads_action_cancel">Cancel</string>
+    <string name="downloads_action_resume">Resume</string>
+    <string name="downloads_action_mobile_data">Mobile data</string>
+    <string name="downloads_action_allow_mobile_data">Allow mobile data for</string>
+    <string name="downloads_action_move_earlier">Move earlier</string>
+    <string name="downloads_action_move_later">Move later</string>
+    <string name="downloads_action_retry">Retry</string>
+    <string name="downloads_action_manage">Manage</string>
+    <string name="downloads_action_done">Done</string>
+    <string name="downloads_action_for_title">%1$s %2$s</string>
+    <string name="downloads_action_cancel_download">Cancel download</string>
+    <string name="downloads_action_delete_all">Delete all</string>
+    <string name="downloads_action_keep">Keep</string>
+    <string name="downloads_action_keep_description">Keep downloads</string>
+    <string name="downloads_manage_show_description">Show delete controls for ready titles</string>
+    <string name="downloads_manage_hide_description">Hide delete controls for ready titles</string>
+    <string name="downloads_manage_shown">Delete controls shown</string>
+    <string name="downloads_manage_hidden">Delete controls hidden</string>
+    <string name="downloads_ready_gesture_hint">Tap to watch or open a series. Press and hold a title to manage it.</string>
+    <string name="downloads_ready_movie_description">Play %1$s. Press and hold to manage this movie.</string>
+    <string name="downloads_ready_series_description">Open %1$s, %2$d saved episodes. Press and hold to manage this series.</string>
+    <string name="downloads_ready_episode_description">Play %1$s. Press and hold to manage this episode.</string>
+    <string name="downloads_long_press_delete">Delete %1$s</string>
+    <string name="downloads_long_press_delete_series">Delete saved episodes of %1$s</string>
+    <string name="downloads_delete_series_description">Delete all saved episodes of %1$s</string>
+    <string name="downloads_series_details">SERIES DETAILS</string>
+    <string name="downloads_series_opened">%1$s episodes opened</string>
+    <string name="downloads_close_series">Close series episodes</string>
 
-    <string name="downloads_mutation_paused" translatable="false">Download paused</string>
-    <string name="downloads_mutation_resumed" translatable="false">Download resumed</string>
-    <string name="downloads_mutation_mobile_data_allowed" translatable="false">Mobile data allowed for this download</string>
-    <string name="downloads_mutation_moved_earlier" translatable="false">Moved earlier in the queue</string>
-    <string name="downloads_mutation_moved_later" translatable="false">Moved later in the queue</string>
-    <string name="downloads_mutation_retry_queued" translatable="false">Download queued to retry</string>
-    <string name="downloads_mutation_removal_requested" translatable="false">Removal requested</string>
-    <string name="downloads_mutation_removing_all" translatable="false">Removing all downloads</string>
-    <string name="downloads_mutation_failed" translatable="false">Could not update this download. Try again.</string>
+    <string name="downloads_mutation_paused">Download paused</string>
+    <string name="downloads_mutation_resumed">Download resumed</string>
+    <string name="downloads_mutation_mobile_data_allowed">Mobile data allowed for this download</string>
+    <string name="downloads_mutation_moved_earlier">Moved earlier in the queue</string>
+    <string name="downloads_mutation_moved_later">Moved later in the queue</string>
+    <string name="downloads_mutation_retry_queued">Download queued to retry</string>
+    <string name="downloads_mutation_removal_requested">Removal requested</string>
+    <string name="downloads_mutation_removing_all">Removing all downloads</string>
+    <string name="downloads_mutation_failed">Could not update this download. Try again.</string>
 
-    <string name="downloads_status_saved" translatable="false">%1$s · Saved</string>
-    <string name="downloads_status_downloading_progress" translatable="false">Downloading %1$d%% · %2$s / %3$s</string>
-    <string name="downloads_status_downloading" translatable="false">Downloading…</string>
-    <string name="downloads_status_paused_progress" translatable="false">Paused · %1$s / %2$s</string>
-    <string name="downloads_status_paused" translatable="false">Paused · %1$s</string>
-    <string name="downloads_status_queued" translatable="false">Queued</string>
-    <string name="downloads_status_failed" translatable="false">Failed · Check your connection and try again</string>
-    <string name="downloads_status_unavailable" translatable="false">Unavailable</string>
-    <string name="downloads_file_unavailable" translatable="false">This download is unavailable. Download it again.</string>
-    <string name="downloads_title_with_subtitle" translatable="false">%1$s — %2$s</string>
+    <string name="downloads_status_saved">%1$s · Saved</string>
+    <string name="downloads_status_downloading_progress">Downloading %1$d%% · %2$s / %3$s</string>
+    <string name="downloads_status_downloading">Downloading…</string>
+    <string name="downloads_status_paused_progress">Paused · %1$s / %2$s</string>
+    <string name="downloads_status_paused">Paused · %1$s</string>
+    <string name="downloads_status_queued">Queued</string>
+    <string name="downloads_status_failed">Failed · Check your connection and try again</string>
+    <string name="downloads_status_unavailable">Unavailable</string>
+    <string name="downloads_file_unavailable">This download is unavailable. Download it again.</string>
+    <string name="downloads_title_with_subtitle">%1$s — %2$s</string>
 
-    <string name="downloads_confirm_delete_title" translatable="false">Delete download?</string>
-    <string name="downloads_confirm_cancel_title" translatable="false">Cancel download?</string>
-    <string name="downloads_confirm_delete_message" translatable="false">Delete “%1$s”? This frees the storage it uses.</string>
-    <string name="downloads_confirm_cancel_message" translatable="false">Cancel and remove “%1$s”? This frees the storage it uses.</string>
-    <string name="downloads_confirm_delete_all_title" translatable="false">Delete all downloads?</string>
-    <plurals name="downloads_confirm_delete_all_message" translatable="false">
+    <string name="downloads_confirm_delete_title">Delete download?</string>
+    <string name="downloads_confirm_cancel_title">Cancel download?</string>
+    <string name="downloads_confirm_delete_message">Delete “%1$s”? This frees the storage it uses.</string>
+    <string name="downloads_confirm_cancel_message">Cancel and remove “%1$s”? This frees the storage it uses.</string>
+    <string name="downloads_confirm_delete_all_title">Delete all downloads?</string>
+    <plurals name="downloads_confirm_delete_all_message">
         <item quantity="one">Remove %1$d download and free its storage?</item>
         <item quantity="other">Remove all %1$d downloads and free their storage?</item>
     </plurals>
-    <string name="downloads_confirm_delete_series_title" translatable="false">Delete series downloads?</string>
-    <plurals name="downloads_confirm_delete_series_message" translatable="false">
+    <string name="downloads_confirm_delete_series_title">Delete series downloads?</string>
+    <plurals name="downloads_confirm_delete_series_message">
         <item quantity="one">Delete the saved episode of “%1$s”? This frees the storage it uses.</item>
         <item quantity="other">Delete all %2$d saved episodes of “%1$s”? This frees the storage they use.</item>
     </plurals>
 
-    <string name="downloads_size_zero" translatable="false">0 MB</string>
-    <string name="downloads_size_mb" translatable="false">%1$s MB</string>
-    <string name="downloads_size_gb" translatable="false">%1$s GB</string>
+    <string name="downloads_size_zero">0 MB</string>
+    <string name="downloads_size_mb">%1$s MB</string>
+    <string name="downloads_size_gb">%1$s GB</string>
+    <string name="native_back_exit">Press back again to exit</string>
+    <string name="native_downloads_preparing">Preparing downloads…</string>
+    <string name="native_downloads_item">Downloading %1$s</string>
 </resources>

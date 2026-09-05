@@ -1,0 +1,283 @@
+{
+  "ui_web_66d27b78bb70": {
+    "ar": "إغلاق {{p3}}"
+  },
+  "ui_web_82d7d8f0db5c": {
+    "ar": "{{p0}} مصدر{{p1}} محذوف{{p2}} مستبعد{{p3}} · تحديث تلقائي كل 30 ثانية"
+  },
+  "ui_web_d2ec30a69f4f": {
+    "tr": "anlık görüntü {{p1}}"
+  },
+  "ui_web_7b259caf0f7a": {
+    "tr": "Norva Ana Sayfa"
+  },
+  "ui_web_b344d80e24a3": {
+    "tr": "Bu"
+  },
+  "ui_web_6036ee0ae6af": {
+    "tr": "{{p0}} profilini düzenle"
+  },
+  "ui_web_0e04cbf21307": {
+    "tr": "{{p7}} kayıtlı jeton{{p8}}{{p9}} · jetonlu {{p10}} hesap{{p11}}"
+  },
+  "ui_web_643a276cb2d4": {
+    "hi": "मानकीकृत विवरण: Norva की {{p0}} पंक्तियाँ, {{p1}} मिलान, {{p2}} अंतर, {{p3}} अज्ञात संदर्भ, {{p4}} डुप्लिकेट, Norva से बाहर की {{p5}} पंक्तियाँ अनदेखी की गईं।",
+    "bn": "মানসম্মত বিবরণ: Norva-এর {{p0}}টি সারি, {{p1}}টি মিল, {{p2}}টি অমিল, {{p3}}টি অজানা রেফারেন্স, {{p4}}টি সদৃশ সারি, Norva-এর বাইরের {{p5}}টি সারি উপেক্ষা করা হয়েছে।"
+  },
+  "ui_web_23c9e66f44a4": {
+    "bn": "এই গোপনীয়তা নীতিতে ব্যাখ্যা করা হয়েছে যে আপনি Norva অ্যাপগুলি (Android ফোন/ট্যাবলেট এবং Android TV) ও norva.tv-এ Norva ওয়েব অ্যাপ (একসঙ্গে, “পরিষেবা”) ব্যবহার করলে Norva (“Norva”, “আমরা”, “আমাদের”) কীভাবে তথ্য সংগ্রহ, ব্যবহার, সংরক্ষণ ও মুছে ফেলে।"
+  },
+  "ui_web_41058f2c135f": {
+    "bn": "নিবন্ধন ওয়েব ব্রাউজারে নাকি Android মোবাইল অ্যাপে সম্পন্ন হয়েছে, Norva-তে ব্যবহৃত পথ (অ্যাকাউন্ট, সাবস্ক্রিপশন বা TV পেয়ারিং), সাইন-ইন পদ্ধতি এবং নেটওয়ার্ক প্রান্তে Cloudflare-এর দেওয়া ও Norva ক্লায়েন্টের পাঠানো আনুমানিক দেশ/অঞ্চল/শহর। এটি বিশ্লেষণের একটি আনুমানিক সংকেত, বসবাসের প্রমাণ নয়। Norva এই রেকর্ডে মূল IP ঠিকানা রাখে না।"
+  },
+  "ui_web_2edbcbabe572": {
+    "bn": "সম্মতির পরে: কুকি বা স্থানীয় সম্মতির অবস্থা, এলোমেলো SDK শনাক্তকারী, অ্যাপ/সংস্করণ/ডিভাইস/স্ক্রিনের প্রসঙ্গ, কর্মক্ষমতা ও ত্রুটি নির্ণয়ের সংকেত, ট্যাপ, অঙ্গভঙ্গি, স্ক্রলিং এবং গোপনীয়তার জন্য আড়াল করা সেশন রিপ্লে ইভেন্ট, যা প্রযোজ্য ক্ষেত্রে Google Analytics, Microsoft Clarity, Google Ads ও Meta Pixel প্রক্রিয়া করে। Android মোবাইল ও Android TV আলাদা Clarity প্রকল্প ব্যবহার করে। নেটিভ WebView ক্যাপচার বিন্যাস ও মিথস্ক্রিয়ার জ্যামিতি রাখে, কিন্তু লেখা ও ছবি আড়াল করে; নেটিভ প্রদানকারী লগইন ও প্লেব্যাক ভিউও আড়াল করা হয়। Norva Clarity-তে মিডিয়া উৎসের পরিচয়পত্র, প্রদানকারীর নাম, মিডিয়ার শিরোনাম বা অ্যাকাউন্ট শনাক্তকারী পাঠায় না।"
+  },
+  "ui_web_7945fafbdb10": {
+    "hi": "मापन घटाएँ = single-flight + Cloudflare fan-out + नेटिव ऐप (सीधे)। STACK-AND-ROADMAP.md देखें।"
+  },
+  "ui_web_35f815832711": {
+    "hi": "Cloudflare, Inc."
+  },
+  "ui_web_123b4cf9d73a": {
+    "hi": "(Cloudflare Pages) — 101 Townsend Street, San Francisco, CA 94107, USA —"
+  },
+  "ui_web_d4b7f6f207bc": {
+    "hi": "Microsoft Clarity"
+  },
+  "ui_web_f9191531404c": {
+    "en": "Cloudflare",
+    "fr": "Cloudflare",
+    "pt-BR": "Cloudflare",
+    "es": "Cloudflare",
+    "hi": "Cloudflare",
+    "tr": "Cloudflare",
+    "bn": "Cloudflare",
+    "ar": "Cloudflare",
+    "id": "Cloudflare",
+    "fil": "Cloudflare"
+  },
+  "ui_web_c7bac46904be": {
+    "en": "Microsoft",
+    "fr": "Microsoft",
+    "pt-BR": "Microsoft",
+    "es": "Microsoft",
+    "hi": "Microsoft",
+    "tr": "Microsoft",
+    "bn": "Microsoft",
+    "ar": "Microsoft",
+    "id": "Microsoft",
+    "fil": "Microsoft"
+  },
+  "ui_web_97f2dbd1e4ae": {
+    "hi": "{{p0}} हालिया अपडेट{{p1}}"
+  },
+  "ui_web_d5502f1d7c55": {
+    "hi": "{{p0}} जब आपको आवश्यकता हो, तब बाकी सामग्री लोड करें।",
+    "id": "{{p0}} Muat sisanya saat Anda membutuhkannya."
+  },
+  "ui_web_679d7e03d4eb": {
+    "en": "paused",
+    "fr": "en pause",
+    "pt-BR": "pausado",
+    "es": "en pausa",
+    "hi": "रुका हुआ",
+    "tr": "duraklatıldı",
+    "bn": "বিরতিতে",
+    "ar": "متوقف مؤقتًا",
+    "id": "dijeda",
+    "fil": "naka-pause"
+  },
+  "ui_web_85f5709fe52a": {
+    "en": "· automatic refresh every 10 min",
+    "fr": "· actualisation automatique toutes les 10 min",
+    "pt-BR": "· atualização automática a cada 10 min",
+    "es": "· actualización automática cada 10 min",
+    "hi": "· हर 10 मिनट में अपने आप रीफ़्रेश",
+    "tr": "· her 10 dakikada otomatik yenileme",
+    "bn": "· প্রতি ১০ মিনিটে স্বয়ংক্রিয় রিফ্রেশ",
+    "ar": "· تحديث تلقائي كل 10 دقائق",
+    "id": "· pembaruan otomatis setiap 10 menit",
+    "fil": "· awtomatikong pag-refresh bawat 10 minuto"
+  },
+  "ui_web_2006c8113ba4": {
+    "en": "Enrich catalogue now",
+    "fr": "Enrichir le catalogue maintenant",
+    "pt-BR": "Enriquecer o catálogo agora",
+    "es": "Enriquecer el catálogo ahora",
+    "hi": "अभी कैटलॉग की जानकारी समृद्ध करें",
+    "tr": "Katalog bilgilerini şimdi zenginleştir",
+    "bn": "এখন ক্যাটালগের তথ্য সমৃদ্ধ করুন",
+    "ar": "إثراء معلومات الكتالوج الآن",
+    "id": "Perkaya informasi katalog sekarang",
+    "fil": "Pagyamanin ang impormasyon ng katalogo ngayon"
+  },
+  "ui_web_5438e23960bd": {
+    "en": "Casting — show playback controls",
+    "fr": "Diffusion — afficher les commandes de lecture",
+    "pt-BR": "Transmitindo — mostrar controles de reprodução",
+    "es": "Transmitiendo — mostrar controles de reproducción",
+    "hi": "कास्टिंग — प्लेबैक नियंत्रण दिखाएँ",
+    "tr": "Yayın aktarılıyor — oynatma kontrollerini göster",
+    "bn": "কাস্ট করা হচ্ছে — প্লেব্যাক নিয়ন্ত্রণ দেখান",
+    "ar": "البث إلى جهاز — إظهار عناصر التحكم بالتشغيل",
+    "id": "Sedang mentransmisikan — tampilkan kontrol pemutaran",
+    "fil": "Nagka-cast — ipakita ang mga kontrol sa pag-play"
+  },
+  "ui_web_2bd873d6c734": {
+    "en": "Breadcrumb navigation",
+    "fr": "Fil d’Ariane",
+    "pt-BR": "Navegação estrutural",
+    "es": "Ruta de navegación",
+    "hi": "नेविगेशन पथ",
+    "tr": "Gezinti yolu",
+    "bn": "নেভিগেশন পথ",
+    "ar": "مسار التنقل",
+    "id": "Jalur navigasi",
+    "fil": "Landas ng nabigasyon"
+  },
+  "ui_web_b1c7a8e09482": {
+    "en": "Suggestion (European Central Bank via Frankfurter): {{p0}}",
+    "fr": "Suggestion (Banque centrale européenne via Frankfurter) : {{p0}}",
+    "pt-BR": "Sugestão (Banco Central Europeu via Frankfurter): {{p0}}",
+    "es": "Sugerencia (Banco Central Europeo a través de Frankfurter): {{p0}}",
+    "hi": "सुझाव (Frankfurter के ज़रिए यूरोपीय केंद्रीय बैंक): {{p0}}",
+    "tr": "Öneri (Frankfurter üzerinden Avrupa Merkez Bankası): {{p0}}",
+    "bn": "পরামর্শ (Frankfurter-এর মাধ্যমে ইউরোপীয় কেন্দ্রীয় ব্যাংক): {{p0}}",
+    "ar": "اقتراح (البنك المركزي الأوروبي عبر Frankfurter): {{p0}}",
+    "id": "Saran (Bank Sentral Eropa melalui Frankfurter): {{p0}}",
+    "fil": "Mungkahi (European Central Bank sa pamamagitan ng Frankfurter): {{p0}}"
+  },
+  "ui_web_ebd02866ec1e": {
+    "en": "Live payout release is enabled.",
+    "fr": "L’exécution des versements réels est activée.",
+    "pt-BR": "A execução de pagamentos reais está ativada.",
+    "es": "La ejecución de pagos reales está activada.",
+    "hi": "वास्तविक भुगतान जारी करना चालू है।",
+    "tr": "Gerçek ödemelerin gerçekleştirilmesi etkin.",
+    "bn": "প্রকৃত অর্থপ্রদান কার্যকর করা চালু আছে।",
+    "ar": "تنفيذ الدفعات الفعلية مفعّل.",
+    "id": "Pelaksanaan pembayaran nyata diaktifkan.",
+    "fil": "Naka-enable ang pagpapatupad ng mga aktuwal na payout."
+  },
+  "ui_web_43acf0568158": {
+    "en": "Live payout release remains disabled; no transfer is triggered from this page.",
+    "fr": "L’exécution des versements réels reste désactivée ; aucun transfert n’est déclenché depuis cette page.",
+    "pt-BR": "A execução de pagamentos reais permanece desativada; nenhuma transferência é iniciada nesta página.",
+    "es": "La ejecución de pagos reales sigue desactivada; esta página no inicia ninguna transferencia.",
+    "hi": "वास्तविक भुगतान जारी करना बंद है; इस पेज से कोई ट्रांसफ़र शुरू नहीं होता।",
+    "tr": "Gerçek ödemelerin gerçekleştirilmesi devre dışı kalır; bu sayfadan hiçbir transfer başlatılmaz.",
+    "bn": "প্রকৃত অর্থপ্রদান কার্যকর করা বন্ধ আছে; এই পৃষ্ঠা থেকে কোনো স্থানান্তর শুরু হয় না।",
+    "ar": "تنفيذ الدفعات الفعلية لا يزال معطّلًا؛ لا تبدأ هذه الصفحة أي تحويل.",
+    "id": "Pelaksanaan pembayaran nyata tetap dinonaktifkan; tidak ada transfer yang dimulai dari halaman ini.",
+    "fil": "Nananatiling naka-disable ang mga aktuwal na payout; walang paglilipat na sinisimulan mula sa pahinang ito."
+  },
+  "ui_web_dbd3a49d0d90": {
+    "en": "en",
+    "fr": "en",
+    "pt-BR": "en",
+    "es": "en",
+    "hi": "en",
+    "tr": "en",
+    "bn": "en",
+    "ar": "en",
+    "id": "en",
+    "fil": "en"
+  },
+  "ui_web_5c49f88dafe6": {
+    "en": "en-US",
+    "fr": "en-US",
+    "pt-BR": "en-US",
+    "es": "en-US",
+    "hi": "en-US",
+    "tr": "en-US",
+    "bn": "en-US",
+    "ar": "en-US",
+    "id": "en-US",
+    "fil": "en-US"
+  },
+  "ui_web_f360adab92f1": {
+    "en": "fr-FR",
+    "fr": "fr-FR",
+    "pt-BR": "fr-FR",
+    "es": "fr-FR",
+    "hi": "fr-FR",
+    "tr": "fr-FR",
+    "bn": "fr-FR",
+    "ar": "fr-FR",
+    "id": "fr-FR",
+    "fil": "fr-FR"
+  },
+  "ui_web_89d1d29123b5": {
+    "fr": "jours restants pour votre essai gratuit Norva"
+  },
+  "ui_web_8478014ead98": {
+    "fr": "Impossible de charger les parrainages suivants."
+  },
+  "ui_web_6064089e4783": {
+    "fr": "Chargement de parrainages supplémentaires. {{p0}}"
+  },
+  "ui_web_13494a4cc3ee": {
+    "fr": "Chargement des parrainages…"
+  },
+  "ui_web_86040c344bc1": {
+    "fr": "est terminée. Les conditions vérifiées réservées à ce paiement restent inchangées."
+  },
+  "ui_web_c4788785846a": {
+    "fr": "En sélectionnant « Réactiver », vous autorisez un paiement immédiat de"
+  },
+  "ui_web_343e2f2726fd": {
+    "fr": "En sélectionnant « Démarrer l’essai gratuit », vous autorisez Norva à prélever"
+  },
+  "ui_web_46cca2bce079": {
+    "fr": "jours gratuits sur vos appareils compatibles — résiliez à tout moment avant la fin de l’essai."
+  },
+  "ui_web_ecd36fb0a942": {
+    "fr": "jours se termine. Résiliez à tout moment avant cette date."
+  },
+  "ui_web_54526b8b3d99": {
+    "fr": "par an"
+  },
+  "ui_web_299c53f042bf": {
+    "fr": "par an →"
+  },
+  "ui_web_64879f7d6b96": {
+    "fr": "abonnement"
+  },
+  "ui_web_fd0078241b96": {
+    "fr": "est terminée. Les tarifs actuels sont maintenant affichés."
+  },
+  "ui_web_511f176fb77f": {
+    "hi": "{{p0}} शीर्षक{{p1}} पुनर्स्थापित किए गए। उन्हें फिर से देखने के लिए फ़िल्में/सीरीज़ को रीलोड करें।"
+  },
+  "ui_web_6cf4b1c9929f": {
+    "tr": "· Şu anda hedeflenebilen {{p0}} cihaz"
+  },
+  "ui_web_a8be22936760": {
+    "fil": "{{p23}} kapaki-pakinabang{{p25}} na desisyon{{p24}}, inayos{{p26}} ayon sa prayoridad"
+  },
+  "ui_web_74d1241ef6d5": {
+    "fil": "Magkaibang bagay ang sinusukat ng {{p25}} account at {{p26}} token: {{p27}} account ang may kahit isang token, {{p28}} token ang hindi pa nag-ulat ng pahintulot, at {{p29}} ang tumanggi. Magkahiwalay pa rin ang mga estadong “tinanggap ng FCM”, “naihatid” at “nabuksan”."
+  },
+  "ui_web_10769c50b5a3": {
+    "fil": "Nakadepende ang pag-trigger nito sa tinukoy na sistema ng transaksyon at hindi ito maaaring i-disable mula sa Marketing.{{p3}}"
+  },
+  "ui_web_57a4980e15f9": {
+    "fil": "{{p4}}{{p5}}{{p6}} · {{p7}} · ginawa noong {{p8}}"
+  },
+  "ui_web_0fff91bb8927": {
+    "fil": "{{p0}} season"
+  },
+  "ui_web_f69cc6ba692c": {
+    "fil": "Aktibo ang exemption sa VAT · Hindi naaangkop ang OSS · Awtomatikong pagsubaybay sa mga limitasyon at takdang petsa.{{p0}}"
+  },
+  "ui_web_2b5227617f58": {
+    "fil": "Muling patakbuhin ang buong pag-sync para sa {{p0}} pinagmulan na may error?"
+  },
+  "ui_web_78070a6da7d9": {
+    "fil": "{{p0}} aktibo{{p1}}"
+  },
+  "ui_web_c3966db7bed1": {
+    "bn": "{{p0}}টি স্ক্রিনে আপনার সহায়তা প্রয়োজন।"
+  }
+}

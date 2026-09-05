@@ -138,7 +138,7 @@ test('failed Revolut resume restores its button and exposes an accessible error'
   const block = source.slice(start, end);
 
   assert.match(block, /clearActionError\(\)/);
-  assert.match(block, /b\.disabled = false; b\.textContent = 'Resume plan'/);
+  assert.match(block, /b\.disabled = false; b\.textContent = [^;\r\n]*'Resume plan'/);
   assert.match(block, /showActionError\('resume', e\)/);
   assert.match(source, /storeNote\.setAttribute\('role', 'alert'\)/);
 });
@@ -190,8 +190,8 @@ test('hard-blocked accounts get support guidance without a billing CTA', () => {
 
 test('payment issue copy distinguishes card recovery from billing management', () => {
   const subscription = read('public/subscription.html');
-  assert.match(subscription, /decision\.status === 'past_due' \|\| decision\.status === 'grace' \? 'Payment due'/);
-  assert.match(subscription, /uc \? 'Manage billing' : 'Update payment'/);
+  assert.match(subscription, /decision\.status === 'past_due' \|\| decision\.status === 'grace' \? [^\n]*'Payment due'/);
+  assert.match(subscription, /uc \? [^\n]*'Manage billing'[^\n]*: [^\n]*'Update payment'/);
 });
 
 test('login separates cloud and local-hub authentication without open redirects', () => {

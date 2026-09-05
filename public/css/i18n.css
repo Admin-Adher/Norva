@@ -39,3 +39,15 @@ html[dir="rtl"] input[type="range"] { direction: ltr; }
 }
 html.tv-mode #page-settings .settings-language-section { display: block; }
 html.tv-mode #page-settings .settings-language-section select { min-height: 48px; font-size: 18px; }
+
+/* Transparent text boundaries preserve the existing flex/grid children. */
+norva-i18n { display: contents; }
+html[dir="rtl"] textarea { text-align: start; }
+html[dir="rtl"] .watch-progress, html[dir="rtl"] .player-progress,
+html[dir="rtl"] .video-progress, html[dir="rtl"] .seek-bar { direction: ltr; }
+
+html[dir="rtl"].tv-mode .navbar { left: auto; right: 0; }
+html[dir="rtl"].tv-mode .navbar:focus-within ~ .main-content { transform: translateX(-176px); }
+html[dir="rtl"] .sidebar-expand-btn { left: auto; right: 0; }
+
+norva-slot { display: contents; }

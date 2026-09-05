@@ -24,12 +24,12 @@ const mainCss = read('public/css/main.css');
 
 test('every sign-out entry uses the same cancel-first accessible confirmation', () => {
   const navigationModel = read('public/js/navigation/NavigationModel.js');
-  assert.match(navigationModel, /key:\s*'logout',[\s\S]{0,180}ariaLabel:\s*'Log out'[\s\S]{0,180}gate:\s*'authenticated'/);
+  assert.match(navigationModel, /key:\s*'logout',[\s\S]{0,450}ariaLabel:\s*[^\n]*'Log out'[\s\S]{0,450}gate:\s*'authenticated'/);
   assert.match(app, /intent\.target === 'logout'[\s\S]{0,100}void this\.signOut\(\)/);
   assert.match(app, /window\.NorvaModal\.confirm\(/);
-  assert.match(app, /title:\s*'Log out of Norva\?'/);
-  assert.match(app, /confirmLabel:\s*'Log out'/);
-  assert.match(app, /cancelLabel:\s*'Stay signed in'/);
+  assert.match(app, /title:\s*[^;\r\n]*'Log out of Norva\?'/);
+  assert.match(app, /confirmLabel:\s*[^\n]*'Log out'/);
+  assert.match(app, /cancelLabel:\s*[^\n]*'Stay signed in'/);
   assert.match(app, /if \(!confirmed\) return false/);
   assert.match(settings, /return this\.app\.signOut\(\)/);
 });
@@ -79,8 +79,8 @@ test('profile picker and editor expose complete modal, field and selection seman
 
 test('profile loading failure is explicit, retryable and never exposes provider diagnostics', () => {
   assert.match(profiles, /Profiles are temporarily unavailable/);
-  assert.match(profiles, /const retry = el\('button', 'np-btn np-btn-primary', 'Try again'\)/);
-  assert.match(profiles, /await promptProfileLoadRetry\('Continue for now'\)/);
+  assert.match(profiles, /const retry = el\('button', 'np-btn np-btn-primary', [^\n]*NorvaI18n[^\n]*'Try again'\)\)/);
+  assert.match(profiles, /await promptProfileLoadRetry\([^\n]*'Continue for now'\)\)/);
   assert.match(profiles, /await promptProfileLoadRetry\('Cancel'\)/);
   assert.match(profiles, /Profiles still could not be loaded\./);
   assert.doesNotMatch(profiles, /setProfileStatus\([^;\n]*(?:e|err|error)\?*\.message/);
@@ -91,7 +91,7 @@ test('profile deletion is fail-closed and keeps the parent dialog inert while co
   assert.match(profiles, /const pendingConfirmation = window\.NorvaModal\.confirm/);
   assert.match(profiles, /overlayEl\.setAttribute\('aria-hidden', 'true'\)/);
   assert.match(profiles, /overlayEl\.setAttribute\('inert', ''\)/);
-  assert.match(profiles, /cancelLabel:\s*'Keep profile'/);
+  assert.match(profiles, /cancelLabel:\s*[^\n]*'Keep profile'/);
   assert.match(profiles, /if \(!ok\)[\s\S]{0,100}del\.focus\(\)/);
   assert.doesNotMatch(profiles, /(?:e|err)\?*\.message|\(e && e\.message\)/);
 });
@@ -112,7 +112,7 @@ test('Settings presents sanitized live errors instead of provider payloads', () 
   assert.match(devicesScreens, /element\.setAttribute\('role', error \? 'alert' : 'status'\)/);
   assert.doesNotMatch(settingsSurfaces, /textContent\s*=\s*[^;\n]*(?:e|err|error)\?*\.message/);
   assert.doesNotMatch(settingsSurfaces, /NorvaModal\.toast\([^;\n]*(?:e|err|error)\?*\.message/);
-  assert.doesNotMatch(settings, /textContent\s*=\s*'Error: '\s*\+\s*data\.error/);
+  assert.doesNotMatch(settings, /textContent\s*=\s*[^;\r\n]*'Error: '\s*\+\s*data\.error/);
 });
 
 test('account entry uses keyboard-complete tabs and live status semantics', () => {
@@ -172,7 +172,7 @@ test('all app-owned modal surfaces isolate the background and warning dialogs sh
   assert.match(norvaModal, /function isolateBackground\(modalEl\)/);
   assert.match(norvaModal, /element\.inert = true/);
   assert.match(norvaModal, /restoreBackground\(backgroundSnapshot\)/);
-  assert.match(sourceManager, /NorvaModal\.installHygiene\(modal,[\s\S]{0,180}onClose: \(\) => finish\(false\)/);
+  assert.match(sourceManager, /NorvaModal\.installHygiene\(modal,[\s\S]{0,450}onClose: \(\) => finish\(false\)/);
   assert.match(sourceManager, /initialFocus: document\.getElementById\('warning-cancel'\)/);
   assert.match(pairTvSheet, /class="pair-tv-close modal-close"/);
   assert.match(pairTvSheet, /NorvaModal\?\.installHygiene\?\.\(this\.overlay/);

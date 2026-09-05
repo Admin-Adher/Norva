@@ -2,9 +2,10 @@
 <html lang="en" class="quote-pending">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Norva — Secure checkout</title>
+  <title data-i18n="ui_web_6f36bcfd9969">Norva — Secure checkout</title>
   <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
@@ -171,21 +172,22 @@
   <script defer src="/js/marketing.js?v=5"></script>
   <script defer src="/js/native-analytics.js?v=2"></script>
   <script defer src="/js/product-analytics.js?v=2"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body class="commerce-page commerce-checkout">
-  <a class="skip-link" href="#payment-title">Skip to payment details</a>
+  <a class="skip-link" href="#payment-title" data-i18n="ui_web_9abb18865fad">Skip to payment details</a>
   <div class="ambient-rail" aria-hidden="true"></div>
   <div class="campaign-backdrop" id="campaign-backdrop" aria-hidden="true"></div>
   <script>
     if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
   </script>
   <header class="site-header">
-    <a class="brand" href="/" aria-label="Norva home"><img src="/favicon.png" alt=""><span>Norva</span></a>
-    <nav class="steps" aria-label="Subscription progress">
-      <span class="step complete"><span class="step-dot" aria-hidden="true">1</span>Plan</span>
+    <a class="brand" href="/" aria-label="Norva home" data-i18n-aria-label="ui_web_1a123bf0fced"><img src="/favicon.png" alt=""><span>Norva</span></a>
+    <nav class="steps" aria-label="Subscription progress" data-i18n-aria-label="ui_web_49b3fe38067c">
+      <span class="step complete"><span class="step-dot" aria-hidden="true">1</span><norva-i18n data-i18n="ui_web_fa8ed0bdabdd">Plan</norva-i18n></span>
       <span class="step-line" aria-hidden="true"></span>
-      <span class="step current" aria-current="step"><span class="step-dot" aria-hidden="true">2</span>Payment</span>
+      <span class="step current" aria-current="step"><span class="step-dot" aria-hidden="true">2</span><norva-i18n data-i18n="ui_web_7048f38b33f1">Payment</norva-i18n></span>
     </nav>
   </header>
 
@@ -193,11 +195,11 @@
     <div id="checkout-view">
       <div class="grid checkout-grid">
         <aside class="card summary-panel" aria-labelledby="sum-plan">
-          <p class="summary-kicker" id="summary-kicker">YOUR ORDER</p>
+          <p class="summary-kicker" id="summary-kicker" data-i18n="ui_web_8b05deed8fe8">YOUR ORDER</p>
           <div class="summary-plan">
             <div>
               <div class="plan-name" id="sum-plan">Norva</div>
-              <p class="plan-tag" id="sum-tag">Up to 2 profiles · every feature included</p>
+              <p class="plan-tag" id="sum-tag" data-i18n="ui_web_7a9cdbb3e96b">Up to 2 profiles · every feature included</p>
             </div>
             <div id="commercial-terms">
               <div class="price-row">
@@ -209,123 +211,123 @@
           </div>
 
           <div class="promo-countdown" id="checkout-promo-countdown" role="timer" aria-live="off" aria-atomic="true" hidden>
-            <span id="checkout-promo-countdown-label">Offer ends in</span>
+            <span id="checkout-promo-countdown-label" data-i18n="ui_web_3faefb1404ea">Offer ends in</span>
             <time id="checkout-promo-countdown-value"></time>
           </div>
           <p class="sr-only" id="checkout-promo-status" role="status" aria-live="polite"></p>
 
           <figure class="checkout-device-proof">
-            <img src="/assets/landing/norva-multi-device.svg" alt="Norva running on a TV, laptop, tablet and phone">
+            <img src="/assets/landing/norva-multi-device.svg" alt="Norva running on a TV, laptop, tablet and phone" data-i18n-alt="ui_web_13971f07a632">
             <figcaption>
-              <strong>One subscription connects your catalog across Web, Android mobile (phone and tablet), and Android TV.</strong>
+              <strong data-i18n="ui_web_aff9a52bff02">One subscription connects your catalog across Web, Android mobile (phone and tablet), and Android TV.</strong><norva-i18n data-i18n="ui_web_4635b46fbc19">
               Norva is a media player. No content or TV subscription is included. Offline downloads remain exclusive to the Android mobile app.
-              <span class="summary-legal"><a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> · <a href="/subscription.html">Manage or cancel</a></span>
+              </norva-i18n><span class="summary-legal"><a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a> · <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a> · <a href="/subscription.html" data-i18n="ui_web_40cbab2c8782">Manage or cancel</a></span>
             </figcaption>
           </figure>
 
           <a class="back-link" id="cancel-btn" href="/subscribe.html">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg><norva-i18n data-i18n="ui_web_76fe68129435">
             Back to plans
-          </a>
+          </norva-i18n></a>
         </aside>
 
         <section class="card payment-panel" aria-labelledby="payment-title">
           <header class="pay-head">
             <div>
-              <h1 id="payment-title">Preparing your secure checkout</h1>
-              <p class="sub">We are loading the exact offer and billing terms for this account.</p>
+              <h1 id="payment-title" data-i18n="ui_web_405751062069">Preparing your secure checkout</h1>
+              <p class="sub" data-i18n="ui_web_897e259e00ad">We are loading the exact offer and billing terms for this account.</p>
             </div>
-            <span class="secure" title="PCI-DSS — card data never touches Norva servers">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3z"></path><path d="M9.5 12l1.7 1.7 3.5-3.7"></path></svg>
+            <span class="secure" title="PCI-DSS — card data never touches Norva servers" data-i18n-title="ui_web_e56e5c1a053e">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3z"></path><path d="M9.5 12l1.7 1.7 3.5-3.7"></path></svg><norva-i18n data-i18n="ui_web_fb55f2b3d5b7">
               Secured &amp; encrypted
-            </span>
+            </norva-i18n></span>
           </header>
 
           <div class="quote-loading" id="quote-loading" role="status" aria-live="polite">
-            <div><div class="spinner"></div>Loading your exact plan, price and renewal terms…</div>
+            <div><div class="spinner"></div><norva-i18n data-i18n="ui_web_615410f5b119">Loading your exact plan, price and renewal terms…</norva-i18n></div>
           </div>
 
-          <div class="compact-terms" id="compact-terms" aria-label="Selected subscription terms">
-            <span><strong id="compact-plan">Norva</strong><span id="compact-date">First payment date pending</span></span>
+          <div class="compact-terms" id="compact-terms" aria-label="Selected subscription terms" data-i18n-aria-label="ui_web_6a472b9f708e">
+            <span><strong id="compact-plan">Norva</strong><span id="compact-date" data-i18n="ui_web_16e8f44f7d81">First payment date pending</span></span>
             <span class="compact-price" id="compact-price">—</span>
           </div>
 
           <div class="status" id="status" role="alert" aria-live="assertive"></div>
 
           <form id="pay-form" autocomplete="on">
-            <label class="fld"><span>Cardholder name</span>
-              <input id="cc-name" name="name" type="text" autocomplete="cc-name" required placeholder="Name on card">
+            <label class="fld"><span data-i18n="ui_web_a65da0c6fe98">Cardholder name</span>
+              <input id="cc-name" name="name" type="text" autocomplete="cc-name" required placeholder="Name on card" data-i18n-placeholder="ui_web_18bf091ea71e">
             </label>
-            <label class="fld"><span>Email for your receipt</span>
-              <input id="cc-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+            <label class="fld"><span data-i18n="ui_web_c36b1f8e391b">Email for your receipt</span>
+              <input id="cc-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" data-i18n-placeholder="ui_web_53e6cdc30765">
             </label>
-            <span class="card-field-label" id="card-field-label">Secure card details</span>
+            <span class="card-field-label" id="card-field-label" data-i18n="ui_web_e609eac3dc4c">Secure card details</span>
             <div class="frame-shell">
               <div id="card-field" class="card-field" role="group" aria-labelledby="card-field-label"></div>
-              <div class="frame-loading" id="frame-loading"><div><div class="spinner"></div>Preparing your secure card form…</div></div>
+              <div class="frame-loading" id="frame-loading"><div><div class="spinner"></div><norva-i18n data-i18n="ui_web_5d3518528794">Preparing your secure card form…</norva-i18n></div></div>
             </div>
-            <button class="btn pay-btn" id="pay-btn" type="submit" aria-describedby="commitment-copy" disabled>Continue securely</button>
-            <p class="commitment-copy" id="commitment-copy">The exact recurring terms will appear here before this button becomes available.</p>
+            <button class="btn pay-btn" id="pay-btn" type="submit" aria-describedby="commitment-copy" disabled data-i18n="ui_web_e64a4963823f">Continue securely</button>
+            <p class="commitment-copy" id="commitment-copy" data-i18n="ui_web_939c3642543a">The exact recurring terms will appear here before this button becomes available.</p>
           </form>
 
           <div class="tv-continue" id="tv-continue" hidden>
-            <h3>Finish securely on your phone</h3>
+            <h3 data-i18n="ui_web_851c28f03962">Finish securely on your phone</h3>
             <div class="tv-qr" id="tv-qr"></div>
-            <p>Scan this code with your phone camera to enter your card on Revolut's secure page. Keep this screen open — your trial starts here automatically once the card is confirmed.</p>
+            <p data-i18n="ui_web_02a211504d04">Scan this code with your phone camera to enter your card on Revolut's secure page. Keep this screen open — your trial starts here automatically once the card is confirmed.</p>
             <p class="tv-url" id="tv-url"></p>
-            <button class="btn ghost" id="tv-pay-here" type="button">Enter card on this TV instead</button>
+            <button class="btn ghost" id="tv-pay-here" type="button" data-i18n="ui_web_65b303369b28">Enter card on this TV instead</button>
           </div>
 
           <details class="schedule-details" id="schedule-details">
             <summary>
-              <span>Payment schedule</span>
+              <span data-i18n="ui_web_6f81cf8e60c6">Payment schedule</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
             </summary>
             <ol class="bill-breakdown timeline" id="bill-breakdown">
               <li class="bd-row">
                 <span class="timeline-dot" aria-hidden="true"></span>
-                <span class="bd-k"><strong id="bd-today-label">Today</strong><small id="bd-today-note">Temporary card check only</small></span>
-                <span class="bd-v"><strong id="bd-today-value">US$0.00</strong><small id="bd-today-suffix">released immediately</small></span>
+                <span class="bd-k"><strong id="bd-today-label" data-i18n="ui_web_2b065c7c9ce4">Today</strong><small id="bd-today-note" data-i18n="ui_web_c1b771d3d9e9">Temporary card check only</small></span>
+                <span class="bd-v"><strong id="bd-today-value" data-i18n="ui_web_6e95e081b543">US$0.00</strong><small id="bd-today-suffix" data-i18n="ui_web_d32a799b659b">released immediately</small></span>
               </li>
               <li class="bd-row">
                 <span class="timeline-dot" aria-hidden="true"></span>
-                <span class="bd-k"><strong id="bd-first-label">First payment on</strong><small id="bd-first-date">—</small></span>
-                <span class="bd-v"><strong id="bd-then">—</strong><small id="bd-first-period">after trial</small></span>
+                <span class="bd-k"><strong id="bd-first-label" data-i18n="ui_web_b0332ed00235">First payment on</strong><small id="bd-first-date">—</small></span>
+                <span class="bd-v"><strong id="bd-then">—</strong><small id="bd-first-period" data-i18n="ui_web_f2b0d57d1fc6">after trial</small></span>
               </li>
               <li class="bd-row" id="post-promo-row" hidden>
                 <span class="timeline-dot" aria-hidden="true"></span>
-                <span class="bd-k"><strong>Later renewals</strong><small>After the promotional periods</small></span>
+                <span class="bd-k"><strong data-i18n="ui_web_b58e07a1e496">Later renewals</strong><small data-i18n="ui_web_d3ca2751e6e2">After the promotional periods</small></span>
                 <span class="bd-v"><strong id="post-promo-price"></strong><small id="post-promo-period"></small></span>
               </li>
               <li class="bd-row">
                 <span class="timeline-dot" aria-hidden="true"></span>
-                <span class="bd-k"><strong id="bd-final-label">Cancel anytime before then</strong><small id="bd-final-note">From your Norva subscription settings</small></span>
-                <span class="bd-v"><strong id="bd-final-value">Nothing charged</strong><small id="bd-final-suffix">cancel anytime</small></span>
+                <span class="bd-k"><strong id="bd-final-label" data-i18n="ui_web_a48130f7a6a3">Cancel anytime before then</strong><small id="bd-final-note" data-i18n="ui_web_ceccdb05ed73">From your Norva subscription settings</small></span>
+                <span class="bd-v"><strong id="bd-final-value" data-i18n="ui_web_2cc88ec8d663">Nothing charged</strong><small id="bd-final-suffix" data-i18n="ui_web_47bc5b86a63a">cancel anytime</small></span>
               </li>
             </ol>
           </details>
 
           <details class="assurance-details" id="card-assurance">
             <summary>
-              <span>How the temporary card check works</span>
+              <span data-i18n="ui_web_363b1460fbe8">How the temporary card check works</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
             </summary>
             <div class="assurance">
               <svg class="assurance-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 018 0v3"></path></svg>
-              <div><b>No charge today.</b> We place a tiny temporary authorization to verify your card. It is <b>released right away and never debited</b>. Your first payment happens only after the trial if you do not cancel. <b>We will email you a reminder before your trial ends.</b></div>
+              <div><b data-i18n="ui_web_1bbc2c3ca5a9">No charge today.</b><norva-i18n data-i18n="ui_web_ed776ac523cf"> We place a tiny temporary authorization to verify your card. It is </norva-i18n><b data-i18n="ui_web_302208f4202f">released right away and never debited</b><norva-i18n data-i18n="ui_web_2331c8111583">. Your first payment happens only after the trial if you do not cancel. </norva-i18n><b data-i18n="ui_web_cb09652752a6">We will email you a reminder before your trial ends.</b></div>
             </div>
           </details>
 
           <div class="processor-row">
-            <span>Card processing by Revolut · Norva never sees your card number</span>
-            <span class="payment-marks" role="img" aria-label="Accepted payment methods: Visa and Mastercard">
+            <span data-i18n="ui_web_afe647b1f2f1">Card processing by Revolut · Norva never sees your card number</span>
+            <span class="payment-marks" role="img" aria-label="Accepted payment methods: Visa and Mastercard" data-i18n-aria-label="ui_web_1cb34636b106">
               <span class="payment-logo" aria-hidden="true"><img src="/img/payments/visa-brandmark.svg" alt="" width="34" height="11"></span>
               <span class="payment-logo" aria-hidden="true"><img src="/img/payments/mastercard-symbol.svg" alt="" width="32" height="20"></span>
             </span>
           </div>
 
           <div class="pay-foot">
-            <a id="fallback-link" class="pay-fallback" href="#" target="_blank" rel="noopener" hidden>Prefer a full page? Open the secure payment page ↗</a>
+            <a id="fallback-link" class="pay-fallback" href="#" target="_blank" rel="noopener" hidden data-i18n="ui_web_d2a8c8a64b02">Prefer a full page? Open the secure payment page ↗</a>
           </div>
         </section>
       </div>
@@ -333,18 +335,18 @@
 
     <div class="success" id="success-view">
       <span class="badge-ok" aria-hidden="true">✓</span>
-      <h2>Your free trial has started</h2>
-      <p>You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your selected plan starts automatically after the 7-day trial unless you cancel before then.</p>
-      <a class="btn" id="continue-btn" href="/app#home">Continue to Norva</a>
+      <h2 data-i18n="ui_web_e1b66617c8d2">Your free trial has started</h2>
+      <p data-i18n="ui_web_75ad2eb283b9">You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your selected plan starts automatically after the 7-day trial unless you cancel before then.</p>
+      <a class="btn" id="continue-btn" href="/app#home" data-i18n="ui_web_d8007b4412b2">Continue to Norva</a>
     </div>
 
-    <p class="page-footer">Secure checkout on norva.tv · <a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> · <a href="/subscription.html">Manage or cancel a subscription</a></p>
+    <p class="page-footer"><norva-i18n data-i18n="ui_web_493e5e3b1147">Secure checkout on norva.tv · </norva-i18n><a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a> · <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a> · <a href="/subscription.html" data-i18n="ui_web_490198f1327e">Manage or cancel a subscription</a></p>
   </main>
 
-  <script src="/js/cloudApi.js?v=52"></script>
-  <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script src="/js/authApi.js?v=be61dee633"></script>
   <script src="/js/vendor/qrcode.js?v=1"></script>
-  <script src="/js/promo-ui.js?v=1"></script>
+  <script src="/js/promo-ui.js?v=be6801a798"></script>
   <script src="/js/billing-config.js?v=8"></script>
 <script src="/js/billing.js?v=17"></script>
   <script type="module">
@@ -445,8 +447,8 @@
         if (postPromoPrice) postPromoPrice.textContent = '';
         if (postPromoPeriod) postPromoPeriod.textContent = '';
         if (firstPeriod) firstPeriod.textContent = period === 'annual'
-          ? 'per year until canceled'
-          : 'per month until canceled';
+          ? (globalThis.NorvaI18n?.t("ui_web_bf5556924072", { defaultValue: "per year until canceled" }) ?? 'per year until canceled')
+          : (globalThis.NorvaI18n?.t("ui_web_b2e6b9299302", { defaultValue: "per month until canceled" }) ?? 'per month until canceled');
       }
       function startCheckoutCountdown(promo, label) {
         stopCheckoutCountdown();
@@ -465,10 +467,10 @@
             stopCheckoutCountdown();
             box.hidden = true;
             const promoStatus = document.getElementById('checkout-promo-status');
-            if (promoStatus) promoStatus.textContent = label + ' has ended. The verified terms reserved for this checkout remain unchanged.';
+            if (promoStatus) promoStatus.textContent = label + (globalThis.NorvaI18n?.t("ui_web_86040c344bc1", { defaultValue: " has ended. The verified terms reserved for this checkout remain unchanged." }) ?? ' has ended. The verified terms reserved for this checkout remain unchanged.');
             return;
           }
-          boxLabel.textContent = countdown.urgent ? 'Ends soon' : 'Offer ends in';
+          boxLabel.textContent = countdown.urgent ? (globalThis.NorvaI18n?.t("ui_web_695715c2282f", { defaultValue: "Ends soon" }) ?? 'Ends soon') : (globalThis.NorvaI18n?.t("ui_web_3faefb1404ea", { defaultValue: "Offer ends in" }) ?? 'Offer ends in');
           clock.textContent = countdown.text;
           clock.setAttribute('aria-label', countdown.ariaText);
           box.classList.toggle('urgent', countdown.urgent);
@@ -486,7 +488,7 @@
           : promoUi.wallpaperFor(promo.event);
         document.body.dataset.promoActive = 'true';
         const summaryKicker = document.getElementById('summary-kicker');
-        if (summaryKicker) summaryKicker.textContent = label + ' offer';
+        if (summaryKicker) summaryKicker.textContent = label + (globalThis.NorvaI18n?.t("ui_web_988180bf0c93", { defaultValue: " offer" }) ?? ' offer');
         const backdrop = document.getElementById('campaign-backdrop');
         if (backdrop && campaignUrl) {
           backdrop.style.setProperty('--campaign-image', 'url(' + JSON.stringify(campaignUrl) + ')');
@@ -509,14 +511,14 @@
         d.appendChild(chip);
         d.appendChild(document.createTextNode(refMonthly ? ' vs ' : ' was '));
         d.appendChild(struck);
-        if (refMonthly) d.appendChild(document.createTextNode(' billed monthly'));
+        if (refMonthly) d.appendChild(document.createTextNode((globalThis.NorvaI18n?.t("ui_web_69ea677b25d4", { defaultValue: " billed monthly" }) ?? ' billed monthly')));
         const pctVal = Math.max(1, Math.round(100 - (cents / refCents) * 100));
         d.appendChild(document.createTextNode(' · −' + pctVal + '% (save ' + displayMoney(((refCents - cents) / 100).toFixed(2))
-          + (refMonthly ? ' vs monthly billing' : '') + ')'));
+          + (refMonthly ? (globalThis.NorvaI18n?.t("ui_web_d1811ab0b9a0", { defaultValue: " vs monthly billing" }) ?? ' vs monthly billing') : '') + ')'));
         if (promo.cycles) {
           const firstTxt = period === 'annual'
-            ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')
-            : (promo.cycles === 1 ? 'your first month' : 'your first ' + promo.cycles + ' months');
+            ? (promo.cycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_83beee809102", { defaultValue: "your first year" }) ?? 'your first year') : 'your first ' + promo.cycles + ' years')
+            : (promo.cycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_770a94ca01a0", { defaultValue: "your first month" }) ?? 'your first month') : 'your first ' + promo.cycles + ' months');
           d.appendChild(document.createTextNode(' · promo price for ' + firstTxt + ', then '
             + displayMoney((promo.base_cents / 100).toFixed(2)) + (period === 'annual' ? '/yr' : '/mo')));
           const postPromoRow = document.getElementById('post-promo-row');
@@ -524,11 +526,11 @@
           const postPromoPeriod = document.getElementById('post-promo-period');
           if (postPromoRow) postPromoRow.hidden = false;
           if (postPromoPrice) postPromoPrice.textContent = displayMoney((promo.base_cents / 100).toFixed(2));
-          if (postPromoPeriod) postPromoPeriod.textContent = period === 'annual' ? 'per year until canceled' : 'per month until canceled';
+          if (postPromoPeriod) postPromoPeriod.textContent = period === 'annual' ? (globalThis.NorvaI18n?.t("ui_web_bf5556924072", { defaultValue: "per year until canceled" }) ?? 'per year until canceled') : (globalThis.NorvaI18n?.t("ui_web_b2e6b9299302", { defaultValue: "per month until canceled" }) ?? 'per month until canceled');
           const firstPeriod = document.getElementById('bd-first-period');
           if (firstPeriod) firstPeriod.textContent = period === 'annual'
-            ? (promo.cycles === 1 ? 'first year at the promotional price' : 'first ' + promo.cycles + ' years at the promotional price')
-            : (promo.cycles === 1 ? 'first month at the promotional price' : 'first ' + promo.cycles + ' months at the promotional price');
+            ? (promo.cycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_e02dc1832f18", { defaultValue: "first year at the promotional price" }) ?? 'first year at the promotional price') : 'first ' + promo.cycles + ' years at the promotional price')
+            : (promo.cycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_e5e2849a0aed", { defaultValue: "first month at the promotional price" }) ?? 'first month at the promotional price') : 'first ' + promo.cycles + ' months at the promotional price');
         }
         priceRow.insertAdjacentElement('afterend', d);
         startCheckoutCountdown(promo, label);
@@ -539,7 +541,7 @@
         if (exact && !Number.isNaN(new Date(exact).getTime())) {
           serverFirstChargeAt = String(exact);
           const label = document.getElementById('bd-first-label');
-          if (label) label.textContent = 'First payment on';
+          if (label) label.textContent = (globalThis.NorvaI18n?.t("ui_web_b0332ed00235", { defaultValue: "First payment on" }) ?? 'First payment on');
         }
         const days = Number(payload.trial_days);
         if (Number.isInteger(days) && days > 0 && days <= 90) serverTrialDays = days;
@@ -637,7 +639,7 @@
             base_cents: quote.promotionTerms.baseAmountMinor,
             cycles: quote.promotionTerms.billingCycles,
             event: 'other',
-            label: 'Limited Offer',
+            label: (globalThis.NorvaI18n?.t("ui_web_7519da60f676", { defaultValue: "Limited Offer" }) ?? 'Limited Offer'),
             ends_at: null,
             ref_cents: null
           };
@@ -684,8 +686,8 @@
         });
       }
       if (plan === 'family') {
-        document.getElementById('sum-plan').textContent = 'Norva Family';
-        document.getElementById('sum-tag').textContent = 'Up to 5 profiles · every feature included';
+        document.getElementById('sum-plan').textContent = (globalThis.NorvaI18n?.t("ui_web_fada8f5631ee", { defaultValue: "Norva Family" }) ?? 'Norva Family');
+        document.getElementById('sum-tag').textContent = (globalThis.NorvaI18n?.t("ui_web_cf5414810712", { defaultValue: "Up to 5 profiles · every feature included" }) ?? 'Up to 5 profiles · every feature included');
       }
       document.getElementById('sum-per').textContent = '';
       // Back control: a normal checkout goes to the plan picker; but when we arrived from
@@ -694,7 +696,7 @@
       const cancelBtn = document.getElementById('cancel-btn');
       if (intent === 'update_card') {
         cancelBtn.setAttribute('href', returnTo);
-        if (cancelBtn.lastChild) cancelBtn.lastChild.textContent = 'Back';
+        if (cancelBtn.lastChild) cancelBtn.lastChild.textContent = (globalThis.NorvaI18n?.t("ui_web_76900f1bfd16", { defaultValue: "Back" }) ?? 'Back');
       } else {
         cancelBtn.setAttribute('href', '/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
       }
@@ -742,8 +744,8 @@
         const sumPer = document.getElementById('sum-per');
         const recurringLabel = displayPrice
           ? displayMoney(displayPrice) + (period === 'annual' ? '/yr' : '/mo')
-          : 'the verified plan price';
-        const planLabel = plan === 'family' ? 'Norva Family' : 'Norva Plus';
+          : (globalThis.NorvaI18n?.t("ui_web_e00986582aa1", { defaultValue: "the verified plan price" }) ?? 'the verified plan price');
+        const planLabel = plan === 'family' ? (globalThis.NorvaI18n?.t("ui_web_fada8f5631ee", { defaultValue: "Norva Family" }) ?? 'Norva Family') : (globalThis.NorvaI18n?.t("ui_web_acc74895bf2b", { defaultValue: "Norva Plus" }) ?? 'Norva Plus');
         const firstChargeLabel = trialChargeDate();
         const promotionTerms = commercialQuote && commercialQuote.promotionTerms;
         const promoCycles = promotionTerms && promotionTerms.billingCycles;
@@ -752,17 +754,17 @@
           : recurringLabel;
         const firstBillingPeriods = promoCycles > 0
           ? (period === 'annual'
-            ? (promoCycles === 1 ? 'the first year' : 'the first ' + promoCycles + ' years')
-            : (promoCycles === 1 ? 'the first month' : 'the first ' + promoCycles + ' months'))
+            ? (promoCycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_acff984c6cad", { defaultValue: "the first year" }) ?? 'the first year') : 'the first ' + promoCycles + ' years')
+            : (promoCycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_ecb8bc69feec", { defaultValue: "the first month" }) ?? 'the first month') : 'the first ' + promoCycles + ' months'))
           : '';
         const recurringCommitment = promotionTerms
           ? recurringLabel + ' for ' + firstBillingPeriods + ', then ' + baseRenewalLabel
           : recurringLabel;
         const promotionalPeriod = promoCycles > 0
           ? (period === 'annual'
-            ? (promoCycles === 1 ? 'first year at the promotional price' : 'first ' + promoCycles + ' years at the promotional price')
-            : (promoCycles === 1 ? 'first month at the promotional price' : 'first ' + promoCycles + ' months at the promotional price'))
-          : (period === 'annual' ? 'per year until canceled' : 'per month until canceled');
+            ? (promoCycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_e02dc1832f18", { defaultValue: "first year at the promotional price" }) ?? 'first year at the promotional price') : 'first ' + promoCycles + ' years at the promotional price')
+            : (promoCycles === 1 ? (globalThis.NorvaI18n?.t("ui_web_e5e2849a0aed", { defaultValue: "first month at the promotional price" }) ?? 'first month at the promotional price') : 'first ' + promoCycles + ' months at the promotional price'))
+          : (period === 'annual' ? (globalThis.NorvaI18n?.t("ui_web_bf5556924072", { defaultValue: "per year until canceled" }) ?? 'per year until canceled') : (globalThis.NorvaI18n?.t("ui_web_b2e6b9299302", { defaultValue: "per month until canceled" }) ?? 'per month until canceled'));
         if (breakdown) breakdown.classList.toggle('hidden', special);
         if (schedule) schedule.hidden = special;
         if (assurance) assurance.hidden = checkoutKind !== 'trial_setup';
@@ -772,64 +774,64 @@
         if (firstPeriod) firstPeriod.textContent = promotionalPeriod;
         if (sumPer) sumPer.textContent = period === 'annual' ? '/yr' : '/mo';
         if (commercialTerms) commercialTerms.hidden = false;
-        if (summaryKicker && !checkoutPromo) summaryKicker.textContent = 'YOUR ORDER';
+        if (summaryKicker && !checkoutPromo) summaryKicker.textContent = (globalThis.NorvaI18n?.t("ui_web_8b05deed8fe8", { defaultValue: "YOUR ORDER" }) ?? 'YOUR ORDER');
         if (sumPlan) sumPlan.textContent = planLabel;
         if (sumTag) sumTag.textContent = plan === 'family'
-          ? 'Up to 5 profiles · every feature included'
-          : 'Up to 2 profiles · every feature included';
+          ? (globalThis.NorvaI18n?.t("ui_web_cf5414810712", { defaultValue: "Up to 5 profiles · every feature included" }) ?? 'Up to 5 profiles · every feature included')
+          : (globalThis.NorvaI18n?.t("ui_web_7a9cdbb3e96b", { defaultValue: "Up to 2 profiles · every feature included" }) ?? 'Up to 2 profiles · every feature included');
         if (checkoutKind === 'card_update') {
           clearCheckoutPromotion();
           if (commercialTerms) commercialTerms.hidden = true;
-          if (summaryKicker) summaryKicker.textContent = 'PAYMENT METHOD';
-          if (sumPlan) sumPlan.textContent = 'Secure card update';
-          if (sumTag) sumTag.textContent = 'No plan change and no subscription charge';
-          h1.textContent = 'Update your payment method';
-          sub.textContent = 'Enter your new card — it becomes the card used for your Norva plan.';
-          after.textContent = 'Today: $0.00 — card check only (a tiny hold, released right away).';
-          if (compactPlan) compactPlan.textContent = 'Payment method update';
-          if (compactDate) compactDate.textContent = 'Temporary card verification only';
-          if (compactPrice) compactPrice.textContent = 'No plan charge';
-          if (commitment) commitment.textContent = 'By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update.';
-          payBtn.textContent = 'Save card';
+          if (summaryKicker) summaryKicker.textContent = (globalThis.NorvaI18n?.t("ui_web_fdb4a7794486", { defaultValue: "PAYMENT METHOD" }) ?? 'PAYMENT METHOD');
+          if (sumPlan) sumPlan.textContent = (globalThis.NorvaI18n?.t("ui_web_cd99d27925aa", { defaultValue: "Secure card update" }) ?? 'Secure card update');
+          if (sumTag) sumTag.textContent = (globalThis.NorvaI18n?.t("ui_web_ad2a074824de", { defaultValue: "No plan change and no subscription charge" }) ?? 'No plan change and no subscription charge');
+          h1.textContent = (globalThis.NorvaI18n?.t("ui_web_f5a995ffbabb", { defaultValue: "Update your payment method" }) ?? 'Update your payment method');
+          sub.textContent = (globalThis.NorvaI18n?.t("ui_web_96e3d6303eac", { defaultValue: "Enter your new card — it becomes the card used for your Norva plan." }) ?? 'Enter your new card — it becomes the card used for your Norva plan.');
+          after.textContent = (globalThis.NorvaI18n?.t("ui_web_e7292a73cc94", { defaultValue: "Today: $0.00 — card check only (a tiny hold, released right away)." }) ?? 'Today: $0.00 — card check only (a tiny hold, released right away).');
+          if (compactPlan) compactPlan.textContent = (globalThis.NorvaI18n?.t("ui_web_aea89318764f", { defaultValue: "Payment method update" }) ?? 'Payment method update');
+          if (compactDate) compactDate.textContent = (globalThis.NorvaI18n?.t("ui_web_766209c7a9c0", { defaultValue: "Temporary card verification only" }) ?? 'Temporary card verification only');
+          if (compactPrice) compactPrice.textContent = (globalThis.NorvaI18n?.t("ui_web_a10d5be4e97b", { defaultValue: "No plan charge" }) ?? 'No plan charge');
+          if (commitment) commitment.textContent = (globalThis.NorvaI18n?.t("ui_web_1d4d4aa78e7e", { defaultValue: "By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update." }) ?? 'By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update.');
+          payBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_27528dd8916e", { defaultValue: "Save card" }) ?? 'Save card');
         } else if (checkoutKind === 'plan_change') {
-          h1.textContent = 'Change your plan';
-          sub.textContent = 'No charge today. Your current plan stays active until the exact date below, when the new plan and price begin.';
-          if (todayValue) todayValue.textContent = displayMoney('0.00') + ' — no charge';
-          if (todayNote) todayNote.textContent = 'Your current plan remains active';
-          if (todaySuffix) todaySuffix.textContent = 'today';
-          if (firstLabel) firstLabel.textContent = 'New plan starts on';
-          if (finalLabel) finalLabel.textContent = 'Until then';
-          if (finalNote) finalNote.textContent = 'Your existing benefits and billing continue';
-          if (finalValue) finalValue.textContent = 'Current plan stays active';
-          if (finalSuffix) finalSuffix.textContent = 'no charge today';
-          if (compactDate) compactDate.textContent = 'No charge today · starts ' + firstChargeLabel;
-          if (commitment) commitment.textContent = 'By selecting “Confirm plan change”, you schedule ' + planLabel + ' for ' + firstChargeLabel + ' at ' + recurringCommitment + '. Nothing is charged today; the plan then renews automatically until canceled.';
-          payBtn.textContent = 'Confirm plan change';
+          h1.textContent = (globalThis.NorvaI18n?.t("ui_web_0d7761373186", { defaultValue: "Change your plan" }) ?? 'Change your plan');
+          sub.textContent = (globalThis.NorvaI18n?.t("ui_web_c130798f7338", { defaultValue: "No charge today. Your current plan stays active until the exact date below, when the new plan and price begin." }) ?? 'No charge today. Your current plan stays active until the exact date below, when the new plan and price begin.');
+          if (todayValue) todayValue.textContent = displayMoney('0.00') + (globalThis.NorvaI18n?.t("ui_web_7a9b11dde773", { defaultValue: " — no charge" }) ?? ' — no charge');
+          if (todayNote) todayNote.textContent = (globalThis.NorvaI18n?.t("ui_web_b4d50f62acf0", { defaultValue: "Your current plan remains active" }) ?? 'Your current plan remains active');
+          if (todaySuffix) todaySuffix.textContent = (globalThis.NorvaI18n?.t("ui_web_e0f4f767ac88", { defaultValue: "today" }) ?? 'today');
+          if (firstLabel) firstLabel.textContent = (globalThis.NorvaI18n?.t("ui_web_f161a54fb02f", { defaultValue: "New plan starts on" }) ?? 'New plan starts on');
+          if (finalLabel) finalLabel.textContent = (globalThis.NorvaI18n?.t("ui_web_1947f9420c01", { defaultValue: "Until then" }) ?? 'Until then');
+          if (finalNote) finalNote.textContent = (globalThis.NorvaI18n?.t("ui_web_40ee82e50372", { defaultValue: "Your existing benefits and billing continue" }) ?? 'Your existing benefits and billing continue');
+          if (finalValue) finalValue.textContent = (globalThis.NorvaI18n?.t("ui_web_7c9b6b8e23b4", { defaultValue: "Current plan stays active" }) ?? 'Current plan stays active');
+          if (finalSuffix) finalSuffix.textContent = (globalThis.NorvaI18n?.t("ui_web_26ac07ef800f", { defaultValue: "no charge today" }) ?? 'no charge today');
+          if (compactDate) compactDate.textContent = (globalThis.NorvaI18n?.t("ui_web_dea808b84444", { defaultValue: "No charge today · starts " }) ?? 'No charge today · starts ') + firstChargeLabel;
+          if (commitment) commitment.textContent = (globalThis.NorvaI18n?.t("ui_web_f487f705a811", { defaultValue: "By selecting “Confirm plan change”, you schedule " }) ?? 'By selecting “Confirm plan change”, you schedule ') + planLabel + (globalThis.NorvaI18n?.t("ui_web_10c22bcf4c76", { defaultValue: " for " }) ?? ' for ') + firstChargeLabel + (globalThis.NorvaI18n?.t("ui_web_b1d6b91b67c2", { defaultValue: " at " }) ?? ' at ') + recurringCommitment + (globalThis.NorvaI18n?.t("ui_web_e1c5f2be0af9", { defaultValue: ". Nothing is charged today; the plan then renews automatically until canceled." }) ?? '. Nothing is charged today; the plan then renews automatically until canceled.');
+          payBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_ef84f7afb991", { defaultValue: "Confirm plan change" }) ?? 'Confirm plan change');
         } else if (checkoutKind === 'resubscribe') {
-          h1.textContent = 'Reactivate your plan';
-          sub.textContent = 'Welcome back — your plan starts only after today\'s payment is confirmed.';
-          after.textContent = 'Billed today: ' + (displayPrice ? displayMoney(displayPrice) : 'the displayed plan price')
-            + (period === 'annual' ? ' for one year.' : ' for one month.');
-          if (compactDate) compactDate.textContent = 'Payment captured after confirmation';
-          if (compactPrice) compactPrice.textContent = recurringLabel + ' today';
-          if (commitment) commitment.textContent = 'By selecting “Reactivate”, you authorize an immediate ' + recurringLabel + ' payment. The promotional terms are ' + recurringCommitment + '; your plan starts after confirmation and renews automatically until canceled.';
-          payBtn.textContent = 'Reactivate';
+          h1.textContent = (globalThis.NorvaI18n?.t("ui_web_815b4a5f4647", { defaultValue: "Reactivate your plan" }) ?? 'Reactivate your plan');
+          sub.textContent = (globalThis.NorvaI18n?.t("ui_web_7ad009296adc", { defaultValue: "Welcome back — your plan starts only after today's payment is confirmed." }) ?? 'Welcome back — your plan starts only after today\'s payment is confirmed.');
+          after.textContent = (globalThis.NorvaI18n?.t("ui_web_ad2f3e00698a", { defaultValue: "Billed today: " }) ?? 'Billed today: ') + (displayPrice ? displayMoney(displayPrice) : (globalThis.NorvaI18n?.t("ui_web_040af479f0b6", { defaultValue: "the displayed plan price" }) ?? 'the displayed plan price'))
+            + (period === 'annual' ? (globalThis.NorvaI18n?.t("ui_web_d55f8db64bfe", { defaultValue: " for one year." }) ?? ' for one year.') : (globalThis.NorvaI18n?.t("ui_web_a289a110c012", { defaultValue: " for one month." }) ?? ' for one month.'));
+          if (compactDate) compactDate.textContent = (globalThis.NorvaI18n?.t("ui_web_0ba6db75d6de", { defaultValue: "Payment captured after confirmation" }) ?? 'Payment captured after confirmation');
+          if (compactPrice) compactPrice.textContent = recurringLabel + (globalThis.NorvaI18n?.t("ui_web_e0f4f767ac88", { defaultValue: " today" }) ?? ' today');
+          if (commitment) commitment.textContent = (globalThis.NorvaI18n?.t("ui_web_c4788785846a", { defaultValue: "By selecting “Reactivate”, you authorize an immediate " }) ?? 'By selecting “Reactivate”, you authorize an immediate ') + recurringLabel + (globalThis.NorvaI18n?.t("ui_web_98a4d41c0917", { defaultValue: " payment. The promotional terms are " }) ?? ' payment. The promotional terms are ') + recurringCommitment + (globalThis.NorvaI18n?.t("ui_web_cc721df99e69", { defaultValue: "; your plan starts after confirmation and renews automatically until canceled." }) ?? '; your plan starts after confirmation and renews automatically until canceled.');
+          payBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_2dc7478fbd42", { defaultValue: "Reactivate" }) ?? 'Reactivate');
         } else {
           const trialDays = serverTrialDays || 7;
-          if (todayValue) todayValue.textContent = displayMoney('0.00') + ' — temporary card check only';
-          if (todayNote) todayNote.textContent = 'Temporary card check only';
-          if (todaySuffix) todaySuffix.textContent = 'released immediately';
-          if (firstLabel) firstLabel.textContent = 'First payment on';
-          if (finalLabel) finalLabel.textContent = 'Cancel anytime before then';
-          if (finalNote) finalNote.textContent = 'From your Norva subscription settings';
-          if (finalValue) finalValue.textContent = 'Nothing charged';
-          if (finalSuffix) finalSuffix.textContent = 'cancel anytime';
-          h1.textContent = 'Start your free trial';
-          sub.textContent = trialDays + ' days free across your compatible devices — cancel anytime before the trial ends.';
+          if (todayValue) todayValue.textContent = displayMoney('0.00') + (globalThis.NorvaI18n?.t("ui_web_6cb5f2bbb6be", { defaultValue: " — temporary card check only" }) ?? ' — temporary card check only');
+          if (todayNote) todayNote.textContent = (globalThis.NorvaI18n?.t("ui_web_c1b771d3d9e9", { defaultValue: "Temporary card check only" }) ?? 'Temporary card check only');
+          if (todaySuffix) todaySuffix.textContent = (globalThis.NorvaI18n?.t("ui_web_d32a799b659b", { defaultValue: "released immediately" }) ?? 'released immediately');
+          if (firstLabel) firstLabel.textContent = (globalThis.NorvaI18n?.t("ui_web_b0332ed00235", { defaultValue: "First payment on" }) ?? 'First payment on');
+          if (finalLabel) finalLabel.textContent = (globalThis.NorvaI18n?.t("ui_web_a48130f7a6a3", { defaultValue: "Cancel anytime before then" }) ?? 'Cancel anytime before then');
+          if (finalNote) finalNote.textContent = (globalThis.NorvaI18n?.t("ui_web_ceccdb05ed73", { defaultValue: "From your Norva subscription settings" }) ?? 'From your Norva subscription settings');
+          if (finalValue) finalValue.textContent = (globalThis.NorvaI18n?.t("ui_web_2cc88ec8d663", { defaultValue: "Nothing charged" }) ?? 'Nothing charged');
+          if (finalSuffix) finalSuffix.textContent = (globalThis.NorvaI18n?.t("ui_web_47bc5b86a63a", { defaultValue: "cancel anytime" }) ?? 'cancel anytime');
+          h1.textContent = (globalThis.NorvaI18n?.t("ui_web_09d6c31d8dd1", { defaultValue: "Start your free trial" }) ?? 'Start your free trial');
+          sub.textContent = trialDays + (globalThis.NorvaI18n?.t("ui_web_46cca2bce079", { defaultValue: " days free across your compatible devices — cancel anytime before the trial ends." }) ?? ' days free across your compatible devices — cancel anytime before the trial ends.');
           if (sumPer) sumPer.textContent = period === 'annual' ? '/yr' : '/mo';
-          if (compactDate) compactDate.textContent = trialDays + ' days free · first payment ' + firstChargeLabel;
-          if (commitment) commitment.textContent = 'By selecting “Start free trial”, you authorize Norva to charge ' + recurringCommitment + ' beginning on ' + firstChargeLabel + ' and renew automatically until canceled. Cancel before then and no subscription payment is taken.';
-          payBtn.textContent = 'Start free trial';
+          if (compactDate) compactDate.textContent = trialDays + (globalThis.NorvaI18n?.t("ui_web_065756b6b215", { defaultValue: " days free · first payment " }) ?? ' days free · first payment ') + firstChargeLabel;
+          if (commitment) commitment.textContent = (globalThis.NorvaI18n?.t("ui_web_343e2f2726fd", { defaultValue: "By selecting “Start free trial”, you authorize Norva to charge " }) ?? 'By selecting “Start free trial”, you authorize Norva to charge ') + recurringCommitment + (globalThis.NorvaI18n?.t("ui_web_14bc7d89c2e8", { defaultValue: " beginning on " }) ?? ' beginning on ') + firstChargeLabel + (globalThis.NorvaI18n?.t("ui_web_68b1a2fa4462", { defaultValue: " and renew automatically until canceled. Cancel before then and no subscription payment is taken." }) ?? ' and renew automatically until canceled. Cancel before then and no subscription payment is taken.');
+          payBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_b1effd1ffed3", { defaultValue: "Start free trial" }) ?? 'Start free trial');
         }
       }
 
@@ -884,7 +886,7 @@
         finishing = true;
         loading.classList.remove('hide');
         loading.style.display = 'grid';
-        loading.firstElementChild.innerHTML = '<div class="spinner"></div>Finalizing…';
+        loading.firstElementChild.innerHTML = '<div class="spinner"></div><norva-i18n data-i18n="ui_web_fae6ce42a3ec">Finalizing…</norva-i18n>';
         // /confirm re-fetches the order server-side; retry briefly while Revolut settles.
         let done = false;
         let confirmed = null;
@@ -906,12 +908,12 @@
           finishing = false;
           loading.classList.add('hide');
           setStatus(checkoutKind === 'resubscribe'
-            ? "Your payment may still be processing. Don't submit it again; retry confirmation so Norva can verify the result."
-            : "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization.", true);
+            ? (globalThis.NorvaI18n?.t("ui_web_b4318296e649", { defaultValue: "Your payment may still be processing. Don't submit it again; retry confirmation so Norva can verify the result." }) ?? "Your payment may still be processing. Don't submit it again; retry confirmation so Norva can verify the result.")
+            : (globalThis.NorvaI18n?.t("ui_web_0b53db41b3bf", { defaultValue: "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization." }) ?? "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization."), true);
           const retryFinalize = document.createElement('button');
           retryFinalize.className = 'btn ghost';
           retryFinalize.style.marginTop = '10px';
-          retryFinalize.textContent = 'Retry finalization';
+          retryFinalize.textContent = (globalThis.NorvaI18n?.t("ui_web_e8a88d4c2915", { defaultValue: "Retry finalization" }) ?? 'Retry finalization');
           retryFinalize.addEventListener('click', function () {
             retryFinalize.remove();
             finish(orderId || currentOrderId);
@@ -1027,7 +1029,7 @@
             return;
           }
           trackCheckout('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
-          setStatus('The exact plan, price and renewal terms could not be verified. No payment can be submitted. Please retry.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_a7e130e5e57f", { defaultValue: "The exact plan, price and renewal terms could not be verified. No payment can be submitted. Please retry." }) ?? 'The exact plan, price and renewal terms could not be verified. No payment can be submitted. Please retry.'), true);
           addRetry();
           return;
         }
@@ -1068,7 +1070,7 @@
               trackCheckout('journey_error', { outcome: 'error', failureFamily: 'payment_declined' });
               submitting = false;
               syncPayAvailability();
-              setStatus('Payment could not be completed. Please check your card and try again.', true);
+              setStatus((globalThis.NorvaI18n?.t("ui_web_8e3f4356aa55", { defaultValue: "Payment could not be completed. Please check your card and try again." }) ?? 'Payment could not be completed. Please check your card and try again.'), true);
             },
             onValidation: function (errors) {
               const validationErrors = Array.isArray(errors) ? errors : [];
@@ -1085,7 +1087,7 @@
               trackCheckout('journey_error', { outcome: 'cancelled', failureFamily: 'cancelled' });
               submitting = false;
               syncPayAvailability();
-              setStatus('Payment was canceled. Your card was not charged; you can try again when ready.', false);
+              setStatus((globalThis.NorvaI18n?.t("ui_web_4c892e766cd7", { defaultValue: "Payment was canceled. Your card was not charged; you can try again when ready." }) ?? 'Payment was canceled. Your card was not charged; you can try again when ready.'), false);
             },
           });
           loading.classList.add('hide');
@@ -1098,7 +1100,7 @@
           loading.classList.add('hide');
           // Widget failed to load → fall back to Revolut's hosted page.
           trackCheckout('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
-          setStatus('Secure card form could not load. Use the full secure payment page below.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_ff8cc7a92a65", { defaultValue: "Secure card form could not load. Use the full secure payment page below." }) ?? 'Secure card form could not load. Use the full secure payment page below.'), true);
           if (data.checkout_url) { fallback.hidden = false; }
         }
       }
@@ -1114,17 +1116,17 @@
         e.preventDefault();
         if (submitting || !cardField || !commercialQuote) return;
         if (!cardValid) {
-          setStatus('Please complete the card details before continuing.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_495258ce6298", { defaultValue: "Please complete the card details before continuing." }) ?? 'Please complete the card details before continuing.'), true);
           return;
         }
-        if (!nameInput.value.trim()) { setStatus('Please enter the cardholder name.', true); nameInput.focus(); return; }
+        if (!nameInput.value.trim()) { setStatus((globalThis.NorvaI18n?.t("ui_web_f4b1f8265e73", { defaultValue: "Please enter the cardholder name." }) ?? 'Please enter the cardholder name.'), true); nameInput.focus(); return; }
         // Revolut requires the cardholder's full name (first + last), else the
         // card submit is rejected — validate here for a clear message up front.
         if (nameInput.value.trim().split(/\s+/).length < 2) {
-          setStatus('Please enter your full name (first and last), as printed on the card.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_aeeae4f85c03", { defaultValue: "Please enter your full name (first and last), as printed on the card." }) ?? 'Please enter your full name (first and last), as printed on the card.'), true);
           nameInput.focus(); return;
         }
-        if (!emailInput.value.trim()) { setStatus('Please enter an email for your receipt.', true); emailInput.focus(); return; }
+        if (!emailInput.value.trim()) { setStatus((globalThis.NorvaI18n?.t("ui_web_b4249cd0e08a", { defaultValue: "Please enter an email for your receipt." }) ?? 'Please enter an email for your receipt.'), true); emailInput.focus(); return; }
         document.getElementById('bd-first-date').textContent = trialChargeDate();
         submitting = true;
         syncPayAvailability();
@@ -1140,7 +1142,7 @@
           trackCheckout('journey_error', { outcome: 'error', failureFamily: 'payment_declined' });
           submitting = false;
           syncPayAvailability();
-          setStatus('Payment could not start. Please review your card details and try again.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_5cb823aa2a14", { defaultValue: "Payment could not start. Please review your card details and try again." }) ?? 'Payment could not start. Please review your card details and try again.'), true);
         }
       });
 
@@ -1148,7 +1150,7 @@
         const retry = document.createElement('button');
         retry.className = 'btn ghost';
         retry.style.marginTop = '10px';
-        retry.textContent = 'Retry';
+        retry.textContent = (globalThis.NorvaI18n?.t("ui_web_942087cc2d41", { defaultValue: "Retry" }) ?? 'Retry');
         retry.addEventListener('click', function () { retry.remove(); boot(); });
         statusEl.appendChild(document.createElement('br'));
         statusEl.appendChild(retry);
@@ -1160,7 +1162,7 @@
         retry.id = 'price-retry';
         retry.className = 'btn ghost';
         retry.style.marginTop = '10px';
-        retry.textContent = 'Reload current price';
+        retry.textContent = (globalThis.NorvaI18n?.t("ui_web_59c8c8fedca1", { defaultValue: "Reload current price" }) ?? 'Reload current price');
         retry.addEventListener('click', function () { location.reload(); });
         statusEl.appendChild(document.createElement('br'));
         statusEl.appendChild(retry);

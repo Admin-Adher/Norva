@@ -9,66 +9,66 @@
     const STATE_META = {
         not_configured: {
             severity: 5,
-            label: 'Not connected',
-            title: 'Connect your TV service',
-            message: 'Add a provider account or playlist link to start watching.',
-            action: 'Connect TV service'
+            label: (globalThis.NorvaI18n?.t("ui_web_0303e1824670", { defaultValue: "Not connected" }) ?? 'Not connected'),
+            title: (globalThis.NorvaI18n?.t("ui_web_9fa1c18bb4b5", { defaultValue: "Connect your TV service" }) ?? 'Connect your TV service'),
+            message: (globalThis.NorvaI18n?.t("ui_web_b5bd4db2a30d", { defaultValue: "Add a provider account or playlist link to start watching." }) ?? 'Add a provider account or playlist link to start watching.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_ecf6dd26c319", { defaultValue: "Connect TV service" }) ?? 'Connect TV service')
         },
         syncing: {
             severity: 1,
-            label: 'Checking',
-            title: 'Preparing your TV service',
-            message: 'Norva is importing your channels, movies and series. A large library can take a while — you can start watching as titles appear.',
-            action: 'View service'
+            label: (globalThis.NorvaI18n?.t("ui_web_0dfe1d63c9d8", { defaultValue: "Checking" }) ?? 'Checking'),
+            title: (globalThis.NorvaI18n?.t("ui_web_15349f77f124", { defaultValue: "Preparing your TV service" }) ?? 'Preparing your TV service'),
+            message: (globalThis.NorvaI18n?.t("ui_web_a6f1ccb9f803", { defaultValue: "Norva is importing your channels, movies and series. A large library can take a while — you can start watching as titles appear." }) ?? 'Norva is importing your channels, movies and series. A large library can take a while — you can start watching as titles appear.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_dc2a62fb3391", { defaultValue: "View service" }) ?? 'View service')
         },
         ready: {
             severity: 0,
-            label: 'Ready',
-            title: 'TV service ready',
-            message: 'Your catalog is ready to watch.',
-            action: 'Manage service'
+            label: (globalThis.NorvaI18n?.t("ui_web_5fa7aac5375c", { defaultValue: "Ready" }) ?? 'Ready'),
+            title: (globalThis.NorvaI18n?.t("ui_web_766bd5403459", { defaultValue: "TV service ready" }) ?? 'TV service ready'),
+            message: (globalThis.NorvaI18n?.t("ui_web_13e44bdca227", { defaultValue: "Your catalog is ready to watch." }) ?? 'Your catalog is ready to watch.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_a23b096cabd0", { defaultValue: "Manage service" }) ?? 'Manage service')
         },
         disabled: {
             severity: 0,
-            label: 'Disabled',
-            title: 'TV service paused',
-            message: 'This service is paused. Its saved catalog will return when you enable it.',
-            action: 'Manage service'
+            label: (globalThis.NorvaI18n?.t("ui_web_75081b593d15", { defaultValue: "Disabled" }) ?? 'Disabled'),
+            title: (globalThis.NorvaI18n?.t("ui_web_0139f3c27706", { defaultValue: "TV service paused" }) ?? 'TV service paused'),
+            message: (globalThis.NorvaI18n?.t("ui_web_3d439b51ff45", { defaultValue: "This service is paused. Its saved catalog will return when you enable it." }) ?? 'This service is paused. Its saved catalog will return when you enable it.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_a23b096cabd0", { defaultValue: "Manage service" }) ?? 'Manage service')
         },
         degraded: {
             severity: 3,
-            label: 'Needs attention',
-            title: 'TV service needs attention',
-            message: 'Some content may be unavailable. Try syncing again or check the provider details.',
-            action: 'Repair service'
+            label: (globalThis.NorvaI18n?.t("ui_web_c1ebc7817870", { defaultValue: "Needs attention" }) ?? 'Needs attention'),
+            title: (globalThis.NorvaI18n?.t("ui_web_82155b6ef5b5", { defaultValue: "TV service needs attention" }) ?? 'TV service needs attention'),
+            message: (globalThis.NorvaI18n?.t("ui_web_82eec2e53ba3", { defaultValue: "Some content may be unavailable. Try syncing again or check the provider details." }) ?? 'Some content may be unavailable. Try syncing again or check the provider details.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_92d7d3033ab0", { defaultValue: "Repair service" }) ?? 'Repair service')
         },
         auth_failed: {
             severity: 4,
-            label: 'Update login',
-            title: 'Update TV service login',
-            message: 'The provider refused the saved login. Update the username or password to restore access.',
-            action: 'Update login'
+            label: (globalThis.NorvaI18n?.t("ui_web_5483db957f58", { defaultValue: "Update login" }) ?? 'Update login'),
+            title: (globalThis.NorvaI18n?.t("ui_web_2b58f12c3b02", { defaultValue: "Update TV service login" }) ?? 'Update TV service login'),
+            message: (globalThis.NorvaI18n?.t("ui_web_289baf2fea08", { defaultValue: "The provider refused the saved login. Update the username or password to restore access." }) ?? 'The provider refused the saved login. Update the username or password to restore access.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_5483db957f58", { defaultValue: "Update login" }) ?? 'Update login')
         },
         expired: {
             severity: 4,
-            label: 'Expired',
-            title: 'TV service may be expired',
-            message: 'The provider reports an inactive or expired account. Renew it, then update the login if needed.',
-            action: 'Update service'
+            label: (globalThis.NorvaI18n?.t("ui_web_424a2551d356", { defaultValue: "Expired" }) ?? 'Expired'),
+            title: (globalThis.NorvaI18n?.t("ui_web_a0ac8434fff6", { defaultValue: "TV service may be expired" }) ?? 'TV service may be expired'),
+            message: (globalThis.NorvaI18n?.t("ui_web_0466029814e9", { defaultValue: "The provider reports an inactive or expired account. Renew it, then update the login if needed." }) ?? 'The provider reports an inactive or expired account. Renew it, then update the login if needed.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_6a61c5f85fef", { defaultValue: "Update service" }) ?? 'Update service')
         },
         provider_changed: {
             severity: 4,
-            label: 'Review service',
-            title: 'Review your TV service',
-            message: 'The provider address or account endpoint is no longer available. Review the access dates and login before syncing again.',
-            action: 'Review access'
+            label: (globalThis.NorvaI18n?.t("ui_web_f3bfa948a110", { defaultValue: "Review service" }) ?? 'Review service'),
+            title: (globalThis.NorvaI18n?.t("ui_web_6667254de8e3", { defaultValue: "Review your TV service" }) ?? 'Review your TV service'),
+            message: (globalThis.NorvaI18n?.t("ui_web_ff5da28287c3", { defaultValue: "The provider address or account endpoint is no longer available. Review the access dates and login before syncing again." }) ?? 'The provider address or account endpoint is no longer available. Review the access dates and login before syncing again.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_5ddb6f051115", { defaultValue: "Review access" }) ?? 'Review access')
         },
         unreachable: {
             severity: 3,
-            label: 'Unavailable',
-            title: 'TV service unavailable',
-            message: 'Norva cannot reach the provider right now. It may be a temporary outage.',
-            action: 'Check service'
+            label: (globalThis.NorvaI18n?.t("ui_web_ca1844969742", { defaultValue: "Unavailable" }) ?? 'Unavailable'),
+            title: (globalThis.NorvaI18n?.t("ui_web_9897f6dd7734", { defaultValue: "TV service unavailable" }) ?? 'TV service unavailable'),
+            message: (globalThis.NorvaI18n?.t("ui_web_7994d081a45b", { defaultValue: "Norva cannot reach the provider right now. It may be a temporary outage." }) ?? 'Norva cannot reach the provider right now. It may be a temporary outage.'),
+            action: (globalThis.NorvaI18n?.t("ui_web_54c4d87263b2", { defaultValue: "Check service" }) ?? 'Check service')
         }
     };
 
@@ -223,12 +223,12 @@
     const INFRA_PATTERN = /\b(media gateway|gateway refused|refused|500|502|503|504|timeout|timed out|econn|enotfound|dns|network|unreachable|service unavailable|temporarily unavailable)\b/;
 
     const ERROR_KIND_LABELS = {
-        busy: 'Slot occupé',
-        expired: 'Abonnement terminé',
-        not_found: 'Service introuvable',
-        auth: 'Identifiants rejetés',
-        infra: 'Panne passerelle',
-        unknown: 'Erreur non classée'
+        busy: (globalThis.NorvaI18n?.t("ui_web_6a447edfb5f4", { defaultValue: "Slot occupé" }) ?? 'Slot occupé'),
+        expired: (globalThis.NorvaI18n?.t("ui_web_49615a499cd3", { defaultValue: "Abonnement terminé" }) ?? 'Abonnement terminé'),
+        not_found: (globalThis.NorvaI18n?.t("ui_web_c8b7e0593303", { defaultValue: "Service introuvable" }) ?? 'Service introuvable'),
+        auth: (globalThis.NorvaI18n?.t("ui_web_7ed82935140a", { defaultValue: "Identifiants rejetés" }) ?? 'Identifiants rejetés'),
+        infra: (globalThis.NorvaI18n?.t("ui_web_001e2d993184", { defaultValue: "Panne passerelle" }) ?? 'Panne passerelle'),
+        unknown: (globalThis.NorvaI18n?.t("ui_web_93f82b62c4f6", { defaultValue: "Erreur non classée" }) ?? 'Erreur non classée')
     };
 
     function classifyErrorKind(text) {
@@ -603,9 +603,9 @@
         if (issues.length) {
             const primary = [...issues].sort((a, b) => b.severity - a.severity)[0];
             const meta = STATE_META[primary.state] || STATE_META.degraded;
-            const title = ready.length ? 'One TV service needs attention' : meta.title;
+            const title = ready.length ? (globalThis.NorvaI18n?.t("ui_web_cdc63b72fa49", { defaultValue: "One TV service needs attention" }) ?? 'One TV service needs attention') : meta.title;
             const message = ready.length
-                ? 'Norva can still play available content, but one service needs repair.'
+                ? (globalThis.NorvaI18n?.t("ui_web_fec22ea53469", { defaultValue: "Norva can still play available content, but one service needs repair." }) ?? 'Norva can still play available content, but one service needs repair.')
                 : meta.message;
             return {
                 state: primary.state,
@@ -645,8 +645,8 @@
                 sources: [],
                 issues: [],
                 ready: [],
-                title: "We can't reach Norva right now",
-                message: 'Your services are unaffected — this is a temporary connection problem. Retrying…'
+                title: (globalThis.NorvaI18n?.t("ui_web_8671b15a00d7", { defaultValue: "We can't reach Norva right now" }) ?? "We can't reach Norva right now"),
+                message: (globalThis.NorvaI18n?.t("ui_web_082b2e404b5e", { defaultValue: "Your services are unaffected — this is a temporary connection problem. Retrying…" }) ?? 'Your services are unaffected — this is a temporary connection problem. Retrying…')
             };
         }
         const sources = Array.isArray(sourcesResult.value) ? sourcesResult.value : [];
@@ -683,42 +683,42 @@
             .filter(Boolean)
             .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
         const detail = options.detail || (latestSync
-            ? `Catalogue updated ${relativeTime(latestSync)}`
+            ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f25e77bb5313", {defaultValue: "Catalogue updated {{p0}}", p0:(relativeTime(latestSync))}) : `Catalogue updated ${relativeTime(latestSync)}`)
             : sourceCount
-                ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${state === 'syncing' ? ', preparing catalogue' : issueCount ? `, ${issueCount} need attention` : ''}`
-                : 'No service connected');
+                ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${state === 'syncing' ? (globalThis.NorvaI18n?.t("ui_web_4dec46ac9bac", { defaultValue: ", preparing catalogue" }) ?? ', preparing catalogue') : issueCount ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0245f7ab350a", {defaultValue: ", {{p0}} need attention", p0:(issueCount)}) : `, ${issueCount} need attention`) : ''}`
+                : (globalThis.NorvaI18n?.t("ui_web_9f7086ea4e7d", { defaultValue: "No service connected" }) ?? 'No service connected'));
         const publicTvState = state === 'ready'
             ? {
-                title: 'TV service is ready',
-                message: latestSync ? `Catalogue updated ${relativeTime(latestSync)}` : 'Your catalogue is ready to watch.',
-                action: 'View service'
+                title: (globalThis.NorvaI18n?.t("ui_web_563c77237903", { defaultValue: "TV service is ready" }) ?? 'TV service is ready'),
+                message: latestSync ? `Catalogue updated ${relativeTime(latestSync)}` : (globalThis.NorvaI18n?.t("ui_web_ee5d2b22fe0d", { defaultValue: "Your catalogue is ready to watch." }) ?? 'Your catalogue is ready to watch.'),
+                action: (globalThis.NorvaI18n?.t("ui_web_dc2a62fb3391", { defaultValue: "View service" }) ?? 'View service')
             }
             : state === 'syncing'
                 ? {
-                    title: 'Preparing your TV service',
-                    message: 'Available titles appear as your catalogue is prepared.',
-                    action: 'Show instructions'
+                    title: (globalThis.NorvaI18n?.t("ui_web_15349f77f124", { defaultValue: "Preparing your TV service" }) ?? 'Preparing your TV service'),
+                    message: (globalThis.NorvaI18n?.t("ui_web_3ad0174d1572", { defaultValue: "Available titles appear as your catalogue is prepared." }) ?? 'Available titles appear as your catalogue is prepared.'),
+                    action: (globalThis.NorvaI18n?.t("ui_web_4a0e4d79a5d8", { defaultValue: "Show instructions" }) ?? 'Show instructions')
                 }
                 : state === 'disabled'
                     ? {
-                        title: 'TV service is paused',
-                        message: 'Enable it from TV Service settings to make its saved catalogue available again.',
-                        action: 'Show instructions'
+                        title: (globalThis.NorvaI18n?.t("ui_web_a80f1ba0e158", { defaultValue: "TV service is paused" }) ?? 'TV service is paused'),
+                        message: (globalThis.NorvaI18n?.t("ui_web_12157a0af31f", { defaultValue: "Enable it from TV Service settings to make its saved catalogue available again." }) ?? 'Enable it from TV Service settings to make its saved catalogue available again.'),
+                        action: (globalThis.NorvaI18n?.t("ui_web_4a0e4d79a5d8", { defaultValue: "Show instructions" }) ?? 'Show instructions')
                     }
                 : {
-                    title: 'TV service needs attention',
-                    message: 'Some content may be unavailable. Available titles still play.',
-                    action: 'Show instructions'
+                    title: (globalThis.NorvaI18n?.t("ui_web_82155b6ef5b5", { defaultValue: "TV service needs attention" }) ?? 'TV service needs attention'),
+                    message: (globalThis.NorvaI18n?.t("ui_web_062cb37ce522", { defaultValue: "Some content may be unavailable. Available titles still play." }) ?? 'Some content may be unavailable. Available titles still play.'),
+                    action: (globalThis.NorvaI18n?.t("ui_web_4a0e4d79a5d8", { defaultValue: "Show instructions" }) ?? 'Show instructions')
                 };
         const accountState = accountSummary && state === 'ready'
             ? publicTvState
             : null;
-        const title = tvHandoff ? publicTvState.title : (accountState?.title || summary.title || STATE_META[state]?.title || 'TV service');
+        const title = tvHandoff ? publicTvState.title : (accountState?.title || summary.title || STATE_META[state]?.title || (globalThis.NorvaI18n?.t("ui_web_bf88149dcb1d", { defaultValue: "TV service" }) ?? 'TV service'));
         const message = tvHandoff ? publicTvState.message : (accountState?.message || summary.message || STATE_META[state]?.message || '');
-        const actionLabel = tvHandoff ? publicTvState.action : (accountState?.action || summary.action || 'Manage service');
+        const actionLabel = tvHandoff ? publicTvState.action : (accountState?.action || summary.action || (globalThis.NorvaI18n?.t("ui_web_a23b096cabd0", { defaultValue: "Manage service" }) ?? 'Manage service'));
         const actionName = tvHandoff && state !== 'ready' ? 'show-instructions' : 'open-sources';
         const progressAction = state === 'syncing' && !tvHandoff
-            ? '<button class="btn btn-secondary" data-source-health-action="view-progress">View progress</button>'
+            ? '<button class="btn btn-secondary" data-source-health-action="view-progress" data-i18n="ui_web_c2e39c2cee78">View progress</button>'
             : '';
         const diagnosticAttributes = tvHandoff
             ? ''
@@ -730,7 +730,7 @@
                  data-source-health-state="${escapeHtml(publicState)}"${diagnosticAttributes}>
                 <div class="service-health-copy">
                     <img class="service-health-status-icon" src="/img/icons/norva-live-tv.svg" alt="" aria-hidden="true">
-                    <span class="service-health-label">${escapeHtml(tvHandoff ? STATE_META[publicState]?.label : (summary.label || STATE_META[state]?.label || 'Status'))}</span>
+                    <span class="service-health-label">${escapeHtml(tvHandoff ? STATE_META[publicState]?.label : (summary.label || STATE_META[state]?.label || (globalThis.NorvaI18n?.t("ui_web_920e413c7d41", { defaultValue: "Status" }) ?? 'Status')))}</span>
                     <h3>${escapeHtml(title)}</h3>
                     <p>${escapeHtml(message)}</p>
                     <small>${escapeHtml(detail)}</small>
@@ -745,17 +745,17 @@
 
     function relativeTime(value) {
         const then = new Date(value).getTime();
-        if (!Number.isFinite(then)) return 'recently';
+        if (!Number.isFinite(then)) return (globalThis.NorvaI18n?.t("ui_web_59f7a3dd09de", { defaultValue: "recently" }) ?? 'recently');
         const diff = Date.now() - then;
-        if (diff <= 0) return 'just now';
+        if (diff <= 0) return (globalThis.NorvaI18n?.t("ui_web_7ddb44d8a533", { defaultValue: "just now" }) ?? 'just now');
         const minutes = Math.floor(diff / 60000);
-        if (minutes < 1) return 'just now';
-        if (minutes < 60) return `${minutes} min ago`;
+        if (minutes < 1) return (globalThis.NorvaI18n?.t("ui_web_7ddb44d8a533", { defaultValue: "just now" }) ?? 'just now');
+        if (minutes < 60) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_23c5964926a1", {defaultValue: "{{p0}} min ago", p0:(minutes)}) : `${minutes} min ago`);
         const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours} h ago`;
+        if (hours < 24) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f1f497484232", {defaultValue: "{{p0}} h ago", p0:(hours)}) : `${hours} h ago`);
         const days = Math.floor(hours / 24);
-        if (days < 7) return `${days} d ago`;
-        return new Date(value).toLocaleDateString('en-US');
+        if (days < 7) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_d8562d2341f6", {defaultValue: "{{p0}} d ago", p0:(days)}) : `${days} d ago`);
+        return new Date(value).toLocaleDateString((globalThis.NorvaI18n?.language || 'en-US'));
     }
 
     function progressSourceFrom(summary = {}) {

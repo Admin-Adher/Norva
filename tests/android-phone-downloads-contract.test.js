@@ -236,7 +236,7 @@ test('downloads disables destructive empty action, sanitizes errors and announce
   assert.match(announcements, /R\.string\.downloads_a11y_failed/);
 });
 
-test('downloads user-facing and accessibility copy stays English on every device locale', () => {
+test('downloads user-facing and accessibility copy covers every supported interface locale', () => {
   const resourceNames = new Set(
     [...source.matchAll(/R\.(?:string|plurals)\.(downloads_[a-z0-9_]+)/g)]
       .map((match) => match[1]),
@@ -250,18 +250,21 @@ test('downloads user-facing and accessibility copy stays English on every device
     assert.match(englishStrings, declaration, `missing English ${resourceName}`);
   }
 
-  assert.doesNotMatch(
-    frenchStrings,
-    /<(?:string|plurals)\s+name="downloads_/,
-    'Downloads must fall back to the default English resources',
-  );
+  const locales = require('../i18n/locales.json');
+  for (const locale of locales.filter(l => l.code !== 'en')) {
+    const xml = fs.readFileSync(path.join(root, 'clients/android-phone/app/src/main/res', locale.android, 'strings.xml'), 'utf8');
+    for (const name of resourceNames) {
+      if (/_glyph$/.test(name) || name === 'downloads_metric_pending') continue;
+      assert.match(xml, new RegExp('<(?:string|plurals)\\s+name="' + name + '"'), locale.code + ':' + name);
+    }
+  }
   assert.doesNotMatch(source, /setText\(\s*"[^"]*[A-Za-z][^"]*"\s*\)/);
   assert.doesNotMatch(
     source,
     /(?:setContentDescription|announceForAccessibility|setStateDescription)\(\s*"[^"]*[A-Za-z][^"]*"/,
   );
-  assert.match(source, /NumberFormat\.getNumberInstance\(Locale\.US\)/);
-  assert.match(source, /NumberFormat\.getIntegerInstance\(Locale\.US\)/);
+  assert.match(source, /NumberFormat\.getNumberInstance\(Locale\.forLanguageTag\(tv\.norva\.i18n\.UiLanguage\.resolved\(this\)\)\)/);
+  assert.match(source, /NumberFormat\.getIntegerInstance\(Locale\.forLanguageTag\(tv\.norva\.i18n\.UiLanguage\.resolved\(this\)\)\)/);
   assert.match(
     englishStrings,
     /<plurals name="downloads_episode_count"(?:\s[^>]*)?>/,

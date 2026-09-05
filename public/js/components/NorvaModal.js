@@ -223,7 +223,7 @@
         /** Yes/no decision. Resolves true on confirm, false on cancel/Escape/backdrop. */
         confirm(message, opts = {}) {
             return open({
-                title: opts.title || 'Please confirm',
+                title: opts.title || (globalThis.NorvaI18n?.t("ui_web_bf12c1b9ad74", { defaultValue: "Please confirm" }) ?? 'Please confirm'),
                 message,
                 confirmLabel: opts.confirmLabel || 'Confirm',
                 cancelLabel: opts.cancelLabel || 'Cancel',

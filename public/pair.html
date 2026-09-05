@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Norva — Pair Device</title>
+    <title data-i18n="ui_web_08038b026f24">Norva — Pair Device</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -289,7 +290,8 @@
     </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
 
@@ -303,7 +305,7 @@
     <!-- Loading state -->
     <div id="loading">
         <div class="spinner"></div>
-        <span style="color:var(--muted);font-size:.9rem;">Generating pairing code…</span>
+        <span style="color:var(--muted);font-size:.9rem;" data-i18n="ui_web_e77ee1ba9e47">Generating pairing code…</span>
     </div>
 
     <!-- Error state -->
@@ -311,31 +313,31 @@
 
     <!-- Main pairing UI -->
     <div id="pair-ui">
-        <h1>Pair this screen</h1>
-        <p class="subtitle">Scan the QR code with Norva,<br>or enter the code from your account.</p>
+        <h1 data-i18n="ui_web_3ae773711069">Pair this screen</h1>
+        <p class="subtitle"><norva-i18n data-i18n="ui_web_a5ce36e33090">Scan the QR code with Norva,</norva-i18n><br><norva-i18n data-i18n="ui_web_343f78e41c78">or enter the code from your account.</norva-i18n></p>
 
         <div id="qr-wrap">
-            <div id="qr-placeholder">Generating…</div>
+            <div id="qr-placeholder" data-i18n="ui_web_d20a4476a0a8">Generating…</div>
         </div>
 
         <div id="pair-code">------</div>
-        <p class="code-label">Enter this code in Norva Account to approve</p>
+        <p class="code-label" data-i18n="ui_web_42e12df73aed">Enter this code in Norva Account to approve</p>
 
-        <div class="divider">or</div>
+        <div class="divider" data-i18n="ui_web_7175517a370b">or</div>
 
-        <p class="fallback" id="fallback-text">
-            Open <strong id="hub-url-display"></strong> on your phone<br>
-            and approve code <strong id="code-display-fallback"></strong>
+        <p class="fallback" id="fallback-text"><norva-i18n data-i18n="ui_web_ed077f3d8125">
+            Open </norva-i18n><strong id="hub-url-display"></strong><norva-i18n data-i18n="ui_web_34e6920fbdab"> on your phone</norva-i18n><br><norva-i18n data-i18n="ui_web_84304ba47fab">
+            and approve code </norva-i18n><strong id="code-display-fallback"></strong>
         </p>
 
         <div id="status-row">
             <div class="dot"></div>
-            <span>Waiting for approval…</span>
+            <span data-i18n="ui_web_209d60ad4a22">Waiting for approval…</span>
         </div>
 
         <div id="countdown"></div>
 
-        <button class="btn btn-ghost" id="regen-btn" onclick="startPairing()">
+        <button class="btn btn-ghost" id="regen-btn" onclick="startPairing()" data-i18n="ui_web_565d2739a2e8">
             &#8635; Regenerate code
         </button>
     </div>
@@ -345,8 +347,8 @@
         <div class="check-circle">
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-        <h2>Paired!</h2>
-        <p>Signing you in…</p>
+        <h2 data-i18n="ui_web_9c8c33f1aa34">Paired!</h2>
+        <p data-i18n="ui_web_afc99407f777">Signing you in…</p>
     </div>
 
 </div>
@@ -415,7 +417,7 @@
             const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
             const m = Math.floor(remaining / 60);
             const s = remaining % 60;
-            countdownEl.textContent = `Code expires in ${m}:${s.toString().padStart(2, '0')}`;
+            countdownEl.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_447dc2884d6c", {defaultValue: "Code expires in {{p0}}:{{p1}}", p0:(m),p1:(s.toString().padStart(2, '0'))}) : `Code expires in ${m}:${s.toString().padStart(2, '0')}`);
             if (remaining === 0) {
                 stopPolling();
                 // Auto-regenerate when timer hits zero
@@ -486,8 +488,8 @@
 
             // Populate QR
             qrWrap.innerHTML = data.qr_data_url
-                ? `<img id="qr-img" src="${data.qr_data_url}" alt="Pairing QR code" width="220" height="220">`
-                : `<div id="qr-placeholder" style="color:var(--muted);font-size:.85rem;width:220px;height:220px;display:flex;align-items:center;justify-content:center;background:var(--border);border-radius:12px;">QR unavailable<br>Use code below</div>`;
+                ? `<img id="qr-img" src="${data.qr_data_url}" alt="Pairing QR code" width="220" height="220" data-i18n-alt="ui_web_83fcf89dc7c2">`
+                : `<div id="qr-placeholder" style="color:var(--muted);font-size:.85rem;width:220px;height:220px;display:flex;align-items:center;justify-content:center;background:var(--border);border-radius:12px;"><norva-i18n data-i18n="ui_web_b312670d6ec6">QR unavailable</norva-i18n><br><norva-i18n data-i18n="ui_web_bc29609543f5">Use code below</norva-i18n></div>`;
 
             // Populate code
             pairCodeEl.textContent = data.code;

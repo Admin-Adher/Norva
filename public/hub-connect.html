@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local connector - Norva</title>
+    <title data-i18n="ui_web_aadbee8c4b9b">Local connector - Norva</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -159,7 +160,8 @@
     </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
     <div class="card">
@@ -167,17 +169,17 @@
             <img src="/img/norva-app-icon.png" alt="Norva">
             <span>Norva</span>
         </div>
-        <h1>Local connector</h1>
-        <p class="subtitle">
+        <h1 data-i18n="ui_web_753b56449bff">Local connector</h1>
+        <p class="subtitle" data-i18n="ui_web_5e400970e2b4">
             Connect to a local Norva hub when you want direct access on your network.
         </p>
 
         <div class="cloud-actions">
-            <a class="btn secondary compact" href="/account.html">Norva Account</a>
-            <a class="cloud-link" href="/cloud.html">Open Norva Cloud</a>
+            <a class="btn secondary compact" href="/account.html" data-i18n="ui_web_070ab76e8398">Norva Account</a>
+            <a class="cloud-link" href="/cloud.html" data-i18n="ui_web_410c7384ee2b">Open Norva Cloud</a>
         </div>
 
-        <label for="hubUrl">Connector address</label>
+        <label for="hubUrl" data-i18n="ui_web_069b400a7995">Connector address</label>
         <input
             type="text"
             id="hubUrl"
@@ -185,19 +187,19 @@
             autocomplete="off"
             spellcheck="false"
         >
-        <p class="hint">Example: <code>http://192.168.1.20:3000</code> or a secure remote URL</p>
+        <p class="hint"><norva-i18n data-i18n="ui_web_872887e563e7">Example: </norva-i18n><code>http://192.168.1.20:3000</code><norva-i18n data-i18n="ui_web_b20d658b77fc"> or a secure remote URL</norva-i18n></p>
 
-        <button class="btn" id="connectBtn" onclick="connect()">Connect</button>
+        <button class="btn" id="connectBtn" onclick="connect()" data-i18n="ui_web_1a2303ede074">Connect</button>
         <div class="status" id="status"></div>
 
         <hr class="divider">
 
         <div class="help">
-            <strong>Advanced local mode</strong><br>
+            <strong data-i18n="ui_web_f9751dc2d515">Advanced local mode</strong><br><norva-i18n data-i18n="ui_web_b6893dbdd97b">
             Open Norva on the PC or server. The local address is usually shown as
-            title bar: <code>Norva — http://&lt;IP&gt;:3000</code><br><br>
+            title bar: </norva-i18n><code>Norva — http://&lt;IP&gt;:3000</code><br><br><norva-i18n data-i18n="ui_web_0b7776a9f610">
             Use this only when you want Norva to talk to a local machine on your network.
-        </div>
+        </norva-i18n></div>
     </div>
 
     <script>

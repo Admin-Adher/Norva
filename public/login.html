@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <script src="/js/i18n.js?v=7e1f81eb95"></script>
-    <title>Norva Account</title>
+    <script src="/js/i18n.js?v=787978bdf0"></script>
+    <title data-i18n="ui_web_070ab76e8398">Norva Account</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="stylesheet" href="css/main.css">
-    <link rel="stylesheet" href="/css/i18n.css?v=3d8c2fca9e">
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -194,7 +194,7 @@
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
 </head>
 
 <body>
@@ -283,7 +283,7 @@
         const error = urlParams.get('error');
         if (error) {
             const errorMessage = document.getElementById('error-message');
-            setMessage(errorMessage, 'ui_sign_in_failed', 'Sign-in could not be completed. Check your details and try again.');
+            setMessage(errorMessage, 'ui_sign_in_failed', (globalThis.NorvaI18n?.t("ui_web_7e9f0468b5dc", { defaultValue: "Sign-in could not be completed. Check your details and try again." }) ?? 'Sign-in could not be completed. Check your details and try again.'));
             errorMessage.classList.add('show');
             // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -299,10 +299,10 @@
 
                 if (data.setupRequired) {
                     isSetupMode = true;
-                    setMessage(document.getElementById('login-subtitle'), 'ui_admin_create', 'Create your Norva administrator account');
-                    setMessage(document.getElementById('submit-btn'), 'ui_create_account', 'Create account');
+                    setMessage(document.getElementById('login-subtitle'), 'ui_admin_create', (globalThis.NorvaI18n?.t("ui_web_cc804bee8aa3", { defaultValue: "Create your Norva administrator account" }) ?? 'Create your Norva administrator account'));
+                    setMessage(document.getElementById('submit-btn'), 'ui_create_account', (globalThis.NorvaI18n?.t("ui_web_798ca2ce18bf", { defaultValue: "Create account" }) ?? 'Create account'));
                     document.getElementById('setup-message').classList.add('show');
-                    setMessage(document.getElementById('password'), 'ui_password_minimum', 'Minimum 6 characters', 'placeholder');
+                    setMessage(document.getElementById('password'), 'ui_password_minimum', (globalThis.NorvaI18n?.t("ui_web_79579b33ad92", { defaultValue: "Minimum 6 characters" }) ?? 'Minimum 6 characters'), 'placeholder');
                     // Hide SSO in setup mode
                     document.querySelector('.sso-divider').style.display = 'none';
                     document.getElementById('btn-sso-login').style.display = 'none';
@@ -328,7 +328,7 @@
 
             // Disable button
             submitBtn.disabled = true;
-            setMessage(submitBtn, 'ui_please_wait', 'Please wait...');
+            setMessage(submitBtn, 'ui_please_wait', (globalThis.NorvaI18n?.t("ui_web_2dfd888fdd5e", { defaultValue: "Please wait..." }) ?? 'Please wait...'));
 
             try {
                 const endpoint = isSetupMode ? '/api/auth/setup' : '/api/auth/login';
@@ -354,7 +354,7 @@
                 window.location.replace(window.__norvaLoginReturnTo || '/');
 
             } catch (err) {
-                setMessage(errorMessage, 'ui_sign_in_failed', 'Sign-in could not be completed. Check your details and try again.');
+                setMessage(errorMessage, 'ui_sign_in_failed', (globalThis.NorvaI18n?.t("ui_web_7e9f0468b5dc", { defaultValue: "Sign-in could not be completed. Check your details and try again." }) ?? 'Sign-in could not be completed. Check your details and try again.'));
                 errorMessage.classList.add('show');
                 submitBtn.disabled = false;
                 setMessage(submitBtn, isSetupMode ? 'ui_create_account' : 'ui_sign_in', isSetupMode ? 'Create account' : 'Sign in');

@@ -706,7 +706,7 @@ test('cash KYC return shows an authoritative progress card and faster pending re
 
   assert.match(pageSource, /KYC_PENDING_REFRESH_MS\s*=\s*10\s*\*\s*1000/);
   assert.match(pageSource, /DASHBOARD_REFRESH_MS\s*=\s*60\s*\*\s*1000/);
-  assert.match(pageSource, /setTimeout\([\s\S]{0,700}refreshDelay\)/);
+  assert.match(pageSource, /this\._dashboardRefreshTimer = setTimeout\(\(\) => \{[\s\S]*?\}, refreshDelay\)/);
   assert.match(cssSource, /\.partners-kyc-progress\s*\{[\s\S]{0,500}var\(--color-bg-secondary\)/);
 });
 

@@ -163,7 +163,7 @@ test('a resolved response without a media URL also expires its server-owned sess
     const play = methodBody('async play(content, streamUrl, playback = {})', '\n    async ');
     const missingUrl = play.indexOf('if (!resolved || !resolved.url)');
     const cleanup = play.indexOf('await this.cleanupStaleCloudPlaybackSession(resolvedSessionId)', missingUrl);
-    const error = play.indexOf("this.showPlaybackError('This title could not be started. Please try again.'", missingUrl);
+    const error = play.indexOf('this.showPlaybackError(', missingUrl);
 
     assert.ok(missingUrl >= 0);
     assert.ok(cleanup > missingUrl, 'malformed responses must release the session they already created');

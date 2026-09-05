@@ -26,8 +26,8 @@
     function fillNativeSelect(selectEl, data) {
         if (selectEl.dataset.regionFilled === '1') return;
         const groups = [
-            { label: 'Countries', items: data.list().filter((r) => r.kind === 'country') },
-            { label: 'Regions', items: data.list().filter((r) => r.kind === 'bundle') }
+            { label: (globalThis.NorvaI18n?.t("ui_web_8faf7ec7ab20", { defaultValue: "Countries" }) ?? 'Countries'), items: data.list().filter((r) => r.kind === 'country') },
+            { label: (globalThis.NorvaI18n?.t("ui_web_610c65d84510", { defaultValue: "Regions" }) ?? 'Regions'), items: data.list().filter((r) => r.kind === 'bundle') }
         ];
         const frag = document.createDocumentFragment();
         for (const g of groups) {
@@ -56,7 +56,7 @@
         selectEl.style.cssText = 'position:static;width:auto;height:auto;clip:auto;opacity:1;pointer-events:auto;margin:0;';
         if (!selectEl.options.length) {
             const legacy = (window.NorvaCloud && window.NorvaCloud.regions && window.NorvaCloud.regions.list())
-                || [{ key: 'FR', label: 'France' }, { key: 'US', label: 'United States' }, { key: 'INTERNATIONAL', label: 'International' }];
+                || [{ key: 'FR', label: (globalThis.NorvaI18n?.t("ui_web_7a1ca4ef7515", { defaultValue: "France" }) ?? 'France') }, { key: 'US', label: (globalThis.NorvaI18n?.t("ui_web_49dca65f362f", { defaultValue: "United States" }) ?? 'United States') }, { key: 'INTERNATIONAL', label: (globalThis.NorvaI18n?.t("ui_web_93202df2ec70", { defaultValue: "International" }) ?? 'International') }];
             for (const r of legacy) selectEl.add(new Option(r.label, r.key));
         }
         if (btn) btn.style.display = 'none';
@@ -84,7 +84,7 @@
         const syncButton = () => {
             const code = selectEl.value;
             const r = data.byCode(code);
-            valueEl.textContent = r ? `${r.flag} ${r.name}` : `${data.flag(code)} ${data.label(code) || 'International'}`;
+            valueEl.textContent = r ? `${r.flag} ${r.name}` : `${data.flag(code)} ${data.label(code) || (globalThis.NorvaI18n?.t("ui_web_93202df2ec70", { defaultValue: "International" }) ?? 'International')}`;
         };
 
         const renderList = (query) => {
@@ -103,7 +103,7 @@
             if (!matches.length) {
                 const li = document.createElement('li');
                 li.className = 'region-picker-empty';
-                li.textContent = 'No match';
+                li.textContent = (globalThis.NorvaI18n?.t("ui_web_cd8d844d2c3d", { defaultValue: "No match" }) ?? 'No match');
                 listEl.appendChild(li);
                 activeIdx = -1;
                 search.removeAttribute('aria-activedescendant');
@@ -117,7 +117,7 @@
                     const head = document.createElement('li');
                     head.className = 'region-picker-group';
                     head.setAttribute('role', 'presentation');
-                    head.textContent = r.kind === 'bundle' ? 'Regions' : 'Countries';
+                    head.textContent = r.kind === 'bundle' ? (globalThis.NorvaI18n?.t("ui_web_610c65d84510", { defaultValue: "Regions" }) ?? 'Regions') : (globalThis.NorvaI18n?.t("ui_web_8faf7ec7ab20", { defaultValue: "Countries" }) ?? 'Countries');
                     frag.appendChild(head);
                 }
                 const li = document.createElement('li');

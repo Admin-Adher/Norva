@@ -240,7 +240,7 @@ class EpgGuide {
             console.error('Error loading EPG:', err);
             if (this.container) this.container.innerHTML = `
         <div class="empty-state">
-          <p>Error loading EPG</p>
+          <p data-i18n="ui_web_c853bf4572e5">Error loading EPG</p>
           <p class="hint">${err.message}</p>
         </div>
       `;
@@ -458,8 +458,8 @@ class EpgGuide {
         if (playableChannels.length === 0) {
             this.container.innerHTML = `
                 <div class="empty-state">
-                    <p>No visible channels available</p>
-                    <p class="hint">Check your content settings or add a source</p>
+                    <p data-i18n="ui_web_e046ff932520">No visible channels available</p>
+                    <p class="hint" data-i18n="ui_web_6374bb1449c0">Check your content settings or add a source</p>
                 </div>
             `;
             return;
@@ -472,7 +472,7 @@ class EpgGuide {
         });
 
         // Collect unique groups from ALL playable channels
-        const groups = [...new Set(allChannels.map(m => m.sourceChannel.groupTitle || 'Uncategorized'))].sort();
+        const groups = [...new Set(allChannels.map(m => m.sourceChannel.groupTitle || (globalThis.NorvaI18n?.t("ui_web_8d40d123b2e1", { defaultValue: "Uncategorized" }) ?? 'Uncategorized')))].sort();
 
         // Add Favorites at the top if there are any
         const hasFavorites = this.favorites.size > 0;
@@ -485,10 +485,10 @@ class EpgGuide {
             let optionsHtml = '';
 
             if (hasFavorites) {
-                optionsHtml += `<option value="Favorites" ${currentValue === 'Favorites' ? 'selected' : ''}>Favorites</option>`;
+                optionsHtml += `<option value="Favorites" ${currentValue === 'Favorites' ? 'selected' : ''} data-i18n="ui_web_7a1f2a83aca9">Favorites</option>`;
             }
 
-            optionsHtml += `<option value="" ${currentValue === '' ? 'selected' : ''}>All Groups</option>`;
+            optionsHtml += `<option value="" ${currentValue === '' ? 'selected' : ''} data-i18n="ui_web_2f1bc6bcd80c">All Groups</option>`;
             optionsHtml += groups.map(g => `<option value="${g}" ${g === currentValue ? 'selected' : ''}>${g}</option>`).join('');
 
             this.groupSelect.innerHTML = optionsHtml;
@@ -533,7 +533,7 @@ class EpgGuide {
             <div class="epg-time-slots">
               ${timeSlots.map(slot => `
                 <div class="epg-time-slot" style="width: ${30 * this.pixelsPerMinute}px;">
-                  ${slot.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  ${slot.toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false })}
                 </div>
               `).join('')}
             </div>
@@ -691,7 +691,7 @@ class EpgGuide {
 
         row.innerHTML = `
           <div class="epg-channel-info">
-            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
+            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
               ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
             </button>
             <img class="epg-channel-logo" src="${logo}" 
@@ -765,11 +765,11 @@ class EpgGuide {
                 if (isNowFavorite) {
                     btn.classList.add('active');
                     btn.innerHTML = Icons.favorite;
-                    btn.title = 'Remove from Favorites';
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
                 } else {
                     btn.classList.remove('active');
                     btn.innerHTML = Icons.favoriteOutline;
-                    btn.title = 'Add to Favorites';
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                 }
             }
         });
@@ -807,11 +807,11 @@ class EpgGuide {
                     if (wasFavorite) {
                         btn.classList.add('active');
                         btn.innerHTML = Icons.favorite;
-                        btn.title = 'Remove from Favorites';
+                        btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
                     } else {
                         btn.classList.remove('active');
                         btn.innerHTML = Icons.favoriteOutline;
-                        btn.title = 'Add to Favorites';
+                        btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                     }
                 }
             });
@@ -850,11 +850,11 @@ class EpgGuide {
                 if (isFavorite) {
                     btn.classList.add('active');
                     btn.innerHTML = Icons.favorite;
-                    btn.title = 'Remove from Favorites';
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
                 } else {
                     btn.classList.remove('active');
                     btn.innerHTML = Icons.favoriteOutline;
-                    btn.title = 'Add to Favorites';
+                    btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                 }
             }
         });
@@ -884,7 +884,7 @@ class EpgGuide {
     renderProgrammes(programmes, startTime, endTime) {
         if (programmes.length === 0) {
             const width = (endTime - startTime) / 60000 * this.pixelsPerMinute;
-            return `<div class="epg-program" style="width: ${width}px;"><span class="epg-program-title">No data</span></div>`;
+            return `<div class="epg-program" style="width: ${width}px;"><span class="epg-program-title" data-i18n="ui_web_3b41ba9c7cb8">No data</span></div>`;
         }
 
         const now = new Date();
@@ -911,9 +911,9 @@ class EpgGuide {
              data-description="${prog.description || ''}"
              data-start="${prog.start}"
              data-stop="${prog.stop}">
-          <div class="epg-program-title">${prog.title || 'Unknown'}</div>
+          <div class="epg-program-title">${prog.title || (globalThis.NorvaI18n?.t("ui_web_b764cdc0eab7", { defaultValue: "Unknown" }) ?? 'Unknown')}</div>
           <div class="epg-program-time">
-            ${new Date(prog.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+            ${new Date(prog.start).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false })}
           </div>
         </div>
       `;
@@ -935,11 +935,11 @@ class EpgGuide {
         tomorrow.setDate(tomorrow.getDate() + 1);
 
         if (date.toDateString() === today.toDateString()) {
-            this.dateDisplay.textContent = 'Today';
+            this.dateDisplay.textContent = (globalThis.NorvaI18n?.t("ui_web_2b065c7c9ce4", { defaultValue: "Today" }) ?? 'Today');
         } else if (date.toDateString() === tomorrow.toDateString()) {
-            this.dateDisplay.textContent = 'Tomorrow';
+            this.dateDisplay.textContent = (globalThis.NorvaI18n?.t("ui_web_456a73bbcefb", { defaultValue: "Tomorrow" }) ?? 'Tomorrow');
         } else {
-            this.dateDisplay.textContent = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            this.dateDisplay.textContent = date.toLocaleDateString(((globalThis.NorvaI18n?.language || 'en-US')), { weekday: ('short'), month: ('short'), day: ('numeric') });
         }
     }
 
@@ -996,18 +996,18 @@ class EpgGuide {
         const body = document.getElementById('modal-body');
         const footer = document.getElementById('modal-footer');
 
-        title.textContent = data.title || 'Program Details';
+        title.textContent = data.title || (globalThis.NorvaI18n?.t("ui_web_3a10d668f5ce", { defaultValue: "Program Details" }) ?? 'Program Details');
 
         const start = new Date(data.start);
         const stop = new Date(data.stop);
 
         body.innerHTML = `
-      <p><strong>Time:</strong> ${start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })} - ${stop.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}</p>
-      <p><strong>Description:</strong></p>
-      <p>${data.description || 'No description available'}</p>
+      <p><strong data-i18n="ui_web_91ab197bfabc">Time:</strong> ${start.toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false })} - ${stop.toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false })}</p>
+      <p><strong data-i18n="ui_web_0cf2814604b4">Description:</strong></p>
+      <p>${data.description || (globalThis.NorvaI18n?.t("ui_web_aab5e3e77b99", { defaultValue: "No description available" }) ?? 'No description available')}</p>
     `;
 
-        footer.innerHTML = '<button class="btn btn-secondary" id="modal-close">Close</button>';
+        footer.innerHTML = '<button class="btn btn-secondary" id="modal-close" data-i18n="ui_web_7d9eb7acb13e">Close</button>';
 
         modal.classList.add('active');
         document.getElementById('modal-close').onclick = () => modal.classList.remove('active');

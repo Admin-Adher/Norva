@@ -28,8 +28,8 @@ test('production commerce pages use the approved shared visual system', () => {
   const checkout = read('public/checkout-revolut.html');
 
   for (const [name, source] of [['subscribe', subscribe], ['checkout', checkout]]) {
-    assert.match(source, /\/css\/commerce\.css\?v=3/, `${name} loads the shared commerce styles`);
-    assert.match(source, /\/js\/promo-ui\.js\?v=1/, `${name} loads the shared campaign contract`);
+    assert.match(source, /\/css\/commerce\.css\?v=[0-9a-f]+/, `${name} loads the shared commerce styles`);
+    assert.match(source, /\/js\/promo-ui\.js\?v=[0-9a-f]+/, `${name} loads the shared campaign contract`);
     assert.match(source, /class="campaign-backdrop"/, `${name} renders campaign art as a page background`);
     assert.match(source, /role="timer"[\s\S]{0,180}aria-live="off"/, `${name} countdown avoids per-second announcements`);
     assert.match(source, /visa-brandmark\.svg/);

@@ -1,3 +1,4 @@
+const visibleUiMarkup = require('./helpers/visible-ui-markup.cjs');
 'use strict';
 
 const test = require('node:test');
@@ -1039,14 +1040,14 @@ test('physical Partners rehearsal is isolated, atomic and leaves only sanitized 
 });
 
 test('Partners legal surfaces separate access credits from optional cash KYC', () => {
-  const privacy = read('public/privacy.html');
-  const terms = read('public/terms.html');
-  const partnersTerms = read('public/partners-terms.html');
+  const privacy = visibleUiMarkup(read('public/privacy.html'));
+  const terms = visibleUiMarkup(read('public/terms.html'));
+  const partnersTerms = visibleUiMarkup(read('public/partners-terms.html'));
   const disclosure = read(
     'ops/partners/disclosures/partners-disclosure-v2.txt',
   ).trim();
 
-  assert.match(privacy, /<strong>Didit<\/strong>/);
+  assert.match(privacy, /<strong[^>]*>Didit<\/strong>/);
   assert.match(privacy, /does not store identity-document images, biometric captures/i);
   assert.match(terms, /href="\/partners-terms\.html"/);
   assert.match(partnersTerms, /20% of eligible Norva subscription payments/);

@@ -3,13 +3,13 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="/js/i18n.js?v=7e1f81eb95"></script>
+  <script src="/js/i18n.js?v=787978bdf0"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0a0a0f">
-  <title>Norva | Cloud media player</title>
+  <title data-i18n="ui_web_eed5e0611e2d">Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="manifest" href="/manifest.json">
@@ -19,8 +19,8 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=71854078d1">
-  <link rel="stylesheet" href="/css/i18n.css?v=3d8c2fca9e">
+  <link rel="stylesheet" href="/css/main.css?v=dc6c526f8e">
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
   <link id="premium-profile-style" rel="stylesheet" href="/css/profiles-premium.css?v=2" media="not all">
   <script>
     if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '') && !/[?&]tv=1\b/.test(window.location.search || '')) {
@@ -132,25 +132,25 @@
   <script defer src="/js/marketing.js?v=5"></script>
   <script defer src="/js/native-analytics.js?v=2"></script>
   <script defer src="/js/product-analytics.js?v=3"></script>
-  <script defer src="/js/consent-banner.js?v=4"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
 </head>
 
 <body class="catalog-locked">
-  <div class="tv-launch-screen" id="tv-launch-screen" role="status" aria-live="polite" aria-label="Norva is loading">
+  <div class="tv-launch-screen" id="tv-launch-screen" role="status" aria-live="polite" aria-label="Norva is loading" data-i18n-aria-label="ui_web_f32f7d0efdcf">
     <div class="tv-launch-orb" aria-hidden="true">
       <span></span><span></span><span></span>
       <img src="/img/norva-app-icon.png" alt="">
     </div>
     <div class="tv-launch-copy">
       <p class="tv-launch-kicker">Norva TV</p>
-      <h1>Preparing your cinema</h1>
-      <p>Checking this screen and loading your synced experience.</p>
+      <h1 data-i18n="ui_web_fa3e38841bd6">Preparing your cinema</h1>
+      <p data-i18n="ui_web_f75de18d65c0">Checking this screen and loading your synced experience.</p>
     </div>
     <div class="tv-launch-progress" aria-hidden="true"><span></span></div>
   </div>
   <div id="app">
     <!-- Navigation -->
-    <nav class="navbar" aria-label="Primary navigation">
+    <nav class="navbar" aria-label="Primary navigation" data-i18n-aria-label="ui_web_e1bfe7eccc45">
       <div class="navbar-brand" id="navbar-brand-home" role="button" tabindex="0" aria-label="Go to Home" data-i18n-aria-label="ui_go_home">
         <span class="logo"><img src="/img/norva-app-icon.png" alt="Norva"></span>
         <span class="brand-text">Norva</span>
@@ -159,32 +159,32 @@
       <!-- Global catalogue search (movies + series). Top-right on phones, where
            the profile avatar used to sit (the Profile tab now lives at the bottom). -->
       <button class="nav-search-btn" id="nav-search" type="button" aria-label="Search"
-        hidden aria-hidden="true" tabindex="-1">
+        hidden aria-hidden="true" tabindex="-1" data-i18n-aria-label="ui_web_49c266baaaa7">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       </button>
       <!-- Companion apps: "Use Norva elsewhere" popover. The canonical mobile
            and TV Play Store links live in NORVA_DEVICE_APPS in app.js. Web-only
            discovery: the native shells and the TV ARE those devices, so app.js
            keeps it hidden there (CSS backstops tv-mode). -->
-      <button class="nav-devices-btn" id="nav-devices" type="button" aria-label="Devices" aria-haspopup="true" aria-expanded="false" hidden>
+      <button class="nav-devices-btn" id="nav-devices" type="button" aria-label="Devices" aria-haspopup="true" aria-expanded="false" hidden data-i18n-aria-label="ui_web_4ba5121d4d1b">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 15v4"/><path d="M7 19h6"/><rect x="16" y="12" width="6" height="10" rx="2"/></svg>
         <span class="nav-devices-dot" id="nav-devices-dot" hidden></span>
       </button>
       <!-- Notifications inbox: bell + unread dot; opens a dropdown feed backed by
            cloud_content_events. Hidden until the app boots the feed. -->
-      <button class="nav-bell-btn" id="nav-bell" type="button" aria-label="Notifications" aria-haspopup="true" aria-expanded="false" hidden>
+      <button class="nav-bell-btn" id="nav-bell" type="button" aria-label="Notifications" aria-haspopup="true" aria-expanded="false" hidden data-i18n-aria-label="ui_web_788011833a5a">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
         <span class="nav-bell-dot" id="nav-bell-dot" hidden></span>
       </button>
       <!-- Profile avatar → account disclosure on Web and direct profile switcher
            on TV. Kept outside .navbar-menu so identity stays distinct from routes. -->
-      <button class="nav-profile" id="nav-profile" type="button" hidden aria-label="Switch profile">
+      <button class="nav-profile" id="nav-profile" type="button" hidden aria-label="Switch profile" data-i18n-aria-label="ui_web_c1e0daeef31e">
         <img class="nav-profile-img" id="nav-profile-img" src="/img/avatars/placeholder.svg" alt="">
       </button>
     </nav>
 
     <!-- The phone adapter projects the shared navigation model into this rail. -->
-    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary" data-navigation-root="phone"></nav>
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary" data-navigation-root="phone" data-i18n-aria-label="ui_web_efe10c80ec8a"></nav>
 
     <!-- Background catalog-enrichment progress (driven by app.js startEnrichmentProgressPoll). -->
     <div id="enrichment-bar" class="enrichment-bar" hidden>
@@ -203,7 +203,7 @@
       <!-- Home (Dashboard) Page -->
       <div id="page-home" class="page active">
         <!-- Content will be rendered by HomePage.js -->
-        <div class="loading-state">Loading Dashboard...</div>
+        <div class="loading-state" data-i18n="ui_web_ea5ac1760408">Loading Dashboard...</div>
       </div>
 
       <!-- Live TV Page (formerly Home) -->
@@ -214,14 +214,14 @@
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
               <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
             </svg>
-            <span>Channels</span>
+            <span data-i18n="ui_web_4c8906cf76f5">Channels</span>
           </button>
 
           <!-- Overlay for drawer -->
           <div class="channel-sidebar-overlay" id="channel-sidebar-overlay"></div>
 
           <!-- Expand button (visible when sidebar collapsed on desktop) -->
-          <button class="sidebar-expand-btn" id="sidebar-expand-btn" title="Expand sidebar">
+          <button class="sidebar-expand-btn" id="sidebar-expand-btn" title="Expand sidebar" data-i18n-title="ui_web_37a5d6485e10">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
               <path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z" />
             </svg>
@@ -232,34 +232,34 @@
             <div class="sidebar-header">
               <div class="sidebar-header-row">
                 <div class="search-wrapper">
-                  <input type="text" id="channel-search" placeholder="Search channels..." class="search-input">
-                  <button type="button" class="search-clear" title="Clear search">&times;</button>
+                  <input type="text" id="channel-search" placeholder="Search channels..." class="search-input" data-i18n-placeholder="ui_web_126e7decb2fe">
+                  <button type="button" class="search-clear" title="Clear search" data-i18n-title="ui_web_3b7ea51793e9">&times;</button>
                 </div>
                 <button id="sidebar-collapse-btn" class="btn btn-sm btn-ghost sidebar-collapse-btn"
-                  title="Collapse sidebar">
+                  title="Collapse sidebar" data-i18n-title="ui_web_aab31cde23ba">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
                   </svg>
                 </button>
               </div>
               <div class="sidebar-controls">
-                <select id="source-select" class="source-select" aria-label="Source">
-                  <option value="">All Sources</option>
+                <select id="source-select" class="source-select" aria-label="Source" data-i18n-aria-label="ui_web_0e570ca6fabe">
+                  <option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>
                 </select>
-                <button id="toggle-groups" class="btn btn-sm btn-ghost" title="Expand/Collapse All">
+                <button id="toggle-groups" class="btn btn-sm btn-ghost" title="Expand/Collapse All" data-i18n-title="ui_web_db51f12b582d">
                   <span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
                         d="M12 5.83L15.17 9l1.41-1.41L12 3 7.41 7.59 8.83 9 12 5.83zm0 12.34L8.83 15l-1.41 1.41L12 21l4.59-4.59L15.17 15 12 18.17z" />
                     </svg></span>
                 </button>
                 <button id="live-hide-broken-btn" class="btn btn-sm btn-ghost playback-filter-toggle"
-                  title="Hide channels that failed the health scan (unreachable / broken streams)">Hide unavailable</button>
+                  title="Hide channels that failed the health scan (unreachable / broken streams)" data-i18n-title="ui_web_ffaf9c11717c" data-i18n="ui_web_d65b28a523c0">Hide unavailable</button>
               </div>
             </div>
             <div id="channel-list" class="channel-list">
               <div class="empty-state">
-                <p>No channels loaded</p>
-                <p class="hint">Add a source in Settings to get started</p>
+                <p data-i18n="ui_web_c7d299b8427e">No channels loaded</p>
+                <p class="hint" data-i18n="ui_web_ac6df9ee687f">Add a source in Settings to get started</p>
               </div>
             </div>
           </aside>
@@ -284,7 +284,7 @@
               <div class="tv-live-art hidden" id="tv-live-art" aria-hidden="true">
                 <img class="tv-live-art-logo" id="tv-live-art-logo" src="" alt="">
                 <div class="tv-live-art-name" id="tv-live-art-name"></div>
-                <div class="tv-live-art-hint"><span class="tv-live-art-ok">OK</span>Watch fullscreen</div>
+                <div class="tv-live-art-hint"><span class="tv-live-art-ok">OK</span><norva-i18n data-i18n="ui_web_f9105a49fbc3">Watch fullscreen</norva-i18n></div>
               </div>
 
               <!-- Custom Controls Overlay -->
@@ -293,7 +293,7 @@
                 <div class="watch-top-bar live-header">
                   <h2 class="watch-title-overlay" id="player-channel-name"></h2>
                   <div class="player-badges">
-                    <div class="transcode-status hidden" id="player-transcode-status">Direct</div>
+                    <div class="transcode-status hidden" id="player-transcode-status" data-i18n="ui_web_002c7c68468b">Direct</div>
                     <div class="quality-badge hidden" id="player-quality-badge"></div>
                   </div>
                 </div>
@@ -314,7 +314,7 @@
                 <!-- Bottom Bar: Controls -->
                 <div class="watch-bottom-bar">
                   <div class="watch-controls">
-                    <button class="watch-btn watch-btn-lg" id="btn-play" title="Play/Pause">
+                    <button class="watch-btn watch-btn-lg" id="btn-play" title="Play/Pause" data-i18n-title="ui_web_c9c7c7ecde58">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
                         class="icon icon-play">
                         <path d="M8 5v14l11-7z" />
@@ -326,28 +326,28 @@
                     </button>
 
                     <!-- One-hand channel zap (live TV only; shown/hidden with the live badge). -->
-                    <button class="watch-btn live-only hidden" id="player-prev-channel" type="button" title="Previous channel" aria-label="Previous channel">
+                    <button class="watch-btn live-only hidden" id="player-prev-channel" type="button" title="Previous channel" aria-label="Previous channel" data-i18n-title="ui_web_b5881eecb8e0" data-i18n-aria-label="ui_web_b5881eecb8e0">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg>
                     </button>
-                    <button class="watch-btn live-only hidden" id="player-next-channel" type="button" title="Next channel" aria-label="Next channel">
+                    <button class="watch-btn live-only hidden" id="player-next-channel" type="button" title="Next channel" aria-label="Next channel" data-i18n-title="ui_web_02c9e938cf93" data-i18n-aria-label="ui_web_02c9e938cf93">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6z" /></svg>
                     </button>
 
                     <!-- Live status / "back to live" badge (live TV only).
                          At the edge: red dot + EN DIRECT. Behind: skip-to-live
                          icon + delay, click to re-launch at the real-time edge. -->
-                    <button class="watch-live-badge hidden" id="player-live-badge" type="button" title="Live">
+                    <button class="watch-live-badge hidden" id="player-live-badge" type="button" title="Live" data-i18n-title="ui_web_b64ac05f17e6">
                       <span class="live-badge-dot"></span>
                       <svg class="live-badge-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
                         fill="currentColor" aria-hidden="true">
                         <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                       </svg>
-                      <span class="live-badge-text">LIVE</span>
+                      <span class="live-badge-text" data-i18n="ui_web_35e0d0360a0a">LIVE</span>
                     </button>
 
                     <div class="watch-spacer"></div>
 
-                    <button class="watch-btn" id="btn-mute" title="Mute">
+                    <button class="watch-btn" id="btn-mute" title="Mute" data-i18n-title="ui_web_8dd6857baf02">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
                         class="icon icon-vol">
                         <path
@@ -363,47 +363,47 @@
 
                     <!-- Quality Button -->
                     <div class="watch-captions-wrapper" id="player-quality-wrapper" style="display:none;">
-                      <button class="watch-btn" id="player-quality-btn" title="Quality">
+                      <button class="watch-btn" id="player-quality-btn" title="Quality" data-i18n-title="ui_web_1b2c08a8733d">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                           <path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z" />
                         </svg>
                       </button>
                       <div class="watch-captions-menu hidden" id="player-quality-menu">
-                        <div class="captions-menu-title">Quality</div>
+                        <div class="captions-menu-title" data-i18n="ui_web_1b2c08a8733d">Quality</div>
                         <div class="captions-menu-list" id="player-quality-list"></div>
                       </div>
                     </div>
 
                     <!-- Captions Button -->
                     <div class="watch-captions-wrapper">
-                      <button class="watch-btn" id="player-captions-btn" title="Captions">
+                      <button class="watch-btn" id="player-captions-btn" title="Captions" data-i18n-title="ui_web_43bf6af8e2d9">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                           <path
                             d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z" />
                         </svg>
                       </button>
                       <div class="watch-captions-menu hidden" id="player-captions-menu">
-                        <div class="captions-menu-title">Subtitles</div>
+                        <div class="captions-menu-title" data-i18n="ui_web_0ee695bdeb26">Subtitles</div>
                         <div class="captions-menu-list" id="player-captions-list">
-                          <button class="captions-option active" data-index="-1">Off</button>
+                          <button class="captions-option active" data-index="-1" data-i18n="ui_web_ca7981b46ecf">Off</button>
                         </div>
                       </div>
                     </div>
 
-                    <button class="watch-btn" id="btn-pip" title="Picture-in-Picture">
+                    <button class="watch-btn" id="btn-pip" title="Picture-in-Picture" data-i18n-title="ui_web_597820ce81c2">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                         <path
                           d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" />
                       </svg>
                     </button>
-                    <button class="watch-btn" id="btn-fullscreen" title="Fullscreen">
+                    <button class="watch-btn" id="btn-fullscreen" title="Fullscreen" data-i18n-title="ui_web_c461dbb2bab7">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                         <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
                       </svg>
                     </button>
                     <!-- Overflow Menu -->
                     <div class="player-overflow-wrapper">
-                      <button class="watch-btn" id="btn-overflow" title="More options">
+                      <button class="watch-btn" id="btn-overflow" title="More options" data-i18n-title="ui_web_bc79cdffbaa8">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                           <path
                             d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
@@ -414,9 +414,9 @@
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                             <path
                               d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                          </svg>
+                          </svg><norva-i18n data-i18n="ui_web_60f1b404dc5b">
                           Copy Stream URL
-                        </button>
+                        </norva-i18n></button>
                       </div>
                     </div>
                   </div>
@@ -427,7 +427,7 @@
                    player — shown while a channel is playing and the controls bar
                    is auto-hidden, so expanding the preview is one obvious click. -->
               <button class="live-fullscreen-cta hidden" id="live-fullscreen-cta" type="button"
-                title="Fullscreen" aria-label="Fullscreen">
+                title="Fullscreen" aria-label="Fullscreen" data-i18n-title="ui_web_c461dbb2bab7" data-i18n-aria-label="ui_web_c461dbb2bab7">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                   <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
                 </svg>
@@ -435,24 +435,24 @@
 
               <div class="player-overlay" id="player-overlay">
                 <div class="overlay-content">
-                  <p>Select a channel to start watching</p>
+                  <p data-i18n="ui_web_022a938fb5cd">Select a channel to start watching</p>
                 </div>
               </div>
               <!-- Now Playing Overlay -->
               <div class="now-playing-overlay hidden" id="now-playing">
                 <div class="now-playing-info">
-                  <h3 class="channel-name">No channel selected</h3>
+                  <h3 class="channel-name" data-i18n="ui_web_d1d465bf6593">No channel selected</h3>
                   <p class="program-title"></p>
                   <p class="program-time"></p>
                 </div>
                 <div class="up-next">
-                  <h4>Up Next</h4>
+                  <h4 data-i18n="ui_web_f9730ea7776a">Up Next</h4>
                   <ul id="up-next-list"></ul>
                 </div>
               </div>
             </div>
             <div id="live-guide-fusion" class="live-guide-fusion">
-              <div class="loading-state">Loading guide...</div>
+              <div class="loading-state" data-i18n="ui_web_80b9a4a1f216">Loading guide...</div>
             </div>
           </section>
         </div>
@@ -463,68 +463,68 @@
         <div class="movies-header">
           <div class="movies-heading">
             <h2 data-i18n="ui_movies">Movies</h2>
-            <p class="movies-subtitle">Your movies from every connected source, in one catalog.</p>
+            <p class="movies-subtitle" data-i18n="ui_web_b08389dbda3f">Your movies from every connected source, in one catalog.</p>
           </div>
           <div class="movies-controls">
             <select id="movies-source-select" class="source-select">
-              <option value="">All Sources</option>
+              <option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>
             </select>
             <div class="multi-select" id="movies-category-multi">
-              <button type="button" class="source-select multi-select-btn" id="movies-category-btn">All
+              <button type="button" class="source-select multi-select-btn" id="movies-category-btn" data-i18n="ui_web_fe3b58f14752">All
                 Categories</button>
               <div class="multi-select-panel hidden" id="movies-category-panel">
                 <input type="text" class="search-input multi-select-search" id="movies-category-search"
-                  placeholder="Search categories...">
+                  placeholder="Search categories..." data-i18n-placeholder="ui_web_8a800ebbdaca">
                 <div class="multi-select-actions">
-                  <button type="button" class="btn btn-sm btn-ghost" data-action="all">All</button>
-                  <button type="button" class="btn btn-sm btn-ghost" data-action="none">Clear</button>
+                  <button type="button" class="btn btn-sm btn-ghost" data-action="all" data-i18n="ui_web_a52ace420f21">All</button>
+                  <button type="button" class="btn btn-sm btn-ghost" data-action="none" data-i18n="ui_web_83b12c2216ef">Clear</button>
                 </div>
                 <div class="multi-select-list" id="movies-category-list"></div>
               </div>
             </div>
             <div class="search-wrapper">
-              <input type="text" id="movies-search" placeholder="Search movies..." class="search-input">
-              <button type="button" class="search-clear" title="Clear search">&times;</button>
+              <input type="text" id="movies-search" placeholder="Search movies..." class="search-input" data-i18n-placeholder="ui_web_29cc28c7f845">
+              <button type="button" class="search-clear" title="Clear search" data-i18n-title="ui_web_3b7ea51793e9">&times;</button>
             </div>
-            <button id="movies-favorites-btn" class="btn btn-icon btn-ghost" title="Show Favorites Only">
-              <img class="icon norva-ui-icon" src="/img/icons/norva-favorites.svg" alt=""> Favorites
-            </button>
+            <button id="movies-favorites-btn" class="btn btn-icon btn-ghost" title="Show Favorites Only" data-i18n-title="ui_web_c3e5414d8926">
+              <img class="icon norva-ui-icon" src="/img/icons/norva-favorites.svg" alt=""><norva-i18n data-i18n="ui_web_7a1f2a83aca9"> Favorites
+            </norva-i18n></button>
           </div>
         </div>
         <div class="catalog-filter-disclosure" data-catalog-filter-disclosure="movies">
           <div class="catalog-filter-disclosure-toolbar">
             <button id="movies-catalog-filter-toggle" class="btn btn-sm btn-ghost catalog-filter-disclosure-toggle"
               type="button" aria-controls="movies-filter-bar" aria-expanded="false">
-              <span id="movies-catalog-filter-label">More filters</span>
+              <span id="movies-catalog-filter-label" data-i18n="ui_web_b1ab49a6fedc">More filters</span>
               <span id="movies-catalog-filter-badge" class="catalog-filter-disclosure-badge hidden"
                 aria-hidden="true"></span>
             </button>
-            <span class="catalog-filter-disclosure-hint">Year, rating, languages and watch status</span>
-            <select id="movies-sort" class="source-select filter-select" title="Sort by">
-              <option value="default">Sort: Default</option>
-              <option value="added">Recently Added</option>
-              <option value="rating">Top Rated</option>
-              <option value="year">Newest</option>
-              <option value="year-asc">Oldest</option>
+            <span class="catalog-filter-disclosure-hint" data-i18n="ui_web_19d6453ba7c0">Year, rating, languages and watch status</span>
+            <select id="movies-sort" class="source-select filter-select" title="Sort by" data-i18n-title="ui_web_c9129025bd3f">
+              <option value="default" data-i18n="ui_web_4130e81f2f93">Sort: Default</option>
+              <option value="added" data-i18n="ui_web_76ad8e11d3ba">Recently Added</option>
+              <option value="rating" data-i18n="ui_web_90e7047ec614">Top Rated</option>
+              <option value="year" data-i18n="ui_web_d15efa178cf6">Newest</option>
+              <option value="year-asc" data-i18n="ui_web_505dc450753e">Oldest</option>
               <option value="name">A → Z</option>
-              <option value="lang-match">Best language match</option>
+              <option value="lang-match" data-i18n="ui_web_9a5de9023528">Best language match</option>
             </select>
             <span id="movies-count" class="filter-count"></span>
           </div>
           <div class="filter-bar catalog-filter-panel is-collapsed" id="movies-filter-bar">
-          <select id="movies-genre" class="source-select filter-select hidden" title="Genre">
-            <option value="">All Genres</option>
+          <select id="movies-genre" class="source-select filter-select hidden" title="Genre" data-i18n-title="ui_web_6da795a8664f">
+            <option value="" data-i18n="ui_web_90009547165f">All Genres</option>
           </select>
-          <select id="movies-year" class="source-select filter-select" title="Release period">
-            <option value="">Any Year</option>
+          <select id="movies-year" class="source-select filter-select" title="Release period" data-i18n-title="ui_web_0754db4731fb">
+            <option value="" data-i18n="ui_web_79d36334cf6a">Any Year</option>
             <option value="2020">2020s</option>
             <option value="2010">2010s</option>
             <option value="2000">2000s</option>
             <option value="1990">1990s</option>
-            <option value="old">Before 1990</option>
+            <option value="old" data-i18n="ui_web_20956297ca42">Before 1990</option>
           </select>
-          <select id="movies-rating" class="source-select filter-select" title="Minimum rating">
-            <option value="">Any Rating</option>
+          <select id="movies-rating" class="source-select filter-select" title="Minimum rating" data-i18n-title="ui_web_6cad6def356f">
+            <option value="" data-i18n="ui_web_bbf585b86efc">Any Rating</option>
             <option value="8">8+ ★</option>
             <option value="7">7+ ★</option>
             <option value="6">6+ ★</option>
@@ -533,50 +533,50 @@
           <!-- Options are populated from the live catalog facets (/media-language-facets);
                only the "Any" placeholder is static so a hardcoded language can never
                outlive what the catalog actually contains. -->
-          <select id="movies-audio" class="source-select filter-select" title="Audio language">
-            <option value="">Any Audio</option>
+          <select id="movies-audio" class="source-select filter-select" title="Audio language" data-i18n-title="ui_web_0be233af17d9">
+            <option value="" data-i18n="ui_web_24aead1e0632">Any Audio</option>
           </select>
-          <select id="movies-subtitle" class="source-select filter-select" title="Subtitles">
-            <option value="">Any Subtitles</option>
+          <select id="movies-subtitle" class="source-select filter-select" title="Subtitles" data-i18n-title="ui_web_0ee695bdeb26">
+            <option value="" data-i18n="ui_web_40cbdd931b1f">Any Subtitles</option>
           </select>
-          <select id="movies-watched" class="source-select filter-select" title="Watch status">
-            <option value="">All</option>
-            <option value="unwatched">Unwatched</option>
-            <option value="inprogress">In Progress</option>
-            <option value="watched">Watched</option>
+          <select id="movies-watched" class="source-select filter-select" title="Watch status" data-i18n-title="ui_web_69371af8df88">
+            <option value="" data-i18n="ui_web_a52ace420f21">All</option>
+            <option value="unwatched" data-i18n="ui_web_645d39e24412">Unwatched</option>
+            <option value="inprogress" data-i18n="ui_web_b4cc4b07c300">In Progress</option>
+            <option value="watched" data-i18n="ui_web_1ca8c1c0de6f">Watched</option>
           </select>
-          <select id="movies-added" class="source-select filter-select" title="Added to catalog">
-            <option value="">Any Time</option>
-            <option value="7">Added this week</option>
-            <option value="30">Added this month</option>
-            <option value="90">Last 3 months</option>
+          <select id="movies-added" class="source-select filter-select" title="Added to catalog" data-i18n-title="ui_web_7acb2919f62a">
+            <option value="" data-i18n="ui_web_65dff84a42bb">Any Time</option>
+            <option value="7" data-i18n="ui_web_4ee3842e9e8d">Added this week</option>
+            <option value="30" data-i18n="ui_web_04d0e9886d87">Added this month</option>
+            <option value="90" data-i18n="ui_web_7fd5aed1ced9">Last 3 months</option>
           </select>
-          <select id="movies-duration" class="source-select filter-select hidden" title="Duration">
-            <option value="">Any Duration</option>
-            <option value="90">&lt; 90 min</option>
+          <select id="movies-duration" class="source-select filter-select hidden" title="Duration" data-i18n-title="ui_web_4fc52a3c4c55">
+            <option value="" data-i18n="ui_web_140f67a2ee18">Any Duration</option>
+            <option value="90" data-i18n="ui_web_b69a1cf9064c">&lt; 90 min</option>
             <option value="120">&lt; 2 h</option>
             <option value="121">&gt; 2 h</option>
           </select>
           <button id="movies-group-toggle" class="btn btn-sm btn-ghost filter-toggle active"
-            title="Group versions of the same movie into a single card">Group versions</button>
-          <button id="movies-random" class="btn btn-sm btn-ghost filter-toggle" title="Play a random movie">Random</button>
-          <button id="movies-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
+            title="Group versions of the same movie into a single card" data-i18n-title="ui_web_61a9837784ab" data-i18n="ui_web_f60605144681">Group versions</button>
+          <button id="movies-random" class="btn btn-sm btn-ghost filter-toggle" title="Play a random movie" data-i18n-title="ui_web_958c2b0aaf13" data-i18n="ui_web_67bc484430fe">Random</button>
+          <button id="movies-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters" data-i18n-title="ui_web_10afa98480f2" data-i18n="ui_web_58d973961227">✕
             Reset</button>
           </div>
         </div>
-        <div id="movies-active-filters" class="active-filters hidden" aria-label="Active filters"></div>
+        <div id="movies-active-filters" class="active-filters hidden" aria-label="Active filters" data-i18n-aria-label="ui_web_213a9822c38a"></div>
         <div id="movies-continue" class="continue-row hidden">
-          <h3>Continue Watching</h3>
+          <h3 data-i18n="ui_web_34d8eb01e1bf">Continue Watching</h3>
           <div class="continue-scroller" id="movies-continue-list"></div>
         </div>
         <div id="movies-grid" class="movies-grid">
           <div class="empty-state">
-            <p>Loading movies...</p>
+            <p data-i18n="ui_web_cc49dc898542">Loading movies...</p>
           </div>
         </div>
         <div id="movie-details" class="movie-details hidden">
           <section class="movie-detail-hero" id="movie-detail-hero">
-            <button class="movie-back-btn" type="button" aria-label="Back">
+            <button class="movie-back-btn" type="button" aria-label="Back" data-i18n-aria-label="ui_web_76900f1bfd16">
               <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
               <span class="back-label" data-i18n="ui_movies">Movies</span>
             </button>
@@ -590,40 +590,40 @@
                   <div></div>
                 </div>
                 <div class="movie-detail-actions">
-                  <button id="movie-primary-action" class="movie-primary-action" type="button">Play</button>
+                  <button id="movie-primary-action" class="movie-primary-action" type="button" data-i18n="ui_web_436e61016e26">Play</button>
                   <button id="movie-detail-favorite" class="movie-secondary-action" type="button"
-                    title="Add to Favorites">
+                    title="Add to Favorites" data-i18n-title="ui_web_2461cfb0ed43">
                     <span class="fav-icon">&hearts;</span>
-                    <span class="fav-label">Favorite</span>
+                    <span class="fav-label" data-i18n="ui_web_ea713ecd8537">Favorite</span>
                   </button>
                   <div id="movie-title-rating" class="title-rating-control" data-state="idle"
-                    aria-label="Your preference for this movie" aria-busy="false">
-                    <div class="title-rating-buttons" role="group" aria-label="Rate this movie">
+                    aria-label="Your preference for this movie" aria-busy="false" data-i18n-aria-label="ui_web_26b52cf83bc6">
+                    <div class="title-rating-buttons" role="group" aria-label="Rate this movie" data-i18n-aria-label="ui_web_d6dea4e49c3d">
                       <button id="movie-thumb-up"
                         class="movie-secondary-action thumb-btn title-rating-choice" type="button"
-                        title="Like this title" aria-label="Like this title" aria-pressed="false" disabled>
+                        title="Like this title" aria-label="Like this title" aria-pressed="false" disabled data-i18n-title="ui_web_e96aa02e91fd" data-i18n-aria-label="ui_web_e96aa02e91fd">
                         <span class="title-rating-icon title-rating-icon-up" aria-hidden="true"></span>
-                        <span class="title-rating-choice-label">Like</span>
+                        <span class="title-rating-choice-label" data-i18n="ui_web_64f915cb8bfc">Like</span>
                       </button>
                       <button id="movie-thumb-down"
                         class="movie-secondary-action thumb-btn title-rating-choice title-rating-choice-down"
-                        type="button" title="Not for me" aria-label="Not for me" aria-pressed="false" disabled>
+                        type="button" title="Not for me" aria-label="Not for me" aria-pressed="false" disabled data-i18n-title="ui_web_d81123b5e9a4" data-i18n-aria-label="ui_web_d81123b5e9a4">
                         <span class="title-rating-icon title-rating-icon-down" aria-hidden="true"></span>
-                        <span class="title-rating-choice-label">Not for me</span>
+                        <span class="title-rating-choice-label" data-i18n="ui_web_d81123b5e9a4">Not for me</span>
                       </button>
                     </div>
                     <div class="title-rating-feedback">
                       <span id="movie-rating-status" class="title-rating-status"
                         role="status" aria-live="polite" aria-atomic="true"></span>
-                      <button id="movie-rating-retry" class="title-rating-retry" type="button" hidden disabled>
+                      <button id="movie-rating-retry" class="title-rating-retry" type="button" hidden disabled data-i18n="ui_web_942087cc2d41">
                         Retry
                       </button>
                     </div>
                   </div>
                   <button id="movie-detail-download" class="movie-secondary-action movie-download-action" type="button"
-                    title="Download for offline" style="display:none">
+                    title="Download for offline" style="display:none" data-i18n-title="ui_web_9562d8134dae">
                     <span class="download-icon">&#x2193;</span>
-                    <span class="download-label">Download</span>
+                    <span class="download-label" data-i18n="ui_web_d6eafe823591">Download</span>
                   </button>
                 </div>
               </div>
@@ -631,7 +631,7 @@
           </section>
           <section class="movie-versions-section">
             <div class="movie-versions-toolbar">
-              <h3>Versions</h3>
+              <h3 data-i18n="ui_web_f89ea27036ac">Versions</h3>
               <p id="movie-version-summary" class="hint"></p>
             </div>
             <div id="movie-versions-list" class="movie-versions-list"></div>
@@ -644,68 +644,68 @@
         <div class="series-header">
           <div class="series-heading">
             <h2 data-i18n="ui_series">Series</h2>
-            <p class="series-subtitle">Pick up where you left off — every series from your sources, in one place.</p>
+            <p class="series-subtitle" data-i18n="ui_web_eb30a4e47973">Pick up where you left off — every series from your sources, in one place.</p>
           </div>
           <div class="series-controls">
             <select id="series-source-select" class="source-select">
-              <option value="">All Sources</option>
+              <option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>
             </select>
             <div class="multi-select" id="series-category-multi">
-              <button type="button" class="source-select multi-select-btn" id="series-category-btn">All
+              <button type="button" class="source-select multi-select-btn" id="series-category-btn" data-i18n="ui_web_fe3b58f14752">All
                 Categories</button>
               <div class="multi-select-panel hidden" id="series-category-panel">
                 <input type="text" class="search-input multi-select-search" id="series-category-search"
-                  placeholder="Search categories...">
+                  placeholder="Search categories..." data-i18n-placeholder="ui_web_8a800ebbdaca">
                 <div class="multi-select-actions">
-                  <button type="button" class="btn btn-sm btn-ghost" data-action="all">All</button>
-                  <button type="button" class="btn btn-sm btn-ghost" data-action="none">Clear</button>
+                  <button type="button" class="btn btn-sm btn-ghost" data-action="all" data-i18n="ui_web_a52ace420f21">All</button>
+                  <button type="button" class="btn btn-sm btn-ghost" data-action="none" data-i18n="ui_web_83b12c2216ef">Clear</button>
                 </div>
                 <div class="multi-select-list" id="series-category-list"></div>
               </div>
             </div>
             <div class="search-wrapper">
-              <input type="text" id="series-search" placeholder="Search series..." class="search-input">
-              <button type="button" class="search-clear" title="Clear search">&times;</button>
+              <input type="text" id="series-search" placeholder="Search series..." class="search-input" data-i18n-placeholder="ui_web_9665d142b14f">
+              <button type="button" class="search-clear" title="Clear search" data-i18n-title="ui_web_3b7ea51793e9">&times;</button>
             </div>
-            <button id="series-favorites-btn" class="btn btn-icon btn-ghost" title="Show Favorites Only">
-              <img class="icon norva-ui-icon" src="/img/icons/norva-favorites.svg" alt=""> Favorites
-            </button>
+            <button id="series-favorites-btn" class="btn btn-icon btn-ghost" title="Show Favorites Only" data-i18n-title="ui_web_c3e5414d8926">
+              <img class="icon norva-ui-icon" src="/img/icons/norva-favorites.svg" alt=""><norva-i18n data-i18n="ui_web_7a1f2a83aca9"> Favorites
+            </norva-i18n></button>
           </div>
         </div>
         <div class="catalog-filter-disclosure" data-catalog-filter-disclosure="series">
           <div class="catalog-filter-disclosure-toolbar">
             <button id="series-catalog-filter-toggle" class="btn btn-sm btn-ghost catalog-filter-disclosure-toggle"
               type="button" aria-controls="series-filter-bar" aria-expanded="false">
-              <span id="series-catalog-filter-label">More filters</span>
+              <span id="series-catalog-filter-label" data-i18n="ui_web_b1ab49a6fedc">More filters</span>
               <span id="series-catalog-filter-badge" class="catalog-filter-disclosure-badge hidden"
                 aria-hidden="true"></span>
             </button>
-            <span class="catalog-filter-disclosure-hint">Year, rating, languages and watch status</span>
-            <select id="series-sort" class="source-select filter-select" title="Sort by">
-              <option value="default">Sort: Default</option>
-              <option value="added">Recently Added</option>
-              <option value="rating">Top Rated</option>
-              <option value="year">Newest</option>
-              <option value="year-asc">Oldest</option>
+            <span class="catalog-filter-disclosure-hint" data-i18n="ui_web_19d6453ba7c0">Year, rating, languages and watch status</span>
+            <select id="series-sort" class="source-select filter-select" title="Sort by" data-i18n-title="ui_web_c9129025bd3f">
+              <option value="default" data-i18n="ui_web_4130e81f2f93">Sort: Default</option>
+              <option value="added" data-i18n="ui_web_76ad8e11d3ba">Recently Added</option>
+              <option value="rating" data-i18n="ui_web_90e7047ec614">Top Rated</option>
+              <option value="year" data-i18n="ui_web_d15efa178cf6">Newest</option>
+              <option value="year-asc" data-i18n="ui_web_505dc450753e">Oldest</option>
               <option value="name">A → Z</option>
-              <option value="lang-match">Best language match</option>
+              <option value="lang-match" data-i18n="ui_web_9a5de9023528">Best language match</option>
             </select>
             <span id="series-count" class="filter-count"></span>
           </div>
           <div class="filter-bar catalog-filter-panel is-collapsed" id="series-filter-bar">
-          <select id="series-genre" class="source-select filter-select hidden" title="Genre">
-            <option value="">All Genres</option>
+          <select id="series-genre" class="source-select filter-select hidden" title="Genre" data-i18n-title="ui_web_6da795a8664f">
+            <option value="" data-i18n="ui_web_90009547165f">All Genres</option>
           </select>
-          <select id="series-year" class="source-select filter-select" title="First aired">
-            <option value="">Any Year</option>
+          <select id="series-year" class="source-select filter-select" title="First aired" data-i18n-title="ui_web_c94c5e1d5af9">
+            <option value="" data-i18n="ui_web_79d36334cf6a">Any Year</option>
             <option value="2020">2020s</option>
             <option value="2010">2010s</option>
             <option value="2000">2000s</option>
             <option value="1990">1990s</option>
-            <option value="old">Before 1990</option>
+            <option value="old" data-i18n="ui_web_20956297ca42">Before 1990</option>
           </select>
-          <select id="series-rating" class="source-select filter-select" title="Minimum rating">
-            <option value="">Any Rating</option>
+          <select id="series-rating" class="source-select filter-select" title="Minimum rating" data-i18n-title="ui_web_6cad6def356f">
+            <option value="" data-i18n="ui_web_bbf585b86efc">Any Rating</option>
             <option value="8">8+ ★</option>
             <option value="7">7+ ★</option>
             <option value="6">6+ ★</option>
@@ -714,50 +714,50 @@
           <!-- Options are populated from the live catalog facets (/media-language-facets);
                only the "Any" placeholder is static so a hardcoded language can never
                outlive what the catalog actually contains. -->
-          <select id="series-audio" class="source-select filter-select" title="Audio language">
-            <option value="">Any Audio</option>
+          <select id="series-audio" class="source-select filter-select" title="Audio language" data-i18n-title="ui_web_0be233af17d9">
+            <option value="" data-i18n="ui_web_24aead1e0632">Any Audio</option>
           </select>
-          <select id="series-subtitle" class="source-select filter-select" title="Subtitles">
-            <option value="">Any Subtitles</option>
+          <select id="series-subtitle" class="source-select filter-select" title="Subtitles" data-i18n-title="ui_web_0ee695bdeb26">
+            <option value="" data-i18n="ui_web_40cbdd931b1f">Any Subtitles</option>
           </select>
-          <select id="series-watched" class="source-select filter-select" title="Watch status">
-            <option value="">All</option>
-            <option value="unwatched">Not Started</option>
-            <option value="inprogress">Watching</option>
+          <select id="series-watched" class="source-select filter-select" title="Watch status" data-i18n-title="ui_web_69371af8df88">
+            <option value="" data-i18n="ui_web_a52ace420f21">All</option>
+            <option value="unwatched" data-i18n="ui_web_6d54f9ecea63">Not Started</option>
+            <option value="inprogress" data-i18n="ui_web_fbc594054d51">Watching</option>
           </select>
-          <select id="series-added" class="source-select filter-select" title="Added to catalog">
-            <option value="">Any Time</option>
-            <option value="7">Added this week</option>
-            <option value="30">Added this month</option>
-            <option value="90">Last 3 months</option>
+          <select id="series-added" class="source-select filter-select" title="Added to catalog" data-i18n-title="ui_web_7acb2919f62a">
+            <option value="" data-i18n="ui_web_65dff84a42bb">Any Time</option>
+            <option value="7" data-i18n="ui_web_4ee3842e9e8d">Added this week</option>
+            <option value="30" data-i18n="ui_web_04d0e9886d87">Added this month</option>
+            <option value="90" data-i18n="ui_web_7fd5aed1ced9">Last 3 months</option>
           </select>
-          <select id="series-status" class="source-select filter-select hidden" title="Series status">
-            <option value="">Any Status</option>
-            <option value="ended">Ended</option>
-            <option value="ongoing">Ongoing</option>
+          <select id="series-status" class="source-select filter-select hidden" title="Series status" data-i18n-title="ui_web_19caa7e51223">
+            <option value="" data-i18n="ui_web_c4c634a4804b">Any Status</option>
+            <option value="ended" data-i18n="ui_web_7cdc804e6996">Ended</option>
+            <option value="ongoing" data-i18n="ui_web_a90620097624">Ongoing</option>
           </select>
           <button id="series-group-toggle" class="btn btn-sm btn-ghost filter-toggle active"
-            title="Group versions of the same series into a single card">Group versions</button>
-          <button id="series-random" class="btn btn-sm btn-ghost filter-toggle" title="Open a random series">Random</button>
-          <button id="series-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
+            title="Group versions of the same series into a single card" data-i18n-title="ui_web_b78d3a122777" data-i18n="ui_web_f60605144681">Group versions</button>
+          <button id="series-random" class="btn btn-sm btn-ghost filter-toggle" title="Open a random series" data-i18n-title="ui_web_987b4c10ab77" data-i18n="ui_web_67bc484430fe">Random</button>
+          <button id="series-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters" data-i18n-title="ui_web_10afa98480f2" data-i18n="ui_web_58d973961227">✕
             Reset</button>
           </div>
         </div>
-        <div id="series-active-filters" class="active-filters hidden" aria-label="Active filters"></div>
+        <div id="series-active-filters" class="active-filters hidden" aria-label="Active filters" data-i18n-aria-label="ui_web_213a9822c38a"></div>
         <div id="series-continue" class="continue-row hidden">
-          <h3>Continue Watching</h3>
+          <h3 data-i18n="ui_web_34d8eb01e1bf">Continue Watching</h3>
           <div class="continue-scroller" id="series-continue-list"></div>
         </div>
 
         <div class="series-content">
           <div id="series-grid" class="series-grid">
             <div class="empty-state">
-              <p>Loading series...</p>
+              <p data-i18n="ui_web_f9e15f492b1e">Loading series...</p>
             </div>
           </div>
           <div id="series-details" class="series-details hidden">
             <section class="series-detail-hero" id="series-detail-hero">
-              <button class="series-back-btn" type="button" aria-label="Back">
+              <button class="series-back-btn" type="button" aria-label="Back" data-i18n-aria-label="ui_web_76900f1bfd16">
                 <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
                 <span class="back-label" data-i18n="ui_series">Series</span>
               </button>
@@ -768,34 +768,34 @@
                   <h3 id="series-title"></h3>
                   <p id="series-plot"></p>
                   <div class="series-detail-actions">
-                    <button id="series-primary-action" class="series-primary-action" type="button">Play</button>
+                    <button id="series-primary-action" class="series-primary-action" type="button" data-i18n="ui_web_436e61016e26">Play</button>
                     <button id="series-play-start" class="series-secondary-action" type="button"
-                      title="Play from the beginning" style="display:none">Play from start</button>
+                      title="Play from the beginning" style="display:none" data-i18n-title="ui_web_905a1c7c507b" data-i18n="ui_web_99d3c4a90684">Play from start</button>
                     <button id="series-detail-favorite" class="series-secondary-action" type="button"
-                      title="Add to Favorites">
+                      title="Add to Favorites" data-i18n-title="ui_web_2461cfb0ed43">
                       <span class="fav-icon">♡</span>
-                      <span class="fav-label">Favorite</span>
+                      <span class="fav-label" data-i18n="ui_web_ea713ecd8537">Favorite</span>
                     </button>
                     <div id="series-title-rating" class="title-rating-control" data-state="idle"
-                      aria-label="Your preference for this series" aria-busy="false">
-                      <div class="title-rating-buttons" role="group" aria-label="Rate this series">
+                      aria-label="Your preference for this series" aria-busy="false" data-i18n-aria-label="ui_web_595293e001a0">
+                      <div class="title-rating-buttons" role="group" aria-label="Rate this series" data-i18n-aria-label="ui_web_00e8c3f9d962">
                         <button id="series-thumb-up"
                           class="series-secondary-action thumb-btn title-rating-choice" type="button"
-                          title="Like this title" aria-label="Like this title" aria-pressed="false" disabled>
+                          title="Like this title" aria-label="Like this title" aria-pressed="false" disabled data-i18n-title="ui_web_e96aa02e91fd" data-i18n-aria-label="ui_web_e96aa02e91fd">
                           <span class="title-rating-icon title-rating-icon-up" aria-hidden="true"></span>
-                          <span class="title-rating-choice-label">Like</span>
+                          <span class="title-rating-choice-label" data-i18n="ui_web_64f915cb8bfc">Like</span>
                         </button>
                         <button id="series-thumb-down"
                           class="series-secondary-action thumb-btn title-rating-choice title-rating-choice-down"
-                          type="button" title="Not for me" aria-label="Not for me" aria-pressed="false" disabled>
+                          type="button" title="Not for me" aria-label="Not for me" aria-pressed="false" disabled data-i18n-title="ui_web_d81123b5e9a4" data-i18n-aria-label="ui_web_d81123b5e9a4">
                           <span class="title-rating-icon title-rating-icon-down" aria-hidden="true"></span>
-                          <span class="title-rating-choice-label">Not for me</span>
+                          <span class="title-rating-choice-label" data-i18n="ui_web_d81123b5e9a4">Not for me</span>
                         </button>
                       </div>
                       <div class="title-rating-feedback">
                         <span id="series-rating-status" class="title-rating-status"
                           role="status" aria-live="polite" aria-atomic="true"></span>
-                        <button id="series-rating-retry" class="title-rating-retry" type="button" hidden disabled>
+                        <button id="series-rating-retry" class="title-rating-retry" type="button" hidden disabled data-i18n="ui_web_942087cc2d41">
                           Retry
                         </button>
                       </div>
@@ -806,15 +806,15 @@
             </section>
             <section class="series-versions-section single-version" id="series-versions-section">
               <div class="series-versions-toolbar">
-                <h3>Versions</h3>
+                <h3 data-i18n="ui_web_f89ea27036ac">Versions</h3>
                 <p id="series-version-summary" class="hint"></p>
               </div>
               <div id="series-versions-list" class="series-versions-list"></div>
             </section>
             <section class="series-episodes-section">
               <div class="series-episodes-toolbar">
-                <h3>Episodes</h3>
-                <div id="series-season-tabs" class="series-season-tabs" role="tablist" aria-label="Seasons"></div>
+                <h3 data-i18n="ui_web_83f9722d9bb2">Episodes</h3>
+                <div id="series-season-tabs" class="series-season-tabs" role="tablist" aria-label="Seasons" data-i18n-aria-label="ui_web_c15527b19b99"></div>
               </div>
               <div id="series-seasons" class="series-seasons"></div>
             </section>
@@ -843,23 +843,23 @@
             </button>
             <button class="tab" data-tab="sources" role="tab" aria-selected="false">
               <img class="settings-tab-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>TV Service</span>
+              <span data-i18n="ui_web_f48b66442266">TV Service</span>
             </button>
             <button class="tab" data-tab="content" role="tab" aria-selected="false">
               <img class="settings-tab-icon" src="/img/icons/norva-series.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Library Management</span>
+              <span data-i18n="ui_web_cf4db6993ffb">Library Management</span>
             </button>
             <button class="settings-advanced-toggle" id="settings-advanced-toggle" type="button" aria-expanded="false">
               <img class="settings-tab-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Advanced</span>
+              <span data-i18n="ui_web_9f088dbebd6c">Advanced</span>
             </button>
             <button class="tab tab-advanced" data-tab="transcode" role="tab" aria-selected="false">
               <img class="settings-tab-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Transcoding</span>
+              <span data-i18n="ui_web_2514fab855a6">Transcoding</span>
             </button>
             <button class="tab tab-advanced" data-tab="users" id="users-tab" role="tab" aria-selected="false" style="display:none;">
               <img class="settings-tab-icon" src="/img/icons/norva-account.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Local Users</span>
+              <span data-i18n="ui_web_85c1a199185d">Local Users</span>
             </button>
           </div>
 
@@ -883,113 +883,113 @@
             <div id="settings-service-health" aria-live="polite" aria-atomic="true"></div>
 
             <div class="settings-section settings-account-section">
-              <h3>Norva Account</h3>
+              <h3 data-i18n="ui_web_070ab76e8398">Norva Account</h3>
               <div class="settings-row-group">
                 <div class="setting-item settings-account-identity">
                   <div class="setting-info">
-                    <span class="setting-eyebrow" id="settings-account-kicker">Signed in as</span>
-                    <strong id="settings-account-email">Norva user</strong>
-                    <span class="setting-hint" id="settings-account-mode">Cloud account</span>
+                    <span class="setting-eyebrow" id="settings-account-kicker" data-i18n="ui_web_abc50e334be4">Signed in as</span>
+                    <strong id="settings-account-email" data-i18n="ui_web_9f4a7bc9ff54">Norva user</strong>
+                    <span class="setting-hint" id="settings-account-mode" data-i18n="ui_web_91c286f1948f">Cloud account</span>
                   </div>
                   <div class="setting-actions account-actions-card">
-                    <button class="btn btn-secondary" id="settings-open-account">Sign-in settings</button>
-                    <button class="btn btn-secondary" id="settings-switch-profile">Switch profile</button>
-                    <button class="btn btn-danger" id="settings-signout-btn">Sign out</button>
+                    <button class="btn btn-secondary" id="settings-open-account" data-i18n="ui_web_e2271e438428">Sign-in settings</button>
+                    <button class="btn btn-secondary" id="settings-switch-profile" data-i18n="ui_web_c1e0daeef31e">Switch profile</button>
+                    <button class="btn btn-danger" id="settings-signout-btn" data-i18n="ui_web_48f0d3d397d4">Sign out</button>
                   </div>
                 </div>
                 <div class="setting-item settings-tv-profile-row">
                   <div class="setting-info">
-                    <span class="setting-label">Active profile</span>
-                    <span class="setting-hint" id="settings-profile-name">Main Profile</span>
+                    <span class="setting-label" data-i18n="ui_web_5608b89a8112">Active profile</span>
+                    <span class="setting-hint" id="settings-profile-name" data-i18n="ui_web_bec3c9b8e5e8">Main Profile</span>
                   </div>
-                  <button class="btn btn-secondary" id="settings-tv-switch-profile">Switch profile</button>
+                  <button class="btn btn-secondary" id="settings-tv-switch-profile" data-i18n="ui_web_c1e0daeef31e">Switch profile</button>
                 </div>
               </div>
             </div>
 
             <div class="settings-section">
-              <h3>Norva Access</h3>
+              <h3 data-i18n="ui_web_90ade6b3fd3a">Norva Access</h3>
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label" id="settings-access-plan">Checking access</span>
-                  <span class="setting-hint" id="settings-access-hint">Norva verifies access without confusing billing status with your TV service.</span>
+                  <span class="setting-label" id="settings-access-plan" data-i18n="ui_web_0faade3653af">Checking access</span>
+                  <span class="setting-hint" id="settings-access-hint" data-i18n="ui_web_991672177782">Norva verifies access without confusing billing status with your TV service.</span>
                 </div>
-                <button class="btn btn-secondary" id="settings-manage-plan-btn">Manage plan</button>
-                <button class="btn btn-secondary" id="settings-support-btn">Contact support</button>
+                <button class="btn btn-secondary" id="settings-manage-plan-btn" data-i18n="ui_web_2d5ab37c33fc">Manage plan</button>
+                <button class="btn btn-secondary" id="settings-support-btn" data-i18n="ui_web_814f4ed2d5bd">Contact support</button>
               </div>
             </div>
 
             <div class="settings-tv-handoff" id="settings-tv-handoff">
               <div class="settings-tv-handoff-copy">
-                <h3 id="settings-tv-handoff-title">Continue on phone or web</h3>
-                <p id="settings-tv-handoff-copy">Open <strong>norva.tv/account</strong> on a personal device to manage your account and TV service. This TV never asks for provider credentials.</p>
+                <h3 id="settings-tv-handoff-title" data-i18n="ui_web_2319df2a8802">Continue on phone or web</h3>
+                <p id="settings-tv-handoff-copy"><norva-i18n data-i18n="ui_web_ed077f3d8125">Open </norva-i18n><strong data-i18n="ui_web_5050ce953bfd">norva.tv/account</strong><norva-i18n data-i18n="ui_web_f1622265d123"> on a personal device to manage your account and TV service. This TV never asks for provider credentials.</norva-i18n></p>
               </div>
-              <button class="btn btn-secondary" id="settings-tv-handoff-btn" type="button">Show instructions</button>
+              <button class="btn btn-secondary" id="settings-tv-handoff-btn" type="button" data-i18n="ui_web_4a0e4d79a5d8">Show instructions</button>
             </div>
 
             <div class="settings-section" id="settings-partners-row" hidden aria-hidden="true">
-              <h3>Norva Partners</h3>
+              <h3 data-i18n="ui_web_eaff23c82663">Norva Partners</h3>
               <div class="setting-item partners-settings-entry">
                 <div class="setting-info">
-                  <span class="setting-label">Norva Partners</span>
-                  <span class="setting-hint">Join the programme or manage your individual partner account.</span>
+                  <span class="setting-label" data-i18n="ui_web_eaff23c82663">Norva Partners</span>
+                  <span class="setting-hint" data-i18n="ui_web_4f41bacf7408">Join the programme or manage your individual partner account.</span>
                 </div>
-                <button class="btn btn-secondary" id="settings-open-partners" type="button">Open Partners</button>
+                <button class="btn btn-secondary" id="settings-open-partners" type="button" data-i18n="ui_web_19833c3420bd">Open Partners</button>
               </div>
             </div>
 
             <div class="settings-section settings-legal-section">
-              <h3>Privacy &amp; legal</h3>
+              <h3 data-i18n="ui_web_4afba636b446">Privacy &amp; legal</h3>
               <div class="setting-item">
-                <span class="settings-tv-legal-label">Privacy &amp; legal</span>
+                <span class="settings-tv-legal-label" data-i18n="ui_web_4afba636b446">Privacy &amp; legal</span>
                 <div class="setting-info">
-                  <span class="setting-label">Norva is a media player and includes no content</span>
-                  <span class="setting-hint">You connect a compatible source you own and are authorized to use. See how Norva handles your data. <a href="#" id="settings-cookie-prefs-btn" class="settings-cookie-link">Manage cookies</a></span>
+                  <span class="setting-label" data-i18n="ui_web_60fc98868715">Norva is a media player and includes no content</span>
+                  <span class="setting-hint"><norva-i18n data-i18n="ui_web_ec9a43ae348a">You connect a compatible source you own and are authorized to use. See how Norva handles your data. </norva-i18n><a href="#" id="settings-cookie-prefs-btn" class="settings-cookie-link" data-i18n="ui_web_2bff1102f9fb">Manage cookies</a></span>
                 </div>
                 <div class="legal-links">
-                  <a class="btn btn-secondary" id="settings-privacy-link" href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
-                  <a class="btn btn-secondary" id="settings-terms-link" href="/terms.html" target="_blank" rel="noopener">Terms</a>
-                  <a class="btn btn-secondary" id="settings-legal-link" href="/mentions-legales.html" target="_blank" rel="noopener">Legal notice</a>
+                  <a class="btn btn-secondary" id="settings-privacy-link" href="/privacy.html" target="_blank" rel="noopener" data-i18n="ui_web_506ff3946215">Privacy Policy</a>
+                  <a class="btn btn-secondary" id="settings-terms-link" href="/terms.html" target="_blank" rel="noopener" data-i18n="ui_web_ede548996483">Terms</a>
+                  <a class="btn btn-secondary" id="settings-legal-link" href="/mentions-legales.html" target="_blank" rel="noopener" data-i18n="ui_web_1011b3a811f0">Legal notice</a>
                 </div>
-                <button class="btn btn-secondary settings-tv-legal-btn" id="settings-tv-legal-btn" type="button">View documents</button>
+                <button class="btn btn-secondary settings-tv-legal-btn" id="settings-tv-legal-btn" type="button" data-i18n="ui_web_d0a435de6fc4">View documents</button>
               </div>
               <div class="setting-item" id="settings-delete-account-row" style="display:none">
                 <div class="setting-info">
-                  <span class="setting-label">Delete account</span>
-                  <span class="setting-hint">Permanently delete your Norva account and associated data. This cannot be undone.</span>
+                  <span class="setting-label" data-i18n="ui_web_a2e20a335700">Delete account</span>
+                  <span class="setting-hint" data-i18n="ui_web_9951752e5ac5">Permanently delete your Norva account and associated data. This cannot be undone.</span>
                 </div>
-                <button class="btn btn-danger" id="settings-delete-account-btn">Delete account</button>
+                <button class="btn btn-danger" id="settings-delete-account-btn" data-i18n="ui_web_a2e20a335700">Delete account</button>
               </div>
             </div>
 
             <button class="btn btn-danger settings-tv-signout" id="settings-tv-signout-btn" type="button">
               <img src="/img/icons/norva-logout.svg?v=sharp-core-1" alt="" aria-hidden="true">
-              <span>Sign out of this TV</span>
+              <span data-i18n="ui_web_a4c51e0f386f">Sign out of this TV</span>
             </button>
           </div>
 
           <!-- Screens & Pairing Tab -->
           <div id="tab-screens" class="tab-content">
             <div id="devices-screens-root" class="devices-screens-root">
-              <div class="devices-loading-fallback" role="status">Loading your screens…</div>
+              <div class="devices-loading-fallback" role="status" data-i18n="ui_web_69ee511ff450">Loading your screens…</div>
             </div>
           </div>
 
           <!-- Sources Tab -->
           <div id="tab-sources" class="tab-content">
             <header class="settings-panel-header">
-              <h2>TV Service</h2>
-              <p>Review the service behind your catalogue.</p>
+              <h2 data-i18n="ui_web_f48b66442266">TV Service</h2>
+              <p data-i18n="ui_web_9f8eaa430c6b">Review the service behind your catalogue.</p>
             </header>
 
             <div class="settings-tv-service-overview">
               <div id="settings-tv-service-health" aria-live="polite" aria-atomic="true"></div>
               <div class="settings-tv-handoff">
                 <div class="settings-tv-handoff-copy">
-                  <h3>Continue on phone or web</h3>
-                  <p>Open <strong>norva.tv/account</strong> on a personal device to review your TV service. This TV never asks for provider credentials.</p>
+                  <h3 data-i18n="ui_web_2319df2a8802">Continue on phone or web</h3>
+                  <p><norva-i18n data-i18n="ui_web_ed077f3d8125">Open </norva-i18n><strong data-i18n="ui_web_5050ce953bfd">norva.tv/account</strong><norva-i18n data-i18n="ui_web_2c74cdd57a48"> on a personal device to review your TV service. This TV never asks for provider credentials.</norva-i18n></p>
                 </div>
-                <button class="btn btn-secondary" id="settings-tv-service-instructions-btn" type="button">Show instructions</button>
+                <button class="btn btn-secondary" id="settings-tv-service-instructions-btn" type="button" data-i18n="ui_web_4a0e4d79a5d8">Show instructions</button>
               </div>
             </div>
 
@@ -997,53 +997,53 @@
             <div class="tc-intro">
               <img class="tc-intro-icon" src="/img/icons/norva-live-tv.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
-                <p class="tc-intro-title">Connect your TV service</p>
-                <p class="tc-intro-text">Add the service you subscribed to. Providers usually give you either a login
+                <p class="tc-intro-title" data-i18n="ui_web_9fa1c18bb4b5">Connect your TV service</p>
+                <p class="tc-intro-text" data-i18n="ui_web_795899199bac">Add the service you subscribed to. Providers usually give you either a login
                   or a playlist link — add whichever you have. You can connect more than one.</p>
               </div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>Provider login</h3>
-                <button class="btn btn-primary" id="add-xtream">Add provider</button>
+                <h3 data-i18n="ui_web_a6f9addc2c4c">Provider login</h3>
+                <button class="btn btn-primary" id="add-xtream" data-i18n="ui_web_8cd1856b03dd">Add provider</button>
               </div>
-              <p class="tc-section-sub" style="margin-top: 2px;">The most common option. Use the server address,
+              <p class="tc-section-sub" style="margin-top: 2px;" data-i18n="ui_web_c67cb7c173aa">The most common option. Use the server address,
                 username and password your provider gave you (sometimes called an “Xtream” login).</p>
               <div id="xtream-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>Playlist link</h3>
-                <button class="btn btn-primary" id="add-m3u">Add playlist</button>
+                <h3 data-i18n="ui_web_8985908fa7c6">Playlist link</h3>
+                <button class="btn btn-primary" id="add-m3u" data-i18n="ui_web_2b0f2e4097a7">Add playlist</button>
               </div>
-              <p class="tc-section-sub" style="margin-top: 2px;">Use this if your provider gave you a single web link
+              <p class="tc-section-sub" style="margin-top: 2px;" data-i18n="ui_web_302a9cf3be0f">Use this if your provider gave you a single web link
                 instead of a login (an address ending in .m3u or .m3u8).</p>
               <div id="m3u-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>TV guide <span style="font-weight: 400; font-size: 0.72em; color: var(--color-text-secondary);">·
+                <h3><norva-i18n data-i18n="ui_web_11be76d03d1c">TV guide </norva-i18n><span style="font-weight: 400; font-size: 0.72em; color: var(--color-text-secondary);" data-i18n="ui_web_304d9877340f">·
                     optional</span></h3>
-                <button class="btn btn-primary" id="add-epg">Add guide</button>
+                <button class="btn btn-primary" id="add-epg" data-i18n="ui_web_38183542daf0">Add guide</button>
               </div>
-              <p class="tc-section-sub" style="margin-top: 2px;">A program guide (EPG) shows what’s on now and next.
+              <p class="tc-section-sub" style="margin-top: 2px;" data-i18n="ui_web_9aaf24f41a33">A program guide (EPG) shows what’s on now and next.
                 Many provider logins already include it — only add one here if your channels have no guide.</p>
               <div id="epg-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
-              <h3>Guide &amp; catalogue updates</h3>
-              <p class="tc-section-sub" style="margin-top: 2px;">Norva refreshes your channels and guide automatically.
+              <h3 data-i18n="ui_web_63d774e88074">Guide &amp; catalogue updates</h3>
+              <p class="tc-section-sub" style="margin-top: 2px;" data-i18n="ui_web_609d25cefb4b">Norva refreshes your channels and guide automatically.
                 You can also tap the refresh icon on any source above to update it right away.</p>
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Last updated</span>
-                  <span class="setting-hint">When your channels and guide were last refreshed.</span>
+                  <span class="setting-label" data-i18n="ui_web_382ac5f308f7">Last updated</span>
+                  <span class="setting-hint" data-i18n="ui_web_49e0ee0082ea">When your channels and guide were last refreshed.</span>
                 </div>
-                <span id="epg-last-refreshed" class="hint">Never</span>
+                <span id="epg-last-refreshed" class="hint" data-i18n="ui_web_6300ef800bb8">Never</span>
               </div>
               <div class="setting-item needs-local-server">
                 <label class="setting-toggle">
@@ -1051,34 +1051,34 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Keep my catalogue up to date</span>
-                  <span class="setting-hint">Norva quietly checks your provider for new movies, shows and channels in
+                  <span class="setting-label" data-i18n="ui_web_494d7cdceb15">Keep my catalogue up to date</span>
+                  <span class="setting-hint" data-i18n="ui_web_41765f856203">Norva quietly checks your provider for new movies, shows and channels in
                     the background when you open the app.</span>
                 </div>
               </div>
               <div class="setting-item needs-local-server" id="auto-refresh-interval-row">
                 <div class="setting-info">
-                  <span class="setting-label">Check for new content</span>
-                  <span class="setting-hint">Choose how often Norva checks after you open the app.</span>
+                  <span class="setting-label" data-i18n="ui_web_da08cff2b0a9">Check for new content</span>
+                  <span class="setting-hint" data-i18n="ui_web_426078361471">Choose how often Norva checks after you open the app.</span>
                 </div>
                 <select id="setting-auto-refresh-interval" class="source-select" style="width: auto; min-width: 230px;">
-                  <option value="24" selected>Daily (recommended)</option>
-                  <option value="1">Every time I open Norva</option>
-                  <option value="168">Weekly</option>
+                  <option value="24" selected data-i18n="ui_web_c70fb6159baa">Daily (recommended)</option>
+                  <option value="1" data-i18n="ui_web_281e966da8ba">Every time I open Norva</option>
+                  <option value="168" data-i18n="ui_web_2975132481a7">Weekly</option>
                 </select>
               </div>
               <div class="setting-item needs-local-server">
                 <div class="setting-info">
-                  <span class="setting-label">Auto-refresh the guide</span>
-                  <span class="setting-hint">How often Norva re-fetches the program guide in the background.</span>
+                  <span class="setting-label" data-i18n="ui_web_2be0a9f2c28e">Auto-refresh the guide</span>
+                  <span class="setting-hint" data-i18n="ui_web_8e4388661813">How often Norva re-fetches the program guide in the background.</span>
                 </div>
                 <select id="epg-refresh-interval" class="source-select" style="width: auto; min-width: 160px;">
-                  <option value="1">Every hour</option>
-                  <option value="2">Every 2 hours</option>
-                  <option value="4">Every 4 hours</option>
-                  <option value="12">Every 12 hours</option>
-                  <option value="24" selected>Once a day</option>
-                  <option value="0">Manual only</option>
+                  <option value="1" data-i18n="ui_web_a4bac4655d45">Every hour</option>
+                  <option value="2" data-i18n="ui_web_f4e35fe19efa">Every 2 hours</option>
+                  <option value="4" data-i18n="ui_web_699126918da5">Every 4 hours</option>
+                  <option value="12" data-i18n="ui_web_9a289972dd1e">Every 12 hours</option>
+                  <option value="24" selected data-i18n="ui_web_6c126a03ea7f">Once a day</option>
+                  <option value="0" data-i18n="ui_web_be1016ce6ded">Manual only</option>
                 </select>
               </div>
             </div>
@@ -1089,26 +1089,26 @@
           <div id="tab-player" class="tab-content">
             <header class="settings-panel-header">
               <h2 data-i18n="ui_playback_discovery">Playback &amp; Discovery</h2>
-              <p>Choose how Norva plays and recommends your content.</p>
+              <p data-i18n="ui_web_666c8d8c3717">Choose how Norva plays and recommends your content.</p>
             </header>
             <div class="tc-intro">
               <img class="tc-intro-icon" src="/img/icons/norva-movies.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
-                <p class="tc-intro-title">Playback &amp; recommendations</p>
-                <p class="tc-intro-text">Set how Norva plays and what it suggests first. The defaults work well —
+                <p class="tc-intro-title" data-i18n="ui_web_f9bae772a4ad">Playback &amp; recommendations</p>
+                <p class="tc-intro-text" data-i18n="ui_web_824508b7b5f4">Set how Norva plays and what it suggests first. The defaults work well —
                   adjust these to match your taste. Nothing here ever hides content.</p>
               </div>
             </div>
 
             <!-- How things play -->
             <div class="settings-section">
-              <h3>Playback</h3>
-              <p class="tc-section-sub">How channels and videos play.</p>
+              <h3 data-i18n="ui_web_2db1db07062e">Playback</h3>
+              <p class="tc-section-sub" data-i18n="ui_web_460bb59ee56b">How channels and videos play.</p>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Default volume</span>
-                  <span class="setting-hint">The level Norva starts playing at.</span>
+                  <span class="setting-label" data-i18n="ui_web_2aed61f36e51">Default volume</span>
+                  <span class="setting-hint" data-i18n="ui_web_fa0dd5614256">The level Norva starts playing at.</span>
                 </div>
                 <div class="volume-slider-container">
                   <input type="range" id="setting-default-volume" class="volume-slider" min="0" max="100" value="80">
@@ -1122,8 +1122,8 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Remember my volume</span>
-                  <span class="setting-hint">Start at the volume you last used, instead of the default.</span>
+                  <span class="setting-label" data-i18n="ui_web_0656e92b4c50">Remember my volume</span>
+                  <span class="setting-hint" data-i18n="ui_web_fbd997c034d7">Start at the volume you last used, instead of the default.</span>
                 </div>
               </div>
 
@@ -1133,8 +1133,8 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Auto-play next episode</span>
-                  <span class="setting-hint">When an episode ends, automatically start the next one.</span>
+                  <span class="setting-label" data-i18n="ui_web_d243b5fd31b3">Auto-play next episode</span>
+                  <span class="setting-hint" data-i18n="ui_web_3654553bb8e8">When an episode ends, automatically start the next one.</span>
                 </div>
               </div>
 
@@ -1144,8 +1144,8 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Arrow keys change channels</span>
-                  <span class="setting-hint">With a keyboard or TV remote: ↑/↓ switch channels, ←/→ change the
+                  <span class="setting-label" data-i18n="ui_web_d9053f4c817f">Arrow keys change channels</span>
+                  <span class="setting-hint" data-i18n="ui_web_c875c1507f18">With a keyboard or TV remote: ↑/↓ switch channels, ←/→ change the
                     volume.</span>
                 </div>
               </div>
@@ -1153,14 +1153,14 @@
 
             <!-- What Norva suggests -->
             <div class="settings-section">
-              <h3>Your taste &amp; recommendations</h3>
-              <p class="tc-section-sub">Help Norva put the right things first. These guide the order of titles and the
+              <h3 data-i18n="ui_web_18a1ac040bdd">Your taste &amp; recommendations</h3>
+              <p class="tc-section-sub" data-i18n="ui_web_3a199f156e88">Help Norva put the right things first. These guide the order of titles and the
                 version played by default — they never hide anything.</p>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Your region</span>
-                  <span class="setting-hint">Organises Live TV, logos, categories and recommendations for your area. It
+                  <span class="setting-label" data-i18n="ui_web_d8b1be5f8e59">Your region</span>
+                  <span class="setting-hint" data-i18n="ui_web_9841e5c05948">Organises Live TV, logos, categories and recommendations for your area. It
                     never blocks access to any content.</span>
                 </div>
                 <div class="region-picker" data-region-picker>
@@ -1170,114 +1170,114 @@
                   <button type="button" class="region-picker-btn source-select" data-region-btn
                           aria-haspopup="listbox" aria-expanded="false" aria-controls="region-listbox"
                           style="width: auto; min-width: 220px;">
-                    <span class="region-picker-value" data-region-value>🌐 International</span>
+                    <span class="region-picker-value" data-region-value data-i18n="ui_web_956516907a4a">🌐 International</span>
                     <span class="region-picker-caret" aria-hidden="true">▾</span>
                   </button>
                   <div class="region-picker-pop" data-region-pop hidden>
                     <input type="text" class="region-picker-search" data-region-search role="combobox"
                            aria-controls="region-listbox" aria-expanded="false" aria-autocomplete="list"
-                           placeholder="Search a country…" aria-label="Search region" autocomplete="off" />
-                    <ul class="region-picker-list" data-region-list id="region-listbox" role="listbox" aria-label="Regions"></ul>
+                           placeholder="Search a country…" aria-label="Search region" autocomplete="off"  data-i18n-placeholder="ui_web_acf3a977233f" data-i18n-aria-label="ui_web_f0a4313b9c5b"/>
+                    <ul class="region-picker-list" data-region-list id="region-listbox" role="listbox" aria-label="Regions" data-i18n-aria-label="ui_web_610c65d84510"></ul>
                   </div>
                 </div>
               </div>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Preferred audio language</span>
-                  <span class="setting-hint">When several versions exist, Norva favours this language for the default
+                  <span class="setting-label" data-i18n="ui_web_a27f6e98699d">Preferred audio language</span>
+                  <span class="setting-hint" data-i18n="ui_web_06e2546dac18">When several versions exist, Norva favours this language for the default
                     pick, and it powers the “Best for my languages” sort on Movies &amp; Series.
                     Unknown languages stay visible.</span>
                 </div>
                 <select id="setting-preferred-audio-language" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="">No preference</option>
-                  <option value="fr">French</option>
-                  <option value="en">English</option>
-                  <option value="es">Spanish</option>
-                  <option value="ar">Arabic</option>
-                  <option value="de">German</option>
-                  <option value="it">Italian</option>
-                  <option value="pt">Portuguese</option>
-                  <option value="tr">Turkish</option>
-                  <option value="nl">Dutch</option>
-                  <option value="ru">Russian</option>
-                  <option value="pl">Polish</option>
-                  <option value="hi">Hindi</option>
-                  <option value="ja">Japanese</option>
-                  <option value="ko">Korean</option>
-                  <option value="zh">Chinese</option>
-                  <option value="original">Original audio</option>
+                  <option value="" data-i18n="ui_web_35f994b0d72d">No preference</option>
+                  <option value="fr" data-i18n="ui_web_7458199fe97a">French</option>
+                  <option value="en" data-i18n="ui_web_ba118bf7fc9c">English</option>
+                  <option value="es" data-i18n="ui_web_3411059cb8e0">Spanish</option>
+                  <option value="ar" data-i18n="ui_web_bafb66f32cd7">Arabic</option>
+                  <option value="de" data-i18n="ui_web_a659b60d246d">German</option>
+                  <option value="it" data-i18n="ui_web_fe1d9c7db376">Italian</option>
+                  <option value="pt" data-i18n="ui_web_98b01b890687">Portuguese</option>
+                  <option value="tr" data-i18n="ui_web_6e7aac65db01">Turkish</option>
+                  <option value="nl" data-i18n="ui_web_45f16144c18c">Dutch</option>
+                  <option value="ru" data-i18n="ui_web_5bcc40adf6e0">Russian</option>
+                  <option value="pl" data-i18n="ui_web_770341d6e89e">Polish</option>
+                  <option value="hi" data-i18n="ui_web_63c2dc51d089">Hindi</option>
+                  <option value="ja" data-i18n="ui_web_be4ee906d3ef">Japanese</option>
+                  <option value="ko" data-i18n="ui_web_04656c6fe003">Korean</option>
+                  <option value="zh" data-i18n="ui_web_8a9779f42128">Chinese</option>
+                  <option value="original" data-i18n="ui_web_8a0d7658de66">Original audio</option>
                 </select>
               </div>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Preferred subtitle language</span>
-                  <span class="setting-hint">A gentle nudge toward versions with subtitles in this language (provider
+                  <span class="setting-label" data-i18n="ui_web_1437b416c126">Preferred subtitle language</span>
+                  <span class="setting-hint" data-i18n="ui_web_0b2fbad2fdea">A gentle nudge toward versions with subtitles in this language (provider
                     subtitles are burned into the picture). Also powers the “Best for my languages”
                     sort on Movies &amp; Series.</span>
                 </div>
                 <select id="setting-preferred-subtitle-language" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="">No preference</option>
-                  <option value="none">No subtitles</option>
-                  <option value="fr">French subtitles</option>
-                  <option value="en">English subtitles</option>
-                  <option value="es">Spanish subtitles</option>
-                  <option value="ar">Arabic subtitles</option>
-                  <option value="de">German subtitles</option>
-                  <option value="it">Italian subtitles</option>
-                  <option value="pt">Portuguese subtitles</option>
-                  <option value="tr">Turkish subtitles</option>
-                  <option value="nl">Dutch subtitles</option>
-                  <option value="ru">Russian subtitles</option>
-                  <option value="pl">Polish subtitles</option>
-                  <option value="hi">Hindi subtitles</option>
-                  <option value="ja">Japanese subtitles</option>
-                  <option value="ko">Korean subtitles</option>
-                  <option value="zh">Chinese subtitles</option>
+                  <option value="" data-i18n="ui_web_35f994b0d72d">No preference</option>
+                  <option value="none" data-i18n="ui_web_68ded0a5dc14">No subtitles</option>
+                  <option value="fr" data-i18n="ui_web_0cf2660ad54e">French subtitles</option>
+                  <option value="en" data-i18n="ui_web_06ebc70d8f5c">English subtitles</option>
+                  <option value="es" data-i18n="ui_web_d2bfb7745ffe">Spanish subtitles</option>
+                  <option value="ar" data-i18n="ui_web_14542eb6e703">Arabic subtitles</option>
+                  <option value="de" data-i18n="ui_web_c8128b2b4961">German subtitles</option>
+                  <option value="it" data-i18n="ui_web_0f8446b0ed75">Italian subtitles</option>
+                  <option value="pt" data-i18n="ui_web_87fe42bf0df1">Portuguese subtitles</option>
+                  <option value="tr" data-i18n="ui_web_acc48082de85">Turkish subtitles</option>
+                  <option value="nl" data-i18n="ui_web_ad51f8b4a785">Dutch subtitles</option>
+                  <option value="ru" data-i18n="ui_web_38ff88e3a6f2">Russian subtitles</option>
+                  <option value="pl" data-i18n="ui_web_c051fecb058b">Polish subtitles</option>
+                  <option value="hi" data-i18n="ui_web_e2ea1dc62bb4">Hindi subtitles</option>
+                  <option value="ja" data-i18n="ui_web_9b23e2ab0638">Japanese subtitles</option>
+                  <option value="ko" data-i18n="ui_web_4218d1d92ccb">Korean subtitles</option>
+                  <option value="zh" data-i18n="ui_web_a320b5260b38">Chinese subtitles</option>
                 </select>
               </div>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Favourite genres</span>
-                  <span class="setting-hint">Tap the genres you enjoy — Norva highlights more of them on Home, Movies and
+                  <span class="setting-label" data-i18n="ui_web_4917cff7de83">Favourite genres</span>
+                  <span class="setting-hint" data-i18n="ui_web_b1ecec97f22b">Tap the genres you enjoy — Norva highlights more of them on Home, Movies and
                     Series. Pick as many as you like.</span>
                 </div>
-                <div id="setting-genre-chips" class="genre-chips" role="group" aria-label="Favourite genres"></div>
+                <div id="setting-genre-chips" class="genre-chips" role="group" aria-label="Favourite genres" data-i18n-aria-label="ui_web_4917cff7de83"></div>
                 <select id="setting-preferred-genres" class="source-select" multiple size="6" style="width: auto; min-width: 240px;">
-                  <option value="action">Action</option>
-                  <option value="adventure">Adventure</option>
-                  <option value="animation">Animation</option>
-                  <option value="comedy">Comedy</option>
-                  <option value="crime">Crime</option>
-                  <option value="documentary">Documentary</option>
-                  <option value="drama">Drama</option>
-                  <option value="family">Family</option>
-                  <option value="fantasy">Fantasy</option>
-                  <option value="history">History</option>
-                  <option value="horror">Horror</option>
-                  <option value="music">Music</option>
-                  <option value="mystery">Mystery</option>
-                  <option value="romance">Romance</option>
-                  <option value="science-fiction">Science Fiction</option>
-                  <option value="thriller">Thriller</option>
-                  <option value="war">War</option>
-                  <option value="western">Western</option>
+                  <option value="action" data-i18n="ui_web_64cff1319d2f">Action</option>
+                  <option value="adventure" data-i18n="ui_web_9a3c16424750">Adventure</option>
+                  <option value="animation" data-i18n="ui_web_1dd10f244a62">Animation</option>
+                  <option value="comedy" data-i18n="ui_web_85f1c8c8e324">Comedy</option>
+                  <option value="crime" data-i18n="ui_web_22611ceccd0b">Crime</option>
+                  <option value="documentary" data-i18n="ui_web_43f1fc2390a4">Documentary</option>
+                  <option value="drama" data-i18n="ui_web_da72bf5bbca4">Drama</option>
+                  <option value="family" data-i18n="ui_web_bd2d677b2ed4">Family</option>
+                  <option value="fantasy" data-i18n="ui_web_542855513e4f">Fantasy</option>
+                  <option value="history" data-i18n="ui_web_0e7696009337">History</option>
+                  <option value="horror" data-i18n="ui_web_271a22f75d73">Horror</option>
+                  <option value="music" data-i18n="ui_web_6eb00b4b2614">Music</option>
+                  <option value="mystery" data-i18n="ui_web_9ed9b84aa0a7">Mystery</option>
+                  <option value="romance" data-i18n="ui_web_3bc3567a7fc6">Romance</option>
+                  <option value="science-fiction" data-i18n="ui_web_35624b8800fa">Science Fiction</option>
+                  <option value="thriller" data-i18n="ui_web_9360404e4f35">Thriller</option>
+                  <option value="war" data-i18n="ui_web_be8816dbd8b8">War</option>
+                  <option value="western" data-i18n="ui_web_d7d2f0ffb02c">Western</option>
                 </select>
               </div>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Preferred quality</span>
-                  <span class="setting-hint">Which version to play by default when several qualities exist.</span>
+                  <span class="setting-label" data-i18n="ui_web_8992595d3efa">Preferred quality</span>
+                  <span class="setting-hint" data-i18n="ui_web_8ecebe4a104e">Which version to play by default when several qualities exist.</span>
                 </div>
                 <select id="setting-preferred-quality" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="highest">Highest available</option>
+                  <option value="highest" data-i18n="ui_web_b70ec697d905">Highest available</option>
                   <option value="4k">4K</option>
                   <option value="1080p">1080p</option>
                   <option value="720p">720p</option>
-                  <option value="lowest">Lowest (save data)</option>
+                  <option value="lowest" data-i18n="ui_web_8afced67a972">Lowest (save data)</option>
                 </select>
               </div>
             </div>
@@ -1287,8 +1287,8 @@
               <summary class="settings-advanced-summary">
                 <span class="settings-advanced-chevron" aria-hidden="true">▸</span>
                 <span>
-                  <span class="settings-advanced-title">Advanced settings</span>
-                  <span class="settings-advanced-sub">For power users — the defaults above suit almost everyone.</span>
+                  <span class="settings-advanced-title" data-i18n="ui_web_7b0bd218a84e">Advanced settings</span>
+                  <span class="settings-advanced-sub" data-i18n="ui_web_2b63dee0a68d">For power users — the defaults above suit almost everyone.</span>
                 </span>
               </summary>
 
@@ -1299,52 +1299,52 @@
                     <span class="toggle-slider"></span>
                   </label>
                   <div class="setting-info">
-                    <span class="setting-label">Strict language matching</span>
-                    <span class="setting-hint">Push down versions confirmed to be in the wrong language. Unknown
+                    <span class="setting-label" data-i18n="ui_web_589db579c27d">Strict language matching</span>
+                    <span class="setting-hint" data-i18n="ui_web_e97402355d89">Push down versions confirmed to be in the wrong language. Unknown
                       language data is still kept, so good content is never hidden.</span>
                   </div>
                 </div>
 
                 <div class="setting-item pd-needs-server tv-hidden">
                   <div class="setting-info" style="flex: 1;">
-                    <span class="setting-label">TMDB API key</span>
-                    <span class="setting-hint">Optional, for self-hosted setups — adds richer posters, real genres and
+                    <span class="setting-label" data-i18n="ui_web_ee888032f4b8">TMDB API key</span>
+                    <span class="setting-hint" data-i18n="ui_web_34617991c73e">Optional, for self-hosted setups — adds richer posters, real genres and
                       smarter matching. Free key at themoviedb.org → Settings → API. (On norva.tv this is handled for
                       you automatically.)</span>
                   </div>
                   <input type="text" id="setting-tmdb-key" class="search-input" style="width: 300px;"
-                    placeholder="TMDB API key or read token…">
+                    placeholder="TMDB API key or read token…" data-i18n-placeholder="ui_web_491eaacc9780">
                 </div>
 
                 <div class="setting-item pd-needs-server">
                   <div class="setting-info" style="flex: 1;">
-                    <span class="setting-label">Metadata enrichment</span>
-                    <span class="setting-hint" id="tmdb-status-hint">Runs automatically after each sync when a TMDB key
+                    <span class="setting-label" data-i18n="ui_web_754175773877">Metadata enrichment</span>
+                    <span class="setting-hint" id="tmdb-status-hint" data-i18n="ui_web_4fa0dd2bf200">Runs automatically after each sync when a TMDB key
                       is set.</span>
                   </div>
-                  <button class="btn btn-secondary" id="tmdb-enrich-btn" style="min-width: 140px;">Enrich now</button>
+                  <button class="btn btn-secondary" id="tmdb-enrich-btn" style="min-width: 140px;" data-i18n="ui_web_3f24460070e9">Enrich now</button>
                 </div>
 
                 <div class="setting-item pd-needs-server">
                   <div class="setting-info" style="flex: 1;">
-                    <span class="setting-label">Restore incorrectly hidden titles</span>
-                    <span class="setting-hint" id="reset-broken-hint">If “Hide broken” hid some titles after a temporary
+                    <span class="setting-label" data-i18n="ui_web_7867f2ac9ade">Restore incorrectly hidden titles</span>
+                    <span class="setting-hint" id="reset-broken-hint" data-i18n="ui_web_e43350120756">If “Hide broken” hid some titles after a temporary
                       connection refusal (401/403), click to bring them back — they were never really broken.</span>
                   </div>
-                  <button class="btn btn-secondary" id="reset-broken-btn" style="min-width: 140px;">Restore titles</button>
+                  <button class="btn btn-secondary" id="reset-broken-btn" style="min-width: 140px;" data-i18n="ui_web_02f467ba0c3d">Restore titles</button>
                 </div>
 
                 <div class="setting-item tc-hw-item">
                   <div class="setting-info" style="flex: 1;">
-                    <span class="setting-label">Keyboard shortcuts</span>
+                    <span class="setting-label" data-i18n="ui_web_e9bef0b0f3c2">Keyboard shortcuts</span>
                     <div class="shortcuts-grid" style="margin-top: 10px;">
-                      <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
-                      <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
-                      <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
-                      <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
-                      <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
-                      <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
-                      <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+                      <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd><norva-i18n data-i18n="ui_web_10fdaf09c18a"> Channel up/down (or volume)</norva-i18n></div>
+                      <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd><norva-i18n data-i18n="ui_web_bf5eaa14cc6a"> Volume down/up (when arrows = channels)</norva-i18n></div>
+                      <div class="shortcut"><kbd data-i18n="ui_web_20eac5aae274">Space</kbd> / <kbd>K</kbd><norva-i18n data-i18n="ui_web_c9c7c7ecde58"> Play/Pause</norva-i18n></div>
+                      <div class="shortcut"><kbd>F</kbd><norva-i18n data-i18n="ui_web_c461dbb2bab7"> Fullscreen</norva-i18n></div>
+                      <div class="shortcut"><kbd>M</kbd><norva-i18n data-i18n="ui_web_dde2b4278bb3"> Mute/Unmute</norva-i18n></div>
+                      <div class="shortcut"><kbd>I</kbd><norva-i18n data-i18n="ui_web_962a7eef2376"> Toggle info overlay</norva-i18n></div>
+                      <div class="shortcut"><kbd data-i18n="ui_web_c7929de4be52">PgUp</kbd> / <kbd data-i18n="ui_web_45a57f5f60e4">PgDn</kbd><norva-i18n data-i18n="ui_web_848db1779d90"> Channel up/down</norva-i18n></div>
                     </div>
                   </div>
                 </div>
@@ -1355,15 +1355,15 @@
           <!-- Transcoding Tab -->
           <div id="tab-transcode" class="tab-content">
             <header class="settings-panel-header">
-              <h2>Transcoding</h2>
-              <p>Advanced playback compatibility and quality controls.</p>
+              <h2 data-i18n="ui_web_2514fab855a6">Transcoding</h2>
+              <p data-i18n="ui_web_67389045d750">Advanced playback compatibility and quality controls.</p>
             </header>
             <!-- Plain-language intro: reassure that defaults are fine. -->
             <div class="tc-intro">
               <img class="tc-intro-icon" src="/img/icons/norva-settings.svg?v=sharp-core-1" alt="" aria-hidden="true">
               <div>
-                <p class="tc-intro-title">Playback &amp; quality</p>
-                <p class="tc-intro-text">Norva is set up to play smoothly on its own — you usually don't need to
+                <p class="tc-intro-title" data-i18n="ui_web_7c6a33517f6d">Playback &amp; quality</p>
+                <p class="tc-intro-text" data-i18n="ui_web_126fcab1695a">Norva is set up to play smoothly on its own — you usually don't need to
                   change anything here. These options help you fine-tune playback or fix a channel that won't play
                   right.</p>
               </div>
@@ -1371,33 +1371,33 @@
 
             <!-- Quality (needs a local transcoder — hidden on the plain web) -->
             <div class="settings-section tc-needs-transcoder">
-              <h3>Picture quality</h3>
-              <p class="tc-section-sub">Sharper looks better but uses more internet and power.</p>
+              <h3 data-i18n="ui_web_d7d596604a51">Picture quality</h3>
+              <p class="tc-section-sub" data-i18n="ui_web_9e347110e4c8">Sharper looks better but uses more internet and power.</p>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Maximum picture quality</span>
-                  <span class="setting-hint">How sharp the video is allowed to get. 1080p looks great on most screens;
+                  <span class="setting-label" data-i18n="ui_web_9e981999aab7">Maximum picture quality</span>
+                  <span class="setting-hint" data-i18n="ui_web_3f8ebcb25077">How sharp the video is allowed to get. 1080p looks great on most screens;
                     pick lower if your connection struggles.</span>
                 </div>
                 <select id="setting-max-resolution" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="4k">4K · Ultra HD</option>
-                  <option value="1080p" selected>1080p · Full HD (recommended)</option>
-                  <option value="720p">720p · HD</option>
-                  <option value="480p">480p · Standard</option>
+                  <option value="4k" data-i18n="ui_web_f50ce2032257">4K · Ultra HD</option>
+                  <option value="1080p" selected data-i18n="ui_web_d159f074eec1">1080p · Full HD (recommended)</option>
+                  <option value="720p" data-i18n="ui_web_62563da552ae">720p · HD</option>
+                  <option value="480p" data-i18n="ui_web_80eae7b06c8f">480p · Standard</option>
                 </select>
               </div>
 
               <div class="setting-item">
                 <div class="setting-info">
-                  <span class="setting-label">Quality vs. data use</span>
-                  <span class="setting-hint">Higher gives a crisper picture but needs more data and a stronger
+                  <span class="setting-label" data-i18n="ui_web_de22506112a9">Quality vs. data use</span>
+                  <span class="setting-hint" data-i18n="ui_web_c039ff31a237">Higher gives a crisper picture but needs more data and a stronger
                     connection.</span>
                 </div>
                 <select id="setting-quality" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="high">Best picture</option>
-                  <option value="medium" selected>Balanced (recommended)</option>
-                  <option value="low">Save data</option>
+                  <option value="high" data-i18n="ui_web_f1890a09c29e">Best picture</option>
+                  <option value="medium" selected data-i18n="ui_web_7d18a1f37d61">Balanced (recommended)</option>
+                  <option value="low" data-i18n="ui_web_07c0fe6b995f">Save data</option>
                 </select>
               </div>
 
@@ -1407,48 +1407,48 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Sharpen older &amp; low-quality channels</span>
-                  <span class="setting-hint">Boost grainy or standard-definition channels closer to HD. Looks nicer
+                  <span class="setting-label" data-i18n="ui_web_b1bc2431fd1c">Sharpen older &amp; low-quality channels</span>
+                  <span class="setting-hint" data-i18n="ui_web_8f177432a6d6">Boost grainy or standard-definition channels closer to HD. Looks nicer
                     but uses a bit more power.</span>
                 </div>
               </div>
               <div class="setting-item tc-sub-setting" id="upscale-method-container" style="display: none;">
                 <div class="setting-info">
-                  <span class="setting-label">Sharpening method</span>
-                  <span class="setting-hint">“Faster” is lighter on your device; “Best quality” looks a little
+                  <span class="setting-label" data-i18n="ui_web_67c87d0791e4">Sharpening method</span>
+                  <span class="setting-hint" data-i18n="ui_web_b50d64ff337e">“Faster” is lighter on your device; “Best quality” looks a little
                     sharper.</span>
                 </div>
                 <select id="setting-upscale-method" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="hardware">Faster</option>
-                  <option value="software">Best quality</option>
+                  <option value="hardware" data-i18n="ui_web_8d0160c0d842">Faster</option>
+                  <option value="software" data-i18n="ui_web_2079494b1d00">Best quality</option>
                 </select>
               </div>
               <div class="setting-item tc-sub-setting" id="upscale-target-container" style="display: none;">
                 <div class="setting-info">
-                  <span class="setting-label">Sharpen up to</span>
-                  <span class="setting-hint">The quality level Norva aims for when sharpening.</span>
+                  <span class="setting-label" data-i18n="ui_web_bbbdfe23b2c4">Sharpen up to</span>
+                  <span class="setting-hint" data-i18n="ui_web_982e22ff4a6c">The quality level Norva aims for when sharpening.</span>
                 </div>
                 <select id="setting-upscale-target" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="720p">720p · HD</option>
-                  <option value="1080p" selected>1080p · Full HD</option>
-                  <option value="4k">4K · Ultra HD</option>
+                  <option value="720p" data-i18n="ui_web_62563da552ae">720p · HD</option>
+                  <option value="1080p" selected data-i18n="ui_web_d459cb71fbda">1080p · Full HD</option>
+                  <option value="4k" data-i18n="ui_web_f50ce2032257">4K · Ultra HD</option>
                 </select>
               </div>
             </div>
 
             <!-- Troubleshooting --------------------------------------------->
             <div class="settings-section">
-              <h3>Having trouble with a channel?</h3>
-              <p class="tc-section-sub">Tell Norva what you're seeing and it'll switch on the right fix — or set the
+              <h3 data-i18n="ui_web_010ce44eb7d0">Having trouble with a channel?</h3>
+              <p class="tc-section-sub" data-i18n="ui_web_8142beed8a98">Tell Norva what you're seeing and it'll switch on the right fix — or set the
                 toggles below yourself.</p>
 
               <div class="tc-wizard" id="tc-wizard">
-                <div class="tc-wizard-q">What happens when you try to watch?</div>
+                <div class="tc-wizard-q" data-i18n="ui_web_90b2b4185513">What happens when you try to watch?</div>
                 <div class="tc-wizard-options">
-                  <button type="button" class="tc-wizard-opt" data-fix="sound">🔇 Picture but no sound</button>
-                  <button type="button" class="tc-wizard-opt" data-fix="black">⬛ Black screen / won't start</button>
-                  <button type="button" class="tc-wizard-opt" data-fix="buffer">⏳ Keeps buffering</button>
-                  <button type="button" class="tc-wizard-opt" data-fix="blocked">🚫 Provider blocks it</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="sound" data-i18n="ui_web_3f25a40eeea2">🔇 Picture but no sound</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="black" data-i18n="ui_web_5710fd6b47d4">⬛ Black screen / won't start</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="buffer" data-i18n="ui_web_66e67efe62ae">⏳ Keeps buffering</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="blocked" data-i18n="ui_web_a12db9415c1e">🚫 Provider blocks it</button>
                 </div>
                 <p class="tc-wizard-result hidden" id="tc-wizard-result" role="status"></p>
               </div>
@@ -1459,8 +1459,8 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Picture plays but no sound</span>
-                  <span class="setting-hint">Turn this on if you can see a channel but hear nothing — it fixes
+                  <span class="setting-label" data-i18n="ui_web_e7c1102da8b9">Picture plays but no sound</span>
+                  <span class="setting-hint" data-i18n="ui_web_ed1631381955">Turn this on if you can see a channel but hear nothing — it fixes
                     surround-sound formats (Dolby / AC3) that browsers can't play.</span>
                 </div>
               </div>
@@ -1471,8 +1471,8 @@
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">A channel stays black or won't start</span>
-                  <span class="setting-hint">Turn this on to have Norva fetch streams through its own servers, which
+                  <span class="setting-label" data-i18n="ui_web_a692b4269b6b">A channel stays black or won't start</span>
+                  <span class="setting-hint" data-i18n="ui_web_8d096d7fef24">Turn this on to have Norva fetch streams through its own servers, which
                     gets past blocks that can stop a channel loading.</span>
                 </div>
               </div>
@@ -1483,8 +1483,8 @@
               <summary class="settings-advanced-summary">
                 <span class="settings-advanced-chevron" aria-hidden="true">▸</span>
                 <span>
-                  <span class="settings-advanced-title">Advanced settings</span>
-                  <span class="settings-advanced-sub">For power users — the defaults above are right for almost
+                  <span class="settings-advanced-title" data-i18n="ui_web_7b0bd218a84e">Advanced settings</span>
+                  <span class="settings-advanced-sub" data-i18n="ui_web_4c4a19ea2c25">For power users — the defaults above are right for almost
                     everyone.</span>
                 </span>
               </summary>
@@ -1496,8 +1496,8 @@
                     <span class="toggle-slider"></span>
                   </label>
                   <div class="setting-info">
-                    <span class="setting-label">Smart processing</span>
-                    <span class="setting-hint">Detect each stream and only convert it when needed. Recommended on; adds
+                    <span class="setting-label" data-i18n="ui_web_58f2f6947239">Smart processing</span>
+                    <span class="setting-hint" data-i18n="ui_web_d315d674cf8c">Detect each stream and only convert it when needed. Recommended on; adds
                       a ~1–3s check on first play.</span>
                   </div>
                 </div>
@@ -1508,8 +1508,8 @@
                     <span class="toggle-slider"></span>
                   </label>
                   <div class="setting-info">
-                    <span class="setting-label">Always re-encode video</span>
-                    <span class="setting-hint">Force a full video conversion (e.g. to burn in subtitles). Much heavier —
+                    <span class="setting-label" data-i18n="ui_web_55264e16f435">Always re-encode video</span>
+                    <span class="setting-hint" data-i18n="ui_web_c750545c8252">Force a full video conversion (e.g. to burn in subtitles). Much heavier —
                       only enable if you need it.</span>
                   </div>
                 </div>
@@ -1520,70 +1520,70 @@
                     <span class="toggle-slider"></span>
                   </label>
                   <div class="setting-info">
-                    <span class="setting-label">Repackage raw streams (remux)</span>
-                    <span class="setting-hint">Repackage raw .ts streams into MP4 without re-encoding — fast. Helps with
+                    <span class="setting-label" data-i18n="ui_web_0ed7c9c3c6ec">Repackage raw streams (remux)</span>
+                    <span class="setting-hint" data-i18n="ui_web_f0e0ffaf6b87">Repackage raw .ts streams into MP4 without re-encoding — fast. Helps with
                       some IPTV middleware (m3u-editor, dispatcharr).</span>
                   </div>
                 </div>
 
                 <div class="setting-item tc-needs-transcoder">
                   <div class="setting-info">
-                    <span class="setting-label">Video chip (encoder)</span>
-                    <span class="setting-hint">Which GPU handles conversion. Leave on Auto unless you know your
+                    <span class="setting-label" data-i18n="ui_web_6f79e93f6077">Video chip (encoder)</span>
+                    <span class="setting-hint" data-i18n="ui_web_5e9bcafd5773">Which GPU handles conversion. Leave on Auto unless you know your
                       hardware — NVENC = NVIDIA, AMF = AMD, QuickSync = Intel, VAAPI = Linux.</span>
                   </div>
                   <select id="setting-hw-encoder" class="source-select" style="width: auto; min-width: 200px;">
-                    <option value="auto">Auto (recommended)</option>
-                    <option value="nvenc">NVIDIA NVENC</option>
-                    <option value="amf">AMD AMF</option>
-                    <option value="qsv">Intel QuickSync</option>
-                    <option value="vaapi">VAAPI (Linux)</option>
-                    <option value="software">Software (CPU)</option>
+                    <option value="auto" data-i18n="ui_web_b1bdf63d93c3">Auto (recommended)</option>
+                    <option value="nvenc" data-i18n="ui_web_fc398e02c821">NVIDIA NVENC</option>
+                    <option value="amf" data-i18n="ui_web_c2448b379925">AMD AMF</option>
+                    <option value="qsv" data-i18n="ui_web_ec92c50e0745">Intel QuickSync</option>
+                    <option value="vaapi" data-i18n="ui_web_d6ec73bbd025">VAAPI (Linux)</option>
+                    <option value="software" data-i18n="ui_web_5ceb788fe7d5">Software (CPU)</option>
                   </select>
                 </div>
 
                 <div class="setting-item tc-needs-transcoder">
                   <div class="setting-info">
-                    <span class="setting-label">Surround-sound mixdown</span>
-                    <span class="setting-hint">How 5.1 / 7.1 audio is folded into stereo for playback.</span>
+                    <span class="setting-label" data-i18n="ui_web_79c0ad5ae30b">Surround-sound mixdown</span>
+                    <span class="setting-hint" data-i18n="ui_web_033686078309">How 5.1 / 7.1 audio is folded into stereo for playback.</span>
                   </div>
                   <select id="setting-audio-mix" class="source-select" style="width: auto; min-width: 200px;">
-                    <option value="auto">Auto (recommended)</option>
-                    <option value="itu">Balanced</option>
-                    <option value="night">Night mode (clearer dialogue)</option>
-                    <option value="cinematic">Cinematic (wide)</option>
-                    <option value="passthrough">Keep original</option>
+                    <option value="auto" data-i18n="ui_web_b1bdf63d93c3">Auto (recommended)</option>
+                    <option value="itu" data-i18n="ui_web_5386ea5db81c">Balanced</option>
+                    <option value="night" data-i18n="ui_web_f6e258c9bb8c">Night mode (clearer dialogue)</option>
+                    <option value="cinematic" data-i18n="ui_web_35d44f7f6c7e">Cinematic (wide)</option>
+                    <option value="passthrough" data-i18n="ui_web_653666740fb0">Keep original</option>
                   </select>
                 </div>
 
                 <div class="setting-item">
                   <div class="setting-info">
-                    <span class="setting-label">Connection identity</span>
-                    <span class="setting-hint">Some providers only allow certain apps. Switch this if your provider
+                    <span class="setting-label" data-i18n="ui_web_527d26a3eee1">Connection identity</span>
+                    <span class="setting-hint" data-i18n="ui_web_f5e981c327e4">Some providers only allow certain apps. Switch this if your provider
                       blocks the default.</span>
                   </div>
                   <select id="setting-user-agent-tc" class="source-select" style="width: auto; min-width: 200px;">
-                    <option value="chrome">Browser (default)</option>
-                    <option value="vlc">VLC</option>
-                    <option value="tivimate">TiviMate</option>
-                    <option value="custom">Custom…</option>
+                    <option value="chrome" data-i18n="ui_web_21d5158e4049">Browser (default)</option>
+                    <option value="vlc" data-i18n="ui_web_ade73385e103">VLC</option>
+                    <option value="tivimate" data-i18n="ui_web_7010e512c8b4">TiviMate</option>
+                    <option value="custom" data-i18n="ui_web_c4e69d543a44">Custom…</option>
                   </select>
                 </div>
                 <div class="setting-item tc-sub-setting" id="custom-user-agent-container-tc" style="display: none;">
                   <div class="setting-info">
-                    <span class="setting-label">Custom connection identity</span>
-                    <span class="setting-hint">Enter the exact identifier (User-Agent) your provider expects.</span>
+                    <span class="setting-label" data-i18n="ui_web_37488abc048c">Custom connection identity</span>
+                    <span class="setting-hint" data-i18n="ui_web_ad66c7325609">Enter the exact identifier (User-Agent) your provider expects.</span>
                   </div>
                   <input type="text" id="setting-user-agent-custom-tc" class="search-input" style="width: 300px;"
-                    placeholder="e.g. Mozilla/5.0 (Windows NT 10.0; Win64; x64)">
+                    placeholder="e.g. Mozilla/5.0 (Windows NT 10.0; Win64; x64)" data-i18n-placeholder="ui_web_6c99cd477ad4">
                 </div>
 
                 <div class="setting-item tc-hw-item tc-needs-transcoder">
                   <div class="setting-info" style="flex: 1;">
-                    <span class="setting-label">Detected hardware</span>
-                    <span class="setting-hint">Graphics acceleration found on the device running Norva.</span>
+                    <span class="setting-label" data-i18n="ui_web_f0ffa08cdc12">Detected hardware</span>
+                    <span class="setting-hint" data-i18n="ui_web_73561cd82e47">Graphics acceleration found on the device running Norva.</span>
                     <div id="hw-info-container" class="hw-info-container">
-                      <p class="hint">Loading hardware information…</p>
+                      <p class="hint" data-i18n="ui_web_607dbb74ec38">Loading hardware information…</p>
                     </div>
                   </div>
                 </div>
@@ -1594,42 +1594,42 @@
           <!-- Library Management Tab -->
           <div id="tab-content" class="tab-content">
             <header class="settings-panel-header">
-              <h2>Library Management</h2>
-              <p>Choose what appears across your Norva screens.</p>
+              <h2 data-i18n="ui_web_cf4db6993ffb">Library Management</h2>
+              <p data-i18n="ui_web_59fed4e71f42">Choose what appears across your Norva screens.</p>
             </header>
             <div class="content-browser">
-              <p class="setting-hint" style="margin:0 0 16px;max-width:760px;line-height:1.55">
+              <p class="setting-hint" style="margin:0 0 16px;max-width:760px;line-height:1.55" data-i18n="ui_web_f8615bfda747">
                 Choose what appears in Norva. Untick any genres, channels or shows you'd rather hide —
                 Movies &amp; Series are organised by genre from your actual catalogue. Your choices apply to
                 every screen on your account.
               </p>
               <div class="content-browser-header">
                 <div class="content-type-toggle">
-                  <button class="btn btn-sm active" id="content-type-channels">Channels</button>
-                  <button class="btn btn-sm" id="content-type-movies">Movies</button>
-                  <button class="btn btn-sm" id="content-type-series">Series</button>
+                  <button class="btn btn-sm active" id="content-type-channels" data-i18n="ui_web_4c8906cf76f5">Channels</button>
+                  <button class="btn btn-sm" id="content-type-movies" data-i18n="ui_web_dff924b69f96">Movies</button>
+                  <button class="btn btn-sm" id="content-type-series" data-i18n="ui_web_a8295e08ff7a">Series</button>
                 </div>
                 <select id="content-source-select" class="source-select">
-                  <option value="">Choose a provider…</option>
+                  <option value="" data-i18n="ui_web_822e013785c8">Choose a provider…</option>
                 </select>
                 <div class="search-wrapper">
-                  <input type="text" id="content-search" placeholder="Search channels…" class="search-input">
-                  <button type="button" class="search-clear" title="Clear search">&times;</button>
+                  <input type="text" id="content-search" placeholder="Search channels…" class="search-input" data-i18n-placeholder="ui_web_951a34ca584e">
+                  <button type="button" class="search-clear" title="Clear search" data-i18n-title="ui_web_3b7ea51793e9">&times;</button>
                 </div>
                 <div class="content-actions">
-                  <button class="btn btn-sm btn-secondary" id="content-show-all">Show all</button>
-                  <button class="btn btn-sm btn-secondary" id="content-hide-all">Hide all</button>
-                  <span id="content-unsaved" class="content-unsaved hidden" role="status">● Unsaved changes</span>
+                  <button class="btn btn-sm btn-secondary" id="content-show-all" data-i18n="ui_web_2150d8df37e4">Show all</button>
+                  <button class="btn btn-sm btn-secondary" id="content-hide-all" data-i18n="ui_web_6bad68f02fab">Hide all</button>
+                  <span id="content-unsaved" class="content-unsaved hidden" role="status" data-i18n="ui_web_1f5d41fb7e6d">● Unsaved changes</span>
                   <button class="btn btn-sm btn-primary" id="content-save"><svg xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
                         d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z" />
-                    </svg> Save changes</button>
+                    </svg><norva-i18n data-i18n="ui_web_dd0ae7a5cbcf"> Save changes</norva-i18n></button>
                 </div>
               </div>
-              <p class="hint" id="content-legend" style="margin-bottom: var(--space-sm);">Ticked = shown in Norva · Unticked = hidden. Switching tabs or providers saves automatically.</p>
+              <p class="hint" id="content-legend" style="margin-bottom: var(--space-sm);" data-i18n="ui_web_96eaaafb60eb">Ticked = shown in Norva · Unticked = hidden. Switching tabs or providers saves automatically.</p>
               <div id="content-tree" class="content-tree">
-                <p class="hint">Choose a provider above to manage its content.</p>
+                <p class="hint" data-i18n="ui_web_3393b2772b1e">Choose a provider above to manage its content.</p>
               </div>
             </div>
           </div>
@@ -1637,51 +1637,51 @@
           <!-- Users Tab (Admin Only) -->
           <div id="tab-users" class="tab-content">
             <header class="settings-panel-header">
-              <h2>Local Users</h2>
-              <p>Advanced access controls for this local Norva hub.</p>
+              <h2 data-i18n="ui_web_85c1a199185d">Local Users</h2>
+              <p data-i18n="ui_web_f8e648c5d107">Advanced access controls for this local Norva hub.</p>
             </header>
             <div class="settings-section">
-              <h3>User Management</h3>
-              <p class="hint">Manage user accounts and permissions</p>
+              <h3 data-i18n="ui_web_fe45f3a1addc">User Management</h3>
+              <p class="hint" data-i18n="ui_web_6cfc012cc4df">Manage user accounts and permissions</p>
 
               <div class="user-list-container">
                 <table class="user-table">
                   <thead>
                     <tr>
-                      <th>Username</th>
-                      <th>Email</th>
-                      <th>Role</th>
-                      <th>Created</th>
-                      <th>Actions</th>
+                      <th data-i18n="ui_web_e3b89e9d33f8">Username</th>
+                      <th data-i18n="ui_web_969ccbd3cf63">Email</th>
+                      <th data-i18n="ui_web_14736a2eb9f4">Role</th>
+                      <th data-i18n="ui_web_d70b9e24bca2">Created</th>
+                      <th data-i18n="ui_web_ff8059dc6752">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="user-list">
                     <tr>
-                      <td colspan="4" class="hint">Loading users...</td>
+                      <td colspan="4" class="hint" data-i18n="ui_web_904e120b676c">Loading users...</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
 
               <div class="add-user-section">
-                <h4>Add New User</h4>
+                <h4 data-i18n="ui_web_8512bf96fff6">Add New User</h4>
                 <form id="add-user-form" class="user-form">
                   <div class="form-group">
-                    <label for="new-username">Username</label>
+                    <label for="new-username" data-i18n="ui_web_e3b89e9d33f8">Username</label>
                     <input type="text" id="new-username" name="username" class="form-input" required>
                   </div>
                   <div class="form-group">
-                    <label for="new-password">Password</label>
+                    <label for="new-password" data-i18n="ui_web_e7cf3ef4f17c">Password</label>
                     <input type="password" id="new-password" name="password" class="form-input" required minlength="6" autocomplete="off">
                   </div>
                   <div class="form-group">
-                    <label for="new-role">Role</label>
+                    <label for="new-role" data-i18n="ui_web_14736a2eb9f4">Role</label>
                     <select id="new-role" name="role" class="form-input" required>
-                      <option value="viewer">Viewer</option>
-                      <option value="admin">Admin</option>
+                      <option value="viewer" data-i18n="ui_web_678bfa6af48b">Viewer</option>
+                      <option value="admin" data-i18n="ui_web_c1c224b03cd9">Admin</option>
                     </select>
                   </div>
-                  <button type="submit" class="btn btn-primary">Add User</button>
+                  <button type="submit" class="btn btn-primary" data-i18n="ui_web_115a26b51cc7">Add User</button>
                 </form>
               </div>
             </div>
@@ -1705,7 +1705,7 @@
           <div class="watch-overlay" id="watch-overlay">
             <!-- Top Bar: Back + Title -->
             <div class="watch-top-bar vod-header">
-              <button class="watch-back-btn" id="watch-back-btn" title="Back" aria-label="Back">
+              <button class="watch-back-btn" id="watch-back-btn" title="Back" aria-label="Back" data-i18n-title="ui_web_76900f1bfd16" data-i18n-aria-label="ui_web_76900f1bfd16">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" class="icon" aria-hidden="true">
                   <path d="M15 18l-6-6 6-6" />
                 </svg>
@@ -1716,7 +1716,7 @@
               </div>
               <div class="player-badges">
                 <div class="watch-subtitle-status hidden" id="watch-subtitle-status" role="status" aria-live="polite" aria-atomic="true"></div>
-                <div class="transcode-status hidden" id="watch-transcode-status">Direct</div>
+                <div class="transcode-status hidden" id="watch-transcode-status" data-i18n="ui_web_002c7c68468b">Direct</div>
                 <div class="quality-badge hidden" id="watch-quality-badge"></div>
               </div>
             </div>
@@ -1738,28 +1738,28 @@
               <div class="watch-progress-container">
                 <span id="watch-time-current" class="watch-time">0:00</span>
                 <input type="range" class="watch-progress" id="watch-progress" min="0" max="100" value="0" step="0.1"
-                  aria-label="Playback position" aria-describedby="watch-buffer-status">
+                  aria-label="Playback position" aria-describedby="watch-buffer-status" data-i18n-aria-label="ui_web_c12ff673ae98">
                 <span id="watch-buffer-status" class="watch-buffer-status" role="status" aria-live="polite"></span>
                 <span id="watch-time-total" class="watch-time watch-time-total">0:00</span>
               </div>
               <div class="watch-controls">
-                <button class="watch-btn" id="watch-restart" title="Restart from the beginning">
+                <button class="watch-btn" id="watch-restart" title="Restart from the beginning" data-i18n-title="ui_web_ad078cce6331">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
                   </svg>
                 </button>
-                <button class="watch-btn watch-series-only" id="watch-prev-ep" title="Previous episode" hidden>
+                <button class="watch-btn watch-series-only" id="watch-prev-ep" title="Previous episode" hidden data-i18n-title="ui_web_b7eada3debb0">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                   </svg>
                 </button>
-                <button class="watch-btn" id="watch-skip-back" title="Back 10 seconds">
+                <button class="watch-btn" id="watch-skip-back" title="Back 10 seconds" data-i18n-title="ui_web_b07313d85440">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
                   </svg>
                   <span class="skip-label">10</span>
                 </button>
-                <button class="watch-btn watch-btn-lg" id="watch-play-pause" title="Play/Pause">
+                <button class="watch-btn watch-btn-lg" id="watch-play-pause" title="Play/Pause" data-i18n-title="ui_web_c9c7c7ecde58">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
                     class="icon icon-play">
                     <path d="M8 5v14l11-7z" />
@@ -1769,19 +1769,19 @@
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 </button>
-                <button class="watch-btn" id="watch-skip-fwd" title="Forward 10 seconds">
+                <button class="watch-btn" id="watch-skip-fwd" title="Forward 10 seconds" data-i18n-title="ui_web_26551d43abbb">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
                   </svg>
                   <span class="skip-label">10</span>
                 </button>
-                <button class="watch-btn watch-series-only" id="watch-next-ep" title="Next episode" hidden>
+                <button class="watch-btn watch-series-only" id="watch-next-ep" title="Next episode" hidden data-i18n-title="ui_web_a38c4e18c73d">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
                   </svg>
                 </button>
                 <div class="watch-spacer"></div>
-                <button class="watch-btn" id="watch-mute" title="Mute">
+                <button class="watch-btn" id="watch-mute" title="Mute" data-i18n-title="ui_web_8dd6857baf02">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon icon-vol">
                     <path
                       d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
@@ -1795,61 +1795,61 @@
                 <input type="range" class="watch-volume" id="watch-volume" min="0" max="100" value="80">
                 <!-- Audio Track Button -->
                 <div class="watch-audio-wrapper">
-                  <button class="watch-btn" id="watch-audio-btn" title="Audio Track">
+                  <button class="watch-btn" id="watch-audio-btn" title="Audio Track" data-i18n-title="ui_web_f3161deff512">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
                         d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6zm-2 14a2 2 0 1 1-4 0 2 2 0 0 1 4 0z" />
                     </svg>
                   </button>
                   <div class="watch-audio-menu hidden" id="watch-audio-menu">
-                    <div class="captions-menu-title">Audio</div>
+                    <div class="captions-menu-title" data-i18n="ui_web_bc1b88907d3b">Audio</div>
                     <div class="audio-menu-status" id="watch-audio-status" role="status" aria-live="polite"
                       aria-atomic="true"></div>
                     <div class="captions-menu-list" id="watch-audio-list">
-                      <button class="audio-option active" data-source="none">Default</button>
+                      <button class="audio-option active" data-source="none" data-i18n="ui_web_21b111cbfe6e">Default</button>
                     </div>
                   </div>
                 </div>
                 <!-- Captions Button -->
                 <div class="watch-captions-wrapper">
-                  <button class="watch-btn" id="watch-captions-btn" title="Captions">
+                  <button class="watch-btn" id="watch-captions-btn" title="Captions" data-i18n-title="ui_web_43bf6af8e2d9">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
                         d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z" />
                     </svg>
                   </button>
                   <div class="watch-captions-menu hidden" id="watch-captions-menu">
-                    <div class="captions-menu-title">Subtitles</div>
+                    <div class="captions-menu-title" data-i18n="ui_web_0ee695bdeb26">Subtitles</div>
                     <div class="captions-menu-list" id="watch-captions-list">
-                      <button class="captions-option active" data-index="-1">Off</button>
+                      <button class="captions-option active" data-index="-1" data-i18n="ui_web_ca7981b46ecf">Off</button>
                     </div>
                   </div>
                 </div>
                 <!-- Episodes selector (series) -->
                 <div class="watch-captions-wrapper watch-series-only" id="watch-episodes-wrapper" hidden>
-                  <button class="watch-btn" id="watch-episodes-btn" title="Episodes">
+                  <button class="watch-btn" id="watch-episodes-btn" title="Episodes" data-i18n-title="ui_web_83f9722d9bb2">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
                     </svg>
                   </button>
                   <div class="watch-captions-menu watch-episodes-menu hidden" id="watch-episodes-menu">
-                    <div class="captions-menu-title">Episodes</div>
+                    <div class="captions-menu-title" data-i18n="ui_web_83f9722d9bb2">Episodes</div>
                     <div class="captions-menu-list" id="watch-episodes-menu-list"></div>
                   </div>
                 </div>
                 <!-- Playback speed -->
                 <div class="watch-captions-wrapper">
-                  <button class="watch-btn" id="watch-speed-btn" title="Playback speed">
+                  <button class="watch-btn" id="watch-speed-btn" title="Playback speed" data-i18n-title="ui_web_afec2b22114c">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path d="M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zm-9.79 6.84a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z" />
                     </svg>
                   </button>
                   <div class="watch-captions-menu hidden" id="watch-speed-menu">
-                    <div class="captions-menu-title">Speed</div>
+                    <div class="captions-menu-title" data-i18n="ui_web_c372fee9b456">Speed</div>
                     <div class="captions-menu-list" id="watch-speed-list">
                       <button class="speed-option" data-rate="0.5">0.5&times;</button>
                       <button class="speed-option" data-rate="0.75">0.75&times;</button>
-                      <button class="speed-option active" data-rate="1">Normal</button>
+                      <button class="speed-option active" data-rate="1" data-i18n="ui_web_a7248eeb45eb">Normal</button>
                       <button class="speed-option" data-rate="1.25">1.25&times;</button>
                       <button class="speed-option" data-rate="1.5">1.5&times;</button>
                       <button class="speed-option" data-rate="2">2&times;</button>
@@ -1857,26 +1857,26 @@
                   </div>
                 </div>
                 <!-- Cast to TV (Chromecast) — hidden until a receiver is discovered -->
-                <button class="watch-btn hidden" id="watch-cast" title="Cast to TV" aria-label="Cast to TV">
+                <button class="watch-btn hidden" id="watch-cast" title="Cast to TV" aria-label="Cast to TV" data-i18n-title="ui_web_7739923feca7" data-i18n-aria-label="ui_web_7739923feca7">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path
                       d="M1,18v3h3C4,19.34 2.66,18 1,18zM1,14v2c2.76,0 5,2.24 5,5h2C8,17.13 4.87,14 1,14zM1,10v2c4.97,0 9,4.03 9,9h2C12,14.92 7.07,10 1,10zM21,3H3C1.9,3 1,3.9 1,5v3h2V5h18v14h-7v2h7c1.1,0 2,-0.9 2,-2V5C23,3.9 22.1,3 21,3z" />
                   </svg>
                 </button>
-                <button class="watch-btn" id="watch-pip" title="Picture-in-Picture">
+                <button class="watch-btn" id="watch-pip" title="Picture-in-Picture" data-i18n-title="ui_web_597820ce81c2">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path
                       d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" />
                   </svg>
                 </button>
-                <button class="watch-btn" id="watch-fullscreen" title="Fullscreen">
+                <button class="watch-btn" id="watch-fullscreen" title="Fullscreen" data-i18n-title="ui_web_c461dbb2bab7">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
                   </svg>
                 </button>
                 <!-- Overflow Menu -->
                 <div class="player-overflow-wrapper">
-                  <button class="watch-btn" id="watch-overflow" title="More options">
+                  <button class="watch-btn" id="watch-overflow" title="More options" data-i18n-title="ui_web_bc79cdffbaa8">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
                         d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
@@ -1887,9 +1887,9 @@
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                         <path
                           d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                      </svg>
+                      </svg><norva-i18n data-i18n="ui_web_60f1b404dc5b">
                       Copy Stream URL
-                    </button>
+                    </norva-i18n></button>
                   </div>
                 </div>
               </div>
@@ -1897,7 +1897,7 @@
 
             <!-- Scroll Indicator -->
             <div class="watch-scroll-hint" id="watch-scroll-hint">
-              <span>Scroll for details</span>
+              <span data-i18n="ui_web_171dc504b544">Scroll for details</span>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                 <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
               </svg>
@@ -1908,17 +1908,17 @@
           <div class="watch-next-episode hidden" id="watch-next-episode">
             <img class="next-still" id="next-episode-still" src="" alt="" hidden>
             <div class="next-info">
-              <p class="next-label">Up Next</p>
+              <p class="next-label" data-i18n="ui_web_f9730ea7776a">Up Next</p>
               <h4 id="next-episode-title"></h4>
               <p class="next-synopsis" id="next-episode-synopsis"></p>
             </div>
             <div class="next-actions">
               <span class="next-countdown" id="next-countdown" aria-live="polite" style="--next-progress: 100%">
                 <span class="next-countdown-num">15</span>
-                <span class="next-countdown-label">sec</span>
+                <span class="next-countdown-label" data-i18n="ui_web_add93534eeb4">sec</span>
               </span>
-              <button class="btn btn-primary btn-sm" id="next-play-now">Play next</button>
-              <button class="btn btn-ghost btn-sm" id="next-cancel">Watch credits</button>
+              <button class="btn btn-primary btn-sm" id="next-play-now" data-i18n="ui_web_994ffab2d071">Play next</button>
+              <button class="btn btn-ghost btn-sm" id="next-cancel" data-i18n="ui_web_bef98915836f">Watch credits</button>
             </div>
           </div>
         </section>
@@ -1941,7 +1941,7 @@
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M8 5v14l11-7z" />
                   </svg>
-                  <span id="watch-play-btn-text">Play</span>
+                  <span id="watch-play-btn-text" data-i18n="ui_web_436e61016e26">Play</span>
                 </button>
                 <button class="btn btn-ghost" id="watch-favorite-btn">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
@@ -1954,7 +1954,7 @@
                     <path
                       d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
                   </svg>
-                  <span>Favorite</span>
+                  <span data-i18n="ui_web_ea713ecd8537">Favorite</span>
                 </button>
               </div>
             </div>
@@ -1962,7 +1962,7 @@
 
           <!-- Movies: Recommended Section -->
           <div class="watch-recommended hidden" id="watch-recommended">
-            <h3>More Like This</h3>
+            <h3 data-i18n="ui_web_a959fc23cef4">More Like This</h3>
             <div class="watch-recommended-grid" id="watch-recommended-grid">
               <!-- Movie cards inserted dynamically -->
             </div>
@@ -1970,7 +1970,7 @@
 
           <!-- Series: Seasons & Episodes -->
           <div class="watch-episodes hidden" id="watch-episodes">
-            <h3>Episodes</h3>
+            <h3 data-i18n="ui_web_83f9722d9bb2">Episodes</h3>
             <div class="watch-seasons" id="watch-seasons">
               <!-- Season accordions inserted dynamically -->
             </div>
@@ -1985,8 +1985,8 @@
   <div id="modal" class="modal">
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
-        <h3 id="modal-title">Modal</h3>
-        <button class="modal-close" aria-label="Close">&times;</button>
+        <h3 id="modal-title" data-i18n="ui_web_18093cad2644">Modal</h3>
+        <button class="modal-close" aria-label="Close" data-i18n-aria-label="ui_web_7d9eb7acb13e">&times;</button>
       </div>
       <div id="modal-body" class="modal-body"></div>
       <div id="modal-footer" class="modal-footer"></div>
@@ -1998,19 +1998,19 @@
     <button class="context-item" data-action="play"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
         fill="currentColor" class="icon">
         <path d="M8 5v14l11-7z" />
-      </svg> Play</button>
+      </svg><norva-i18n data-i18n="ui_web_436e61016e26"> Play</norva-i18n></button>
     <button class="context-item" data-action="hide"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
         fill="currentColor" class="icon">
         <path
           d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-4.01.7l2.16 2.16C10.85 7.18 11.4 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" />
-      </svg> Hide</button>
+      </svg><norva-i18n data-i18n="ui_web_ac20a57bfde0"> Hide</norva-i18n></button>
   </div>
 
   <!-- Edit User Modal -->
   <div class="modal-overlay" id="edit-user-modal">
     <div class="modal">
       <div class="modal-header">
-        <h3 class="modal-title">Edit User</h3>
+        <h3 class="modal-title" data-i18n="ui_web_e8a883531956">Edit User</h3>
         <button class="modal-close" id="edit-user-close">&times;</button>
       </div>
       <div class="modal-body">
@@ -2018,95 +2018,95 @@
           <input type="hidden" id="edit-user-id">
 
           <div class="modal-form-group">
-            <label for="edit-username">Username</label>
+            <label for="edit-username" data-i18n="ui_web_e3b89e9d33f8">Username</label>
             <input type="text" id="edit-username" name="username" class="form-input" required>
           </div>
 
           <div class="modal-form-group">
-            <label for="edit-email">Email</label>
-            <input type="text" id="edit-email" class="form-input" readonly disabled placeholder="No email associated">
+            <label for="edit-email" data-i18n="ui_web_969ccbd3cf63">Email</label>
+            <input type="text" id="edit-email" class="form-input" readonly disabled placeholder="No email associated" data-i18n-placeholder="ui_web_a0bc2a4567ec">
           </div>
 
           <div class="modal-form-group">
-            <label for="edit-role">Role</label>
+            <label for="edit-role" data-i18n="ui_web_14736a2eb9f4">Role</label>
             <select id="edit-role" name="role" class="form-input" required>
-              <option value="viewer">Viewer</option>
-              <option value="admin">Admin</option>
+              <option value="viewer" data-i18n="ui_web_678bfa6af48b">Viewer</option>
+              <option value="admin" data-i18n="ui_web_c1c224b03cd9">Admin</option>
             </select>
           </div>
 
           <div class="modal-form-group">
-            <label for="edit-password">New Password</label>
+            <label for="edit-password" data-i18n="ui_web_7c451e0f436d">New Password</label>
             <input type="password" id="edit-password" name="password" class="form-input"
-              placeholder="Leave blank to keep current" autocomplete="off">
-            <p class="hint" id="edit-password-hint" style="margin-top: 4px;">Optional. Leave blank to keep unchanged.
+              placeholder="Leave blank to keep current" autocomplete="off" data-i18n-placeholder="ui_web_25a1ae17f01b">
+            <p class="hint" id="edit-password-hint" style="margin-top: 4px;" data-i18n="ui_web_8c3d48ae69ca">Optional. Leave blank to keep unchanged.
             </p>
           </div>
 
           <div class="modal-form-group hidden" id="oidc-info-group">
-            <label>OIDC Provider ID</label>
+            <label data-i18n="ui_web_d54cbdb4a9f4">OIDC Provider ID</label>
             <code id="edit-oidc-id"
               style="font-size: 0.8rem; color: var(--color-text-muted); padding: 4px; background: rgba(0,0,0,0.3); border-radius: 4px; display: block;"></code>
           </div>
         </form>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" id="edit-user-cancel">Cancel</button>
-        <button class="btn btn-primary" id="edit-user-save">Save Changes</button>
+        <button class="btn btn-ghost" id="edit-user-cancel" data-i18n="ui_web_19766ed6ccb2">Cancel</button>
+        <button class="btn btn-primary" id="edit-user-save" data-i18n="ui_web_35322b5bb5a2">Save Changes</button>
       </div>
     </div>
   </div>
 
   <!-- JavaScript -->
   <script defer src="/js/icons.js?v=3"></script>
-  <script defer src="/js/utils/regions.js?v=1"></script>
+  <script defer src="/js/utils/regions.js?v=68b00bc227"></script>
   <script defer src="/js/provider-access-config.js?v=1"></script>
-  <script defer src="/js/cloudApi.js?v=36b703f117"></script>
-  <script defer src="/js/authApi.js?v=9"></script>
-  <script defer src="/js/norvaEngine.js?v=48"></script>
-  <script defer src="/js/api.js?v=9d5ef0cf1a"></script>
+  <script defer src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script defer src="/js/authApi.js?v=be61dee633"></script>
+  <script defer src="/js/norvaEngine.js?v=0f3a1ea929"></script>
+  <script defer src="/js/api.js?v=79bedea721"></script>
   <script defer src="/js/utils/catalogCache.js?v=1"></script>
-  <script defer src="/js/utils/mediaUtils.js?v=18"></script>
+  <script defer src="/js/utils/mediaUtils.js?v=365a3c9187"></script>
   <script defer src="/js/utils/CatalogFilterState.js?v=1"></script>
   <script defer src="/js/utils/CatalogQueryParams.js?v=1"></script>
-  <script defer src="/js/utils/hoverPreview.js?v=1"></script>
+  <script defer src="/js/utils/hoverPreview.js?v=89a1abb538"></script>
   <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
-  <script defer src="/js/utils/sourceHealth.js?v=72a7e5bf20"></script>
-  <script defer src="/js/navigation/NavigationModel.js?v=5279356025"></script>
+  <script defer src="/js/utils/sourceHealth.js?v=8f12e5ca97"></script>
+  <script defer src="/js/navigation/NavigationModel.js?v=e6522ef860"></script>
   <script defer src="/js/navigation/NavigationAdapters.js?v=1"></script>
   <script defer src="/js/navigation/navigationBootstrap.js?v=1"></script>
-  <script defer src="/js/utils/tvNavigation.js?v=32"></script>
-  <script defer src="/js/utils/standalone.js?v=12"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=f5f0aa2f08"></script>
+  <script defer src="/js/utils/standalone.js?v=bedbd1e12f"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
-  <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
-  <script defer src="/js/utils/GenreRails.js?v=8"></script>
-  <script defer src="/js/components/NorvaModal.js?v=2"></script>
-  <script defer src="/js/components/PairTvSheet.js?v=a8db32010d"></script>
-  <script defer src="/js/components/DevicesScreensModule.js?v=cb8a9f10e4"></script>
-  <script defer src="/js/components/MultiSelect.js?v=4"></script>
-  <script defer src="/js/components/RegionPicker.js?v=1"></script>
+  <script defer src="/js/utils/GenreTaxonomy.js?v=b1a86efc92"></script>
+  <script defer src="/js/utils/GenreRails.js?v=bb9e14a237"></script>
+  <script defer src="/js/components/NorvaModal.js?v=0a46686142"></script>
+  <script defer src="/js/components/PairTvSheet.js?v=76b90a06de"></script>
+  <script defer src="/js/components/DevicesScreensModule.js?v=f865c42fcb"></script>
+  <script defer src="/js/components/MultiSelect.js?v=dcf4b45081"></script>
+  <script defer src="/js/components/RegionPicker.js?v=6fa2be2f73"></script>
   <script defer src="/js/vendor/qrcode.js?v=1"></script>
-  <script defer src="/js/components/TitleRatingControl.js?v=2"></script>
-  <script defer src="/js/components/VideoPlayer.js?v=42"></script>
-  <script defer src="/js/components/ChannelList.js?v=49"></script>
-  <script defer src="/js/components/SourceManager.js?v=de08b95122"></script>
-  <script defer src="/js/components/EpgGuide.js?v=13"></script>
-  <script defer src="/js/components/LiveGuideFusion.js?v=30"></script>
-  <script defer src="/js/pages/HomePage.js?v=6fdf890230"></script>
+  <script defer src="/js/components/TitleRatingControl.js?v=fde4ab57a7"></script>
+  <script defer src="/js/components/VideoPlayer.js?v=05b4e3aadc"></script>
+  <script defer src="/js/components/ChannelList.js?v=5ad2479bbc"></script>
+  <script defer src="/js/components/SourceManager.js?v=d9183f8fc6"></script>
+  <script defer src="/js/components/EpgGuide.js?v=a0f9f26b0f"></script>
+  <script defer src="/js/components/LiveGuideFusion.js?v=3351954746"></script>
+  <script defer src="/js/pages/HomePage.js?v=ae5c5512cb"></script>
   <script defer src="/js/pages/LivePage.js?v=9"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>
-  <script defer src="/js/pages/MoviesPage.js?v=3f5f2cacd5"></script>
-  <script defer src="/js/pages/SeriesPage.js?v=01ee9949cb"></script>
-  <script defer src="/js/pages/Settings.js?v=2e8503448a"></script>
-  <script defer src="/js/pages/PartnersPage.js?v=10"></script>
-  <script defer src="/js/pages/WatchPage.js?v=155"></script>
-  <script defer src="/js/profiles.js?v=d2b1662711"></script>
+  <script defer src="/js/pages/MoviesPage.js?v=d892fc3eb3"></script>
+  <script defer src="/js/pages/SeriesPage.js?v=1333f376ff"></script>
+  <script defer src="/js/pages/Settings.js?v=b1019bc765"></script>
+  <script defer src="/js/pages/PartnersPage.js?v=2e4adbbee5"></script>
+  <script defer src="/js/pages/WatchPage.js?v=a65abf1336"></script>
+  <script defer src="/js/profiles.js?v=a086ae985e"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
-  <script defer src="/js/maintenance-banner.js?v=1"></script>
+  <script defer src="/js/maintenance-banner.js?v=07cae3b33f"></script>
   <script defer src="/js/billing-config.js?v=8"></script>
 <script defer src="/js/billing.js?v=18"></script>
-  <script defer src="/js/app.js?v=5e217dfb7b"></script>
+  <script defer src="/js/app.js?v=3c99fb68cb"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

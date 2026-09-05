@@ -9,6 +9,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         localStorage.setItem('sessionToken', response.token);
         window.location.href = '/';
     } catch (err) {
-        document.getElementById('login-error').textContent = 'Login failed. Check your details and try again.';
+        document.getElementById('login-error').textContent = (globalThis.NorvaI18n?.t("ui_web_b26beb014af8", { defaultValue: "Login failed. Check your details and try again." }) ?? 'Login failed. Check your details and try again.');
     }
 });

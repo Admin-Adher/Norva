@@ -1,3 +1,4 @@
+const visibleUiMarkup = require('./helpers/visible-ui-markup.cjs');
 'use strict';
 
 const test = require('node:test');
@@ -265,21 +266,21 @@ test('Providers rendering makes provisional isolation and progress explicit', ()
 
   page._renderSources(rows);
   const html = elements['admin-sources'].innerHTML;
-  assert.match(html, /Xtream Demo &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.match(html, /Provisoire · <b>1\/32 signaux<\/b>/);
-  assert.match(html, /Traitements isolés à cette source jusqu’à vérification/);
-  assert.match(html, /relancer la résolution/);
-  assert.doesNotMatch(html, /Sans empreinte/);
-  assert.doesNotMatch(html, /must-never-render/);
-  assert.doesNotMatch(html, /<script>|<img src=x/);
+  assert.match(visibleUiMarkup(html), /Xtream Demo &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(visibleUiMarkup(html), /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(visibleUiMarkup(html), /Provisoire · <b>1\/32 signaux<\/b>/);
+  assert.match(visibleUiMarkup(html), /Traitements isolés à cette source jusqu’à vérification/);
+  assert.match(visibleUiMarkup(html), /relancer la résolution/);
+  assert.doesNotMatch(visibleUiMarkup(html), /Sans empreinte/);
+  assert.doesNotMatch(visibleUiMarkup(html), /must-never-render/);
+  assert.doesNotMatch(visibleUiMarkup(html), /<script>|<img src=x/);
 
   page._renderProvKpis({ identities_active: 4, titles_movie: 10, titles_series: 5 }, rows, {});
-  assert.match(elements['prov-kpis'].innerHTML, /Provisoires/);
-  assert.match(elements['prov-kpis'].innerHTML, /Non résolues/);
+  assert.match(visibleUiMarkup(elements['prov-kpis'].innerHTML), /Provisoires/);
+  assert.match(visibleUiMarkup(elements['prov-kpis'].innerHTML), /Non résolues/);
 
   page._renderProviderScope();
-  assert.match(elements['prov-scope'].innerHTML, /2 source\(s\) provisoire\(s\) affichée\(s\) sur 3/);
+  assert.match(visibleUiMarkup(elements['prov-scope'].innerHTML), /2 source\(s\) provisoire\(s\) affichée\(s\) sur 3/);
   assert.equal(elements['prov-scope'].hidden, false);
   assert.equal(elements['prov-scope'].classList.contains('is-warn'), true);
 });

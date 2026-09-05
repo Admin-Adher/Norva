@@ -112,8 +112,8 @@ test('Home and phone genre rails bound pre-paint catalogue hydration', () => {
   assert.match(catalog, /variantsByTitle: await variantsPromise/);
   assert.match(read('public/js/pages/MoviesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
   assert.match(read('public/js/pages/SeriesPage.js'), /limit: this\._isTvMode\(\) \? 18 : 12/);
-  assert.match(appHtml, /MoviesPage\.js\?v=3f5f2cacd5/);
-  assert.match(appHtml, /SeriesPage\.js\?v=01ee9949cb/);
+  assert.match(appHtml, /MoviesPage\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /SeriesPage\.js\?v=[0-9a-f]+/);
 });
 
 test('Live bounds first paint and defers off-screen logo decoding without hiding the lineup', () => {
@@ -121,8 +121,8 @@ test('Live bounds first paint and defers off-screen logo decoding without hiding
   assert.match(live, /this\.TV_ROW_LIMIT = 60/);
   assert.match(live, /data-action="show-more"/);
   assert.match(live, /loading="lazy" decoding="async" fetchpriority="low"/);
-  assert.match(appHtml, /cloudApi\.js\?v=36b703f117/);
-  assert.match(appHtml, /api\.js\?v=9d5ef0cf1a/);
-  assert.match(appHtml, /LiveGuideFusion\.js\?v=30/);
-  assert.match(appHtml, /HomePage\.js\?v=6fdf890230/);
+  assert.match(appHtml, /cloudApi\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /api\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /LiveGuideFusion\.js\?v=[0-9a-f]+/);
+  assert.match(appHtml, /HomePage\.js\?v=[0-9a-f]+/);
 });

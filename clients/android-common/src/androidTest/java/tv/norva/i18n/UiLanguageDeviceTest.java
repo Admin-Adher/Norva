@@ -28,6 +28,28 @@ public class UiLanguageDeviceTest {
                 int id = localized.getResources().getIdentifier("ui_language", "string", target.getPackageName());
                 assertTrue(id != 0);
                 assertEquals(labels[i], localized.getString(id));
+                // Resolve the real APK resources, including offline player/download
+                // copy. No network or account is needed for this resource contract.
+                Class<?> strings = Class.forName(target.getPackageName() + ".R$string");
+                int checked = 0;
+                for (java.lang.reflect.Field field : strings.getFields()) {
+                    String name = field.getName();
+                    if (!name.startsWith("ui_") && !name.startsWith("native_") && !name.startsWith("downloads_")) continue;
+                    String copy = localized.getString(field.getInt(null));
+                    assertFalse(name + ": empty", copy.trim().isEmpty());
+                    assertFalse(name + ": untranslated placeholder", copy.contains("ZXQARG"));
+                    checked++;
+                }
+                assertTrue("Expected the packaged UI resources", checked >= 56);
+                for (String name : new String[]{"downloads_episode_count", "downloads_ready_count", "downloads_attention_count"}) {
+                    int plural = localized.getResources().getIdentifier(name, "plurals", target.getPackageName());
+                    if (plural == 0) continue; // TV has no DownloadsActivity.
+                    for (int count : new int[]{0, 1, 2, 3, 11, 100}) {
+                        String copy = localized.getResources().getQuantityString(plural, count, count);
+                        assertFalse(copy.trim().isEmpty());
+                        assertFalse(copy.contains("%1$d"));
+                    }
+                }
                 assertEquals("ar".equals(codes[i]) ? 1 : 0, localized.getResources().getConfiguration().getLayoutDirection());
             }
             manager.setApplicationLocales(LocaleList.getEmptyLocaleList());

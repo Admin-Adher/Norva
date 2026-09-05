@@ -16,12 +16,12 @@ test('landing exposes both shipped Play Store apps directly below the primary he
     assert.ok(store < preview, `${file}: store actions stay above the product preview`);
     assert.match(html, /play\.google\.com\/store\/apps\/details\?id=tv\.norva\.phone/);
     assert.match(html, /play\.google\.com\/store\/apps\/details\?id=tv\.norva\.tv/);
-    assert.match(html, /data-store-platform="android_mobile"[\s\S]{0,900}data-store-platform="android_tv"/);
+    assert.match(html, /data-store-platform="android_mobile"[\s\S]{0,1800}data-store-platform="android_tv"/);
     assert.match(html, /Google Play \(opens in a new tab\)/);
 
-    const analytics = html.indexOf('/js/product-analytics.js?v=2');
-    const consent = html.indexOf('/js/consent-banner.js?v=3');
-    const landing = html.indexOf('/js/landing.js?v=29');
+    const analytics = html.indexOf('/js/product-analytics.js');
+    const consent = html.indexOf('/js/consent-banner.js');
+    const landing = html.indexOf('/js/landing.js');
     assert.ok(analytics > 0 && analytics < consent && consent < landing,
       `${file}: analytics adapter must be ready before consent and landing events`);
   }

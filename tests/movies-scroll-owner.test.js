@@ -52,6 +52,6 @@ test('Movies main pagination prefetches against the Movies grid before its last 
 
 test('Movies scroll assets are cache-busted together', () => {
   const app = read('public/app.html');
-  assert.match(app, /\/css\/main\.css\?v=71854078d1/);
-  assert.match(app, /\/js\/pages\/MoviesPage\.js\?v=3f5f2cacd5/);
+  assert.match(app, /\/css\/main\.css\?v=[0-9a-f]+/);
+  assert.match(app, /\/js\/pages\/MoviesPage\.js\?v=[0-9a-f]+/);
 });

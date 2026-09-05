@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Norva Support</title>
+  <title data-i18n="ui_web_e82d9ffdc3bb">Norva Support</title>
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -117,8 +118,9 @@
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
-  <script defer src="/js/utils/tvNavigation.js?v=31"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=f5f0aa2f08"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
   <script>
@@ -127,44 +129,44 @@
     if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
   </script>
   <main class="wrap">
-    <a class="back" id="back-link" href="/app#settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Back</a>
+    <a class="back" id="back-link" href="/app#settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg><norva-i18n data-i18n="ui_web_76900f1bfd16">Back</norva-i18n></a>
     <div class="brand"><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></div>
-    <h1>Support</h1>
-    <p class="sub">Tell us what's wrong — we usually reply within a day, straight to this page and your inbox.</p>
+    <h1 data-i18n="ui_web_be91940b79f4">Support</h1>
+    <p class="sub" data-i18n="ui_web_88d12b963549">Tell us what's wrong — we usually reply within a day, straight to this page and your inbox.</p>
 
     <div class="card" id="new-ticket-card">
-      <h2>Open a ticket</h2>
+      <h2 data-i18n="ui_web_0f3ee46ab522">Open a ticket</h2>
       <div id="signin-needed" style="display:none">
-        <p class="note" style="margin-top:0">Sign in to contact support from your account.</p>
-        <a class="btn" id="signin-link" href="/account.html">Sign in</a>
+        <p class="note" style="margin-top:0" data-i18n="ui_web_73ddd72449d0">Sign in to contact support from your account.</p>
+        <a class="btn" id="signin-link" href="/account.html" data-i18n="ui_web_bfd402b2f6f3">Sign in</a>
       </div>
       <form id="ticket-form" style="display:none">
         <div id="t-feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
-        <label for="t-subject">Subject</label>
+        <label for="t-subject" data-i18n="ui_web_68971283841a">Subject</label>
         <!-- No `required`: the unified JS validation below handles both fields with one
              consistent message (mixing native constraint bubbles + JS was two UX styles). -->
         <input type="text" id="t-subject" maxlength="180" aria-describedby="t-subject-count"
-               placeholder="e.g. Playback stops after a few minutes">
+               placeholder="e.g. Playback stops after a few minutes" data-i18n-placeholder="ui_web_b1f5fb0f90d3">
         <div class="field-row">
-          <label for="t-body" style="margin-top:12px">What happened?</label>
+          <label for="t-body" style="margin-top:12px" data-i18n="ui_web_c4dc542b511f">What happened?</label>
           <span class="counter" id="t-body-count" aria-live="polite">0 / 8000</span>
         </div>
         <textarea id="t-body" maxlength="8000" aria-describedby="t-body-count"
-                  placeholder="Describe the issue — device, what you tried, any error message."></textarea>
+                  placeholder="Describe the issue — device, what you tried, any error message." data-i18n-placeholder="ui_web_f829047505f7"></textarea>
         <div id="t-error" class="err-msg" role="alert"></div>
-        <button type="submit" class="btn primary" id="t-submit">Send to support</button>
-        <p class="note">Your ticket goes to our support team and every reply lands here and in your email.</p>
+        <button type="submit" class="btn primary" id="t-submit" data-i18n="ui_web_3d418b7fa300">Send to support</button>
+        <p class="note" data-i18n="ui_web_bee3f169f9f7">Your ticket goes to our support team and every reply lands here and in your email.</p>
       </form>
     </div>
 
     <div class="card">
-      <h2>Your tickets</h2>
+      <h2 data-i18n="ui_web_1f673a9885eb">Your tickets</h2>
       <div id="tickets"><div class="skeleton"></div><div class="skeleton"></div></div>
     </div>
   </main>
 
-  <script src="/js/cloudApi.js?v=50"></script>
-  <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script src="/js/authApi.js?v=be61dee633"></script>
   <script>
     (function () {
       const BASE = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '') + '/functions/v1/norva-support';
@@ -257,7 +259,7 @@
       async function loadTickets(opts) {
         opts = opts || {};
         const el = document.getElementById('tickets');
-        if (!signedIn) { el.innerHTML = '<div class="empty">Sign in to see your tickets.</div>'; return; }
+        if (!signedIn) { el.innerHTML = '<div class="empty" data-i18n="ui_web_b34b2bbb1078">Sign in to see your tickets.</div>'; return; }
         try {
           const data = await call('/mine', { method: 'GET' });
           renderTickets(el, data.tickets || [], data.messages || [], opts);
@@ -273,17 +275,17 @@
         } catch (e) {
           // Non-destructive on a post-action refresh: keep whatever is on screen, surface a note.
           if (el.children.length && !el.querySelector('.skeleton')) {
-            const n = document.createElement('div'); n.className = 'note'; n.textContent = 'Could not refresh your tickets. Check your connection and try again.';
+            const n = document.createElement('div'); n.className = 'note'; n.textContent = (globalThis.NorvaI18n?.t("ui_web_0496c2543d15", { defaultValue: "Could not refresh your tickets. Check your connection and try again." }) ?? 'Could not refresh your tickets. Check your connection and try again.');
             el.appendChild(n);
           } else {
-            el.innerHTML = '<div class="empty">Could not load your tickets. Check your connection and try again.</div>';
+            el.innerHTML = '<div class="empty" data-i18n="ui_web_9255fb18b721">Could not load your tickets. Check your connection and try again.</div>';
           }
         }
       }
 
       function renderTickets(el, tickets, messages, opts) {
         if (!tickets.length) {
-          el.innerHTML = '<div class="empty"><span class="ico" aria-hidden="true">📭</span>No tickets yet. If something\'s wrong, open one above — we\'re quick.</div>';
+          el.innerHTML = '<div class="empty"><span class="ico" aria-hidden="true">📭</span><norva-i18n data-i18n="ui_web_1f5103aaffee">No tickets yet. If something\'s wrong, open one above — we\'re quick.</norva-i18n></div>';
           return;
         }
         const open = opts.expandIds || new Set();
@@ -295,13 +297,13 @@
           const isOpen = open.has(id);
           const msgs = (byTicket[t.id] || []).map(function (m) {
             return '<div class="msg ' + (m.from_admin ? 'admin' : 'user') + '">' +
-              '<div class="who">' + (m.from_admin ? 'Norva support' : 'You') + ' · ' + esc(timeAgo(m.created_at)) + '</div>' +
+              '<div class="who">' + (m.from_admin ? (globalThis.NorvaI18n?.t("ui_web_848b3e686c8d", { defaultValue: "Norva support" }) ?? 'Norva support') : (globalThis.NorvaI18n?.t("ui_web_08b041935798", { defaultValue: "You" }) ?? 'You')) + ' · ' + esc(timeAgo(m.created_at)) + '</div>' +
               esc(m.body) + '</div>';
           }).join('');
-          const chip = t.status === 'closed' ? '<span class="chip closed">closed</span>'
-            : (t.last_from === 'admin' ? '<span class="chip replied">replied</span>' : '<span class="chip open">open</span>');
+          const chip = t.status === 'closed' ? '<span class="chip closed" data-i18n="ui_web_c3eefb58d7c4">closed</span>'
+            : (t.last_from === 'admin' ? '<span class="chip replied" data-i18n="ui_web_4e686cee486f">replied</span>' : '<span class="chip open" data-i18n="ui_web_2348f9987442">open</span>');
           const reply = t.status === 'closed'
-            ? '<p class="note">This ticket is closed — open a new one above if you need anything else.</p>'
+            ? '<p class="note" data-i18n="ui_web_b4bc49d81efa">This ticket is closed — open a new one above if you need anything else.</p>'
             : '<div class="reply-row">' +
                 '<textarea placeholder="Reply…" aria-label="Reply to: ' + esc(t.subject) + '" data-reply="' + esc(id) + '"></textarea>' +
                 '<button type="button" class="btn ghost" data-send="' + esc(id) + '">Send</button>' +
@@ -332,8 +334,8 @@
           b.addEventListener('click', async function () {
             if (b.dataset.arm !== '1') {
               b.dataset.arm = '1';
-              b.textContent = 'Click again to confirm — this closes the ticket';
-              setTimeout(function () { b.dataset.arm = ''; b.textContent = '✓ Mark this ticket as resolved'; }, 4000);
+              b.textContent = (globalThis.NorvaI18n?.t("ui_web_63447dd712ae", { defaultValue: "Click again to confirm — this closes the ticket" }) ?? 'Click again to confirm — this closes the ticket');
+              setTimeout(function () { b.dataset.arm = ''; b.textContent = (globalThis.NorvaI18n?.t("ui_web_c2b513abade2", { defaultValue: "✓ Mark this ticket as resolved" }) ?? '✓ Mark this ticket as resolved'); }, 4000);
               return;
             }
             b.disabled = true;
@@ -342,7 +344,7 @@
               await loadTickets({ expandIds: currentOpenIds() });
             } catch (e) {
               b.disabled = false; b.dataset.arm = '';
-              b.textContent = 'Could not close this ticket. Try again.';
+              b.textContent = (globalThis.NorvaI18n?.t("ui_web_c10df21da720", { defaultValue: "Could not close this ticket. Try again." }) ?? 'Could not close this ticket. Try again.');
             }
           });
         });
@@ -365,7 +367,7 @@
         if (fb) fb.textContent = '';
         // Match the server threshold (body >= 2 chars → 400 "Empty message" otherwise).
         if (!body || body.length < 2) {
-          if (fb && body) fb.textContent = 'Please write at least a couple of characters.';
+          if (fb && body) fb.textContent = (globalThis.NorvaI18n?.t("ui_web_8a9c201889e2", { defaultValue: "Please write at least a couple of characters." }) ?? 'Please write at least a couple of characters.');
           if (ta) ta.focus();
           return;
         }
@@ -376,8 +378,8 @@
           await call('/reply', { method: 'POST', body: JSON.stringify({ ticket_id: id, body: body }) });
           await loadTickets({ expandIds: openIds, scrollId: id });
         } catch (e) {
-          b.disabled = false; b.textContent = 'Send';
-          if (fb) fb.textContent = 'Could not send your reply. Try again.';
+          b.disabled = false; b.textContent = (globalThis.NorvaI18n?.t("ui_web_f6f4688ff23d", { defaultValue: "Send" }) ?? 'Send');
+          if (fb) fb.textContent = (globalThis.NorvaI18n?.t("ui_web_7a3ebe81999c", { defaultValue: "Could not send your reply. Try again." }) ?? 'Could not send your reply. Try again.');
         }
       }
 
@@ -390,7 +392,7 @@
         const btn = document.getElementById('t-submit');
         errEl.textContent = ''; fb.innerHTML = '';
         if (subject.length < 3 || body.length < 5) {
-          errEl.textContent = 'Please add a subject and describe what happened.';
+          errEl.textContent = (globalThis.NorvaI18n?.t("ui_web_d229ca98d0cf", { defaultValue: "Please add a subject and describe what happened." }) ?? 'Please add a subject and describe what happened.');
           (subject.length < 3 ? subjEl : bodyEl).focus();
           return;
         }
@@ -398,15 +400,15 @@
         try {
           const res = await call('/create', { method: 'POST', body: JSON.stringify({ subject: subject, body: body }) });
           fb.innerHTML = '<div class="confirm"><span class="badge-ok" aria-hidden="true">✓</span>' +
-            '<div><b>Ticket sent</b><span>We\'ve got it and emailed our support team. Replies land right here and in your inbox.</span></div></div>';
+            '<div><b data-i18n="ui_web_1be761b77138">Ticket sent</b><span data-i18n="ui_web_e48222a72ff7">We\'ve got it and emailed our support team. Replies land right here and in your inbox.</span></div></div>';
           subjEl.value = ''; bodyEl.value = '';
           updateCounter(subjEl, subjCount, 180); updateCounter(bodyEl, bodyCount, 8000);
           fb.focus();
           await loadTickets({ scrollId: res && res.ticket_id });
         } catch (e) {
-          errEl.textContent = 'Could not send your message. Check your connection and try again.';
+          errEl.textContent = (globalThis.NorvaI18n?.t("ui_web_1af2cee8792b", { defaultValue: "Could not send your message. Check your connection and try again." }) ?? 'Could not send your message. Check your connection and try again.');
         }
-        btn.disabled = false; btn.textContent = 'Send to support';
+        btn.disabled = false; btn.textContent = (globalThis.NorvaI18n?.t("ui_web_3d418b7fa300", { defaultValue: "Send to support" }) ?? 'Send to support');
       });
 
       function currentOpenIds() {

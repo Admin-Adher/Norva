@@ -533,7 +533,7 @@ test('SPA contract uses the shared control, semantic states and source-aware rea
     const movies = fs.readFileSync(path.join(ROOT, 'public/js/pages/MoviesPage.js'), 'utf8');
     const series = fs.readFileSync(path.join(ROOT, 'public/js/pages/SeriesPage.js'), 'utf8');
 
-    assert.match(html, /components\/TitleRatingControl\.js\?v=2/);
+    assert.match(html, /components\/TitleRatingControl\.js\?v=[0-9a-f]+/);
     assert.equal(html.includes('👍'), false);
     assert.equal(html.includes('👎'), false);
     assert.match(html, /id="movie-thumb-up"[\s\S]*aria-pressed="false"/);

@@ -140,7 +140,7 @@
       if (signedIn && isAuthCta) {
         const isAccountLink = link.matches('.login-link') || /^sign in$/i.test(label);
         link.setAttribute('href', isAccountLink ? '/app#settings' : '/app#home');
-        replaceLinkLabel(link, isAccountLink ? 'Account' : 'Open Norva');
+        replaceLinkLabel(link, isAccountLink ? 'Account' : (globalThis.NorvaI18n?.t("ui_web_58b4fd1126eb", { defaultValue: "Open Norva" }) ?? 'Open Norva'));
       } else {
         link.setAttribute('href', decorateConversionHref(link.getAttribute('href')));
       }
@@ -261,7 +261,7 @@
       }
       nav.classList.toggle('open', open);
       toggle.setAttribute('aria-expanded', String(open));
-      toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+      toggle.setAttribute('aria-label', open ? (globalThis.NorvaI18n?.t("ui_web_99904db30de4", { defaultValue: "Close navigation" }) ?? 'Close navigation') : (globalThis.NorvaI18n?.t("ui_web_0ed77fd2619b", { defaultValue: "Open navigation" }) ?? 'Open navigation'));
       panels.forEach(controlled => {
         controlled.setAttribute('aria-hidden', String(!open && mobile.matches));
       });
@@ -613,7 +613,7 @@
           const exactMonthly = Number.isFinite(annual) ? (annual / 12).toFixed(2) : '';
           note.textContent = isAnnual
             ? (exactMonthly
-              ? `That's about ${currency}${exactMonthly}/mo, billed yearly.`
+              ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_445f2bab7723", {defaultValue: "That's about {{p0}}{{p1}}/mo, billed yearly.", p0:(currency),p1:(exactMonthly)}) : `That's about ${currency}${exactMonthly}/mo, billed yearly.`)
               : (note.dataset.annualNote || ''))
             : (note.dataset.monthlyNote || '');
         }
@@ -625,7 +625,7 @@
         }
         if (amount) {
           const amountText = (isAnnual ? price.dataset.annual : price.dataset.monthly) || amount.textContent;
-          price.setAttribute('aria-label', `${currency}${amountText} ${isAnnual ? 'per year' : 'per month'}`.trim());
+          price.setAttribute('aria-label', `${currency}${amountText} ${isAnnual ? (globalThis.NorvaI18n?.t("ui_web_611c1ee32d89", { defaultValue: "per year" }) ?? 'per year') : (globalThis.NorvaI18n?.t("ui_web_88b1d1a67e34", { defaultValue: "per month" }) ?? 'per month')}`.trim());
         }
         // Promo active sur ce plan+période : la card s'habille aux couleurs de
         // l'événement (maquette) — badge « ⚡ ÉVÉNEMENT − X% » en tête, ligne
@@ -677,7 +677,7 @@
             price.insertAdjacentElement('beforebegin', wasLine);
           }
           wasLine.querySelector('s').textContent = `${currency}${(refCents / 100).toFixed(2)}`;
-          wasLine.querySelector('span').textContent = (isAnnual ? '/yr' : '/mo') + (refMonthly ? ' billed monthly' : '');
+          wasLine.querySelector('span').textContent = (isAnnual ? '/yr' : '/mo') + (refMonthly ? (globalThis.NorvaI18n?.t("ui_web_69ea677b25d4", { defaultValue: " billed monthly" }) ?? ' billed monthly') : '');
           article.classList.add('has-promo');
           article.style.borderColor = edge.border;
           article.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,.08), 0 25px 60px rgba(0,0,0,.45), 0 0 40px ${edge.glow}`;
@@ -696,7 +696,7 @@
       });
 
       if (announce && status) {
-        status.textContent = `${isAnnual ? 'Annual' : 'Monthly'} billing selected. Prices and checkout links updated.`;
+        status.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_d60b78683868", {defaultValue: "{{p0}} billing selected. Prices and checkout links updated.", p0:(isAnnual ? (globalThis.NorvaI18n?.t("ui_web_2c5e81714652", { defaultValue: "Annual" }) ?? 'Annual') : (globalThis.NorvaI18n?.t("ui_web_9b11f6b707d2", { defaultValue: "Monthly" }) ?? 'Monthly'))}) : `${isAnnual ? 'Annual' : 'Monthly'} billing selected. Prices and checkout links updated.`);
       }
       positionThumb();
     }
@@ -789,10 +789,10 @@
       if (refAnchorLive) {
         // La card porte les chiffres (−X% vs monthly billing) ; le toggle garde
         // un nudge non chiffré — aucun double claim possible.
-        saveBadge.textContent = 'Best value';
+        saveBadge.textContent = (globalThis.NorvaI18n?.t("ui_web_b4d06debb5f8", { defaultValue: "Best value" }) ?? 'Best value');
         saveBadge.hidden = false;
       } else if (best > 0.01) {
-        saveBadge.textContent = `Save ${Math.round(best * 100)}%`;
+        saveBadge.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_dba63e082cde", {defaultValue: "Save {{p0}}%", p0:(Math.round(best * 100))}) : `Save ${Math.round(best * 100)}%`);
         saveBadge.hidden = false;
       } else {
         saveBadge.hidden = true;
@@ -828,7 +828,7 @@
       ev.textContent = `${PROMO_ICONS[soonestPromo.event] || PROMO_ICONS.other} ${cdLabel}`;
       ev.style.background = PROMO_BADGE_BG[soonestPromo.event] || PROMO_BADGE_BG.other;
       const txt = document.createElement('span');
-      txt.textContent = 'ends in';
+      txt.textContent = (globalThis.NorvaI18n?.t("ui_web_3f9fa1682461", { defaultValue: "ends in" }) ?? 'ends in');
       const clock = document.createElement('b');
       box.appendChild(ev);
       box.appendChild(txt);
@@ -1057,95 +1057,95 @@
     const messages = {
       hero: [
         {
-          id: 'available-now', label: 'Available now', title: 'Norva is available now',
-          body: 'Use Norva on the Web, mobile and TV with one synchronized account.',
-          cta: 'See supported screens', href: '#availability'
+          id: 'available-now', label: (globalThis.NorvaI18n?.t("ui_web_2a4729fa7647", { defaultValue: "Available now" }) ?? 'Available now'), title: (globalThis.NorvaI18n?.t("ui_web_bcfa45896b8c", { defaultValue: "Norva is available now" }) ?? 'Norva is available now'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_8c4a2c5c0a59", { defaultValue: "Use Norva on the Web, mobile and TV with one synchronized account." }) ?? 'Use Norva on the Web, mobile and TV with one synchronized account.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_5d2ba749aef4", { defaultValue: "See supported screens" }) ?? 'See supported screens'), href: '#availability'
         },
         {
-          id: 'one-space', label: 'One experience', title: 'One Norva space, every screen',
-          body: 'Keep your catalog, progress, favorites and preferences together across supported devices.',
-          cta: 'Explore the benefits', href: '#features'
+          id: 'one-space', label: (globalThis.NorvaI18n?.t("ui_web_f03b706bc5d2", { defaultValue: "One experience" }) ?? 'One experience'), title: (globalThis.NorvaI18n?.t("ui_web_1a3d1e176b56", { defaultValue: "One Norva space, every screen" }) ?? 'One Norva space, every screen'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_1aed8b02eb23", { defaultValue: "Keep your catalog, progress, favorites and preferences together across supported devices." }) ?? 'Keep your catalog, progress, favorites and preferences together across supported devices.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_019ad03c9d9d", { defaultValue: "Explore the benefits" }) ?? 'Explore the benefits'), href: '#features'
         }
       ],
       availability: [
         {
-          id: 'apps-ready', label: 'Ready on your screens', title: 'Web, mobile and TV are ready',
-          body: 'The Norva experience is available now across supported Web, mobile and TV devices.',
-          cta: 'See how it stays in sync', href: '#features'
+          id: 'apps-ready', label: (globalThis.NorvaI18n?.t("ui_web_cdf0f2c97c84", { defaultValue: "Ready on your screens" }) ?? 'Ready on your screens'), title: (globalThis.NorvaI18n?.t("ui_web_11fe1600e52c", { defaultValue: "Web, mobile and TV are ready" }) ?? 'Web, mobile and TV are ready'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_dc65faa882bf", { defaultValue: "The Norva experience is available now across supported Web, mobile and TV devices." }) ?? 'The Norva experience is available now across supported Web, mobile and TV devices.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_a37de43bb51c", { defaultValue: "See how it stays in sync" }) ?? 'See how it stays in sync'), href: '#features'
         },
         {
-          id: 'same-account', label: 'One account', title: 'Move between screens naturally',
-          body: 'Your account keeps the same catalog, progress and preferences wherever you use Norva.',
-          cta: 'See the simple setup', href: '#how-it-works'
+          id: 'same-account', label: (globalThis.NorvaI18n?.t("ui_web_582e2659b0e7", { defaultValue: "One account" }) ?? 'One account'), title: (globalThis.NorvaI18n?.t("ui_web_bc1e8a23b604", { defaultValue: "Move between screens naturally" }) ?? 'Move between screens naturally'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_025ba4816db6", { defaultValue: "Your account keeps the same catalog, progress and preferences wherever you use Norva." }) ?? 'Your account keeps the same catalog, progress and preferences wherever you use Norva.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_05a74e319178", { defaultValue: "See the simple setup" }) ?? 'See the simple setup'), href: '#how-it-works'
         }
       ],
       features: [
         {
-          id: 'continue-anywhere', label: 'Cross-screen continuity', title: 'Pick up on another screen',
-          body: 'Resume from the same progress with the favorites and preferences already in your Norva space.',
-          cta: 'See the three steps', href: '#how-it-works'
+          id: 'continue-anywhere', label: (globalThis.NorvaI18n?.t("ui_web_54a0d3dda8db", { defaultValue: "Cross-screen continuity" }) ?? 'Cross-screen continuity'), title: (globalThis.NorvaI18n?.t("ui_web_fa7980372e9b", { defaultValue: "Pick up on another screen" }) ?? 'Pick up on another screen'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_1b18e65899e6", { defaultValue: "Resume from the same progress with the favorites and preferences already in your Norva space." }) ?? 'Resume from the same progress with the favorites and preferences already in your Norva space.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_c4382ad8499d", { defaultValue: "See the three steps" }) ?? 'See the three steps'), href: '#how-it-works'
         },
         {
-          id: 'organized-catalog', label: 'Less searching', title: 'A calmer way to browse',
-          body: 'Norva organizes the compatible source you connect into one consistent media experience.',
-          cta: 'See how Norva works', href: '#how-it-works'
+          id: 'organized-catalog', label: (globalThis.NorvaI18n?.t("ui_web_44299e25c81d", { defaultValue: "Less searching" }) ?? 'Less searching'), title: (globalThis.NorvaI18n?.t("ui_web_722c7c95e908", { defaultValue: "A calmer way to browse" }) ?? 'A calmer way to browse'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_80c1954dad63", { defaultValue: "Norva organizes the compatible source you connect into one consistent media experience." }) ?? 'Norva organizes the compatible source you connect into one consistent media experience.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_42d668799803", { defaultValue: "See how Norva works" }) ?? 'See how Norva works'), href: '#how-it-works'
         }
       ],
       steps: [
         {
-          id: 'three-steps', label: 'Simple setup', title: 'Your Norva space in three steps',
-          body: 'Create your space, connect a compatible source and start watching across supported screens.',
-          cta: 'Compare the plans', href: '#pricing'
+          id: 'three-steps', label: (globalThis.NorvaI18n?.t("ui_web_09a7c425bf09", { defaultValue: "Simple setup" }) ?? 'Simple setup'), title: (globalThis.NorvaI18n?.t("ui_web_d88b3dbcdb59", { defaultValue: "Your Norva space in three steps" }) ?? 'Your Norva space in three steps'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_d1cbd490e8d8", { defaultValue: "Create your space, connect a compatible source and start watching across supported screens." }) ?? 'Create your space, connect a compatible source and start watching across supported screens.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_1e51516e9f44", { defaultValue: "Compare the plans" }) ?? 'Compare the plans'), href: '#pricing'
         },
         {
-          id: 'source-control', label: 'You stay in control', title: 'Your compatible source stays yours',
-          body: 'Norva provides the software experience while you remain in control of the source you connect.',
-          cta: 'Read the clear promise', href: '#trust'
+          id: 'source-control', label: (globalThis.NorvaI18n?.t("ui_web_faa171843999", { defaultValue: "You stay in control" }) ?? 'You stay in control'), title: (globalThis.NorvaI18n?.t("ui_web_7880a08db42b", { defaultValue: "Your compatible source stays yours" }) ?? 'Your compatible source stays yours'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_9abf4a049506", { defaultValue: "Norva provides the software experience while you remain in control of the source you connect." }) ?? 'Norva provides the software experience while you remain in control of the source you connect.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_8964f7dad816", { defaultValue: "Read the clear promise" }) ?? 'Read the clear promise'), href: '#trust'
         }
       ],
       preview: [
         {
-          id: 'guide-follows', label: 'Guided product tour', title: 'This guide follows your journey',
-          body: 'Its message changes with the part of Norva you are exploring, then it folds away when space matters.',
-          cta: 'Continue to pricing', href: '#pricing'
+          id: 'guide-follows', label: (globalThis.NorvaI18n?.t("ui_web_d7a5f1318255", { defaultValue: "Guided product tour" }) ?? 'Guided product tour'), title: (globalThis.NorvaI18n?.t("ui_web_759a79c6f997", { defaultValue: "This guide follows your journey" }) ?? 'This guide follows your journey'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_218a8e035f18", { defaultValue: "Its message changes with the part of Norva you are exploring, then it folds away when space matters." }) ?? 'Its message changes with the part of Norva you are exploring, then it folds away when space matters.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_2b50eb436a8f", { defaultValue: "Continue to pricing" }) ?? 'Continue to pricing'), href: '#pricing'
         },
         {
-          id: 'guide-control', label: 'Always under your control', title: 'Pause, minimize or reopen it',
-          body: 'The guide stays available during the scroll without pretending to be a system notification.',
-          cta: 'See the trial options', href: '#pricing'
+          id: 'guide-control', label: (globalThis.NorvaI18n?.t("ui_web_4d8aedf0599d", { defaultValue: "Always under your control" }) ?? 'Always under your control'), title: (globalThis.NorvaI18n?.t("ui_web_326b632b5d39", { defaultValue: "Pause, minimize or reopen it" }) ?? 'Pause, minimize or reopen it'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_61154566f214", { defaultValue: "The guide stays available during the scroll without pretending to be a system notification." }) ?? 'The guide stays available during the scroll without pretending to be a system notification.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_eab4f45922d2", { defaultValue: "See the trial options" }) ?? 'See the trial options'), href: '#pricing'
         }
       ],
       pricing: [
         {
-          id: 'trial-terms', label: 'Clear trial terms', title: 'Start with a 7-day free trial',
-          body: 'Payment method required. We remind you before renewal, and you can cancel anytime.',
-          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
+          id: 'trial-terms', label: (globalThis.NorvaI18n?.t("ui_web_0d279c98bd81", { defaultValue: "Clear trial terms" }) ?? 'Clear trial terms'), title: (globalThis.NorvaI18n?.t("ui_web_40309e875e30", { defaultValue: "Start with a 7-day free trial" }) ?? 'Start with a 7-day free trial'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_9771e303fa5b", { defaultValue: "Payment method required. We remind you before renewal, and you can cancel anytime." }) ?? 'Payment method required. We remind you before renewal, and you can cancel anytime.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_a926bf6d7bc2", { defaultValue: "Start my 7-day free trial" }) ?? 'Start my 7-day free trial'), href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
         }
       ],
       trust: [
         {
-          id: 'clear-role', label: 'A clear service', title: 'Know exactly what Norva does',
-          body: 'Your subscription covers the interface, organization, playback and synchronization features.',
-          cta: 'Review the service scope', href: '#trust'
+          id: 'clear-role', label: (globalThis.NorvaI18n?.t("ui_web_d7f02211a4f3", { defaultValue: "A clear service" }) ?? 'A clear service'), title: (globalThis.NorvaI18n?.t("ui_web_c166a2fdd8e2", { defaultValue: "Know exactly what Norva does" }) ?? 'Know exactly what Norva does'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_f93d8ee469fd", { defaultValue: "Your subscription covers the interface, organization, playback and synchronization features." }) ?? 'Your subscription covers the interface, organization, playback and synchronization features.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_6b1f083dc216", { defaultValue: "Review the service scope" }) ?? 'Review the service scope'), href: '#trust'
         },
         {
-          id: 'account-control', label: 'Account controls', title: 'EU-hosted account data',
-          body: 'Access or delete your account data with privacy controls designed around GDPR requirements.',
-          cta: 'Read the FAQ', href: '#faq'
+          id: 'account-control', label: (globalThis.NorvaI18n?.t("ui_web_9db712ff2708", { defaultValue: "Account controls" }) ?? 'Account controls'), title: (globalThis.NorvaI18n?.t("ui_web_e501b9488aae", { defaultValue: "EU-hosted account data" }) ?? 'EU-hosted account data'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_b31171c89a34", { defaultValue: "Access or delete your account data with privacy controls designed around GDPR requirements." }) ?? 'Access or delete your account data with privacy controls designed around GDPR requirements.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_959a6e7de7b8", { defaultValue: "Read the FAQ" }) ?? 'Read the FAQ'), href: '#faq'
         }
       ],
       faq: [
         {
-          id: 'answers-ready', label: 'Before you start', title: 'Answers are close at hand',
-          body: 'Review billing, compatible sources, account controls and device availability in the FAQ.',
-          cta: 'Browse the questions', href: '#faq'
+          id: 'answers-ready', label: (globalThis.NorvaI18n?.t("ui_web_74e492d5d0df", { defaultValue: "Before you start" }) ?? 'Before you start'), title: (globalThis.NorvaI18n?.t("ui_web_0afd7e9951eb", { defaultValue: "Answers are close at hand" }) ?? 'Answers are close at hand'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_f985190d9b84", { defaultValue: "Review billing, compatible sources, account controls and device availability in the FAQ." }) ?? 'Review billing, compatible sources, account controls and device availability in the FAQ.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_18e9f1b3ac6c", { defaultValue: "Browse the questions" }) ?? 'Browse the questions'), href: '#faq'
         }
       ],
       final: [
         {
-          id: 'ready-to-start', label: 'Ready when you are', title: 'Bring every screen together',
-          body: 'Create your Norva space and begin with a 7-day free trial.',
-          cta: 'Start my 7-day free trial', href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
+          id: 'ready-to-start', label: (globalThis.NorvaI18n?.t("ui_web_34ef57043285", { defaultValue: "Ready when you are" }) ?? 'Ready when you are'), title: (globalThis.NorvaI18n?.t("ui_web_1a0a5307cd98", { defaultValue: "Bring every screen together" }) ?? 'Bring every screen together'),
+          body: ((globalThis.NorvaI18n?.t("ui_web_cc10e6c27365", { defaultValue: "Create your Norva space and begin with a 7-day free trial." }) ?? 'Create your Norva space and begin with a 7-day free trial.')),
+          cta: (globalThis.NorvaI18n?.t("ui_web_a926bf6d7bc2", { defaultValue: "Start my 7-day free trial" }) ?? 'Start my 7-day free trial'), href: '/account.html?returnTo=%2Fapp%23home', action: 'signup'
         }
       ]
     };
@@ -1235,13 +1235,13 @@
       if (!pause) return;
       pause.hidden = motion.matches || !hasMultiple;
       pause.setAttribute('aria-pressed', String(userPaused));
-      pause.setAttribute('aria-label', userPaused ? 'Resume guide updates' : 'Pause guide updates');
-      pause.textContent = userPaused ? 'Resume updates' : 'Pause updates';
+      pause.setAttribute('aria-label', userPaused ? (globalThis.NorvaI18n?.t("ui_web_b264de7b5e5d", { defaultValue: "Resume guide updates" }) ?? 'Resume guide updates') : (globalThis.NorvaI18n?.t("ui_web_b48fb7066b1b", { defaultValue: "Pause guide updates" }) ?? 'Pause guide updates'));
+      pause.textContent = userPaused ? (globalThis.NorvaI18n?.t("ui_web_adcaa1076d37", { defaultValue: "Resume updates" }) ?? 'Resume updates') : (globalThis.NorvaI18n?.t("ui_web_28fdf83bd3ed", { defaultValue: "Pause updates" }) ?? 'Pause updates');
     };
 
     const resolveAction = item => {
       if (item.action === 'signup' && signedIn) {
-        return { label: 'Open Norva', href: '/app#home', target: 'app' };
+        return { label: (globalThis.NorvaI18n?.t("ui_web_58b4fd1126eb", { defaultValue: "Open Norva" }) ?? 'Open Norva'), href: '/app#home', target: 'app' };
       }
       if (item.action === 'signup') {
         return { label: item.cta, href: decorateConversionHref(item.href), target: 'account' };
@@ -1317,8 +1317,8 @@
       persist();
       renderMode();
       if (settings.announce && status) {
-        status.textContent = nextMode === 'expanded' ? 'Norva guide expanded.'
-          : nextMode === 'compact' ? 'Norva guide minimized.' : 'Norva guide reduced to its icon.';
+        status.textContent = nextMode === 'expanded' ? (globalThis.NorvaI18n?.t("ui_web_2f23fbaa3620", { defaultValue: "Norva guide expanded." }) ?? 'Norva guide expanded.')
+          : nextMode === 'compact' ? (globalThis.NorvaI18n?.t("ui_web_8474747496f6", { defaultValue: "Norva guide minimized." }) ?? 'Norva guide minimized.') : (globalThis.NorvaI18n?.t("ui_web_fa1d62f847d6", { defaultValue: "Norva guide reduced to its icon." }) ?? 'Norva guide reduced to its icon.');
       }
       if (settings.interaction) {
         emitLandingEvent('context_widget_action', {
@@ -1422,7 +1422,7 @@
       updatePauseControl();
       if (userPaused) stopRotation();
       else scheduleRotation();
-      if (status) status.textContent = userPaused ? 'Guide updates paused.' : 'Guide updates resumed.';
+      if (status) status.textContent = userPaused ? (globalThis.NorvaI18n?.t("ui_web_36959a48e7a4", { defaultValue: "Guide updates paused." }) ?? 'Guide updates paused.') : (globalThis.NorvaI18n?.t("ui_web_8c9574a8cac7", { defaultValue: "Guide updates resumed." }) ?? 'Guide updates resumed.');
       emitLandingEvent('context_widget_action', {
         interaction: userPaused ? 'pause' : 'resume',
         section: currentContext,

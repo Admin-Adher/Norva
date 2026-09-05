@@ -426,7 +426,7 @@ test("all balance consumers use net reversals and reporting restores semantics",
     correctionMigration,
     /when 'reinstatement' then 'commission_restored'/,
   );
-  assert.match(page, /commission_restored: 'Commission restored'/);
+  assert.match(page, /commission_restored: [^\n]*NorvaI18n[^\n]*'Commission restored'/);
   assert.match(worker, /type JobKind = "commission" \| "correction" \| "maturation"/);
   assert.match(
     worker,

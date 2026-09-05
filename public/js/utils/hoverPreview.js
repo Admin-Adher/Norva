@@ -99,8 +99,8 @@ window.NorvaHoverPreview = (() => {
                 <div class="hover-preview-title">${esc(data.title || '')}</div>
                 ${data.meta ? `<div class="hover-preview-meta">${esc(data.meta)}</div>` : ''}
                 <div class="hover-preview-actions">
-                    <button type="button" class="hover-preview-play">▶ Play</button>
-                    <button type="button" class="hover-preview-info">More info</button>
+                    <button type="button" class="hover-preview-play" data-i18n="ui_web_b3b60a22a04f">▶ Play</button>
+                    <button type="button" class="hover-preview-info" data-i18n="ui_web_7dd4d97d9aae">More info</button>
                 </div>
             </div>`;
         el.style.width = `${width}px`;

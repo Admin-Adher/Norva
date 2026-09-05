@@ -58,12 +58,12 @@ test('phone Home reveals a dismissible ecosystem card only after a cloud catalog
   assert.doesNotMatch(method, /norva-multi-device\.svg/);
   assert.match(method, /play\.google\.com\/store\/apps\/details\?id=tv\.norva\.tv/);
   assert.match(method, /data-ecosystem-pair/);
-  assert.match(method, /class="btn btn-primary" data-ecosystem-pair>Pair a TV<\/button>/);
+  assert.match(method, /class="btn btn-primary" data-ecosystem-pair[^>]*>Pair a TV<\/button>/);
   assert.ok(
     method.indexOf('data-ecosystem-pair') < method.indexOf('play.google.com/store/apps/details?id=tv.norva.tv'),
     'Pair a TV must remain the primary action before the install link',
   );
-  assert.match(method, /<span>Need the TV app\?<\/span><strong>Get it on Google Play<\/strong>/);
+  assert.match(method, /<span[^>]*>Need the TV app\?<\/span><strong[^>]*>Get it on Google Play<\/strong>/);
   assert.match(method, /aria-label="Dismiss TV setup tip"/);
   assert.match(method, /Enable notifications/);
 });

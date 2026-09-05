@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="app_name">Norva</string>
-
-    <!-- Lecteur natif : erreurs récupérables et navigation principale. -->
     <string name="player_error_title">Impossible de lire ce titre</string>
     <string name="player_error_pane_title">Problème de lecture</string>
     <string name="player_retry">Réessayer</string>
@@ -28,9 +26,6 @@
     <string name="player_state_generic_terminal_message">La lecture s’est arrêtée de manière inattendue. Réessayez ou revenez au titre.</string>
     <string name="player_change_version">Changer de version</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
-
-    <!-- Sélecteur natif unifié des pistes. Ces libellés restent volontairement
-         neutres quand la langue du fichier exact n’est pas vérifiée. -->
     <string name="player_tracks_button">Audio et sous-titres</string>
     <string name="player_tracks_title">Audio et sous-titres</string>
     <string name="player_tracks_pane_title">Options audio et sous-titres</string>
@@ -40,7 +35,7 @@
     <string name="player_subtitles_selected_description">Sous-titres : %1$s</string>
     <string name="player_audio_section">Audio</string>
     <string name="player_subtitle_section">Sous-titres</string>
-    <string name="player_subtitles_off">Désactivés</string>
+    <string name="player_subtitles_off">Désactivé</string>
     <string name="player_subtitles_off_short">Sous-titres désactivés</string>
     <string name="player_audio_unavailable">Aucune piste audio disponible</string>
     <string name="player_subtitles_unavailable">Aucun sous-titre sélectionnable</string>
@@ -54,13 +49,11 @@
     <string name="player_tracks_close">Fermer</string>
     <string name="player_track_change_failed">Impossible de changer de piste. La lecture continue.</string>
     <string name="player_tracks_selected_description">Audio : %1$s. Sous-titres : %2$s.</string>
-    <string name="player_track_selected_state">Sélectionnée</string>
+    <string name="player_track_selected_state">Sélectionné</string>
     <string name="player_track_not_selected_state">Non sélectionnée</string>
     <string name="player_subtitles_burned_in">%1$s · incrustés dans l’image</string>
     <string name="player_subtitles_burned_in_unknown">Sous-titres incrustés · toujours affichés</string>
     <string name="player_subtitles_burned_in_detail">Toujours affichés ; impossible à désactiver</string>
-
-    <!-- Commandes et retours d’état du lecteur. -->
     <string name="player_lock">Verrouiller les commandes</string>
     <string name="player_unlock">Déverrouiller les commandes</string>
     <string name="player_controls_locked">Commandes de lecture verrouillées</string>
@@ -89,8 +82,6 @@
     <string name="player_resize_feedback">Affichage vidéo : %1$s</string>
     <string name="player_playback_speed_section">Vitesse de lecture</string>
     <string name="player_playback_speed_normal">Normale</string>
-
-    <!-- Variantes du direct, reconnexion et Chromecast. -->
     <string name="player_version">Version</string>
     <string name="player_version_title">Choisir une version</string>
     <string name="player_version_change_description">Changer de version ou de qualité</string>
@@ -108,6 +99,211 @@
     <string name="player_pip_pause">Mettre en pause</string>
     <string name="player_pip_play">Lire</string>
     <string name="player_pip_play_pause">Lire ou mettre en pause</string>
-
-    <!-- Downloads intentionally use the default English resources on every locale. -->
+    <string name="downloads_kicker">NORVA HORS LIGNE</string>
+    <string name="downloads_title">Téléchargements</string>
+    <string name="downloads_close">Fermer</string>
+    <string name="downloads_overview">APERÇU HORS LIGNE</string>
+    <string name="downloads_overview_checking">Vérification de votre bibliothèque</string>
+    <string name="downloads_overview_loading_caption">Vous recherchez des vidéos téléchargées et des transferts actifs…</string>
+    <string name="downloads_overview_ready">Prêt à regarder</string>
+    <string name="downloads_overview_moving">Préparation de votre prochaine vidéo</string>
+    <string name="downloads_overview_attention">Un téléchargement nécessite de l\'attention</string>
+    <string name="downloads_overview_empty">Créez votre bibliothèque hors ligne</string>
+    <string name="downloads_overview_moving_caption">Les téléchargements se poursuivent en toute sécurité en arrière-plan.</string>
+    <string name="downloads_overview_attention_caption">Vos vidéos téléchargées restent disponibles pendant que vous corrigez l\'élément ci-dessous.</string>
+    <string name="downloads_overview_empty_caption">Enregistrez un film ou un épisode avant de vous déconnecter.</string>
+    <plurals name="downloads_overview_saved_titles">
+        <item quantity="one">%1$d vidéo téléchargée est prête à être regardée sans connexion.</item>
+        <item quantity="many">%1$d vidéos téléchargées peuvent être visionnées sans connexion.</item>
+        <item quantity="other">%1$d vidéos téléchargées peuvent être visionnées sans connexion.</item>
+    </plurals>
+    <string name="downloads_ready">Prêt</string>
+    <string name="downloads_moving">En cours</string>
+    <string name="downloads_attention">Attention</string>
+    <string name="downloads_storage_used">%1$s utilisés</string>
+    <string name="downloads_storage_free">%1$s libres</string>
+    <string name="downloads_storage_description">Stockage hors ligne : %1$s de stockage utilisé, %2$s de stockage disponible</string>
+    <string name="downloads_rules">Règles de téléchargement</string>
+    <string name="downloads_rules_summary">%1$s · %2$s</string>
+    <string name="downloads_rules_wifi_only_on">Wi-Fi uniquement</string>
+    <string name="downloads_rules_wifi_only_off">Données mobiles autorisées</string>
+    <string name="downloads_rules_smart_on">Téléchargements intelligents activés</string>
+    <string name="downloads_rules_smart_off">Téléchargements intelligents désactivés</string>
+    <string name="downloads_rules_description">Paramètres de téléchargement. %1$s. %2$s. Appuyez deux fois sur %3$s</string>
+    <string name="downloads_rules_expanded">Paramètres de téléchargement étendus</string>
+    <string name="downloads_rules_collapsed">Paramètres de téléchargement réduits</string>
+    <string name="downloads_wifi_only">Wi-Fi uniquement</string>
+    <string name="downloads_wifi_only_subtitle">Téléchargez uniquement en utilisant le Wi-Fi pour réduire l\'utilisation des données mobiles</string>
+    <string name="downloads_wifi_only_description">Téléchargez uniquement en utilisant le Wi-Fi pour réduire l\'utilisation des données mobiles</string>
+    <string name="downloads_wifi_only_on">Wi-Fi activé uniquement</string>
+    <string name="downloads_wifi_only_off">Wi-Fi uniquement désactivé</string>
+    <string name="downloads_smart">Téléchargements intelligents</string>
+    <string name="downloads_smart_subtitle">Lorsqu\'un épisode se termine, mettez automatiquement le suivant en file d\'attente</string>
+    <string name="downloads_smart_description">Mettre automatiquement l\'épisode suivant en file d\'attente</string>
+    <string name="downloads_smart_on">Téléchargements intelligents activés</string>
+    <string name="downloads_smart_off">Téléchargements intelligents désactivés</string>
+    <string name="downloads_state_on">Activé</string>
+    <string name="downloads_state_off">Désactivé</string>
+    <string name="downloads_toggle_description">%1$s. %2$s</string>
+    <string name="downloads_toggle_description_with_state">%1$s. %2$s. %3$s</string>
+    <string name="downloads_turn_on">Allumez %1$s</string>
+    <string name="downloads_turn_off">Éteignez %1$s</string>
+    <string name="downloads_clear_all">Tout effacer</string>
+    <string name="downloads_clear_all_description">Effacer tous les téléchargements</string>
+    <string name="downloads_clear_all_disabled_description">Effacez tous les téléchargements. Désactivé car il n\'y a pas de téléchargements</string>
+    <string name="downloads_loading">Chargement de votre bibliothèque hors ligne…</string>
+    <string name="downloads_empty">Aucun téléchargement pour l\'instant.\nAppuyez sur Télécharger un film ou un épisode pour le regarder hors ligne.</string>
+    <plurals name="downloads_summary_titles">
+        <item quantity="one">%1$d titre · %2$s de stockage utilisé · %3$s de stockage disponible</item>
+        <item quantity="many">%1$d titres · %2$s d\'espace de stockage utilisé · %3$s d\'espace de stockage disponible</item>
+        <item quantity="other">%1$d titres · %2$s d\'espace de stockage utilisé · %3$s d\'espace de stockage disponible</item>
+    </plurals>
+    <string name="downloads_active">Téléchargement de %1$s — %2$d%%</string>
+    <plurals name="downloads_active_with_queue">
+        <item quantity="one">Téléchargement de %1$s — %2$d%% · %3$d dans la file d\'attente</item>
+        <item quantity="many">Téléchargement de %1$s — %2$d%% · %3$d dans la file d\'attente</item>
+        <item quantity="other">Téléchargement de %1$s — %2$d%% · %3$d dans la file d\'attente</item>
+    </plurals>
+    <plurals name="downloads_in_queue">
+        <item quantity="one">%1$d dans la file d\'attente</item>
+        <item quantity="many">%1$d dans la file d\'attente</item>
+        <item quantity="other">%1$d dans la file d\'attente</item>
+    </plurals>
+    <string name="downloads_queue_waiting_wifi">%1$s · en attente du Wi-Fi</string>
+    <string name="downloads_refresh_failed">Les téléchargements n\'ont pas pu être actualisés. Essayer à nouveau.</string>
+    <plurals name="downloads_a11y_progress">
+        <item quantity="one">%1$s télécharger %2$d pourcentage</item>
+        <item quantity="many">%1$s télécharger %2$d pourcentage</item>
+        <item quantity="other">%1$s télécharger %2$d pourcentage</item>
+    </plurals>
+    <string name="downloads_a11y_ready_offline">%1$s est prêt hors ligne</string>
+    <string name="downloads_a11y_failed">Le téléchargement de %1$s a échoué. Vérifiez votre connexion et réessayez.</string>
+    <string name="downloads_fallback_title">Titre</string>
+    <plurals name="downloads_progress_description">
+        <item quantity="one">Téléchargement %1$s, pourcentage %2$d</item>
+        <item quantity="many">Téléchargement %1$s, pourcentage %2$d</item>
+        <item quantity="other">Téléchargement %1$s, pourcentage %2$d</item>
+    </plurals>
+    <string name="downloads_active_transfer">Transfert actif</string>
+    <string name="downloads_first_in_queue">Premier dans la file d\'attente</string>
+    <string name="downloads_paused_focus">En pause : reprenez lorsque vous êtes prêt</string>
+    <string name="downloads_waiting_wifi_focus">En attente du Wi-Fi</string>
+    <string name="downloads_ordered_queue">À suivre</string>
+    <string name="downloads_ready_offline">Prêt hors ligne</string>
+    <string name="downloads_needs_attention">A besoin d\'attention</string>
+    <string name="downloads_attention_label">ACTION NÉCESSAIRE</string>
+    <plurals name="downloads_queue_count">
+        <item quantity="one">%1$d titre dans la file d\'attente de téléchargement</item>
+        <item quantity="many">%1$d titres dans la file d\'attente de téléchargement</item>
+        <item quantity="other">%1$d titres dans la file d\'attente de téléchargement</item>
+    </plurals>
+    <plurals name="downloads_ready_count">
+        <item quantity="one">%1$d vidéo téléchargée</item>
+        <item quantity="many">%1$d vidéos téléchargées</item>
+        <item quantity="other">%1$d vidéos téléchargées</item>
+    </plurals>
+    <plurals name="downloads_attention_count">
+        <item quantity="one">%1$d article à revoir</item>
+        <item quantity="many">%1$d éléments à revoir</item>
+        <item quantity="other">%1$d éléments à revoir</item>
+    </plurals>
+    <string name="downloads_state_downloading">TÉLÉCHARGEMENT</string>
+    <string name="downloads_state_paused">EN PAUSE</string>
+    <string name="downloads_state_queued">EN QUEUE</string>
+    <string name="downloads_state_waiting_wifi">EN ATTENTE DU WI-FI</string>
+    <string name="downloads_paused_overview">En pause %1$s — %2$d%%</string>
+    <plurals name="downloads_paused_with_pending">
+        <item quantity="one">%1$s · %2$d titre dans la file d\'attente de téléchargement</item>
+        <item quantity="many">%1$s · %2$d titres dans la file d\'attente de téléchargement</item>
+        <item quantity="other">%1$s · %2$d titres dans la file d\'attente de téléchargement</item>
+    </plurals>
+    <plurals name="downloads_episode_count">
+        <item quantity="one">Épisode %1$d</item>
+        <item quantity="many">Épisodes de %1$d</item>
+        <item quantity="other">Épisodes de %1$d</item>
+    </plurals>
+    <string name="downloads_season_number">Saison %1$d</string>
+    <string name="downloads_episodes">Épisodes</string>
+    <string name="downloads_episode">Épisode</string>
+    <string name="downloads_episode_number">Épisode %1$d</string>
+    <string name="downloads_episode_short_title">E%1$d · %2$s</string>
+    <string name="downloads_state_collapsed">Replié</string>
+    <string name="downloads_state_expanded">Déplié</string>
+    <string name="downloads_expand">déplier</string>
+    <string name="downloads_collapse">replier</string>
+    <string name="downloads_section_description">%1$s. %2$s. %3$s. Appuyez deux fois sur %4$s.</string>
+    <string name="downloads_section_expanded">%1$s étendu</string>
+    <string name="downloads_section_collapsed">%1$s effondré</string>
+    <string name="downloads_action_play">Lire</string>
+    <string name="downloads_action_delete">Supprimer</string>
+    <string name="downloads_action_pause">Mettre en pause</string>
+    <string name="downloads_action_cancel">Annuler</string>
+    <string name="downloads_action_resume">Reprendre</string>
+    <string name="downloads_action_mobile_data">Données mobiles</string>
+    <string name="downloads_action_allow_mobile_data">Autoriser les données mobiles pour</string>
+    <string name="downloads_action_move_earlier">Avancer dans la file</string>
+    <string name="downloads_action_move_later">Reculer dans la file</string>
+    <string name="downloads_action_retry">Réessayer</string>
+    <string name="downloads_action_manage">Gérer</string>
+    <string name="downloads_action_done">Terminé</string>
+    <string name="downloads_action_for_title">%1$s %2$s</string>
+    <string name="downloads_action_cancel_download">Annuler le téléchargement</string>
+    <string name="downloads_action_delete_all">Supprimer tout</string>
+    <string name="downloads_action_keep">Garder</string>
+    <string name="downloads_action_keep_description">Conserver les téléchargements</string>
+    <string name="downloads_manage_show_description">Afficher les commandes de suppression pour les titres prêts</string>
+    <string name="downloads_manage_hide_description">Masquer les commandes de suppression pour les titres prêts</string>
+    <string name="downloads_manage_shown">Les boutons de suppression sont visibles</string>
+    <string name="downloads_manage_hidden">Les boutons de suppression sont masqués</string>
+    <string name="downloads_ready_gesture_hint">Appuyez pour regarder ou ouvrir une série. Appuyez et maintenez un titre pour le gérer.</string>
+    <string name="downloads_ready_movie_description">Regardez %1$s. Appuyez et maintenez pour gérer ce film.</string>
+    <string name="downloads_ready_series_description">Ouvrez les épisodes enregistrés %1$s, %2$d. Appuyez et maintenez pour gérer cette série.</string>
+    <string name="downloads_ready_episode_description">Regardez %1$s. Appuyez et maintenez pour gérer cet épisode.</string>
+    <string name="downloads_long_press_delete">Supprimer %1$s</string>
+    <string name="downloads_long_press_delete_series">Supprimer les épisodes enregistrés de %1$s</string>
+    <string name="downloads_delete_series_description">Supprimer tous les épisodes enregistrés de %1$s</string>
+    <string name="downloads_series_details">DÉTAILS DE LA SÉRIE</string>
+    <string name="downloads_series_opened">Épisodes %1$s ouverts</string>
+    <string name="downloads_close_series">Fermer les épisodes de la série</string>
+    <string name="downloads_mutation_paused">Téléchargement interrompu</string>
+    <string name="downloads_mutation_resumed">Téléchargement repris</string>
+    <string name="downloads_mutation_mobile_data_allowed">Données mobiles autorisées pour ce téléchargement</string>
+    <string name="downloads_mutation_moved_earlier">Déplacé plus tôt dans la file d\'attente</string>
+    <string name="downloads_mutation_moved_later">Déplacé plus tard dans la file d\'attente</string>
+    <string name="downloads_mutation_retry_queued">Téléchargement en file d\'attente pour réessayer</string>
+    <string name="downloads_mutation_removal_requested">Suppression demandée</string>
+    <string name="downloads_mutation_removing_all">Supprimer tous les téléchargements</string>
+    <string name="downloads_mutation_failed">Impossible de mettre à jour ce téléchargement. Essayer à nouveau.</string>
+    <string name="downloads_status_saved">%1$s · Enregistré</string>
+    <string name="downloads_status_downloading_progress">Téléchargement de %1$d%% · %2$s / %3$s</string>
+    <string name="downloads_status_downloading">Téléchargement…</string>
+    <string name="downloads_status_paused_progress">En pause · %1$s / %2$s</string>
+    <string name="downloads_status_paused">En pause · %1$s</string>
+    <string name="downloads_status_queued">En file d\'attente</string>
+    <string name="downloads_status_failed">Échec · Vérifiez votre connexion et réessayez</string>
+    <string name="downloads_status_unavailable">Indisponible</string>
+    <string name="downloads_file_unavailable">Ce téléchargement n\'est pas disponible. Téléchargez-le à nouveau.</string>
+    <string name="downloads_title_with_subtitle">%1$s — %2$s</string>
+    <string name="downloads_confirm_delete_title">Supprimer le téléchargement ?</string>
+    <string name="downloads_confirm_cancel_title">Annuler le téléchargement ?</string>
+    <string name="downloads_confirm_delete_message">Supprimer « %1$s » ? Cela libère le stockage qu’il utilise.</string>
+    <string name="downloads_confirm_cancel_message">Annuler et supprimer « %1$s » ? Cela libère le stockage qu’il utilise.</string>
+    <string name="downloads_confirm_delete_all_title">Supprimer tous les téléchargements ?</string>
+    <plurals name="downloads_confirm_delete_all_message">
+        <item quantity="one">Supprimer le téléchargement de %1$d et libérer son stockage ?</item>
+        <item quantity="many">Supprimer tous les téléchargements %1$d et libérer leur stockage ?</item>
+        <item quantity="other">Supprimer tous les téléchargements %1$d et libérer leur stockage ?</item>
+    </plurals>
+    <string name="downloads_confirm_delete_series_title">Supprimer les téléchargements de séries ?</string>
+    <plurals name="downloads_confirm_delete_series_message">
+        <item quantity="one">Supprimer l\'épisode enregistré de « %1$s » ? Cela libère le stockage qu’il utilise.</item>
+        <item quantity="many">Supprimer tous les épisodes enregistrés %2$d de « %1$s » ? Cela libère le stockage qu’ils utilisent.</item>
+        <item quantity="other">Supprimer tous les épisodes enregistrés %2$d de « %1$s » ? Cela libère le stockage qu’ils utilisent.</item>
+    </plurals>
+    <string name="downloads_size_zero">0 Mo</string>
+    <string name="downloads_size_mb">%1$s MB</string>
+    <string name="downloads_size_gb">%1$s FR</string>
+    <string name="native_back_exit">Appuyez à nouveau pour quitter</string>
+    <string name="native_downloads_preparing">Préparation des téléchargements…</string>
+    <string name="native_downloads_item">Téléchargement de %1$s</string>
 </resources>

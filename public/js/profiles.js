@@ -314,7 +314,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     return state.profiles;
   }
 
-  function promptProfileLoadRetry(continueLabel = 'Continue for now') {
+  function promptProfileLoadRetry(continueLabel = (globalThis.NorvaI18n?.t("ui_web_6488ced8aa1a", { defaultValue: "Continue for now" }) ?? 'Continue for now')) {
     if (loadFailureFlight) return loadFailureFlight;
 
     injectStyles();
@@ -335,15 +335,15 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     brand.appendChild(logo);
     brand.appendChild(el('span', null, 'Norva'));
     panel.appendChild(brand);
-    const title = el('h1', 'np-title', 'Profiles are temporarily unavailable');
+    const title = el('h1', 'np-title', (globalThis.NorvaI18n?.t("ui_web_d19f1f3eb9f1", { defaultValue: "Profiles are temporarily unavailable" }) ?? 'Profiles are temporarily unavailable'));
     panel.appendChild(title);
     panel.appendChild(el('div', 'np-subtitle',
-      'Check your connection and try again. Your existing profile data is safe.'));
+      (globalThis.NorvaI18n?.t("ui_web_276f1ec0987d", { defaultValue: "Check your connection and try again. Your existing profile data is safe." }) ?? 'Check your connection and try again. Your existing profile data is safe.')));
     const status = el('div', 'np-status', '');
     setProfileStatus(status, '', false);
     panel.appendChild(status);
     const actions = el('div', 'np-actions');
-    const retry = el('button', 'np-btn np-btn-primary', 'Try again');
+    const retry = el('button', 'np-btn np-btn-primary', (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'));
     retry.type = 'button';
     const continueButton = el('button', 'np-btn np-btn-ghost', continueLabel);
     continueButton.type = 'button';
@@ -369,13 +369,13 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     settleLoadFailure = finish;
     retry.addEventListener('click', async () => {
       setPanelBusy(panel, true);
-      setProfileStatus(status, 'Loading profiles…', false);
+      setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_16b0bbfd1d11", { defaultValue: "Loading profiles…" }) ?? 'Loading profiles…'), false);
       try {
         const profiles = await loadProfiles();
         finish(profiles);
       } catch (_) {
         setPanelBusy(panel, false);
-        setProfileStatus(status, 'Profiles still could not be loaded. Check your connection and try again.', true);
+        setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_cdd40118607f", { defaultValue: "Profiles still could not be loaded. Check your connection and try again." }) ?? 'Profiles still could not be loaded. Check your connection and try again.'), true);
         try { retry.focus(); } catch (_) { /* noop */ }
       }
     });
@@ -508,7 +508,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     if (state.mode === 'select' && resolveSelect) return; // no exit at the forced pick
     const btn = el('button', 'np-close modal-close', '✕');
     btn.type = 'button';
-    btn.setAttribute('aria-label', 'Back');
+    btn.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_76900f1bfd16", { defaultValue: "Back" }) ?? 'Back'));
     btn.onclick = handleOverlayBack;
     overlayEl.appendChild(btn);
   }
@@ -561,7 +561,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       brand.appendChild(el('span', null, 'Norva'));
       panel.appendChild(brand);
     }
-    const title = el('h1', 'np-title', manage ? 'Manage profiles' : "Who's watching?");
+    const title = el('h1', 'np-title', manage ? (globalThis.NorvaI18n?.t("ui_web_4be8b4595698", { defaultValue: "Manage profiles" }) ?? 'Manage profiles') : (globalThis.NorvaI18n?.t("ui_web_d0ec3b8c7167", { defaultValue: "Who's watching?" }) ?? "Who's watching?"));
     bindDialogTitle(title);
     panel.appendChild(title);
 
@@ -578,8 +578,8 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       card.type = 'button';
       card.dataset.profileId = String(p.id);
       card.setAttribute('aria-label', manage
-        ? `Edit profile ${p.name}`
-        : (showLock ? `${p.name}, profile locked` : `Watch as ${p.name}`));
+        ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_6036ee0ae6af", {defaultValue: "Edit profile {{p0}}", p0:(p.name)}) : `Edit profile ${p.name}`)
+        : (showLock ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_144d98033178", {defaultValue: "{{p0}}, profile locked", p0:(p.name)}) : `${p.name}, profile locked`) : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_56f09f741fe9", {defaultValue: "Watch as {{p0}}", p0:(p.name)}) : `Watch as ${p.name}`)));
       if (!manage && !showLock && p.id === activeId) card.setAttribute('aria-current', 'true');
       const av = el('div', 'np-avatar');
       av.appendChild(avatarImg(p.avatar_id, ''));
@@ -600,16 +600,16 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     if (!manage && state.canCreate) {
       const add = el('button', 'np-card np-add');
       add.type = 'button';
-      add.setAttribute('aria-label', 'Add profile');
+      add.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_f964be7d8a96", { defaultValue: "Add profile" }) ?? 'Add profile'));
       add.appendChild(el('div', 'np-avatar np-avatar-add', '+'));
-      add.appendChild(el('span', 'np-name', 'Add profile'));
+      add.appendChild(el('span', 'np-name', (globalThis.NorvaI18n?.t("ui_web_f964be7d8a96", { defaultValue: "Add profile" }) ?? 'Add profile')));
       add.addEventListener('click', openAdd);
       grid.appendChild(add);
     }
     panel.appendChild(grid);
 
     const actions = el('div', 'np-actions');
-    const manageBtn = el('button', 'np-btn np-btn-ghost', manage ? 'Done' : 'Manage profiles');
+    const manageBtn = el('button', 'np-btn np-btn-ghost', manage ? (globalThis.NorvaI18n?.t("ui_web_11a6767d5674", { defaultValue: "Done" }) ?? 'Done') : (globalThis.NorvaI18n?.t("ui_web_4be8b4595698", { defaultValue: "Manage profiles" }) ?? 'Manage profiles'));
     manageBtn.type = 'button';
     manageBtn.dataset.action = 'manage';
     manageBtn.addEventListener('click', () => {
@@ -656,7 +656,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     overlayEl.innerHTML = '';
     const panel = el('div', 'np-panel np-panel-edit');
     panel.setAttribute('aria-busy', 'false');
-    const title = el('h1', 'np-title', isEdit ? 'Edit profile' : 'Add profile');
+    const title = el('h1', 'np-title', isEdit ? (globalThis.NorvaI18n?.t("ui_web_15c4aa13037e", { defaultValue: "Edit profile" }) ?? 'Edit profile') : (globalThis.NorvaI18n?.t("ui_web_f964be7d8a96", { defaultValue: "Add profile" }) ?? 'Add profile'));
     bindDialogTitle(title);
     panel.appendChild(title);
 
@@ -670,14 +670,14 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     nameInput.id = 'np-profile-name';
     nameInput.type = 'text';
     nameInput.maxLength = 40;
-    nameInput.placeholder = 'Profile name';
+    nameInput.placeholder = (globalThis.NorvaI18n?.t("ui_web_d3663280e101", { defaultValue: "Profile name" }) ?? 'Profile name');
     nameInput.value = isEdit ? (state.editing.name || '') : '';
-    const nameLabel = el('label', 'np-field-label', 'Profile name');
+    const nameLabel = el('label', 'np-field-label', (globalThis.NorvaI18n?.t("ui_web_d3663280e101", { defaultValue: "Profile name" }) ?? 'Profile name'));
     nameLabel.htmlFor = nameInput.id;
     panel.appendChild(nameLabel);
     panel.appendChild(nameInput);
 
-    const avatarsLabel = el('div', 'np-avatars-label', 'Choose an avatar');
+    const avatarsLabel = el('div', 'np-avatars-label', (globalThis.NorvaI18n?.t("ui_web_a54ae2283964", { defaultValue: "Choose an avatar" }) ?? 'Choose an avatar'));
     avatarsLabel.id = 'np-avatar-label';
     panel.appendChild(avatarsLabel);
     const avatars = el('div', 'np-avatars');
@@ -687,7 +687,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       const id = avatarIdAt(i);
       const choice = el('button', 'np-avatar-choice' + (id === state.pickedAvatar ? ' np-picked' : ''));
       choice.type = 'button';
-      choice.setAttribute('aria-label', `Choose avatar ${i + 1}`);
+      choice.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_859493ae6086", {defaultValue: "Choose avatar {{p0}}", p0:(i + 1)}) : `Choose avatar ${i + 1}`));
       choice.setAttribute('aria-pressed', id === state.pickedAvatar ? 'true' : 'false');
       choice.appendChild(avatarImg(id, ''));
       choice.addEventListener('click', () => {
@@ -705,13 +705,13 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
 
     const actions = el('div', 'np-actions');
 
-    const save = el('button', 'np-btn np-btn-primary', isEdit ? 'Save' : 'Create');
+    const save = el('button', 'np-btn np-btn-primary', isEdit ? (globalThis.NorvaI18n?.t("ui_web_1509f561f241", { defaultValue: "Save" }) ?? 'Save') : (globalThis.NorvaI18n?.t("ui_web_4759498ac2a7", { defaultValue: "Create" }) ?? 'Create'));
     save.type = 'button';
     save.addEventListener('click', async () => {
       const name = (nameInput.value || '').trim();
-      if (!name) { setProfileStatus(status, 'Please enter a name.', true); nameInput.focus(); return; }
+      if (!name) { setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_d1f5782591c4", { defaultValue: "Please enter a name." }) ?? 'Please enter a name.'), true); nameInput.focus(); return; }
       setPanelBusy(panel, true);
-      setProfileStatus(status, 'Saving…', false);
+      setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_23e39291d613", { defaultValue: "Saving…" }) ?? 'Saving…'), false);
       try {
         if (isEdit) await profilesApi().update(state.editing.id, { name, avatarId: state.pickedAvatar, setupCompleted: true });
         else await profilesApi().create({ name, avatarId: state.pickedAvatar });
@@ -723,7 +723,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
         render();
       } catch (e) {
         console.warn('[Profiles] Profile save failed.', e);
-        setProfileStatus(status, 'Could not save the profile. Check your connection and try again.', true);
+        setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_4072b8c3ce0d", { defaultValue: "Could not save the profile. Check your connection and try again." }) ?? 'Could not save the profile. Check your connection and try again.'), true);
         setPanelBusy(panel, false);
         try { save.focus(); } catch (_) { /* noop */ }
       }
@@ -731,23 +731,23 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     actions.appendChild(save);
 
     if (isEdit && state.profiles.length > 1) {
-      const del = el('button', 'np-btn np-btn-danger', 'Delete');
+      const del = el('button', 'np-btn np-btn-danger', (globalThis.NorvaI18n?.t("ui_web_e2d0a54968ea", { defaultValue: "Delete" }) ?? 'Delete'));
       del.type = 'button';
-      del.setAttribute('aria-label', `Delete profile ${state.editing.name || ''}`.trim());
+      del.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_c8ce7adfc856", {defaultValue: "Delete profile {{p0}}", p0:(state.editing.name || '')}) : `Delete profile ${state.editing.name || ''}`).trim());
       del.addEventListener('click', async () => {
         // Use the shared focus-trapped confirmation on every platform. The profile
         // dialog becomes inert while the nested destructive decision is open.
         if (!window.NorvaModal || typeof window.NorvaModal.confirm !== 'function') {
-          setProfileStatus(status, 'Confirmation is unavailable. The profile was not deleted.', true);
+          setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_1ec67c9114b0", { defaultValue: "Confirmation is unavailable. The profile was not deleted." }) ?? 'Confirmation is unavailable. The profile was not deleted.'), true);
           return;
         }
         nestedDialogOpen = true;
         const pendingConfirmation = window.NorvaModal.confirm(
-          'Its history, favorites and viewing progress will be removed.',
+          (globalThis.NorvaI18n?.t("ui_web_98544b215f18", { defaultValue: "Its history, favorites and viewing progress will be removed." }) ?? 'Its history, favorites and viewing progress will be removed.'),
           {
-            title: 'Delete this profile?',
-            confirmLabel: 'Delete',
-            cancelLabel: 'Keep profile',
+            title: (globalThis.NorvaI18n?.t("ui_web_8c7f9cf16e17", { defaultValue: "Delete this profile?" }) ?? 'Delete this profile?'),
+            confirmLabel: (globalThis.NorvaI18n?.t("ui_web_e2d0a54968ea", { defaultValue: "Delete" }) ?? 'Delete'),
+            cancelLabel: (globalThis.NorvaI18n?.t("ui_web_8e76f0627b3b", { defaultValue: "Keep profile" }) ?? 'Keep profile'),
             danger: true
           }
         );
@@ -771,7 +771,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
           return;
         }
         setPanelBusy(panel, true);
-        setProfileStatus(status, 'Deleting…', false);
+        setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_43b5894c3e4e", { defaultValue: "Deleting…" }) ?? 'Deleting…'), false);
         try {
           const wasActive = profilesApi().getActiveId() === state.editing.id;
           await profilesApi().remove(state.editing.id);
@@ -790,7 +790,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
           render();
         } catch (e) {
           console.warn('[Profiles] Profile deletion failed.', e);
-          setProfileStatus(status, 'Could not delete the profile. Check your connection and try again.', true);
+          setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_c67394731c8c", { defaultValue: "Could not delete the profile. Check your connection and try again." }) ?? 'Could not delete the profile. Check your connection and try again.'), true);
           setPanelBusy(panel, false);
           try { del.focus(); } catch (_) { /* noop */ }
         }
@@ -798,7 +798,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       actions.appendChild(del);
     }
 
-    const cancel = el('button', 'np-btn np-btn-ghost', 'Cancel');
+    const cancel = el('button', 'np-btn np-btn-ghost', (globalThis.NorvaI18n?.t("ui_web_19766ed6ccb2", { defaultValue: "Cancel" }) ?? 'Cancel'));
     cancel.type = 'button';
     cancel.addEventListener('click', () => {
       if (isEdit) state.focusReturnProfileId = state.editing?.id || null;
@@ -837,10 +837,10 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     brand.appendChild(el('span', null, 'Norva'));
     panel.appendChild(brand);
 
-    const title = el('h1', 'np-title', 'Set up your profile');
+    const title = el('h1', 'np-title', (globalThis.NorvaI18n?.t("ui_web_f46704147850", { defaultValue: "Set up your profile" }) ?? 'Set up your profile'));
     bindDialogTitle(title);
     panel.appendChild(title);
-    panel.appendChild(el('div', 'np-subtitle', 'Pick a name and an avatar — you can change them anytime.'));
+    panel.appendChild(el('div', 'np-subtitle', (globalThis.NorvaI18n?.t("ui_web_481af72ae3ae", { defaultValue: "Pick a name and an avatar — you can change them anytime." }) ?? 'Pick a name and an avatar — you can change them anytime.')));
 
     const preview = el('div', 'np-avatar np-avatar-lg');
     preview.setAttribute('aria-hidden', 'true');
@@ -852,14 +852,14 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     nameInput.id = 'np-profile-name';
     nameInput.type = 'text';
     nameInput.maxLength = 40;
-    nameInput.placeholder = 'Profile name';
+    nameInput.placeholder = (globalThis.NorvaI18n?.t("ui_web_d3663280e101", { defaultValue: "Profile name" }) ?? 'Profile name');
     nameInput.value = p.name || '';
-    const nameLabel = el('label', 'np-field-label', 'Profile name');
+    const nameLabel = el('label', 'np-field-label', (globalThis.NorvaI18n?.t("ui_web_d3663280e101", { defaultValue: "Profile name" }) ?? 'Profile name'));
     nameLabel.htmlFor = nameInput.id;
     panel.appendChild(nameLabel);
     panel.appendChild(nameInput);
 
-    const avatarsLabel = el('div', 'np-avatars-label', 'Choose an avatar');
+    const avatarsLabel = el('div', 'np-avatars-label', (globalThis.NorvaI18n?.t("ui_web_a54ae2283964", { defaultValue: "Choose an avatar" }) ?? 'Choose an avatar'));
     avatarsLabel.id = 'np-avatar-label';
     panel.appendChild(avatarsLabel);
     const avatars = el('div', 'np-avatars');
@@ -869,7 +869,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       const id = avatarIdAt(i);
       const choice = el('button', 'np-avatar-choice' + (id === state.pickedAvatar ? ' np-picked' : ''));
       choice.type = 'button';
-      choice.setAttribute('aria-label', `Choose avatar ${i + 1}`);
+      choice.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_859493ae6086", {defaultValue: "Choose avatar {{p0}}", p0:(i + 1)}) : `Choose avatar ${i + 1}`));
       choice.setAttribute('aria-pressed', id === state.pickedAvatar ? 'true' : 'false');
       choice.appendChild(avatarImg(id, ''));
       choice.addEventListener('click', () => {
@@ -886,23 +886,23 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     panel.appendChild(status);
 
     const actions = el('div', 'np-actions');
-    const save = el('button', 'np-btn np-btn-primary', "Let's go");
+    const save = el('button', 'np-btn np-btn-primary', (globalThis.NorvaI18n?.t("ui_web_b59bed0f2717", { defaultValue: "Let's go" }) ?? "Let's go"));
     save.type = 'button';
-    const skip = el('button', 'np-btn np-btn-ghost', 'Skip for now');
+    const skip = el('button', 'np-btn np-btn-ghost', (globalThis.NorvaI18n?.t("ui_web_b58eb52c8810", { defaultValue: "Skip for now" }) ?? 'Skip for now'));
     skip.type = 'button';
 
     save.addEventListener('click', async () => {
       const name = (nameInput.value || '').trim();
-      if (!name) { setProfileStatus(status, 'Please enter a name.', true); nameInput.focus(); return; }
+      if (!name) { setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_d1f5782591c4", { defaultValue: "Please enter a name." }) ?? 'Please enter a name.'), true); nameInput.focus(); return; }
       setPanelBusy(panel, true);
-      setProfileStatus(status, 'Saving…', false);
+      setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_23e39291d613", { defaultValue: "Saving…" }) ?? 'Saving…'), false);
       try {
         await profilesApi().update(p.id, { name, avatarId: state.pickedAvatar, setupCompleted: true });
         setPanelBusy(panel, false);
         finishSetup(p.id);
       } catch (e) {
         console.warn('[Profiles] Initial profile setup failed.', e);
-        setProfileStatus(status, 'Could not save your profile. Check your connection and try again.', true);
+        setProfileStatus(status, (globalThis.NorvaI18n?.t("ui_web_4efe405105f3", { defaultValue: "Could not save your profile. Check your connection and try again." }) ?? 'Could not save your profile. Check your connection and try again.'), true);
         setPanelBusy(panel, false);
         try { save.focus(); } catch (_) { /* noop */ }
       }
@@ -943,11 +943,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
   // we can't open a checkout — point the user to their phone/web instead.
   function handleLockedProfile(p) {
     if (IS_TV) {
-      const msg = 'This profile is locked on your current plan. Upgrade to Norva Family from your phone or the web to unlock it — your profile is kept safe until then.';
+      const msg = (globalThis.NorvaI18n?.t("ui_web_44674fd9efd7", { defaultValue: "This profile is locked on your current plan. Upgrade to Norva Family from your phone or the web to unlock it — your profile is kept safe until then." }) ?? 'This profile is locked on your current plan. Upgrade to Norva Family from your phone or the web to unlock it — your profile is kept safe until then.');
       if (window.NorvaModal && typeof window.NorvaModal.alert === 'function') {
         const opener = document.activeElement;
         nestedDialogOpen = true;
-        const pendingNotice = window.NorvaModal.alert(msg, { title: 'Profile locked' });
+        const pendingNotice = window.NorvaModal.alert(msg, { title: (globalThis.NorvaI18n?.t("ui_web_7105c3d0f388", { defaultValue: "Profile locked" }) ?? 'Profile locked') });
         focusNewestNorvaModal();
         if (overlayEl) {
           overlayEl.setAttribute('aria-hidden', 'true');
@@ -1014,7 +1014,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     try {
       list = await loadProfiles();
     } catch (_) {
-      list = await promptProfileLoadRetry('Continue for now');
+      list = await promptProfileLoadRetry((globalThis.NorvaI18n?.t("ui_web_6488ced8aa1a", { defaultValue: "Continue for now" }) ?? 'Continue for now'));
       if (!list) return true;
     }
 
@@ -1124,11 +1124,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     const tvShell = document.documentElement?.classList?.contains('tv-mode')
       || /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
     btn.title = tvShell
-      ? (p.name ? `${p.name} — switch profile` : 'Switch profile')
-      : (p.name ? `${p.name} — account menu` : 'Account menu');
+      ? (p.name ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_7fedb73623ad", {defaultValue: "{{p0}} — switch profile", p0:(p.name)}) : `${p.name} — switch profile`) : (globalThis.NorvaI18n?.t("ui_web_c1e0daeef31e", { defaultValue: "Switch profile" }) ?? 'Switch profile'))
+      : (p.name ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_62f25cbeeafb", {defaultValue: "{{p0}} — account menu", p0:(p.name)}) : `${p.name} — account menu`) : (globalThis.NorvaI18n?.t("ui_web_7fb5995bca43", { defaultValue: "Account menu" }) ?? 'Account menu'));
     btn.setAttribute('aria-label', tvShell
-      ? (p.name ? `Profile ${p.name}, switch profile` : 'Switch profile')
-      : (p.name ? `Profile ${p.name}, open account menu` : 'Open account menu'));
+      ? (p.name ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_6a7b555f68be", {defaultValue: "Profile {{p0}}, switch profile", p0:(p.name)}) : `Profile ${p.name}, switch profile`) : (globalThis.NorvaI18n?.t("ui_web_c1e0daeef31e", { defaultValue: "Switch profile" }) ?? 'Switch profile'))
+      : (p.name ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_d5111346f2a6", {defaultValue: "Profile {{p0}}, open account menu", p0:(p.name)}) : `Profile ${p.name}, open account menu`) : (globalThis.NorvaI18n?.t("ui_web_04b5bfe665e3", { defaultValue: "Open account menu" }) ?? 'Open account menu')));
     if (!tvShell) {
       btn.setAttribute('aria-haspopup', 'menu');
       btn.setAttribute('aria-controls', 'account-menu-popover');

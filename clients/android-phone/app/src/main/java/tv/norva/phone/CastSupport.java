@@ -131,7 +131,7 @@ final class CastSupport {
                             R.string.player_cast_connected_to, deviceName(current)))
                     .setPositiveButton(activity.getString(R.string.player_cast_stop_streaming),
                             (d, w) -> endSession())
-                    .setNegativeButton("Fermer", null)
+                    .setNegativeButton(R.string.player_tracks_close, null)
                     .show();
             return;
         }
@@ -142,7 +142,7 @@ final class CastSupport {
                 .setItems(names, (d, which) -> {
                     try { mediaRouter.selectRoute(routes.get(which)); } catch (Exception ignored) { }
                 })
-                .setNegativeButton("Annuler", null)
+                .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 

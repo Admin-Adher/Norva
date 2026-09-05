@@ -2,9 +2,10 @@
 <html lang="en" class="prices-pending">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Choose your Norva plan</title>
+  <title data-i18n="ui_web_c42bfdada7d3">Choose your Norva plan</title>
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -248,10 +249,11 @@
   <script defer src="/js/marketing.js?v=5"></script>
   <script defer src="/js/native-analytics.js?v=2"></script>
   <script defer src="/js/product-analytics.js?v=2"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body class="commerce-page commerce-subscribe">
-  <a class="skip-link" href="#plans">Skip to plan selection</a>
+  <a class="skip-link" href="#plans" data-i18n="ui_web_c85b53f38e71">Skip to plan selection</a>
   <div class="ambient-rail" aria-hidden="true"></div>
   <div class="campaign-backdrop" id="campaign-backdrop" aria-hidden="true"></div>
   <script>
@@ -267,43 +269,43 @@
     }
   </script>
   <header class="site-header">
-    <a class="brand" href="/" aria-label="Norva home"><img src="/img/norva-app-icon-96.png?v=1" alt=""><span>Norva</span></a>
+    <a class="brand" href="/" aria-label="Norva home" data-i18n-aria-label="ui_web_1a123bf0fced"><img src="/img/norva-app-icon-96.png?v=1" alt=""><span>Norva</span></a>
     <span class="secure-context">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.1-7 10-4.2-1.9-7-5.4-7-10V6l7-3z"></path><path d="M9.5 12l1.7 1.7 3.5-3.7"></path></svg>
-      <span class="secure-copy"><span class="secure-short">Secure</span><span class="secure-long"> Checkout</span></span>
+      <span class="secure-copy"><span class="secure-short" data-i18n="ui_web_1bced1d0ce55">Secure</span><span class="secure-long" data-i18n="ui_web_99e71f48c48f"> Checkout</span></span>
     </span>
   </header>
 
   <main class="wrap commerce-main" id="main-content">
     <section class="subscribe-layout" aria-labelledby="page-title">
       <header class="intro">
-        <p class="eyebrow" id="page-eyebrow">Norva membership</p>
-        <h1 id="page-title"><span class="title-standard">Choose your Norva plan.</span><span class="title-landscape">Choose your plan.</span></h1>
-        <p class="lead"><span class="lead-desktop">Every plan includes the complete Norva experience. Just choose the number of profiles your home needs.</span><span class="lead-mobile">Every feature is included. Choose how many personal profiles your home needs.</span></p>
+        <p class="eyebrow" id="page-eyebrow" data-i18n="ui_web_397288829fd4">Norva membership</p>
+        <h1 id="page-title"><span class="title-standard" data-i18n="ui_web_2bf383241a0e">Choose your Norva plan.</span><span class="title-landscape" data-i18n="ui_web_bdd95378ac1b">Choose your plan.</span></h1>
+        <p class="lead"><span class="lead-desktop" data-i18n="ui_web_f2af39733333">Every plan includes the complete Norva experience. Just choose the number of profiles your home needs.</span><span class="lead-mobile" data-i18n="ui_web_64468c2446a0">Every feature is included. Choose how many personal profiles your home needs.</span></p>
       </header>
 
       <section class="purchase-panel" id="plans" aria-labelledby="choose-plan-title">
-        <h2 class="sr-only" id="choose-plan-title">Choose your subscription plan</h2>
+        <h2 class="sr-only" id="choose-plan-title" data-i18n="ui_web_feb63702ab1b">Choose your subscription plan</h2>
 
         <div class="tv-purchase-path" id="tv-purchase-path" role="note" hidden>
-          <strong>Choose your plan on your phone or computer</strong>
+          <strong data-i18n="ui_web_1115c9faae71">Choose your plan on your phone or computer</strong><norva-i18n data-i18n="ui_web_ef45c9e57753">
           Open norva.tv, sign in with this same Norva account, then choose your plan. Your access updates on this TV automatically.
-        </div>
+        </norva-i18n></div>
 
         <div class="status" id="already-sub"></div>
 
-        <div class="toggle" role="group" aria-label="Billing period">
-          <button type="button" class="period" data-period="monthly" aria-pressed="false">Monthly</button>
-          <button type="button" class="period active" data-period="annual" aria-pressed="true">Annual <span class="save">Save 30%</span></button>
+        <div class="toggle" role="group" aria-label="Billing period" data-i18n-aria-label="ui_web_a4a987fb16d9">
+          <button type="button" class="period" data-period="monthly" aria-pressed="false" data-i18n="ui_web_9b11f6b707d2">Monthly</button>
+          <button type="button" class="period active" data-period="annual" aria-pressed="true"><norva-i18n data-i18n="ui_web_2c5e81714652">Annual </norva-i18n><span class="save" data-i18n="ui_web_bc2127f14840">Save 30%</span></button>
         </div>
 
         <div class="promo-countdown" id="promo-countdown" role="timer" aria-live="off" aria-atomic="true" hidden>
-          <span id="promo-countdown-label">Offer ends in</span>
+          <span id="promo-countdown-label" data-i18n="ui_web_3faefb1404ea">Offer ends in</span>
           <time id="promo-countdown-value"></time>
         </div>
         <p class="sr-only" id="promo-status" role="status" aria-live="polite"></p>
 
-        <div class="grid" role="radiogroup" aria-label="Subscription plan">
+        <div class="grid" role="radiogroup" aria-label="Subscription plan" data-i18n-aria-label="ui_web_f41aa98f66fe">
           <article class="card"
             data-plan="plus"
             data-plan-name="Norva"
@@ -316,12 +318,12 @@
               <span class="plan-choice-head">
                 <span>
                   <strong class="plan-name">Norva</strong>
-                  <span class="tag"><span class="tag-desktop">Ideal for individual users or a plus-one.</span><span class="tag-mobile">For you and a plus-one.</span></span>
+                  <span class="tag"><span class="tag-desktop" data-i18n="ui_web_4237d6ec7876">Ideal for individual users or a plus-one.</span><span class="tag-mobile" data-i18n="ui_web_4c7a50a71577">For you and a plus-one.</span></span>
                 </span>
                 <span class="plan-radio" aria-hidden="true"></span>
               </span>
               <span class="plan-choice-foot">
-                <span class="profile-count"><span class="profile-count-icon" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt=""><img src="/img/icons/norva-account.svg" alt=""></span><span class="profile-desktop">Up to 2 Profiles</span><span class="profile-mobile">2 profiles</span></span>
+                <span class="profile-count"><span class="profile-count-icon" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt=""><img src="/img/icons/norva-account.svg" alt=""></span><span class="profile-desktop" data-i18n="ui_web_68a7594a3af1">Up to 2 Profiles</span><span class="profile-mobile" data-i18n="ui_web_105ca11aca5a">2 profiles</span></span>
                 <span class="plan-price-block">
                   <span class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></span>
                   <small class="price-note"></small>
@@ -329,12 +331,12 @@
               </span>
             </label>
             <ul class="plan-source-details" hidden>
-              <li>Up to 2 profiles</li>
-              <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
-              <li>Offline downloads (Android app)</li>
-              <li>Every Norva feature included</li>
+              <li data-i18n="ui_web_5e10438a5fcf">Up to 2 profiles</li>
+              <li data-i18n="ui_web_4beb420f09b1">Sync across Web, Android mobile (phone and tablet), and Android TV</li>
+              <li data-i18n="ui_web_59187a3aa295">Offline downloads (Android app)</li>
+              <li data-i18n="ui_web_7051110de069">Every Norva feature included</li>
             </ul>
-            <button class="btn buy plan-source-buy" type="button" tabindex="-1" aria-hidden="true">Start 7-day free trial</button>
+            <button class="btn buy plan-source-buy" type="button" tabindex="-1" aria-hidden="true" data-i18n="ui_web_c42f9913b2f7">Start 7-day free trial</button>
           </article>
 
           <article class="card"
@@ -344,18 +346,18 @@
             data-product="norva_family"
             data-package-monthly="family_monthly" data-package-annual="family_annual"
             data-monthly="8.99" data-annual="74.99" data-annual-note="That's about $6.25/mo, billed yearly.">
-            <span class="sr-only">Best for households</span>
+            <span class="sr-only" data-i18n="ui_web_0ba471c9502d">Best for households</span>
             <input class="plan-choice-input sr-only" type="radio" name="subscription-plan" id="plan-family" value="family">
             <label class="plan-choice-surface" for="plan-family">
               <span class="plan-choice-head">
                 <span>
-                  <strong class="plan-name">Norva Family</strong>
-                  <span class="tag"><span class="tag-desktop">The full experience for the entire household.</span><span class="tag-mobile">For the whole household.</span></span>
+                  <strong class="plan-name" data-i18n="ui_web_fada8f5631ee">Norva Family</strong>
+                  <span class="tag"><span class="tag-desktop" data-i18n="ui_web_1f6c8b814b5b">The full experience for the entire household.</span><span class="tag-mobile" data-i18n="ui_web_7bbb0a3cf8e4">For the whole household.</span></span>
                 </span>
                 <span class="plan-radio" aria-hidden="true"></span>
               </span>
               <span class="plan-choice-foot">
-                <span class="profile-count"><span class="profile-count-icon" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt=""><img src="/img/icons/norva-account.svg" alt=""></span><span class="profile-desktop">Up to 5 Profiles</span><span class="profile-mobile">5 profiles</span></span>
+                <span class="profile-count"><span class="profile-count-icon" aria-hidden="true"><img src="/img/icons/norva-account.svg" alt=""><img src="/img/icons/norva-account.svg" alt=""></span><span class="profile-desktop" data-i18n="ui_web_a6d7fc026580">Up to 5 Profiles</span><span class="profile-mobile" data-i18n="ui_web_c70e96f52333">5 profiles</span></span>
                 <span class="plan-price-block">
                   <span class="price"><span class="cur">$</span><span class="amount">8.99</span><span class="per">/mo</span></span>
                   <small class="price-note"></small>
@@ -363,50 +365,50 @@
               </span>
             </label>
             <ul class="plan-source-details" hidden>
-              <li>Up to 5 profiles</li>
-              <li>Sync across Web, Android mobile (phone and tablet), and Android TV</li>
-              <li>Offline downloads (Android app)</li>
-              <li>Every Norva feature included</li>
+              <li data-i18n="ui_web_6f79d9da7556">Up to 5 profiles</li>
+              <li data-i18n="ui_web_4beb420f09b1">Sync across Web, Android mobile (phone and tablet), and Android TV</li>
+              <li data-i18n="ui_web_59187a3aa295">Offline downloads (Android app)</li>
+              <li data-i18n="ui_web_7051110de069">Every Norva feature included</li>
             </ul>
-            <button class="btn buy plan-source-buy" type="button" tabindex="-1" aria-hidden="true">Start 7-day free trial</button>
+            <button class="btn buy plan-source-buy" type="button" tabindex="-1" aria-hidden="true" data-i18n="ui_web_c42f9913b2f7">Start 7-day free trial</button>
           </article>
         </div>
 
         <section class="shared-benefits" aria-labelledby="included-title">
-          <h2 id="included-title">Included in every plan</h2>
+          <h2 id="included-title" data-i18n="ui_web_e70b8e6853d8">Included in every plan</h2>
           <ul>
-            <li>Web, Phone &amp; TV</li>
-            <li>Synced Progress</li>
-            <li>Offline Downloads</li>
+            <li data-i18n="ui_web_74c62cecadd0">Web, Phone &amp; TV</li>
+            <li data-i18n="ui_web_8921c1750385">Synced Progress</li>
+            <li data-i18n="ui_web_1c3ef359682c">Offline Downloads</li>
           </ul>
         </section>
 
-        <p class="compare sr-only">Both plans include <b>every Norva feature</b>. The only difference is profiles: <b>Norva</b> gives 2 and <b>Norva Family</b> gives 5, so everyone keeps their own favorites and Continue Watching.</p>
+        <p class="compare sr-only"><norva-i18n data-i18n="ui_web_a03e5dd4078f">Both plans include </norva-i18n><b data-i18n="ui_web_2a28ebb8d31d">every Norva feature</b><norva-i18n data-i18n="ui_web_71561041d666">. The only difference is profiles: </norva-i18n><b>Norva</b><norva-i18n data-i18n="ui_web_1cb34a10326d"> gives 2 and </norva-i18n><b data-i18n="ui_web_fada8f5631ee">Norva Family</b><norva-i18n data-i18n="ui_web_62973db7eb14"> gives 5, so everyone keeps their own favorites and Continue Watching.</norva-i18n></p>
 
-        <aside class="plan-decision" aria-label="Selected plan and continuation">
+        <aside class="plan-decision" aria-label="Selected plan and continuation" data-i18n-aria-label="ui_web_5191804c0521">
           <div class="decision-summary" aria-live="polite">
             <span>
-              <span class="decision-label">Selected plan</span>
-              <strong id="selected-plan">Norva · 2 profiles</strong>
+              <span class="decision-label" data-i18n="ui_web_a0bed2aa6145">Selected plan</span>
+              <strong id="selected-plan" data-i18n="ui_web_8c8146948212">Norva · 2 profiles</strong>
             </span>
             <strong class="selected-price"><span id="selected-currency">$</span><span id="selected-amount">41.99</span><span id="selected-period">/yr</span></strong>
           </div>
-          <button class="btn decision-cta" id="continue-plan" type="button">Continue with Norva</button>
-          <p id="decision-helper">Sign in to check your 7-day trial eligibility before payment.</p>
+          <button class="btn decision-cta" id="continue-plan" type="button" data-i18n="ui_web_ddd74cfbd739">Continue with Norva</button>
+          <p id="decision-helper" data-i18n="ui_web_de0b1d39841c">Sign in to check your 7-day trial eligibility before payment.</p>
         </aside>
 
         <figure class="product-proof">
-          <img src="/assets/landing/norva-every-screen-premium.webp?v=1" alt="Norva streaming artwork displayed across a TV, phone and tablet" width="1586" height="992" loading="lazy">
+          <img src="/assets/landing/norva-every-screen-premium.webp?v=1" alt="Norva streaming artwork displayed across a TV, phone and tablet" width="1586" height="992" loading="lazy" data-i18n-alt="ui_web_b126b48a03a3">
           <figcaption class="proof-caption">
-            <strong>One subscription, every screen.</strong>
-            <span>Web, Android mobile (phone and tablet), and Android TV stay in sync with the same profiles, favorites and playback progress.</span>
-            <span class="platforms">Web · Mobile · Android TV</span>
+            <strong data-i18n="ui_web_4997d5c6bb3c">One subscription, every screen.</strong>
+            <span data-i18n="ui_web_11e0a2b9ece9">Web, Android mobile (phone and tablet), and Android TV stay in sync with the same profiles, favorites and playback progress.</span>
+            <span class="platforms" data-i18n="ui_web_201ea27d2a29">Web · Mobile · Android TV</span>
           </figcaption>
         </figure>
 
-        <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods">
-          <span class="pm-lbl">Secure card payment</span>
-          <span class="payment-marks" role="img" aria-label="Accepted payment methods: Visa and Mastercard">
+        <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods" data-i18n-aria-label="ui_web_577dfc209b41">
+          <span class="pm-lbl" data-i18n="ui_web_aa26310bd9df">Secure card payment</span>
+          <span class="payment-marks" role="img" aria-label="Accepted payment methods: Visa and Mastercard" data-i18n-aria-label="ui_web_1cb34636b106">
             <span class="payment-logo" aria-hidden="true"><img src="/img/payments/visa-brandmark.svg" alt="" width="34" height="11"></span>
             <span class="payment-logo" aria-hidden="true"><img src="/img/payments/mastercard-symbol.svg" alt="" width="32" height="20"></span>
           </span>
@@ -414,38 +416,38 @@
 
         <div class="assurance" id="trial-assurance" role="note">
           <svg class="assurance-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 018 0v3"></path></svg>
-          <div><strong>No charge today — we only verify your card.</strong> To open your free trial we place a tiny temporary authorization to confirm the card is valid. It may appear briefly in your local currency and is <b>released right away and never debited.</b> Your first real payment happens only after the trial if you do not cancel. <b>We will email you a reminder before it ends.</b></div>
+          <div><strong data-i18n="ui_web_a9251f5aebe3">No charge today — we only verify your card.</strong><norva-i18n data-i18n="ui_web_d12b4243e7bc"> To open your free trial we place a tiny temporary authorization to confirm the card is valid. It may appear briefly in your local currency and is </norva-i18n><b data-i18n="ui_web_bd891aa62fc4">released right away and never debited.</b><norva-i18n data-i18n="ui_web_c6f027b0bdd0"> Your first real payment happens only after the trial if you do not cancel. </norva-i18n><b data-i18n="ui_web_e9b988aaa423">We will email you a reminder before it ends.</b></div>
         </div>
 
         <div class="status" id="status" role="status" aria-live="polite"></div>
 
         <div class="confirm" id="trial-confirm" hidden>
           <span class="badge-ok" aria-hidden="true">✓</span>
-          <h2 id="confirm-title">You're in</h2>
+          <h2 id="confirm-title" data-i18n="ui_web_0fbb72da4e9f">You're in</h2>
           <p id="confirm-msg"></p>
-          <a class="btn" id="confirm-continue" href="/app#home">Continue to Norva</a>
+          <a class="btn" id="confirm-continue" href="/app#home" data-i18n="ui_web_d8007b4412b2">Continue to Norva</a>
         </div>
 
         <div class="row">
-          <button class="btn ghost" id="retry-prices" type="button" hidden>Retry Google Play prices</button>
-          <button class="btn ghost" id="restore" type="button">Restore purchases</button>
-          <a class="btn ghost" id="back" href="/app#home">Not now</a>
+          <button class="btn ghost" id="retry-prices" type="button" hidden data-i18n="ui_web_177bd38c8923">Retry Google Play prices</button>
+          <button class="btn ghost" id="restore" type="button" data-i18n="ui_web_c6399925b391">Restore purchases</button>
+          <a class="btn ghost" id="back" href="/app#home" data-i18n="ui_web_a0e63d7c7125">Not now</a>
         </div>
       </section>
     </section>
 
-    <p class="note">The free trial requires a payment method and converts to a paid plan unless cancelled before it ends. Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.<br>
-      <a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> ·
-      <a href="/subscription.html">Manage or cancel a subscription</a></p>
+    <p class="note"><norva-i18n data-i18n="ui_web_e66b0fcffa3f">The free trial requires a payment method and converts to a paid plan unless cancelled before it ends. Norva is a media player; no content or TV subscription is included. Your TV content stays provided by your own TV service.</norva-i18n><br>
+      <a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a> · <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a> ·
+      <a href="/subscription.html" data-i18n="ui_web_490198f1327e">Manage or cancel a subscription</a></p>
   </main>
 
-  <script src="/js/cloudApi.js?v=52"></script>
-  <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script src="/js/authApi.js?v=be61dee633"></script>
   <script src="/js/navigation-safety.js?v=1"></script>
-  <script src="/js/promo-ui.js?v=1"></script>
+  <script src="/js/promo-ui.js?v=be6801a798"></script>
   <script src="/js/billing-config.js?v=8"></script>
   <script src="/js/billing.js?v=18"></script>
-  <script src="/js/plan-selection-ui.js?v=1"></script>
+  <script src="/js/plan-selection-ui.js?v=2d4aed9cfc"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -517,14 +519,19 @@
         const iso = String((offer && offer.trialPeriodIso8601) || '').toUpperCase();
         const cycles = Math.max(1, Number(offer && offer.trialBillingCycles) || 1);
         let match = iso.match(/^P(\d+)D$/);
-        if (match) return (Number(match[1]) * cycles) + '-day';
+        if (match) return formatTrialDuration(Number(match[1]) * cycles, 'day');
         match = iso.match(/^P(\d+)W$/);
-        if (match) return (Number(match[1]) * cycles) + '-week';
+        if (match) return formatTrialDuration(Number(match[1]) * cycles, 'week');
         match = iso.match(/^P(\d+)M$/);
-        if (match) return (Number(match[1]) * cycles) + '-month';
+        if (match) return formatTrialDuration(Number(match[1]) * cycles, 'month');
         match = iso.match(/^P(\d+)Y$/);
-        if (match) return (Number(match[1]) * cycles) + '-year';
+        if (match) return formatTrialDuration(Number(match[1]) * cycles, 'year');
         return '';
+      }
+      function formatTrialDuration(count, unit) {
+        return new Intl.NumberFormat(globalThis.NorvaI18n?.language || document.documentElement.lang || 'en', {
+          style: 'unit', unit, unitDisplay: 'long'
+        }).format(count);
       }
 
       backBtn.setAttribute('href', returnTo);
@@ -641,17 +648,17 @@
           }
           if (nativeOffersRequired && !nativeOffersReady) {
             b.disabled = true;
-            b.textContent = nativeOffersError ? 'Google Play price unavailable' : 'Loading Google Play price…';
+            b.textContent = nativeOffersError ? (globalThis.NorvaI18n?.t("ui_web_f110a0d4f08d", { defaultValue: "Google Play price unavailable" }) ?? 'Google Play price unavailable') : (globalThis.NorvaI18n?.t("ui_web_66d93beb4bc3", { defaultValue: "Loading Google Play price…" }) ?? 'Loading Google Play price…');
             return;
           }
           if (nativeOffersRequired && nativeOffersReady && !nativeOfferFor(card, period)) {
             b.disabled = true;
-            b.textContent = 'Google Play price unavailable';
+            b.textContent = (globalThis.NorvaI18n?.t("ui_web_f110a0d4f08d", { defaultValue: "Google Play price unavailable" }) ?? 'Google Play price unavailable');
             return;
           }
           if (webPricesRequired && !webPricesReady) {
             b.disabled = true;
-            b.textContent = webPricesError ? 'Current price unavailable' : 'Loading current price…';
+            b.textContent = webPricesError ? (globalThis.NorvaI18n?.t("ui_web_e65b7788aecd", { defaultValue: "Current price unavailable" }) ?? 'Current price unavailable') : (globalThis.NorvaI18n?.t("ui_web_47bf462b121d", { defaultValue: "Loading current price…" }) ?? 'Loading current price…');
             return;
           }
           const samePlan = hasLivePlan && currentPlan === card.dataset.plan;
@@ -675,22 +682,22 @@
               hint = document.createElement('button');
               hint.type = 'button';
               hint.className = 'save-hint';
-              hint.textContent = 'Your plan, billed annually — save $' + saveAmt.toFixed(2) + ' a year →';
+              hint.textContent = (globalThis.NorvaI18n?.t("ui_web_588951ce211f", { defaultValue: "Your plan, billed annually — save $" }) ?? 'Your plan, billed annually — save $') + saveAmt.toFixed(2) + (globalThis.NorvaI18n?.t("ui_web_299c53f042bf", { defaultValue: " a year →" }) ?? ' a year →');
               hint.addEventListener('click', function () { applyPeriod('annual'); });
               b.insertAdjacentElement('afterend', hint);
             }
           }
           if (hint) hint.hidden = !wantHint;
-          if (isCurrent) { b.textContent = 'Current plan'; return; }
+          if (isCurrent) { b.textContent = (globalThis.NorvaI18n?.t("ui_web_37ca715f53b6", { defaultValue: "Current plan" }) ?? 'Current plan'); return; }
           if (samePlan) {
-            b.textContent = period === 'annual' ? 'Switch to annual billing' : 'Switch to monthly billing';
+            b.textContent = period === 'annual' ? (globalThis.NorvaI18n?.t("ui_web_9d7254293b83", { defaultValue: "Switch to annual billing" }) ?? 'Switch to annual billing') : (globalThis.NorvaI18n?.t("ui_web_5deeaa347d75", { defaultValue: "Switch to monthly billing" }) ?? 'Switch to monthly billing');
           } else if (hasLivePlan) {
-            b.textContent = 'Switch to this plan';
+            b.textContent = (globalThis.NorvaI18n?.t("ui_web_790f964c88d1", { defaultValue: "Switch to this plan" }) ?? 'Switch to this plan');
           } else {
-            const trialLabel = nativeOffersRequired ? nativeTrialLabel(nativeOfferFor(card, period)) : '7-day';
+            const trialLabel = nativeOffersRequired ? nativeTrialLabel(nativeOfferFor(card, period)) : formatTrialDuration(7, 'day');
             b.textContent = cardOffersTrial(card)
-              ? ('Start ' + (trialLabel ? trialLabel + ' ' : '') + 'free trial')
-              : (nativeOffersRequired ? 'Subscribe with Google Play' : 'Subscribe');
+              ? (globalThis.NorvaI18n?.t('ui_trial_start_duration', { duration: trialLabel, defaultValue: 'Start free trial · {{duration}}' }) ?? ('Start free trial · ' + trialLabel))
+              : (nativeOffersRequired ? (globalThis.NorvaI18n?.t("ui_web_82071e0d292e", { defaultValue: "Subscribe with Google Play" }) ?? 'Subscribe with Google Play') : (globalThis.NorvaI18n?.t("ui_web_cc0e38da9c41", { defaultValue: "Subscribe" }) ?? 'Subscribe'));
           }
         });
         if (planSelection) planSelection.sync();
@@ -702,14 +709,14 @@
         if (noTrialCopyDone) return;
         noTrialCopyDone = true;
         const lead = document.querySelector('.lead');
-        if (lead) lead.textContent = 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.';
+        if (lead) lead.textContent = (globalThis.NorvaI18n?.t("ui_web_394207e0b0e2", { defaultValue: "Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets." }) ?? 'Every plan unlocks all of Norva. Plans differ only by how many profiles your household gets.');
         const decisionHelper = document.getElementById('decision-helper');
-        if (decisionHelper) decisionHelper.textContent = 'Your exact price and renewal terms are shown before you confirm.';
+        if (decisionHelper) decisionHelper.textContent = (globalThis.NorvaI18n?.t("ui_web_55cc52855c0c", { defaultValue: "Your exact price and renewal terms are shown before you confirm." }) ?? 'Your exact price and renewal terms are shown before you confirm.');
         const note = document.querySelector('.note');
         if (note) note.innerHTML = 'Norva is a media player; no content or TV subscription is included. ' +
-          'Your TV content stays provided by your own TV service.<br>' +
-          '<a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> · ' +
-          '<a href="/subscription.html">Manage or cancel a subscription</a>';
+          '<norva-i18n data-i18n="ui_web_c790f206a21a">Your TV content stays provided by your own TV service.</norva-i18n><br>' +
+          '<a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a> · <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a> · ' +
+          '<a href="/subscription.html" data-i18n="ui_web_490198f1327e">Manage or cancel a subscription</a>';
       }
 
       // Clear "trial started" confirmation so the renewal terms are explicit
@@ -732,18 +739,18 @@
         const msg = document.getElementById('confirm-msg');
         const cont = document.getElementById('confirm-continue');
         if (rs === 'plan_changed') {
-          title.textContent = 'Plan change confirmed';
-          msg.textContent = 'Your plan features update right away. The new price takes effect at your next renewal — your current period is already paid, so nothing extra is charged today.';
+          title.textContent = (globalThis.NorvaI18n?.t("ui_web_1e16b9e4c26e", { defaultValue: "Plan change confirmed" }) ?? 'Plan change confirmed');
+          msg.textContent = (globalThis.NorvaI18n?.t("ui_web_e2661601e46e", { defaultValue: "Your plan features update right away. The new price takes effect at your next renewal — your current period is already paid, so nothing extra is charged today." }) ?? 'Your plan features update right away. The new price takes effect at your next renewal — your current period is already paid, so nothing extra is charged today.');
         } else if (rs === 'plan_scheduled') {
-          title.textContent = 'Plan change scheduled';
-          msg.textContent = 'Your new plan starts at your next billing cycle — you keep everything you already paid for until then.';
+          title.textContent = (globalThis.NorvaI18n?.t("ui_web_553e96681d69", { defaultValue: "Plan change scheduled" }) ?? 'Plan change scheduled');
+          msg.textContent = (globalThis.NorvaI18n?.t("ui_web_f9146361c105", { defaultValue: "Your new plan starts at your next billing cycle — you keep everything you already paid for until then." }) ?? 'Your new plan starts at your next billing cycle — you keep everything you already paid for until then.');
         } else if (rs === 'unchanged') {
-          title.textContent = "You're already on this plan";
-          msg.textContent = 'No changes were made — your plan stays exactly as it is.';
+          title.textContent = (globalThis.NorvaI18n?.t("ui_web_83abe3f17300", { defaultValue: "You're already on this plan" }) ?? "You're already on this plan");
+          msg.textContent = (globalThis.NorvaI18n?.t("ui_web_c7a2523c4428", { defaultValue: "No changes were made — your plan stays exactly as it is." }) ?? 'No changes were made — your plan stays exactly as it is.');
         } else if (nativeOffersRequired && (!result || result.purchaseVerified !== true
             || result.entitlementActive !== true)) {
-          title.textContent = 'Purchase received';
-          msg.textContent = 'Google Play confirmed your purchase. Norva is syncing your access now; you can continue as soon as it appears on your account.';
+          title.textContent = (globalThis.NorvaI18n?.t("ui_web_b3cee281adce", { defaultValue: "Purchase received" }) ?? 'Purchase received');
+          msg.textContent = (globalThis.NorvaI18n?.t("ui_web_ca5a3657785f", { defaultValue: "Google Play confirmed your purchase. Norva is syncing your access now; you can continue as soon as it appears on your account." }) ?? 'Google Play confirmed your purchase. Norva is syncing your access now; you can continue as soon as it appears on your account.');
         } else if (nativeOffersRequired
             ? Boolean(selectedOffer
               && nativeTrialLabel(selectedOffer)
@@ -754,12 +761,12 @@
               && result.entitlementActive === true
               && result.purchaseVerified === true)
             : (selectedCard ? cardOffersTrial(selectedCard) : offersTrial())) {
-          const trialLabel = nativeOffersRequired ? nativeTrialLabel(selectedOffer) : '7-day';
-          title.textContent = 'Your free trial has started';
-          msg.textContent = "You have full access now and won't be charged until your " + trialLabel + " trial ends. Cancel anytime before then.";
+          const trialLabel = nativeOffersRequired ? nativeTrialLabel(selectedOffer) : formatTrialDuration(7, 'day');
+          title.textContent = (globalThis.NorvaI18n?.t("ui_web_e1b66617c8d2", { defaultValue: "Your free trial has started" }) ?? 'Your free trial has started');
+          msg.textContent = globalThis.NorvaI18n?.t('ui_trial_started_duration', { duration: trialLabel, defaultValue: 'You have full access now. Your free trial lasts {{duration}}. No payment is taken before it ends. Cancel anytime before then.' }) ?? ('You have full access now. Your free trial lasts ' + trialLabel + '. No payment is taken before it ends. Cancel anytime before then.');
         } else {
-          title.textContent = "You're subscribed";
-          msg.textContent = 'Your plan is active on Web, Android mobile (phone and tablet), and Android TV.';
+          title.textContent = (globalThis.NorvaI18n?.t("ui_web_29dc17f54333", { defaultValue: "You're subscribed" }) ?? "You're subscribed");
+          msg.textContent = (globalThis.NorvaI18n?.t("ui_web_122edf259c58", { defaultValue: "Your plan is active on Web, Android mobile (phone and tablet), and Android TV." }) ?? 'Your plan is active on Web, Android mobile (phone and tablet), and Android TV.');
         }
         if (cont) { cont.setAttribute('href', returnTo); }
         if (panel) { panel.hidden = false; }
@@ -777,7 +784,7 @@
       let liveCampaignBg = null; // uploaded campaign background URL (overrides the event theme)
       const defaultPageTitleHtml = document.getElementById('page-title')
         ? document.getElementById('page-title').innerHTML
-        : 'Choose your Norva plan.';
+        : (globalThis.NorvaI18n?.t("ui_web_2bf383241a0e", { defaultValue: "Choose your Norva plan." }) ?? 'Choose your Norva plan.');
       let countdownTimer = 0;
 
       // Visual identity per event: badge colors + a tinted card background, so a
@@ -816,7 +823,7 @@
           n.addEventListener('click', function () { applyPeriod('annual'); });
           document.querySelector('.toggle')?.insertAdjacentElement('afterend', n);
         }
-        n.textContent = 'Save up to $' + bestAmt.toFixed(2) + (firstYear ? ' your first year' : ' a year') + ' with annual billing →';
+        n.textContent = (globalThis.NorvaI18n?.t("ui_web_82735eaf1637", { defaultValue: "Save up to $" }) ?? 'Save up to $') + bestAmt.toFixed(2) + (firstYear ? (globalThis.NorvaI18n?.t("ui_web_83beee809102", { defaultValue: " your first year" }) ?? ' your first year') : (globalThis.NorvaI18n?.t("ui_web_54526b8b3d99", { defaultValue: " a year" }) ?? ' a year')) + (globalThis.NorvaI18n?.t("ui_web_0336b4fbb5bd", { defaultValue: " with annual billing →" }) ?? ' with annual billing →');
         n.hidden = false;
       }
 
@@ -895,12 +902,12 @@
             const trialLabel = cardOffersTrial(card) ? nativeTrialLabel(offer) : '';
             const trialPrice = trialLabel && offer && offer.trialPriceString ? ' (' + offer.trialPriceString + ')' : '';
             note.textContent = nativeOffersReady
-              ? ((trialLabel ? trialLabel + ' free trial' + trialPrice + '. ' : '') + (annual ? 'Billed yearly through Google Play.' : 'Billed monthly through Google Play.'))
-              : 'Current Google Play price unavailable.';
+              ? ((trialLabel ? (globalThis.NorvaI18n?.t('ui_trial_duration', { duration: trialLabel, defaultValue: 'Free trial · {{duration}}' }) ?? ('Free trial · ' + trialLabel)) + trialPrice + '. ' : '') + (annual ? (globalThis.NorvaI18n?.t("ui_web_2148cb7dca71", { defaultValue: "Billed yearly through Google Play." }) ?? 'Billed yearly through Google Play.') : (globalThis.NorvaI18n?.t("ui_web_e645bffea0e5", { defaultValue: "Billed monthly through Google Play." }) ?? 'Billed monthly through Google Play.')))
+              : (globalThis.NorvaI18n?.t("ui_web_8d86c54c5eca", { defaultValue: "Current Google Play price unavailable." }) ?? 'Current Google Play price unavailable.');
           } else if (webPricesRequired && !webPricesReady) {
             note.textContent = webPricesError
-              ? 'Current price unavailable. Reload to try again.'
-              : 'Loading current price…';
+              ? (globalThis.NorvaI18n?.t("ui_web_51cc4cad3b66", { defaultValue: "Current price unavailable. Reload to try again." }) ?? 'Current price unavailable. Reload to try again.')
+              : (globalThis.NorvaI18n?.t("ui_web_47bf462b121d", { defaultValue: "Loading current price…" }) ?? 'Loading current price…');
           } else {
             setPriceNote(note, annual ? (card.dataset.annualNote || '') : '');
           }
@@ -932,7 +939,7 @@
             // legal; a bare struck price that was never charged is not).
             const refCents = promo.ref_cents || promo.base_cents;
             const refMonthly = Boolean(promo.ref_cents);
-            was.textContent = '$' + (refCents / 100).toFixed(2) + (refMonthly ? ' billed monthly' : '');
+            was.textContent = '$' + (refCents / 100).toFixed(2) + (refMonthly ? (globalThis.NorvaI18n?.t("ui_web_69ea677b25d4", { defaultValue: " billed monthly" }) ?? ' billed monthly') : '');
             // Discount made explicit — the % pill next to the badge and the
             // saved amount under the price (the struck reference price above is
             // the EU Omnibus requirement; these two are the selling points).
@@ -964,7 +971,7 @@
               const firstTxt = annual
                 ? (promo.cycles === 1 ? 'your first year' : 'your first ' + promo.cycles + ' years')
                 : (promo.cycles === 1 ? 'your first month' : 'your first ' + promo.cycles + ' months');
-              save.textContent = saveAmt + ' for ' + firstTxt + ', then $' + (promo.base_cents / 100).toFixed(2) + unit;
+              save.textContent = saveAmt + (globalThis.NorvaI18n?.t("ui_web_10c22bcf4c76", { defaultValue: " for " }) ?? ' for ') + firstTxt + (globalThis.NorvaI18n?.t("ui_web_c98bfb78876f", { defaultValue: ", then $" }) ?? ', then $') + (promo.base_cents / 100).toFixed(2) + unit;
             } else {
               save.textContent = saveAmt;
             }
@@ -1083,8 +1090,8 @@
               const minSaving = Math.min.apply(Math, nativeSavings);
               const maxSaving = Math.max.apply(Math, nativeSavings);
               nativeSaveBadge.textContent = minSaving === maxSaving
-                ? 'Save ' + minSaving + '%'
-                : 'Save ' + minSaving + '–' + maxSaving + '%';
+                ? (globalThis.NorvaI18n?.t("ui_web_1509f561f241", { defaultValue: "Save " }) ?? 'Save ') + minSaving + '%'
+                : (globalThis.NorvaI18n?.t("ui_web_1509f561f241", { defaultValue: "Save " }) ?? 'Save ') + minSaving + '–' + maxSaving + '%';
               nativeSaveBadge.hidden = false;
             } else {
               nativeSaveBadge.hidden = true;
@@ -1113,8 +1120,8 @@
           document.documentElement.classList.remove('native-prices-pending');
           applyPeriod(period);
           const helper = document.getElementById('decision-helper');
-          if (helper) helper.textContent = 'Google Play prices could not be loaded for this account.';
-          setStatus('Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available. (' + nativeOffersError + ')', true);
+          if (helper) helper.textContent = (globalThis.NorvaI18n?.t("ui_web_0a12f172e704", { defaultValue: "Google Play prices could not be loaded for this account." }) ?? 'Google Play prices could not be loaded for this account.');
+          setStatus((globalThis.NorvaI18n?.t("ui_web_1edcae524b89", { defaultValue: "Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available. (" }) ?? 'Current Google Play prices could not be loaded. Update Norva or check your connection, then retry. No purchase can start until the exact store price is available. (') + nativeOffersError + ')', true);
           if (retryPricesBtn) retryPricesBtn.hidden = false;
         }
       }
@@ -1123,12 +1130,12 @@
         retryPricesBtn.addEventListener('click', async function () {
           retryPricesBtn.disabled = true;
           const original = retryPricesBtn.textContent;
-          retryPricesBtn.textContent = 'Loading prices…';
-          setStatus('Asking Google Play for the current prices…', false);
+          retryPricesBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_2063f445e1a7", { defaultValue: "Loading prices…" }) ?? 'Loading prices…');
+          setStatus((globalThis.NorvaI18n?.t("ui_web_182d3e9295d6", { defaultValue: "Asking Google Play for the current prices…" }) ?? 'Asking Google Play for the current prices…'), false);
           try {
             await loadNativePrices({ refresh: true });
             if (nativeOffersReady) {
-              setStatus('Google Play prices loaded. Choose your plan to continue.', false);
+              setStatus((globalThis.NorvaI18n?.t("ui_web_18953dda753d", { defaultValue: "Google Play prices loaded. Choose your plan to continue." }) ?? 'Google Play prices loaded. Choose your plan to continue.'), false);
               // The offer only became real now, so this is when the exposure
               // counts. The observer arms at most once, so boot cannot double it.
               observePaywallExposure();
@@ -1142,7 +1149,7 @@
 
       async function buy(card, button) {
         if (tvPurchaseOnly) {
-          setStatus('Open norva.tv on your phone or computer and sign in with this same account to choose a plan.', false);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_c6890356bba8", { defaultValue: "Open norva.tv on your phone or computer and sign in with this same account to choose a plan." }) ?? 'Open norva.tv on your phone or computer and sign in with this same account to choose a plan.'), false);
           return;
         }
         trackSubscription('plan_selected', {
@@ -1158,17 +1165,17 @@
         if (!window.NorvaBilling.hasNativeBilling() && !window.NorvaBilling.isWebBillingConfigured()
             && !window.NorvaBilling.isRevolutEnabled()) {
           trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
-          setStatus('Billing is not configured yet on this platform. Please try again once setup is complete.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_ecb3c2a9259c", { defaultValue: "Billing is not configured yet on this platform. Please try again once setup is complete." }) ?? 'Billing is not configured yet on this platform. Please try again once setup is complete.'), true);
           return;
         }
         if (nativeOffersRequired && !nativeOffersReady) {
           trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
-          setStatus('Current Google Play prices are still loading or unavailable. No purchase has started.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_b15c423d1412", { defaultValue: "Current Google Play prices are still loading or unavailable. No purchase has started." }) ?? 'Current Google Play prices are still loading or unavailable. No purchase has started.'), true);
           return;
         }
         if (webPricesRequired && !webPricesReady) {
           trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
-          setStatus('Current web prices are unavailable. No checkout has started. Please retry when the exact price can be loaded.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_b2f0896d76a3", { defaultValue: "Current web prices are unavailable. No checkout has started. Please retry when the exact price can be loaded." }) ?? 'Current web prices are unavailable. No checkout has started. Please retry when the exact price can be loaded.'), true);
           return;
         }
         const packageId = period === 'annual' ? card.dataset.packageAnnual : card.dataset.packageMonthly;
@@ -1179,13 +1186,13 @@
             || selectedOffer.productId !== card.dataset.product
             || selectedOffer.supported !== true)) {
           trackSubscription('journey_error', { outcome: 'error', failureFamily: 'invalid_state' });
-          setStatus('The selected Google Play offer is no longer current. Reload prices before purchasing.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_c17ed454768c", { defaultValue: "The selected Google Play offer is no longer current. Reload prices before purchasing." }) ?? 'The selected Google Play offer is no longer current. Reload prices before purchasing.'), true);
           return;
         }
         const original = button.textContent;
         button.disabled = true;
         button.setAttribute('aria-busy', 'true');
-        button.textContent = 'Opening checkout…';
+        button.textContent = (globalThis.NorvaI18n?.t("ui_web_f1ec8f02951c", { defaultValue: "Opening checkout…" }) ?? 'Opening checkout…');
         try {
           trackSubscription('checkout_started', {
             plan: card.dataset.plan,
@@ -1228,13 +1235,13 @@
         } catch (e) {
           if (e && e.code === 'cancelled') {
             trackSubscription('journey_error', { outcome: 'cancelled', failureFamily: 'cancelled' });
-            setStatus('Checkout cancelled. You can pick a plan whenever you\'re ready.', false);
+            setStatus((globalThis.NorvaI18n?.t("ui_web_1bf51f8a4585", { defaultValue: "Checkout cancelled. You can pick a plan whenever you're ready." }) ?? 'Checkout cancelled. You can pick a plan whenever you\'re ready.'), false);
           } else if (e && (e.code === 'not_configured' || e.code === 'unavailable')) {
             trackSubscription('journey_error', { outcome: 'error', failureFamily: 'billing_unavailable' });
-            setStatus('Billing is not available on this platform yet.', true);
+            setStatus((globalThis.NorvaI18n?.t("ui_web_088123486d04", { defaultValue: "Billing is not available on this platform yet." }) ?? 'Billing is not available on this platform yet.'), true);
           } else {
             trackSubscription('journey_error', { outcome: 'error', failureFamily: 'unknown' });
-            setStatus('Something went wrong starting the purchase. Try again.', true);
+            setStatus((globalThis.NorvaI18n?.t("ui_web_1f953dd0dc36", { defaultValue: "Something went wrong starting the purchase. Try again." }) ?? 'Something went wrong starting the purchase. Try again.'), true);
           }
           button.disabled = false;
           button.removeAttribute('aria-busy');
@@ -1250,13 +1257,13 @@
       restoreBtn.addEventListener('click', async function () {
         restoreBtn.disabled = true;
         const original = restoreBtn.textContent;
-        restoreBtn.textContent = 'Restoring…';
+        restoreBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_5a4918e0201c", { defaultValue: "Restoring…" }) ?? 'Restoring…');
         try {
           await window.NorvaBilling.restore({ appUserId: appUserId() });
-          setStatus('Purchases restored. If you have an active plan it\'s back now.', false);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_4ccc7d73b468", { defaultValue: "Purchases restored. If you have an active plan it's back now." }) ?? 'Purchases restored. If you have an active plan it\'s back now.'), false);
           setTimeout(function () { window.location.href = returnTo; }, 900);
         } catch (e) {
-          setStatus('Could not restore purchases. Check your connection and try again.', true);
+          setStatus((globalThis.NorvaI18n?.t("ui_web_340b597a5f6e", { defaultValue: "Could not restore purchases. Check your connection and try again." }) ?? 'Could not restore purchases. Check your connection and try again.'), true);
         } finally {
           restoreBtn.disabled = false;
           restoreBtn.textContent = original;
@@ -1285,12 +1292,12 @@
         if (denied && denied.message) return denied.message;
         const r = String((denied && denied.reason) || '');
         const s = String((denied && denied.status) || '');
-        if (r.indexOf('trial') !== -1) return 'Your free trial has ended. Pick a plan to keep watching.';
-        if (r.indexOf('expired') !== -1 || s === 'expired') return 'Your Norva plan has expired. Resubscribe to keep watching.';
+        if (r.indexOf('trial') !== -1) return (globalThis.NorvaI18n?.t("ui_web_44af609bbd8b", { defaultValue: "Your free trial has ended. Pick a plan to keep watching." }) ?? 'Your free trial has ended. Pick a plan to keep watching.');
+        if (r.indexOf('expired') !== -1 || s === 'expired') return (globalThis.NorvaI18n?.t("ui_web_2bb06d112ac8", { defaultValue: "Your Norva plan has expired. Resubscribe to keep watching." }) ?? 'Your Norva plan has expired. Resubscribe to keep watching.');
         if (r.indexOf('capacity') !== -1 || r.indexOf('concurrent') !== -1 || r.indexOf('stream') !== -1) {
-          return "Too many streams are playing at once. Close one on another device and try again.";
+          return (globalThis.NorvaI18n?.t("ui_web_fe475d74b7f9", { defaultValue: "Too many streams are playing at once. Close one on another device and try again." }) ?? "Too many streams are playing at once. Close one on another device and try again.");
         }
-        return offersTrial() ? 'Start your 7-day free trial to keep watching.' : 'Subscribe to keep watching.';
+        return offersTrial() ? (globalThis.NorvaI18n?.t("ui_web_2b9fc03d3d76", { defaultValue: "Start your 7-day free trial to keep watching." }) ?? 'Start your 7-day free trial to keep watching.') : (globalThis.NorvaI18n?.t("ui_web_821b27110cae", { defaultValue: "Subscribe to keep watching." }) ?? 'Subscribe to keep watching.');
       }
 
       // If we landed here from a playback/capacity wall (soft wall at first
@@ -1361,10 +1368,10 @@
           } catch (_) { /* cosmetic */ }
           const box = document.getElementById('already-sub');
           if (!box) return;
-          box.textContent = 'You already have a Norva ' + (st === 'trialing' ? 'free trial' : 'plan') + '. ';
+          box.textContent = (globalThis.NorvaI18n?.t("ui_web_dcbe00f777cd", { defaultValue: "You already have a Norva " }) ?? 'You already have a Norva ') + (st === 'trialing' ? (globalThis.NorvaI18n?.t("ui_web_45c2e6113936", { defaultValue: "free trial" }) ?? 'free trial') : (globalThis.NorvaI18n?.t("ui_web_64879f7d6b96", { defaultValue: "plan" }) ?? 'plan')) + '. ';
           const a = document.createElement('a');
           a.href = '/subscription.html?returnTo=' + encodeURIComponent(returnTo);
-          a.textContent = 'Manage your subscription →';
+          a.textContent = (globalThis.NorvaI18n?.t("ui_web_d32de78c2705", { defaultValue: "Manage your subscription →" }) ?? 'Manage your subscription →');
           a.style.cssText = 'color:var(--pink);font-weight:700;text-decoration:none';
           box.appendChild(a);
           box.classList.add('show');
@@ -1388,7 +1395,7 @@
             if (el && !offersTrial()) {
               const body = el.querySelector('div');
               if (body) {
-                body.innerHTML = '<strong>Secure card check first.</strong> ' +
+                body.innerHTML = '<strong data-i18n="ui_web_4577368599d2">Secure card check first.</strong> ' +
                   'We verify your card with a tiny temporary authorization that is released right away and never debited. ' +
                   'The exact billing for your plan is shown on the next screen before you confirm, and every payment comes with an email receipt.';
               }
@@ -1538,10 +1545,10 @@
             if (refAnchorLive) {
               // The card carries the numbers (−42% vs monthly billing); the
               // toggle keeps a non-numeric nudge — no double claim possible.
-              save.textContent = 'Best value';
+              save.textContent = (globalThis.NorvaI18n?.t("ui_web_b4d06debb5f8", { defaultValue: "Best value" }) ?? 'Best value');
               save.hidden = false;
             } else if (best > 0.01) {
-              save.textContent = 'Save ' + Math.round(best * 100) + '%';
+              save.textContent = (globalThis.NorvaI18n?.t("ui_web_1509f561f241", { defaultValue: "Save " }) ?? 'Save ') + Math.round(best * 100) + '%';
               save.hidden = false;
             } else {
               save.hidden = true;
@@ -1566,10 +1573,10 @@
           const note = card.querySelector('.price-note');
           if (cur) cur.textContent = '';
           if (amount) amount.textContent = '—';
-          if (note) note.textContent = 'Current price unavailable. Reload to try again.';
+          if (note) note.textContent = (globalThis.NorvaI18n?.t("ui_web_51cc4cad3b66", { defaultValue: "Current price unavailable. Reload to try again." }) ?? 'Current price unavailable. Reload to try again.');
         });
         refreshCtas();
-        setStatus('Exact current prices could not be loaded. No purchase can start until they are available.', true);
+        setStatus((globalThis.NorvaI18n?.t("ui_web_38869bbccaaa", { defaultValue: "Exact current prices could not be loaded. No purchase can start until they are available." }) ?? 'Exact current prices could not be loaded. No purchase can start until they are available.'), true);
       }
 
       // Campaign presentation follows the selected cadence and preferred plan.
@@ -1582,7 +1589,7 @@
         try {
           pruneExpiredPromos(Date.now());
           const promoStatus = document.getElementById('promo-status');
-          if (promoStatus) promoStatus.textContent = selection.label + ' has ended. Current prices are now displayed.';
+          if (promoStatus) promoStatus.textContent = selection.label + (globalThis.NorvaI18n?.t("ui_web_fd0078241b96", { defaultValue: " has ended. Current prices are now displayed." }) ?? ' has ended. Current prices are now displayed.');
           applyPeriod(period);
         } catch (_) { /* presentation must never block purchase */ }
       }
@@ -1602,12 +1609,12 @@
         if (!selection) {
           if (box) box.hidden = true;
           if (backdrop) backdrop.style.removeProperty('--campaign-image');
-          if (eyebrow) eyebrow.textContent = 'Norva membership';
+          if (eyebrow) eyebrow.textContent = (globalThis.NorvaI18n?.t("ui_web_397288829fd4", { defaultValue: "Norva membership" }) ?? 'Norva membership');
           if (title) title.innerHTML = defaultPageTitleHtml;
           return;
         }
 
-        if (eyebrow) eyebrow.textContent = 'Limited-time Norva offer';
+        if (eyebrow) eyebrow.textContent = (globalThis.NorvaI18n?.t("ui_web_9da5fb7e0449", { defaultValue: "Limited-time Norva offer" }) ?? 'Limited-time Norva offer');
         if (title) title.textContent = selection.label;
         const campaignUrl = liveCampaignBg || promoUi.wallpaperFor(selection.promo.event);
         if (backdrop && campaignUrl) {
@@ -1632,7 +1639,7 @@
             expireSelectedPromo(selection);
             return;
           }
-          countdownLabel.textContent = countdown.urgent ? 'Ends soon' : 'Offer ends in';
+          countdownLabel.textContent = countdown.urgent ? (globalThis.NorvaI18n?.t("ui_web_695715c2282f", { defaultValue: "Ends soon" }) ?? 'Ends soon') : (globalThis.NorvaI18n?.t("ui_web_3faefb1404ea", { defaultValue: "Offer ends in" }) ?? 'Offer ends in');
           clock.textContent = countdown.text;
           clock.setAttribute('aria-label', countdown.ariaText);
           box.classList.toggle('urgent', countdown.urgent);
@@ -1656,7 +1663,7 @@
         document.documentElement.classList.remove('entitlement-pending');
         if (appUserId()) {
           const helper = document.getElementById('decision-helper');
-          if (helper) helper.textContent = 'Loading your Google Play price…';
+          if (helper) helper.textContent = (globalThis.NorvaI18n?.t("ui_web_b1ea29117d43", { defaultValue: "Loading your Google Play price…" }) ?? 'Loading your Google Play price…');
         }
 
         const pending = [loadNativePrices(), loadTrialEligibility()];

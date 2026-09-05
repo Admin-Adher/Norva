@@ -100,7 +100,7 @@ class MoviesPage {
             panelId: 'movies-category-panel',
             searchId: 'movies-category-search',
             listId: 'movies-category-list',
-            allLabel: 'All Categories',
+            allLabel: (globalThis.NorvaI18n?.t("ui_web_fe3b58f14752", { defaultValue: "All Categories" }) ?? 'All Categories'),
             onChange: () => {
                 // An explicit category interaction wins over any still-pending
                 // restore from a partial provider response.
@@ -367,7 +367,7 @@ class MoviesPage {
     openLanguageBucket() {
         const langKey = this.currentBucketViewKey();
         if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
-        this.openBucket({ id: 'genre-all', title: 'All movies', curation: { bucket: 'all' } });
+        this.openBucket({ id: 'genre-all', title: (globalThis.NorvaI18n?.t("ui_web_a222b992fad7", { defaultValue: "All movies" }) ?? 'All movies'), curation: { bucket: 'all' } });
     }
 
     // Audio-language / burned-in-subtitle / year / rating filter params + "best
@@ -425,8 +425,8 @@ class MoviesPage {
         const source = this.selectedCloudSourceId();
         const scope = source || 'all';
         const scopeChanged = this._facetsLoadedScope !== scope;
-        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio, 'movies', scopeChanged);
-        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle, 'movies', scopeChanged);
+        this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), [], this.savedFilters?.audio, 'movies', scopeChanged);
+        this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), [], this.savedFilters?.subtitle, 'movies', scopeChanged);
         // Re-fetch at most once per 60s so the menu tracks the background crawl (new
         // languages get detected over the first day) instead of freezing at first load.
         // applyFacetOptions preserves the current selection and skips the DOM rebuild
@@ -443,8 +443,8 @@ class MoviesPage {
                 ...(source ? { source } : {})
             });
             if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
-            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio, 'movies');
-            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle, 'movies');
+            this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), facets && facets.audio, this.savedFilters?.audio, 'movies');
+            this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), facets && facets.subtitles, this.savedFilters?.subtitle, 'movies');
             this.renderActiveFilterChips();
         } catch (_) {
             if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
@@ -573,7 +573,7 @@ class MoviesPage {
                 return this.loadMovies();
             }
             window.GenreRails.render(this.container, rails, {
-                emptyText: 'No movies to show yet.',
+                emptyText: (globalThis.NorvaI18n?.t("ui_web_c2b745920eb8", { defaultValue: "No movies to show yet." }) ?? 'No movies to show yet.'),
                 onItemClick: (item) => this.openRailItem(item),
                 onSeeAll: (rail) => this.openBucket(rail)
             });
@@ -613,9 +613,9 @@ class MoviesPage {
         this.container.classList.add('rail-host');
         this.container.innerHTML = `
             <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
-                <button class="norva-back" id="genre-bucket-back" type="button" aria-label="Back to all genres">
+                <button class="norva-back" id="genre-bucket-back" type="button" aria-label="Back to all genres" data-i18n-aria-label="ui_web_5a4703d3ea87">
                     <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-                    <span class="back-label">All genres</span>
+                    <span class="back-label" data-i18n="ui_web_69558e9e33a9">All genres</span>
                 </button>
                 <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
             </div>
@@ -667,7 +667,7 @@ class MoviesPage {
             // The endpoint returns the exact filtered count — show it (the grid view
             // otherwise leaves the header count blank).
             if (this.countEl && typeof payload?.count === 'number') {
-                this.countEl.textContent = `${payload.count} titles`;
+                this.countEl.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_117bd4782d6b", {defaultValue: "{{p0}} titles", p0:(payload.count)}) : `${payload.count} titles`);
             }
         } catch (err) {
             console.warn('[Movies] Genre bucket page failed:', err);
@@ -792,7 +792,7 @@ class MoviesPage {
         const chips = [];
 
         const q = this.searchInput?.value?.trim();
-        if (q) chips.push({ label: `Search: “${q}”`, clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
+        if (q) chips.push({ label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3ec972eec0ae", {defaultValue: "Search: “{{p0}}”", p0:(q)}) : `Search: “${q}”`), clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
 
         const catCount = this.categoryMulti?.getSelected().size || 0;
         if (catCount > 0) chips.push({ label: catCount === 1 ? '1 category' : `${catCount} categories`,
@@ -809,9 +809,9 @@ class MoviesPage {
         if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
         if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
         if (this.durationSelect?.value) chips.push({ label: optText(this.durationSelect), clear: () => { this.durationSelect.value = ''; } });
-        if (this.audioSelect?.value) chips.push({ label: `Audio: ${facetText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
-        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${facetText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
-        if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
+        if (this.audioSelect?.value) chips.push({ label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(facetText(this.audioSelect))}) : `Audio: ${facetText(this.audioSelect)}`), clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_86aab5b3d670", {defaultValue: "Subtitles: {{p0}}", p0:(facetText(this.subtitleSelect))}) : `Subtitles: ${facetText(this.subtitleSelect)}`), clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.showFavoritesOnly) chips.push({ label: (globalThis.NorvaI18n?.t("ui_web_7a1f2a83aca9", { defaultValue: "Favorites" }) ?? 'Favorites'), clear: () => {
             this.showFavoritesOnly = false;
             document.getElementById('movies-favorites-btn')?.classList.remove('active');
         } });
@@ -821,7 +821,7 @@ class MoviesPage {
         host.classList.remove('hidden');
         host.innerHTML = chips.map((c, i) =>
             `<button type="button" class="filter-chip" data-chip="${i}">${MediaUtils.escapeHtml(c.label)}<span class="filter-chip-x" aria-hidden="true">×</span></button>`
-        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear">Clear all</button>';
+        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear" data-i18n="ui_web_29a390f9237e">Clear all</button>';
 
         host.querySelectorAll('.filter-chip').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -1034,9 +1034,9 @@ class MoviesPage {
             this.container.classList.remove('rail-host');
             this.container.innerHTML = `
                 <div class="catalog-locked-empty">
-                    <h2>Connect your TV service first</h2>
-                    <p>Movies unlock as soon as Norva finishes preparing your catalog.</p>
-                    <button class="btn btn-primary" id="movies-connect-service">Connect TV Service</button>
+                    <h2 data-i18n="ui_web_b4bddfa3478c">Connect your TV service first</h2>
+                    <p data-i18n="ui_web_5eeb28b18028">Movies unlock as soon as Norva finishes preparing your catalog.</p>
+                    <button class="btn btn-primary" id="movies-connect-service" data-i18n="ui_web_8dcd2c670793">Connect TV Service</button>
                 </div>
             `;
             this.container.querySelector('#movies-connect-service')?.addEventListener('click', () => {
@@ -1124,7 +1124,7 @@ class MoviesPage {
             const allSources = await API.sources.getAll();
             this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
 
-            this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
+            this.sourceSelect.innerHTML = '<option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>';
             this.sources.forEach(s => {
                 const option = document.createElement('option');
                 option.value = s.id;
@@ -1228,7 +1228,7 @@ class MoviesPage {
             this.categories = genres;
             const options = genres
                 .filter(g => Number(g.count) > 0 && !hiddenBuckets.has(String(g.bucket)))
-                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
+                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString((globalThis.NorvaI18n?.language || 'en-US'))}` }));
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);
         } catch (err) {
@@ -1480,7 +1480,7 @@ class MoviesPage {
             this.genreSelect.classList.add('hidden');
         } else {
             const current = this.savedFilters?.genre || this.genreSelect.value;
-            this.genreSelect.innerHTML = '<option value="">All Genres</option>' +
+            this.genreSelect.innerHTML = '<option value="" data-i18n="ui_web_90009547165f">All Genres</option>' +
                 [...genres].sort().map(g =>
                     `<option value="${MediaUtils.escapeHtml(g)}">${MediaUtils.escapeHtml(g)}</option>`).join('');
             if (current && genres.has(current)) this.genreSelect.value = current;
@@ -1718,10 +1718,10 @@ class MoviesPage {
             const filtered = this.hasActiveFilters();
             this.container.innerHTML = `
                 <div class="empty-state rich-empty premium-state">
-                    <span class="premium-state-kicker">Movies</span>
-                    <h3>${filtered ? 'No movies match these filters' : 'No movies here yet'}</h3>
-                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Movies appear as soon as Norva finishes preparing your catalog.'}</p>
-                    ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset">Clear filters</button>' : ''}
+                    <span class="premium-state-kicker" data-i18n="ui_web_dff924b69f96">Movies</span>
+                    <h3>${filtered ? (globalThis.NorvaI18n?.t("ui_web_32b26e4563e3", { defaultValue: "No movies match these filters" }) ?? 'No movies match these filters') : (globalThis.NorvaI18n?.t("ui_web_464390318a90", { defaultValue: "No movies here yet" }) ?? 'No movies here yet')}</h3>
+                    <p>${filtered ? (globalThis.NorvaI18n?.t("ui_web_36829c37f1ab", { defaultValue: "Try widening your search, genre or language filters." }) ?? 'Try widening your search, genre or language filters.') : (globalThis.NorvaI18n?.t("ui_web_18e957ab6714", { defaultValue: "Movies appear as soon as Norva finishes preparing your catalog." }) ?? 'Movies appear as soon as Norva finishes preparing your catalog.')}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset" data-i18n="ui_web_7179ea0035fc">Clear filters</button>' : ''}
                 </div>`;
             this.container.querySelector('#movies-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
             // A non-filtered empty grid means the catalog is still filling — auto-reload
@@ -1922,7 +1922,7 @@ class MoviesPage {
         if (this._isTvMode()) {
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
-            card.setAttribute('aria-label', displayName || 'Movie');
+            card.setAttribute('aria-label', displayName || (globalThis.NorvaI18n?.t("ui_web_941de4447b2e", { defaultValue: "Movie" }) ?? 'Movie'));
         }
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = this.displayLanguageStatus(
@@ -1933,19 +1933,19 @@ class MoviesPage {
         const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="movie-poster">
-                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
+                ${isNew ? '<span class="new-badge" data-i18n="ui_web_a253ff09c5a8">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="movie-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
-                ${groupBroken ? '<span class="playback-badge" title="Playback failed">⚠</span>' : ''}
-                ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
+                ${groupBroken ? '<span class="playback-badge" title="Playback failed" data-i18n-title="ui_web_0535388758c1">⚠</span>' : ''}
+                ${versionCount > 1 ? `<button class="version-badge" title="Choose version" data-i18n-title="ui_web_70428a34013f" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(versionCount)}) || "{}")}">${versionCount} versions</button>` : ''}
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
-                ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched">✓</span>' : ''}
+                ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched" data-i18n-title="ui_web_1ca8c1c0de6f">✓</span>' : ''}
                 ${watch.status === 'inprogress' ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.round(watch.ratio * 100)}%"></div></div>` : ''}
-                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
+                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}" title="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
                 </button>
             </div>
@@ -1954,7 +1954,7 @@ class MoviesPage {
                 <div class="movie-meta">
                     ${year ? `<span>${year}</span>` : ''}
                     ${rating ? `<span>${Icons.star} ${MediaUtils.escapeHtml(rating)}</span>` : ''}
-                    ${movie.tmdb?.runtime ? `<span>${movie.tmdb.runtime} min</span>` : ''}
+                    ${movie.tmdb?.runtime ? `<span data-i18n="ui_web_06808aabded6" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(movie.tmdb.runtime)}) || "{}")}">${movie.tmdb.runtime} min</span>` : ''}
                 </div>
             </div>
         `;
@@ -2075,7 +2075,7 @@ class MoviesPage {
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
-                    <p class="continue-card-title">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(h.data?.title || '') || 'Unknown')}</p>
+                    <p class="continue-card-title">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(h.data?.title || '') || (globalThis.NorvaI18n?.t("ui_web_b764cdc0eab7", { defaultValue: "Unknown" }) ?? 'Unknown'))}</p>
                     <div class="card-progress"><div class="card-progress-fill" style="width:${ratio}%"></div></div>
                 </div>
             </div>`;
@@ -2092,7 +2092,7 @@ class MoviesPage {
             };
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
-            card.setAttribute('aria-label', `Resume ${MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie'}`);
+            card.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_85b82fc7f5bb", {defaultValue: "Resume {{p0}}", p0:(MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie')}) : `Resume ${MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie'}`));
             if (!this._isTvMode()) {
                 card.addEventListener('keydown', event => {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -2204,7 +2204,7 @@ class MoviesPage {
         const title = hasCatalogTitle
             ? (movie?.title || movie?.tmdb?.title || movie?.name || '')
             : (movie?.tmdb?.title || movie?.title || movie?.name || '');
-        return this.cleanMovieTitle(title) || 'Movie';
+        return this.cleanMovieTitle(title) || (globalThis.NorvaI18n?.t("ui_web_941de4447b2e", { defaultValue: "Movie" }) ?? 'Movie');
     }
 
     getMovieOverview(movie = this.currentMovie) {
@@ -2217,7 +2217,7 @@ class MoviesPage {
         return (hasCatalogTitle ? localized : movie?.tmdb?.overview)
             || movie?.tmdb?.overview
             || localized
-            || 'No summary available yet.';
+            || (globalThis.NorvaI18n?.t("ui_web_6e6f8d4e6690", { defaultValue: "No summary available yet." }) ?? 'No summary available yet.');
     }
 
     cleanMovieTitle(value) {
@@ -2314,9 +2314,9 @@ class MoviesPage {
 
     getMovieActionLabel(movie = this.currentMovie) {
         const state = this.getMovieWatchState(movie);
-        if (state.status === 'inprogress') return 'Resume';
-        if (state.status === 'watched') return 'Restart';
-        return 'Play';
+        if (state.status === 'inprogress') return (globalThis.NorvaI18n?.t("ui_web_d640c7421da0", { defaultValue: "Resume" }) ?? 'Resume');
+        if (state.status === 'watched') return (globalThis.NorvaI18n?.t("ui_web_6b983a81e5e8", { defaultValue: "Restart" }) ?? 'Restart');
+        return (globalThis.NorvaI18n?.t("ui_web_436e61016e26", { defaultValue: "Play" }) ?? 'Play');
     }
 
     applyPlaybackProgress(update = {}) {
@@ -2423,11 +2423,11 @@ class MoviesPage {
         if (!this.detailFavoriteBtn || !this.currentMovieGroup) return;
         const isFav = this.currentMovieGroup.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
         this.detailFavoriteBtn.classList.toggle('active', isFav);
-        this.detailFavoriteBtn.title = isFav ? 'Remove from Favorites' : 'Add to Favorites';
+        this.detailFavoriteBtn.title = isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
         const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
         const label = this.detailFavoriteBtn.querySelector('.fav-label');
         if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
-        if (label) label.textContent = 'Favorite';
+        if (label) label.textContent = (globalThis.NorvaI18n?.t("ui_web_ea713ecd8537", { defaultValue: "Favorite" }) ?? 'Favorite');
     }
 
     // === Thumbs up/down (per-profile title rating) ===
@@ -2489,18 +2489,18 @@ class MoviesPage {
         btn.disabled = false;
         let text = 'Download';
         if (state === 'done') {
-            text = 'Downloaded';
+            text = (globalThis.NorvaI18n?.t("ui_web_f0b0738f75b8", { defaultValue: "Downloaded" }) ?? 'Downloaded');
             btn.classList.add('is-done');
             if (icon) icon.innerHTML = '&#x2713;'; // check
         } else if (state === 'downloading' || state === 'queued') {
-            text = state === 'queued' ? 'Queued…' : 'Downloading…';
+            text = state === 'queued' ? (globalThis.NorvaI18n?.t("ui_web_abff5572a370", { defaultValue: "Queued…" }) ?? 'Queued…') : (globalThis.NorvaI18n?.t("ui_web_a778d3492af2", { defaultValue: "Downloading…" }) ?? 'Downloading…');
             btn.classList.add('is-downloading');
             if (icon) icon.innerHTML = '&#x2193;';
         } else {
             if (icon) icon.innerHTML = '&#x2193;';
         }
         if (label) label.textContent = text;
-        btn.title = state === 'done' ? 'Open downloads' : 'Download for offline';
+        btn.title = state === 'done' ? (globalThis.NorvaI18n?.t("ui_web_3e4ad24ac0b2", { defaultValue: "Open downloads" }) ?? 'Open downloads') : (globalThis.NorvaI18n?.t("ui_web_9562d8134dae", { defaultValue: "Download for offline" }) ?? 'Download for offline');
         // Reveal the Downloads menu entry as soon as something is downloading.
         window.app?.refreshDownloadsNav?.();
         // Poll while in flight so the label tracks progress and flips to Downloaded.
@@ -2546,7 +2546,7 @@ class MoviesPage {
         const label = btn?.querySelector('.download-label');
         try {
             if (btn) { btn.disabled = true; }
-            if (label) label.textContent = 'Preparing…';
+            if (label) label.textContent = (globalThis.NorvaI18n?.t("ui_web_5d1fa38bcf0d", { defaultValue: "Preparing…" }) ?? 'Preparing…');
             const container = movie.container_extension || 'mp4';
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(movie, { container })
@@ -2570,7 +2570,7 @@ class MoviesPage {
             bridge.downloadMedia(JSON.stringify(payload));
         } catch (err) {
             console.warn('[Download] Could not start:', err?.message || err);
-            if (label) label.textContent = 'Download failed';
+            if (label) label.textContent = (globalThis.NorvaI18n?.t("ui_web_eae34ccbc443", { defaultValue: "Download failed" }) ?? 'Download failed');
         } finally {
             if (btn) btn.disabled = false;
             // Give the native side a moment to register the entry, then refresh.
@@ -2583,15 +2583,15 @@ class MoviesPage {
         const versions = this.currentMovieVersions || [];
         if (versions.length <= 1) {
             this.versionsList.innerHTML = '';
-            this.versionSummary.textContent = 'Best version selected automatically.';
+            this.versionSummary.textContent = (globalThis.NorvaI18n?.t("ui_web_25b3741f18c5", { defaultValue: "Best version selected automatically." }) ?? 'Best version selected automatically.');
             this.versionsList.closest('.movie-versions-section')?.classList.add('single-version');
             return;
         }
 
         this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
         this.versionSummary.textContent = this._isTvMode()
-            ? `${versions.length} versions available. Press OK to play a version.`
-            : `${versions.length} versions available. Play uses the selected version.`;
+            ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_bf46e4d55d9e", {defaultValue: "{{p0}} versions available. Press OK to play a version.", p0:(versions.length)}) : `${versions.length} versions available. Press OK to play a version.`)
+            : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a0de6bad1870", {defaultValue: "{{p0}} versions available. Play uses the selected version.", p0:(versions.length)}) : `${versions.length} versions available. Play uses the selected version.`);
         this.versionsList.innerHTML = versions.map((item, index) => {
             const desc = MediaUtils.versionDescriptor(item, {
                 siblings: versions,
@@ -2608,13 +2608,13 @@ class MoviesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
-            const headline = this.displayLanguageStatus(desc.headline) || `Version ${index + 1}`;
+            const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
                     ${meta}
-                    ${state.status === 'inprogress' ? '<span class="movie-version-progress">In progress</span>' : ''}
-                    ${state.status === 'watched' ? '<span class="movie-version-progress">Watched</span>' : ''}
+                    ${state.status === 'inprogress' ? '<span class="movie-version-progress" data-i18n="ui_web_c1f88e9d6c41">In progress</span>' : ''}
+                    ${state.status === 'watched' ? '<span class="movie-version-progress" data-i18n="ui_web_1ca8c1c0de6f">Watched</span>' : ''}
                 </button>`;
         }).join('');
 
@@ -2671,13 +2671,13 @@ class MoviesPage {
         const primary = document.createElement('div');
         primary.id = 'movies-tv-primary-filters';
         primary.className = 'tv-movies-filter-row tv-movies-primary-filters';
-        primary.setAttribute('aria-label', 'Movie filters');
+        primary.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_dd48b2e2bd92", { defaultValue: "Movie filters" }) ?? 'Movie filters'));
         primary.dataset.tvNavRegion = 'movies-filters';
 
         const secondary = document.createElement('div');
         secondary.id = 'movies-tv-secondary-filters';
         secondary.className = 'tv-movies-filter-row tv-movies-secondary-filters';
-        secondary.setAttribute('aria-label', 'Availability and view options');
+        secondary.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_4b6dfa7e650a", { defaultValue: "Availability and view options" }) ?? 'Availability and view options'));
         secondary.dataset.tvNavRegion = 'movies-filters';
 
         const catalogHead = document.createElement('div');
@@ -2687,7 +2687,7 @@ class MoviesPage {
 
         const catalogTitle = document.createElement('h3');
         catalogTitle.className = 'tv-movies-catalog-title';
-        catalogTitle.textContent = 'All Movies';
+        catalogTitle.textContent = (globalThis.NorvaI18n?.t("ui_web_3db9a76d3453", { defaultValue: "All Movies" }) ?? 'All Movies');
         const catalogMeta = document.createElement('div');
         catalogMeta.className = 'tv-movies-catalog-meta';
         catalogMeta.appendChild(catalogTitle);
@@ -2743,10 +2743,10 @@ class MoviesPage {
         if (!this.container) return;
         this.container.innerHTML = `
             <div class="premium-state premium-state-error" role="alert">
-                <span class="premium-state-kicker">Movies</span>
-                <h3>Movies could not be refreshed</h3>
-                <p>Your catalogue is still connected. Try loading this view again.</p>
-                <button class="btn btn-primary" type="button" data-movies-retry>Try again</button>
+                <span class="premium-state-kicker" data-i18n="ui_web_dff924b69f96">Movies</span>
+                <h3 data-i18n="ui_web_2729bd7e41ca">Movies could not be refreshed</h3>
+                <p data-i18n="ui_web_58d140544bb7">Your catalogue is still connected. Try loading this view again.</p>
+                <button class="btn btn-primary" type="button" data-movies-retry data-i18n="ui_web_d8b8392e2c54">Try again</button>
             </div>`;
         if (this._isTvMode()) this._clearTvPreview();
     }
@@ -2766,15 +2766,15 @@ class MoviesPage {
         const title = document.getElementById('movie-detail-title');
         const plot = document.getElementById('movie-detail-plot');
         const meta = document.getElementById('movie-detail-meta');
-        if (title) title.textContent = 'Select a movie';
-        if (plot) plot.textContent = 'Move through the catalogue to see artwork, metadata and available versions.';
-        if (meta) meta.innerHTML = '<span>Your catalogue</span>';
+        if (title) title.textContent = (globalThis.NorvaI18n?.t("ui_web_225ec6ab72ce", { defaultValue: "Select a movie" }) ?? 'Select a movie');
+        if (plot) plot.textContent = (globalThis.NorvaI18n?.t("ui_web_fc8640e48f00", { defaultValue: "Move through the catalogue to see artwork, metadata and available versions." }) ?? 'Move through the catalogue to see artwork, metadata and available versions.');
+        if (meta) meta.innerHTML = '<span data-i18n="ui_web_c17ea43539ae">Your catalogue</span>';
         if (this.primaryActionBtn) {
             this.primaryActionBtn.disabled = true;
-            this.primaryActionBtn.textContent = 'Select a movie';
+            this.primaryActionBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_225ec6ab72ce", { defaultValue: "Select a movie" }) ?? 'Select a movie');
         }
         if (this.detailFavoriteBtn) this.detailFavoriteBtn.disabled = true;
-        if (this.versionSummary) this.versionSummary.textContent = 'Versions appear after you select a title.';
+        if (this.versionSummary) this.versionSummary.textContent = (globalThis.NorvaI18n?.t("ui_web_b0e9247dc899", { defaultValue: "Versions appear after you select a title." }) ?? 'Versions appear after you select a title.');
         if (this.versionsList) this.versionsList.innerHTML = '';
     }
 
@@ -2953,7 +2953,7 @@ class MoviesPage {
         const backBtn = this.detailsPanel.querySelector('.movie-back-btn');
         if (backBtn) {
             const ctx = this.searchInput?.value?.trim()
-                ? 'Search results'
+                ? (globalThis.NorvaI18n?.t("ui_web_e978b00de465", { defaultValue: "Search results" }) ?? 'Search results')
                 : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Movies');
             // Update only the label span — the button holds an SVG arrow icon that a
             // raw textContent write would destroy.
@@ -3107,13 +3107,13 @@ class MoviesPage {
             const liveOverview = String(meta.overview || '').trim();
             if (plotEl && liveOverview
                 && (!String(plotEl.textContent || '').trim()
-                    || plotEl.textContent === 'No summary available yet.')) {
+                    || plotEl.textContent === (globalThis.NorvaI18n?.t('ui_web_6e6f8d4e6690', { defaultValue: "No summary available yet." }) ?? 'No summary available yet.'))) {
                 plotEl.textContent = liveOverview;
             }
             const people = [];
             const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
-            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
-            if ((meta.directors || []).length) people.push(`<span class="detail-credits-label">Director</span> ${MediaUtils.escapeHtml(meta.directors.join(', '))}`);
+            if (castNames.length) people.push(`<span class="detail-credits-label" data-i18n="ui_web_150040557337">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            if ((meta.directors || []).length) people.push(`<span class="detail-credits-label" data-i18n="ui_web_c149bc14e45c">Director</span> ${MediaUtils.escapeHtml(meta.directors.join(', '))}`);
             if (people.length && plotEl) {
                 const credits = document.createElement('div');
                 credits.className = 'detail-credits';
@@ -3158,7 +3158,7 @@ class MoviesPage {
             host.querySelector('.more-like-this')?.remove();
             const section = document.createElement('section');
             section.className = 'more-like-this';
-            section.innerHTML = '<h3 class="more-like-title">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
+            section.innerHTML = '<h3 class="more-like-title" data-i18n="ui_web_ee548a882ea6">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
             host.appendChild(section);
             const rail = section.querySelector('.more-like-grid');
             window.GenreRails.appendCards(rail, items, {
@@ -3258,7 +3258,7 @@ class MoviesPage {
         title.textContent = this.getMovieDisplayTitle(group.representative);
 
         body.innerHTML = `
-            <p class="hint" style="margin-bottom: 8px;">Choose a version to play:</p>
+            <p class="hint" style="margin-bottom: 8px;" data-i18n="ui_web_7051e3d81636">Choose a version to play:</p>
             <div class="version-list">
                 ${ordered.map((item, i) => `
                     <button class="version-item" data-index="${i}">
@@ -3465,12 +3465,12 @@ class MoviesPage {
                     }
                 }
                 btn.classList.remove('active');
-                btn.title = 'Add to Favorites';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                 if (iconSpan) iconSpan.innerHTML = Icons.favoriteOutline;
             } else {
                 this.favoriteIds.add(favKey);
                 btn.classList.add('active');
-                btn.title = 'Remove from Favorites';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
                 if (iconSpan) iconSpan.innerHTML = Icons.favorite;
                 await API.favorites.add(movie.sourceId, movie.stream_id, 'movie', {
                     name: this.getMovieDisplayTitle(movie),

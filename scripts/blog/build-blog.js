@@ -41,6 +41,7 @@ const SITEMAP_OUT = path.join(PUBLIC_DIR, 'sitemap-blog.xml');
 const MIN_PUBLISHED = parseInt(process.env.BLOG_MIN_PUBLISHED || '4', 10);
 const ROBOTS = process.env.BLOG_ROBOTS || 'index,follow';
 const DRY_RUN = process.argv.includes('--dry-run');
+const RENDER_PUBLISHED_ONLY = process.argv.includes('--render-published-only');
 
 /* ------------------------------ CSV parsing ------------------------------ */
 

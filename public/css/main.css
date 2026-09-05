@@ -280,8 +280,8 @@ h4 {
   height: calc(var(--navbar-height) + var(--safe-area-inset-top));
   padding: 0 var(--space-lg);
   padding-top: var(--safe-area-inset-top);
-  padding-left: max(var(--space-lg), var(--safe-area-inset-left));
-  padding-right: max(var(--space-lg), var(--safe-area-inset-right));
+  padding-inline-start: max(var(--space-lg), var(--safe-area-inset-left));
+  padding-inline-end: max(var(--space-lg), var(--safe-area-inset-right));
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--glass-border);
@@ -342,10 +342,10 @@ h4 {
 
 /* Profile avatar in the navbar — always-visible, discoverable entry to the
    "Who's watching?" switcher (no more digging into Settings to change profile).
-   margin-right:auto on the brand clusters the menu + avatar to the right and
+   margin-inline-end:auto on the brand clusters the menu + avatar to the right and
    keeps the avatar OUTSIDE .navbar-menu so it stays visible on mobile (where
    .navbar-menu collapses behind the hamburger). */
-.navbar-brand { margin-right: auto; }
+.navbar-brand { margin-inline-end: auto; }
 .nav-profile {
   display: flex;
   align-items: center;
@@ -354,7 +354,7 @@ h4 {
   width: 44px;
   height: 44px;
   padding: 3px;
-  margin-left: var(--space-sm);
+  margin-inline-start: var(--space-sm);
   border: 2px solid transparent;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.06);
@@ -407,7 +407,7 @@ h4 {
   width: 12px;
   height: 12px;
   border-top: 1px solid var(--glass-border);
-  border-left: 1px solid var(--glass-border);
+  border-inline-start: 1px solid var(--glass-border);
   background: var(--color-bg-tertiary);
   transform: translateX(-50%) rotate(45deg);
 }
@@ -473,7 +473,7 @@ h4 {
   font: inherit;
   font-size: 0.9375rem;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
@@ -486,7 +486,7 @@ h4 {
   content: '';
   width: 6px;
   height: 6px;
-  margin-left: auto;
+  margin-inline-start: auto;
   border-radius: var(--radius-full);
   background: var(--color-accent);
   box-shadow: 0 0 10px var(--color-accent);
@@ -670,7 +670,7 @@ h4 {
   display: flex;
   flex-direction: column;
   background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
 }
 
 .sidebar-header {
@@ -711,7 +711,7 @@ h4 {
   width: 0;
   min-width: 0;
   overflow: hidden;
-  border-right: none;
+  border-inline-end: none;
 }
 
 .channel-sidebar.collapsed .sidebar-header,
@@ -730,7 +730,7 @@ h4 {
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   border: 1px solid var(--glass-border);
-  border-left: none;
+  border-inline-start: none;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding: var(--space-sm);
   cursor: pointer;
@@ -802,7 +802,7 @@ h4 {
 }
 
 .search-wrapper .search-input {
-  padding-right: 30px;
+  padding-inline-end: 30px;
   /* Room for clear button */
 }
 
@@ -939,7 +939,7 @@ h4 {
   color: #9fb1ff;
   font-size: 0.78rem;
   font-weight: 800;
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
 }
 
@@ -957,7 +957,7 @@ h4 {
 
 .channel-item.active {
   background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
+  border-inline-start: 3px solid var(--color-accent);
 }
 
 .channel-item.hidden {
@@ -969,7 +969,7 @@ h4 {
   content: "HS";
   display: inline-flex;
   align-items: center;
-  margin-left: 8px;
+  margin-inline-start: 8px;
   padding: 1px 6px;
   border-radius: var(--radius-full);
   background: rgba(239, 68, 68, 0.18);
@@ -984,7 +984,7 @@ h4 {
   content: "OK";
   display: inline-flex;
   align-items: center;
-  margin-left: 8px;
+  margin-inline-start: 8px;
   padding: 1px 6px;
   border-radius: var(--radius-full);
   background: rgba(34, 197, 94, 0.2);
@@ -1080,7 +1080,7 @@ h4 {
 .live-guide-groups {
   overflow-y: auto;
   padding: 18px 10px 18px 18px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-inline-end: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .live-guide-group {
@@ -1095,7 +1095,7 @@ h4 {
   background: transparent;
   color: var(--color-text-secondary);
   font-weight: 700;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -1190,7 +1190,7 @@ h4 {
 }
 
 .live-guide-preview-channel span {
-  margin-left: 10px;
+  margin-inline-start: 10px;
   color: #a6b1d6;
   font-size: 0.78rem;
 }
@@ -1215,7 +1215,7 @@ h4 {
 .live-guide-upnext .t {
   color: #7d8cff;
   font-weight: 700;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .live-guide-preview-actions {
@@ -1275,7 +1275,7 @@ h4 {
   min-height: 0;
   height: 100%;
   overflow-y: auto;
-  padding-right: 6px;
+  padding-inline-end: 6px;
 }
 
 .live-guide-row {
@@ -1291,7 +1291,7 @@ h4 {
   background: rgba(16, 20, 34, 0.66);
   color: var(--color-text-primary);
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .live-guide-row:nth-child(even) {
@@ -1329,7 +1329,7 @@ h4 {
 .live-guide-num {
   color: #9fb1ff;
   font-weight: 800;
-  text-align: right;
+  text-align: end;
   font-size: 0.85rem;
 }
 
@@ -1436,7 +1436,7 @@ h4 {
 .live-guide-next-time {
   color: #7d8cff;
   font-weight: 700;
-  margin-right: 5px;
+  margin-inline-end: 5px;
 }
 
 .live-guide-play {
@@ -1553,7 +1553,7 @@ h4 {
     overflow-x: auto;
     overflow-y: hidden;
     padding: 10px;
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
@@ -1738,7 +1738,7 @@ h4 {
 /* Favorites */
 .group-header.favorites-group {
   background: linear-gradient(to right, rgba(239, 68, 68, 0.1), transparent);
-  border-left: 3px solid var(--color-error);
+  border-inline-start: 3px solid var(--color-error);
 }
 
 .group-header.favorites-group .group-name {
@@ -2103,7 +2103,7 @@ video::cue {
   width: var(--epg-sidebar-width);
   flex-shrink: 0;
   background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
 }
 
 .epg-time-slots {
@@ -2116,7 +2116,7 @@ video::cue {
   text-align: center;
   font-size: 0.875rem;
   color: var(--color-text-muted);
-  border-right: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
@@ -2136,7 +2136,7 @@ video::cue {
   position: sticky;
   left: 0;
   z-index: 5;
-  border-right: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
   cursor: pointer;
   transition: background var(--transition-fast);
 }
@@ -2185,7 +2185,7 @@ video::cue {
 .epg-program {
   padding: var(--space-sm);
   background: var(--color-bg-tertiary);
-  border-right: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
   cursor: pointer;
   overflow: hidden;
   transition: background var(--transition-fast);
@@ -2197,7 +2197,7 @@ video::cue {
 
 .epg-program.current {
   background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
+  border-inline-start: 3px solid var(--color-accent);
 }
 
 .epg-program-title {
@@ -2562,8 +2562,8 @@ video::cue {
 }
 
 .norva-paused-home-count {
-  padding-left: var(--space-sm);
-  border-left: 1px solid color-mix(in srgb, var(--color-warning) 22%, var(--color-border));
+  padding-inline-start: var(--space-sm);
+  border-inline-start: 1px solid color-mix(in srgb, var(--color-warning) 22%, var(--color-border));
   color: var(--color-text-muted);
 }
 
@@ -2891,7 +2891,7 @@ video::cue {
 .setup-password-field .form-input {
   height: 100%;
   width: 100%;
-  padding-right: 66px;
+  padding-inline-end: 66px;
 }
 
 .setup-password-toggle {
@@ -3040,7 +3040,7 @@ video::cue {
   background: transparent;
   color: var(--color-text-secondary);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -3229,8 +3229,8 @@ video::cue {
 }
 
 .setup-provider-request {
-  padding-left: 12px;
-  border-left: 2px solid var(--color-accent);
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--color-accent);
 }
 
 .setup-provider-request > strong {
@@ -3261,7 +3261,7 @@ video::cue {
   display: grid;
   gap: 5px;
   margin: 0;
-  padding-left: 22px;
+  padding-inline-start: 22px;
 }
 
 .setup-copy-feedback {
@@ -3415,8 +3415,8 @@ video::cue {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding-left: clamp(20px, 4vw, 56px);
-  border-left: 1px solid rgba(148, 163, 184, 0.24);
+  padding-inline-start: clamp(20px, 4vw, 56px);
+  border-inline-start: 1px solid rgba(148, 163, 184, 0.24);
 }
 
 .norva-setup-progress-kicker {
@@ -3539,7 +3539,7 @@ video::cue {
 
 #page-home.home-setup-connect-active .norva-setup-progress-panel {
   gap: clamp(12px, 1.8vh, 20px);
-  padding-left: clamp(22px, 4vw, 64px);
+  padding-inline-start: clamp(22px, 4vw, 64px);
 }
 
 #page-home.home-setup-connect-active .norva-setup-progress-step {
@@ -3586,8 +3586,8 @@ video::cue {
   }
 
   #page-home.home-setup-connect-active .norva-setup-progress-panel {
-    padding-left: 0;
-    border-left: 0;
+    padding-inline-start: 0;
+    border-inline-start: 0;
   }
 }
 
@@ -3746,7 +3746,7 @@ video::cue {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   max-height: none;
   overflow: hidden;
-  padding-right: 0;
+  padding-inline-end: 0;
 }
 
 .norva-setup-sync-panel .source-sync-milestone {
@@ -3832,7 +3832,7 @@ video::cue {
 
 .source-advanced-login summary::after {
   content: '+';
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--color-primary);
   font-size: 1.2rem;
 }
@@ -4029,8 +4029,8 @@ video::cue {
   font-size: 1.1rem;
   line-height: 1;
   font-weight: 800;
-  padding-left: 12px;
-  padding-right: 12px;
+  padding-inline-start: 12px;
+  padding-inline-end: 12px;
 }
 
 .source-menu {
@@ -4090,7 +4090,7 @@ video::cue {
   align-items: flex-start;
   justify-content: center;
   gap: 2px;
-  text-align: left;
+  text-align: start;
   padding: 10px 12px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -4286,7 +4286,7 @@ video::cue {
 
   .settings-container .tab {
     width: 100%;
-    text-align: left;
+    text-align: start;
     padding: 13px 14px;
     border-bottom: none;
     border-radius: 10px;
@@ -4325,16 +4325,16 @@ video::cue {
     align-self: start;
     margin-bottom: 0;
     border-bottom: none;
-    border-right: 1px solid var(--color-border);
-    padding-right: var(--space-md);
+    border-inline-end: 1px solid var(--color-border);
+    padding-inline-end: var(--space-md);
   }
 
   .settings-container > .tabs .tab {
     width: 100%;
-    text-align: left;
+    text-align: start;
     padding: 10px 12px;
     border-bottom: none;
-    border-left: 2px solid transparent;
+    border-inline-start: 2px solid transparent;
     border-radius: 8px;
   }
 
@@ -4381,7 +4381,7 @@ video::cue {
   color: var(--color-text-primary);
   font-size: 0.9rem;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
@@ -4766,7 +4766,7 @@ video::cue {
   background: color-mix(in srgb, var(--color-bg-primary) 72%, transparent);
   color: var(--color-text-primary);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: transform var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -4883,7 +4883,7 @@ video::cue {
   min-height: 64px;
   margin-top: var(--space-lg);
   padding: var(--space-sm) var(--space-md);
-  border-left: 3px solid var(--color-accent);
+  border-inline-start: 3px solid var(--color-accent);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   background: color-mix(in srgb, var(--color-accent) 7%, transparent);
 }
@@ -5021,7 +5021,7 @@ video::cue {
   color: var(--color-text-primary);
   font-size: 0.8rem;
   font-weight: 700;
-  text-align: right;
+  text-align: end;
 }
 
 .provider-access-remove-period {
@@ -5094,7 +5094,7 @@ video::cue {
 
 .provider-access-select-shell select.form-input {
   width: 100%;
-  padding-right: var(--space-2xl);
+  padding-inline-end: var(--space-2xl);
   cursor: pointer;
 }
 
@@ -5103,10 +5103,10 @@ video::cue {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding-right: var(--space-md);
+  padding-inline-end: var(--space-md);
   color: var(--color-text-primary);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -5119,7 +5119,7 @@ video::cue {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  margin-left: var(--space-sm);
+  margin-inline-start: var(--space-sm);
   color: var(--color-text-secondary);
   pointer-events: none;
   transition: color var(--transition-fast), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -5176,7 +5176,7 @@ video::cue {
   color: var(--color-text-secondary);
   font: inherit;
   font-weight: 650;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
@@ -5184,7 +5184,7 @@ video::cue {
 .provider-access-select-option::after {
   width: 8px;
   height: 8px;
-  margin-left: var(--space-md);
+  margin-inline-start: var(--space-md);
   border-radius: var(--radius-full);
   background: transparent;
   content: '';
@@ -5453,7 +5453,7 @@ button.provider-access-calendar-day {
 .provider-access-calendar-caption {
   margin: var(--space-md) 0 0;
   padding: var(--space-sm) var(--space-md);
-  border-left: 2px solid color-mix(in srgb, var(--color-accent) 72%, transparent);
+  border-inline-start: 2px solid color-mix(in srgb, var(--color-accent) 72%, transparent);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: color-mix(in srgb, var(--color-accent) 6%, transparent);
   color: var(--color-text-secondary);
@@ -5514,7 +5514,7 @@ button.provider-access-calendar-day {
 .provider-access-reminder input {
   width: 22px;
   height: 22px;
-  margin-left: auto;
+  margin-inline-start: auto;
   accent-color: var(--color-accent);
 }
 
@@ -5671,7 +5671,7 @@ button.provider-access-calendar-day {
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   color: var(--color-text-primary);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
@@ -5784,7 +5784,7 @@ button.provider-access-calendar-day {
 .provider-access-wizard-modal .provider-access-overview > p {
   margin: 0;
   font-size: 0.78rem;
-  text-align: right;
+  text-align: end;
 }
 
 .provider-access-wizard-modal .provider-access-policy-note {
@@ -5800,7 +5800,7 @@ button.provider-access-calendar-day {
 
 .provider-access-wizard-modal .provider-access-wizard-stage {
   min-height: auto;
-  padding-right: 0;
+  padding-inline-end: 0;
   overflow: visible;
   overscroll-behavior: auto;
   scrollbar-gutter: auto;
@@ -6750,8 +6750,8 @@ button.provider-access-calendar-day {
 
 /* Dependent sub-options (e.g. upscaling method) sit indented under their parent. */
 .setting-item.tc-sub-setting {
-  margin-left: 22px;
-  border-left: 2px solid var(--color-accent-dim);
+  margin-inline-start: 22px;
+  border-inline-start: 2px solid var(--color-accent-dim);
   background: var(--color-bg-primary);
 }
 
@@ -6836,7 +6836,7 @@ button.provider-access-calendar-day {
 
 #volume-value {
   min-width: 40px;
-  text-align: right;
+  text-align: end;
   font-weight: 500;
   color: var(--color-text-secondary);
 }
@@ -7055,7 +7055,7 @@ kbd {
 
 .epg-program.current {
   background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
+  border-inline-start: 3px solid var(--color-accent);
 }
 
 .epg-program-time {
@@ -7134,7 +7134,7 @@ kbd {
   border: none;
   color: var(--color-text-primary);
   font-size: 0.875rem;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background var(--transition-fast);
 }
@@ -7187,7 +7187,7 @@ kbd {
 .content-actions {
   display: flex;
   gap: var(--space-sm);
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .content-tree {
@@ -7219,7 +7219,7 @@ kbd {
 }
 
 .group-expander {
-  margin-right: var(--space-sm);
+  margin-inline-end: var(--space-sm);
   font-size: 0.8em;
   width: 20px;
   text-align: center;
@@ -7231,7 +7231,7 @@ kbd {
 }
 
 .content-channels {
-  margin-left: 28px;
+  margin-inline-start: 28px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -7369,7 +7369,7 @@ kbd {
   justify-content: space-between;
   gap: 14px;
   width: 100%;
-  text-align: left;
+  text-align: start;
   margin: 0;
   padding: 14px 16px;
   font-family: inherit;
@@ -7995,7 +7995,7 @@ kbd {
     bottom: 0;
     width: var(--sidebar-width);
     height: auto;
-    border-right: 1px solid var(--color-border);
+    border-inline-end: 1px solid var(--color-border);
     border-bottom: none;
     transform: translateX(-100%);
     transition: transform 0.3s ease;
@@ -8205,8 +8205,8 @@ kbd {
   }
 
   .norva-setup-progress-panel {
-    padding-left: 0;
-    border-left: 0;
+    padding-inline-start: 0;
+    border-inline-start: 0;
   }
 
   .norva-setup-card h1 {
@@ -8572,7 +8572,7 @@ kbd {
   }
 
   .content-actions {
-    margin-left: 0;
+    margin-inline-start: 0;
     justify-content: space-between;
   }
 
@@ -8884,7 +8884,7 @@ kbd {
   }
 
   #page-home.home-setup-connect-active .norva-setup-progress-panel {
-    padding-left: clamp(14px, 3vw, 26px);
+    padding-inline-start: clamp(14px, 3vw, 26px);
   }
 
   #page-home.home-setup-connect-active .norva-setup-progress-step {
@@ -9141,7 +9141,7 @@ kbd {
   font-size: 1.2rem;
   opacity: 0;
   /* Hide by default in list until hover or active */
-  margin-left: var(--space-xs);
+  margin-inline-start: var(--space-xs);
 }
 
 .channel-item:hover .favorite-btn,
@@ -9636,7 +9636,7 @@ kbd {
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text-primary);
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .movie-version-item:hover,
@@ -10131,7 +10131,7 @@ kbd {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  margin-left: 10px;
+  margin-inline-start: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -10180,7 +10180,7 @@ kbd {
 }
 
 .season-dl-count {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--color-text-secondary);
   font-size: 0.8125rem;
 }
@@ -10480,7 +10480,7 @@ kbd {
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text-primary);
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
@@ -10938,7 +10938,7 @@ kbd {
 
 .episode-airdate {
   flex: none;
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: 0.72rem;
   font-weight: 700;
   color: rgba(224, 231, 255, 0.55);
@@ -10956,7 +10956,7 @@ kbd {
 /* The native download button carries its own margin elsewhere; inside the flex
    actions row the gap already spaces it, so cancel the double spacing. */
 .episode-actions .episode-download {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 .episode-mark {
@@ -11363,7 +11363,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 
 .user-table th {
   padding: var(--space-md);
-  text-align: left;
+  text-align: start;
   font-weight: 600;
   color: var(--color-text-primary);
   border-bottom: 1px solid var(--color-border);
@@ -11475,8 +11475,8 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 /* iOS safe area support for landscape mode (notched devices) */
 @supports (padding: env(safe-area-inset-left)) {
   .watch-overlay {
-    padding-left: env(safe-area-inset-left, 0px);
-    padding-right: env(safe-area-inset-right, 0px);
+    padding-inline-start: env(safe-area-inset-left, 0px);
+    padding-inline-end: env(safe-area-inset-right, 0px);
   }
 }
 
@@ -11641,7 +11641,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 .watch-time:last-child {
-  text-align: right;
+  text-align: end;
 }
 
 .watch-progress {
@@ -11834,7 +11834,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   background: none;
   border: none;
   color: var(--color-text-primary);
-  text-align: left;
+  text-align: start;
   font-size: 0.875rem;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -11892,7 +11892,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   background: none;
   border: none;
   color: var(--color-text-primary);
-  text-align: left;
+  text-align: start;
   font-size: 0.875rem;
   line-height: 1.25;
   cursor: pointer;
@@ -11921,7 +11921,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   background: none;
   border: none;
   color: var(--color-text-primary);
-  text-align: left;
+  text-align: start;
   font-size: 0.875rem;
   cursor: pointer;
 }
@@ -12007,7 +12007,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: 8px;
+  margin-inline-start: 8px;
   padding: 5px 11px;
   border: none;
   border-radius: 999px;
@@ -12449,7 +12449,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 
 .watch-episode-item.active {
   background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
+  border-inline-start: 3px solid var(--color-accent);
 }
 
 .watch-episode-num {
@@ -12496,7 +12496,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   }
 
   .watch-description {
-    text-align: left;
+    text-align: start;
   }
 
   .watch-actions {
@@ -12535,7 +12535,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 
   .watch-next-episode .next-actions {
     width: 100%;
-    margin-left: 0;
+    margin-inline-start: 0;
     justify-content: flex-end;
   }
 
@@ -12745,7 +12745,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  margin-inline-start: auto;
   /* Fallback for cases without flex-grow middle element */
 }
 
@@ -13289,7 +13289,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 .home-ecosystem-install strong {
-  margin-left: 4px;
+  margin-inline-start: 4px;
   color: var(--color-text-primary);
   font-weight: 700;
 }
@@ -13371,7 +13371,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   }
 
   .home-ecosystem-install strong {
-    margin-left: 0;
+    margin-inline-start: 0;
   }
 
   .home-ecosystem-phone-status svg {
@@ -13969,7 +13969,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 .catalog-filter-disclosure-toolbar > .filter-count {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--color-text-secondary);
 }
 
@@ -14030,7 +14030,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 .filter-count {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: 0.82rem;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -14105,7 +14105,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 
 .multi-select-btn {
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -14311,7 +14311,7 @@ html.tv-mode .multi-select-item:focus {
   align-items: flex-start;
   gap: 2px;
   width: 100%;
-  text-align: left;
+  text-align: start;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -14476,7 +14476,7 @@ html.tv-mode .multi-select-item:focus {
 .episode-watched {
   color: var(--color-success);
   font-size: 0.8rem;
-  margin-left: var(--space-xs);
+  margin-inline-start: var(--space-xs);
   flex-shrink: 0;
 }
 
@@ -14498,7 +14498,7 @@ html.tv-mode .multi-select-item:focus {
 
   .filter-count {
     width: 100%;
-    margin-left: 0;
+    margin-inline-start: 0;
     order: 99;
   }
 
@@ -14738,8 +14738,8 @@ html.tv-mode .multi-select-item:focus {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding-left: 6px;
-    padding-right: 6px;
+    padding-inline-start: 6px;
+    padding-inline-end: 6px;
     font-size: 0.82rem;
   }
 
@@ -15050,8 +15050,8 @@ html.tv-mode #page-series .series-controls .search-wrapper .search-input {
     min-height: 420px;
     margin: -4px -12px 28px;
     border-radius: 0;
-    border-left: none;
-    border-right: none;
+    border-inline-start: none;
+    border-inline-end: none;
   }
 
   .home-hero-section::before {
@@ -15305,7 +15305,7 @@ mark.search-highlight {
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-full);
   padding: 0 6px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
   vertical-align: 1px;
 }
 
@@ -15441,7 +15441,7 @@ mark.search-highlight {
 .detail-credits-label {
   color: var(--color-text-muted, #71717a);
   font-weight: 600;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .detail-credits-label::after {
@@ -15694,7 +15694,7 @@ mark.search-highlight {
 }
 
 .watch-cast-time.dur {
-  text-align: right;
+  text-align: end;
 }
 
 .watch-cast-seek {
@@ -15973,7 +15973,7 @@ mark.search-highlight {
      A solid 0.96 bg looks identical and drops the permanent compositing cost. */
   background: rgba(10, 10, 15, 0.96);
   border-bottom: none;
-  border-right: 1px solid var(--glass-border);
+  border-inline-end: 1px solid var(--glass-border);
   overflow: hidden;                 /* clip labels while collapsed */
   z-index: 150;
   transition: width 0.18s ease-out, background 0.18s ease-out;
@@ -16000,7 +16000,7 @@ mark.search-highlight {
    the "Norva" wordmark revealed only when the rail is expanded. */
 .tv-mode .navbar-brand {
   margin: 0 0 8px 0;
-  padding-left: 29px;
+  padding-inline-start: 29px;
   justify-content: flex-start;
   flex: 0 0 auto;
 }
@@ -16060,7 +16060,7 @@ mark.search-highlight {
 .tv-mode .nav-bell-btn,
 .tv-mode .nav-profile {
   align-self: flex-start;
-  margin-left: 22px;
+  margin-inline-start: 22px;
   width: 40px;
   height: 40px;
   flex: 0 0 40px;
@@ -16381,7 +16381,7 @@ html.tv-mode #page-movies .movie-versions-toolbar h3 { font-size: 1.05rem; margi
 html.tv-mode #page-movies .movie-version-item {
   display: block;
   width: 100%;
-  text-align: left;
+  text-align: start;
   padding: 10px 12px;
   margin-bottom: 6px;
   border-radius: 10px;
@@ -16482,7 +16482,7 @@ html.tv-mode #page-live .search-clear {
 }
 .tv-mode #page-live .live-guide-preview-channel span {
   display: inline-block;
-  margin-left: 8px;
+  margin-inline-start: 8px;
   font-size: 0.8rem;
   font-weight: 600;
   color: #9fb2d6;
@@ -16566,7 +16566,7 @@ html.tv-mode #page-live .search-clear {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-inline-end: 4px;
 }
 .tv-mode #page-live .live-guide-row {
   display: grid;
@@ -16741,11 +16741,11 @@ html.tv-mode #page-live .search-clear {
    overscan so edge cards aren't clipped. (Navbar padding is set by the rail
    block above.) */
 .tv-mode .main-content {
-  margin-left: 88px;
-  padding-left: 20px;               /* the rail + each rail's own padding give the
+  margin-inline-start: 88px;
+  padding-inline-start: 20px;               /* the rail + each rail's own padding give the
                                        left gutter; keep content padding small so
                                        the narrow panel isn't over-indented */
-  padding-right: 32px;
+  padding-inline-end: 32px;
   padding-top: 24px;                /* top overscan — the rail replaced the old top
                                        bar, so content would otherwise sit flush to
                                        the top edge and be cropped by TV overscan */
@@ -16758,13 +16758,13 @@ html.tv-mode #page-live .search-clear {
   display: none;
 }
 .tv-mode body.is-watching .main-content {
-  margin-left: 0;
-  padding-left: 0;
-  padding-right: 0;
+  margin-inline-start: 0;
+  padding-inline-start: 0;
+  padding-inline-end: 0;
 }
 .tv-mode .main-content #page-watch {
-  margin-left: 0;
-  margin-right: 0;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
 }
 
 /* Android TV — Home billboard reads from the couch: taller hero, larger copy and
@@ -16874,7 +16874,7 @@ html.tv-mode #page-live .search-clear {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  text-align: left;
+  text-align: start;
   padding: 16px 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 13px;
@@ -17085,7 +17085,7 @@ html.tv-mode #page-live .search-clear {
 .account-name { color: #f8fafc; font-weight: 700; font-size: 16px; line-height: 1.2; }
 .account-email { color: #8b95a9; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-close { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--color-border, #1f2733); background: transparent; color: #cbd5e1; font-size: 22px; line-height: 1; cursor: pointer; }
-.account-row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 12px 16px; background: transparent; border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #e7ecf5; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.account-row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 12px 16px; background: transparent; border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #e7ecf5; font: inherit; font-size: 15px; font-weight: 600; text-align: start; cursor: pointer; }
 .account-row[hidden] { display: none; }
 .account-row:active { background: rgba(255, 255, 255, 0.06); }
 .account-ic { width: 22px; height: 22px; flex: 0 0 auto; opacity: 0.9; }
@@ -17158,7 +17158,7 @@ html.tv .nav-search-btn { display: none; }
   overflow-x: auto;
   overflow-y: hidden;
   padding: 10px 12px;
-  border-right: 0;
+  border-inline-end: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .norva-phone-apk .live-guide-group {
@@ -17432,7 +17432,7 @@ body.is-watching .norva-mini { display: none !important; }
   background: transparent;
   color: #e7ecf5;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .gsearch-result:active { background: rgba(255, 255, 255, 0.06); }
@@ -17441,7 +17441,7 @@ body.is-watching .norva-mini { display: none !important; }
 .gsearch-text { display: flex; flex-direction: column; min-width: 0; }
 .gsearch-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gsearch-sub { color: #8b95a9; font-size: 12.5px; }
-.gsearch-seeall { display: block; width: 100%; margin: 2px 0 10px; padding: 10px 12px; border: none; background: transparent; color: var(--color-accent, #4f8cff); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; border-radius: 10px; }
+.gsearch-seeall { display: block; width: 100%; margin: 2px 0 10px; padding: 10px 12px; border: none; background: transparent; color: var(--color-accent, #4f8cff); font: inherit; font-size: 13.5px; font-weight: 600; text-align: start; cursor: pointer; border-radius: 10px; }
 .gsearch-seeall:active { background: rgba(255, 255, 255, 0.06); }
 @media (hover: hover) { .gsearch-seeall:hover { background: rgba(255, 255, 255, 0.05); } }
 @media (min-width: 641px) {
@@ -17805,7 +17805,7 @@ html.tv-mode #gsearch-input:focus {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-left: auto;
+  margin-inline-start: auto;
   flex: 0 0 auto;
 }
 
@@ -17816,7 +17816,7 @@ html.tv-mode #gsearch-input:focus {
 }
 
 .watch-next-episode.no-countdown .next-actions {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 html.tv-mode .watch-next-episode {
@@ -18203,7 +18203,7 @@ html.tv-mode .nav-devices-btn { display: none !important; }
 }
 .region-picker-btn {
   display: inline-flex; align-items: center; justify-content: space-between; gap: 10px;
-  cursor: pointer; text-align: left;
+  cursor: pointer; text-align: start;
 }
 .region-picker-value { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .region-picker-caret { flex: none; opacity: 0.6; font-size: 0.8em; }
@@ -18249,7 +18249,7 @@ html.tv-mode .nav-devices-btn { display: none !important; }
 }
 .region-picker-option.is-current { font-weight: 700; }
 .region-picker-option.is-current::after {
-  content: '✓'; margin-left: auto; color: #6287ff; font-weight: 800;
+  content: '✓'; margin-inline-start: auto; color: #6287ff; font-weight: 800;
 }
 .region-picker-empty { padding: 14px 10px; text-align: center; color: var(--color-text-secondary); font-size: 0.9rem; }
 
@@ -18286,7 +18286,7 @@ html.tv-mode .navbar:focus-within ~ .main-content {
 }
 
 html.tv-mode .main-content {
-  margin-left: var(--tv-nav-compact-width);
+  margin-inline-start: var(--tv-nav-compact-width);
   transition: none;
 }
 
@@ -18337,7 +18337,7 @@ html.tv-mode .nav-profile {
   width: 38px;
   height: 38px;
   flex: 0 0 38px;
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 /* ============================================================
@@ -18840,7 +18840,7 @@ html.tv-mode #page-series .tv-series-preview-body > p {
 html.tv-mode #page-series .tv-series-preview-progress-copy {
   color: #aebbd2;
   font-size: 0.67rem;
-  text-align: right;
+  text-align: end;
 }
 
 html.tv-mode #page-series .tv-series-preview-progress {
@@ -19048,8 +19048,8 @@ html.tv-mode #page-series.series-detail-open .series-episodes-section,
 html.tv-mode #page-series.series-detail-open .more-like-this {
   width: calc(100% - 64px);
   max-width: none;
-  margin-left: auto;
-  margin-right: auto;
+  margin-inline-start: auto;
+  margin-inline-end: auto;
 }
 
 html.tv-mode #page-series.series-detail-open .series-versions-section {
@@ -19332,14 +19332,14 @@ html.tv-mode.tv-movies-active .nav-search-btn,
 html.tv-mode.tv-movies-active .nav-bell-btn,
 html.tv-mode.tv-movies-active .nav-profile {
   align-self: center;
-  margin-left: 0;
+  margin-inline-start: 0;
   width: 38px;
   height: 38px;
   flex-basis: 38px;
 }
 
 html.tv-mode.tv-movies-active .main-content {
-  margin-left: var(--tv-movies-nav-width);
+  margin-inline-start: var(--tv-movies-nav-width);
   padding: 14px 18px 14px 14px;
 }
 
@@ -20691,7 +20691,7 @@ html.tv-mode .premium-state {
     radial-gradient(circle at 82% 18%, rgba(48, 119, 255, 0.16), transparent 36%),
     linear-gradient(145deg, rgba(12, 24, 43, 0.98), rgba(7, 13, 24, 0.99));
   color: #f6f9ff;
-  text-align: left;
+  text-align: start;
 }
 
 html.tv-mode .premium-state h3 {
@@ -20738,7 +20738,7 @@ html.tv-mode #page-live .live-guide-status {
   background:
     radial-gradient(circle at 22% 20%, rgba(47, 119, 255, 0.17), transparent 32%),
     linear-gradient(145deg, #0a1425, #070c15);
-  text-align: left;
+  text-align: start;
 }
 
 html.tv-mode #page-live .live-guide-status-mark {
@@ -20914,7 +20914,7 @@ html.tv-mode #norva-notif-panel .norva-notif-list {
 html.tv-mode #norva-notif-panel .norva-notif-item {
   min-height: 76px;
   padding: 13px 20px;
-  border-left: 3px solid transparent;
+  border-inline-start: 3px solid transparent;
 }
 
 html.tv-mode #norva-notif-panel .norva-notif-item.unread {
@@ -20957,7 +20957,7 @@ html.tv-mode.tv-settings-active .navbar {
 }
 
 html.tv-mode.tv-settings-active .main-content {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 html.tv-mode #page-settings .settings-container > h2 {
@@ -21335,7 +21335,7 @@ html:not(.tv-mode) .home-state-inline {
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -21486,7 +21486,7 @@ html:not(.tv-mode) .home-state-inline {
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font: inherit;
-  text-align: left;
+  text-align: start;
 }
 
 .live-source-option[aria-selected="true"] {
@@ -21878,7 +21878,7 @@ html:not(.tv-mode) .home-state-inline {
   color: var(--color-text-primary);
   font-weight: 700;
   overflow-wrap: anywhere;
-  text-align: right;
+  text-align: end;
 }
 
 .partners-program-card > .partners-program-intro {
@@ -21908,7 +21908,7 @@ html:not(.tv-mode) .home-state-inline {
   color: var(--color-text-primary);
   font-size: 0.85rem;
   line-height: 1.4;
-  text-align: right;
+  text-align: end;
 }
 
 .partners-program-facts--guided .partners-program-help {
@@ -21985,7 +21985,7 @@ html:not(.tv-mode) .home-state-inline {
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  text-align: left;
+  text-align: start;
 }
 
 .partners-program-help-popover strong {
@@ -22262,7 +22262,7 @@ html:not(.tv-mode) .home-state-inline {
   display: grid;
   gap: var(--space-sm);
   margin: 0;
-  padding-left: var(--space-lg);
+  padding-inline-start: var(--space-lg);
 }
 
 .partners-state-card {
@@ -22297,7 +22297,7 @@ html:not(.tv-mode) .home-state-inline {
 .partners-state-wide .partners-checklist {
   width: min(100%, 560px);
   margin-block: var(--space-xl);
-  text-align: left;
+  text-align: start;
 }
 
 .partners-kyc-rights {
@@ -22306,7 +22306,7 @@ html:not(.tv-mode) .home-state-inline {
   margin-top: var(--space-xl);
   gap: var(--space-md);
   place-content: initial;
-  text-align: left;
+  text-align: start;
 }
 
 .partners-kyc-rights h2 {
@@ -22342,7 +22342,7 @@ html:not(.tv-mode) .home-state-inline {
 
 .partners-jurisdiction-card {
   justify-items: stretch;
-  text-align: left;
+  text-align: start;
 }
 
 .partners-jurisdiction-card > .partners-status-pill {
@@ -22520,7 +22520,7 @@ html:not(.tv-mode) .home-state-inline {
 .partners-country-list {
   min-height: 0;
   max-height: none;
-  padding-right: var(--space-xs);
+  padding-inline-end: var(--space-xs);
   overscroll-behavior: contain;
 }
 
@@ -22763,8 +22763,8 @@ html:not(.tv-mode) .home-state-inline {
   display: grid;
   flex: 0 0 112px;
   justify-items: center;
-  padding-left: var(--space-lg);
-  border-left: 1px solid var(--color-border);
+  padding-inline-start: var(--space-lg);
+  border-inline-start: 1px solid var(--color-border);
 }
 
 .partners-rate-badge strong {
@@ -23534,7 +23534,7 @@ html.tv-mode .partners-tv-shell .btn:focus {
     gap: var(--space-sm);
     padding: var(--space-md) 0 0;
     border-top: 1px solid var(--color-border);
-    border-left: 0;
+    border-inline-start: 0;
   }
 
   .partners-history-heading,
@@ -23609,9 +23609,9 @@ html.tv-mode .partners-tv-shell .btn:focus {
       max(var(--space-md), var(--safe-area-inset-right))
       max(var(--space-md), var(--safe-area-inset-bottom))
       max(var(--space-md), var(--safe-area-inset-left));
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 0;
-    border-left: 0;
+    border-inline-start: 0;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 
@@ -23631,9 +23631,9 @@ html.tv-mode .partners-tv-shell .btn:focus {
       max(var(--space-md), var(--safe-area-inset-right))
       max(var(--space-md), var(--safe-area-inset-bottom))
       max(var(--space-md), var(--safe-area-inset-left));
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 0;
-    border-left: 0;
+    border-inline-start: 0;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 
@@ -23653,9 +23653,9 @@ html.tv-mode .partners-tv-shell .btn:focus {
       max(var(--space-md), var(--safe-area-inset-right))
       max(var(--space-xl), var(--safe-area-inset-bottom))
       max(var(--space-md), var(--safe-area-inset-left));
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 0;
-    border-left: 0;
+    border-inline-start: 0;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 }
@@ -23668,7 +23668,7 @@ html.tv-mode .partners-tv-shell .btn:focus {
   .partners-program-facts--guided .partners-program-value {
     grid-column: 1;
     grid-row: 2;
-    text-align: left;
+    text-align: start;
   }
 
   .partners-program-facts--guided .partners-program-help {
@@ -23861,7 +23861,7 @@ html.tv-mode .partners-tv-shell .btn:focus {
 
 #settings-service-health .service-health-account .service-health-copy {
   position: relative;
-  padding-left: 44px;
+  padding-inline-start: 44px;
 }
 
 #settings-service-health .service-health-account .service-health-copy::before {
@@ -23986,13 +23986,13 @@ html.tv-mode .partners-tv-shell .btn:focus {
     font-size: 0.9rem;
     font-weight: 500;
     line-height: 1.25;
-    text-align: left;
+    text-align: start;
     white-space: normal;
   }
 
   #page-settings .settings-container > .tabs .tab.tab-advanced {
     display: none;
-    margin-left: var(--space-sm);
+    margin-inline-start: var(--space-sm);
     width: calc(100% - var(--space-sm));
   }
 
@@ -24109,7 +24109,7 @@ html.tv-mode #page-settings .settings-container > .tabs {
   padding: 0 clamp(20px, 2vw, 32px) 0 0;
   overflow: visible;
   border: 0;
-  border-right: 1px solid var(--color-border);
+  border-inline-end: 1px solid var(--color-border);
 }
 
 html.tv-mode #page-settings .settings-container > .tabs .tab {
@@ -24126,7 +24126,7 @@ html.tv-mode #page-settings .settings-container > .tabs .tab {
   font-size: clamp(1.15rem, 1.8vw, 1.45rem);
   font-weight: 500;
   line-height: 1.25;
-  text-align: left;
+  text-align: start;
   white-space: normal;
 }
 
@@ -24267,7 +24267,7 @@ html.tv-mode #page-settings .service-health-card {
   min-height: 108px;
   margin-bottom: clamp(20px, 3vh, 36px);
   padding: var(--space-md) var(--space-xl);
-  border-left: 4px solid var(--color-success);
+  border-inline-start: 4px solid var(--color-success);
   border-radius: var(--radius-lg);
 }
 
@@ -24291,7 +24291,7 @@ html.tv-mode #page-settings .service-health-copy small {
 html.tv-mode #page-settings .service-health-copy {
   position: relative;
   min-width: 0;
-  padding-left: 72px;
+  padding-inline-start: 72px;
 }
 
 html.tv-mode #page-settings .service-health-copy::before {
@@ -24486,7 +24486,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
 
   html.tv-mode #page-settings .settings-container > .tabs {
     gap: 4px;
-    padding-right: 20px;
+    padding-inline-end: 20px;
   }
 
   html.tv-mode #page-settings .settings-container > .tabs .tab {
@@ -24526,7 +24526,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   }
 
   html.tv-mode #page-settings .service-health-copy {
-    padding-left: 36px;
+    padding-inline-start: 36px;
   }
 
   html.tv-mode #page-settings .service-health-status-icon {
@@ -24998,7 +24998,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -25032,7 +25032,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -25099,7 +25099,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   position: relative;
   display: grid;
   margin-top: var(--space-md);
-  padding-left: 36px;
+  padding-inline-start: 36px;
 }
 
 .devices-steps::before {
@@ -25108,7 +25108,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   left: 12px;
   top: 28px;
   bottom: 28px;
-  border-left: 1px solid var(--color-border-light);
+  border-inline-start: 1px solid var(--color-border-light);
 }
 
 .devices-step {
@@ -25612,7 +25612,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
     width: 44px;
     height: 44px;
     place-items: center;
-    margin-left: -8px;
+    margin-inline-start: -8px;
     padding: 0;
     color: var(--color-text-primary);
     background: transparent;
@@ -25721,7 +25721,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
     width: 44px;
     height: 44px;
     place-items: center;
-    margin-left: -8px;
+    margin-inline-start: -8px;
     padding: 0;
     color: var(--color-text-primary);
     background: transparent;
@@ -25827,7 +25827,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
   }
 
   .devices-play-note {
-    text-align: left;
+    text-align: start;
   }
 }
 
@@ -26036,7 +26036,7 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
 .pair-tv-form input {
   width: calc(100% - 39px);
   height: 56px;
-  margin-left: 39px;
+  margin-inline-start: 39px;
   padding: 0 16px;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);

@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="app_name">Norva TV</string>
-
-    <!-- Navigation et commandes principales du lecteur TV natif. -->
     <string name="player_back">Retour</string>
     <string name="player_back_content_description">Revenir en arrière</string>
     <string name="player_show_controls">Afficher les commandes de lecture</string>
-    <string name="player_live">Direct</string>
+    <string name="player_live">En direct</string>
     <string name="player_rewind_10">Reculer de 10 secondes</string>
     <string name="player_play">Lire</string>
     <string name="player_pause">Mettre en pause</string>
@@ -17,13 +15,11 @@
     <string name="player_subtitles_button">Sous-titres</string>
     <string name="player_cc_button">Sous-titres</string>
     <string name="player_subtitles_selected_description">Sous-titres, %1$s sélectionné</string>
-    <string name="player_subtitles_off">Désactivés</string>
+    <string name="player_subtitles_off">Désactivé</string>
     <string name="player_aspect_button">Taille de l’image</string>
     <string name="player_resize_selected_description">Taille de l’image, %1$s sélectionnée</string>
     <string name="player_more">Plus</string>
     <string name="player_more_options">Plus d’options de lecture</string>
-
-    <!-- Les libellés restent neutres quand la langue du fichier n’est pas vérifiée. -->
     <string name="player_audio_track">Piste audio</string>
     <string name="player_video_track">Piste vidéo</string>
     <string name="player_audio_unknown">Piste audio %1$d · langue non identifiée</string>
@@ -31,8 +27,6 @@
     <string name="player_audio_unavailable">Aucune piste audio disponible</string>
     <string name="player_video_unavailable">Aucune qualité vidéo sélectionnable</string>
     <string name="player_subtitles_unavailable">Aucun sous-titre sélectionnable</string>
-
-    <!-- Affichage, lecture et options des épisodes. -->
     <string name="player_resize">Taille de l’image</string>
     <string name="player_resize_fit">Ajuster</string>
     <string name="player_resize_zoom">Zoomer</string>
@@ -46,9 +40,7 @@
     <string name="player_next_episode">Épisode suivant</string>
     <string name="player_up_next">À suivre</string>
     <string name="player_play_now">Lire maintenant</string>
-    <string name="player_playing_in">Lecture dans %1$d s</string>
-
-    <!-- Versions, reconnexion et erreurs actionnables. -->
+    <string name="player_playing_in">La lecture vidéo commence dans %1$d s</string>
     <string name="player_version">Version</string>
     <string name="player_version_title">Choisir une version</string>
     <string name="player_change_version">Changer de version</string>
@@ -70,7 +62,6 @@
     <string name="player_error_liveness_title">Vérification de lecture interrompue</string>
     <string name="player_error_liveness">Norva n’a pas pu vérifier cette lecture pendant 45 secondes. Vérifiez votre connexion, puis réessayez.</string>
     <string name="native_playback_auth_error">Norva n’a pas pu vérifier la session de lecture. Reconnectez votre compte, puis réessayez.</string>
-    <!-- Démarrage, focus, accessibilité et récupération du lecteur TV premium. -->
     <string name="player_aspect_short">Taille</string>
     <string name="player_option_selected_description">%1$s, %2$s sélectionné</string>
     <string name="player_option_unavailable">%1$s est indisponible</string>
@@ -93,7 +84,7 @@
     <string name="player_audio_mono">mono</string>
     <string name="player_audio_stereo">stéréo</string>
     <string name="player_on">Activé</string>
-    <string name="player_subtitle_forced">Forcé</string>
+    <string name="player_subtitle_forced">Forcés</string>
     <string name="player_episode_list_unavailable">Liste des épisodes indisponible</string>
     <string name="player_version_number">Version %1$d</string>
     <string name="player_no_other_version">Aucune autre version n’est disponible</string>
@@ -112,4 +103,9 @@
     <string name="tv_exit_cancel">Rester dans Norva</string>
     <string name="tv_connection_settings">Paramètres de connexion</string>
     <string name="tv_exit_confirm">Quitter Norva</string>
+    <string name="native_pair_hint">Connectez ce téléviseur à votre compte Norva. Le couplage est le moyen le plus simple de connecter cet écran à votre foyer.</string>
+    <string name="native_address_invalid">Adresse invalide. Utilisez http://IP:PORT</string>
+    <string name="native_standalone_hint">Autonome : exécutez Norva entièrement sur ce téléviseur. Utilisez-le lorsque vous ne souhaitez pas de compte sur cet appareil. La lecture utilise le décodeur natif du téléviseur.</string>
+    <string name="native_connection_tip">Options de connexion avancées : appuyez sur MENU ou appuyez sur RETOUR depuis Accueil et choisissez \"Paramètres de connexion\".</string>
+    <string name="native_setup_failed">Norva n\'a pas pu démarrer sur ce téléviseur. Essayer à nouveau.</string>
 </resources>

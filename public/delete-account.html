@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
-  <title>Norva — Delete your account</title>
+  <title data-i18n="ui_web_c3b69edcc400">Norva — Delete your account</title>
   <meta name="description" content="Permanently delete your Norva account and associated data.">
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
@@ -50,37 +51,38 @@
   </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
   <main class="panel">
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
-    <h1>Delete your account</h1>
-    <p>This permanently closes access to your Norva account. Norva removes or de-identifies data directly attached to it, including:</p>
+    <h1 data-i18n="ui_web_7ab60595358e">Delete your account</h1>
+    <p data-i18n="ui_web_0b2ab76ee099">This permanently closes access to your Norva account. Norva removes or de-identifies data directly attached to it, including:</p>
     <ul>
-      <li>Your profile and sign-in credentials</li>
-      <li>Watch history, progress, favorites and preferences</li>
-      <li>Connected media sources and trusted devices</li>
-      <li>Active service access and entitlement state held by Norva</li>
+      <li data-i18n="ui_web_e90ccba0dd40">Your profile and sign-in credentials</li>
+      <li data-i18n="ui_web_90fb823961ff">Watch history, progress, favorites and preferences</li>
+      <li data-i18n="ui_web_5a2361c9428e">Connected media sources and trusted devices</li>
+      <li data-i18n="ui_web_c80a843c5c61">Active service access and entitlement state held by Norva</li>
     </ul>
-    <p><strong>This cannot be undone.</strong> Limited records may be retained where required by law or for security, fraud prevention and billing, as explained in our <a href="/privacy.html">Privacy Policy</a>. Downloads saved on your devices are removed when you
+    <p><strong data-i18n="ui_web_b545dd165128">This cannot be undone.</strong><norva-i18n data-i18n="ui_web_f1e1ac92b633"> Limited records may be retained where required by law or for security, fraud prevention and billing, as explained in our </norva-i18n><a href="/privacy.html" data-i18n="ui_web_506ff3946215">Privacy Policy</a><norva-i18n data-i18n="ui_web_7365f0b6ea7f">. Downloads saved on your devices are removed when you
       delete them or uninstall the app. Subscriptions purchased through an app store must also be
       cancelled in that store. If a Norva Partners payout, return or recovery is still open,
-      deletion remains pending until that account-specific financial closure is resolved.</p>
+      deletion remains pending until that account-specific financial closure is resolved.</norva-i18n></p>
 
     <div id="signed-out" hidden>
-      <div class="status">You need to sign in to delete your account.</div>
+      <div class="status" data-i18n="ui_web_d17fb711c3d1">You need to sign in to delete your account.</div>
       <div class="actions">
-        <a class="btn" id="signin-link" href="/account.html">Sign in</a>
+        <a class="btn" id="signin-link" href="/account.html" data-i18n="ui_web_bfd402b2f6f3">Sign in</a>
       </div>
     </div>
 
     <div id="signed-in" hidden>
-      <label for="confirm">Type <strong>DELETE</strong> (or your account email) to confirm</label>
-      <input id="confirm" type="text" autocomplete="off" placeholder="DELETE">
+      <label for="confirm"><norva-i18n data-i18n="ui_web_baaddf70fb5d">Type </norva-i18n><strong data-i18n="ui_web_65daeb378bde">DELETE</strong><norva-i18n data-i18n="ui_web_fc5a5a1bca11"> (or your account email) to confirm</norva-i18n></label>
+      <input id="confirm" type="text" autocomplete="off" placeholder="DELETE" data-i18n-placeholder="ui_web_65daeb378bde">
       <div class="actions">
-        <button class="btn danger" id="delete-btn" disabled>Delete my account</button>
-        <a class="btn secondary" href="/app#settings">Cancel</a>
+        <button class="btn danger" id="delete-btn" disabled data-i18n="ui_web_21d5294717e2">Delete my account</button>
+        <a class="btn secondary" href="/app#settings" data-i18n="ui_web_19766ed6ccb2">Cancel</a>
       </div>
       <p class="fine" id="who"></p>
     </div>
@@ -88,12 +90,12 @@
     <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
     <p class="fine">
-      <a href="/privacy.html">Privacy Policy</a> · <a href="/terms.html">Terms</a>
+      <a href="/privacy.html" data-i18n="ui_web_506ff3946215">Privacy Policy</a> · <a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a>
     </p>
   </main>
 
-  <script src="/js/cloudApi.js?v=50"></script>
-  <script src="/js/authApi.js?v=6"></script>
+  <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+  <script src="/js/authApi.js?v=be61dee633"></script>
   <script>
     (function () {
       const statusEl = document.getElementById('status');
@@ -129,24 +131,24 @@
           return;
         }
         currentEmail = user.email || '';
-        who.textContent = currentEmail ? ('Signed in as ' + currentEmail) : '';
+        who.textContent = currentEmail ? ((globalThis.NorvaI18n?.t("ui_web_abc50e334be4", { defaultValue: "Signed in as " }) ?? 'Signed in as ') + currentEmail) : '';
         signedIn.hidden = false;
       }
 
       deleteBtn.addEventListener('click', async () => {
         if (!validConfirm()) return;
         deleteBtn.disabled = true;
-        setStatus('Deleting your account…');
+        setStatus((globalThis.NorvaI18n?.t("ui_web_88a3f5c5a154", { defaultValue: "Deleting your account…" }) ?? 'Deleting your account…'));
         try {
           await window.NorvaAuth.deleteAccount(confirmInput.value.trim());
           signedIn.hidden = true;
-          setStatus('Your account has been deleted. Thank you for using Norva.', 'ok');
+          setStatus((globalThis.NorvaI18n?.t("ui_web_8bcf7ce0c28e", { defaultValue: "Your account has been deleted. Thank you for using Norva." }) ?? 'Your account has been deleted. Thank you for using Norva.'), 'ok');
           try { localStorage.clear(); } catch (_) {}
           setTimeout(() => { window.location.replace('/'); }, 3500);
         } catch (err) {
           const code = err && err.payload && err.payload.code;
           if (code === 'reauthentication_required') {
-            setStatus('For your security, sign in again before deleting your account. Redirecting to sign in…', 'err');
+            setStatus((globalThis.NorvaI18n?.t("ui_web_0823bef2c96d", { defaultValue: "For your security, sign in again before deleting your account. Redirecting to sign in…" }) ?? 'For your security, sign in again before deleting your account. Redirecting to sign in…'), 'err');
             try { await window.NorvaAuth.signOut(); } catch (_) { window.NorvaAuth.clearSession(); }
             setTimeout(() => {
               window.location.replace('/account.html?returnTo=' + encodeURIComponent('/delete-account.html'));
@@ -155,16 +157,16 @@
           }
           if (code === 'mfa_verification_required') {
             deleteBtn.disabled = false;
-            setStatus('Complete your second-factor verification, then return here to delete your account.', 'err');
+            setStatus((globalThis.NorvaI18n?.t("ui_web_1cfe3ad56c11", { defaultValue: "Complete your second-factor verification, then return here to delete your account." }) ?? 'Complete your second-factor verification, then return here to delete your account.'), 'err');
             return;
           }
           if (code === 'partners_financial_closure_pending') {
             deleteBtn.disabled = false;
-            setStatus('Your deletion request is pending completion of a required Norva Partners financial operation. No amount is disclosed here. Open Support from Norva Settings for the next step.');
+            setStatus((globalThis.NorvaI18n?.t("ui_web_e0cb291f678d", { defaultValue: "Your deletion request is pending completion of a required Norva Partners financial operation. No amount is disclosed here. Open Support from Norva Settings for the next step." }) ?? 'Your deletion request is pending completion of a required Norva Partners financial operation. No amount is disclosed here. Open Support from Norva Settings for the next step.'));
             return;
           }
           deleteBtn.disabled = false;
-          setStatus('Deletion failed. Check your connection and try again.', 'err');
+          setStatus((globalThis.NorvaI18n?.t("ui_web_02e4a2621c17", { defaultValue: "Deletion failed. Check your connection and try again." }) ?? 'Deletion failed. Check your connection and try again.'), 'err');
         }
       });
 

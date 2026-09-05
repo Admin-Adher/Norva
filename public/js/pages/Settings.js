@@ -321,12 +321,12 @@ class SettingsPage {
     }
 
     showTvHandoffInstructions(serviceSpecific = false) {
-        const title = serviceSpecific ? 'Review your TV service' : 'Manage your Norva account';
+        const title = serviceSpecific ? (globalThis.NorvaI18n?.t("ui_web_6667254de8e3", { defaultValue: "Review your TV service" }) ?? 'Review your TV service') : (globalThis.NorvaI18n?.t("ui_web_cd4a1e00601e", { defaultValue: "Manage your Norva account" }) ?? 'Manage your Norva account');
         const message = serviceSpecific
-            ? 'Open norva.tv/account on a phone, tablet or computer to review your TV service. This TV never asks for provider credentials.'
-            : 'Open norva.tv/account on a phone, tablet or computer to manage your plan, payment method and library sources.';
+            ? (globalThis.NorvaI18n?.t("ui_web_c318d019a54f", { defaultValue: "Open norva.tv/account on a phone, tablet or computer to review your TV service. This TV never asks for provider credentials." }) ?? 'Open norva.tv/account on a phone, tablet or computer to review your TV service. This TV never asks for provider credentials.')
+            : (globalThis.NorvaI18n?.t("ui_web_78ea60582e38", { defaultValue: "Open norva.tv/account on a phone, tablet or computer to manage your plan, payment method and library sources." }) ?? 'Open norva.tv/account on a phone, tablet or computer to manage your plan, payment method and library sources.');
         if (window.NorvaModal?.alert) {
-            window.NorvaModal.alert(message, { title, confirmLabel: 'Done' });
+            window.NorvaModal.alert(message, { title, confirmLabel: (globalThis.NorvaI18n?.t("ui_web_11a6767d5674", { defaultValue: "Done" }) ?? 'Done') });
             return;
         }
         window.alert?.(message);
@@ -335,12 +335,12 @@ class SettingsPage {
     showTvLegalInstructions() {
         if (window.NorvaModal?.alert) {
             window.NorvaModal.alert(
-                'Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html',
-                { title: 'Privacy & legal', confirmLabel: 'Done' }
+                (globalThis.NorvaI18n?.t("ui_web_420359a59790", { defaultValue: "Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html" }) ?? 'Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html'),
+                { title: (globalThis.NorvaI18n?.t("ui_web_4afba636b446", { defaultValue: "Privacy & legal" }) ?? 'Privacy & legal'), confirmLabel: (globalThis.NorvaI18n?.t("ui_web_11a6767d5674", { defaultValue: "Done" }) ?? 'Done') }
             );
             return;
         }
-        window.alert?.('Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html');
+        window.alert?.((globalThis.NorvaI18n?.t("ui_web_420359a59790", { defaultValue: "Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html" }) ?? 'Privacy Policy: norva.tv/privacy.html\nTerms: norva.tv/terms.html\nLegal notice: norva.tv/mentions-legales.html'));
     }
 
     // "Sign-in settings" as a lightweight in-context modal rather than a full-page
@@ -361,42 +361,42 @@ class SettingsPage {
             || window.NorvaAuth?.getSession?.()?.user?.email || '';
         const inputStyle = 'width:100%;min-height:44px;padding:0 12px;border-radius:8px;border:1px solid #344158;background:#0b0f16;color:#f8fafc;font:inherit';
 
-        title.textContent = 'Sign-in settings';
+        title.textContent = (globalThis.NorvaI18n?.t("ui_web_e2271e438428", { defaultValue: "Sign-in settings" }) ?? 'Sign-in settings');
         if (footer) footer.innerHTML = '';
         body.innerHTML = `
             <div style="display:flex;flex-direction:column;gap:14px">
               <div>
-                <div class="setting-label">Signed in as</div>
+                <div class="setting-label" data-i18n="ui_web_abc50e334be4">Signed in as</div>
                 <strong id="ss-email" style="color:#f8fafc"></strong>
               </div>
               <div>
-                <div class="setting-label" style="margin-bottom:6px">Sign-in methods</div>
+                <div class="setting-label" style="margin-bottom:6px" data-i18n="ui_web_477be8678405">Sign-in methods</div>
                 <div id="ss-methods" style="display:flex;flex-direction:column;gap:8px">
-                  <p class="setting-hint" style="margin:0">Loading…</p>
+                  <p class="setting-hint" style="margin:0" data-i18n="ui_web_ba3bbbe10d8b">Loading…</p>
                 </div>
               </div>
               <div id="ss-current-row" style="display:none">
-                <label class="setting-label" for="ss-current" style="display:block;margin-bottom:6px">Current password</label>
-                <input id="ss-current" type="password" autocomplete="current-password" placeholder="Your current password" style="${inputStyle}">
+                <label class="setting-label" for="ss-current" style="display:block;margin-bottom:6px" data-i18n="ui_web_72ed2bd767ce">Current password</label>
+                <input id="ss-current" type="password" autocomplete="current-password" placeholder="Your current password" style="${inputStyle}" data-i18n-placeholder="ui_web_4e2baa8d5f44">
               </div>
               <div>
-                <label class="setting-label" for="ss-new" id="ss-pwd-heading" style="display:block;margin-bottom:6px">New password</label>
-                <input id="ss-new" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" style="${inputStyle}">
+                <label class="setting-label" for="ss-new" id="ss-pwd-heading" style="display:block;margin-bottom:6px" data-i18n="ui_web_3dd9df4441fb">New password</label>
+                <input id="ss-new" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" style="${inputStyle}" data-i18n-placeholder="ui_web_85347d171d7d">
               </div>
               <div>
-                <label class="setting-label" for="ss-confirm" style="display:block;margin-bottom:6px">Confirm new password</label>
+                <label class="setting-label" for="ss-confirm" style="display:block;margin-bottom:6px" data-i18n="ui_web_bf000421aeb3">Confirm new password</label>
                 <input id="ss-confirm" type="password" autocomplete="new-password" minlength="6" style="${inputStyle}">
               </div>
               <p id="ss-status" class="setting-hint" role="status" aria-live="polite" aria-atomic="true" style="min-height:18px;margin:0"></p>
-              <p class="setting-hint" style="margin:0"><a id="ss-reset" href="#" style="color:#5b7cfa">Send a password reset email instead</a></p>
+              <p class="setting-hint" style="margin:0"><a id="ss-reset" href="#" style="color:#5b7cfa" data-i18n="ui_web_17cceb2f9a1c">Send a password reset email instead</a></p>
               <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
-                <button class="btn btn-secondary" id="ss-cancel" type="button">Close</button>
-                <button class="btn btn-primary" id="ss-update" type="button">Update password</button>
+                <button class="btn btn-secondary" id="ss-cancel" type="button" data-i18n="ui_web_7d9eb7acb13e">Close</button>
+                <button class="btn btn-primary" id="ss-update" type="button" data-i18n="ui_web_fe45b4014135">Update password</button>
               </div>
             </div>`;
 
         const emailEl = document.getElementById('ss-email');
-        if (emailEl) emailEl.textContent = email || 'your account';
+        if (emailEl) emailEl.textContent = email || (globalThis.NorvaI18n?.t("ui_web_17a7e5cfee17", { defaultValue: "your account" }) ?? 'your account');
 
         const close = () => modal.classList.remove('active');
         const closeX = modal.querySelector('.modal-close');
@@ -418,16 +418,16 @@ class SettingsPage {
         document.getElementById('ss-update')?.addEventListener('click', async () => {
             const pwd = newInput?.value || '';
             const confirmPwd = confirmInput?.value || '';
-            if (pwd.length < 6) { setStatus('Password must be at least 6 characters.', true); newInput?.focus(); return; }
-            if (pwd !== confirmPwd) { setStatus('The passwords do not match.', true); confirmInput?.focus(); return; }
+            if (pwd.length < 6) { setStatus((globalThis.NorvaI18n?.t("ui_web_1da023356624", { defaultValue: "Password must be at least 6 characters." }) ?? 'Password must be at least 6 characters.'), true); newInput?.focus(); return; }
+            if (pwd !== confirmPwd) { setStatus((globalThis.NorvaI18n?.t("ui_web_f694aaa8da2c", { defaultValue: "The passwords do not match." }) ?? 'The passwords do not match.'), true); confirmInput?.focus(); return; }
             const currentRow = document.getElementById('ss-current-row');
             const currentInput = document.getElementById('ss-current');
             const needsReauth = !!currentRow && currentRow.style.display !== 'none';
             const currentPwd = currentInput?.value || '';
-            if (needsReauth && !currentPwd) { setStatus('Enter your current password.', true); currentInput?.focus(); return; }
+            if (needsReauth && !currentPwd) { setStatus((globalThis.NorvaI18n?.t("ui_web_cf4d205e451d", { defaultValue: "Enter your current password." }) ?? 'Enter your current password.'), true); currentInput?.focus(); return; }
             const btn = document.getElementById('ss-update');
             if (btn) btn.disabled = true;
-            setStatus('Updating…', false);
+            setStatus((globalThis.NorvaI18n?.t("ui_web_dfe40efe921f", { defaultValue: "Updating…" }) ?? 'Updating…'), false);
             try {
                 // Premium/Netflix-grade: verify the CURRENT password (re-authenticate) before
                 // changing it, so a momentarily-unlocked session can't silently take over the
@@ -436,14 +436,14 @@ class SettingsPage {
                     try {
                         await window.NorvaAuth.signIn({ email, password: currentPwd });
                     } catch (_) {
-                        setStatus('Current password is incorrect.', true);
+                        setStatus((globalThis.NorvaI18n?.t("ui_web_7bd90cab5f6d", { defaultValue: "Current password is incorrect." }) ?? 'Current password is incorrect.'), true);
                         if (btn) btn.disabled = false;
                         currentInput?.focus();
                         return;
                     }
                 }
                 await window.NorvaAuth.updatePassword(pwd);
-                setStatus('Password updated.', false);
+                setStatus((globalThis.NorvaI18n?.t("ui_web_df01ff0dd6ed", { defaultValue: "Password updated." }) ?? 'Password updated.'), false);
                 if (newInput) newInput.value = '';
                 if (confirmInput) confirmInput.value = '';
                 if (currentInput) currentInput.value = '';
@@ -451,19 +451,19 @@ class SettingsPage {
                 setTimeout(close, 900);
             } catch (e) {
                 console.warn('[Settings] Password update failed.', e);
-                setStatus('Could not update the password. Check your connection and try again.', true);
+                setStatus((globalThis.NorvaI18n?.t("ui_web_a0d6f43c574a", { defaultValue: "Could not update the password. Check your connection and try again." }) ?? 'Could not update the password. Check your connection and try again.'), true);
                 if (btn) btn.disabled = false;
             }
         });
         document.getElementById('ss-reset')?.addEventListener('click', async (e) => {
             e.preventDefault();
-            if (!email) { setStatus('No email on file for a reset link.', true); return; }
+            if (!email) { setStatus((globalThis.NorvaI18n?.t("ui_web_0d6f32edd2f4", { defaultValue: "No email on file for a reset link." }) ?? 'No email on file for a reset link.'), true); return; }
             try {
                 await window.NorvaAuth.recover(email);
-                setStatus('Reset email sent — check your inbox.', false);
+                setStatus((globalThis.NorvaI18n?.t("ui_web_7f35bafafb23", { defaultValue: "Reset email sent — check your inbox." }) ?? 'Reset email sent — check your inbox.'), false);
             } catch (err) {
                 console.warn('[Settings] Password reset email failed.', err);
-                setStatus('Could not send the reset email. Try again in a moment.', true);
+                setStatus((globalThis.NorvaI18n?.t("ui_web_1054d48f2a02", { defaultValue: "Could not send the reset email. Try again in a moment." }) ?? 'Could not send the reset email. Try again in a moment.'), true);
             }
         });
 
@@ -515,18 +515,18 @@ class SettingsPage {
             </div>`;
 
         methodsEl.innerHTML =
-            row('Email &amp; password', hasPassword, hasPassword ? 'Connected' : 'Not set — add one below') +
-            row('Magic link (email)', emailConfirmed, emailConfirmed ? 'Enabled' : 'Confirm your email to enable') +
-            row('Google', hasGoogle, hasGoogle ? (meta.google_email || 'Connected')
-                : 'Sign in with Google (same email) to connect');
+            row((globalThis.NorvaI18n?.t("ui_web_d4026adee761", { defaultValue: "Email &amp; password" }) ?? 'Email &amp; password'), hasPassword, hasPassword ? (globalThis.NorvaI18n?.t("ui_web_22965568d22a", { defaultValue: "Connected" }) ?? 'Connected') : (globalThis.NorvaI18n?.t("ui_web_98b1938a6be4", { defaultValue: "Not set — add one below" }) ?? 'Not set — add one below')) +
+            row((globalThis.NorvaI18n?.t("ui_web_741ca6a01193", { defaultValue: "Magic link (email)" }) ?? 'Magic link (email)'), emailConfirmed, emailConfirmed ? (globalThis.NorvaI18n?.t("ui_web_92c1cdfdf4cb", { defaultValue: "Enabled" }) ?? 'Enabled') : (globalThis.NorvaI18n?.t("ui_web_7256a5cde7a8", { defaultValue: "Confirm your email to enable" }) ?? 'Confirm your email to enable')) +
+            row('Google', hasGoogle, hasGoogle ? (meta.google_email || (globalThis.NorvaI18n?.t("ui_web_22965568d22a", { defaultValue: "Connected" }) ?? 'Connected'))
+                : (globalThis.NorvaI18n?.t("ui_web_124e6e396235", { defaultValue: "Sign in with Google (same email) to connect" }) ?? 'Sign in with Google (same email) to connect'));
 
         // Adapt the password section in BOTH directions so re-calling after an
         // add/change flips it live: no password yet → "Add a password"; has one →
         // "Change password".
         const heading = document.getElementById('ss-pwd-heading');
         const updateBtn = document.getElementById('ss-update');
-        if (heading) heading.textContent = hasPassword ? 'Change password' : 'Add a password';
-        if (updateBtn) updateBtn.textContent = hasPassword ? 'Update password' : 'Add password';
+        if (heading) heading.textContent = hasPassword ? (globalThis.NorvaI18n?.t("ui_web_3f9c991f63a9", { defaultValue: "Change password" }) ?? 'Change password') : (globalThis.NorvaI18n?.t("ui_web_a4e0337667fc", { defaultValue: "Add a password" }) ?? 'Add a password');
+        if (updateBtn) updateBtn.textContent = hasPassword ? (globalThis.NorvaI18n?.t("ui_web_fe45b4014135", { defaultValue: "Update password" }) ?? 'Update password') : (globalThis.NorvaI18n?.t("ui_web_dcec8ee65c57", { defaultValue: "Add password" }) ?? 'Add password');
         // Changing an EXISTING password requires re-auth (premium/security): reveal the
         // current-password field. Adding a first password (passwordless account) does not.
         const currentRow = document.getElementById('ss-current-row');
@@ -549,20 +549,20 @@ class SettingsPage {
         const profileName = document.getElementById('settings-profile-name');
         const tv = isTvSettingsShell();
 
-        if (email) email.textContent = user.email || user.username || 'Paired Norva screen';
-        if (kicker) kicker.textContent = tv && user.device ? 'Identity' : 'Signed in as';
+        if (email) email.textContent = user.email || user.username || (globalThis.NorvaI18n?.t("ui_web_40168a4a3ee9", { defaultValue: "Paired Norva screen" }) ?? 'Paired Norva screen');
+        if (kicker) kicker.textContent = tv && user.device ? (globalThis.NorvaI18n?.t("ui_web_999f23fcd7be", { defaultValue: "Identity" }) ?? 'Identity') : (globalThis.NorvaI18n?.t("ui_web_abc50e334be4", { defaultValue: "Signed in as" }) ?? 'Signed in as');
         if (mode) {
             mode.textContent = user.cloud
-                ? (user.device ? 'Paired cloud screen' : 'Norva Cloud account')
-                : (user.role ? `Local ${user.role}` : 'Local account');
+                ? (user.device ? (globalThis.NorvaI18n?.t("ui_web_94c5a14124e7", { defaultValue: "Paired cloud screen" }) ?? 'Paired cloud screen') : (globalThis.NorvaI18n?.t("ui_web_9a646f09c1e6", { defaultValue: "Norva Cloud account" }) ?? 'Norva Cloud account'))
+                : (user.role ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_938bdf2ad535", {defaultValue: "Local {{p0}}", p0:(user.role)}) : `Local ${user.role}`) : (globalThis.NorvaI18n?.t("ui_web_871e019bee76", { defaultValue: "Local account" }) ?? 'Local account'));
         }
         if (tv && user.device && email && mode) {
             const identity = email.textContent;
-            email.textContent = 'Paired cloud screen';
+            email.textContent = (globalThis.NorvaI18n?.t("ui_web_94c5a14124e7", { defaultValue: "Paired cloud screen" }) ?? 'Paired cloud screen');
             mode.textContent = identity;
         }
         if (profileName) {
-            profileName.textContent = window.NorvaProfiles?.current?.()?.name || 'Main Profile';
+            profileName.textContent = window.NorvaProfiles?.current?.()?.name || (globalThis.NorvaI18n?.t("ui_web_bec3c9b8e5e8", { defaultValue: "Main Profile" }) ?? 'Main Profile');
         }
 
         const accountOnly = document.getElementById('settings-open-account');
@@ -612,8 +612,8 @@ class SettingsPage {
         if (!plan || !hint) return;
 
         if (!this.app.currentUser?.cloud || !window.NorvaCloud?.entitlements) {
-            plan.textContent = 'Local access';
-            hint.textContent = 'This device is using the local hub. Norva Cloud billing is not active here.';
+            plan.textContent = (globalThis.NorvaI18n?.t("ui_web_52956997f7b3", { defaultValue: "Local access" }) ?? 'Local access');
+            hint.textContent = (globalThis.NorvaI18n?.t("ui_web_a74ff92b4961", { defaultValue: "This device is using the local hub. Norva Cloud billing is not active here." }) ?? 'This device is using the local hub. Norva Cloud billing is not active here.');
             if (button) button.style.display = 'none';
             return;
         }
@@ -630,10 +630,10 @@ class SettingsPage {
             } else if (isNativeShell()) {
                 const ready = nativeBillingReady(this.app);
                 button.style.display = ready ? '' : 'none';
-                if (ready) button.textContent = 'Subscribe';
+                if (ready) button.textContent = (globalThis.NorvaI18n?.t("ui_web_cc0e38da9c41", { defaultValue: "Subscribe" }) ?? 'Subscribe');
             } else {
                 button.style.display = '';
-                button.textContent = 'Manage plan';
+                button.textContent = (globalThis.NorvaI18n?.t("ui_web_2d5ab37c33fc", { defaultValue: "Manage plan" }) ?? 'Manage plan');
             }
         }
 
@@ -659,7 +659,7 @@ class SettingsPage {
 
             plan.textContent = this.accessLabel(decision);
             hint.textContent = isTvSettingsShell()
-                ? (this.app.currentUser?.device ? 'Valid via cloud synchronization' : 'Access available on this TV')
+                ? (this.app.currentUser?.device ? (globalThis.NorvaI18n?.t("ui_web_94797ff5c4da", { defaultValue: "Valid via cloud synchronization" }) ?? 'Valid via cloud synchronization') : (globalThis.NorvaI18n?.t("ui_web_3633545db1ca", { defaultValue: "Access available on this TV" }) ?? 'Access available on this TV'))
                 : this.accessHint(decision);
 
             if (includedAccess || hardBlocked) {
@@ -669,30 +669,30 @@ class SettingsPage {
                 if (button) button.style.display = 'none';
             } else if (observing && !hasRealSub) {
                 // No subscription yet → access is open in observe mode.
-                plan.textContent = 'Full access';
-                hint.textContent = 'You have full access to Norva.';
+                plan.textContent = (globalThis.NorvaI18n?.t("ui_web_f19611c61ca5", { defaultValue: "Full access" }) ?? 'Full access');
+                hint.textContent = (globalThis.NorvaI18n?.t("ui_web_568be01a5dbc", { defaultValue: "You have full access to Norva." }) ?? 'You have full access to Norva.');
                 if (button && !isNativeShell()) button.style.display = 'none';
             } else if (button && !isNativeShell()) {
                 // A real membership exists (even while observed) → let the user open
                 // the plan-management surface so the state is inspectable/actionable.
                 button.style.display = '';
-                button.textContent = 'Manage plan';
+                button.textContent = (globalThis.NorvaI18n?.t("ui_web_2d5ab37c33fc", { defaultValue: "Manage plan" }) ?? 'Manage plan');
             }
 
             if (decision.failOpen && !observing) {
-                hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
+                hint.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b016cf047253", {defaultValue: "{{p0}} Last known access is being honored while billing is checked.", p0:(hint.textContent)}) : `${hint.textContent} Last known access is being honored while billing is checked.`);
             }
         } catch (err) {
             console.warn('[Settings] Unable to load Norva access:', err);
-            plan.textContent = 'Access temporarily unavailable';
-            hint.textContent = 'Norva will keep access open briefly while billing status is checked.';
+            plan.textContent = (globalThis.NorvaI18n?.t("ui_web_3768abe13c0f", { defaultValue: "Access temporarily unavailable" }) ?? 'Access temporarily unavailable');
+            hint.textContent = (globalThis.NorvaI18n?.t("ui_web_05d963368ca4", { defaultValue: "Norva will keep access open briefly while billing status is checked." }) ?? 'Norva will keep access open briefly while billing status is checked.');
         }
     }
 
     // Human plan name from a plan_code ('plus' is marketed as plain "Norva").
     planName(decision = {}) {
         const plan = String(decision.planCode || decision.plan_code || decision.projection?.plan_code || '').toLowerCase();
-        if (plan === 'family') return 'Norva Family';
+        if (plan === 'family') return (globalThis.NorvaI18n?.t("ui_web_fada8f5631ee", { defaultValue: "Norva Family" }) ?? 'Norva Family');
         if (plan === 'premium' || plan === 'plus') return 'Norva';
         return null;
     }
@@ -703,21 +703,21 @@ class SettingsPage {
         const status = String(decision.status || '').toLowerCase();
         const name = this.planName(decision);
         const provider = String(decision.projection?.provider || '').toLowerCase();
-        if (status === 'revoked') return 'Access revoked';
-        if (status === 'refunded') return 'Payment refunded';
-        if (status === 'fraud') return 'Access under review';
+        if (status === 'revoked') return (globalThis.NorvaI18n?.t("ui_web_42849e0bea59", { defaultValue: "Access revoked" }) ?? 'Access revoked');
+        if (status === 'refunded') return (globalThis.NorvaI18n?.t("ui_web_dc142ba53499", { defaultValue: "Payment refunded" }) ?? 'Payment refunded');
+        if (status === 'fraud') return (globalThis.NorvaI18n?.t("ui_web_3fcf72db54fd", { defaultValue: "Access under review" }) ?? 'Access under review');
         if (status === 'active' && (provider === 'system' || provider === 'manual')) {
-            return name ? `${name} · Included` : 'Included access';
+            return name ? `${name} · Included` : (globalThis.NorvaI18n?.t("ui_web_25e587cfd863", { defaultValue: "Included access" }) ?? 'Included access');
         }
         const withPlan = (suffix) => name ? `${name} · ${suffix}` : suffix;
         switch (status) {
-            case 'trialing': return withPlan('Free trial');
-            case 'active': return withPlan('Active');
-            case 'cancelled_at_period_end': return withPlan('Ending soon');
-            case 'past_due': return withPlan('Payment due');
-            case 'grace': return withPlan('Payment retrying');
-            case 'expired': return 'Plan expired';
-            default: return 'Full access';
+            case 'trialing': return withPlan((globalThis.NorvaI18n?.t("ui_web_17f6390c3192", { defaultValue: "Free trial" }) ?? 'Free trial'));
+            case 'active': return withPlan((globalThis.NorvaI18n?.t("ui_web_92340695899b", { defaultValue: "Active" }) ?? 'Active'));
+            case 'cancelled_at_period_end': return withPlan((globalThis.NorvaI18n?.t("ui_web_584cf74c33fb", { defaultValue: "Ending soon" }) ?? 'Ending soon'));
+            case 'past_due': return withPlan((globalThis.NorvaI18n?.t("ui_web_a648708bed4a", { defaultValue: "Payment due" }) ?? 'Payment due'));
+            case 'grace': return withPlan((globalThis.NorvaI18n?.t("ui_web_610cc1dd9921", { defaultValue: "Payment retrying" }) ?? 'Payment retrying'));
+            case 'expired': return (globalThis.NorvaI18n?.t("ui_web_c07147b4c107", { defaultValue: "Plan expired" }) ?? 'Plan expired');
+            default: return (globalThis.NorvaI18n?.t("ui_web_f19611c61ca5", { defaultValue: "Full access" }) ?? 'Full access');
         }
     }
 
@@ -725,46 +725,46 @@ class SettingsPage {
     accessHint(decision = {}) {
         const status = String(decision.status || '').toLowerCase();
         const p = decision.projection || {};
-        const fmt = (iso) => { try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); } catch (_) { return null; } };
+        const fmt = (iso) => { try { return new Date(iso).toLocaleDateString((globalThis.NorvaI18n?.language || 'en-US'), { year: 'numeric', month: 'short', day: 'numeric' }); } catch (_) { return null; } };
         const daysLeft = (iso) => { const t = new Date(iso).getTime(); return Number.isFinite(t) ? Math.max(0, Math.ceil((t - Date.now()) / 86400000)) : null; };
         switch (status) {
             case 'revoked':
             case 'refunded':
             case 'fraud':
-                return 'This account cannot start or manage a payment. Contact Norva support for help.';
+                return (globalThis.NorvaI18n?.t("ui_web_368e98ee3170", { defaultValue: "This account cannot start or manage a payment. Contact Norva support for help." }) ?? 'This account cannot start or manage a payment. Contact Norva support for help.');
             case 'trialing': {
                 const endIso = p.trial_ends_at || p.current_period_end;
                 const d = endIso ? daysLeft(endIso) : null;
                 const when = endIso ? fmt(endIso) : null;
                 if (d != null && when) {
                     return d > 0
-                        ? `Free trial — ${d} day${d === 1 ? '' : 's'} left. Renews ${when} unless cancelled.`
-                        : `Trial ends today (${when}). You’ll be charged unless you cancel.`;
+                        ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_31f1e01bef41", {defaultValue: "Free trial — {{p0}} day{{p1}} left. Renews {{p2}} unless cancelled.", p0:(d),p1:(d === 1 ? '' : 's'),p2:(when)}) : `Free trial — ${d} day${d === 1 ? '' : 's'} left. Renews ${when} unless cancelled.`)
+                        : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_05134afefa0c", {defaultValue: "Trial ends today ({{p0}}). You’ll be charged unless you cancel.", p0:(when)}) : `Trial ends today (${when}). You’ll be charged unless you cancel.`);
                 }
-                return 'Your free trial is active.';
+                return (globalThis.NorvaI18n?.t("ui_web_792e06044a23", { defaultValue: "Your free trial is active." }) ?? 'Your free trial is active.');
             }
             case 'active': {
                 // A manually granted plan (VIP/system) never renews and has nothing
                 // to cancel — say what it is instead of implying a billing cycle.
                 const prov = String(p.provider || '').toLowerCase();
                 if (prov === 'manual' || prov === 'system') {
-                    return 'Your access is included with your account — nothing renews, nothing to pay.';
+                    return (globalThis.NorvaI18n?.t("ui_web_03324546447a", { defaultValue: "Your access is included with your account — nothing renews, nothing to pay." }) ?? 'Your access is included with your account — nothing renews, nothing to pay.');
                 }
                 const when = p.current_period_end ? fmt(p.current_period_end) : null;
-                return when ? `Your plan renews on ${when}. Cancel anytime.` : 'Your plan is active.';
+                return when ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5eb617bad990", {defaultValue: "Your plan renews on {{p0}}. Cancel anytime.", p0:(when)}) : `Your plan renews on ${when}. Cancel anytime.`) : (globalThis.NorvaI18n?.t("ui_web_08ce28b6c1e1", { defaultValue: "Your plan is active." }) ?? 'Your plan is active.');
             }
             case 'cancelled_at_period_end': {
                 const when = p.current_period_end ? fmt(p.current_period_end) : null;
-                return when ? `Access continues until ${when}, then your plan ends.` : 'Your plan ends at the end of the current period.';
+                return when ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_479a5017e836", {defaultValue: "Access continues until {{p0}}, then your plan ends.", p0:(when)}) : `Access continues until ${when}, then your plan ends.`) : (globalThis.NorvaI18n?.t("ui_web_bcc8412d4860", { defaultValue: "Your plan ends at the end of the current period." }) ?? 'Your plan ends at the end of the current period.');
             }
             case 'past_due':
-                return 'Your last payment didn’t go through. Update your payment method to keep access.';
+                return (globalThis.NorvaI18n?.t("ui_web_0a3027ec898f", { defaultValue: "Your last payment didn’t go through. Update your payment method to keep access." }) ?? 'Your last payment didn’t go through. Update your payment method to keep access.');
             case 'grace':
-                return 'We’re retrying your payment — access continues in the meantime.';
+                return (globalThis.NorvaI18n?.t("ui_web_68386973eaed", { defaultValue: "We’re retrying your payment — access continues in the meantime." }) ?? 'We’re retrying your payment — access continues in the meantime.');
             case 'expired':
-                return 'Your plan has expired. Choose a plan to keep watching.';
+                return (globalThis.NorvaI18n?.t("ui_web_778bbb67ff61", { defaultValue: "Your plan has expired. Choose a plan to keep watching." }) ?? 'Your plan has expired. Choose a plan to keep watching.');
             default:
-                return 'You have full access to Norva.';
+                return (globalThis.NorvaI18n?.t("ui_web_568be01a5dbc", { defaultValue: "You have full access to Norva." }) ?? 'You have full access to Norva.');
         }
     }
 
@@ -808,11 +808,11 @@ class SettingsPage {
         const needsAttention = !['ready'].includes(String(summary.state || '').toLowerCase());
         const title = document.getElementById('settings-tv-handoff-title');
         const copy = document.getElementById('settings-tv-handoff-copy');
-        if (title) title.textContent = 'Continue on phone or web';
+        if (title) title.textContent = (globalThis.NorvaI18n?.t("ui_web_2319df2a8802", { defaultValue: "Continue on phone or web" }) ?? 'Continue on phone or web');
         if (copy) {
             copy.innerHTML = needsAttention
-                ? 'Open <strong>norva.tv/account</strong> on a personal device to review your TV service. This TV never asks for provider credentials.'
-                : 'Open <strong>norva.tv/account</strong> on a personal device to manage your account and TV service. This TV never asks for provider credentials.';
+                ? '<norva-i18n data-i18n="ui_web_ed077f3d8125">Open </norva-i18n><strong data-i18n="ui_web_5050ce953bfd">norva.tv/account</strong><norva-i18n data-i18n="ui_web_2c74cdd57a48"> on a personal device to review your TV service. This TV never asks for provider credentials.</norva-i18n>'
+                : '<norva-i18n data-i18n="ui_web_ed077f3d8125">Open </norva-i18n><strong data-i18n="ui_web_5050ce953bfd">norva.tv/account</strong><norva-i18n data-i18n="ui_web_f1622265d123"> on a personal device to manage your account and TV service. This TV never asks for provider credentials.</norva-i18n>';
         }
     }
 
@@ -943,7 +943,7 @@ class SettingsPage {
             // surface it, and skip wiring the save handlers below.
             console.warn('Could not load settings for content section', err);
             loadOk = false;
-            window.NorvaModal?.toast?.('Could not load your preferences — reopen Settings to retry.', 'error');
+            window.NorvaModal?.toast?.((globalThis.NorvaI18n?.t("ui_web_a3a7670c446d", { defaultValue: "Could not load your preferences — reopen Settings to retry." }) ?? 'Could not load your preferences — reopen Settings to retry.'), 'error');
         }
 
         const languagePrefs = window.MediaUtils?.normalizeContentPreferences
@@ -1018,7 +1018,7 @@ class SettingsPage {
         if (countrySelect) {
             const regionApi = window.NorvaCloud?.regions;
             const hint = countrySelect.parentElement?.querySelector('.setting-hint');
-            const baseHint = hint?.textContent || 'Catalog region changes only the presentation order, not access.';
+            const baseHint = hint?.textContent || (globalThis.NorvaI18n?.t("ui_web_d3418f669ef0", { defaultValue: "Catalog region changes only the presentation order, not access." }) ?? 'Catalog region changes only the presentation order, not access.');
             const applyResolution = () => {
                 const resolution = regionApi?.resolve?.() || { region: 'FR', status: 'inferred', source: 'fallback' };
                 const value = String(resolution.region || 'FR').toUpperCase();
@@ -1045,7 +1045,7 @@ class SettingsPage {
                 countrySelect.disabled = true;
                 if (pickerBtn) pickerBtn.disabled = true;
                 const originalHint = hint?.textContent;
-                if (hint) hint.textContent = `Syncing catalog for ${regionApi?.label?.(value) || value}...`;
+                if (hint) hint.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_bcf59b6a0de3", {defaultValue: "Syncing catalog for {{p0}}...", p0:(regionApi?.label?.(value) || value)}) : `Syncing catalog for ${regionApi?.label?.(value) || value}...`);
                 try {
                     if (regionApi?.setPreferred) {
                         await regionApi.setPreferred(value);
@@ -1071,7 +1071,7 @@ class SettingsPage {
                     // unhandled rejection while `finally` repainted the button as if the
                     // switch had succeeded. Surface it instead of faking success.
                     console.warn('[country] region switch failed', e);
-                    window.NorvaModal?.toast?.('Could not finish switching region — please retry.', 'error');
+                    window.NorvaModal?.toast?.((globalThis.NorvaI18n?.t("ui_web_daa6854e70fb", { defaultValue: "Could not finish switching region — please retry." }) ?? 'Could not finish switching region — please retry.'), 'error');
                 } finally {
                     countrySelect.disabled = false;
                     // Restore focus to the region button: RegionPicker.choose() called
@@ -1091,14 +1091,14 @@ class SettingsPage {
                 return Number.isFinite(number) && number >= 0 ? Math.round(number) : 0;
             };
             if (st.running) {
-                return `Enriching… ${metric(st.processed)}/${metric(st.total)} titles (${metric(st.matched)} matched)`;
+                return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_965be0b60ca9", {defaultValue: "Enriching… {{p0}}/{{p1}} titles ({{p2}} matched)", p0:(metric(st.processed)),p1:(metric(st.total)),p2:(metric(st.matched))}) : `Enriching… ${metric(st.processed)}/${metric(st.total)} titles (${metric(st.matched)} matched)`);
             }
             if (st.finishedAt) {
                 const failed = metric(st.failed);
                 const errors = failed ? `, ${failed} errors` : '';
-                return `Last run: ${metric(st.matched)}/${metric(st.total)} matched${errors}.`;
+                return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_78d9c08371da", {defaultValue: "Last run: {{p0}}/{{p1}} matched{{p2}}.", p0:(metric(st.matched)),p1:(metric(st.total)),p2:(errors)}) : `Last run: ${metric(st.matched)}/${metric(st.total)} matched${errors}.`);
             }
-            return 'Runs automatically after each sync when a TMDB key is set.';
+            return (globalThis.NorvaI18n?.t("ui_web_4fa0dd2bf200", { defaultValue: "Runs automatically after each sync when a TMDB key is set." }) ?? 'Runs automatically after each sync when a TMDB key is set.');
         };
 
         let pollTimer = null;
@@ -1108,7 +1108,7 @@ class SettingsPage {
                 try {
                     const st = await API.tmdb.status();
                     if (statusHint) statusHint.textContent = formatStatus(st);
-                    if (enrichBtn) enrichBtn.textContent = st.running ? 'Running…' : 'Enrich Now';
+                    if (enrichBtn) enrichBtn.textContent = st.running ? (globalThis.NorvaI18n?.t("ui_web_46c541363b02", { defaultValue: "Running…" }) ?? 'Running…') : (globalThis.NorvaI18n?.t("ui_web_2006c8113ba4", { defaultValue: "Enrich Now" }) ?? 'Enrich Now');
                     if (!st.running) clearInterval(pollTimer);
                 } catch (e) {
                     clearInterval(pollTimer);
@@ -1120,7 +1120,7 @@ class SettingsPage {
         API.tmdb.status().then(st => {
             if (statusHint) statusHint.textContent = formatStatus(st);
             if (st.running) {
-                if (enrichBtn) enrichBtn.textContent = 'Running…';
+                if (enrichBtn) enrichBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_46c541363b02", { defaultValue: "Running…" }) ?? 'Running…');
                 pollStatus();
             }
         }).catch(() => { });
@@ -1130,23 +1130,23 @@ class SettingsPage {
                 resetBrokenHint?.setAttribute('role', 'status');
                 resetBrokenHint?.setAttribute('aria-live', 'polite');
                 resetBrokenBtn.disabled = true;
-                resetBrokenBtn.textContent = 'Restoring…';
+                resetBrokenBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_5a4918e0201c", { defaultValue: "Restoring…" }) ?? 'Restoring…');
                 const res = await fetch('/api/playback-status/reset-connection-errors', { method: 'POST' });
                 const data = await res.json();
                 if (data.success) {
                     const n = data.reset;
                     if (resetBrokenHint) resetBrokenHint.textContent = n > 0
-                        ? `${n} title${n > 1 ? 's' : ''} restored. Reload Movies/Series to see them again.`
-                        : 'No incorrectly hidden titles found — nothing to restore.';
-                    resetBrokenBtn.textContent = 'Done';
+                        ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_511f176fb77f", {defaultValue: "{{p0}} title{{p1}} restored. Reload Movies/Series to see them again.", p0:(n),p1:(n > 1 ? 's' : '')}) : `${n} title${n > 1 ? 's' : ''} restored. Reload Movies/Series to see them again.`)
+                        : (globalThis.NorvaI18n?.t("ui_web_771242068096", { defaultValue: "No incorrectly hidden titles found — nothing to restore." }) ?? 'No incorrectly hidden titles found — nothing to restore.');
+                    resetBrokenBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_11a6767d5674", { defaultValue: "Done" }) ?? 'Done');
                 } else {
                     console.warn('[Settings] Restore hidden titles was rejected.', data?.error);
                     if (resetBrokenHint) {
                         resetBrokenHint.setAttribute('role', 'alert');
                         resetBrokenHint.setAttribute('aria-live', 'assertive');
-                        resetBrokenHint.textContent = 'Could not restore hidden titles. Try again.';
+                        resetBrokenHint.textContent = (globalThis.NorvaI18n?.t("ui_web_67760f1e89ac", { defaultValue: "Could not restore hidden titles. Try again." }) ?? 'Could not restore hidden titles. Try again.');
                     }
-                    resetBrokenBtn.textContent = 'Restore titles';
+                    resetBrokenBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_02f467ba0c3d", { defaultValue: "Restore titles" }) ?? 'Restore titles');
                     resetBrokenBtn.disabled = false;
                 }
             } catch (err) {
@@ -1154,9 +1154,9 @@ class SettingsPage {
                 if (resetBrokenHint) {
                     resetBrokenHint.setAttribute('role', 'alert');
                     resetBrokenHint.setAttribute('aria-live', 'assertive');
-                    resetBrokenHint.textContent = 'Could not restore hidden titles. Check your connection and try again.';
+                    resetBrokenHint.textContent = (globalThis.NorvaI18n?.t("ui_web_e51cd5a678f0", { defaultValue: "Could not restore hidden titles. Check your connection and try again." }) ?? 'Could not restore hidden titles. Check your connection and try again.');
                 }
-                resetBrokenBtn.textContent = 'Restore titles';
+                resetBrokenBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_02f467ba0c3d", { defaultValue: "Restore titles" }) ?? 'Restore titles');
                 resetBrokenBtn.disabled = false;
             }
         });
@@ -1171,11 +1171,11 @@ class SettingsPage {
                 }
                 const result = await API.tmdb.enrich();
                 if (result.started) {
-                    enrichBtn.textContent = 'Running…';
-                    if (statusHint) statusHint.textContent = 'Starting enrichment…';
+                    enrichBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_46c541363b02", { defaultValue: "Running…" }) ?? 'Running…');
+                    if (statusHint) statusHint.textContent = (globalThis.NorvaI18n?.t("ui_web_721503d2e78f", { defaultValue: "Starting enrichment…" }) ?? 'Starting enrichment…');
                     pollStatus();
                 } else if (result.reason === 'no-api-key') {
-                    if (statusHint) statusHint.textContent = 'Add a TMDB API key first.';
+                    if (statusHint) statusHint.textContent = (globalThis.NorvaI18n?.t("ui_web_39ca0b3b6ffd", { defaultValue: "Add a TMDB API key first." }) ?? 'Add a TMDB API key first.');
                 } else if (result.reason === 'already-running') {
                     pollStatus();
                 }
@@ -1184,7 +1184,7 @@ class SettingsPage {
                 if (statusHint) {
                     statusHint.setAttribute('role', 'alert');
                     statusHint.setAttribute('aria-live', 'assertive');
-                    statusHint.textContent = 'Could not start enrichment. Check the API key and try again.';
+                    statusHint.textContent = (globalThis.NorvaI18n?.t("ui_web_eba9b94ca2bb", { defaultValue: "Could not start enrichment. Check the API key and try again." }) ?? 'Could not start enrichment. Check the API key and try again.');
                 }
             }
         });
@@ -1373,10 +1373,10 @@ class SettingsPage {
         const resultEl = document.getElementById('tc-wizard-result');
 
         const FIXES = {
-            sound:   { toggle: 'setting-force-transcode-tc', msg: 'Turned on the audio fix (Dolby/AC3 → browser-friendly sound). Play the channel again.', off: 'Audio fix turned off.' },
-            black:   { toggle: 'setting-force-proxy-tc', msg: "Now fetching the stream through Norva's servers to get past what stopped it loading. Try again.", off: "Turned off — streams play directly from your provider again." },
-            blocked: { toggle: 'setting-force-proxy-tc', msg: "Now streaming through Norva's servers to bypass provider blocks. Try again.", off: "Turned off — streams play directly from your provider again." },
-            buffer:  { selects: [['setting-quality', 'low'], ['setting-max-resolution', '720p']], msg: 'Lowered quality to reduce buffering. Raise it again once it plays smoothly.', off: 'Quality settings restored.' }
+            sound:   { toggle: 'setting-force-transcode-tc', msg: (globalThis.NorvaI18n?.t("ui_web_10f70d1667ee", { defaultValue: "Turned on the audio fix (Dolby/AC3 → browser-friendly sound). Play the channel again." }) ?? 'Turned on the audio fix (Dolby/AC3 → browser-friendly sound). Play the channel again.'), off: (globalThis.NorvaI18n?.t("ui_web_3b0eaa9d7fa4", { defaultValue: "Audio fix turned off." }) ?? 'Audio fix turned off.') },
+            black:   { toggle: 'setting-force-proxy-tc', msg: (globalThis.NorvaI18n?.t("ui_web_8750ef6ea197", { defaultValue: "Now fetching the stream through Norva's servers to get past what stopped it loading. Try again." }) ?? "Now fetching the stream through Norva's servers to get past what stopped it loading. Try again."), off: (globalThis.NorvaI18n?.t("ui_web_9d3d36225c68", { defaultValue: "Turned off — streams play directly from your provider again." }) ?? "Turned off — streams play directly from your provider again.") },
+            blocked: { toggle: 'setting-force-proxy-tc', msg: (globalThis.NorvaI18n?.t("ui_web_99c84200ddbf", { defaultValue: "Now streaming through Norva's servers to bypass provider blocks. Try again." }) ?? "Now streaming through Norva's servers to bypass provider blocks. Try again."), off: (globalThis.NorvaI18n?.t("ui_web_9d3d36225c68", { defaultValue: "Turned off — streams play directly from your provider again." }) ?? "Turned off — streams play directly from your provider again.") },
+            buffer:  { selects: [['setting-quality', 'low'], ['setting-max-resolution', '720p']], msg: (globalThis.NorvaI18n?.t("ui_web_4fff445ca3bb", { defaultValue: "Lowered quality to reduce buffering. Raise it again once it plays smoothly." }) ?? 'Lowered quality to reduce buffering. Raise it again once it plays smoothly.'), off: (globalThis.NorvaI18n?.t("ui_web_c7375a0cf9ff", { defaultValue: "Quality settings restored." }) ?? 'Quality settings restored.') }
         };
 
         const flash = (el) => el?.closest('.setting-item')?.classList.add('tc-flash');
@@ -1413,7 +1413,7 @@ class SettingsPage {
                 });
                 forgetPrev(fix);
                 showResult('✓ ' + fix.off);
-                window.NorvaModal?.toast('Fix turned off.', 'info');
+                window.NorvaModal?.toast((globalThis.NorvaI18n?.t("ui_web_82664455ace7", { defaultValue: "Fix turned off." }) ?? 'Fix turned off.'), 'info');
                 return;
             }
             if (fix.toggle) setToggle(fix.toggle, true);
@@ -1425,7 +1425,7 @@ class SettingsPage {
             });
             wiz.querySelectorAll('.tc-wizard-opt').forEach(o => o.classList.toggle('is-active', o === btn));
             showResult('✓ ' + fix.msg);
-            window.NorvaModal?.toast('Applied a fix — try the channel again.', 'success');
+            window.NorvaModal?.toast((globalThis.NorvaI18n?.t("ui_web_129e346ee50f", { defaultValue: "Applied a fix — try the channel again." }) ?? 'Applied a fix — try the channel again.'), 'success');
             setTimeout(() => {
                 document.getElementById('tab-transcode')?.querySelectorAll('.tc-flash')
                     .forEach(el => el.classList.remove('tc-flash'));
@@ -1481,44 +1481,44 @@ class SettingsPage {
             // Only show detected hardware
             if (hwInfo.nvidia?.available) {
                 detected.push(`<div class="hw-info-item hw-available">
-                    <span class="hw-badge">✓ NVIDIA</span>
+                    <span class="hw-badge" data-i18n="ui_web_7e64b788f17e">✓ NVIDIA</span>
                     <span class="hw-name">${hwInfo.nvidia.name}</span>
                 </div>`);
             }
 
             if (hwInfo.amf?.available) {
                 detected.push(`<div class="hw-info-item hw-available">
-                    <span class="hw-badge">✓ AMD</span>
-                    <span class="hw-name">${hwInfo.amf.name || 'Available'}</span>
+                    <span class="hw-badge" data-i18n="ui_web_7717042cb7d9">✓ AMD</span>
+                    <span class="hw-name">${hwInfo.amf.name || (globalThis.NorvaI18n?.t("ui_web_e674447337e8", { defaultValue: "Available" }) ?? 'Available')}</span>
                 </div>`);
             }
 
             if (hwInfo.qsv?.available) {
                 detected.push(`<div class="hw-info-item hw-available">
-                    <span class="hw-badge">✓ Intel QSV</span>
-                    <span class="hw-name">Available</span>
+                    <span class="hw-badge" data-i18n="ui_web_2a6a6a91f452">✓ Intel QSV</span>
+                    <span class="hw-name" data-i18n="ui_web_e674447337e8">Available</span>
                 </div>`);
             }
 
             if (hwInfo.vaapi?.available) {
                 detected.push(`<div class="hw-info-item hw-available">
-                    <span class="hw-badge">✓ VAAPI</span>
-                    <span class="hw-name">${hwInfo.vaapi.device || 'Available'}</span>
+                    <span class="hw-badge" data-i18n="ui_web_8859e93ed520">✓ VAAPI</span>
+                    <span class="hw-name">${hwInfo.vaapi.device || (globalThis.NorvaI18n?.t("ui_web_e674447337e8", { defaultValue: "Available" }) ?? 'Available')}</span>
                 </div>`);
             }
 
             let html;
             if (detected.length > 0) {
                 html = `<div class="hw-info-grid">${detected.join('')}</div>`;
-                html += `<p class="hint" style="margin-top: var(--space-sm);">Recommended encoder: <strong>${hwInfo.recommended}</strong></p>`;
+                html += `<p class="hint" style="margin-top: var(--space-sm);"><norva-i18n data-i18n="ui_web_c78849f584ee">Recommended encoder: </norva-i18n><strong>${hwInfo.recommended}</strong></p>`;
             } else {
-                html = `<p class="hint">No GPU acceleration detected. Using software encoding.</p>`;
+                html = `<p class="hint" data-i18n="ui_web_5cdf54a6b59f">No GPU acceleration detected. Using software encoding.</p>`;
             }
 
             container.innerHTML = html;
         } catch (err) {
             console.error('Error loading hardware info:', err);
-            container.innerHTML = '<p class="hint">Couldn\'t check your hardware right now — Norva will use software encoding, which works everywhere.</p>';
+            container.innerHTML = '<p class="hint" data-i18n="ui_web_14a865e282c0">Couldn\'t check your hardware right now — Norva will use software encoding, which works everywhere.</p>';
         }
     }
 
@@ -1542,12 +1542,12 @@ class SettingsPage {
 
                 try {
                     await API.users.create({ username, password, role });
-                    NorvaModal.toast('User created successfully!', 'success');
+                    NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_09d887a7061a", { defaultValue: "User created successfully!" }) ?? 'User created successfully!'), 'success');
                     addUserForm.reset();
                     this.loadUsers();
                 } catch (err) {
                     console.warn('[Settings] Local user creation failed.', err);
-                    NorvaModal.toast('Could not create the user. Review the fields and try again.', 'error');
+                    NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_2f3f78f2a9ca", { defaultValue: "Could not create the user. Review the fields and try again." }) ?? 'Could not create the user. Review the fields and try again.'), 'error');
                 } finally {
                     if (btn) btn.disabled = false;
                 }
@@ -1565,7 +1565,7 @@ class SettingsPage {
             this.users = users;
 
             if (users.length === 0) {
-                userList.innerHTML = '<tr><td colspan="5" class="hint">No users found</td></tr>';
+                userList.innerHTML = '<tr><td colspan="5" class="hint" data-i18n="ui_web_bf1e104fb3c8">No users found</td></tr>';
                 return;
             }
 
@@ -1573,11 +1573,11 @@ class SettingsPage {
                 const isSSO = !!user.oidcId;
                 const typeBadge = isSSO
                     ? '<span class="user-badge user-badge-sso">SSO</span>'
-                    : '<span class="user-badge user-badge-local">Local</span>';
+                    : '<span class="user-badge user-badge-local" data-i18n="ui_web_8c31e6e72230">Local</span>';
 
                 const roleBadge = user.role === 'admin'
-                    ? '<span class="user-badge user-badge-admin">Admin</span>'
-                    : '<span class="user-badge user-badge-viewer">Viewer</span>';
+                    ? '<span class="user-badge user-badge-admin" data-i18n="ui_web_c1c224b03cd9">Admin</span>'
+                    : '<span class="user-badge user-badge-viewer" data-i18n="ui_web_678bfa6af48b">Viewer</span>';
 
                 return `
                 <tr>
@@ -1589,16 +1589,16 @@ class SettingsPage {
                     </td>
                     <td>${user.email || '<span class="hint">-</span>'}</td>
                     <td>${roleBadge}</td>
-                    <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US') : 'N/A'}</td>
+                    <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString((globalThis.NorvaI18n?.language || 'en-US')) : 'N/A'}</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
-                        <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
+                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})" data-i18n="ui_web_464c4ffd019e">Edit</button>
+                        <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')" data-i18n="ui_web_e2d0a54968ea">Delete</button>
                     </td>
                 </tr>
             `}).join('');
         } catch (err) {
             console.error('Error loading users:', err);
-            userList.innerHTML = '<tr><td colspan="5" class="hint">Error loading users</td></tr>';
+            userList.innerHTML = '<tr><td colspan="5" class="hint" data-i18n="ui_web_dd02ae1a4a2f">Error loading users</td></tr>';
         }
     }
 
@@ -1618,7 +1618,7 @@ class SettingsPage {
         console.log('Modal element:', modal);
         if (!modal) {
             console.error('CRITICAL: Modal element #edit-user-modal not found in DOM!');
-            NorvaModal.toast('Error: could not open the editor. Please refresh the page.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_da059d5e024f", { defaultValue: "Error: could not open the editor. Please refresh the page." }) ?? 'Error: could not open the editor. Please refresh the page.'), 'error');
             return;
         }
 
@@ -1649,17 +1649,17 @@ class SettingsPage {
             if (isSSO) {
                 if (editPassword) {
                     editPassword.disabled = true;
-                    editPassword.placeholder = "Managed by SSO Provider";
+                    editPassword.placeholder = (globalThis.NorvaI18n?.t("ui_web_d1237668ba2a", { defaultValue: "Managed by SSO Provider" }) ?? "Managed by SSO Provider");
                 }
-                if (passwordHint) passwordHint.textContent = "Password cannot be changed for SSO users.";
+                if (passwordHint) passwordHint.textContent = (globalThis.NorvaI18n?.t("ui_web_d0adfbd8e884", { defaultValue: "Password cannot be changed for SSO users." }) ?? "Password cannot be changed for SSO users.");
                 if (oidcGroup) oidcGroup.classList.remove('hidden');
                 if (oidcIdDisplay) oidcIdDisplay.textContent = user.oidcId;
             } else {
                 if (editPassword) {
                     editPassword.disabled = false;
-                    editPassword.placeholder = "Leave blank to keep current";
+                    editPassword.placeholder = (globalThis.NorvaI18n?.t("ui_web_25a1ae17f01b", { defaultValue: "Leave blank to keep current" }) ?? "Leave blank to keep current");
                 }
-                if (passwordHint) passwordHint.textContent = "Optional. Leave blank to keep unchanged.";
+                if (passwordHint) passwordHint.textContent = (globalThis.NorvaI18n?.t("ui_web_8c3d48ae69ca", { defaultValue: "Optional. Leave blank to keep unchanged." }) ?? "Optional. Leave blank to keep unchanged.");
                 if (oidcGroup) oidcGroup.classList.add('hidden');
             }
 
@@ -1674,7 +1674,7 @@ class SettingsPage {
             console.log('Modal should now be visible!');
         } catch (err) {
             console.error('Error populating modal:', err);
-            NorvaModal.toast('Could not open the user editor. Refresh the page and try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_9a3a013ae23e", { defaultValue: "Could not open the user editor. Refresh the page and try again." }) ?? 'Could not open the user editor. Refresh the page and try again.'), 'error');
         }
     }
 
@@ -1703,7 +1703,7 @@ class SettingsPage {
             // fires — validate the name explicitly rather than PUT an empty username.
             const username = document.getElementById('edit-username').value.trim();
             if (!username) {
-                NorvaModal.toast('Username cannot be empty.', 'error');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_430404bb87ed", { defaultValue: "Username cannot be empty." }) ?? 'Username cannot be empty.'), 'error');
                 return;
             }
             const updates = {
@@ -1719,12 +1719,12 @@ class SettingsPage {
             saveBtn.disabled = true;
             try {
                 await API.users.update(userId, updates);
-                NorvaModal.toast('User updated.', 'success');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_9addefc02b88", { defaultValue: "User updated." }) ?? 'User updated.'), 'success');
                 closeModal();
                 this.loadUsers();
             } catch (err) {
                 console.warn('[Settings] Local user update failed.', err);
-                NorvaModal.toast('Could not update the user. Try again.', 'error');
+                NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_a863d18a9043", { defaultValue: "Could not update the user. Try again." }) ?? 'Could not update the user. Try again.'), 'error');
             } finally {
                 saveBtn.disabled = false;
             }
@@ -1761,8 +1761,8 @@ class SettingsPage {
 
     async deleteUser(userId, username) {
         const ok = await NorvaModal.confirm(
-            `"${username}" will lose access to this Norva server. This cannot be undone.`,
-            { title: 'Delete user?', confirmLabel: 'Delete', danger: true }
+            (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_449b2d1558c2", {defaultValue: "\"{{p0}}\" will lose access to this Norva server. This cannot be undone.", p0:(username)}) : `"${username}" will lose access to this Norva server. This cannot be undone.`),
+            { title: (globalThis.NorvaI18n?.t("ui_web_a974bdbf8f4b", { defaultValue: "Delete user?" }) ?? 'Delete user?'), confirmLabel: (globalThis.NorvaI18n?.t("ui_web_e2d0a54968ea", { defaultValue: "Delete" }) ?? 'Delete'), danger: true }
         );
         if (!ok) return;
 
@@ -1771,7 +1771,7 @@ class SettingsPage {
             this.loadUsers();
         } catch (err) {
             console.warn('[Settings] Local user deletion failed.', err);
-            NorvaModal.toast('Could not delete the user. Try again.', 'error');
+            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_ce87fda3b51f", { defaultValue: "Could not delete the user. Try again." }) ?? 'Could not delete the user. Try again.'), 'error');
         }
     }
 
@@ -2027,26 +2027,24 @@ class SettingsPage {
 
                 let text;
                 if (diffMins < 1) {
-                    text = 'Just now';
-                } else if (diffMins < 60) {
-                    text = `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
-                } else if (diffHours < 24) {
-                    text = `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+                    text = (globalThis.NorvaI18n?.t("ui_web_66f53417d3b7", { defaultValue: "Just now" }) ?? 'Just now');
+                } else if (diffMins < 60) {                    text = new Intl.RelativeTimeFormat(globalThis.NorvaI18n?.language || 'en', { numeric: 'auto' }).format(-diffMins, 'minute');
+                } else if (diffHours < 24) {                    text = new Intl.RelativeTimeFormat(globalThis.NorvaI18n?.language || 'en', { numeric: 'auto' }).format(-diffHours, 'hour');
                 } else {
                     // Use absolute time for older refreshes
-                    text = lastRefreshTime.toLocaleString('en-US');
+                    text = lastRefreshTime.toLocaleString((globalThis.NorvaI18n?.language || 'en-US'));
                 }
 
                 display.textContent = text;
-                display.title = lastRefreshTime.toLocaleString('en-US'); // Full timestamp on hover
+                display.title = lastRefreshTime.toLocaleString(((globalThis.NorvaI18n?.language || 'en-US'))); // Full timestamp on hover
             } else {
-                display.textContent = 'Never';
-                display.title = 'Sync has not run yet since server started';
+                display.textContent = (globalThis.NorvaI18n?.t("ui_web_6300ef800bb8", { defaultValue: "Never" }) ?? 'Never');
+                display.title = (globalThis.NorvaI18n?.t("ui_web_1faa5300ff48", { defaultValue: "Sync has not run yet since server started" }) ?? 'Sync has not run yet since server started');
             }
         } catch (err) {
             console.debug('Sync status unavailable:', err);
-            display.textContent = 'Unknown';
-            display.title = 'Could not fetch sync status';
+            display.textContent = (globalThis.NorvaI18n?.t("ui_web_b764cdc0eab7", { defaultValue: "Unknown" }) ?? 'Unknown');
+            display.title = (globalThis.NorvaI18n?.t("ui_web_e939d614a2a2", { defaultValue: "Could not fetch sync status" }) ?? 'Could not fetch sync status');
         }
     }
 

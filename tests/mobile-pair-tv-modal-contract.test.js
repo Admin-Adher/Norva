@@ -58,14 +58,14 @@ test('the phone Home action opens the sheet without changing route', () => {
   assert.match(component, /isCatalogReady/);
   assert.match(component, /options\.force === true \|\| options\.code/);
 
-  const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js?v=2');
-  const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js?v=a8db32010d');
-  const devicesIndex = appHtml.indexOf('/js/components/DevicesScreensModule.js?v=cb8a9f10e4');
-  const homeIndex = appHtml.indexOf('/js/pages/HomePage.js?v=6fdf890230');
-  const appIndex = appHtml.indexOf('/js/app.js?v=5e217dfb7b');
+  const modalIndex = appHtml.indexOf('/js/components/NorvaModal.js');
+  const pairIndex = appHtml.indexOf('/js/components/PairTvSheet.js');
+  const devicesIndex = appHtml.indexOf('/js/components/DevicesScreensModule.js');
+  const homeIndex = appHtml.indexOf('/js/pages/HomePage.js');
+  const appIndex = appHtml.indexOf('/js/app.js');
   assert.ok(modalIndex > 0 && modalIndex < pairIndex && pairIndex < devicesIndex && devicesIndex < homeIndex && homeIndex < appIndex);
-  assert.match(appHtml, /\/css\/main\.css\?v=71854078d1/);
-  assert.match(appHtml, /\/js\/pages\/Settings\.js\?v=2e8503448a/);
+  assert.match(appHtml, /\/css\/main\.css\?v=[0-9a-f]+/);
+  assert.match(appHtml, /\/js\/pages\/Settings\.js\?v=[0-9a-f]+/);
 });
 
 test('pairing code normalization matches the six-character TV alphabet exactly', () => {

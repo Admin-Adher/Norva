@@ -16,11 +16,11 @@
   var VERSION = 1;
 
   var T = {
-    text: 'We use analytics, including privacy-masked session replay, and advertising cookies to understand friction and improve Norva. You can accept or decline — this won’t affect how the site works.',
-    accept: 'Accept',
-    refuse: 'Decline',
-    more: 'Learn more',
-    aria: 'Cookie consent'
+    text: ((globalThis.NorvaI18n?.t("ui_web_f7d909a256a1", { defaultValue: "We use analytics, including privacy-masked session replay, and advertising cookies to understand friction and improve Norva. You can accept or decline — this won’t affect how the site works." }) ?? 'We use analytics, including privacy-masked session replay, and advertising cookies to understand friction and improve Norva. You can accept or decline — this won’t affect how the site works.')),
+    accept: (globalThis.NorvaI18n?.t("ui_web_89713b9c9c1b", { defaultValue: "Accept" }) ?? 'Accept'),
+    refuse: (globalThis.NorvaI18n?.t("ui_web_a2d285b35287", { defaultValue: "Decline" }) ?? 'Decline'),
+    more: (globalThis.NorvaI18n?.t("ui_web_1445799c033a", { defaultValue: "Learn more" }) ?? 'Learn more'),
+    aria: (globalThis.NorvaI18n?.t("ui_web_8d5e02d16834", { defaultValue: "Cookie consent" }) ?? 'Cookie consent')
   };
 
   var privacyHref = '/privacy.html';

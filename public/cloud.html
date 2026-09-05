@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script src="/js/i18n.js?v=dac5204a94"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b10">
-    <title>Norva Account</title>
+    <title data-i18n="ui_web_070ab76e8398">Norva Account</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <script>
       (function () {
@@ -273,42 +274,43 @@
     </style>
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=5"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=6a8faac5fe"></script>
+    <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
 </head>
 <body>
     <header class="topbar">
         <div class="brand">
             <img src="/img/norva-app-icon.png" alt="Norva">
-            <strong>Norva Account</strong>
+            <strong data-i18n="ui_web_070ab76e8398">Norva Account</strong>
         </div>
         <div class="top-actions">
             <span class="email" id="account-email"></span>
-            <a class="btn link" href="/">Watch</a>
-            <button class="btn danger" id="signout-button" type="button">Sign out</button>
+            <a class="btn link" href="/" data-i18n="ui_web_a71e75732446">Watch</a>
+            <button class="btn danger" id="signout-button" type="button" data-i18n="ui_web_48f0d3d397d4">Sign out</button>
         </div>
     </header>
 
     <main class="shell">
         <section class="hero">
             <div>
-                <h1>Your household, attached to one Norva account.</h1>
-                <p class="lead">Manage your profile, IPTV providers, trusted screens and pairing codes. Watching happens in the Norva app.</p>
+                <h1 data-i18n="ui_web_3af89c5ac624">Your household, attached to one Norva account.</h1>
+                <p class="lead" data-i18n="ui_web_4fcc38ecbcc3">Manage your profile, IPTV providers, trusted screens and pairing codes. Watching happens in the Norva app.</p>
                 <div class="stats">
-                    <div class="stat"><strong id="device-count">0</strong><span>Trusted screens</span></div>
-                    <div class="stat"><strong id="source-count">0</strong><span>TV providers</span></div>
-                    <div class="stat"><strong id="history-count">0</strong><span>History records</span></div>
+                    <div class="stat"><strong id="device-count">0</strong><span data-i18n="ui_web_061926836c40">Trusted screens</span></div>
+                    <div class="stat"><strong id="source-count">0</strong><span data-i18n="ui_web_b34d34ef8285">TV providers</span></div>
+                    <div class="stat"><strong id="history-count">0</strong><span data-i18n="ui_web_fc21741a9fbf">History records</span></div>
                 </div>
             </div>
             <section class="panel">
-                <h2>Pair a screen</h2>
-                <p class="muted">Enter the code shown on a TV, mobile app or web screen.</p>
+                <h2 data-i18n="ui_web_81c090b36564">Pair a screen</h2>
+                <p class="muted" data-i18n="ui_web_993e77852f49">Enter the code shown on a TV, mobile app or web screen.</p>
                 <div class="field" style="margin-top:14px">
-                    <label for="pair-code">Pairing code</label>
-                    <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
+                    <label for="pair-code" data-i18n="ui_web_1c5ea2f7ed52">Pairing code</label>
+                    <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123" data-i18n-placeholder="ui_web_e0bebd228199">
                 </div>
                 <div class="button-row">
-                    <button class="btn primary" id="approve-button" type="button">Approve device</button>
-                    <button class="btn" id="clear-code-button" type="button">Clear</button>
+                    <button class="btn primary" id="approve-button" type="button" data-i18n="ui_web_83a50cb4bdfe">Approve device</button>
+                    <button class="btn" id="clear-code-button" type="button" data-i18n="ui_web_83b12c2216ef">Clear</button>
                 </div>
                 <div class="status" id="pair-status"></div>
             </section>
@@ -316,20 +318,20 @@
 
         <section class="grid">
             <section class="panel">
-                <h2>Profile</h2>
+                <h2 data-i18n="ui_web_d696a35bdd18">Profile</h2>
                 <div class="field">
-                    <label for="display-name">Display name</label>
+                    <label for="display-name" data-i18n="ui_web_2b7f6a84de91">Display name</label>
                     <input id="display-name" type="text" maxlength="80" autocomplete="name">
                 </div>
                 <div class="button-row">
-                    <button class="btn primary" id="save-profile-button" type="button">Save profile</button>
-                    <a class="btn link" href="/account.html?manage=1">Sign-in settings</a>
+                    <button class="btn primary" id="save-profile-button" type="button" data-i18n="ui_web_0c8209e72ec8">Save profile</button>
+                    <a class="btn link" href="/account.html?manage=1" data-i18n="ui_web_e2271e438428">Sign-in settings</a>
                 </div>
                 <div class="status" id="profile-status"></div>
             </section>
 
             <section class="panel">
-                <h2>Trusted screens</h2>
+                <h2 data-i18n="ui_web_061926836c40">Trusted screens</h2>
                 <div class="list" id="devices-list"></div>
                 <div class="status" id="devices-status"></div>
             </section>
@@ -337,82 +339,82 @@
 
         <section class="grid">
             <section class="panel">
-                <h2>Add TV provider</h2>
-                <div class="segmented" aria-label="Provider type">
-                    <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Provider account</button>
-                    <button class="segment" id="type-m3u" type="button" data-source-type="m3u">Playlist link</button>
+                <h2 data-i18n="ui_web_e10bf05e823c">Add TV provider</h2>
+                <div class="segmented" aria-label="Provider type" data-i18n-aria-label="ui_web_8c0f6d3ebfe7">
+                    <button class="segment active" id="type-xtream" type="button" data-source-type="xtream" data-i18n="ui_web_20e8bb9ff8ed">Provider account</button>
+                    <button class="segment" id="type-m3u" type="button" data-source-type="m3u" data-i18n="ui_web_8985908fa7c6">Playlist link</button>
                 </div>
                 <div class="field">
-                    <label for="source-name">Name</label>
-                    <input id="source-name" name="provider-display-name" type="text" maxlength="80" placeholder="Family IPTV" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
+                    <label for="source-name" data-i18n="ui_web_dcd1d5223f73">Name</label>
+                    <input id="source-name" name="provider-display-name" type="text" maxlength="80" placeholder="Family IPTV" autocomplete="off" autocapitalize="words" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" data-i18n-placeholder="ui_web_841996633e67">
                 </div>
                 <div id="xtream-fields">
                     <div class="field">
-                        <label for="xtream-url">Provider URL or complete Xtream link</label>
+                        <label for="xtream-url" data-i18n="ui_web_826594fbf7e5">Provider URL or complete Xtream link</label>
                         <input id="xtream-url" name="provider-server-url" type="url" placeholder="https://provider.example/get.php?username=...&password=..." autocomplete="off" autocapitalize="none" spellcheck="false">
-                        <p class="muted" id="xtream-link-hint">Paste the complete link from your TV service, or enter the fields separately.</p>
+                        <p class="muted" id="xtream-link-hint" data-i18n="ui_web_fc42920389b8">Paste the complete link from your TV service, or enter the fields separately.</p>
                     </div>
                     <div class="field">
-                        <label for="xtream-username">Username</label>
+                        <label for="xtream-username" data-i18n="ui_web_e3b89e9d33f8">Username</label>
                         <input id="xtream-username" name="provider-login" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                     </div>
                     <div class="field">
-                        <label for="xtream-password">Password</label>
+                        <label for="xtream-password" data-i18n="ui_web_e7cf3ef4f17c">Password</label>
                         <input id="xtream-password" name="provider-secret" type="password" autocomplete="new-password" data-1p-ignore="true" data-lpignore="true" data-form-type="other">
                     </div>
                 </div>
                 <div id="m3u-fields" class="hidden">
                     <div class="field">
-                        <label for="m3u-url">Playlist URL</label>
+                        <label for="m3u-url" data-i18n="ui_web_498c686fc285">Playlist URL</label>
                         <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u" autocomplete="off" autocapitalize="none" spellcheck="false">
                     </div>
                 </div>
-                <button class="btn primary" id="add-source-button" type="button">Add provider</button>
+                <button class="btn primary" id="add-source-button" type="button" data-i18n="ui_web_8cd1856b03dd">Add provider</button>
                 <div class="status" id="source-status"></div>
             </section>
 
             <section class="panel">
-                <h2>Your providers</h2>
+                <h2 data-i18n="ui_web_3929b3357171">Your providers</h2>
                 <div class="list" id="sources-list"></div>
             </section>
         </section>
 
         <section class="grid">
             <section class="panel">
-                <h2>Remote command</h2>
-                <p class="muted">Send a playback or navigation command to a trusted Norva screen.</p>
+                <h2 data-i18n="ui_web_ce40bddf87ca">Remote command</h2>
+                <p class="muted" data-i18n="ui_web_99495fe447b7">Send a playback or navigation command to a trusted Norva screen.</p>
                 <div class="field" style="margin-top:14px">
-                    <label for="command-device">Target screen</label>
+                    <label for="command-device" data-i18n="ui_web_b59bf178afc0">Target screen</label>
                     <select id="command-device"></select>
                 </div>
                 <div class="field">
-                    <label for="command-title">Title</label>
-                    <input id="command-title" type="text" maxlength="120" placeholder="Norva stream">
+                    <label for="command-title" data-i18n="ui_web_7e8cd2056da7">Title</label>
+                    <input id="command-title" type="text" maxlength="120" placeholder="Norva stream" data-i18n-placeholder="ui_web_4180eb121044">
                 </div>
                 <div class="field">
-                    <label for="command-url">URL</label>
+                    <label for="command-url" data-i18n="ui_web_e7a241debad5">URL</label>
                     <input id="command-url" type="url" placeholder="https://...">
                 </div>
                 <div class="button-row">
-                    <button class="btn primary" id="send-play-button" type="button">Play</button>
-                    <button class="btn" id="send-open-button" type="button">Open</button>
+                    <button class="btn primary" id="send-play-button" type="button" data-i18n="ui_web_436e61016e26">Play</button>
+                    <button class="btn" id="send-open-button" type="button" data-i18n="ui_web_ed077f3d8125">Open</button>
                 </div>
                 <div class="status" id="command-status"></div>
             </section>
 
             <section class="panel">
-                <h2>Advanced</h2>
-                <p class="muted">The local connector remains available for offline/local hub workflows. The public product should use Norva Account first.</p>
+                <h2 data-i18n="ui_web_9f088dbebd6c">Advanced</h2>
+                <p class="muted" data-i18n="ui_web_0742157fc53e">The local connector remains available for offline/local hub workflows. The public product should use Norva Account first.</p>
                 <div class="button-row" style="margin-top:14px">
-                    <a class="btn link" href="/hub-connect.html">Local connector</a>
-                    <a class="btn link" href="/">Open Watch</a>
+                    <a class="btn link" href="/hub-connect.html" data-i18n="ui_web_753b56449bff">Local connector</a>
+                    <a class="btn link" href="/" data-i18n="ui_web_824c506bc06d">Open Watch</a>
                 </div>
             </section>
         </section>
     </main>
 
-    <script src="/js/cloudApi.js?v=50"></script>
-    <script src="/js/authApi.js?v=6"></script>
+    <script src="/js/cloudApi.js?v=6f42c6cc9f"></script>
+    <script src="/js/authApi.js?v=be61dee633"></script>
     <script>
         const params = new URLSearchParams(location.search);
         const currentReturn = location.pathname + location.search;
@@ -481,7 +483,7 @@
             ]);
 
             if (pairCodeInput.value) {
-                setStatus(pairStatus, 'info', 'Pairing code detected. Review it, then approve the device.');
+                setStatus(pairStatus, 'info', (globalThis.NorvaI18n?.t("ui_web_7574702bf9b7", { defaultValue: "Pairing code detected. Review it, then approve the device." }) ?? 'Pairing code detected. Review it, then approve the device.'));
             }
         }
 
@@ -493,28 +495,28 @@
         async function saveProfile() {
             const name = document.getElementById('display-name').value.trim();
             try {
-                setStatus(profileStatus, 'info', 'Saving profile...');
+                setStatus(profileStatus, 'info', (globalThis.NorvaI18n?.t("ui_web_734d599ae8b8", { defaultValue: "Saving profile..." }) ?? 'Saving profile...'));
                 await NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' });
-                setStatus(profileStatus, 'success', 'Profile saved.');
+                setStatus(profileStatus, 'success', (globalThis.NorvaI18n?.t("ui_web_c1632eafd446", { defaultValue: "Profile saved." }) ?? 'Profile saved.'));
             } catch (error) {
-                setStatus(profileStatus, 'error', 'Unable to save this profile. Try again.');
+                setStatus(profileStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_7772f26793f7", { defaultValue: "Unable to save this profile. Try again." }) ?? 'Unable to save this profile. Try again.'));
             }
         }
 
         async function approveCode() {
             const code = pairCodeInput.value.trim().toUpperCase();
             if (!code) {
-                setStatus(pairStatus, 'error', 'Enter the pairing code shown on the screen.');
+                setStatus(pairStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_3511f637d8c4", { defaultValue: "Enter the pairing code shown on the screen." }) ?? 'Enter the pairing code shown on the screen.'));
                 return;
             }
             try {
-                setStatus(pairStatus, 'info', 'Approving device...');
+                setStatus(pairStatus, 'info', (globalThis.NorvaI18n?.t("ui_web_e12525aacffc", { defaultValue: "Approving device..." }) ?? 'Approving device...'));
                 await NorvaCloud.pairing.approve(code);
-                setStatus(pairStatus, 'success', 'Device approved.');
+                setStatus(pairStatus, 'success', (globalThis.NorvaI18n?.t("ui_web_26e47d73a55d", { defaultValue: "Device approved." }) ?? 'Device approved.'));
                 pairCodeInput.value = '';
                 await loadDevices();
             } catch (error) {
-                setStatus(pairStatus, 'error', 'Unable to approve this code. Check it and try again.');
+                setStatus(pairStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_3ce7509a2ef4", { defaultValue: "Unable to approve this code. Check it and try again." }) ?? 'Unable to approve this code. Check it and try again.'));
             }
         }
 
@@ -524,11 +526,11 @@
                 trustedDevices = (payload.devices || []).filter(device => !device.revoked);
                 document.getElementById('device-count').textContent = trustedDevices.length;
                 commandDevice.innerHTML = trustedDevices.length
-                    ? trustedDevices.map(device => `<option value="${escapeAttr(device.id)}">${escapeHtml(device.device_name || device.device_type || 'Norva screen')}</option>`).join('')
-                    : '<option value="">No trusted screen</option>';
+                    ? trustedDevices.map(device => `<option value="${escapeAttr(device.id)}">${escapeHtml(device.device_name || device.device_type || (globalThis.NorvaI18n?.t("ui_web_a3ca1b4bce6e", { defaultValue: "Norva screen" }) ?? 'Norva screen'))}</option>`).join('')
+                    : '<option value="" data-i18n="ui_web_6de1f61ac011">No trusted screen</option>';
                 devicesEl.innerHTML = trustedDevices.length
                     ? trustedDevices.map(renderDevice).join('')
-                    : '<div class="muted">No trusted screen yet. Pair a TV, phone or browser to see it here.</div>';
+                    : '<div class="muted" data-i18n="ui_web_7dc492bde842">No trusted screen yet. Pair a TV, phone or browser to see it here.</div>';
                 devicesEl.querySelectorAll('[data-revoke-device]').forEach(button => {
                     button.addEventListener('click', async () => {
                         const id = button.dataset.revokeDevice;
@@ -540,27 +542,27 @@
                                 localStorage.removeItem('norva-cloud-device-id');
                             }
                             await loadDevices();
-                            setStatus(devicesStatus, 'success', 'Screen revoked.');
+                            setStatus(devicesStatus, 'success', (globalThis.NorvaI18n?.t("ui_web_105fcf804d8d", { defaultValue: "Screen revoked." }) ?? 'Screen revoked.'));
                         } catch (error) {
                             button.disabled = false;
-                            setStatus(devicesStatus, 'error', 'Unable to revoke this screen. Try again.');
+                            setStatus(devicesStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_92233e4f44ee", { defaultValue: "Unable to revoke this screen. Try again." }) ?? 'Unable to revoke this screen. Try again.'));
                         }
                     });
                 });
             } catch (error) {
-                setStatus(devicesStatus, 'error', 'Unable to load devices. Check your connection and try again.');
+                setStatus(devicesStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_41f1380fc5eb", { defaultValue: "Unable to load devices. Check your connection and try again." }) ?? 'Unable to load devices. Check your connection and try again.'));
             }
         }
 
         function renderDevice(device) {
-            const seen = device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never seen';
+            const seen = device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : (globalThis.NorvaI18n?.t("ui_web_5b9c95c22ea8", { defaultValue: "Never seen" }) ?? 'Never seen');
             return `
                 <div class="list-item">
                     <div>
-                        <strong>${escapeHtml(device.device_name || 'Norva screen')}</strong>
+                        <strong>${escapeHtml(device.device_name || (globalThis.NorvaI18n?.t("ui_web_a3ca1b4bce6e", { defaultValue: "Norva screen" }) ?? 'Norva screen'))}</strong>
                         <span>${escapeHtml(device.device_type || 'device')} - ${escapeHtml(device.platform || 'unknown')} - ${escapeHtml(seen)}</span>
                     </div>
-                    <button class="btn danger" type="button" data-revoke-device="${escapeAttr(device.id)}">Revoke</button>
+                    <button class="btn danger" type="button" data-revoke-device="${escapeAttr(device.id)}" data-i18n="ui_web_87e6d00bbf53">Revoke</button>
                 </div>
             `;
         }
@@ -625,14 +627,14 @@
             const hint = document.getElementById('xtream-link-hint');
             const parsed = parseXtreamLink(urlInput?.value);
             if (!parsed) {
-                if (hint) hint.textContent = 'Paste the complete link from your TV service, or enter the fields separately.';
+                if (hint) hint.textContent = (globalThis.NorvaI18n?.t("ui_web_fc42920389b8", { defaultValue: "Paste the complete link from your TV service, or enter the fields separately." }) ?? 'Paste the complete link from your TV service, or enter the fields separately.');
                 return null;
             }
             urlInput.value = parsed.serverUrl;
             if (!usernameInput.value) usernameInput.value = parsed.username;
             if (!passwordInput.value) passwordInput.value = parsed.password;
             if (nameInput && !nameInput.value && parsed.host) nameInput.value = parsed.host;
-            if (hint) hint.textContent = 'Link recognized. Norva filled the server and login fields.';
+            if (hint) hint.textContent = (globalThis.NorvaI18n?.t("ui_web_661c3460dfbd", { defaultValue: "Link recognized. Norva filled the server and login fields." }) ?? 'Link recognized. Norva filled the server and login fields.');
             return parsed;
         }
 
@@ -640,7 +642,7 @@
             const displayName = document.getElementById('source-name').value.trim();
             const payload = { sourceType: selectedSourceType, displayName, syncNow: true };
             if (!displayName) {
-                setStatus(sourceStatus, 'error', 'Name your TV provider.');
+                setStatus(sourceStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_d42a53865e6b", { defaultValue: "Name your TV provider." }) ?? 'Name your TV provider.'));
                 return;
             }
             if (selectedSourceType === 'xtream') {
@@ -649,21 +651,21 @@
                 payload.username = document.getElementById('xtream-username').value.trim();
                 payload.password = document.getElementById('xtream-password').value;
                 if (!payload.url || !payload.username || !payload.password) {
-                    setStatus(sourceStatus, 'error', 'Paste the complete Xtream link or enter server, username and password.');
+                    setStatus(sourceStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_5a8fbc2b0f30", { defaultValue: "Paste the complete Xtream link or enter server, username and password." }) ?? 'Paste the complete Xtream link or enter server, username and password.'));
                     return;
                 }
             } else {
                 payload.url = document.getElementById('m3u-url').value.trim();
             }
             try {
-                setStatus(sourceStatus, 'info', 'Adding provider and starting sync...');
+                setStatus(sourceStatus, 'info', (globalThis.NorvaI18n?.t("ui_web_212c74129128", { defaultValue: "Adding provider and starting sync..." }) ?? 'Adding provider and starting sync...'));
                 await NorvaCloud.sources.create(payload);
-                setStatus(sourceStatus, 'success', 'Provider added. Sync is running in the cloud.');
+                setStatus(sourceStatus, 'success', (globalThis.NorvaI18n?.t("ui_web_84b7d83a7555", { defaultValue: "Provider added. Sync is running in the cloud." }) ?? 'Provider added. Sync is running in the cloud.'));
                 clearSourceForm();
                 await loadSources();
                 setTimeout(loadSources, 5000);
             } catch (error) {
-                setStatus(sourceStatus, 'error', 'Unable to add this provider. Check the details and try again.');
+                setStatus(sourceStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_52660549f4f1", { defaultValue: "Unable to add this provider. Check the details and try again." }) ?? 'Unable to add this provider. Check the details and try again.'));
             }
         }
 
@@ -680,7 +682,7 @@
             document.getElementById('source-count').textContent = cloudSources.length;
             sourcesEl.innerHTML = cloudSources.length
                 ? cloudSources.map(renderSource).join('')
-                : '<div class="muted">No TV provider yet. Add a provider account or playlist link to unlock Watch.</div>';
+                : '<div class="muted" data-i18n="ui_web_217fde5118a7">No TV provider yet. Add a provider account or playlist link to unlock Watch.</div>';
             sourcesEl.querySelectorAll('[data-sync-source]').forEach(button => {
                 button.addEventListener('click', async () => {
                     button.disabled = true;
@@ -694,7 +696,7 @@
             });
             sourcesEl.querySelectorAll('[data-delete-source]').forEach(button => {
                 button.addEventListener('click', async () => {
-                    if (!confirm('Remove this provider from Norva Cloud?')) return;
+                    if (!confirm((globalThis.NorvaI18n?.t("ui_web_141a34a29ac0", { defaultValue: "Remove this provider from Norva Cloud?" }) ?? 'Remove this provider from Norva Cloud?'))) return;
                     await NorvaCloud.sources.remove(button.dataset.deleteSource);
                     await loadSources();
                 });
@@ -708,12 +710,12 @@
             return `
                 <div class="list-item">
                     <div>
-                        <strong>${escapeHtml(source.display_name || 'TV provider')}</strong>
+                        <strong>${escapeHtml(source.display_name || (globalThis.NorvaI18n?.t("ui_web_42b3bacc2b1b", { defaultValue: "TV provider" }) ?? 'TV provider'))}</strong>
                         <span>${escapeHtml(source.source_type || 'source')} - ${escapeHtml(status)}${detail ? ' - ' + escapeHtml(detail) : ''}</span>
                     </div>
                     <div class="button-row">
-                        <button class="btn" type="button" data-sync-source="${escapeAttr(source.id)}">Sync</button>
-                        <button class="btn danger" type="button" data-delete-source="${escapeAttr(source.id)}">Remove</button>
+                        <button class="btn" type="button" data-sync-source="${escapeAttr(source.id)}" data-i18n="ui_web_8d261a372fde">Sync</button>
+                        <button class="btn danger" type="button" data-delete-source="${escapeAttr(source.id)}" data-i18n="ui_web_c3812fc4acb8">Remove</button>
                     </div>
                 </div>
             `;
@@ -729,24 +731,24 @@
             const url = document.getElementById('command-url').value.trim();
             const title = document.getElementById('command-title').value.trim() || 'Norva';
             if (!targetDeviceId) {
-                setStatus(commandStatus, 'error', 'Choose a trusted screen.');
+                setStatus(commandStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_277008009bbb", { defaultValue: "Choose a trusted screen." }) ?? 'Choose a trusted screen.'));
                 return;
             }
             if (command === 'play' && !url) {
-                setStatus(commandStatus, 'error', 'Enter a playback URL.');
+                setStatus(commandStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_4b6cc368d32b", { defaultValue: "Enter a playback URL." }) ?? 'Enter a playback URL.'));
                 return;
             }
             try {
-                setStatus(commandStatus, 'info', 'Sending command...');
+                setStatus(commandStatus, 'info', (globalThis.NorvaI18n?.t("ui_web_81b9378650c0", { defaultValue: "Sending command..." }) ?? 'Sending command...'));
                 await NorvaCloud.commands.queue({
                     targetDeviceId,
                     command,
                     payload: command === 'play' ? { url, playbackUrl: url, title } : { url: url || '/' },
                     ttlSeconds: 120
                 });
-                setStatus(commandStatus, 'success', 'Command sent.');
+                setStatus(commandStatus, 'success', (globalThis.NorvaI18n?.t("ui_web_514af3358df0", { defaultValue: "Command sent." }) ?? 'Command sent.'));
             } catch (error) {
-                setStatus(commandStatus, 'error', 'Unable to send this command. Try again.');
+                setStatus(commandStatus, 'error', (globalThis.NorvaI18n?.t("ui_web_adf94cc6fbff", { defaultValue: "Unable to send this command. Try again." }) ?? 'Unable to send this command. Try again.'));
             }
         }
 

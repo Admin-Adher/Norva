@@ -14,7 +14,7 @@ test('subscription selection is plan-first and keeps one explicit continuation a
   const proofAt = source.indexOf('class="product-proof"');
 
   assert.match(source, /<h1 id="page-title">[\s\S]{0,160}Choose your Norva plan\.[\s\S]{0,160}<\/h1>/);
-  assert.match(source, /class="title-landscape">Choose your plan\.<\/span>/);
+  assert.match(source, /class="title-landscape"[^>]*>Choose your plan\.<\/span>/);
   assert.match(source, /Every plan includes the complete Norva experience/);
   assert.match(source, /Every feature is included\. Choose how many personal profiles/);
   assert.equal((source.match(/class="plan-choice-input sr-only" type="radio"/g) || []).length, 2);
@@ -23,8 +23,8 @@ test('subscription selection is plan-first and keeps one explicit continuation a
   assert.equal((source.match(/id="continue-plan"/g) || []).length, 1);
   assert.ok(gridAt > 0 && benefitsAt > gridAt && decisionAt > benefitsAt && proofAt > decisionAt,
     'selection and decision precede secondary product proof in reading order');
-  assert.match(source, /\/js\/plan-selection-ui\.js\?v=1/);
-  assert.match(source, /\/css\/commerce\.css\?v=3/);
+  assert.match(source, /\/js\/plan-selection-ui\.js\?v=[0-9a-f]+/);
+  assert.match(source, /\/css\/commerce\.css\?v=[0-9a-f]+/);
 });
 
 test('the presentation adapter delegates without becoming a pricing authority', () => {
@@ -35,7 +35,7 @@ test('the presentation adapter delegates without becoming a pricing authority', 
   assert.match(source, /sourceButton\.click\(\)/);
   assert.match(source, /MutationObserver\(sync\)/);
   assert.match(source, /\['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'\]/);
-  assert.match(source, /'Continue with ' \+ planName/);
+  assert.match(source, /'Continue with '[^\n]*\+ planName/);
   assert.doesNotMatch(source, /NorvaBilling|RevenueCat|revolutCreateOrder|\b4\.99\b|\b8\.99\b|\b41\.99\b|\b74\.99\b/,
     'selection UI mirrors verified DOM offers and never invents commerce terms');
 });

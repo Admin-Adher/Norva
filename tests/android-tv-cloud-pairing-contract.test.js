@@ -92,7 +92,7 @@ test('status is the only pairing live region and reduced motion is respected', (
   assert.match(page, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(page, /statusEl\.setAttribute\('role', normalizedType === 'error' \? 'alert' : 'status'\)/);
   assert.match(page, /statusEl\.setAttribute\('aria-live', normalizedType === 'error' \? 'assertive' : 'polite'\)/);
-  assert.match(page, /timerEl\.textContent = seconds \? `Refreshes in/);
+  assert.match(page, /timerEl\.textContent = seconds \? [^\n]*`Refreshes in/);
 });
 
 test('pair creation is single-flight and the remote skips disabled actions', () => {
@@ -100,8 +100,8 @@ test('pair creation is single-flight and the remote skips disabled actions', () 
   assert.match(page, /if \(pairingStartPromise\) return pairingStartPromise/);
   assert.match(page, /restartButton\.disabled = isPending/);
   assert.match(page, /restartButton\.setAttribute\('aria-busy', String\(isPending\)\)/);
-  assert.match(page, /qrStateLabelEl\.textContent = 'QR unavailable'/);
-  assert.match(page, /timerEl\.textContent = 'Select New code to retry'/);
+  assert.match(page, /qrStateLabelEl\.textContent = [^;\r\n]*'QR unavailable'/);
+  assert.match(page, /timerEl\.textContent = [^;\r\n]*'Select New code to retry'/);
   assert.match(page, /function remoteItems\(\)[\s\S]*?filter\(\(item\) => item && !item\.disabled && !item\.hidden/);
   assert.match(page, /if \(!isPending && restoreRestartFocus\)[\s\S]*?restartButton\.focus\(\{ preventScroll: true \}\)/);
   assert.match(page, /else if \(!isPending\) \{[\s\S]*?focusInitialRemoteAction\(\)/);

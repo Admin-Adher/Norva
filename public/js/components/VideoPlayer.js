@@ -602,7 +602,7 @@ class VideoPlayer {
         // Update Title when channel changes
         window.addEventListener('channelChanged', (e) => {
             if (channelNameEl && e.detail) {
-                channelNameEl.textContent = e.detail.name || e.detail.tvgName || 'Live TV';
+                channelNameEl.textContent = e.detail.name || e.detail.tvgName || (globalThis.NorvaI18n?.t("ui_web_d451ef69d283", { defaultValue: "Live TV" }) ?? 'Live TV');
             }
             showOverlay();
         });
@@ -677,7 +677,7 @@ class VideoPlayer {
         }
 
         const showPromptFallback = () => {
-            prompt('Copy this URL:', streamUrl);
+            prompt((globalThis.NorvaI18n?.t("ui_web_1b0b51b2013f", { defaultValue: "Copy this URL:" }) ?? 'Copy this URL:'), streamUrl);
         };
 
         // navigator.clipboard is only available in secure contexts (HTTPS/localhost)
@@ -687,9 +687,9 @@ class VideoPlayer {
                 const btn = document.getElementById('btn-copy-url');
                 if (btn) {
                     const originalText = btn.textContent;
-                    btn.textContent = '✓ Copied!';
+                    btn.textContent = (globalThis.NorvaI18n?.t("ui_web_4e45a91772b8", { defaultValue: "✓ Copied!" }) ?? '✓ Copied!');
                     setTimeout(() => {
-                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
+                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><norva-i18n data-i18n="ui_web_60f1b404dc5b"> Copy Stream URL</norva-i18n>`;
                     }, 1500);
                 }
                 console.log('[Player] Stream URL copied:', this.describePlaybackUrl(streamUrl));
@@ -799,7 +799,7 @@ class VideoPlayer {
             .replace(/\{[^}]*\}/g, ' ')
             .toLowerCase();
         if (sample.length < 40) return null;
-        if (/[\u0600-\u06ff]/.test(sample)) return 'ar';
+        if (/[\u0600-\u06ff]/.test(sample)) return ('ar');
 
         const count = patterns => patterns.reduce((score, pattern) => score + (sample.match(pattern) || []).length, 0);
         const scores = {
@@ -853,7 +853,7 @@ class VideoPlayer {
         const sourceId = this.currentChannel?.sourceId || this.currentChannel?.source_id || 'local';
         const itemId = this.currentChannel?.streamId || this.currentChannel?.stream_id || this.currentChannel?.id || 'unknown';
         const trackId = streamIndex === null || streamIndex === undefined ? 'default' : String(streamIndex);
-        return `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8ef7892473ba", {defaultValue: "norva-subtitle-offset:{{p0}}:{{p1}}:{{p2}}", p0:(sourceId),p1:(itemId),p2:(trackId)}) : `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`);
     }
 
     normalizeSubtitleOffset(value) {
@@ -1015,7 +1015,7 @@ class VideoPlayer {
                     source: 'probe',
                     index,
                     streamIndex: track.index,
-                    label: this.getSubtitleLabel(track, probeTracks.length > 1 ? `Subtitles ${index + 1}` : 'Subtitles'),
+                    label: this.getSubtitleLabel(track, probeTracks.length > 1 ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_182da8bf4542", {defaultValue: "Subtitles {{p0}}", p0:(index + 1)}) : `Subtitles ${index + 1}`) : (globalThis.NorvaI18n?.t("ui_web_0ee695bdeb26", { defaultValue: "Subtitles" }) ?? 'Subtitles')),
                     active
                 });
             });
@@ -1028,7 +1028,7 @@ class VideoPlayer {
                     options.push({
                         source: 'native',
                         index: i,
-                        label: track.label || `Track ${i + 1} (${track.language || 'unknown'})`,
+                        label: track.label || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_46b59fc02a0f", {defaultValue: "Track {{p0}} ({{p1}})", p0:(i + 1),p1:(track.language || 'unknown')}) : `Track ${i + 1} (${track.language || 'unknown'})`),
                         active
                     });
                 }
@@ -1036,18 +1036,18 @@ class VideoPlayer {
         }
 
         const buttons = [
-            `<button class="captions-option ${!hasActiveTrack ? 'active' : ''}" data-source="off" data-index="-1">Off</button>`
+            `<button class="captions-option ${!hasActiveTrack ? 'active' : ''}" data-source="off" data-index="-1" data-i18n="ui_web_ca7981b46ecf">Off</button>`
         ];
         options.forEach(track => {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
             buttons.push(`<button class="captions-option ${track.active ? 'active' : ''}" data-source="${track.source}" data-index="${track.index}"${streamAttr}>${this.escapeHtml(track.label)}</button>`);
         });
         if (!options.length) {
-            buttons.push('<div class="captions-empty">No subtitle track exposed by this stream.</div>');
+            buttons.push('<div class="captions-empty" data-i18n="ui_web_5c9d9ae8dd3f">No subtitle track exposed by this stream.</div>');
         }
         if (this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeTracks.length) {
-            buttons.push(`<div class="captions-offset" aria-label="Subtitle sync">
-                <div class="captions-offset-label">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
+            buttons.push(`<div class="captions-offset" aria-label="Subtitle sync" data-i18n-aria-label="ui_web_7c00519e5d03">
+                <div class="captions-offset-label" data-i18n="ui_web_d54102038298" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(this.formatSubtitleOffset())}) || "{}")}">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
                 <div class="captions-offset-controls">
                   <button type="button" class="captions-offset-btn" data-offset-delta="-0.5">-0.5s</button>
                   <button type="button" class="captions-offset-btn" data-offset-delta="0.5">+0.5s</button>
@@ -1576,7 +1576,7 @@ class VideoPlayer {
                 if (this.isStalePlayRequest(requestSeq)) return;
                 if (sniff?.kind === 'mpegts') {
                     console.log('[Player] Auto Transcode: fast sniff detected MPEG-TS, using audio transcode');
-                    this.updateTranscodeStatus('transcoding', 'Transcoding (Audio)');
+                    this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_1bde7db61bec", { defaultValue: "Transcoding (Audio)" }) ?? 'Transcoding (Audio)'));
                     const transcodeUrl = this.getTranscodeUrl(streamUrl);
                     this.currentUrl = transcodeUrl;
                     this.video.src = transcodeUrl;
@@ -1641,7 +1641,7 @@ class VideoPlayer {
                         // copied directly into fragmented MP4. Copy video, encode
                         // audio to browser-safe AAC instead of using pure remux.
                         console.log('[Player] Auto: Using audio transcode for MPEG-TS stream');
-                        this.updateTranscodeStatus('transcoding', 'Transcoding (Audio)');
+                        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_1bde7db61bec", { defaultValue: "Transcoding (Audio)" }) ?? 'Transcoding (Audio)'));
                         const transcodeUrl = this.getTranscodeUrl(streamUrl);
                         this.currentUrl = transcodeUrl;
                         this.video.src = transcodeUrl;
@@ -1663,7 +1663,7 @@ class VideoPlayer {
 
             // CHECK: Force Video Transcode (Full) or Upscaling
             if (this.settings.forceVideoTranscode || this.settings.upscaleEnabled) {
-                const statusText = this.settings.upscaleEnabled ? 'Upscaling' : 'Transcoding (Video)';
+                const statusText = this.settings.upscaleEnabled ? (globalThis.NorvaI18n?.t("ui_web_d827fea4f9a0", { defaultValue: "Upscaling" }) ?? 'Upscaling') : (globalThis.NorvaI18n?.t("ui_web_59d35c5bdd2d", { defaultValue: "Transcoding (Video)" }) ?? 'Transcoding (Video)');
                 const statusMode = this.settings.upscaleEnabled ? 'upscaling' : 'transcoding';
                 console.log(`[Player] ${statusText} enabled. Starting session (encode)...`);
                 this.updateTranscodeStatus(statusMode, statusText);
@@ -1765,7 +1765,7 @@ class VideoPlayer {
             if (this.settings.forceRemux && (isRawTs || isExtensionless)) {
                 console.log('[Player] Force Remux enabled. Routing through FFmpeg remux...');
                 console.log('[Player] Stream type:', isRawTs ? 'Raw TS' : 'Extension-less (assumed TS)');
-                this.updateTranscodeStatus('remuxing', 'Remux (Force)');
+                this.updateTranscodeStatus('remuxing', (globalThis.NorvaI18n?.t("ui_web_42cd3feba539", { defaultValue: "Remux (Force)" }) ?? 'Remux (Force)'));
                 const remuxUrl = this.getRemuxUrl(streamUrl);
                 this.video.src = remuxUrl;
                 this.video.play().catch(e => {
@@ -1783,18 +1783,18 @@ class VideoPlayer {
             if (isRawTs && !this.settings.forceRemux) {
                 console.warn('[Player] Raw MPEG-TS stream detected. Browsers cannot play .ts files directly.');
                 this.showError(
-                    'This stream uses raw MPEG-TS format (.ts) which browsers cannot play directly.<br><br>' +
-                    '<strong>To fix this:</strong><br>' +
-                    '1. Enable <strong>"Force Remux"</strong> in Settings → Streaming<br>' +
-                    '2. Or configure your source to output HLS (.m3u8) format'
+                    '<norva-i18n data-i18n="ui_web_624ef9c79ca5">This stream uses raw MPEG-TS format (.ts) which browsers cannot play directly.</norva-i18n><br><br>' +
+                    '<strong data-i18n="ui_web_f2a14b9be908">To fix this:</strong><br>' +
+                    '<norva-i18n data-i18n="ui_web_fe1e9b561a40">1. Enable </norva-i18n><strong data-i18n="ui_web_d2c0ec17dcf2">"Force Remux"</strong><norva-i18n data-i18n="ui_web_8ae5767e8cf3"> in Settings → Streaming</norva-i18n><br>' +
+                    '<norva-i18n data-i18n="ui_hls_source_hint">2. Or configure your source to output HLS (.m3u8) format</norva-i18n>'
                 );
-                this.handlePlaybackError('Raw MPEG-TS stream cannot play directly.');
+                this.handlePlaybackError((((('Raw MPEG-TS stream cannot play directly.')))));
                 return;
             }
 
             // Priority 1: Use HLS.js for HLS streams on browsers that support it
             if (looksLikeHls && typeof Hls !== 'undefined' && Hls.isSupported()) {
-                this.updateTranscodeStatus('direct', 'Direct HLS');
+                this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_3d632b68f10e", { defaultValue: "Direct HLS" }) ?? 'Direct HLS'));
 
                 // Use playHls helper logic here (or extract it)
                 // For now, let's just use existing logic but wrapped/modularized if possible?
@@ -1857,7 +1857,7 @@ class VideoPlayer {
             } else if (this.video.canPlayType('application/vnd.apple.mpegurl') === 'probably' ||
                 this.video.canPlayType('application/vnd.apple.mpegurl') === 'maybe') {
                 // Priority 2: Native HLS support (Safari on iOS/macOS where HLS.js may not work)
-                this.updateTranscodeStatus('direct', 'Direct Native');
+                this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_f790499a7dc3", { defaultValue: "Direct Native" }) ?? 'Direct Native'));
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name === 'AbortError') return; // Ignore interruption by new load
@@ -1872,7 +1872,7 @@ class VideoPlayer {
                 });
             } else {
                 // Priority 3: Try direct playback for non-HLS streams
-                this.updateTranscodeStatus('direct', 'Direct Play');
+                this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_74d004705fc0", { defaultValue: "Direct Play" }) ?? 'Direct Play'));
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
@@ -1890,7 +1890,7 @@ class VideoPlayer {
 
         } catch (err) {
             console.error('Error playing channel:', err);
-            this.showError('Failed to play channel');
+            this.showError((globalThis.NorvaI18n?.t("ui_web_fb8c8c2687f1", { defaultValue: "Failed to play channel" }) ?? 'Failed to play channel'));
             this.handlePlaybackError(err.message || 'Failed to play channel');
         }
     }
@@ -1910,7 +1910,7 @@ class VideoPlayer {
                     this.video.src = url;
                     this.video.play().catch(() => {});
                 } else {
-                    this.handlePlaybackError('HLS_RUNTIME_UNAVAILABLE — hls.js could not be loaded');
+                    this.handlePlaybackError((((('HLS_RUNTIME_UNAVAILABLE — hls.js could not be loaded')))));
                 }
             });
             return;
@@ -2036,7 +2036,7 @@ class VideoPlayer {
         // Show as live immediately; the first tick refines it.
         this._liveBadge.classList.add('is-live');
         this._liveBadge.classList.remove('behind');
-        if (this._liveBadgeText) this._liveBadgeText.textContent = 'LIVE';
+        if (this._liveBadgeText) this._liveBadgeText.textContent = (globalThis.NorvaI18n?.t("ui_web_35e0d0360a0a", { defaultValue: "LIVE" }) ?? 'LIVE');
         this._showLiveBadge(true);
         this._updateLiveSyncBadge();
         if (this._liveSyncTimer) return;
@@ -2208,10 +2208,10 @@ class VideoPlayer {
         this._liveBadge.classList.toggle('is-live', !isBehind);
         if (this._liveBadgeText) {
             this._liveBadgeText.textContent = isBehind
-                ? `Behind by ${this._formatBehind(behind)}`
+                ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_cbc0f960d602", {defaultValue: "Behind by {{p0}}", p0:(this._formatBehind(behind))}) : `Behind by ${this._formatBehind(behind)}`)
                 : 'LIVE';
         }
-        this._liveBadge.title = isBehind ? 'Back to live' : 'Live';
+        this._liveBadge.title = isBehind ? (globalThis.NorvaI18n?.t("ui_web_67f859b06127", { defaultValue: "Back to live" }) ?? 'Back to live') : (globalThis.NorvaI18n?.t("ui_web_b64ac05f17e6", { defaultValue: "Live" }) ?? 'Live');
     }
 
     _formatBehind(seconds) {
@@ -2247,7 +2247,7 @@ class VideoPlayer {
             this._liveBadge.classList.remove('behind');
             this._liveBadge.classList.add('is-live');
         }
-        if (this._liveBadgeText) this._liveBadgeText.textContent = 'LIVE';
+        if (this._liveBadgeText) this._liveBadgeText.textContent = (globalThis.NorvaI18n?.t("ui_web_35e0d0360a0a", { defaultValue: "LIVE" }) ?? 'LIVE');
         clearTimeout(this._liveJumpResetTimer);
         // Backstop: if neither the fresh session's first frame nor a teardown clears the
         // suppression, end it after 10s and refresh the badge to the real state so a
@@ -2366,7 +2366,7 @@ class VideoPlayer {
         const err = this.video?.error;
         if (!err || this._clearingMedia) return;
         const switchSeq = this._variantSwitchSeq;
-        const message = err.message || 'Media error';
+        const message = err.message || (globalThis.NorvaI18n?.t("ui_web_7ff3fa368bcd", { defaultValue: "Media error" }) ?? 'Media error');
         this._clearMediaElementErrorTimer();
         this._mediaElementErrorTimer = setTimeout(() => {
             this._mediaElementErrorTimer = null;
@@ -2750,7 +2750,7 @@ class VideoPlayer {
             const btn = document.createElement('button');
             const active = this.currentVariant && String(v.streamId) === String(this.currentVariant.streamId);
             btn.className = 'captions-option' + (active ? ' active' : '');
-            btn.textContent = v.label + (v.healthRank >= 3 ? '  (HS)' : '');
+            btn.textContent = v.label + (v.healthRank >= 3 ? (globalThis.NorvaI18n?.t("ui_web_a32e4c37c3ae", { defaultValue: "  (HS)" }) ?? '  (HS)') : '');
             btn.addEventListener('click', (e) => { e.stopPropagation(); this.switchVariant(v); });
             this.qualityList.appendChild(btn);
         });
@@ -2847,7 +2847,7 @@ class VideoPlayer {
             if (!this._tryFallback(variant, e?.message || 'resolve failed')) {
                 const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
                 if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
-                this.showError('No working stream variant is currently available for this channel.<br>Try again later or choose another channel.');
+                this.showError('<norva-i18n data-i18n="ui_web_4978783e09b2">No working stream variant is currently available for this channel.</norva-i18n><br><norva-i18n data-i18n="ui_web_6be0ab3b259b">Try again later or choose another channel.</norva-i18n>');
                 this.handlePlaybackError(e?.message || 'Variant resolve failed');
             }
         }
@@ -2881,8 +2881,8 @@ class VideoPlayer {
             if (!progressed && !this._tryFallback(variant, 'no start in time', switchSeq)) {
                 const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
                 if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
-                this.showError('No working stream variant is currently available for this channel.<br>Try again later or choose another channel.');
-                this.handlePlaybackError('No live variant produced a playable frame');
+                this.showError('<norva-i18n data-i18n="ui_web_4978783e09b2">No working stream variant is currently available for this channel.</norva-i18n><br><norva-i18n data-i18n="ui_web_6be0ab3b259b">Try again later or choose another channel.</norva-i18n>');
+                this.handlePlaybackError((((('No live variant produced a playable frame')))));
             }
         }, this.isGatewayPlaybackUrl() ? 18000 : 9000);
     }
@@ -2936,7 +2936,7 @@ class VideoPlayer {
                     if (!this._tryFallback(target, followupReason, nextSeq)) {
                         const selectSeq = this.currentChannel?._norvaSelection?.selectSeq;
                         if (selectSeq != null) window.app?.channelList?.failPendingPlaybackSelection?.(selectSeq);
-                        this.showError('No working stream variant is currently available for this channel.<br>Try again later or choose another channel.');
+                        this.showError('<norva-i18n data-i18n="ui_web_4978783e09b2">No working stream variant is currently available for this channel.</norva-i18n><br><norva-i18n data-i18n="ui_web_6be0ab3b259b">Try again later or choose another channel.</norva-i18n>');
                         this.handlePlaybackError(followupReason);
                     }
                 }
@@ -3236,12 +3236,12 @@ class VideoPlayer {
         const programTime = this.nowPlaying.querySelector('.program-time');
         const upNextList = document.getElementById('up-next-list');
 
-        channelName.textContent = channel.name || channel.tvgName || 'Unknown Channel';
+        channelName.textContent = channel.name || channel.tvgName || (globalThis.NorvaI18n?.t("ui_web_6b811e57fa85", { defaultValue: "Unknown Channel" }) ?? 'Unknown Channel');
 
         if (epgData && epgData.current) {
             programTitle.textContent = epgData.current.title;
-            const start = new Date(epgData.current.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-            const end = new Date(epgData.current.stop).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+            const start = new Date(epgData.current.start).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
+            const end = new Date(epgData.current.stop).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
             programTime.textContent = `${start} - ${end}`;
         } else {
             programTitle.textContent = '';
@@ -3253,7 +3253,7 @@ class VideoPlayer {
         if (epgData && epgData.upcoming) {
             epgData.upcoming.slice(0, 3).forEach(prog => {
                 const li = document.createElement('li');
-                const time = new Date(prog.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                const time = new Date(prog.start).toLocaleTimeString((globalThis.NorvaI18n?.language || 'en-US'), { hour: '2-digit', minute: '2-digit', hour12: false });
                 li.textContent = `${time} - ${prog.title}`;
                 upNextList.appendChild(li);
             });

@@ -107,7 +107,7 @@ class SeriesPage {
             panelId: 'series-category-panel',
             searchId: 'series-category-search',
             listId: 'series-category-list',
-            allLabel: 'All Categories',
+            allLabel: (globalThis.NorvaI18n?.t("ui_web_fe3b58f14752", { defaultValue: "All Categories" }) ?? 'All Categories'),
             onChange: () => {
                 // An explicit category interaction wins over any still-pending
                 // restore from a partial provider response.
@@ -362,7 +362,7 @@ class SeriesPage {
     openLanguageBucket() {
         const langKey = this.currentBucketViewKey();
         if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
-        this.openBucket({ id: 'genre-all', title: 'All series', curation: { bucket: 'all' } });
+        this.openBucket({ id: 'genre-all', title: (globalThis.NorvaI18n?.t("ui_web_5f4a7f23c367", { defaultValue: "All series" }) ?? 'All series'), curation: { bucket: 'all' } });
     }
 
     // Audio-language / burned-in-subtitle / year / rating filter params + "best
@@ -424,8 +424,8 @@ class SeriesPage {
         const source = this.selectedCloudSourceId();
         const scope = source || 'all';
         const scopeChanged = this._facetsLoadedScope !== scope;
-        this.applyFacetOptions(this.audioSelect, 'Any Audio', [], this.savedFilters?.audio, 'series', scopeChanged);
-        this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', [], this.savedFilters?.subtitle, 'series', scopeChanged);
+        this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), [], this.savedFilters?.audio, 'series', scopeChanged);
+        this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), [], this.savedFilters?.subtitle, 'series', scopeChanged);
         // Re-fetch at most once per 60s so the menu tracks the background crawl (new
         // languages get detected over the first day) instead of freezing at first load.
         // applyFacetOptions preserves the current selection and skips the DOM rebuild
@@ -442,8 +442,8 @@ class SeriesPage {
                 ...(source ? { source } : {})
             });
             if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
-            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio, this.savedFilters?.audio, 'series');
-            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles, this.savedFilters?.subtitle, 'series');
+            this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), facets && facets.audio, this.savedFilters?.audio, 'series');
+            this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), facets && facets.subtitles, this.savedFilters?.subtitle, 'series');
             this.renderActiveFilterChips();
         } catch (_) {
             if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
@@ -571,7 +571,7 @@ class SeriesPage {
                 return this.loadSeries();
             }
             window.GenreRails.render(this.container, rails, {
-                emptyText: 'No shows to show yet.',
+                emptyText: (globalThis.NorvaI18n?.t("ui_web_ecbf34a19fd7", { defaultValue: "No shows to show yet." }) ?? 'No shows to show yet.'),
                 onItemClick: (item) => this.openRailItem(item),
                 onSeeAll: (rail) => this.openBucket(rail)
             });
@@ -631,9 +631,9 @@ class SeriesPage {
         this.container.classList.add('rail-host');
         this.container.innerHTML = `
             <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
-                <button class="norva-back" id="genre-bucket-back" type="button" aria-label="Back to all genres">
+                <button class="norva-back" id="genre-bucket-back" type="button" aria-label="Back to all genres" data-i18n-aria-label="ui_web_5a4703d3ea87">
                     <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-                    <span class="back-label">All genres</span>
+                    <span class="back-label" data-i18n="ui_web_69558e9e33a9">All genres</span>
                 </button>
                 <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
             </div>
@@ -692,8 +692,8 @@ class SeriesPage {
             // otherwise leaves the header count blank).
             if (this.countEl && typeof payload?.count === 'number') {
                 this.countEl.textContent = this._isTvMode()
-                    ? `${this.bucketRenderedCount || 0}${this.bucketHasMore ? '+' : ''} titles`
-                    : `${payload.count} titles`;
+                    ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5fd765f29ee9", {defaultValue: "{{p0}}{{p1}} titles", p0:(this.bucketRenderedCount || 0),p1:(this.bucketHasMore ? '+' : '')}) : `${this.bucketRenderedCount || 0}${this.bucketHasMore ? '+' : ''} titles`)
+                    : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_117bd4782d6b", {defaultValue: "{{p0}} titles", p0:(payload.count)}) : `${payload.count} titles`);
             }
             // A source/favorites filter can remove a whole server page.
             // Keep paging while the loader is still empty instead of requiring a
@@ -821,7 +821,7 @@ class SeriesPage {
         const chips = [];
 
         const q = this.searchInput?.value?.trim();
-        if (q) chips.push({ label: `Search: “${q}”`, clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
+        if (q) chips.push({ label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3ec972eec0ae", {defaultValue: "Search: “{{p0}}”", p0:(q)}) : `Search: “${q}”`), clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
 
         const catCount = this.categoryMulti?.getSelected().size || 0;
         if (catCount > 0) chips.push({ label: catCount === 1 ? '1 category' : `${catCount} categories`,
@@ -838,9 +838,9 @@ class SeriesPage {
         if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
         if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
         if (this.statusSelect?.value) chips.push({ label: optText(this.statusSelect), clear: () => { this.statusSelect.value = ''; } });
-        if (this.audioSelect?.value) chips.push({ label: `Audio: ${facetText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
-        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${facetText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
-        if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
+        if (this.audioSelect?.value) chips.push({ label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(facetText(this.audioSelect))}) : `Audio: ${facetText(this.audioSelect)}`), clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_86aab5b3d670", {defaultValue: "Subtitles: {{p0}}", p0:(facetText(this.subtitleSelect))}) : `Subtitles: ${facetText(this.subtitleSelect)}`), clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.showFavoritesOnly) chips.push({ label: (globalThis.NorvaI18n?.t("ui_web_7a1f2a83aca9", { defaultValue: "Favorites" }) ?? 'Favorites'), clear: () => {
             this.showFavoritesOnly = false;
             document.getElementById('series-favorites-btn')?.classList.remove('active');
         } });
@@ -850,7 +850,7 @@ class SeriesPage {
         host.classList.remove('hidden');
         host.innerHTML = chips.map((c, i) =>
             `<button type="button" class="filter-chip" data-chip="${i}">${MediaUtils.escapeHtml(c.label)}<span class="filter-chip-x" aria-hidden="true">×</span></button>`
-        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear">Clear all</button>';
+        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear" data-i18n="ui_web_29a390f9237e">Clear all</button>';
 
         host.querySelectorAll('.filter-chip').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -1064,9 +1064,9 @@ class SeriesPage {
             this.container.classList.remove('rail-host');
             this.container.innerHTML = `
                 <div class="catalog-locked-empty">
-                    <h2>Connect your TV service first</h2>
-                    <p>Series unlock as soon as Norva finishes preparing your catalog.</p>
-                    <button class="btn btn-primary" id="series-connect-service">Connect TV Service</button>
+                    <h2 data-i18n="ui_web_b4bddfa3478c">Connect your TV service first</h2>
+                    <p data-i18n="ui_web_ec750642e43f">Series unlock as soon as Norva finishes preparing your catalog.</p>
+                    <button class="btn btn-primary" id="series-connect-service" data-i18n="ui_web_8dcd2c670793">Connect TV Service</button>
                 </div>
             `;
             this.container.querySelector('#series-connect-service')?.addEventListener('click', () => {
@@ -1138,7 +1138,7 @@ class SeriesPage {
             const allSources = await API.sources.getAll();
             this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
 
-            this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
+            this.sourceSelect.innerHTML = '<option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>';
             this.sources.forEach(s => {
                 const option = document.createElement('option');
                 option.value = s.id;
@@ -1238,7 +1238,7 @@ class SeriesPage {
             this.categories = genres;
             const options = genres
                 .filter(g => Number(g.count) > 0 && !hiddenBuckets.has(String(g.bucket)))
-                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
+                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString((globalThis.NorvaI18n?.language || 'en-US'))}` }));
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);
         } catch (err) {
@@ -1469,7 +1469,7 @@ class SeriesPage {
             this.genreSelect.classList.add('hidden');
         } else {
             const current = this.savedFilters?.genre || this.genreSelect.value;
-            this.genreSelect.innerHTML = '<option value="">All Genres</option>' +
+            this.genreSelect.innerHTML = '<option value="" data-i18n="ui_web_90009547165f">All Genres</option>' +
                 [...genres].sort().map(g =>
                     `<option value="${MediaUtils.escapeHtml(g)}">${MediaUtils.escapeHtml(g)}</option>`).join('');
             if (current && genres.has(current)) this.genreSelect.value = current;
@@ -1699,10 +1699,10 @@ class SeriesPage {
             const filtered = this.hasActiveFilters();
             this.container.innerHTML = `
                 <div class="empty-state rich-empty premium-state">
-                    <span class="premium-state-kicker">Series</span>
-                    <h3>${filtered ? 'No series match these filters' : 'No series here yet'}</h3>
-                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Series appear as soon as Norva finishes preparing your catalog.'}</p>
-                    ${filtered ? '<button class="btn btn-primary" id="series-empty-reset">Clear filters</button>' : ''}
+                    <span class="premium-state-kicker" data-i18n="ui_web_a8295e08ff7a">Series</span>
+                    <h3>${filtered ? (globalThis.NorvaI18n?.t("ui_web_d4b3d340528f", { defaultValue: "No series match these filters" }) ?? 'No series match these filters') : (globalThis.NorvaI18n?.t("ui_web_2b0d83d9c23c", { defaultValue: "No series here yet" }) ?? 'No series here yet')}</h3>
+                    <p>${filtered ? (globalThis.NorvaI18n?.t("ui_web_36829c37f1ab", { defaultValue: "Try widening your search, genre or language filters." }) ?? 'Try widening your search, genre or language filters.') : (globalThis.NorvaI18n?.t("ui_web_98fde0398986", { defaultValue: "Series appear as soon as Norva finishes preparing your catalog." }) ?? 'Series appear as soon as Norva finishes preparing your catalog.')}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="series-empty-reset" data-i18n="ui_web_7179ea0035fc">Clear filters</button>' : ''}
                 </div>`;
             this.container.querySelector('#series-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
             // A non-filtered empty grid means the catalog is still filling — auto-reload
@@ -1894,18 +1894,18 @@ class SeriesPage {
         const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="series-poster">
-                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
+                ${isNew ? '<span class="new-badge" data-i18n="ui_web_a253ff09c5a8">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="series-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
-                ${groupBroken ? '<span class="playback-badge" title="Unavailable — failed the health scan">⚠</span>' : ''}
-                ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
+                ${groupBroken ? '<span class="playback-badge" title="Unavailable — failed the health scan" data-i18n-title="ui_web_6168604ed2ae">⚠</span>' : ''}
+                ${versionCount > 1 ? `<button class="version-badge" title="Choose version" data-i18n-title="ui_web_70428a34013f" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(versionCount)}) || "{}")}">${versionCount} versions</button>` : ''}
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
-                ${started ? '<span class="watched-badge inprogress-badge" title="Watching">▶</span>' : ''}
-                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
+                ${started ? '<span class="watched-badge inprogress-badge" title="Watching" data-i18n-title="ui_web_fbc594054d51">▶</span>' : ''}
+                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}" title="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
                 </button>
             </div>
@@ -1914,7 +1914,7 @@ class SeriesPage {
                 <div class="series-meta">
                     ${year ? `<span>${year}</span>` : ''}
                     ${rating ? `<span>${Icons.star} ${MediaUtils.escapeHtml(rating)}</span>` : ''}
-                    ${series.tmdb?.number_of_seasons ? `<span>${series.tmdb.number_of_seasons} seasons</span>` : ''}
+                    ${series.tmdb?.number_of_seasons ? `<span data-i18n="ui_web_0fff91bb8927" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(series.tmdb.number_of_seasons)}) || "{}")}">${series.tmdb.number_of_seasons} seasons</span>` : ''}
                 </div>
             </div>
         `;
@@ -1922,7 +1922,7 @@ class SeriesPage {
         if (this._isTvMode()) {
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
-            card.setAttribute('aria-label', `View ${displayName || 'series'} details`);
+            card.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a473896821d0", {defaultValue: "View {{p0}} details", p0:(displayName || 'series')}) : `View ${displayName || 'series'} details`));
             card.querySelectorAll('.favorite-btn, .version-badge').forEach(button => {
                 button.tabIndex = -1;
             });
@@ -2070,7 +2070,7 @@ class SeriesPage {
         this.continueList.innerHTML = inProgress.map(h => {
             const ratio = h.duration > 0 ? Math.round((h.progress / h.duration) * 100) : 0;
             const historyKey = this.historyEpisodeProgressKey(h);
-            const title = MediaUtils.cleanReleaseName(h.data?.title || '') || 'Unknown';
+            const title = MediaUtils.cleanReleaseName(h.data?.title || '') || (globalThis.NorvaI18n?.t("ui_web_b764cdc0eab7", { defaultValue: "Unknown" }) ?? 'Unknown');
             const subtitle = MediaUtils.formatEpisodeDisplayLabel(h.data?.subtitle || '', {
                 season: h.data?.currentSeason,
                 episode: h.data?.currentEpisode
@@ -2097,7 +2097,7 @@ class SeriesPage {
             const title = card.querySelector('.continue-card-title')?.textContent || 'series';
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
-            card.setAttribute('aria-label', `Resume ${title}`);
+            card.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_85b82fc7f5bb", {defaultValue: "Resume {{p0}}", p0:(title)}) : `Resume ${title}`));
             if (!this._isTvMode()) {
                 card.addEventListener('keydown', event => {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -2243,13 +2243,13 @@ class SeriesPage {
         const primary = document.createElement('div');
         primary.id = 'series-tv-primary-filters';
         primary.className = 'tv-series-filter-row tv-series-primary-filters';
-        primary.setAttribute('aria-label', 'Series filters');
+        primary.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_9389e620715d", { defaultValue: "Series filters" }) ?? 'Series filters'));
         primary.dataset.tvNavRegion = 'series-filters';
 
         const secondary = document.createElement('div');
         secondary.id = 'series-tv-secondary-filters';
         secondary.className = 'tv-series-filter-row tv-series-secondary-filters';
-        secondary.setAttribute('aria-label', 'Availability and view options');
+        secondary.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_4b6dfa7e650a", { defaultValue: "Availability and view options" }) ?? 'Availability and view options'));
         secondary.dataset.tvNavRegion = 'series-filters';
 
         const catalogHead = document.createElement('div');
@@ -2260,7 +2260,7 @@ class SeriesPage {
         catalogMeta.className = 'tv-series-catalog-meta';
         const catalogTitle = document.createElement('h3');
         catalogTitle.className = 'tv-series-catalog-title';
-        catalogTitle.textContent = 'All Series';
+        catalogTitle.textContent = (globalThis.NorvaI18n?.t("ui_web_0df56f6290ef", { defaultValue: "All Series" }) ?? 'All Series');
         catalogMeta.appendChild(catalogTitle);
         catalogHead.appendChild(catalogMeta);
 
@@ -2268,7 +2268,7 @@ class SeriesPage {
         preview.id = 'series-tv-preview';
         preview.className = 'tv-series-preview is-empty';
         preview.dataset.tvSplitPreview = 'true';
-        preview.setAttribute('aria-label', 'Selected series preview');
+        preview.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_9201d21d6d5a", { defaultValue: "Selected series preview" }) ?? 'Selected series preview'));
         preview.setAttribute('aria-live', 'polite');
 
         const categoryControl = document.getElementById('series-category-btn')?.closest('.multi-select');
@@ -2306,7 +2306,7 @@ class SeriesPage {
                 favorite.classList.toggle('active', active);
                 favorite.setAttribute('aria-pressed', String(active));
                 const label = favorite.querySelector('.tv-series-preview-favorite-label');
-                if (label) label.textContent = active ? 'Remove from Favorites' : 'Add to Favorites';
+                if (label) label.textContent = active ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                 if (this.showFavoritesOnly && !active) {
                     this.activeBucketLangKey = null;
                     this.onFiltersChanged();
@@ -2334,7 +2334,7 @@ class SeriesPage {
             ...variant,
             sourceId: variant.sourceId ?? variant.source_id ?? title?.sourceId ?? title?.source_id,
             series_id: variant.series_id ?? variant.seriesId ?? variant.item_id ?? variant.itemId ?? variant.id,
-            name: variant.name || variant.title || title?.name || title?.title || 'Series',
+            name: variant.name || variant.title || title?.name || title?.title || (globalThis.NorvaI18n?.t("ui_web_a8295e08ff7a", { defaultValue: "Series" }) ?? 'Series'),
             cover: variant.cover || variant.stream_icon || variant.poster_url || title?.cover || title?.poster_url,
             stream_icon: variant.stream_icon || variant.cover || variant.poster_url || title?.stream_icon || title?.cover,
             tmdb: variant.tmdb || title?.tmdb,
@@ -2432,8 +2432,8 @@ class SeriesPage {
         preview.classList.add('is-empty');
         preview.innerHTML = `
             <div class="tv-series-preview-empty">
-                <strong>Select a series</strong>
-                <span>Move through the catalogue to see its details.</span>
+                <strong data-i18n="ui_web_a87db5300a66">Select a series</strong>
+                <span data-i18n="ui_web_6879cfa308dc">Move through the catalogue to see its details.</span>
             </div>`;
     }
 
@@ -2441,10 +2441,10 @@ class SeriesPage {
         if (!this.container) return;
         this.container.innerHTML = `
             <div class="premium-state premium-state-error" role="alert">
-                <span class="premium-state-kicker">Series</span>
-                <h3>Series could not be refreshed</h3>
-                <p>Your catalogue is still connected. Try loading this view again.</p>
-                <button class="btn btn-primary" type="button" data-series-retry>Try again</button>
+                <span class="premium-state-kicker" data-i18n="ui_web_a8295e08ff7a">Series</span>
+                <h3 data-i18n="ui_web_64c8f9f95586">Series could not be refreshed</h3>
+                <p data-i18n="ui_web_58d140544bb7">Your catalogue is still connected. Try loading this view again.</p>
+                <button class="btn btn-primary" type="button" data-series-retry data-i18n="ui_web_d8b8392e2c54">Try again</button>
             </div>`;
         if (this._isTvMode()) this._clearTvPreview();
     }
@@ -2498,7 +2498,7 @@ class SeriesPage {
         const progressLabel = history
             ? [history.data?.currentSeason ? `S${history.data.currentSeason}` : '',
                history.data?.currentEpisode ? `E${history.data.currentEpisode}` : ''].filter(Boolean).join(' ') +
-              (minsLeft ? ` · ${minsLeft} min left` : '')
+              (minsLeft ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_27c34f7177a9", {defaultValue: "· {{p0}} min left", p0:(minsLeft)}) : ` · ${minsLeft} min left`) : '')
             : '';
         const sources = [...new Set(group.items.map(item => this.getSourceName(item.sourceId)).filter(Boolean))];
         const isFav = group.items.some(item => this.favoriteIds.has(`${item.sourceId}:${item.series_id}`));
@@ -2517,16 +2517,16 @@ class SeriesPage {
                     <div class="tv-series-preview-progress-copy">${MediaUtils.escapeHtml(progressLabel)}</div>
                     <div class="tv-series-preview-progress"><div style="width:${ratio}%"></div></div>` : ''}
                 <div class="tv-series-preview-actions">
-                    <button id="series-tv-preview-open" class="btn btn-primary tv-series-preview-primary" type="button">View Series Details</button>
+                    <button id="series-tv-preview-open" class="btn btn-primary tv-series-preview-primary" type="button" data-i18n="ui_web_ab2dadc7468a">View Series Details</button>
                     <button id="series-tv-preview-favorite" class="btn btn-ghost tv-series-preview-favorite ${isFav ? 'active' : ''}"
                             type="button" aria-pressed="${isFav ? 'true' : 'false'}">
                         <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
-                        <span class="tv-series-preview-favorite-label">${isFav ? 'Remove from Favorites' : 'Add to Favorites'}</span>
+                        <span class="tv-series-preview-favorite-label">${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}</span>
                     </button>
                 </div>
                 ${sources.length ? `
                     <div class="tv-series-preview-sources">
-                        <span class="tv-series-preview-sources-label">Available on</span>
+                        <span class="tv-series-preview-sources-label" data-i18n="ui_web_b867a3288d1f">Available on</span>
                         ${sources.slice(0, 3).map(source => `<span class="tv-series-preview-source">${MediaUtils.escapeHtml(source)}</span>`).join('')}
                         ${sources.length > 3 ? `<span class="tv-series-preview-source">+${sources.length - 3}</span>` : ''}
                     </div>` : ''}
@@ -2674,7 +2674,7 @@ class SeriesPage {
             return;
         }
         section.classList.remove('single-version');
-        this.versionSummary.textContent = `${versions.length} versions — choose language / source.`;
+        this.versionSummary.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b7bbbf508e0c", {defaultValue: "{{p0}} versions — choose language / source.", p0:(versions.length)}) : `${versions.length} versions — choose language / source.`);
         this.versionsList.innerHTML = versions.map((item, index) => {
             const active = this.isSameSeriesVersion(item, selectedSeries);
             const broken = this.isBrokenItem(item);
@@ -2690,12 +2690,12 @@ class SeriesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
-            const headline = this.displayLanguageStatus(desc.headline) || `Version ${index + 1}`;
+            const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
                     ${meta}
-                    ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan">Unavailable</span>' : ''}
+                    ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan" data-i18n-title="ui_web_6168604ed2ae" data-i18n="ui_web_ca1844969742">Unavailable</span>' : ''}
                 </button>`;
         }).join('');
         this.versionsList.querySelectorAll('.series-version-item').forEach(btn => {
@@ -2765,7 +2765,7 @@ class SeriesPage {
         // for identity/audit purposes. Apply the same display-only normalization
         // used by the grid so a fiche never reintroduces prefixes such as
         // "MULTI ▎" after its card was rendered correctly.
-        return MediaUtils.cleanReleaseName(candidate) || String(candidate).trim() || 'Series';
+        return MediaUtils.cleanReleaseName(candidate) || String(candidate).trim() || (globalThis.NorvaI18n?.t("ui_web_a8295e08ff7a", { defaultValue: "Series" }) ?? 'Series');
     }
 
     getSeriesOverview(series = this.currentSeries) {
@@ -2778,7 +2778,7 @@ class SeriesPage {
         return (hasCatalogTitle ? localized : series?.tmdb?.overview)
             || series?.tmdb?.overview
             || localized
-            || 'No summary available yet.';
+            || (globalThis.NorvaI18n?.t("ui_web_6e6f8d4e6690", { defaultValue: "No summary available yet." }) ?? 'No summary available yet.');
     }
 
     getSeriesRatingText(series = this.currentSeries) {
@@ -2997,7 +2997,7 @@ class SeriesPage {
             await this.setEpisodeWatched(episodeId, row.dataset.season, row.dataset.episodeNum, !watched);
             this.repaintEpisodeWatchState();
         } catch (_) {
-            this.app?.showToast?.('Could not update watch state', { type: 'error' });
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_fd295b0107e1", { defaultValue: "Could not update watch state" }) ?? 'Could not update watch state'), { type: 'error' });
         } finally {
             if (btn) btn.disabled = false;
         }
@@ -3018,7 +3018,7 @@ class SeriesPage {
         // Guard CSS.escape like the sibling downloadSeason (some WebViews lack it).
         const esc = (window.CSS && CSS.escape) ? CSS.escape(String(seasonNum)) : String(seasonNum);
         const btn = this.seasonsContainer?.querySelector(`.season-mark-all[data-season="${esc}"]`);
-        if (btn) { btn.disabled = true; btn.textContent = target ? 'Marking…' : 'Updating…'; }
+        if (btn) { btn.disabled = true; btn.textContent = target ? (globalThis.NorvaI18n?.t("ui_web_98a436e57b71", { defaultValue: "Marking…" }) ?? 'Marking…') : (globalThis.NorvaI18n?.t("ui_web_dfe40efe921f", { defaultValue: "Updating…" }) ?? 'Updating…'); }
         let failed = false;
         try {
             // Sequential to keep the history writes gentle and deterministic.
@@ -3037,7 +3037,7 @@ class SeriesPage {
             if (this.currentSeries === series) this.repaintEpisodeWatchState();
             if (btn) btn.disabled = false;
             this.refreshSeasonMarkButtons();
-            if (failed) this.app?.showToast?.('Some episodes could not be updated', { type: 'error' });
+            if (failed) this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_e3a0939f3b44", { defaultValue: "Some episodes could not be updated" }) ?? 'Some episodes could not be updated'), { type: 'error' });
         }
     }
 
@@ -3050,7 +3050,7 @@ class SeriesPage {
             const eps = Array.isArray(this.currentSeriesInfo.episodes?.[s]) ? this.currentSeriesInfo.episodes[s] : [];
             const allWatched = eps.length > 0 && eps.every(ep =>
                 this.isEpisodeWatched(this.getEpisodeHistory(map, ep.id)));
-            btn.textContent = allWatched ? 'Mark season as unwatched' : 'Mark season as watched';
+            btn.textContent = allWatched ? (globalThis.NorvaI18n?.t("ui_web_78f60b73df0b", { defaultValue: "Mark season as unwatched" }) ?? 'Mark season as unwatched') : (globalThis.NorvaI18n?.t("ui_web_efda801992bd", { defaultValue: "Mark season as watched" }) ?? 'Mark season as watched');
             btn.classList.toggle('is-watched', allWatched);
         });
     }
@@ -3084,7 +3084,7 @@ class SeriesPage {
                 }
                 marker.classList.add('inprogress');
                 marker.textContent = '◐';
-                marker.title = 'In progress';
+                marker.title = (globalThis.NorvaI18n?.t("ui_web_c1f88e9d6c41", { defaultValue: "In progress" }) ?? 'In progress');
             } else if (marker) {
                 marker.remove();
             }
@@ -3110,7 +3110,7 @@ class SeriesPage {
             if (isUp && !flag) {
                 flag = document.createElement('span');
                 flag.className = 'episode-upnext-flag';
-                flag.textContent = 'Up next';
+                flag.textContent = (globalThis.NorvaI18n?.t("ui_web_e31da5b25f8b", { defaultValue: "Up next" }) ?? 'Up next');
                 titleRow?.appendChild(flag);
             } else if (!isUp && flag) {
                 flag.remove();
@@ -3122,7 +3122,7 @@ class SeriesPage {
             if (btn) {
                 btn.classList.toggle('is-watched', watched);
                 btn.setAttribute('aria-pressed', watched ? 'true' : 'false');
-                btn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
+                btn.title = watched ? (globalThis.NorvaI18n?.t("ui_web_01fe6b45c2e3", { defaultValue: "Mark as unwatched" }) ?? 'Mark as unwatched') : (globalThis.NorvaI18n?.t("ui_web_aad77636f1ac", { defaultValue: "Mark as watched" }) ?? 'Mark as watched');
                 btn.textContent = watched ? '✓' : '';
             }
         });
@@ -3132,7 +3132,7 @@ class SeriesPage {
             const h = this.getEpisodeHistory(map, featuredId);
             const isResuming = this.isEpisodeInProgress(h);
             const minsLeft = (isResuming && h?.duration > 0) ? Math.max(0, Math.round((h.duration - h.progress) / 60)) : 0;
-            const label = `${featured.label}${minsLeft ? ` · ${minsLeft} min left` : ''}`;
+            const label = `${featured.label}${minsLeft ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_27c34f7177a9", {defaultValue: "· {{p0}} min left", p0:(minsLeft)}) : ` · ${minsLeft} min left`) : ''}`;
             this.primaryActionBtn.disabled = false;
             this.primaryActionBtn.dataset.episodeId = featured.episode.id;
             this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(label)}</span>`;
@@ -3177,7 +3177,7 @@ class SeriesPage {
         if (inProgress) {
             return {
                 ...inProgress,
-                label: `Resume S${inProgress.seasonNum}:E${inProgress.episodeNum}`
+                label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_e2a735ff408a", {defaultValue: "Resume S{{p0}}:E{{p1}}", p0:(inProgress.seasonNum),p1:(inProgress.episodeNum)}) : `Resume S${inProgress.seasonNum}:E${inProgress.episodeNum}`)
             };
         }
 
@@ -3202,18 +3202,18 @@ class SeriesPage {
         }
 
         const first = flatEpisodes[0];
-        return { ...first, label: `Restart S${first.seasonNum}:E${first.episodeNum}` };
+        return { ...first, label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_7ff977dfbfb0", {defaultValue: "Restart S{{p0}}:E{{p1}}", p0:(first.seasonNum),p1:(first.episodeNum)}) : `Restart S${first.seasonNum}:E${first.episodeNum}`) };
     }
 
     syncDetailFavoriteButton() {
         if (!this.detailFavoriteBtn || !this.currentSeriesGroup) return;
         const isFav = this.currentSeriesGroup.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`));
         this.detailFavoriteBtn.classList.toggle('active', isFav);
-        this.detailFavoriteBtn.title = isFav ? 'Remove from Favorites' : 'Add to Favorites';
+        this.detailFavoriteBtn.title = isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
         const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
         const label = this.detailFavoriteBtn.querySelector('.fav-label');
         if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
-        if (label) label.textContent = 'Favorite';
+        if (label) label.textContent = (globalThis.NorvaI18n?.t("ui_web_ea713ecd8537", { defaultValue: "Favorite" }) ?? 'Favorite');
     }
 
     // === Thumbs up/down (per-profile title rating) ===
@@ -3337,7 +3337,7 @@ class SeriesPage {
             const watched = this.isEpisodeWatched(history);
             const inProgress = this.isEpisodeInProgress(history);
             const marker = inProgress
-                ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
+                ? '<span class="episode-watched inprogress" title="In progress" data-i18n-title="ui_web_c1f88e9d6c41">◐</span>' : '';
             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
             const episodeNum = ep.episode_num || ep.episodeNumber || '';
             const accessibleTitle = [
@@ -3359,15 +3359,15 @@ class SeriesPage {
                                     <div class="episode-title-row">
                                         <span class="episode-title">${MediaUtils.escapeHtml(cleanTitle)}</span>
                                         ${marker}
-                                        ${isUpNext ? '<span class="episode-upnext-flag">Up next</span>' : ''}
+                                        ${isUpNext ? '<span class="episode-upnext-flag" data-i18n="ui_web_e31da5b25f8b">Up next</span>' : ''}
                                     </div>
                                     ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
                                     ${inProgress && ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
                                 </div>
                                 <div class="episode-actions">
                                     <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
-                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${watched ? '✓' : ''}</button>
-                                    <button class="episode-download" type="button" title="Download for offline" style="display:none">
+                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? (globalThis.NorvaI18n?.t("ui_web_01fe6b45c2e3", { defaultValue: "Mark as unwatched" }) ?? 'Mark as unwatched') : (globalThis.NorvaI18n?.t("ui_web_aad77636f1ac", { defaultValue: "Mark as watched" }) ?? 'Mark as watched')}">${watched ? '✓' : ''}</button>
+                                    <button class="episode-download" type="button" title="Download for offline" style="display:none" data-i18n-title="ui_web_9562d8134dae">
                                         <span class="episode-download-icon">&#x2193;</span>
                                     </button>
                                 </div>
@@ -3418,7 +3418,7 @@ class SeriesPage {
                         titleEl.textContent = te.name;
                         row.setAttribute(
                             'aria-label',
-                            `Season ${seasonNum}, episode ${row.dataset.episodeNum}: ${te.name}`
+                            (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_70ef0aac6cd5", {defaultValue: "Season {{p0}}, episode {{p1}}: {{p2}}", p0:(seasonNum),p1:(row.dataset.episodeNum),p2:(te.name)}) : `Season ${seasonNum}, episode ${row.dataset.episodeNum}: ${te.name}`)
                         );
                     }
                 }
@@ -3541,7 +3541,7 @@ class SeriesPage {
         const backBtn = this.detailsPanel.querySelector('.series-back-btn');
         if (backBtn) {
             const ctx = this.searchInput?.value?.trim()
-                ? 'Search results'
+                ? (globalThis.NorvaI18n?.t("ui_web_e978b00de465", { defaultValue: "Search results" }) ?? 'Search results')
                 : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Series');
             // Update only the label span — the button holds an SVG arrow icon that a
             // raw textContent write would destroy (the old circle-with-spilled-text bug).
@@ -3581,7 +3581,7 @@ class SeriesPage {
 
         this.seasonsContainer.innerHTML = `
             <div class="series-episode-loading" role="status" aria-live="polite" aria-atomic="true"
-                 aria-label="Loading episodes. Please wait.">
+                 aria-label="Loading episodes. Please wait." data-i18n-aria-label="ui_web_f5e759e83538">
                 <div class="series-episode-loader-art" aria-hidden="true">
                     <span class="series-episode-loader-glow"></span>
                     <span class="series-episode-loader-card series-episode-loader-card-left">
@@ -3598,15 +3598,15 @@ class SeriesPage {
                     </span>
                 </div>
                 <div class="series-episode-loader-copy">
-                    <strong>Gathering this season</strong>
-                    <span>Settle in — your episodes are loading. This can take a few seconds.</span>
+                    <strong data-i18n="ui_web_5d33ce86074e">Gathering this season</strong>
+                    <span data-i18n="ui_web_d751076330dc">Settle in — your episodes are loading. This can take a few seconds.</span>
                 </div>
             </div>`;
         const tvEpisodeCount = this._ensureTvEpisodeCount();
         if (tvEpisodeCount) tvEpisodeCount.textContent = '';
         if (this.primaryActionBtn) {
             this.primaryActionBtn.disabled = true;
-            this.primaryActionBtn.textContent = 'Loading...';
+            this.primaryActionBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_47d2a515ef2f", { defaultValue: "Loading..." }) ?? 'Loading...');
             delete this.primaryActionBtn.dataset.episodeId;
         }
         // Clear any stale "Play from start" state before the fetch — failure exits below
@@ -3649,16 +3649,16 @@ class SeriesPage {
                 const hasAlternate = this.hasAlternateSeriesVersion();
                 this.seasonsContainer.innerHTML = `
                     <div class="series-info-state empty-state" role="status" aria-live="polite" aria-atomic="true">
-                        <h3>No episodes in this version</h3>
+                        <h3 data-i18n="ui_web_8b0f2fccead7">No episodes in this version</h3>
                         <p class="hint">${hasAlternate
-                            ? 'Choose another version to keep watching.'
-                            : 'Episodes are not available for this title yet.'}</p>
+                            ? (globalThis.NorvaI18n?.t("ui_web_c0c138fb45c5", { defaultValue: "Choose another version to keep watching." }) ?? 'Choose another version to keep watching.')
+                            : (globalThis.NorvaI18n?.t("ui_web_5c8b52015ede", { defaultValue: "Episodes are not available for this title yet." }) ?? 'Episodes are not available for this title yet.')}</p>
                         ${hasAlternate ? `
                             <div class="series-info-state-actions">
-                                <button class="btn btn-primary" type="button" data-series-info-action="versions">Choose another version</button>
+                                <button class="btn btn-primary" type="button" data-series-info-action="versions" data-i18n="ui_web_11a3d20a309c">Choose another version</button>
                             </div>` : ''}
                     </div>`;
-                if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'No episodes';
+                if (this.primaryActionBtn) this.primaryActionBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_eca73b91d505", { defaultValue: "No episodes" }) ?? 'No episodes');
                 return;
             }
 
@@ -3673,7 +3673,7 @@ class SeriesPage {
             const episodeCount = flatEpisodes.length;
             const seasonCount = seasons.length;
             if (tvEpisodeCount) {
-                tvEpisodeCount.textContent = `${episodeCount} episode${episodeCount === 1 ? '' : 's'}`;
+                tvEpisodeCount.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_2fa60079f674", {defaultValue: "{{p0}} episode{{p1}}", p0:(episodeCount),p1:(episodeCount === 1 ? '' : 's')}) : `${episodeCount} episode${episodeCount === 1 ? '' : 's'}`);
             }
             const genres = this.getSeriesGenres(series).slice(0, 3);
             const rating = this.getSeriesRatingText(series);
@@ -3704,7 +3704,7 @@ class SeriesPage {
                 ? String(prevSeason)
                 : (featured ? String(featured.seasonNum) : (seasons.length ? String(seasons[0]) : null));
             if (this.seasonTabs) {
-                const seasonLabel = (n) => String(n) === '0' ? 'Specials' : `Season ${n}`;
+                const seasonLabel = (n) => String(n) === '0' ? (globalThis.NorvaI18n?.t("ui_web_90a92d7ef85b", { defaultValue: "Specials" }) ?? 'Specials') : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9e42662ef1b7", {defaultValue: "Season {{p0}}", p0:(n)}) : `Season ${n}`);
                 this.seasonTabs.innerHTML = seasons.map(seasonNum => {
                     const count = Array.isArray(info.episodes[seasonNum]) ? info.episodes[seasonNum].length : 0;
                     const on = String(seasonNum) === String(this._activeSeason);
@@ -3734,13 +3734,13 @@ class SeriesPage {
                 ? Math.max(0, Math.round((featuredHist.duration - featuredHist.progress) / 60)) : 0;
             if (this.primaryActionBtn) {
                 if (featured) {
-                    const label = `${featured.label}${minsLeft ? ` · ${minsLeft} min left` : ''}`;
+                    const label = `${featured.label}${minsLeft ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_27c34f7177a9", {defaultValue: "· {{p0}} min left", p0:(minsLeft)}) : ` · ${minsLeft} min left`) : ''}`;
                     this.primaryActionBtn.disabled = false;
                     this.primaryActionBtn.dataset.episodeId = featured.episode.id;
                     this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(label)}</span>`;
                 } else {
                     this.primaryActionBtn.disabled = true;
-                    this.primaryActionBtn.textContent = 'No episodes';
+                    this.primaryActionBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_eca73b91d505", { defaultValue: "No episodes" }) ?? 'No episodes');
                 }
             }
             if (this.playStartBtn) {
@@ -3760,14 +3760,14 @@ class SeriesPage {
                 html += `
                 <div class="season-group" data-season="${MediaUtils.escapeHtml(seasonNum)}"${isActive ? '' : ' data-episodes-pending="1"'}>
                     <div class="season-dl-bar" data-season="${MediaUtils.escapeHtml(seasonNum)}" style="display:none">
-                        <span class="season-dl-name">Season ${MediaUtils.escapeHtml(seasonNum)}</span>
+                        <span class="season-dl-name" data-i18n="ui_web_107d061d7abf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p3":(seasonNum)}) || "{}")}">Season ${MediaUtils.escapeHtml(seasonNum)}</span>
                         <span class="season-dl-count"></span>
-                        <button class="season-download-btn" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}" title="Download every episode of this season">
-                            <span class="season-download-label">Download season</span>
+                        <button class="season-download-btn" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}" title="Download every episode of this season" data-i18n-title="ui_web_f802310baf8d">
+                            <span class="season-download-label" data-i18n="ui_web_8b9fb7230459">Download season</span>
                         </button>
                     </div>
                     <div class="season-actions">
-                        <button class="season-mark-all" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}">Mark season as watched</button>
+                        <button class="season-mark-all" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-i18n="ui_web_efda801992bd">Mark season as watched</button>
                     </div>
                     <div class="episode-list">${isActive ? this._episodeListInnerHtml(episodes, seasonNum, watchedEpisodes, featured, series) : ''}</div>
                 </div>`;
@@ -3821,7 +3821,7 @@ class SeriesPage {
             this.renderSeriesInfoError(errorState, { focusAction: focusStatusAction });
             // Put the primary button in a terminal state — it was left disabled on
             // "Loading..." at the top, and the catch never reset it.
-            if (this.primaryActionBtn) { this.primaryActionBtn.disabled = true; this.primaryActionBtn.textContent = 'Unavailable'; }
+            if (this.primaryActionBtn) { this.primaryActionBtn.disabled = true; this.primaryActionBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_ca1844969742", { defaultValue: "Unavailable" }) ?? 'Unavailable'); }
         }
     }
 
@@ -3886,65 +3886,65 @@ class SeriesPage {
         const hasAlternate = this.hasAlternateSeriesVersion();
         const states = {
             offline: {
-                title: "You're offline",
-                message: 'Reconnect to the internet, then try loading the episodes again.',
+                title: (globalThis.NorvaI18n?.t("ui_web_050be7950a63", { defaultValue: "You're offline" }) ?? "You're offline"),
+                message: (globalThis.NorvaI18n?.t("ui_web_2df8f63ebd46", { defaultValue: "Reconnect to the internet, then try loading the episodes again." }) ?? 'Reconnect to the internet, then try loading the episodes again.'),
                 action: 'retry',
-                actionLabel: 'Try again',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'),
                 allowVersionChoice: false,
             },
             'account-busy': {
-                title: 'This TV service is busy',
-                message: 'Wait a few seconds, then try again.',
+                title: (globalThis.NorvaI18n?.t("ui_web_3be599075bbf", { defaultValue: "This TV service is busy" }) ?? 'This TV service is busy'),
+                message: (globalThis.NorvaI18n?.t("ui_web_b3a8e197467e", { defaultValue: "Wait a few seconds, then try again." }) ?? 'Wait a few seconds, then try again.'),
                 action: 'retry',
-                actionLabel: 'Try again',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'),
                 allowVersionChoice: true,
             },
             authentication: {
-                title: 'Your TV service needs attention',
-                message: 'Review your TV service access in Settings before trying again.',
+                title: (globalThis.NorvaI18n?.t("ui_web_b4604a9b1ef1", { defaultValue: "Your TV service needs attention" }) ?? 'Your TV service needs attention'),
+                message: (globalThis.NorvaI18n?.t("ui_web_8ed5a049b615", { defaultValue: "Review your TV service access in Settings before trying again." }) ?? 'Review your TV service access in Settings before trying again.'),
                 action: 'settings',
-                actionLabel: 'Open Settings',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_3f940108cb1e", { defaultValue: "Open Settings" }) ?? 'Open Settings'),
                 allowVersionChoice: true,
             },
             'rate-limited': {
-                title: 'Episodes need a moment',
-                message: 'Wait a moment, then try loading this version again.',
+                title: (globalThis.NorvaI18n?.t("ui_web_fefd25585454", { defaultValue: "Episodes need a moment" }) ?? 'Episodes need a moment'),
+                message: (globalThis.NorvaI18n?.t("ui_web_e63390067ca8", { defaultValue: "Wait a moment, then try loading this version again." }) ?? 'Wait a moment, then try loading this version again.'),
                 action: 'retry',
-                actionLabel: 'Try again',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'),
                 allowVersionChoice: true,
             },
             'circuit-open': {
-                title: 'This TV service is recovering',
-                message: 'Norva has paused requests briefly. Try again in a moment.',
+                title: (globalThis.NorvaI18n?.t("ui_web_53ec10d3bbc5", { defaultValue: "This TV service is recovering" }) ?? 'This TV service is recovering'),
+                message: (globalThis.NorvaI18n?.t("ui_web_282cc18d808e", { defaultValue: "Norva has paused requests briefly. Try again in a moment." }) ?? 'Norva has paused requests briefly. Try again in a moment.'),
                 action: 'retry',
-                actionLabel: 'Try again',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'),
                 allowVersionChoice: true,
             },
             unsupported: {
-                title: 'This version is not supported',
+                title: (globalThis.NorvaI18n?.t("ui_web_38c68cc11a67", { defaultValue: "This version is not supported" }) ?? 'This version is not supported'),
                 message: hasAlternate
-                    ? 'Choose another version to continue.'
-                    : 'This title does not have another compatible version yet.',
+                    ? (globalThis.NorvaI18n?.t("ui_web_f307176be4db", { defaultValue: "Choose another version to continue." }) ?? 'Choose another version to continue.')
+                    : (globalThis.NorvaI18n?.t("ui_web_797166e945a1", { defaultValue: "This title does not have another compatible version yet." }) ?? 'This title does not have another compatible version yet.'),
                 action: hasAlternate ? 'versions' : 'back',
-                actionLabel: hasAlternate ? 'Choose another version' : 'Back to Series',
+                actionLabel: hasAlternate ? (globalThis.NorvaI18n?.t("ui_web_11a3d20a309c", { defaultValue: "Choose another version" }) ?? 'Choose another version') : (globalThis.NorvaI18n?.t("ui_web_8d9190b7b81a", { defaultValue: "Back to Series" }) ?? 'Back to Series'),
                 allowVersionChoice: false,
             },
             'provider-unavailable': {
-                title: 'This version is unavailable right now',
+                title: (globalThis.NorvaI18n?.t("ui_web_bb4a851528da", { defaultValue: "This version is unavailable right now" }) ?? 'This version is unavailable right now'),
                 message: hasAlternate
-                    ? 'Try loading it again, or choose another version.'
-                    : 'Try loading this version again in a moment.',
+                    ? (globalThis.NorvaI18n?.t("ui_web_64b1ee1352ab", { defaultValue: "Try loading it again, or choose another version." }) ?? 'Try loading it again, or choose another version.')
+                    : (globalThis.NorvaI18n?.t("ui_web_25f3b22a0f4b", { defaultValue: "Try loading this version again in a moment." }) ?? 'Try loading this version again in a moment.'),
                 action: 'retry',
-                actionLabel: 'Try again',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'),
                 allowVersionChoice: true,
             },
             generic: {
-                title: "Episodes couldn't be loaded",
+                title: (globalThis.NorvaI18n?.t("ui_web_0ded6c6bada3", { defaultValue: "Episodes couldn't be loaded" }) ?? "Episodes couldn't be loaded"),
                 message: hasAlternate
-                    ? 'Try loading this version again, or choose another version.'
-                    : 'Try loading this version again.',
+                    ? (globalThis.NorvaI18n?.t("ui_web_dcebba1d00e0", { defaultValue: "Try loading this version again, or choose another version." }) ?? 'Try loading this version again, or choose another version.')
+                    : (globalThis.NorvaI18n?.t("ui_web_93d32b83e0f3", { defaultValue: "Try loading this version again." }) ?? 'Try loading this version again.'),
                 action: 'retry',
-                actionLabel: 'Try again',
+                actionLabel: (globalThis.NorvaI18n?.t("ui_web_d8b8392e2c54", { defaultValue: "Try again" }) ?? 'Try again'),
                 allowVersionChoice: true,
             },
         };
@@ -3966,7 +3966,7 @@ class SeriesPage {
                 <div class="series-info-state-actions">
                     <button class="btn btn-primary" type="button" data-series-info-action="${MediaUtils.escapeHtml(state.action)}">${MediaUtils.escapeHtml(state.actionLabel)}</button>
                     ${showVersionAction
-                        ? '<button class="btn btn-secondary" type="button" data-series-info-action="versions">Choose another version</button>'
+                        ? '<button class="btn btn-secondary" type="button" data-series-info-action="versions" data-i18n="ui_web_11a3d20a309c">Choose another version</button>'
                         : ''}
                 </div>
             </div>`;
@@ -4015,14 +4015,14 @@ class SeriesPage {
             const liveOverview = String(meta.overview || '').trim();
             if (plotEl && liveOverview
                 && (!String(plotEl.textContent || '').trim()
-                    || plotEl.textContent === 'No summary available yet.')) {
+                    || plotEl.textContent === (globalThis.NorvaI18n?.t('ui_web_6e6f8d4e6690', { defaultValue: "No summary available yet." }) ?? 'No summary available yet.'))) {
                 plotEl.textContent = liveOverview;
             }
             const people = [];
             const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
-            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            if (castNames.length) people.push(`<span class="detail-credits-label" data-i18n="ui_web_150040557337">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
             const makers = (meta.creators || []).length ? meta.creators : (meta.directors || []);
-            if (makers.length) people.push(`<span class="detail-credits-label">Created by</span> ${MediaUtils.escapeHtml(makers.join(', '))}`);
+            if (makers.length) people.push(`<span class="detail-credits-label" data-i18n="ui_web_374cd9d220fb">Created by</span> ${MediaUtils.escapeHtml(makers.join(', '))}`);
             if (people.length && plotEl) {
                 const credits = document.createElement('div');
                 credits.className = 'detail-credits';
@@ -4092,7 +4092,7 @@ class SeriesPage {
             host.querySelector('.more-like-this')?.remove();
             const section = document.createElement('section');
             section.className = 'more-like-this';
-            section.innerHTML = '<h3 class="more-like-title">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
+            section.innerHTML = '<h3 class="more-like-title" data-i18n="ui_web_ee548a882ea6">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
             host.appendChild(section);
             const rail = section.querySelector('.more-like-grid');
             window.GenreRails.appendCards(rail, items, {
@@ -4231,14 +4231,14 @@ class SeriesPage {
 
     promptNextEpisode(nextEl) {
         this.cancelNextEpisodePrompt();
-        const title = nextEl.querySelector('.episode-title')?.textContent || 'Next episode';
+        const title = nextEl.querySelector('.episode-title')?.textContent || (globalThis.NorvaI18n?.t("ui_web_a38c4e18c73d", { defaultValue: "Next episode" }) ?? 'Next episode');
         const banner = document.createElement('div');
         banner.className = 'up-next-banner';
         banner.innerHTML =
-            '<span class="up-next-label">Up next</span>' +
+            '<span class="up-next-label" data-i18n="ui_web_e31da5b25f8b">Up next</span>' +
             '<span class="up-next-title"></span>' +
-            '<button class="up-next-play" type="button">Play</button>' +
-            '<button class="up-next-cancel" type="button" aria-label="Cancel">✕</button>';
+            '<button class="up-next-play" type="button" data-i18n="ui_web_436e61016e26">Play</button>' +
+            '<button class="up-next-cancel" type="button" aria-label="Cancel" data-i18n-aria-label="ui_web_19766ed6ccb2">✕</button>';
         banner.querySelector('.up-next-title').textContent = title;
         document.body.appendChild(banner);
         this._upNextBanner = banner;
@@ -4309,7 +4309,7 @@ class SeriesPage {
                 }
             }
         }
-        const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
+        const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(episodeNum)}) : `Episode ${episodeNum}`);
         // Episode duration ("00:42:10") as timeline fallback
         const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
         const durationHint = (h?.duration) || MediaUtils.parseDurationToSeconds(durationText);
@@ -4443,7 +4443,7 @@ class SeriesPage {
             || { id: episodeId, container_extension: container, type: 'episode', streamType: 'series' };
         const seasonNum = episodeEl.dataset.season || '1';
         const episodeNum = episodeEl.dataset.episodeNum || '';
-        const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
+        const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(episodeNum)}) : `Episode ${episodeNum}`);
         const playbackHint = MediaUtils.playbackHintFromItem
             ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
             : { container, streamType: 'series' };
@@ -4513,7 +4513,7 @@ class SeriesPage {
             await this.prepareForPlaybackSession();
             let n = 0;
             for (const ep of pending) {
-                if (label) label.textContent = `Queuing ${++n}/${pending.length}…`;
+                if (label) label.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f1aaaa075d0d", {defaultValue: "Queuing {{p0}}/{{p1}}…", p0:(++n),p1:(pending.length)}) : `Queuing ${++n}/${pending.length}…`);
                 try { await this.queueEpisodeDownload(ep); }
                 catch (err) { console.warn('[Download] season episode failed:', err?.message || err); }
                 this.refreshEpisodeDownloadStates();
@@ -4521,7 +4521,7 @@ class SeriesPage {
             window.app?.refreshDownloadsNav?.();
         } finally {
             if (btn) btn.disabled = false;
-            if (label) label.textContent = original || 'Download season';
+            if (label) label.textContent = original || (globalThis.NorvaI18n?.t("ui_web_8b9fb7230459", { defaultValue: "Download season" }) ?? 'Download season');
             setTimeout(() => this.refreshEpisodeDownloadStates(), 600);
         }
     }
@@ -4546,14 +4546,14 @@ class SeriesPage {
             if (state === 'done') {
                 btn.classList.add('is-done');
                 if (icon) icon.innerHTML = '&#x2713;';
-                btn.title = 'Downloaded — open Downloads';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_5d8b12386c94", { defaultValue: "Downloaded — open Downloads" }) ?? 'Downloaded — open Downloads');
             } else if (state === 'downloading' || state === 'queued') {
                 btn.classList.add('is-active');
                 if (icon) icon.innerHTML = '&#x22EF;';
-                btn.title = 'Downloading';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_37b345555d7e", { defaultValue: "Downloading" }) ?? 'Downloading');
             } else {
                 if (icon) icon.innerHTML = '&#x2193;';
-                btn.title = 'Download for offline';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_9562d8134dae", { defaultValue: "Download for offline" }) ?? 'Download for offline');
             }
         });
         // Reflect per-season progress on each "Download season" bar.
@@ -4562,12 +4562,12 @@ class SeriesPage {
             const countEl = bar.querySelector('.season-dl-count');
             const seasonBtn = bar.querySelector('.season-download-btn');
             const labelEl = bar.querySelector('.season-download-label');
-            if (countEl) countEl.textContent = agg.total ? `${agg.done}/${agg.total} offline` : '';
+            if (countEl) countEl.textContent = agg.total ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9fce9fe16775", {defaultValue: "{{p0}}/{{p1}} offline", p0:(agg.done),p1:(agg.total)}) : `${agg.done}/${agg.total} offline`) : '';
             const allDone = agg.total > 0 && agg.done === agg.total;
             if (seasonBtn) seasonBtn.classList.toggle('is-done', allDone);
             // Don't stomp the transient "Queuing x/y…" label while a batch runs.
             if (labelEl && seasonBtn && !seasonBtn.disabled) {
-                labelEl.textContent = allDone ? 'Saved offline' : 'Download season';
+                labelEl.textContent = allDone ? (globalThis.NorvaI18n?.t("ui_web_a95d2864990c", { defaultValue: "Saved offline" }) ?? 'Saved offline') : (globalThis.NorvaI18n?.t("ui_web_8b9fb7230459", { defaultValue: "Download season" }) ?? 'Download season');
             }
         });
         if (anyActive) {
@@ -4616,12 +4616,12 @@ class SeriesPage {
                     }
                 }
                 btn.classList.remove('active');
-                btn.title = 'Add to Favorites';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites');
                 if (iconSpan) iconSpan.innerHTML = Icons.favoriteOutline;
             } else {
                 this.favoriteIds.add(favKey);
                 btn.classList.add('active');
-                btn.title = 'Remove from Favorites';
+                btn.title = (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites');
                 if (iconSpan) iconSpan.innerHTML = Icons.favorite;
                 await API.favorites.add(series.sourceId, series.series_id, 'series', {
                     name: this.getSeriesDisplayTitle(series),

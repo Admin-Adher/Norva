@@ -134,7 +134,7 @@ test('both M3U sync engines use the shared streaming importer and no 20,000-item
   assert.doesNotMatch(cloud, /fetchText\(playlistUrl, 12000, 1_000_000\)/);
   assert.doesNotMatch(cloud, /fetchText\(url, 15000, 20_000_000\)/);
   const sourceManager = read('public/js/components/SourceManager.js');
-  assert.match(sourceManager, /estimate\.countIsLowerBound \? `at least \$\{count\}` : count/);
+  assert.match(sourceManager, /estimate\.countIsLowerBound \? [^\n]*p0:\(count\)[^\n]*`at least \$\{count\}`\) : count/);
 });
 
 test('production health gates identify the streaming import release', () => {

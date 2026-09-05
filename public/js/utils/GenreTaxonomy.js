@@ -9,22 +9,22 @@
     'use strict';
 
     const BUCKETS = [
-        { id: 'action', label: 'Action' },
-        { id: 'aventure', label: 'Adventure' },
-        { id: 'comedie', label: 'Comedy' },
-        { id: 'drame', label: 'Drama' },
-        { id: 'scifi', label: 'Sci-Fi & Fantasy' },
-        { id: 'horreur', label: 'Horror' },
-        { id: 'thriller', label: 'Thriller & Crime' },
-        { id: 'romance', label: 'Romance' },
-        { id: 'familial', label: 'Family' },
-        { id: 'animation_kids', label: 'Kids Animation' },
-        { id: 'animation_adult', label: 'Adult Animation' },
-        { id: 'kdrama', label: 'K-Drama' },
-        { id: 'telerealite', label: 'Reality TV' },
-        { id: 'documentaires', label: 'Documentaries' },
-        { id: 'arabe', label: 'Arabic Collection' },
-        { id: 'autres', label: 'Other' }
+        { id: 'action', label: (globalThis.NorvaI18n?.t("ui_web_64cff1319d2f", { defaultValue: "Action" }) ?? 'Action') },
+        { id: 'aventure', label: (globalThis.NorvaI18n?.t("ui_web_9a3c16424750", { defaultValue: "Adventure" }) ?? 'Adventure') },
+        { id: 'comedie', label: (globalThis.NorvaI18n?.t("ui_web_85f1c8c8e324", { defaultValue: "Comedy" }) ?? 'Comedy') },
+        { id: 'drame', label: (globalThis.NorvaI18n?.t("ui_web_da72bf5bbca4", { defaultValue: "Drama" }) ?? 'Drama') },
+        { id: 'scifi', label: (globalThis.NorvaI18n?.t("ui_web_fb78fb739cfd", { defaultValue: "Sci-Fi & Fantasy" }) ?? 'Sci-Fi & Fantasy') },
+        { id: 'horreur', label: (globalThis.NorvaI18n?.t("ui_web_271a22f75d73", { defaultValue: "Horror" }) ?? 'Horror') },
+        { id: 'thriller', label: (globalThis.NorvaI18n?.t("ui_web_623cf66ba78f", { defaultValue: "Thriller & Crime" }) ?? 'Thriller & Crime') },
+        { id: 'romance', label: (globalThis.NorvaI18n?.t("ui_web_3bc3567a7fc6", { defaultValue: "Romance" }) ?? 'Romance') },
+        { id: 'familial', label: (globalThis.NorvaI18n?.t("ui_web_bd2d677b2ed4", { defaultValue: "Family" }) ?? 'Family') },
+        { id: 'animation_kids', label: (globalThis.NorvaI18n?.t("ui_web_e606ac593a68", { defaultValue: "Kids Animation" }) ?? 'Kids Animation') },
+        { id: 'animation_adult', label: (globalThis.NorvaI18n?.t("ui_web_2c512aa71e62", { defaultValue: "Adult Animation" }) ?? 'Adult Animation') },
+        { id: 'kdrama', label: (globalThis.NorvaI18n?.t("ui_web_a20fcbea9409", { defaultValue: "K-Drama" }) ?? 'K-Drama') },
+        { id: 'telerealite', label: (globalThis.NorvaI18n?.t("ui_web_fb8662781fb3", { defaultValue: "Reality TV" }) ?? 'Reality TV') },
+        { id: 'documentaires', label: (globalThis.NorvaI18n?.t("ui_web_551b890d09d2", { defaultValue: "Documentaries" }) ?? 'Documentaries') },
+        { id: 'arabe', label: (globalThis.NorvaI18n?.t("ui_web_d3772238ed12", { defaultValue: "Arabic Collection" }) ?? 'Arabic Collection') },
+        { id: 'autres', label: (globalThis.NorvaI18n?.t("ui_web_f97e9da0e3b8", { defaultValue: "Other" }) ?? 'Other') }
     ];
     const BUCKET_ORDER = BUCKETS.map((b) => b.id);
     const LABELS = {};

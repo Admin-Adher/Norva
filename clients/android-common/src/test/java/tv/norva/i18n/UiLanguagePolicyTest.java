@@ -9,6 +9,14 @@ public class UiLanguagePolicyTest {
         assertEquals("ar", UiLanguagePolicy.resolve("ar", new String[]{"en"}));
         assertEquals("en", UiLanguagePolicy.resolve("auto", null));
     }
+    @Test public void importsLegacyPreferenceOnlyBeforeFrameworkOwnership() {
+        assertEquals("fr", UiLanguagePolicy.legacyPreferenceToImport("fr", false, false));
+        assertEquals("pt-BR", UiLanguagePolicy.legacyPreferenceToImport("pt", false, false));
+        assertEquals("", UiLanguagePolicy.legacyPreferenceToImport("fr", true, false));
+        assertEquals("", UiLanguagePolicy.legacyPreferenceToImport("fr", false, true));
+        assertEquals("", UiLanguagePolicy.legacyPreferenceToImport("auto", false, false));
+        assertEquals("", UiLanguagePolicy.legacyPreferenceToImport("invalid", false, false));
+    }
     @Test public void normalizesAndroidAndBrowserAliases() {
         assertEquals("pt-BR", UiLanguagePolicy.normalize("pt_PT"));
         assertEquals("fil", UiLanguagePolicy.normalize("tl-PH"));

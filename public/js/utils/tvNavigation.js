@@ -537,7 +537,16 @@
         }, { item: items[0], distance: Infinity }).item;
     }
 
+    function logicalHorizontalDirection(direction, element) {
+        const rtl = typeof getComputedStyle === 'function' && element?.nodeType === 1
+            ? getComputedStyle(element).direction === 'rtl'
+            : typeof document !== 'undefined' && document.documentElement?.dir === 'rtl';
+        if (!rtl) return direction;
+        return direction === 'ArrowLeft' ? 'ArrowRight' : direction === 'ArrowRight' ? 'ArrowLeft' : direction;
+    }
+
     function catalogFilterStep(focused, direction) {
+        direction = logicalHorizontalDirection(direction, focused);
         if (!focused) return null;
         const rows = catalogFilterRows();
         const rowIndex = rows.findIndex(({ row }) => row.contains(focused));
@@ -607,6 +616,7 @@
     // contract tests. Vertical moves preserve the nearest x-coordinate; horizontal
     // moves follow the visual DOM order inside one semantic band.
     function catalogRegionStep(regions, focused, direction) {
+        direction = logicalHorizontalDirection(direction, focused);
         if (!focused || !Array.isArray(regions)) return null;
         const regionIndex = regions.findIndex(({ items }) => items.includes(focused));
         if (regionIndex < 0) return null;
@@ -1057,6 +1067,8 @@
     }
 
     function settingsGraphMove(focused, direction) {
+        const physicalDirection = direction;
+        direction = logicalHorizontalDirection(direction, focused);
         const page = activePage();
         if (!focused || page?.id !== 'page-settings' || !page.contains(focused)) {
             return { handled: false, target: null, selectTab: false, scroll: false };
@@ -1111,7 +1123,7 @@
         const candidates = settingsPanelCandidates(panel, focused);
 
         if (direction === 'ArrowLeft' || direction === 'ArrowRight') {
-            const target = settingsHorizontalTarget(focused, candidates, direction);
+            const target = settingsHorizontalTarget(focused, candidates, physicalDirection);
             if (target) {
                 return { handled: true, target, selectTab: false, scroll: false };
             }
@@ -1200,7 +1212,7 @@
         const label = select.getAttribute('aria-label')
             || select.closest('label')?.textContent?.trim()
             || document.querySelector(`label[for="${select.id}"]`)?.textContent?.trim()
-            || 'Choose an option';
+            || (globalThis.NorvaI18n?.t("ui_web_aef4076f194a", { defaultValue: "Choose an option" }) ?? 'Choose an option');
         // Keep the value shown in each row stable even if language facets refresh
         // while the overlay is open. Resolve that value against the live select on OK.
         const optionSnapshot = [...select.options];
@@ -1213,7 +1225,7 @@
             <div class="tv-select-panel" role="listbox" aria-label="${label.replace(/"/g, '&quot;')}">
                 <div class="tv-select-title">${label}</div>
                 <div class="tv-select-list">${rows}</div>
-                <button type="button" class="modal-close tv-select-cancel">Cancel</button>
+                <button type="button" class="modal-close tv-select-cancel" data-i18n="ui_web_19766ed6ccb2">Cancel</button>
             </div>`;
         const close = () => { ov.remove(); focusElement(select); };
         ov.querySelector('.tv-select-cancel').onclick = close;
@@ -1332,7 +1344,7 @@
 
             // Live search has an explicit rail boundary: Left at the beginning
             // always opens the menu, including while the guide is still loading.
-            if (focused.id === 'channel-search' && e.key === 'ArrowLeft' &&
+            if (focused.id === 'channel-search' && logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' &&
                 (focused.selectionStart ?? 0) === 0 &&
                 (focused.selectionEnd ?? 0) === 0) {
                 e.preventDefault();
@@ -1375,7 +1387,7 @@
                 }
                 const atEnd = (focused.selectionStart ?? 0) === focused.value.length
                     && (focused.selectionEnd ?? 0) === focused.value.length;
-                if (e.key === 'ArrowRight' && atEnd) {
+                if (logicalHorizontalDirection(e.key, focused) === 'ArrowRight' && atEnd) {
                     const cancel = ov?.querySelector('.gsearch-cancel');
                     if (cancel && isVisible(cancel)) { e.preventDefault(); e.stopPropagation(); focusElement(cancel); return; }
                 }
@@ -1394,7 +1406,7 @@
 
             // At the beginning of a catalogue search field, Left leaves the page
             // for the rail instead of becoming an empty caret move.
-            if (!e.repeat && isCatalogSearch && e.key === 'ArrowLeft' &&
+            if (!e.repeat && isCatalogSearch && logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' &&
                 (focused.selectionStart ?? 0) === 0 && (focused.selectionEnd ?? 0) === 0) {
                 const active = activeRailLink();
                 const railTarget = (active && isVisible(active))
@@ -1410,7 +1422,7 @@
 
             // Symmetric boundary: Right at the end of search enters the
             // docked fiche instead of remaining an inert caret press.
-            if (!e.repeat && isCatalogSearch && e.key === 'ArrowRight' &&
+            if (!e.repeat && isCatalogSearch && logicalHorizontalDirection(e.key, focused) === 'ArrowRight' &&
                 (focused.selectionStart ?? 0) === focused.value.length &&
                 (focused.selectionEnd ?? 0) === focused.value.length) {
                 const panelTarget = tvSplitPanelEntryTarget();
@@ -1461,7 +1473,7 @@
             // Only ←/→ (caret) and Enter stay with the input; ↑ leaves via spatial nav.
             // (On phone the input keeps ↑/↓ for its own highlight nav — but this module
             // never runs there.)
-            if (isEnter || e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
+            if (isEnter || logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' || logicalHorizontalDirection(e.key, focused) === 'ArrowRight') return;
         }
         // <select>: arrows navigate away (never trapped); Enter opens a custom
         // full-screen option list instead of the WebView's tiny native spinner.
@@ -1476,7 +1488,7 @@
         // activate the season and repaint the episode list. Let that target handler
         // receive the event instead of swallowing it in capture-phase spatial nav.
         if (focused?.matches?.('.season-tab') &&
-            (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' || logicalHorizontalDirection(e.key, focused) === 'ArrowRight')) {
             return;
         }
 
@@ -1587,7 +1599,7 @@
         // leaving an off-screen tab geometrically "left" of the rail. Without an
         // explicit boundary, another Left press re-entered that hidden strip.
         // Keep Left on the rail as a stable no-op; Right is the sole page entry.
-        if (e.key === 'ArrowLeft' && focused.closest('.navbar')) {
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' && focused.closest('.navbar')) {
             return;
         }
 
@@ -1596,7 +1608,7 @@
         // Right would be a silent no-op (the scroll fallback at the end only handles
         // Up/Down). Fall back to the page's default target so Right is never dead —
         // mirroring the ArrowDown dive above.
-        if (e.key === 'ArrowRight' && focused.closest('.navbar')) {
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowRight' && focused.closest('.navbar')) {
             // Returning from the active section's rail restores its exact content
             // stop. This precedes geometry so an aligned far-right control cannot
             // steal entry (the Settings -> Transcoding regression).
@@ -1607,7 +1619,7 @@
                     return;
                 }
             }
-            const rightNext = findNext(focused, 'ArrowRight');
+            const rightNext = findNext(focused, e.key);
             if (rightNext) {
                 focusElement(rightNext);
                 return;
@@ -1622,7 +1634,7 @@
         // Movies/Series TV: catalogFilterStep above owns the two filter rows. This
         // fallback keeps toolbar chips/sort walking horizontally and bridges the
         // right edge of any catalogue control band to the docked preview CTA.
-        if (e.key === 'ArrowRight' &&
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowRight' &&
             (activePage()?.id === 'page-movies' || activePage()?.id === 'page-series') &&
             navScope() === document) {
             const regionName = activePage()?.id === 'page-series' ? 'series-filters' : 'movies-filters';
@@ -1666,7 +1678,7 @@
         // the arbitrary same-screen-y node (often an invisible heart) that pure findNext
         // would pick. Runs BEFORE the rail guard so the sidebar wins; the rail stays one
         // further Left press away (column-hop).
-        if (e.key === 'ArrowLeft' && focused.closest('.player-section')) {
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' && focused.closest('.player-section')) {
             const sb = document.querySelector('.channel-sidebar');
             if (sb) {
                 let target = sb.querySelector('.channel-item.active, .channel-item.nav-active, .channel-item.playing');
@@ -1688,7 +1700,7 @@
         // Live TV loading/empty states still expose a guaranteed path to the rail.
         // From a full-width list row, or from the first available header control,
         // Left is semantic "open menu" rather than a diagonal geometry move.
-        if (e.key === 'ArrowLeft' && focused.closest('#page-live .channel-sidebar')) {
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' && focused.closest('#page-live .channel-sidebar')) {
             const controls = [
                 document.getElementById('source-select'),
                 document.getElementById('toggle-groups'),
@@ -1708,9 +1720,9 @@
         // control that HAS a panel neighbour to its left (e.g. Favorite ← Play) falls
         // through to the generic handler, which steps to that neighbour.
         const splitPanel = focused.closest?.('#movie-details, #series-tv-preview');
-        if (e.key === 'ArrowLeft' && isTvSplitPanel(splitPanel)) {
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' && isTvSplitPanel(splitPanel)) {
             const panel = splitPanel;
-            const leftInPanel = findNext(focused, 'ArrowLeft');
+            const leftInPanel = findNext(focused, e.key);
             const realPanelNeighbour = leftInPanel && panel.contains(leftInPanel) &&
                 hasMeaningfulVerticalOverlap(focused, leftInPanel);
             if (!realPanelNeighbour) {
@@ -1742,8 +1754,8 @@
         // diagonally up to a filter control (the first filter <select> sits above-and-
         // left of the first card). A tile that DOES have a left neighbour on its row
         // falls through to the generic handler below, which steps to that neighbour.
-        if (e.key === 'ArrowLeft' && focused.matches?.(CATALOG_TILE_SELECTOR)) {
-            const leftCard = findNext(focused, 'ArrowLeft');
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' && focused.matches?.(CATALOG_TILE_SELECTOR)) {
+            const leftCard = findNext(focused, e.key);
             const sameRow = leftCard && leftCard.matches?.(CATALOG_TILE_SELECTOR) &&
                 hasMeaningfulVerticalOverlap(focused, leftCard, 0.5);
             if (!sameRow) {
@@ -1760,8 +1772,8 @@
         // more to the left, or the only thing left is the rail itself) it lands on
         // the rail's CURRENT section. Pure spatial findNext could miss the rail
         // when a partially-scrolled card still sits to the left — this guarantees it.
-        if (e.key === 'ArrowLeft' && !focused.closest('.navbar')) {
-            const leftNext = findNext(focused, 'ArrowLeft');
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' && !focused.closest('.navbar')) {
+            const leftNext = findNext(focused, e.key);
             // Full-width sidebar list rows (a category header or a channel) have no
             // in-row neighbour to their left — only the header controls sit up-and-left.
             // For them, Left must open the menu, not jump diagonally to Hide-unavailable.
@@ -1806,7 +1818,7 @@
         // findNext's score. The header controls row (source · sort · Hide unavailable)
         // is NOT force-crossed: normal findNext walks it rightward and only reaches
         // the player at the row's right edge — otherwise those controls are stranded.
-        if (e.key === 'ArrowRight' && focused.closest('.channel-sidebar') &&
+        if (logicalHorizontalDirection(e.key, focused) === 'ArrowRight' && focused.closest('.channel-sidebar') &&
             focused.matches?.('.group-header, .channel-item, .search-result')) {
             const player = document.querySelector('.player-section');
             if (player) {
@@ -1843,7 +1855,7 @@
         // a rail (no card to its right) leaps diagonally into a different rail and recenters
         // the page — on a 10-foot UI the expected behaviour is a no-op. Vertical presses, the
         // hero action row, and vertical grids (not a .horizontal-scroll) are unaffected.
-        if (next && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        if (next && (logicalHorizontalDirection(e.key, focused) === 'ArrowLeft' || logicalHorizontalDirection(e.key, focused) === 'ArrowRight')) {
             const row = focused.closest?.('.horizontal-scroll');
             if (row && !row.contains(next)) next = null;
         }
