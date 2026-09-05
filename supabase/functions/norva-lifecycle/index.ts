@@ -51,7 +51,6 @@ const LC_DUNNING = flag("NORVA_LC_DUNNING");     // failed-payment escalation (R
 const LC_EXPIRE = flag("NORVA_LC_EXPIRE");       // past_due → expired state transition
 const LC_WINBACK = flag("NORVA_LC_WINBACK");     // MARKETING; remains false unless explicitly enabled
 const LC_ABANDONED = flag("NORVA_LC_ABANDONED"); // MARKETING; remains false unless explicitly enabled
-const WELCOME_WINDOW_H = 72;   // don't email the historical base — only recent signups
 const BATCH = 100;
 // Resend's default team rate limit is five requests/second. A contact projection
 // can need multiple contact/segment/topic calls, so claims are processed serially.
@@ -358,12 +357,10 @@ async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string
 }
 
 async function runWelcome(db: SupabaseClient): Promise<number> {
-  const since = new Date(Date.now() - WELCOME_WINDOW_H * 3600_000).toISOString();
-  const { data } = await db.from("cloud_entitlement_projection")
-    .select("user_id")
-    .is("welcome_email_at", null)
-    .gt("created_at", since)
-    .limit(BATCH);
+  // Database owns confirmed-signup eligibility, activation cutoff and the
+  // independent durable welcome marker. Never synthesize an entitlement.
+  const { data, error } = await db.rpc("norva_pending_signup_welcomes", { p_limit: BATCH });
+  if (error) throw new Error(`signup_welcome_candidates_failed:${error.message}`);
   // Never welcome internal/test accounts (owner, family, internal test) — mirrors
   // the admin_internal_accounts exclusion the finance/funnel views already apply.
   const { data: internal, error: internalError } = await db.from("admin_internal_accounts").select("user_id");
