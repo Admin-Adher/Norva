@@ -2550,7 +2550,7 @@ class VideoPlayer {
         // These failures are shared account/session conditions. Trying siblings
         // would only hammer the same mono-session provider and can evict a real
         // viewer. Variant fallback is reserved for stream-local startup failures.
-        return !/(\b458\b|playback_superseded|\b401\b|\b429\b|unauthori[sz]ed|too many|rate.?limit|concurr|max.?connection|provider.?busy|slot)/i
+        return !/(\b458\b|playback_superseded|\b401\b|\b429\b|unauthori[sz]ed|too many|rate.?limit|concurr|max.?connection|provider.?account.?busy|provider.?account.?busy|provider.?busy|slot)/i
             .test(String(reason || ''));
     }
 

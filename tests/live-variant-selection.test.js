@@ -279,6 +279,80 @@ test('initial live resolution is bounded to three total variants', async () => {
   assert.equal(drains, 2);
 });
 
+function publicHlsPriorityFixture(streamId) {
+  const variants = ['default', 'alternate', 'third', streamId].map((id) => ({
+    sourceId: 'selection', streamId: id, healthRank: 1,
+    channel: { id: `row-${id}`, sourceId: 'selection', streamId: id, sourceType: 'm3u' },
+  }));
+  const window = {
+    app: { player: { supportsPublicHlsDirectSessionGuard: true } },
+    ChannelGrouping: {
+      pickDefault: items => items[0],
+      fallbackOrder: (items, initialId) => items.filter(item => item.streamId !== initialId && item.healthRank < 3),
+    },
+  };
+  const { ChannelList } = loadChannelListClass({ window });
+  const list = Object.create(ChannelList.prototype);
+  list._forceTranscode = new Set();
+  const channel = {
+    id: 'logical-row', sourceId: 'selection', streamId: 'default',
+    currentVariant: variants[0], qualityGroup: { variants },
+    _norvaSelection: { logicalSourceId: 'selection' },
+  };
+  return { list, window, channel, variants,
+    order: () => Array.from(list.getInitialLiveResolveCandidates(channel), candidate => candidate.streamId) };
+}
+
+const reviewedPublicLiveIds = fs.readFileSync(path.join(__dirname, '..', 'public/catalog/xumo-live.m3u'), 'utf8')
+  .split(/\r?\n/).filter(line => line.startsWith('https://')).map(url =>
+    'norva-discovery:live:' + require('node:crypto').createHash('sha256').update(`live:${new URL(url).href}`).digest('hex'));
+
+test('guarded web initially prefers either exact reviewed Xumo sibling while keeping the fallback order and three-candidate bound', () => {
+  assert.equal(reviewedPublicLiveIds.length, 2);
+  for (const streamId of reviewedPublicLiveIds) {
+    const fixture = publicHlsPriorityFixture(streamId);
+    const before = JSON.stringify(fixture.channel);
+    assert.deepEqual(fixture.order(), [streamId, 'default', 'alternate']);
+    assert.equal(JSON.stringify(fixture.channel), before, 'ranking must not mutate the logical or explicit current variant');
+    fixture.channel.currentVariant = fixture.variants[3];
+    fixture.channel.streamId = streamId;
+    assert.deepEqual(fixture.order(), [streamId, 'default', 'alternate'], 'the preferred initial variant is not duplicated');
+  }
+});
+
+test('legacy clients, native bridges, private source siblings and unrelated channels retain their initial ordering', () => {
+  const expected = ['default', 'alternate', 'third'];
+  for (const change of [
+    value => { delete value.window.app.player.supportsPublicHlsDirectSessionGuard; },
+    value => { value.window.app.player.supportsPublicHlsDirectSessionGuard = false; },
+    value => { value.window.NodeCastNative = {}; },
+    value => { value.window.NorvaTVCloud = {}; },
+    value => { value.window.NorvaAndroidTV = {}; },
+    value => { value.variants[3].sourceId = 'private-source'; },
+    value => { value.channel._norvaSelection.logicalSourceId = 'other-logical-source'; },
+    value => { value.variants[3].streamId = '99951251'; },
+    value => { value.variants[3].streamId = 'unreviewed-public-hls'; },
+    value => { value.variants[3].healthRank = 3; },
+  ]) {
+    const fixture = publicHlsPriorityFixture(reviewedPublicLiveIds[0]); change(fixture);
+    assert.deepEqual(fixture.order(), expected);
+  }
+});
+
+test('forced transcode on the logical channel, current version or reviewed sibling prevents public direct prioritization', () => {
+  for (const key of ['selection:logical-row', 'selection:row-default', `selection:row-${reviewedPublicLiveIds[0]}`]) {
+    const fixture = publicHlsPriorityFixture(reviewedPublicLiveIds[0]);
+    fixture.list._forceTranscode.add(key);
+    assert.deepEqual(fixture.order(), ['default', 'alternate', 'third'], key);
+  }
+});
+
+test('manual player version selection stays outside the initial catalogue ranking', () => {
+  const switching = section(playerSource, 'async switchVariant(variant', '_clearVariantFallbackTimer()');
+  assert.doesNotMatch(switching, /getInitialLiveResolveCandidates|resolveInitialLiveStream/);
+  assert.match(switching, /variant\.streamId/);
+});
+
 test('live resolution preserves the selected variant container across a mixed-format fallback', async () => {
   const attempts = [];
   const variants = [
@@ -365,6 +439,19 @@ test('initial live resolution never retries a shared provider slot failure', asy
     /busy/,
   );
   assert.deepEqual(attempts, ['801']);
+});
+
+test('the player and initial resolver do not retry an account-wide 409 circuit rejection', () => {
+  const { VideoPlayer } = loadPlayerClass();
+  const player = Object.create(VideoPlayer.prototype);
+  const reason = 'http 409 PROVIDER_ACCOUNT_BUSY Provider account is already in use';
+  assert.equal(player.canAutoFallbackVariantForReason(reason), false);
+  const { ChannelList } = loadChannelListClass();
+  const list = Object.create(ChannelList.prototype);
+  const error = Object.assign(new Error('Provider account is already in use'), {
+    status: 409, code: 'PROVIDER_ACCOUNT_BUSY',
+  });
+  assert.equal(list.canFallbackInitialLiveVariant(error), false);
 });
 
 test('initial live resolution expires a returned session with no playable URL before fallback', async () => {

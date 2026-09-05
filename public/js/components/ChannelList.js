@@ -3416,7 +3416,7 @@ class ChannelList {
         // Keep the initial resolver aligned with VideoPlayer: a sibling may
         // replace a stream-local 403/5xx, but never a shared account/session
         // condition, where another attempt would only hammer the same slot.
-        return !/(\b458\b|playback_superseded|\b401\b|\b429\b|unauthori[sz]ed|too many|rate.?limit|concurr|max.?connection|provider.?busy|gateway.?startup.?busy|capacity.?busy|coordinator.?unavailable|slot)/i
+        return !/(\b458\b|playback_superseded|\b401\b|\b429\b|unauthori[sz]ed|too many|rate.?limit|concurr|max.?connection|provider.?account.?busy|provider.?busy|gateway.?startup.?busy|capacity.?busy|coordinator.?unavailable|slot)/i
             .test(reason);
     }
 
@@ -3453,9 +3453,25 @@ class ChannelList {
             || variants[0];
         const siblings = window.ChannelGrouping.fallbackOrder?.(variants, initial?.streamId) || [];
         const ordered = [initial, ...siblings];
+        const guardedWeb = window.app?.player?.supportsPublicHlsDirectSessionGuard === true
+            && !window.NodeCastNative && !window.NorvaTVCloud && !window.NorvaAndroidTV;
+        const logicalSourceId = String(channel?._norvaSelection?.logicalSourceId ?? channel?.sourceId ?? '');
+        const forced = (candidate) => this._forceTranscode?.has?.(`${candidate?.sourceId}:${candidate?.id}`);
+        const preferred = guardedWeb && logicalSourceId && String(channel?.sourceId) === logicalSourceId
+            && !forced(channel) && !forced(this.buildInitialLiveVariantChannel(channel, initial))
+            ? ordered.filter((variant) => {
+                const candidate = this.buildInitialLiveVariantChannel(channel, variant);
+                // Initial choice only: the server independently verifies the
+                // owned Selection source and exact reviewed public HLS target.
+                return String(candidate.sourceId) === logicalSourceId && !forced(candidate)
+                    && Number(variant?.healthRank || 0) < 3 && [
+                        'norva-discovery:live:a8b253951350b12b699d671ad39b7fc87c6c52b6d1e74db167ad1ad37be67052',
+                        'norva-discovery:live:b9dd1102ab7b431fe392cb4e49f7471eff4e714945547c1c300c42bf96610199'
+                    ].includes(String(candidate.streamId));
+            }) : [];
         const seen = new Set();
         const candidates = [];
-        for (const variant of ordered) {
+        for (const variant of [...preferred, ...ordered]) {
             if (!variant) continue;
             const variantStreamId = variant.streamId ?? variant.stream_id;
             const key = `${variant.sourceId ?? channel.sourceId}:${variantStreamId ?? ''}`;
