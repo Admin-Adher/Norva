@@ -11,6 +11,41 @@
     return node ? String(node.textContent || '').trim() : '';
   }
 
+  // Presentation only: values are supplied by the verified billing catalogue.
+  function message(key, values, fallback) {
+    const options = Object.assign({ defaultValue: fallback }, values);
+    return globalThis.NorvaI18n?.t(key, options)
+      ?? fallback.replace(/\{\{(\w+)\}\}/g, (_, name) => String(values[name] ?? ''));
+  }
+  function number(value, options) {
+    return new Intl.NumberFormat(globalThis.NorvaI18n?.language || 'en', options).format(value);
+  }
+  function money(value) {
+    // The complete money token is isolated by its DOM/paragraph host. Do not
+    // retain ICU's outer direction marks inside that isolated token.
+    return number(Number(value), { style: 'currency', currency: 'USD' }).replace(/[\u061c\u200e\u200f]/g, '');
+  }
+  function isolated(value) { return '\u2068' + value + '\u2069'; }
+  function cadence(period) {
+    return period === 'annual'
+      ? message('ui_sub_per_year', {}, '/yr')
+      : message('ui_sub_per_month', {}, '/mo');
+  }
+  function planName(plan) {
+    return plan === 'family' ? message('ui_sub_family', {}, 'Norva Family') : 'Norva';
+  }
+  function savePercent(min, max) {
+    const format = value => number(value / 100, { style: 'percent', maximumFractionDigits: 0 });
+    const percent = max && max !== min ? format(min) + '–' + format(max) : format(min);
+    return message('ui_sub_save_percent', { percent: isolated(percent) }, 'Save {{percent}}');
+  }
+  const copy = Object.freeze({ message, money, isolated, cadence, planName, savePercent, number,
+    annualNote: value => message('ui_sub_annual_note', { amount: isolated(money(value)) }, '{{amount}} per month, billed annually.'),
+    continueWith: plan => message('ui_sub_continue', { plan: planName(plan) }, 'Continue with {{plan}}'),
+    selected: (plan, profiles) => message(profiles === '2' ? 'ui_sub_selected_two' : 'ui_sub_selected_five',
+      { plan: planName(plan) }, profiles === '2' ? '{{plan}} · 2 profiles' : '{{plan}} · 5 profiles'),
+  });
+
   function init(options) {
     const config = options || {};
     const root = document.querySelector(config.rootSelector || '#plans');
@@ -40,14 +75,14 @@
       if (!card) return;
 
       const sourceButton = card.querySelector('.buy');
-      const planName = card.dataset.planName || text(card.querySelector('.plan-name')) || 'Norva';
       const profiles = card.dataset.profiles || '';
       const currency = text(card.querySelector('.cur'));
       const amount = text(card.querySelector('.amount'));
       const cadence = text(card.querySelector('.per'));
 
       if (selectedPlanLabel) {
-        selectedPlanLabel.textContent = planName + (profiles ? ' \u00b7 ' + profiles + (globalThis.NorvaI18n?.t("ui_web_d52fd337f016", { defaultValue: " profiles" }) ?? ' profiles') : '');
+        selectedPlanLabel.removeAttribute('data-i18n');
+        selectedPlanLabel.textContent = copy.selected(card.dataset.plan, profiles);
       }
       if (selectedCurrency) selectedCurrency.textContent = currency;
       if (selectedAmount) selectedAmount.textContent = amount;
@@ -60,10 +95,32 @@
       const mirrorSourceState = Boolean(sourceButton && (
         sourceButton.disabled || sourceButton.getAttribute('aria-busy') === 'true'
       ));
+      continueButton.removeAttribute('data-i18n');
       continueButton.textContent = mirrorSourceState && sourceText
         ? sourceText
-        : (globalThis.NorvaI18n?.t("ui_web_d2b79489c9e6", { defaultValue: "Continue with " }) ?? 'Continue with ') + planName;
+        : copy.continueWith(card.dataset.plan);
       continueButton.setAttribute('aria-busy', sourceButton && sourceButton.getAttribute('aria-busy') === 'true' ? 'true' : 'false');
+      updateDecisionSpace();
+    }
+
+    function updateDecisionSpace() {
+      if (typeof getComputedStyle !== 'function') return;
+      const fixed = !decision.hidden && getComputedStyle(decision).position === 'fixed';
+      const space = fixed ? Math.ceil(decision.getBoundingClientRect().height) + 24 : 0;
+      document.documentElement.style.setProperty('--plan-decision-space', space + 'px');
+    }
+    function revealFocus() {
+      const active = document.activeElement;
+      if (!active || decision.contains(active) || getComputedStyle(decision).position !== 'fixed') return;
+      const bounds = active.getBoundingClientRect();
+      const edge = decision.getBoundingClientRect().top;
+      if (bounds.bottom > edge) window.scrollBy({ top: bounds.bottom - edge + 16, behavior: 'instant' });
+    }
+    if (typeof ResizeObserver === 'function') new ResizeObserver(updateDecisionSpace).observe(decision);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', updateDecisionSpace);
+      document.addEventListener('focusin', () => requestAnimationFrame(revealFocus));
+      document.fonts?.ready.then(updateDecisionSpace);
     }
 
     function select(plan, options) {
@@ -133,5 +190,5 @@
     });
   }
 
-  return Object.freeze({ init: init });
+  return Object.freeze({ init: init, copy: copy });
 });

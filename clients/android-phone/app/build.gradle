@@ -81,8 +81,12 @@ namespace "tv.norva.phone"
 }
 
 def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
-    from("../../../public/js/i18n.js", "../../../public/js/consent-banner.js")
-    into("$buildDir/generated/i18nTestAssets/js")
+    from("../../../public") {
+        include "subscribe.html", "css/commerce.css", "css/i18n.css"
+        include "js/i18n.js", "js/consent-banner.js", "js/plan-selection-ui.js", "js/promo-ui.js", "js/navigation-safety.js"
+        include "fonts/**", "assets/fonts/**", "img/**", "assets/landing/norva-every-screen-premium.webp"
+    }
+    into("$buildDir/generated/i18nTestAssets")
 }
 tasks.configureEach { task ->
     if (task.name.contains("AndroidTest") && (task.name.startsWith("merge") || task.name.contains("Lint") || task.name.startsWith("lint"))) task.dependsOn(copyI18nTestBundle)

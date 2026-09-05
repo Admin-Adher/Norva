@@ -91,9 +91,10 @@ test('plan copy uses exact annual equivalents and an explicit household distinct
   const subscribe = read('public/subscribe.html');
   const paywall = read('public/paywall.html');
 
-  assert.match(subscribe, /data-annual="41\.99" data-annual-note="That's about \$3\.50\/mo/);
-  assert.match(subscribe, /data-annual="74\.99" data-annual-note="That's about \$6\.25\/mo/);
-  assert.match(subscribe, /pl\.annual \/ 1200/);
+  assert.match(subscribe, /data-annual="41\.99"/);
+  assert.match(subscribe, /data-annual="74\.99"/);
+  assert.match(subscribe, /copy\.annualNote\(Number\(card\.dataset\.annual\) \/ 12\)/);
+  assert.doesNotMatch(subscribe, /data-annual-note=/);
   assert.doesNotMatch(subscribe, /Math\.floor\(pl\.annual \/ 12\)/);
   assert.match(subscribe, />Best for households</);
   assert.match(subscribe, /Up to 2 profiles/);

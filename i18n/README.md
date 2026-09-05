@@ -12,7 +12,7 @@ Audio, subtitles and content-region preferences remain independent.
 
 ## Coverage
 
-- 7,074 web messages and 73 shared messages: all ten locale values present,
+- 7,104 web messages and 73 shared messages: all ten locale values present,
   with no missing or duplicated interpolation parameters.
 - 320 native source messages, generating 3,240 translated Android resource entries,
   including locale-specific plural categories. No MissingTranslation baseline.
@@ -85,6 +85,26 @@ The final task report records their verified state; progress.json is the pre-pus
 validation checkpoint and does not assert production availability.
 
 ## Maintenance
+
+### Subscription page follow-up (2026-09-05)
+
+The `/subscribe` audit identified gaps beyond catalogue completeness. Thirty
+context-reviewed messages now cover complete pricing, savings, promotion and
+account-state sentences. Dynamic labels keep their state through initial
+translation and language changes; web accounts no longer inherit Google Play's
+loading message. Arabic money tokens are isolated from their billing periods.
+
+The benefits heading has its own row, long labels can wrap, and the fixed decision
+bar reserves its measured height so enlarged text cannot cover the footer links.
+The existing plan-first flow and verified billing values remain the source of truth.
+
+Evidence is kept under `output/playwright/subscribe-fix-20260905/`: browser viewport
+and enlarged-text matrices, offline account/promotion fixtures, and the actual
+Android System WebView at 100% and 130% text zoom. Fixtures cannot purchase.
+The final report records the deployed commit, CI and live-page verification
+separately; Android instrumentation is not a new Google Play publication.
+
+### Catalogue workflow
 
 - npm run i18n:build generates strict web/native assets.
 - npm run i18n:check rejects stale or incomplete generated assets.

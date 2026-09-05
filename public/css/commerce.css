@@ -1920,7 +1920,7 @@ html:not(.tv) body.commerce-subscribe .price-note {
 }
 
 .commerce-subscribe .shared-benefits {
-  display: flex;
+  display: grid;
   align-items: center;
   justify-content: center;
   gap: var(--commerce-space-5);
@@ -1940,9 +1940,10 @@ html:not(.tv) body.commerce-subscribe .price-note {
 
 .commerce-subscribe .shared-benefits ul {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 34px;
+  gap: 12px 24px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1952,12 +1953,12 @@ html:not(.tv) body.commerce-subscribe .price-note {
   color: var(--commerce-text);
   font-size: 13px;
   font-weight: 700;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .commerce-subscribe .shared-benefits li::before {
   content: "✓";
-  margin-right: 10px;
+  margin-inline-end: 10px;
   color: var(--commerce-success);
   font-weight: 900;
 }
@@ -2543,6 +2544,64 @@ html.tv-purchase-only .commerce-subscribe .plan-decision {
   .commerce-subscribe .decision-summary {
     display: none;
   }
+}
+
+/* Complete localized amounts and sentences must keep their own direction. */
+.commerce-subscribe .secure-short { display: none; }
+.commerce-subscribe .secure-long { display: inline; }
+.commerce-subscribe .shared-benefits h2 { text-align: center; min-width: 0; }
+.commerce-subscribe .price,
+.commerce-subscribe .selected-price {
+  direction: ltr;
+  unicode-bidi: isolate;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.commerce-subscribe .amount,
+.commerce-subscribe .per,
+.commerce-subscribe #selected-amount,
+.commerce-subscribe #selected-period { unicode-bidi: isolate; }
+.commerce-subscribe .plan-price-block { min-width: 0; }
+.commerce-subscribe .price-note { overflow-wrap: normal; }
+.commerce-subscribe .toggle .period { white-space: normal; flex-wrap: wrap; }
+.commerce-subscribe .plan-choice-foot { flex-wrap: wrap; }
+.commerce-subscribe .plan-radio { flex-shrink: 0; }
+.commerce-subscribe .price-was { flex-basis: 100%; white-space: normal; }
+.commerce-subscribe .note a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
+  padding-inline: 4px;
+  vertical-align: middle;
+}
+
+@media (max-width: 720px), (orientation: landscape) and (max-height: 500px) and (max-width: 960px) {
+  .commerce-subscribe .secure-short { display: inline; }
+  .commerce-subscribe .secure-long { display: none; }
+  html:has(body.commerce-subscribe) { scroll-padding-bottom: var(--plan-decision-space, 188px); }
+  body.commerce-subscribe .commerce-main { padding-bottom: var(--plan-decision-space, 188px); }
+  .commerce-subscribe .intro,
+  .commerce-subscribe .proof-caption,
+  .commerce-subscribe .decision-summary { text-align: start; }
+  .commerce-subscribe .plan-price-block,
+  .commerce-subscribe .price-note { text-align: end; }
+  .commerce-subscribe .plan-price-block { flex: 1 1 170px; }
+  .commerce-subscribe .profile-count { flex: 0 1 auto; }
+  .commerce-subscribe .shared-benefits { display: grid; gap: 16px; }
+  .commerce-subscribe .shared-benefits ul { margin-top: 0; }
+  .commerce-subscribe #selected-period { margin-inline-start: 0; }
+}
+
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 960px) {
+  .commerce-subscribe .shared-benefits ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    align-items: start;
+  }
+  .commerce-subscribe .shared-benefits h2 { letter-spacing: 0; }
 }
 
 @media (forced-colors: active) {

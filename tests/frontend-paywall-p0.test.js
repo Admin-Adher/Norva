@@ -138,7 +138,7 @@ test('native billing reads localized RevenueCat offers and fails closed without 
   assert.match(subscribe, /native_catalog_incomplete/);
   assert.match(subscribe, /offer\.priceString/);
   assert.match(subscribe, /Number\(offer\.priceMicros\) \/ 1000000/);
-  assert.match(subscribe, /No purchase can start until the exact store price is available/);
+  assert.match(subscribe, /No purchase can start until prices are available/);
   assert.match(subscribe, /if \(nativeOffersRequired && !nativeOffersReady\)/);
   assert.match(subscribe, /NorvaAuth\.getSession/);
   assert.match(subscribe, /entitlement_timeout/);
@@ -154,7 +154,7 @@ test('native billing reads localized RevenueCat offers and fails closed without 
   assert.match(subscribe, /nativeCurrencies\.size !== 1/);
   assert.match(subscribe, /annual \/ \(monthly \* 12\)/,
     'native savings must be recomputed from exact Google Play prices');
-  assert.match(subscribe, /nativeSaveBadge\.textContent = minSaving === maxSaving/);
+  assert.match(subscribe, /nativeSaveBadge\.textContent = copy\.savePercent\(minSaving, maxSaving\)/);
 });
 
 test('Android TV has one external purchase path and native prices cannot be overwritten by web prices', () => {
@@ -283,7 +283,7 @@ test('Family annual fallbacks match the production catalog snapshot', () => {
     assert.doesNotMatch(source, /75\.99|6\.33/, file);
     assert.match(source, /74\.99/, file);
   }
-  assert.match(read('public/subscribe.html'), /That's about \$6\.25\/mo/);
+  assert.match(require('../public/js/plan-selection-ui.js').copy.annualNote(74.99 / 12), /6\.25/);
 });
 
 test('edited checkout inline module remains valid JavaScript', () => {

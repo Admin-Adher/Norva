@@ -35,7 +35,7 @@ test('the presentation adapter delegates without becoming a pricing authority', 
   assert.match(source, /sourceButton\.click\(\)/);
   assert.match(source, /MutationObserver\(sync\)/);
   assert.match(source, /\['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'\]/);
-  assert.match(source, /'Continue with '[^\n]*\+ planName/);
+  assert.match(source, /copy\.continueWith\(card\.dataset\.plan\)/);
   assert.doesNotMatch(source, /NorvaBilling|RevenueCat|revolutCreateOrder|\b4\.99\b|\b8\.99\b|\b41\.99\b|\b74\.99\b/,
     'selection UI mirrors verified DOM offers and never invents commerce terms');
 });

@@ -1,0 +1,512 @@
+{
+  "ui_sub_existing_plan": {
+    "source": "You already have a Norva plan.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "You already have a Norva plan.",
+    "fr": "Vous avez déjà un forfait Norva.",
+    "pt-BR": "Você já tem um plano Norva.",
+    "es": "Ya tienes un plan Norva.",
+    "hi": "आपके पास पहले से Norva प्लान है।",
+    "tr": "Zaten bir Norva planın var.",
+    "bn": "আপনার ইতিমধ্যেই একটি Norva প্ল্যান আছে।",
+    "ar": "لديك خطة Norva بالفعل.",
+    "id": "Anda sudah memiliki paket Norva.",
+    "fil": "May plano ka na sa Norva."
+  },
+  "ui_sub_existing_trial": {
+    "source": "Your Norva free trial is already active.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Your Norva free trial is already active.",
+    "fr": "Votre essai gratuit Norva est déjà actif.",
+    "pt-BR": "Seu teste gratuito do Norva já está ativo.",
+    "es": "Tu prueba gratuita de Norva ya está activa.",
+    "hi": "आपका Norva मुफ़्त ट्रायल पहले से सक्रिय है।",
+    "tr": "Norva ücretsiz denemen zaten aktif.",
+    "bn": "আপনার Norva ফ্রি ট্রায়াল ইতিমধ্যেই সক্রিয়।",
+    "ar": "فترتك التجريبية المجانية في Norva نشطة بالفعل.",
+    "id": "Uji coba gratis Norva Anda sudah aktif.",
+    "fil": "Aktibo na ang libreng pagsubok mo sa Norva."
+  },
+  "ui_sub_native_prices_error": {
+    "source": "Google Play prices could not be loaded. Check your connection or update Norva, then retry. No purchase can start until prices are available.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Google Play prices could not be loaded. Check your connection or update Norva, then retry. No purchase can start until prices are available.",
+    "fr": "Impossible de charger les prix Google Play. Vérifiez votre connexion ou mettez Norva à jour, puis réessayez. Aucun achat ne peut démarrer avant le chargement des prix.",
+    "pt-BR": "Não foi possível carregar os preços do Google Play. Verifique a conexão ou atualize o Norva e tente novamente. Nenhuma compra pode começar até os preços estarem disponíveis.",
+    "es": "No se pudieron cargar los precios de Google Play. Revisa tu conexión o actualiza Norva y vuelve a intentarlo. No se puede iniciar ninguna compra hasta que los precios estén disponibles.",
+    "hi": "Google Play की कीमतें लोड नहीं हो सकीं। कनेक्शन जाँचें या Norva अपडेट करें, फिर दोबारा कोशिश करें। कीमतें उपलब्ध होने तक खरीदारी शुरू नहीं हो सकती।",
+    "tr": "Google Play fiyatları yüklenemedi. Bağlantını kontrol et veya Norva’yı güncelle, ardından tekrar dene. Fiyatlar yüklenene kadar satın alma başlatılamaz.",
+    "bn": "Google Play-এর মূল্য লোড করা যায়নি। সংযোগ পরীক্ষা করুন অথবা Norva আপডেট করে আবার চেষ্টা করুন। মূল্য পাওয়া না যাওয়া পর্যন্ত কেনাকাটা শুরু করা যাবে না।",
+    "ar": "تعذّر تحميل أسعار Google Play. تحقّق من اتصالك أو حدّث Norva ثم أعد المحاولة. لا يمكن بدء الشراء حتى تتوفر الأسعار.",
+    "id": "Harga Google Play tidak dapat dimuat. Periksa koneksi atau perbarui Norva, lalu coba lagi. Pembelian tidak dapat dimulai sampai harga tersedia.",
+    "fil": "Hindi ma-load ang mga presyo sa Google Play. Suriin ang koneksyon o i-update ang Norva, saka subukang muli. Hindi maaaring magsimula ang pagbili hangga’t walang presyo."
+  },
+  "ui_sub_card_check": {
+    "source": "We verify your card with a small temporary authorization that is released immediately and never debited. Your exact billing terms appear on the next screen before confirmation. Every payment comes with an email receipt.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "We verify your card with a small temporary authorization that is released immediately and never debited. Your exact billing terms appear on the next screen before confirmation. Every payment comes with an email receipt.",
+    "fr": "Nous vérifions votre carte au moyen d’une petite autorisation temporaire, immédiatement libérée et jamais débitée. Les conditions exactes de facturation figurent sur l’écran suivant, avant confirmation. Chaque paiement donne lieu à un reçu par e-mail.",
+    "pt-BR": "Verificamos seu cartão com uma pequena autorização temporária, liberada imediatamente e nunca debitada. As condições exatas de cobrança aparecem na próxima tela, antes da confirmação. Cada pagamento inclui um recibo por e-mail.",
+    "es": "Verificamos tu tarjeta con una pequeña autorización temporal que se libera de inmediato y nunca se cobra. Las condiciones exactas de facturación aparecen en la siguiente pantalla, antes de confirmar. Cada pago incluye un recibo por correo electrónico.",
+    "hi": "हम एक छोटी अस्थायी प्राधिकरण राशि से आपके कार्ड की पुष्टि करते हैं। यह तुरंत मुक्त कर दी जाती है और कभी डेबिट नहीं होती। पुष्टि से पहले अगली स्क्रीन पर बिलिंग की सटीक शर्तें दिखाई देंगी। हर भुगतान की रसीद ईमेल से मिलेगी।",
+    "tr": "Kartını, hemen serbest bırakılan ve hiçbir zaman tahsil edilmeyen küçük bir geçici provizyonla doğrularız. Kesin faturalandırma koşulları onaylamadan önce sonraki ekranda gösterilir. Her ödeme için e-posta ile makbuz gönderilir.",
+    "bn": "একটি ছোট অস্থায়ী অনুমোদনের মাধ্যমে আপনার কার্ড যাচাই করা হয়। এটি সঙ্গে সঙ্গে ছেড়ে দেওয়া হয় এবং কখনো কেটে নেওয়া হয় না। নিশ্চিত করার আগে পরের পর্দায় বিলিংয়ের সঠিক শর্ত দেখানো হবে। প্রতিটি পেমেন্টের রসিদ ইমেইলে পাবেন।",
+    "ar": "نتحقّق من بطاقتك عبر حجز مؤقت لمبلغ صغير يُحرّر فورًا ولا يُخصم أبدًا. تظهر شروط الفوترة الدقيقة في الشاشة التالية قبل التأكيد. يصلك إيصال بالبريد الإلكتروني عن كل دفعة.",
+    "id": "Kami memverifikasi kartu melalui otorisasi sementara bernilai kecil yang langsung dilepas dan tidak pernah didebit. Ketentuan penagihan yang tepat ditampilkan pada layar berikutnya sebelum konfirmasi. Setiap pembayaran disertai tanda terima melalui email.",
+    "fil": "Bineberipika namin ang iyong card gamit ang maliit na pansamantalang awtorisasyon na agad na inaalis at hindi kailanman sinisingil. Makikita ang eksaktong mga tuntunin ng pagsingil sa susunod na screen bago kumpirmahin. May resibo sa email ang bawat bayad."
+  },
+  "ui_sub_compare": {
+    "source": "Both plans include all Norva features. Norva includes 2 profiles and Norva Family includes 5, each with separate favorites and viewing progress.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Both plans include all Norva features. Norva includes 2 profiles and Norva Family includes 5, each with separate favorites and viewing progress.",
+    "fr": "Les deux forfaits incluent toutes les fonctionnalités Norva. Norva comprend 2 profils et Norva Famille en comprend 5, chacun avec ses favoris et sa progression de lecture.",
+    "pt-BR": "Os dois planos incluem todos os recursos do Norva. O Norva inclui 2 perfis e o Norva Família inclui 5, cada um com favoritos e progresso de reprodução próprios.",
+    "es": "Ambos planes incluyen todas las funciones de Norva. Norva incluye 2 perfiles y Norva Familia incluye 5, cada uno con sus favoritos y su progreso de reproducción.",
+    "hi": "दोनों प्लान में Norva की सभी सुविधाएँ शामिल हैं। Norva में 2 और Norva परिवार में 5 प्रोफ़ाइल हैं। हर प्रोफ़ाइल के पसंदीदा और देखने की प्रगति अलग हैं।",
+    "tr": "Her iki plan da tüm Norva özelliklerini içerir. Norva 2, Norva Aile 5 profil sunar. Her profilin favorileri ve izleme ilerlemesi ayrıdır.",
+    "bn": "দুটি প্ল্যানেই Norva-এর সব সুবিধা রয়েছে। Norva-তে ২টি এবং Norva পরিবার-এ ৫টি প্রোফাইল রয়েছে। প্রতিটি প্রোফাইলের পছন্দের তালিকা ও দেখার অগ্রগতি আলাদা।",
+    "ar": "تشمل الخطتان جميع ميزات Norva. توفّر Norva ملفين شخصيين وتوفّر Norva للعائلة ٥ ملفات، لكل منها مفضّلات وتقدّم مشاهدة مستقلّان.",
+    "id": "Kedua paket mencakup semua fitur Norva. Norva menyediakan 2 profil dan Norva Keluarga menyediakan 5 profil, masing-masing dengan favorit dan progres menonton sendiri.",
+    "fil": "Kasama sa parehong plano ang lahat ng feature ng Norva. May 2 profile ang Norva at 5 ang Norva Pamilya, bawat isa ay may sariling mga paborito at progreso sa panonood."
+  },
+  "ui_sub_secure_checkout": {
+    "source": "Secure checkout",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Secure checkout",
+    "fr": "Paiement sécurisé",
+    "pt-BR": "Pagamento seguro",
+    "es": "Pago seguro",
+    "hi": "सुरक्षित भुगतान",
+    "tr": "Güvenli ödeme",
+    "bn": "নিরাপদ পেমেন্ট",
+    "ar": "دفع آمن",
+    "id": "Pembayaran aman",
+    "fil": "Ligtas na pagbabayad"
+  },
+  "ui_sub_family": {
+    "source": "Norva Family",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Norva Family",
+    "fr": "Norva Famille",
+    "pt-BR": "Norva Família",
+    "es": "Norva Familia",
+    "hi": "Norva परिवार",
+    "tr": "Norva Aile",
+    "bn": "Norva পরিবার",
+    "ar": "Norva للعائلة",
+    "id": "Norva Keluarga",
+    "fil": "Norva Pamilya"
+  },
+  "ui_sub_continue": {
+    "source": "Continue with {{plan}}",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Continue with {{plan}}",
+    "fr": "Continuer avec {{plan}}",
+    "pt-BR": "Continuar com {{plan}}",
+    "es": "Continuar con {{plan}}",
+    "hi": "{{plan}} के साथ आगे बढ़ें",
+    "tr": "{{plan}} ile devam et",
+    "bn": "{{plan}} দিয়ে এগিয়ে যান",
+    "ar": "المتابعة مع {{plan}}",
+    "id": "Lanjutkan dengan {{plan}}",
+    "fil": "Magpatuloy sa {{plan}}"
+  },
+  "ui_sub_selected_two": {
+    "source": "{{plan}} · 2 profiles",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "{{plan}} · 2 profiles",
+    "fr": "{{plan}} · 2 profils",
+    "pt-BR": "{{plan}} · 2 perfis",
+    "es": "{{plan}} · 2 perfiles",
+    "hi": "{{plan}} · 2 प्रोफ़ाइल",
+    "tr": "{{plan}} · 2 profil",
+    "bn": "{{plan}} · ২টি প্রোফাইল",
+    "ar": "{{plan}} · ملفان شخصيان",
+    "id": "{{plan}} · 2 profil",
+    "fil": "{{plan}} · 2 profile"
+  },
+  "ui_sub_selected_five": {
+    "source": "{{plan}} · 5 profiles",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "{{plan}} · 5 profiles",
+    "fr": "{{plan}} · 5 profils",
+    "pt-BR": "{{plan}} · 5 perfis",
+    "es": "{{plan}} · 5 perfiles",
+    "hi": "{{plan}} · 5 प्रोफ़ाइल",
+    "tr": "{{plan}} · 5 profil",
+    "bn": "{{plan}} · ৫টি প্রোফাইল",
+    "ar": "{{plan}} · ٥ ملفات شخصية",
+    "id": "{{plan}} · 5 profil",
+    "fil": "{{plan}} · 5 profile"
+  },
+  "ui_sub_profiles_two": {
+    "source": "2 profiles",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "2 profiles",
+    "fr": "2 profils",
+    "pt-BR": "2 perfis",
+    "es": "2 perfiles",
+    "hi": "2 प्रोफ़ाइल",
+    "tr": "2 profil",
+    "bn": "২টি প্রোফাইল",
+    "ar": "ملفان شخصيان",
+    "id": "2 profil",
+    "fil": "2 profile"
+  },
+  "ui_sub_profiles_five": {
+    "source": "5 profiles",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "5 profiles",
+    "fr": "5 profils",
+    "pt-BR": "5 perfis",
+    "es": "5 perfiles",
+    "hi": "5 प्रोफ़ाइल",
+    "tr": "5 profil",
+    "bn": "৫টি প্রোফাইল",
+    "ar": "٥ ملفات شخصية",
+    "id": "5 profil",
+    "fil": "5 profile"
+  },
+  "ui_sub_personal": {
+    "source": "For you and one other person.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "For you and one other person.",
+    "fr": "Pour vous et une autre personne.",
+    "pt-BR": "Para você e mais uma pessoa.",
+    "es": "Para ti y otra persona.",
+    "hi": "आपके और एक अन्य व्यक्ति के लिए।",
+    "tr": "Sen ve bir kişi daha için.",
+    "bn": "আপনার ও আরও একজনের জন্য।",
+    "ar": "لك ولشخص آخر.",
+    "id": "Untuk Anda dan satu orang lainnya.",
+    "fil": "Para sa iyo at isa pang tao."
+  },
+  "ui_sub_household": {
+    "source": "For your whole household.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "For your whole household.",
+    "fr": "Pour toute votre famille.",
+    "pt-BR": "Para toda a sua família.",
+    "es": "Para toda tu familia.",
+    "hi": "आपके पूरे परिवार के लिए।",
+    "tr": "Tüm ailen için.",
+    "bn": "আপনার পুরো পরিবারের জন্য।",
+    "ar": "لجميع أفراد عائلتك.",
+    "id": "Untuk seluruh keluarga Anda.",
+    "fil": "Para sa buong pamilya mo."
+  },
+  "ui_sub_per_year": {
+    "source": "/yr",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "/yr",
+    "fr": "/an",
+    "pt-BR": "/ano",
+    "es": "/año",
+    "hi": "/वर्ष",
+    "tr": "/yıl",
+    "bn": "/বছর",
+    "ar": " سنويًا",
+    "id": "/tahun",
+    "fil": "/taon"
+  },
+  "ui_sub_per_month": {
+    "source": "/mo",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "/mo",
+    "fr": "/mois",
+    "pt-BR": "/mês",
+    "es": "/mes",
+    "hi": "/माह",
+    "tr": "/ay",
+    "bn": "/মাস",
+    "ar": " شهريًا",
+    "id": "/bulan",
+    "fil": "/buwan"
+  },
+  "ui_sub_annual_note": {
+    "source": "{{amount}} per month, billed annually.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "{{amount}} per month, billed annually.",
+    "fr": "Soit {{amount}} par mois, facturés à l’année.",
+    "pt-BR": "Equivale a {{amount}} por mês, com cobrança anual.",
+    "es": "Equivale a {{amount}} al mes, con facturación anual.",
+    "hi": "{{amount}} प्रति माह के बराबर, सालाना बिलिंग।",
+    "tr": "Aylık {{amount}} tutarına eşdeğer, yıllık faturalandırılır.",
+    "bn": "মাসে {{amount}}-এর সমান, বিল বছরে একবার।",
+    "ar": "ما يعادل {{amount}} شهريًا، تُدفع سنويًا.",
+    "id": "Setara {{amount}} per bulan, ditagih tahunan.",
+    "fil": "Katumbas ng {{amount}} bawat buwan, sinisingil taun-taon."
+  },
+  "ui_sub_save_percent": {
+    "source": "Save {{percent}}",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Save {{percent}}",
+    "fr": "Économisez {{percent}}",
+    "pt-BR": "Economize {{percent}}",
+    "es": "Ahorra {{percent}}",
+    "hi": "{{percent}} बचाएँ",
+    "tr": "{{percent}} tasarruf et",
+    "bn": "{{percent}} সাশ্রয় করুন",
+    "ar": "وفّر {{percent}}",
+    "id": "Hemat {{percent}}",
+    "fil": "Makatipid ng {{percent}}"
+  },
+  "ui_sub_annual_nudge": {
+    "source": "Save up to {{amount}} a year with annual billing →",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Save up to {{amount}} a year with annual billing →",
+    "fr": "Économisez jusqu’à {{amount}} par an avec la facturation annuelle →",
+    "pt-BR": "Economize até {{amount}} por ano com a cobrança anual →",
+    "es": "Ahorra hasta {{amount}} al año con la facturación anual →",
+    "hi": "सालाना बिलिंग से प्रति वर्ष {{amount}} तक बचाएँ →",
+    "tr": "Yıllık faturalandırmayla yılda {{amount}} tutarına kadar tasarruf et →",
+    "bn": "বার্ষিক বিলিংয়ে বছরে সর্বোচ্চ {{amount}} সাশ্রয় করুন →",
+    "ar": "وفّر حتى {{amount}} سنويًا مع الدفع السنوي ←",
+    "id": "Hemat hingga {{amount}} per tahun dengan tagihan tahunan →",
+    "fil": "Makatipid ng hanggang {{amount}} bawat taon sa taunang pagsingil →"
+  },
+  "ui_sub_first_year_nudge": {
+    "source": "Save up to {{amount}} in your first year with annual billing →",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Save up to {{amount}} in your first year with annual billing →",
+    "fr": "Économisez jusqu’à {{amount}} la première année avec la facturation annuelle →",
+    "pt-BR": "Economize até {{amount}} no primeiro ano com a cobrança anual →",
+    "es": "Ahorra hasta {{amount}} el primer año con la facturación anual →",
+    "hi": "सालाना बिलिंग से पहले वर्ष {{amount}} तक बचाएँ →",
+    "tr": "Yıllık faturalandırmayla ilk yıl {{amount}} tutarına kadar tasarruf et →",
+    "bn": "বার্ষিক বিলিংয়ে প্রথম বছরে সর্বোচ্চ {{amount}} সাশ্রয় করুন →",
+    "ar": "وفّر حتى {{amount}} في السنة الأولى مع الدفع السنوي ←",
+    "id": "Hemat hingga {{amount}} pada tahun pertama dengan tagihan tahunan →",
+    "fil": "Makatipid ng hanggang {{amount}} sa unang taon sa taunang pagsingil →"
+  },
+  "ui_sub_current_annual_nudge": {
+    "source": "Switch your plan to annual billing and save {{amount}} a year →",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Switch your plan to annual billing and save {{amount}} a year →",
+    "fr": "Passez votre forfait à la facturation annuelle et économisez {{amount}} par an →",
+    "pt-BR": "Mude seu plano para cobrança anual e economize {{amount}} por ano →",
+    "es": "Cambia tu plan a facturación anual y ahorra {{amount}} al año →",
+    "hi": "अपने प्लान की बिलिंग सालाना करें और प्रति वर्ष {{amount}} बचाएँ →",
+    "tr": "Planını yıllık faturalandırmaya geçir, yılda {{amount}} tasarruf et →",
+    "bn": "আপনার প্ল্যানে বার্ষিক বিলিং বেছে নিয়ে বছরে {{amount}} সাশ্রয় করুন →",
+    "ar": "حوّل خطتك إلى الدفع السنوي ووفّر {{amount}} سنويًا ←",
+    "id": "Ubah paket ke tagihan tahunan dan hemat {{amount}} per tahun →",
+    "fil": "Lumipat sa taunang pagsingil at makatipid ng {{amount}} bawat taon →"
+  },
+  "ui_sub_monthly_reference": {
+    "source": "{{amount}} with monthly billing",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "{{amount}} with monthly billing",
+    "fr": "{{amount}} avec la facturation mensuelle",
+    "pt-BR": "{{amount}} com cobrança mensal",
+    "es": "{{amount}} con facturación mensual",
+    "hi": "मासिक बिलिंग पर {{amount}}",
+    "tr": "Aylık faturalandırmayla {{amount}}",
+    "bn": "মাসিক বিলিংয়ে {{amount}}",
+    "ar": "{{amount}} عند الدفع الشهري",
+    "id": "{{amount}} dengan tagihan bulanan",
+    "fil": "{{amount}} sa buwanang pagsingil"
+  },
+  "ui_sub_amount_saved": {
+    "source": "You save {{amount}}{{period}}.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "You save {{amount}}{{period}}.",
+    "fr": "Vous économisez {{amount}}{{period}}.",
+    "pt-BR": "Você economiza {{amount}}{{period}}.",
+    "es": "Ahorras {{amount}}{{period}}.",
+    "hi": "आप {{amount}}{{period}} बचाते हैं।",
+    "tr": "{{amount}}{{period}} tasarruf edersin.",
+    "bn": "আপনি {{amount}}{{period}} সাশ্রয় করেন।",
+    "ar": "توفّر {{amount}} {{period}}.",
+    "id": "Anda hemat {{amount}}{{period}}.",
+    "fil": "Makakatipid ka ng {{amount}}{{period}}."
+  },
+  "ui_sub_compared_monthly": {
+    "source": "Compared with monthly billing.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Compared with monthly billing.",
+    "fr": "Par rapport à la facturation mensuelle.",
+    "pt-BR": "Em comparação com a cobrança mensal.",
+    "es": "En comparación con la facturación mensual.",
+    "hi": "मासिक बिलिंग की तुलना में।",
+    "tr": "Aylık faturalandırmaya kıyasla.",
+    "bn": "মাসিক বিলিংয়ের তুলনায়।",
+    "ar": "مقارنةً بالدفع الشهري.",
+    "id": "Dibandingkan dengan tagihan bulanan.",
+    "fil": "Kumpara sa buwanang pagsingil."
+  },
+  "ui_sub_promo_first_year": {
+    "source": "Offer applies to your first year.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Offer applies to your first year.",
+    "fr": "Offre valable la première année.",
+    "pt-BR": "Oferta válida no primeiro ano.",
+    "es": "Oferta válida el primer año.",
+    "hi": "ऑफ़र पहले वर्ष के लिए लागू है।",
+    "tr": "Teklif ilk yıl için geçerlidir.",
+    "bn": "অফারটি প্রথম বছরের জন্য প্রযোজ্য।",
+    "ar": "يسري العرض على السنة الأولى.",
+    "id": "Penawaran berlaku untuk tahun pertama.",
+    "fil": "Para sa unang taon ang alok."
+  },
+  "ui_sub_promo_first_month": {
+    "source": "Offer applies to your first month.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Offer applies to your first month.",
+    "fr": "Offre valable le premier mois.",
+    "pt-BR": "Oferta válida no primeiro mês.",
+    "es": "Oferta válida el primer mes.",
+    "hi": "ऑफ़र पहले माह के लिए लागू है।",
+    "tr": "Teklif ilk ay için geçerlidir.",
+    "bn": "অফারটি প্রথম মাসের জন্য প্রযোজ্য।",
+    "ar": "يسري العرض على الشهر الأول.",
+    "id": "Penawaran berlaku untuk bulan pertama.",
+    "fil": "Para sa unang buwan ang alok."
+  },
+  "ui_sub_promo_years": {
+    "source": "Offer applies to your first {{count}} years.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Offer applies to your first {{count}} years.",
+    "fr": "Offre valable les {{count}} premières années.",
+    "pt-BR": "Oferta válida nos primeiros {{count}} anos.",
+    "es": "Oferta válida los primeros {{count}} años.",
+    "hi": "ऑफ़र पहले {{count}} वर्षों के लिए लागू है।",
+    "tr": "Teklif ilk {{count}} yıl için geçerlidir.",
+    "bn": "অফারটি প্রথম {{count}} বছরের জন্য প্রযোজ্য।",
+    "ar": "يسري العرض على أول {{count}} من السنوات.",
+    "id": "Penawaran berlaku untuk {{count}} tahun pertama.",
+    "fil": "Para sa unang {{count}} taon ang alok."
+  },
+  "ui_sub_promo_months": {
+    "source": "Offer applies to your first {{count}} months.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Offer applies to your first {{count}} months.",
+    "fr": "Offre valable les {{count}} premiers mois.",
+    "pt-BR": "Oferta válida nos primeiros {{count}} meses.",
+    "es": "Oferta válida los primeros {{count}} meses.",
+    "hi": "ऑफ़र पहले {{count}} महीनों के लिए लागू है।",
+    "tr": "Teklif ilk {{count}} ay için geçerlidir.",
+    "bn": "অফারটি প্রথম {{count}} মাসের জন্য প্রযোজ্য।",
+    "ar": "يسري العرض على أول {{count}} من الأشهر.",
+    "id": "Penawaran berlaku untuk {{count}} bulan pertama.",
+    "fil": "Para sa unang {{count}} buwan ang alok."
+  },
+  "ui_sub_then_price": {
+    "source": "Then {{amount}}{{period}}.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Then {{amount}}{{period}}.",
+    "fr": "Puis {{amount}}{{period}}.",
+    "pt-BR": "Depois, {{amount}}{{period}}.",
+    "es": "Después, {{amount}}{{period}}.",
+    "hi": "उसके बाद {{amount}}{{period}}।",
+    "tr": "Sonrasında {{amount}}{{period}}.",
+    "bn": "এরপর {{amount}}{{period}}।",
+    "ar": "ثم {{amount}} {{period}}.",
+    "id": "Setelah itu {{amount}}{{period}}.",
+    "fil": "Pagkatapos, {{amount}}{{period}}."
+  },
+  "ui_sub_content_only": {
+    "source": "Norva is a media player; no content or TV subscription is included. Your TV content is supplied by your own TV service.",
+    "refs": [
+      "public/subscribe.html",
+      "public/js/plan-selection-ui.js"
+    ],
+    "en": "Norva is a media player; no content or TV subscription is included. Your TV content is supplied by your own TV service.",
+    "fr": "Norva est un lecteur multimédia : aucun contenu ni abonnement TV n’est inclus. Votre contenu TV est fourni par votre propre service TV.",
+    "pt-BR": "O Norva é um reprodutor de mídia; nenhum conteúdo ou assinatura de TV está incluído. Seu conteúdo de TV é fornecido pelo seu próprio serviço de TV.",
+    "es": "Norva es un reproductor multimedia; no incluye contenido ni suscripciones de TV. Tu contenido de TV lo proporciona tu propio servicio de TV.",
+    "hi": "Norva एक मीडिया प्लेयर है; इसमें कोई सामग्री या टीवी सदस्यता शामिल नहीं है। आपकी टीवी सामग्री आपकी अपनी टीवी सेवा से आती है।",
+    "tr": "Norva bir medya oynatıcıdır; içerik veya TV aboneliği içermez. TV içeriğin kendi TV hizmetin tarafından sağlanır.",
+    "bn": "Norva একটি মিডিয়া প্লেয়ার; এতে কোনো কনটেন্ট বা টিভি সাবস্ক্রিপশন অন্তর্ভুক্ত নেই। আপনার টিভি কনটেন্ট আপনার নিজস্ব টিভি পরিষেবা থেকে আসে।",
+    "ar": "Norva مشغّل وسائط؛ لا يتضمن أي محتوى أو اشتراك تلفزيوني. يوفّر المحتوى التلفزيوني مزوّد الخدمة الخاص بك.",
+    "id": "Norva adalah pemutar media; tidak termasuk konten atau langganan TV. Konten TV disediakan oleh layanan TV Anda sendiri.",
+    "fil": "Media player ang Norva; walang kasamang content o subscription sa TV. Ang sarili mong serbisyo sa TV ang nagbibigay ng content."
+  }
+}
