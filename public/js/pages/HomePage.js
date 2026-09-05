@@ -1260,7 +1260,7 @@ class HomePage {
                                     <span><strong>My provider only gave me an app login</strong><small>No M3U link or Xtream server details</small></span>
                                     <span class="setup-compatibility-arrow" aria-hidden="true">${Icons.chevronRight}</span>
                                 </button>
-                                <div class="setup-player-note"><span aria-hidden="true">${Icons.fingerprint}</span><span>Your service details are encrypted. Norva is a player and never supplies content.</span></div>
+                                <div class="setup-player-note"><span aria-hidden="true">${Icons.fingerprint}</span><span>Your service details are encrypted.</span></div>
                                 ${offerNotifications ? `<div class="home-ecosystem-notifications setup-notification-nudge">
                                     <span><strong>Let Norva finish in the background</strong><small>Enable notifications to know when a large catalogue is ready or needs attention.</small></span>
                                     <button type="button" class="btn btn-secondary" data-ecosystem-notifications>Enable notifications</button>
@@ -1301,6 +1301,14 @@ class HomePage {
                         ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true, deferred: true }) || ''}
                         <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Check playlist</button>
                     </form>
+                    ${this.app?.currentUser?.cloud ? `<section class="setup-discovery" aria-labelledby="home-discovery-title">
+                        <h2 id="home-discovery-title" data-i18n="ui_discovery_title">No catalogue? Start with our selection.</h2>
+                        <p data-i18n="ui_discovery_description">Enjoy Norva with a selection of short films, without adding a provider.</p>
+                        <button type="button" class="btn btn-secondary" id="home-discovery-start" data-i18n="ui_discovery_continue">Continue with this selection</button>
+                        <p class="setup-discovery-terms" data-i18n="ui_discovery_terms">Included in your 7-day trial, then in your Norva subscription.</p>
+                        <a href="/catalog/credits.html" target="_blank" rel="noopener" data-i18n="ui_discovery_credits">Films, sources and credits</a>
+                        <p id="home-discovery-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                    </section>` : ''}
                 </div>
             </section>
         `;
@@ -1309,6 +1317,36 @@ class HomePage {
             window.NorvaCloud?.lifecycleEvents?.recordProduct?.('source_form_opened');
         }
         this.bindSetupConnectionForm(container);
+        this.bindDiscoverySelection(container);
+    }
+
+    bindDiscoverySelection(container) {
+        const button = container.querySelector('#home-discovery-start');
+        if (!button) return;
+        const status = container.querySelector('#home-discovery-status');
+        const text = (key, fallback) => window.NorvaI18n?.t?.(key) || fallback;
+        button.addEventListener('click', async () => {
+            if (this._discoveryAdding || container.querySelector('#home-tv-service-submit')?.disabled) return;
+            this._discoveryAdding = true;
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            status.textContent = text('ui_discovery_loading', 'Preparing your selection…');
+            try {
+                await window.API.sources.create({ type: 'm3u', name: 'Norva Selection', url: 'https://norva.tv/catalog/discovery.m3u' });
+                await this.app?.sourceManager?.loadSources?.();
+                document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
+                this.lastLoadedAt = 0;
+                await this.app?.refreshSourceHealth?.();
+                await this.loadDashboardData();
+            } catch (error) {
+                status.textContent = text('ui_discovery_error', 'The selection could not be prepared. Check your connection and Norva subscription, then try again.');
+                button.disabled = false;
+                button.focus({ preventScroll: true });
+            } finally {
+                this._discoveryAdding = false;
+                button.removeAttribute('aria-busy');
+            }
+        });
     }
 
     renderSetupProgressStep(step, index) {
@@ -1805,6 +1843,7 @@ class HomePage {
 
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
+            if (this._discoveryAdding) return;
             clearErrors();
 
             if (!validateSelectedConnection()) return;

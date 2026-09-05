@@ -23,7 +23,7 @@ test('M3U raw import hands projection to the durable finalizer', () => {
   const m3u = section(worker, 'async function syncM3uSource(', '\nasync function replaceSourceItems(');
 
   assert.match(m3u, /replaceSourceItems\([\s\S]*stage:\s*"finalizing"[\s\S]*finalizePending:\s*true/);
-  assert.match(m3u, /liveCatalog:\s*\{\s*rawLive:\s*savedRows\.length,\s*pending:\s*true\s*\}/);
+  assert.match(m3u, /liveCatalog:\s*\{\s*rawLive:\s*liveCount,\s*pending:\s*true\s*\}/);
   assert.doesNotMatch(m3u, /refreshMaterializedLiveCatalog/);
 });
 

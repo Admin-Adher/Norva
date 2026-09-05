@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DISCOVERY_PLAYLIST_URL, discoveryMovieFields, discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -741,6 +742,15 @@ async function route(
       return { status: 202, body: await recordClientSourceConnectionAttempt(req, user.id, db) };
     }
     if (req.method === "POST" && !id) {
+      const input = await readJson(req.clone());
+      const inputType = stringOr(input.sourceType ?? input.source_type ?? input.type, "");
+      if (inputType === "m3u" && buildSourceConfig(inputType, input).playlistUrl === DISCOVERY_PLAYLIST_URL) {
+        await requireCloudAccess(user.id, db, "source_sync");
+        const selectionId = await discoverySourceId(user.id);
+        const { data: existing, error } = await db.from("cloud_sources").select("id").eq("id", selectionId).eq("user_id", user.id).maybeSingle();
+        if (error) throwDb(error, "Unable to check selection");
+        if (existing) return { body: { source: await managedSourceSnapshot(selectionId, user.id, db), syncStarted: false } };
+      }
       // A hidden Phase-4 staging source is part of the same logical provider
       // replacement and must never consume a second commercial source slot.
       await requirePlanCapacity(user.id, db, "sources", "cloud_catalog_visible_sources");
@@ -1514,7 +1524,10 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
     };
     const syncNow = hasManagedConfig && body.syncNow !== false && body.sync_now !== false;
 
+    const selectionId = sourceType === "m3u" && rawConfig.playlistUrl === DISCOVERY_PLAYLIST_URL
+      ? await discoverySourceId(userId) : null;
     const row = {
+      ...(selectionId ? { id: selectionId } : {}),
       user_id: userId,
       source_type: sourceType,
       display_name: displayName,
@@ -1524,6 +1537,9 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
     };
 
     const { data, error } = await db.from("cloud_sources").insert(row).select("id").single();
+    if (error?.code === "23505" && selectionId) {
+      return { source: await managedSourceSnapshot(selectionId, userId, db), syncStarted: false };
+    }
     if (error) throwDb(error, "Unable to create source");
 
     if (syncNow) {
@@ -3472,18 +3488,22 @@ async function syncM3uSource(
       metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
       playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
       available: true,
+      ...discoveryMovieFields(playlistUrl, item.url),
     })));
     rows.push(...chunk);
   }
 
+  const movieCount = rows.filter(row => row.item_type === "movie").length;
+  const liveCount = rows.length - movieCount;
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
   await reportProgress({
     stage: "importing",
     percent: 62,
-    counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
-    categories: { live: categoryCount, movies: 0, series: 0, total: categoryCount },
+    counts: { live: liveCount, movies: movieCount, series: 0, total: rows.length },
+    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: 0, total: categoryCount },
     steps: {
-      channels: { status: "done", count: rows.length },
+      channels: { status: "done", count: liveCount },
+      movies: { status: "done", count: movieCount },
       categories: { status: "done", count: categoryCount },
       import: { status: "running", count: rows.length },
     },
@@ -3502,10 +3522,19 @@ async function syncM3uSource(
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
   const liveCatalog = await refreshMaterializedLiveCatalog(db, {
-    sourceId, userId, rows: savedRows, generation, heartbeat,
+    sourceId, userId, rows: savedRows.filter(row => row.item_type === "live"), generation, heartbeat,
   });
+  if (movieCount > 0) {
+    await refreshVodTitleProjection({
+      sourceId, userId, db, generation,
+      rows: savedRows.filter(row => row.item_type === "movie"),
+      xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
+      assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
+    });
+  }
   return {
-    live: rows.length,
+    live: liveCount,
+    movies: movieCount,
     total: rows.length,
     liveCatalog,
     importTruncated: playlist.truncated || undefined,

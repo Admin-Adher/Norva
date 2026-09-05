@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { discoveryMovieFields } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   buildLiveMaterializationPlan,
@@ -4331,10 +4332,13 @@ async function syncM3uSource(
       metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
       playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
       available: true,
+      ...discoveryMovieFields(playlistUrl, item.url),
     })));
     rows.push(...chunk);
   }
 
+  const movieCount = rows.filter(row => row.item_type === "movie").length;
+  const liveCount = rows.length - movieCount;
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
 
   // Change-detection (same as Xtream): skip the rebuild when the playlist's
@@ -4346,7 +4350,8 @@ async function syncM3uSource(
     const changed = Boolean(opts.previousSignature) && !contentSignatureEquals(contentSignature, opts.previousSignature);
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     return {
-      live: rows.length,
+      live: liveCount,
+      movies: movieCount,
       total: rows.length,
       contentSignature,
       changed,
@@ -4360,12 +4365,13 @@ async function syncM3uSource(
     await reportProgress({
       stage: "unchanged",
       percent: 100,
-      counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
+      counts: { live: liveCount, movies: movieCount, series: 0, total: rows.length },
       steps: { import: { status: "done", count: rows.length }, finalize: { status: "done" } },
     });
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     return {
-      live: rows.length,
+      live: liveCount,
+      movies: movieCount,
       total: rows.length,
       contentSignature,
       skipped: true,
@@ -4377,10 +4383,11 @@ async function syncM3uSource(
   await reportProgress({
     stage: "importing",
     percent: 62,
-    counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
-    categories: { live: categoryCount, movies: 0, series: 0, total: categoryCount },
+    counts: { live: liveCount, movies: movieCount, series: 0, total: rows.length },
+    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: 0, total: categoryCount },
     steps: {
-      channels: { status: "done", count: rows.length },
+      channels: { status: "done", count: liveCount },
+      movies: { status: "done", count: movieCount },
       categories: { status: "done", count: categoryCount },
       import: { status: "running", count: rows.length },
     },
@@ -4401,11 +4408,13 @@ async function syncM3uSource(
   });
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
   return {
-    live: rows.length,
+    live: liveCount,
+    movies: movieCount,
     total: rows.length,
-    liveCategories: categoryCount,
+    liveCategories: liveCount ? categoryCount : 0,
+    movieCategories: movieCount ? categoryCount : 0,
     finalizePending: true,
-    liveCatalog: { rawLive: savedRows.length, pending: true },
+    liveCatalog: { rawLive: liveCount, pending: true },
     contentSignature,
     importTruncated: playlist.truncated || undefined,
     importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
