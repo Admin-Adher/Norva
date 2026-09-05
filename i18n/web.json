@@ -46506,20 +46506,20 @@
     "fil": "Mga Bukas na Kasosyo"
   },
   "ui_web_60fc98868715": {
-    "source": "Norva is a media player and includes no content",
+    "source": "Norva plays content from external sources",
     "refs": [
       "public/app.html"
     ],
-    "en": "Norva is a media player and includes no content",
-    "fr": "Norva est un lecteur multimédia et n'inclut aucun contenu",
-    "pt-BR": "Norva é um reprodutor de mídia e não inclui conteúdo",
-    "es": "Norva es un reproductor multimedia y no incluye contenido.",
-    "hi": "Norva एक मीडिया प्लेयर है और इसमें कोई सामग्री शामिल नहीं है",
-    "tr": "Norva bir medya oynatıcısıdır ve hiçbir içerik içermez",
-    "bn": "Norva একটি মিডিয়া প্লেয়ার এবং এতে কোন বিষয়বস্তু নেই",
-    "ar": "Norva هو مشغل وسائط ولا يتضمن أي محتوى",
-    "id": "Norva adalah pemutar media dan tidak menyertakan konten",
-    "fil": "Ang Norva ay isang media player at walang kasamang nilalaman"
+    "en": "Norva plays content from external sources",
+    "fr": "Norva lit les contenus de sources externes",
+    "pt-BR": "O Norva reproduz conteúdo de fontes externas",
+    "es": "Norva reproduce contenido de fuentes externas",
+    "hi": "Norva बाहरी स्रोतों की सामग्री चलाता है",
+    "tr": "Norva harici kaynaklardan içerik oynatır",
+    "bn": "Norva বাইরের উৎসের কনটেন্ট চালায়",
+    "ar": "يشغّل Norva المحتوى من مصادر خارجية",
+    "id": "Norva memutar konten dari sumber eksternal",
+    "fil": "Nagpe-play ang Norva ng content mula sa mga panlabas na source"
   },
   "ui_web_ec9a43ae348a": {
     "source": "You connect a compatible source you own and are authorized to use. See how Norva handles your data.",
