@@ -46,6 +46,35 @@ test('regional Pluto copies and rotating JWTs keep one stable programme identity
   assert.equal(discoveryCatalogFields(canonical, a.items[5]).metadata.container, 'm3u8');
 });
 
+test('the curated Xumo feed imports only its two reviewed channels as live TV and retains provider parameters', async () => {
+  const { readFileSync } = require('node:fs');
+  const { DISCOVERY_SOURCES, fetchDiscoverySelection, discoveryCatalogFields } = await import(modulePath);
+  const { readM3uPlaylistStream } = await import('../supabase/functions/_shared/m3u-playlist-stream.mjs');
+  const feed = DISCOVERY_SOURCES.find(source => source.id === 'xumo-curated');
+  assert.ok(feed);
+  const text = readFileSync('public/catalog/xumo-live.m3u', 'utf8');
+  const urls = text.split(/\r?\n/).filter(line => line.startsWith('https://'));
+  const parsed = await readM3uPlaylistStream(new Response(text).body);
+  const selection = await fetchDiscoverySelection({ feeds: [feed], fetchPlaylist: async url => {
+    assert.equal(url, 'https://norva.tv/catalog/xumo-live.m3u');
+    return { ...parsed, response: { ok: true } };
+  } });
+  const channels = selection.items.map(item => discoveryCatalogFields(canonical, item))
+    .filter(row => row.metadata.discoveryFeed === feed.id);
+  assert.deepEqual(channels.map(row => [row.metadata.tvgId, row.title, row.item_type]), [
+    ['99951251', 'MovieSphere by Lionsgate', 'live'],
+    ['99991638', 'DOCUMENTARY+', 'live'],
+  ]);
+  assert.deepEqual(channels.map(row => row.playback_hint.targetUrl), urls);
+  for (const row of channels) {
+    assert.equal(row.metadata.discoverySource, 'https://play.xumo.com/');
+    assert.equal(row.metadata.container, 'm3u8');
+    assert.ok(row.playback_hint.targetUrl.includes('ads.xumo_platform=[PLATFORM]'));
+    assert.ok(row.playback_hint.targetUrl.includes('ads._fw_did=[IFA]'));
+  }
+  assert.equal(selection.sources[0].included, 2);
+});
+
 test('a failing playlist is visible in the report and cannot prevent other feeds importing', async () => {
   const { fetchDiscoverySelection } = await import(modulePath);
   let active = 0, peak = 0;

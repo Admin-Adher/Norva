@@ -18,6 +18,7 @@ export const DISCOVERY_SOURCES = Object.freeze([
   ...[['plutotv', 'Pluto TV'], ['plex', 'Plex'], ['roku', 'Roku'], ['tubi', 'Tubi']].map(([id, name]) => ({
     id, name, kind: 'live', url: `${fast}${id}_all.m3u`, website: 'https://github.com/insa-ship-it/app-m3u-generator', refreshOnPlay: id === 'plex',
   })),
+  { id: 'xumo-curated', name: 'Xumo', kind: 'live', url: 'https://norva.tv/catalog/xumo-live.m3u', website: 'https://play.xumo.com/' },
 ].map(Object.freeze));
 
 // Previously researched or retired sources remain documented outside the active feeds.

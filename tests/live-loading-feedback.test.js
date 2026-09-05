@@ -30,6 +30,7 @@ function harness(resolveStream = async () => ({ url: 'https://example.test/live.
   const document = { body: { classList: { contains: () => false } }, getElementById: () => null };
   const context = vm.createContext({ window, document, navigator: {}, setTimeout, clearTimeout,
     console: { log() {}, warn() {}, error() {} }, requestAnimationFrame: fn => fn(),
+    CustomEvent: function CustomEvent(type, options) { this.type = type; this.detail = options.detail; },
     API: { proxy: { xtream: { getStreamUrl: resolveStream } } },
   });
   for (const file of ['VideoPlayer', 'ChannelList', 'LiveGuideFusion']) {
@@ -184,4 +185,44 @@ test('the guide action identifies loading separately from idle and first-frame p
   rendered = guide.renderPreview(a);
   assert.match(rendered, /is-playing/);
   assert.match(rendered, />Playing<\/span>/);
+});
+
+test('a stale first frame cannot replace the latest guide preview, while current quality and legacy playback still notify', () => {
+  const { window, player, list, a, b } = harness();
+  const events = [];
+  const preview = { channel: b };
+  window.dispatchEvent = event => { events.push(event.detail.name); preview.channel = event.detail; };
+  Object.assign(player, {
+    _variantSwitchSeq: 1, _triedVariants: new Set(), hasCurrentMedia: () => true,
+    _clearMediaElementErrorTimer() {}, resetGatewayHlsRetries() {}, _sendLiveEvent() {},
+    _clearVariantFallbackTimer() {}, populateQualityMenu() {}, updateQualityBadge() {},
+    getPlaybackHealthTarget: () => null, isLivePlayback: () => false,
+  });
+  list._selectRequestSeq = 2;
+  list._pendingPlaybackSelection = { selectSeq: 2, channel: b };
+  player.showPendingChannel(b, 2);
+  player.currentChannel = { ...a, _norvaSelection: { selectSeq: 1 } };
+  player.markPlaybackUsable();
+  assert.deepEqual(events, []);
+  assert.equal(preview.channel, b);
+  assert.equal(player._switchSplashName.textContent, b.name);
+
+  player._playbackStatusOkReported = false;
+  player._variantSwitchSeq++;
+  player.currentChannel = { ...b, _norvaSelection: { selectSeq: 2, renderId: 'b', logicalChannelId: 'b' } };
+  player.markPlaybackUsable();
+  assert.deepEqual(events, [b.name]);
+  assert.equal(list._pendingPlaybackSelection, null);
+
+  // A quality change after the selection already committed must still notify.
+  player._playbackStatusOkReported = false;
+  player._variantSwitchSeq++;
+  player.markPlaybackUsable();
+  assert.deepEqual(events, [b.name, b.name]);
+
+  player._playbackStatusOkReported = false;
+  player._variantSwitchSeq++;
+  player.currentChannel = { name: 'Legacy direct playback' };
+  player.markPlaybackUsable();
+  assert.deepEqual(events, [b.name, b.name, 'Legacy direct playback']);
 });

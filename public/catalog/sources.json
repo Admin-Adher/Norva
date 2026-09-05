@@ -335,6 +335,13 @@
       "url": "https://raw.githubusercontent.com/insa-ship-it/app-m3u-generator/main/playlists/tubi_all.m3u",
       "website": "https://github.com/insa-ship-it/app-m3u-generator",
       "refreshOnPlay": false
+    },
+    {
+      "id": "xumo-curated",
+      "name": "Xumo",
+      "kind": "live",
+      "url": "https://norva.tv/catalog/xumo-live.m3u",
+      "website": "https://play.xumo.com/"
     }
   ],
   "research": [

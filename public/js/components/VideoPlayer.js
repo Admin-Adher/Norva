@@ -2019,7 +2019,13 @@ class VideoPlayer {
             this.populateQualityMenu();
             this.updateQualityBadge();
             try { window.app?.channelList?.commitPlaybackChannel?.(this.currentChannel); } catch (_) { }
-            try { window.dispatchEvent(new CustomEvent('channelChanged', { detail: this.currentChannel })); } catch (_) { }
+            // A late first frame may belong to the channel we just left. Keep
+            // its notification from replacing a newer preview/loading intent.
+            const selectionSeq = this.currentChannel?._norvaSelection?.selectSeq;
+            const requestedSeq = window.app?.channelList?._selectRequestSeq;
+            if (selectionSeq == null || requestedSeq == null || selectionSeq === requestedSeq) {
+                try { window.dispatchEvent(new CustomEvent('channelChanged', { detail: this.currentChannel })); } catch (_) { }
+            }
         }
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
