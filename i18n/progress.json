@@ -38,7 +38,9 @@
       "failed": 0,
       "skipped": 7,
       "run": 33954860592
-    }
+    },
+    "livePublicPageChecks": 280,
+    "livePublicPageFailures": 0
   },
   "publication": {
     "git": "main release, latest verified tree 4e919257",

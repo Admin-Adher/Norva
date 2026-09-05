@@ -108,13 +108,14 @@
     el.className = 'norva-consent';
     el.setAttribute('role', 'region');
     el.setAttribute('aria-label', T.aria);
+    el.setAttribute('data-i18n-aria-label', 'ui_web_8d5e02d16834');
     el.innerHTML =
       '<div class="norva-consent__card">' +
-        '<p class="norva-consent__text">' + T.text +
-          ' <a class="norva-consent__link" href="' + privacyHref + '">' + T.more + '</a></p>' +
+        '<p class="norva-consent__text"><span data-i18n="ui_web_f7d909a256a1">' + T.text + '</span>' +
+          ' <a class="norva-consent__link" data-i18n="ui_web_1445799c033a" href="' + privacyHref + '">' + T.more + '</a></p>' +
         '<div class="norva-consent__actions">' +
-          '<button type="button" class="norva-consent__btn norva-consent__btn--ghost" data-consent="denied">' + T.refuse + '</button>' +
-          '<button type="button" class="norva-consent__btn norva-consent__btn--solid" data-consent="granted">' + T.accept + '</button>' +
+          '<button type="button" class="norva-consent__btn norva-consent__btn--ghost" data-i18n="ui_web_a2d285b35287" data-consent="denied">' + T.refuse + '</button>' +
+          '<button type="button" class="norva-consent__btn norva-consent__btn--solid" data-i18n="ui_web_89713b9c9c1b" data-consent="granted">' + T.accept + '</button>' +
         '</div>' +
       '</div>';
     el.addEventListener('click', function (event) {

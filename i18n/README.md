@@ -26,6 +26,7 @@ Audio, subtitles and content-region preferences remain independent.
   release ownership after an imperative state change. RTL uses logical spacing;
   region display names use Intl without changing stored country/content codes.
 - Full sentences replace hardcoded trial-day fragments; relative times use Intl.
+- The consent banner updates in place when the UI language changes, preserving focus, button identity and the unmodified consent decision.
 
 Coverage counts describe registered UI messages. Machine translation and structural
 checks are not a professional linguistic certification of every sentence, nor proof
@@ -71,7 +72,7 @@ The earlier evaluated local model was rejected and its outputs are not in the re
 ## Publication
 
 - Web deployment verified: Git main 4e919257, Cloudflare run 33954860592, 3,553 tests passed / 0 failed / 7 skipped. Six served assets matched local SHA-256 values.
-- Live browser: all ten languages switched, Filipino preference persisted after reload; Arabic mobile account screen had no horizontal overflow.
+- Live browser: all ten languages switched, Filipino preference persisted after reload; 280 route/language/viewport checks had no locale, direction or horizontal overflow failures (14 routes x 10 languages x 390/1280 px).
 - Phone 1.3.18 (31) and TV 3.8.18-hybrid (31): signed bundles from run 33954616434 accepted by Play and submitted for full production rollout. No supported devices lost. Managed publishing is disabled, so approved releases publish automatically.
 - Play review and quick automated checks are still in progress; submission is not yet public availability. Phone listing translations already under review were preserved in the restarted review.
 - Android bundles were built from 38840bab. Later Git changes concern validation scripts/tests, integrity metadata and web account copy; no native implementation changes.

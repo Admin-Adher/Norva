@@ -81,7 +81,7 @@ namespace "tv.norva.phone"
 }
 
 def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
-    from("../../../public/js/i18n.js")
+    from("../../../public/js/i18n.js", "../../../public/js/consent-banner.js")
     into("$buildDir/generated/i18nTestAssets/js")
 }
 tasks.configureEach { task ->
