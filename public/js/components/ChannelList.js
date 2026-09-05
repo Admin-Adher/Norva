@@ -3787,7 +3787,10 @@ class ChannelList {
             let playbackPayload = null; // resolver payload (carries the gateway fallbackUrl)
             let staleSessionId = null;
             let playbackChannel = channel;
-            if (channel.sourceType === 'xtream') {
+            // Cloud M3U catalogues expose an owned item identity, never a raw
+            // provider URL. They need the same authenticated resolver and strict
+            // session handoff as Xtream; local M3U entries keep their direct URL.
+            if (channel.sourceType === 'xtream' || channel.cloudSourceId) {
                 // Channel SWITCH: tear down the currently-playing channel BEFORE
                 // creating the new gateway session. The provider grants one slot,
                 // so creating the new session closes the old one; if the old

@@ -541,6 +541,45 @@ test('a new xtream selection always cancels pending player fallback state', () =
   assert.doesNotMatch(select, /switchPlayer\.hls \|\| switchPlayer\.currentUrl/);
 });
 
+for (const scenario of [
+  { name: 'cloud M3U', sourceType: 'm3u', cloudSourceId: 'owned-source', resolved: true },
+  { name: 'Xtream', sourceType: 'xtream', resolved: true },
+  { name: 'local M3U', sourceType: 'm3u', resolved: false },
+]) {
+  test(`${scenario.name} selection uses the correct playback path`, async () => {
+    const events = [];
+    const channel = {
+      id: 'channel-1', sourceId: 'source-1', streamId: 'media-1', name: 'Public channel',
+      sourceType: scenario.sourceType, cloudSourceId: scenario.cloudSourceId,
+      ...(scenario.resolved ? {} : { url: 'https://local.example.test/live.m3u8' }),
+    };
+    const window = { app: { player: {
+      async prepareLiveSwitch() { events.push('release'); },
+      async play(selected, url, payload) {
+        events.push('play');
+        assert.equal(url, scenario.resolved
+          ? 'https://relay.example.test/live.m3u8' : channel.url);
+        assert.equal(selected.cloudPlaybackSessionId, scenario.resolved ? 'session-1' : null);
+        assert.equal(payload?.sessionId, scenario.resolved ? 'session-1' : undefined);
+      },
+    } } };
+    const API = { proxy: { xtream: { async getStreamUrl(sourceId, streamId, type) {
+      events.push('resolve');
+      assert.deepEqual([sourceId, streamId, type], ['source-1', 'media-1', 'live']);
+      return { url: 'https://relay.example.test/live.m3u8', sessionId: 'session-1' };
+    } } } };
+    const { ChannelList } = loadChannelListClass({ window, API });
+    const list = Object.create(ChannelList.prototype);
+    Object.assign(list, {
+      channels: [channel], searchMode: true, _selectRequestSeq: 0,
+      container: { querySelectorAll: () => [], querySelector: () => null },
+    });
+    list.buildDynamicLiveChannel = value => ({ ...value });
+    await list.selectChannel({ channelId: channel.id });
+    assert.deepEqual(events, scenario.resolved ? ['release', 'resolve', 'play'] : ['play']);
+  });
+}
+
 test('native duplicate intent rejection preserves the already playing channel', () => {
   const select = section(channelListSource, 'async selectChannel(dataset)', 'async expireStaleCloudPlaybackSession');
   assert.match(select, /failPendingPlaybackSelection\(selectSeq, \{ clearCommitted: false \}\)/);
