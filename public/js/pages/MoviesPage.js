@@ -2182,6 +2182,12 @@ class MoviesPage {
                 const seen = new Set([`${tapped.sourceId}:${tapped.stream_id}`]);
                 for (const m of (page.items || [])) {
                     const k = `${m.sourceId}:${m.stream_id}`;
+                    if (k === `${tapped.sourceId}:${tapped.stream_id}`) {
+                        // Replace the rail's sparse fields with the owned catalogue
+                        // record before deduplicating siblings.
+                        Object.assign(tapped, m, { sourceId: m.sourceId, id: k });
+                        continue;
+                    }
                     if (!seen.has(k)) { seen.add(k); items.push({ ...m, sourceId: m.sourceId, id: k }); }
                 }
             } catch (_) { /* best-effort: keep just the tapped item */ }

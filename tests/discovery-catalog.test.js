@@ -3,6 +3,22 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+test('resolving a film enriches the selected item instead of discarding its full metadata as a duplicate', async () => {
+  const context = vm.createContext({ window: {},
+    API: { media: { page: async () => ({ items: [{ sourceId: 'owned', stream_id: 'film', metadata: { plot: 'Synopsis and credits' } }] }) } },
+    MediaUtils: { groupItems: items => [{ items, representative: items[0] }] },
+  });
+  vm.runInContext(fs.readFileSync('public/js/pages/MoviesPage.js', 'utf8') + '\nthis.TestMoviesPage = MoviesPage;', context);
+  const page = Object.create(context.TestMoviesPage.prototype);
+  page.isFicheIntentCurrent = () => true;
+  page.openGroup = async (group, options) => {
+    assert.equal(group.items.length, 1);
+    assert.equal(options.selectedMovie.metadata.plot, 'Synopsis and credits');
+    return true;
+  };
+  assert.equal(await page.openByItem({ sourceId: 'owned', stream_id: 'film', name: 'Film' }, { intentToken: 1 }), true);
+});
+
 test('a curated home rail resolves the full owned film even when it has a playback variant', async () => {
   const callbacks = [];
   const context = vm.createContext({ window: {}, setTimeout: callback => callbacks.push(callback) });
