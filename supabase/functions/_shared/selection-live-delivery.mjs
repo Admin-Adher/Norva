@@ -16,6 +16,14 @@ const PUBLIC_HLS_CHANNELS = Object.freeze({
     itemId: 'norva-discovery:live:b9dd1102ab7b431fe392cb4e49f7471eff4e714945547c1c300c42bf96610199',
   }),
 });
+// Two browser trials for the authorized test owner. Plex refreshes its anonymous
+// token before playback; pin the provider part and every non-token URL component.
+// The browser keeps long nested HLS URLs intact, unlike FFmpeg 5.1's URL buffer.
+const PLEX_TRIAL_OWNER_SHA256 = 'a7da1be5077b8c10cd7a5c177554d38e9d48bf060d17047e77da02928f011c12';
+const PLEX_TRIAL_PARTS = Object.freeze({
+  '6430aa45fc3be5947780904e-66be944f8711311880995280': 'norva-discovery:live:0bbf9a23d453660d92469cba6d1c75b8b4e68736537efd826869a5a9e067120b',
+  '6430aa45fc3be5947780904e-68a799722895f21006e758e4': 'norva-discovery:live:52064226a3cb515cff83bf663c3bd24bc2086ddb44df00a93949dd9f91c03082',
+});
 const verifiedDeliveries = new WeakSet();
 const canaryDeliveries = new WeakSet();
 const record = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -44,6 +52,19 @@ async function sha256(value) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function exactPlexPart(raw, part) {
+  if (typeof raw !== 'string' || raw.length > 2048) return null;
+  try {
+    const url = new URL(raw);
+    const keys = [...url.searchParams.keys()];
+    if (url.href !== raw || url.origin !== 'https://epg.provider.plex.tv' || url.username || url.password || url.hash
+      || url.pathname !== `/library/parts/${part}/` || keys.length !== 1 || keys[0] !== 'X-Plex-Token'
+      || !/^[A-Za-z0-9_-]{1,256}$/.test(url.searchParams.get('X-Plex-Token'))) return null;
+    url.search = '';
+    return url.href;
+  } catch { return null; }
+}
+
 function canarySnapshot(manifest) {
   if (manifest?.schemaVersion !== 1 || !Array.isArray(manifest.entries) || manifest.entries.length > 16) return [];
   const entries = manifest.entries.filter(value => {
@@ -69,12 +90,29 @@ function canarySnapshot(manifest) {
 
 // Injection is for server wiring and isolated tests, never a request field.
 // Snapshot the manifest once: mutating a caller's object cannot grant a lane.
-export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES } = {}) {
+export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES,
+  plexTrialOwnerSha256 = PLEX_TRIAL_OWNER_SHA256 } = {}) {
   const canaries = canarySnapshot(canaryManifest);
   return async function resolveSelectionLiveDelivery({ sourceId, userId, itemType, itemId, ownedItem, targetUrl }) {
     if (itemType !== 'live' || typeof userId !== 'string' || !userId || !ownedItem) return null;
     const metadata = record(ownedItem.metadata);
     const hint = record(ownedItem.playback_hint);
+    if (metadata.discoveryFeed === 'plex') {
+      const part = metadata.tvgId;
+      if (typeof part !== 'string' || !Object.hasOwn(PLEX_TRIAL_PARTS, part) || PLEX_TRIAL_PARTS[part] !== itemId
+        || metadata.discoverySource !== 'https://github.com/insa-ship-it/app-m3u-generator'
+        || hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hasExplicitCanarySelection(hint)
+        || !digestPattern.test(plexTrialOwnerSha256) || await sha256(userId) !== plexTrialOwnerSha256
+        || sourceId !== await discoverySourceId(userId)) return null;
+      const key = exactPlexPart(targetUrl, part);
+      if (!key || exactPlexPart(hint.targetUrl, part) !== key || metadata.discoveryMediaKey !== key
+        || itemId !== `norva-discovery:live:${await sha256(`live:${key}`)}`) return null;
+      const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: part, targetUrl,
+        providerAccountScopeSuffix: `public-media:${itemId.slice('norva-discovery:live:'.length)}` });
+      verifiedDeliveries.add(delivery);
+      canaryDeliveries.add(delivery);
+      return delivery;
+    }
     const channel = typeof metadata.tvgId === 'string' && Object.hasOwn(PUBLIC_HLS_CHANNELS, metadata.tvgId)
       ? PUBLIC_HLS_CHANNELS[metadata.tvgId] : null;
     if (!channel && !canaries.length) return null;
