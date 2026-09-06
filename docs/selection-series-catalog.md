@@ -13,3 +13,12 @@ TMDB search policy `catalog-title-tags-v3` removes release-quality/language suff
 Existing catalogues use the normal admin resync/finalize workflow. The bounded service-only `norva_requeue_catalog_search_for_source` RPC can recover unmatched searches after the policy update without resetting the global worker cursor or overwriting validated titles. New imports enter the existing automatic owner/enrichment workflow.
 
 Supplier language categories are declarations for badges/facets, not evidence of observed audio tracks. This provenance remains internal; real playback track observations retain priority.
+# Catalogue filters
+
+Cloud Movies and Series source menus include enabled M3U catalogues, including
+Norva Selection. Local M3U remains live-only. Audio facets and their filtered
+title sets use the requested movie/series type, selected source, visible
+generation and owning user. Selection parent language groups stay internal
+declarations; observed file audio takes precedence and no subtitle track is
+inferred. The four-argument counts RPC leaves the old movie RPC available during
+rolling deployment. Categories continue to use the existing TMDB genre buckets.

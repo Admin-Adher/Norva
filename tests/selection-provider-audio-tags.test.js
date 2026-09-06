@@ -25,6 +25,10 @@ test('only explicit curated supplier language categories produce declarations', 
   assert.deepEqual(languages({ title: 'Hindi', metadata: { original_language: 'hi' } }), []);
   assert.equal(providerAudioFacet('provider-fr'), null);
   assert.equal(providerAudioFacet('hi'), null);
+  const series = { ...item('Movies / Telugu / 2026'), external_id: 'norva-selection:series:' + 'a'.repeat(64) };
+  assert.deepEqual(languages(series), ['te']);
+  assert.equal(providerAudioFacet('catalog-te'), 'te');
+  assert.deepEqual(languages({ ...series, metadata: { ...series.metadata, discoveryFeed: 'unreviewed' } }), []);
 });
 
 test('catalogue declarations survive repeated sanitization without becoming track evidence', async () => {

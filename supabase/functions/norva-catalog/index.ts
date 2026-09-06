@@ -2333,10 +2333,11 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     audio: exactLanguageFacetItems(d.audio, itemType),
     subtitles: exactLanguageFacetItems(d.subtitles, itemType),
   };
-  const selectionId = itemType === 'movie' ? await discoverySourceId(userId) : null;
+  const selectionId = await discoverySourceId(userId);
   if (selectionId && (!sourceId || sourceId === selectionId)) {
     const { data: declaredCounts, error: declaredError } = await db.rpc('cloud_selection_audio_catalog_counts', {
       p_user_id: userId, p_selection_source_id: selectionId, p_source_id: sourceId,
+      p_item_type: itemType,
     });
     if (declaredError) throwDb(declaredError, 'Unable to load provider language declarations');
     for (const facet of exactLanguageFacetItems(declaredCounts, itemType)) {

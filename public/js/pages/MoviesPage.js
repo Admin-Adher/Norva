@@ -1137,7 +1137,9 @@ class MoviesPage {
     async loadSources() {
         try {
             const allSources = await API.sources.getAll();
-            this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
+            this.sources = allSources.filter(s => s.enabled && (
+                s.type === 'xtream' || (this.isCloudPagedMode() && s.type === 'm3u')
+            ));
 
             this.sourceSelect.innerHTML = '<option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>';
             this.sources.forEach(s => {
