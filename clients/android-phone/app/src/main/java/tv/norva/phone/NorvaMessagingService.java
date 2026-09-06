@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 
@@ -304,7 +305,9 @@ public class NorvaMessagingService extends FirebaseMessagingService {
         PendingIntent pi = PendingIntent.getActivity(this, notificationId, open, piFlags);
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, channel)
-                .setSmallIcon(R.drawable.ic_launcher)
+                .setSmallIcon(R.drawable.ic_norva_notification)
+                .setColor(getColor(R.color.norva_accent))
+                .setLargeIcon(BitmapFactory.decodeResource(getResources(), R.drawable.norva_app_icon))
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(body))

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome status-bar adaptation of the existing rounded Norva N.
+     The full-colour norva_app_icon remains the launcher/large notification logo.
+     No tile/background: Android uses this drawable's alpha mask. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+    <group android:translateX="-75" android:translateY="-70">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M102,325 L102,188 C102,145 125,114 161,114 C187,114 207,133 226,158 L306,266 C315,278 321,285 326,286 L326,174 C326,144 344,123 366,122 C391,121 409,142 409,171 L409,307 C409,355 389,385 353,385 C324,385 303,368 282,342 L203,237 C196,228 192,225 189,224 L189,327 C189,356 171,376 147,376 C121,376 102,354 102,325 Z" />
+    </group>
+</vector>
