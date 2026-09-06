@@ -1,5 +1,18 @@
 # Lifecycle remediation — active, not complete
 
+## Latest verified state — 2026-09-06
+
+Work resumed in isolated branch `codex/lifecycle-resume-20260906` from `origin/main` `4ed43231`. Previously deployed telemetry, failure-copy and dormant welcome increments were reconciled into this branch. The original dirty checkout and the earlier remediation worktree remain preserved.
+
+- Postal is the live Norva email transport; this does not activate any behavioral audience. The four journeys are still draft/0%, emergency stop is on, the independent signup welcome gate is disabled, and behavioral outbox/receipt counts remain zero.
+- Timezone provenance and its FCM-independent authenticated context RPC are now installed on Hetzner; web publication is tracked separately below.
+- Local full Node suite: **3,701 passed, 0 failed, 8 skipped** (3,709 total). The skips remain unproven runtime scenarios, not successes. Generated locale validation, region model and JS/TS syntax checks pass. A localization-sensitive test now scopes assertions to the real connection section rather than a brittle character-count limit; no provider UI behavior was changed for that test.
+- Real PostgreSQL 17 synthetic integration proof passed. The live controlled-account RPC smoke also passed in a transaction that was explicitly rolled back, without changing the account timezone, creating a token, claiming a job or sending an email.
+- USB ADB currently lists no device. Actual receipt, tap, foreground/background, deduplication and conversion-cancellation proofs are still missing.
+- Still outstanding: shared input validation/settings guidance completion, conditional +24h no-push email and its final Postal authorization, controlled import/first-play attestation, real internal sends, then separately authorized pilot and mature J+7/J+14 results. Do not activate the pilot or revive paused Codex monitoring.
+
+Evidence outputs are under `outputs/01a05135-6828-78c2-aeae-17738180c47a/lifecycle-followup-20260906/` in the original workspace (not committed customer data).
+
 Working branch: `codex/lifecycle-remediation-20260905`, isolated worktree based on fetched `origin/main` at `a3eed288`. The original dirty checkout is untouched. No production deployment, send, or audience activation is authorized by this progress record.
 
 ## Full scope and acceptance gates
@@ -88,3 +101,17 @@ Remaining gates: the signup welcome gate must be activated with a fresh cutoff o
 Real PostgreSQL test `tests/sql/lifecycle-timezone.integration.sql` passed against the complete behavioral engine in a network-disabled, 512 MiB disposable database (`norva-timezone-proof-20260905`): `LIFECYCLE_TIMEZONE_RUNTIME_PROOF_OK`. It covers default/missing timezone rejection, explicit India/UTC acceptance, invalid update preservation, India and Bangladesh quiet hours, withheld external scheduling versus available in-app help, scheduling after verification, and final refusal after timezone evidence expires. No provider requests or production changes occurred for this increment.
 
 Before deployment: add authenticated context reporting independently of FCM so users without push can become email-eligible; verify production function baselines before replacing them; deploy Cloud's empty fallback to both replicas BEFORE the SQL provenance migration (otherwise the old Cloud UTC fallback could falsely establish provenance). Review fresh SQL tests and metadata collection. The conditional +24h no-push email remains to implement; existing J+3 configuration is unchanged.
+
+### Fourth increment installed on Hetzner — 2026-09-06
+
+Those backend prerequisites are now satisfied. Context reporting derives the account exclusively from authenticated identity and accepts only a timezone payload. It does not require an FCM token or analytics consent, never invents UTC, and retries after a failed report. Client reports are coalesced and throttled for one hour per account/timezone; returning to a visible page refreshes stale observations. Explicit, observed UTC remains valid. An explicit `timezoneObserved` protocol flag prevents older clients' default UTC from minting fresh provenance.
+
+Both Edge replicas were updated sequentially using the exact prior runtime as the baseline. All unrelated function files, environment values, container images and Compose settings were preserved. The new `norva-cloud/index.ts` normalized SHA256 is `f524d4687f40e8f1ff1815a9e38e89606ab5959e82e55acc0fec185d0b2de36f`. Both readiness checks passed.
+
+Migration normalized SHA256: `8695b3f72227334b295fc4cd7327910be44a1aab69698cacee4585c45a8eecde`. The migration requires stopped/draft audiences, checks the three production function baselines and uses 5-second lock/30-second statement timeouts. It committed after both new Cloud replicas. The prior function definitions are preserved at `/home/adrien/.norva/lifecycle-context-20260906-r1/timezone-functions.before.sql`; no broad rollback or destructive schema reset is needed.
+
+At 11:59 UTC, 439 user states had matching legacy device evidence and 238 remained unknown. Unknown does not mean the timezone value is wrong: it means no sufficiently trustworthy observation exists, so outbound behavioral messages remain ineligible. No country-derived timezone correction was fabricated.
+
+`PRODUCTION_TIMEZONE_RPC_SMOKE_ROLLED_BACK_OK` verifies a real controlled account can record Asia/Dhaka without push, rejects an invalid timezone without overwriting the good observation, preserves token counts, restricts execution to service role and leaves every journey stopped. The transaction was rolled back. This is not proof of browser/Android transport or receipt.
+
+Deployment helpers: `ops/hetzner/scripts/deploy-lifecycle-context-20260906.py` and `ops/hetzner/scripts/deploy-lifecycle-timezone-20260906.py`. Web publication and live asset verification remain separate gates; the conditional +24h email is not deployed by this increment.

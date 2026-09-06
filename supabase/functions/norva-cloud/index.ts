@@ -867,6 +867,19 @@ async function route(
     return { status: 202, body: await recordBehavioralLifecycleEvent(req, user.id, db) };
   }
 
+  if (scope === "lifecycle-context" && req.method === "POST" && !id) {
+    const body = await readJson(req);
+    if (!body || Array.isArray(body) || Object.keys(body).some((key) => key !== "timezone")
+      || typeof body.timezone !== "string" || body.timezone.length > 64 || !body.timezone.trim()) {
+      throw new HttpError(400, "Invalid lifecycle context");
+    }
+    const { data, error } = await db.rpc("norva_record_lifecycle_timezone", {
+      p_user_id: user.id, p_timezone: body.timezone,
+    });
+    if (error) throwDb(error, "Unable to record scheduling context");
+    return { status: 202, body: data };
+  }
+
   if (scope === "pairing" && req.method === "POST" && id === "approve") {
     await requirePlanCapacity(user.id, db, "trusted_devices", "cloud_devices", {
       revoked: false,
@@ -6583,7 +6596,10 @@ async function registerPushToken(req: Request, userId: string, db: SupabaseClien
     ? permissionRaw
     : "unknown";
   // Missing device metadata is unknown, not evidence that the user is in UTC.
-  const timezone = stringOr(body.timezone, "").slice(0, 64);
+  // Older WebViews supplied a default UTC even when Intl failed. Only the new
+  // observation protocol may create fresh provenance; existing good evidence
+  // is retained by the RPC when this value is absent.
+  const timezone = body.timezoneObserved === true ? stringOr(body.timezone, "").slice(0, 64) : "";
   const locale = stringOrNull(body.locale)?.slice(0, 35) ?? null;
   const appVersion = stringOrNull(body.appVersion ?? body.app_version)?.slice(0, 40) ?? null;
   const { data, error } = await db.rpc("norva_register_push_token", {

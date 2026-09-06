@@ -647,6 +647,13 @@ class App {
         // it returns, so the very next line already dedups onto it. User
         // sessions only — paired-device screens use the device-token path.
         if (this.currentUser && !this.currentUser.device) {
+            void this.refreshLifecycleTimezoneContext();
+            if (!this._lifecycleTimezoneListener) {
+                this._lifecycleTimezoneListener = () => {
+                    if (!document.hidden) void this.refreshLifecycleTimezoneContext();
+                };
+                document.addEventListener('visibilitychange', this._lifecycleTimezoneListener);
+            }
             window.NorvaTrace?.log?.('boot() fired — one /boot call seeds the caches the lines below read');
             try { window.NorvaCloud?.boot?.(); } catch (_) { /* best-effort speedup */ }
         }
@@ -1522,6 +1529,30 @@ class App {
     // invisible un mois précisément parce que tout était avalé en silence. Chemin DIRECT
     // NorvaCloud.push.register (pas API.request). Re-tenté au retour au premier plan : au premier
     // lancement, le token FCM peut mettre plus de temps que la fenêtre de retry du boot.
+    async refreshLifecycleTimezoneContext() {
+        // This is a delivery setting, not an analytics event or an FCM permission.
+        const userId = this.currentUser?.id;
+        if (!userId || this.currentUser.device || !window.NorvaCloud?.lifecycleEvents?.recordContext) return;
+        let timezone;
+        try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { return; }
+        if (typeof timezone !== 'string' || !timezone || timezone.length > 64) return;
+        const key = `${userId}:${timezone}`;
+        const now = Date.now();
+        if (this._lifecycleTimezonePending?.key === key) return;
+        if (this._lifecycleTimezoneLast?.key === key
+            && now >= this._lifecycleTimezoneLast.at
+            && now - this._lifecycleTimezoneLast.at < 60 * 60 * 1000) return;
+        const pending = { key };
+        this._lifecycleTimezonePending = pending;
+        try {
+            const result = await window.NorvaCloud.lifecycleEvents.recordContext(timezone);
+            if (result?.ok === true) this._lifecycleTimezoneLast = { key, at: Date.now() };
+        } catch (_) { /* best-effort: retry on next visible session, never block onboarding */ }
+        finally {
+            if (this._lifecycleTimezonePending === pending) this._lifecycleTimezonePending = null;
+        }
+    }
+
     async registerPushToken() {
         const note = (status, detail) => {
             try { localStorage.setItem('norva-push-reg', JSON.stringify({ status, detail: detail || '', at: new Date().toISOString() })); } catch (_) { /* plein/privé */ }
@@ -1553,8 +1584,8 @@ class App {
                     : 'unknown';
             } catch (_) { permissionState = 'unknown'; }
             if (!['unknown', 'prompt', 'granted', 'denied'].includes(permissionState)) permissionState = 'unknown';
-            let timezone = 'UTC';
-            try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (_) { /* UTC */ }
+            let timezone = null;
+            try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (_) { /* unknown */ }
             const locale = String(navigator.language || 'en').slice(0, 35);
             let appVersion = null;
             try {
@@ -1569,7 +1600,7 @@ class App {
                 return;
             }
             await window.NorvaCloud.push.register(token, {
-                platform: 'android', permissionState, timezone, locale, appVersion
+                platform: 'android', permissionState, timezone, timezoneObserved: Boolean(timezone), locale, appVersion
             });
             this._lastPushToken = token;
             this._lastPushRegistrationKey = registrationKey;

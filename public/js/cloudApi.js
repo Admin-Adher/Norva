@@ -4486,7 +4486,8 @@
                     token,
                     platform: details.platform || 'android',
                     permissionState: details.permissionState || details.permission_state || 'unknown',
-                    timezone: details.timezone || 'UTC',
+                    timezone: details.timezone || null,
+                    timezoneObserved: details.timezoneObserved === true,
                     locale: details.locale || null,
                     appVersion: details.appVersion || details.app_version || null
                 });
@@ -4494,6 +4495,13 @@
         },
 
         lifecycleEvents: {
+            recordContext: (timezone) => {
+                // Only observed scheduling context, never country inference or a default UTC.
+                if (typeof timezone !== 'string' || !timezone || timezone.length > 64) return Promise.resolve(null);
+                try {
+                    return request('POST', '/lifecycle-context', { timezone }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            },
             record: (deliveryId, event) => {
                 try {
                     return request('POST', '/lifecycle-events', { deliveryId, event }).catch(() => null);

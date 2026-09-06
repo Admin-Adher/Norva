@@ -1,5 +1,25 @@
 -- Unknown/default UTC is not device evidence. No audience activation.
 begin;
+set local lock_timeout='5s';
+set local statement_timeout='30s';
+do $baseline$
+declare row record; actual text;
+begin
+  if not exists(select 1 from public.behavioral_lifecycle_runtime where singleton and emergency_stop)
+     or exists(select 1 from public.behavioral_lifecycle_journeys where status<>'draft' or rollout_percent<>0) then
+    raise exception 'Review active journeys before timezone migration';
+  end if;
+  for row in select * from (values
+    ('public.norva_register_push_token(uuid,text,text,text,text,text,text)','6588a6990946e1e9d241e3f3e98ce0d2'),
+    ('public.norva_seed_behavioral_lifecycle_jobs(integer)','953b3ae0c6c6b6f441a86241584cec2f'),
+    ('public.norva_behavioral_delivery_eligible(uuid,timestamptz)','ccb72b228835da87c01579813c38bf1d')
+  ) as expected(signature,hash)
+  loop
+    select md5(replace(prosrc,chr(13),'')) into actual from pg_proc where oid=to_regprocedure(row.signature);
+    if actual is distinct from row.hash then raise exception 'Timezone function baseline drift: %',row.signature; end if;
+  end loop;
+end;
+$baseline$;
 alter table public.behavioral_lifecycle_user_state
   add column timezone_source text not null default 'unknown'
     check(timezone_source in ('unknown','device','legacy_device')),
@@ -278,4 +298,39 @@ as $function$
     where o.id = p_delivery_id
   ), false)
 $function$;
+-- This endpoint is independent of push availability and cannot be invoked
+-- directly by a browser for another account. Edge derives p_user_id from Auth.
+create function public.norva_record_lifecycle_timezone(p_user_id uuid, p_timezone text)
+returns jsonb language plpgsql security definer set search_path=''
+as $function$
+declare
+  v_timezone text := btrim(coalesce(p_timezone,''));
+  v_now timestamptz := clock_timestamp();
+begin
+  if coalesce(nullif(auth.jwt()->>'role',''),
+      nullif(current_setting('request.jwt.claim.role',true),''),
+      nullif(current_setting('role',true),'none'),'') <> 'service_role' then
+    raise exception 'service_role required' using errcode='42501';
+  end if;
+  if char_length(v_timezone)>64 or not exists(
+      select 1 from pg_catalog.pg_timezone_names where name=v_timezone) then
+    return jsonb_build_object('ok',false,'reason','unknown_timezone');
+  end if;
+  if not exists(select 1 from auth.users where id=p_user_id) then
+    return jsonb_build_object('ok',false,'reason','account_unavailable');
+  end if;
+  insert into public.behavioral_lifecycle_user_state(
+    user_id,registered_at,timezone,timezone_source,timezone_observed_at)
+  select id,created_at,v_timezone,'device',v_now from auth.users where id=p_user_id
+  on conflict(user_id) do update set timezone=excluded.timezone,timezone_source='device',
+    timezone_observed_at=excluded.timezone_observed_at,updated_at=v_now
+  where public.behavioral_lifecycle_user_state.timezone is distinct from excluded.timezone
+    or public.behavioral_lifecycle_user_state.timezone_source='unknown'
+    or public.behavioral_lifecycle_user_state.timezone_observed_at is null
+    or public.behavioral_lifecycle_user_state.timezone_observed_at < v_now-interval '1 hour';
+  return jsonb_build_object('ok',true);
+end;
+$function$;
+revoke all on function public.norva_record_lifecycle_timezone(uuid,text) from public,anon,authenticated;
+grant execute on function public.norva_record_lifecycle_timezone(uuid,text) to service_role;
 commit;

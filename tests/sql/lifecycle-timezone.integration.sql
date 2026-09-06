@@ -33,6 +33,22 @@ begin
  if public.norva_behavioral_delivery_eligible(o) then raise exception 'stale timezone allowed delivery'; end if;
  perform public.norva_register_push_token(u,'synthetic-token','android','granted','UTC','en','1.3.17');
  if not public.norva_behavioral_timezone_verified(u) then raise exception 'explicit real UTC rejected'; end if;
+ delete from public.cloud_push_tokens where user_id=u;
+ update public.behavioral_lifecycle_user_state set timezone='UTC',timezone_source='unknown',timezone_observed_at=null where user_id=u;
+ if not (public.norva_record_lifecycle_timezone(u,'Asia/Dhaka')->>'ok')::boolean then raise exception 'no-push context refused'; end if;
+ if not public.norva_behavioral_timezone_verified(u) or (select timezone from public.behavioral_lifecycle_user_state where user_id=u)<>'Asia/Dhaka' then raise exception 'no-push timezone not observed'; end if;
+ if (public.norva_record_lifecycle_timezone(u,'invalid-zone')->>'ok')::boolean then raise exception 'invalid context accepted'; end if;
+ if (select timezone from public.behavioral_lifecycle_user_state where user_id=u)<>'Asia/Dhaka' then raise exception 'invalid context overwrote valid timezone'; end if;
+ if exists(select 1 from public.cloud_push_tokens where user_id=u) then raise exception 'context fabricated a push token'; end if;
+ if has_function_privilege('authenticated','public.norva_record_lifecycle_timezone(uuid,text)','EXECUTE')
+   or has_function_privilege('anon','public.norva_record_lifecycle_timezone(uuid,text)','EXECUTE') then raise exception 'browser can choose another context owner'; end if;
+ perform set_config('request.jwt.claim.role','authenticated',true);
+ begin
+   perform public.norva_record_lifecycle_timezone(u,'Europe/Paris');
+   raise exception 'role check missing';
+ exception when insufficient_privilege then null;
+ end;
+ perform set_config('request.jwt.claim.role','service_role',true);
 end;
 $test$;
 rollback;

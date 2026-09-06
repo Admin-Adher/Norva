@@ -71,7 +71,12 @@ test('onboarding progress only advertises the Access step when it is available',
 
 test('Add TV provider makes connection step one and access choice step two', () => {
   assert.match(sourceManager, /data-source-provider-onboarding/);
-  assert.match(sourceManager, /data-source-connection-step[\s\S]{0,900}Step 1 of \$\{initialTotal\}[\s\S]{0,900}Add your TV provider/);
+  // Bound the contract to the actual section, not a character budget that
+  // grows with localization/accessibility attributes and CRLF line endings.
+  const connectionSection = sourceManager.match(/<section\b[^>]*\bdata-source-connection-step\s[^>]*>[\s\S]*?<\/section>/)?.[0];
+  assert.ok(connectionSection, 'the connection step is a complete section');
+  assert.match(connectionSection, /data-source-connection-step-label[^>]*>Step 1 of \$\{initialTotal\}<\/span>/);
+  assert.match(connectionSection, /<h3 id="source-provider-connection-title"[^>]*>Add your TV provider<\/h3>/);
   assert.match(sourceManager, /\$\{urlField\}[\s\S]{0,180}source-provider-login-separator[\s\S]{0,180}\$\{manualLogin\}[\s\S]{0,120}\$\{nameField\}/);
   assert.match(sourceManager, /source-provider-manual-login[\s\S]{0,180}Enter server login manually/);
   assert.match(sourceManager, /source-access-onboarding'[\s\S]{0,120}deferred: true, stepOffset: 1/);
