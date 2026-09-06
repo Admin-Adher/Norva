@@ -24,7 +24,7 @@ test('authentication email transport is bounded, deterministic and provider-ackn
   const source = fs.readFileSync(path.join(root, 'supabase/functions/norva-auth-email/index.ts'), 'utf8');
   assert.match(source, /crypto\.subtle\.digest\("SHA-256"/);
   assert.match(source, /"Idempotency-Key": request\.idempotencyKey/);
-  assert.match(source, /https:\/\/api\.resend\.com\/emails\/batch/);
+  assert.match(source, /postal:batch/);
   assert.match(source, /signal: AbortSignal\.timeout\(4_000\)/);
   assert.match(source, /crypto\.subtle\.digest\("SHA-256", new TextEncoder\(\)\.encode\(body\)\)/);
   assert.doesNotMatch(source, /upstreamDeliveryId|svix-id/);
@@ -95,7 +95,7 @@ test('secure email change uses one strict idempotent batch with complete equival
   });
 
   const request = buildResendAuthRequest(messages, 'wh_01-safe-delivery');
-  assert.equal(request.endpoint, 'https://api.resend.com/emails/batch');
+  assert.equal(request.endpoint, 'postal:batch');
   assert.equal(request.idempotencyKey, 'norva-auth-wh_01-safe-delivery-batch');
   assert.equal(request.idempotencyKey.includes('@'), false);
   assert.equal(request.expectedIds, 2);

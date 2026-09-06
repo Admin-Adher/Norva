@@ -19,6 +19,7 @@
 // replies go only to that ticket owner's current Auth address, with Reply-To set to the same support
 // inbox. We never discover recipients from admins/internal accounts.
 
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram as sendDomainTelegram, tgEscape, maskedEmail } from "../_shared/telegram.ts";
 const sendTelegram = (text: string) => sendDomainTelegram(text, 'support');
@@ -27,7 +28,7 @@ type JsonRecord = Record<string, unknown>;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const SUPPORT_FROM = Deno.env.get("SUPPORT_EMAIL_FROM")?.trim() || "Norva Support <support@norva.tv>";
 const SUPPORT_INBOX = Deno.env.get("NORVA_SUPPORT_EMAIL")?.trim().toLowerCase() || "support@norva.tv";
 const SITE_URL = "https://norva.tv";
@@ -230,10 +231,10 @@ function classifyRetry(status: number | null, providerCode: string, acceptedWith
 
 async function sendMail(claim: SupportDeliveryClaim): Promise<MailDeliveryResult> {
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await requestEmailProvider("postal:send", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": "Norva-Support-Email/2.0",
         "Idempotency-Key": claim.delivery_key,
@@ -292,7 +293,7 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 async function drainSupportEmailOutbox(): Promise<Record<string, number | boolean>> {
-  if (!RESEND_API_KEY) return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, deferred: 0, lease_lost: 0 };
+  if (!NORVA_POSTAL_WIRE_KEY) return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, deferred: 0, lease_lost: 0 };
   const { data, error } = await db.rpc("claim_support_email_deliveries", {
     p_batch: SUPPORT_DELIVERY_BATCH,
     p_lease_seconds: 90,
@@ -319,10 +320,10 @@ async function drainSupportEmailOutbox(): Promise<Record<string, number | boolea
     networkAttempts++;
     if (sent.status === 429) sharedRetryAfter = Math.max(1, sent.retryAfterSeconds ?? 60);
     if (sent.accepted && sent.emailId) {
-      const { data: completed, error: completeError } = await db.rpc("complete_support_email_delivery", {
+      const { data: completed, error: completeError } = await db.rpc("complete_postal_support_email_delivery", {
         p_delivery_key: claim.delivery_key,
         p_lease_token: claim.lease_token,
-        p_resend_email_id: sent.emailId,
+        p_postal_delivery_id: sent.emailId,
         p_http_status: sent.status,
         p_response: sent.response,
       });
@@ -332,7 +333,7 @@ async function drainSupportEmailOutbox(): Promise<Record<string, number | boolea
       } else result.sent++;
       continue;
     }
-    const { data: failed, error: failError } = await db.rpc("fail_support_email_delivery", {
+    const { data: failed, error: failError } = await db.rpc("fail_postal_support_email_delivery", {
       p_delivery_key: claim.delivery_key,
       p_lease_token: claim.lease_token,
       p_http_status: sent.status,

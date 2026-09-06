@@ -9,7 +9,7 @@ const root=path.resolve(__dirname,'..');
 
 function load(file,globals={}) {
   const code=esbuild.buildSync({entryPoints:[path.join(root,file)],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text;
-  const sandbox={module:{exports:{}},exports:{},Date,Intl,TextEncoder,AbortSignal,DOMException,crypto:webcrypto,encodeURIComponent,console,...globals};
+  const sandbox={module:{exports:{}},exports:{},Date,Intl,TextEncoder,TextDecoder,Response,Headers,AbortSignal,DOMException,btoa,atob,crypto:webcrypto,encodeURIComponent,console,...globals};
   vm.runInNewContext(code,sandbox);return sandbox.module.exports;
 }
 const routing=load('supabase/functions/_shared/telegram-routing.mjs');
@@ -49,12 +49,15 @@ function fakeDb(initial=[]) {
   };}};
 }
 function opsRuntime(failingChat) {
-  const values={RESEND_API_KEY:'email-secret',TELEGRAM_CATEGORY_ROUTING_STRICT:'1'};
+  const values={NORVA_POSTAL_WIRE_KEY:'7'.repeat(64),TELEGRAM_CATEGORY_ROUTING_STRICT:'1'};
   for(const c of routing.TELEGRAM_CATEGORIES){values[`TELEGRAM_${c.toUpperCase()}_BOT_TOKEN`]=c;values[`TELEGRAM_${c.toUpperCase()}_CHAT_ID`]=c;}
   const calls=[];
   const api=load('supabase/functions/_shared/ops-notifications.ts',{Deno:{env:env(values)},fetch:async(url,options)=>{
+    if(url.includes('norva-private-mail-gateway')){
+      const {postalDouble}=await import('./helpers/postal-wire-double.mjs');
+      return postalDouble(async(clear)=>{calls.push(clear.messages);return{status:200,body:{id:'postal_accepted'}};})(url,options);
+    }
     const body=JSON.parse(options.body);calls.push(body);
-    if(url.includes('resend'))return {ok:true,json:async()=>({id:'accepted'})};
     return {ok:body.chat_id!==failingChat,status:body.chat_id===failingChat?503:200,text:async()=>JSON.stringify({ok:body.chat_id!==failingChat,result:{message_id:1}})};
   }});
   return {api,calls};

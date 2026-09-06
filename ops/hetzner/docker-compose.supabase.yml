@@ -401,7 +401,7 @@ services:
       NORVA_CRON_SHARED_SECRET: ${NORVA_CRON_SHARED_SECRET:-}
       # Domain-scoped sending_access key only. Never expose the host-side
       # RESEND_MANAGEMENT_API_KEY to this shared public Edge runtime.
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NORVA_POSTAL_WIRE_KEY: ${NORVA_POSTAL_WIRE_KEY:?Private Postal transport key is required}
       # Signing secret returned by Resend when the delivery webhook is created.
       RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
       # Optional ops mailbox. Empty is intentional: norva-admin then sends ops
@@ -645,6 +645,9 @@ services:
   # receive the full-access management key; public Edge functions only receive
   # the domain-scoped sending key above.
   resend-contact-worker:
+    # Retained only as an explicit historical rollback tool. Postal uses Norva's
+    # local preferences/suppression registry; no external contact sync is needed.
+    profiles: ["retired-resend"]
     container_name: norva-resend-contact-worker
     image: node:22-alpine
     restart: unless-stopped

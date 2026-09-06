@@ -1,16 +1,9 @@
-const fs = require('node:fs');
-const { transform } = require('esbuild');
+const { bundleTypescriptModule } = require('./bundle-typescript-module');
 
 async function importTypescriptModule(modulePath) {
-  const source = fs.readFileSync(modulePath, 'utf8');
-  const { code } = await transform(source, {
-    format: 'esm',
-    loader: 'ts',
-    sourcefile: modulePath,
-    target: 'node18',
-  });
-  const encoded = Buffer.from(code).toString('base64');
-  return import(`data:text/javascript;base64,${encoded}`);
+  // Bundle local shared modules before importing a data URL, which has no
+  // filesystem base for relative imports (e.g. the common email boundary).
+  return bundleTypescriptModule(modulePath);
 }
 
 module.exports = { importTypescriptModule };

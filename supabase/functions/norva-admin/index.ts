@@ -853,7 +853,7 @@ Deno.serve(async (req) => {
         gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
         relay ? ping(relay) : Promise.resolve({ configured: false } as JsonRecord),
         ping(revolutApiBase),
-        ping("https://api.resend.com"),
+        ping("http://norva-private-mail-gateway:18185/health"),
         readLidCascadeLeaseHealth(),
         readStrictLidRuntimeHealth(gateway),
       ]);
@@ -865,7 +865,8 @@ Deno.serve(async (req) => {
         entitlements_mode: (Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce").toLowerCase(),
         lifecycle_billing_live: (Deno.env.get("NORVA_LIFECYCLE_BILLING_LIVE") ?? "").toLowerCase() === "true",
         webhook_secret_set: Boolean(Deno.env.get("REVOLUT_WEBHOOK_SIGNING_SECRET")),
-        resend_configured: Boolean(Deno.env.get("RESEND_API_KEY")),
+        email_provider: "postal",
+        resend_configured: Boolean(Deno.env.get("NORVA_POSTAL_WIRE_KEY")),
         revolut: revolutPing,
         resend: resendPing,
       };

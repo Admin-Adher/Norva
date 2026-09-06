@@ -108,7 +108,7 @@ test('worker has typed 409 handling, sequential shared throttling and 429 deferr
   assert.doesNotMatch(worker, /Promise\.all\(claims\.map/);
   assert.match(worker, /setTimeout\(resolve, 300\)/);
   assert.match(worker, /sent\.status === 429/);
-  assert.match(worker, /defer_branded_email_delivery/);
+  assert.match(worker, /defer_postal_branded_email_delivery/);
   assert.match(transport, /headers: claim\.request_headers/);
 });
 

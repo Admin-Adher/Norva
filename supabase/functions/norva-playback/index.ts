@@ -1,5 +1,6 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
@@ -307,7 +308,7 @@ const ENV_MEDIA_CACHE_FOLLOWER_WAIT_MS = Deno.env.get("NORVA_MEDIA_CACHE_FOLLOWE
 const MEDIA_CACHE_SINGLEFLIGHT_OWNER_INSTANCE_ID = crypto.randomUUID();
 const MEDIA_CACHE_SINGLEFLIGHT_LEASE_TTL_SECONDS = 120;
 const MEDIA_CACHE_BACKGROUND_PREEMPT_WAIT_MS = 8_000;
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const SUBTITLE_EMAIL_FROM = Deno.env.get("NORVA_SUBTITLE_EMAIL_FROM") ?? "Norva Updates <updates@norva.tv>";
 const EMAIL_REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const PUBLIC_SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
@@ -12210,10 +12211,10 @@ async function sendPreparedSubtitleEmail(
   prepared: PreparedSubtitleEmail,
 ): Promise<SubtitleEmailTransportResult> {
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await requestEmailProvider("postal:send", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": "Norva-Subtitle-Email/2.0",
         "Idempotency-Key": claim.delivery_key,
@@ -12264,7 +12265,7 @@ async function runSubtitleEmailDelivery(req: Request, db: SupabaseClient): Promi
   const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   const { data: authorized, error: authError } = await db.rpc("norva_verify_cron_secret", { presented: token });
   if (authError || authorized !== true) throw new HttpError(403, "Unauthorized");
-  if (!RESEND_API_KEY) throw new HttpError(503, "Resend transport is not configured");
+  if (!NORVA_POSTAL_WIRE_KEY) throw new HttpError(503, "Postal transport is not configured");
   return { ok: true, ...(await drainSubtitleEmailDeliveries(db)) };
 }
 
@@ -12287,7 +12288,7 @@ async function drainSubtitleEmailDeliveries(db: SupabaseClient): Promise<JsonRec
     retryAfterSeconds: number | null = null,
     ambiguous = false,
   ) => {
-    const { data: disposition, error: failError } = await db.rpc("fail_subtitle_email_delivery", {
+    const { data: disposition, error: failError } = await db.rpc("fail_postal_subtitle_email_delivery", {
       p_delivery_id: claim.delivery_id,
       p_lease_token: claim.lease_token,
       p_retryable: retryable,
@@ -12393,11 +12394,11 @@ async function drainSubtitleEmailDeliveries(db: SupabaseClient): Promise<JsonRec
       }
       transportAccepted = true;
 
-      const { data: completed, error: completeError } = await db.rpc("complete_subtitle_email_delivery", {
+      const { data: completed, error: completeError } = await db.rpc("complete_postal_subtitle_email_delivery", {
         p_delivery_id: claim.delivery_id,
         p_lease_token: claim.lease_token,
         p_http_status: result.httpStatus,
-        p_resend_email_id: result.emailId,
+        p_postal_delivery_id: result.emailId,
         p_response: result.response,
       });
       if (completeError || completed !== true) {

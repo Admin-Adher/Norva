@@ -49,7 +49,7 @@ test('email transport resolves the current Auth recipient and uses the SQL deliv
   assert.match(worker, /admin\.auth\.admin\.getUserById\(userId\)/);
   assert.match(worker, /await authorize\(claimed, "email", worker, resolved\.email\)/);
   assert.match(worker, /"Idempotency-Key": claimed\.delivery_key/);
-  assert.match(worker, /RESEND_ACCEPTED/);
+  assert.match(worker, /POSTAL_SMTP_SENT/);
   assert.match(worker, /response\.ok && providerId/);
   assert.match(worker, /This reminder concerns access supplied by an external provider/);
   assert.match(worker, /Your Norva plan is not affected/);
@@ -58,7 +58,7 @@ test('email transport resolves the current Auth recipient and uses the SQL deliv
 });
 
 test('push is data-only, independently durable and deduplicated by a stable row key', () => {
-  assert.match(worker, /const emailDrain = RESEND_API_KEY[\s\S]*const pushDrain = fcmConfigured\(\)[\s\S]*Promise\.allSettled\(\[emailDrain, pushDrain\]\)/);
+  assert.match(worker, /const emailDrain = NORVA_POSTAL_WIRE_KEY[\s\S]*const pushDrain = fcmConfigured\(\)[\s\S]*Promise\.allSettled\(\[emailDrain, pushDrain\]\)/);
   assert.match(worker, /skipped_not_configured/);
   assert.match(worker, /dataOnly: true/);
   assert.match(worker, /notificationId: claimed\.delivery_key/);

@@ -186,10 +186,10 @@ test('accepted-but-unacknowledged receipt keeps its lease for a safe replay', ()
     billing.indexOf('// Is this the owner'),
   );
   const accepted = drain.slice(drain.indexOf('if (sent.accepted'), drain.indexOf('const { data: failed'));
-  assert.match(accepted, /complete_billing_receipt_delivery/);
+  assert.match(accepted, /complete_postal_billing_receipt_delivery/);
   assert.match(accepted, /accepted_unacknowledged\+\+/);
   assert.match(accepted, /continue;/);
-  assert.doesNotMatch(accepted, /fail_billing_receipt_delivery/);
+  assert.doesNotMatch(accepted, /fail_postal_billing_receipt_delivery/);
 });
 
 test('billing cron drains the receipt outbox without changing charge decisions', () => {

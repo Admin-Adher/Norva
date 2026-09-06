@@ -2,13 +2,14 @@
 // leases, eligibility and terminal state; this worker only resolves the current
 // recipient/token, performs the final authorization CAS and calls Resend/FCM.
 
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { fcmConfigured, sendFcmPush } from "../_shared/fcm.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const EMAIL_FROM = Deno.env.get("PROVIDER_ACCESS_EMAIL_FROM") ?? "Norva <hello@norva.tv>";
 const EMAIL_REPLY_TO = Deno.env.get("PROVIDER_ACCESS_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const BATCH = 4;
@@ -209,15 +210,15 @@ async function sendEmail(claimed: Claim, worker: string): Promise<"delivered" | 
   if (!await authorize(claimed, "email", worker, resolved.email)) return "stale";
   const recipient = resolved.email;
   if (!recipient) return "stale";
-  if (!RESEND_API_KEY) {
+  if (!NORVA_POSTAL_WIRE_KEY) {
     return (await fail(claimed, "email", worker, "RESEND_NOT_CONFIGURED", true)) as "retry" | "dead_letter" | "stale";
   }
   const copy = copyFor(claimed.event_kind, claimed.expires_on);
   try {
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await requestEmailProvider("postal:send", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "Idempotency-Key": claimed.delivery_key,
         "User-Agent": "Norva-Provider-Access/2.0",
@@ -236,7 +237,7 @@ async function sendEmail(claimed: Claim, worker: string): Promise<"delivered" | 
     const payload = await response.json().catch(() => ({})) as { id?: unknown };
     const providerId = typeof payload.id === "string" ? payload.id.slice(0, 240) : null;
     if (response.ok && providerId) {
-      return await complete(claimed, "email", worker, "RESEND_ACCEPTED", providerId) ? "delivered" : "stale";
+      return await complete(claimed, "email", worker, "POSTAL_SMTP_SENT", providerId) ? "delivered" : "stale";
     }
     const retryable = response.ok || retryableStatus(response.status);
     return (await fail(
@@ -317,7 +318,7 @@ async function drain(): Promise<Record<string, unknown>> {
   // not claim or consume attempts: its rows remain pending and visible in the
   // health snapshot until the operator configures the secret or disables the
   // corresponding default-off channel flag.
-  const emailDrain = RESEND_API_KEY
+  const emailDrain = NORVA_POSTAL_WIRE_KEY
     ? drainChannel("email")
     : Promise.resolve({ skipped_not_configured: 1 });
   const pushDrain = fcmConfigured()

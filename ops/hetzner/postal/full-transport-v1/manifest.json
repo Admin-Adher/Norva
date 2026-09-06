@@ -1,0 +1,15 @@
+{
+  "model.mjs": "490d27007aae924d0356a3f4be564c08e02eacffe5cfcd1eca36615d2aa2e4e0",
+  "store.mjs": "7b685c4c41c4f36e3e7d1953148ae6a4f297d2536762715df511180f3cc42b5d",
+  "worker.mjs": "3f5f478c3c651d71ec3ad0e85f5ed581d4d29da47d14b239d57c755161c7b63a",
+  "service.mjs": "c0241232e193eeefd8aafbf1f8da7ee1195555bb23d7280293c2d86af87d70f5",
+  "gateway.mjs": "f8af65f09d2f37481534ac982284cf61a738a22bee387f5be41766ef8f01b20b",
+  "postal-mail-wire.mjs": "17996d4c9b8bac6c381c872e45849064c8801d79050ccc2b8c20b05a1cb1b13a",
+  "postal-webhook-verifier.mjs": "aca4533a08a3a22df5ed905b7884738cd21535caa14311178263e47abc278708",
+  "guest.py": "ace2dcf4d4ab53387b59e24121ee6ab5f89affea700b7e6da8548cb555b71caa",
+  "postal.rb": "93a8c01b13ed3f092e8ff10c07c984272f7179dabdd45366ca6b351b8ea0fc7a",
+  "install-host.py": "e16dd6c589171a7d4c01a9ad0a84045b2d75794556fc15d5a7fbde56080d68da",
+  "install-guest.py": "ee4c85a17233470b2ac14eeab3a763aac15fe45c7e8da5f85f1a3083b370fdd1",
+  "Dockerfile": "7c037e86aa887634b3a88e9b6c60dbb841efb7b2e2b83746d259a648820690c1",
+  "migration.sql": "182c9ed55d21035ef8bd41650c0dbf2d0fb506257f431794158d9b82bea860f9"
+}

@@ -148,7 +148,7 @@ test('Resend senders include multipart text, reply-to and stable tags without we
   assert.match(resendTransport, /headers: claim\.request_headers/);
 });
 
-test('every remaining direct Resend API caller declares an explicit product User-Agent', () => {
+test('every Postal mail caller declares its product User-Agent and no sender uses Resend HTTP', () => {
   const functionRoot = path.join(root, 'supabase/functions');
   const senders = fs.readdirSync(functionRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(functionRoot, entry.name, 'index.ts')))
@@ -156,10 +156,11 @@ test('every remaining direct Resend API caller declares an explicit product User
   let auditedSenders = 0;
   for (const sender of senders) {
     const source = fs.readFileSync(path.join(functionRoot, sender), 'utf8');
-    if (!/https:\/\/api\.resend\.com\/emails(?:\/batch)?/.test(source)) continue;
+    assert.doesNotMatch(source, /https:\/\/api\.resend\.com\/emails(?:\/batch)?/, `${sender} must not send through Resend`);
+    if (!/postal:(?:send|batch)/.test(source)) continue;
     auditedSenders++;
     const agents = source.match(/"User-Agent":\s*"Norva-[A-Za-z-]+\/2\.0"/g) ?? [];
-    assert.ok(agents.length > 0, `${sender} must identify every direct Resend request`);
+    assert.ok(agents.length > 0, `${sender} must identify every Postal request`);
   }
-  assert.ok(auditedSenders > 0, 'the direct Resend sender inventory must not be empty');
+  assert.ok(auditedSenders > 0, 'the Postal sender inventory must not be empty');
 });

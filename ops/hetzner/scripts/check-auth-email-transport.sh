@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Read-only preflight for Norva's authoritative GoTrue -> signed HTTP hook ->
-# Resend authentication-email path. It never sends an email and never prints a
+# Postal authentication-email path. It never sends an email and never prints a
 # credential. Run from ops/hetzner before a recreate, then again with --runtime.
 
 ENV_FILE="${ENV_FILE:-.env}"
@@ -34,7 +34,7 @@ read_env() {
 
 # Duplicate dotenv keys make first-value/last-value consumers disagree. Reject
 # them before reading anything so Auth and Edge cannot silently diverge.
-for key in RESEND_API_KEY SEND_EMAIL_HOOK_SECRET AUTH_SEND_EMAIL_HOOK_URI SUPABASE_PUBLIC_URL AUTH_EMAIL_FROM; do
+for key in NORVA_POSTAL_WIRE_KEY SEND_EMAIL_HOOK_SECRET AUTH_SEND_EMAIL_HOOK_URI SUPABASE_PUBLIC_URL AUTH_EMAIL_FROM; do
   count="$(grep -c "^${key}=" "$ENV_FILE" || true)"
   if [[ "$count" != "1" ]]; then
     echo "auth_email_transport=fail reason=duplicate_or_missing_env_key key=$key" >&2
@@ -42,14 +42,14 @@ for key in RESEND_API_KEY SEND_EMAIL_HOOK_SECRET AUTH_SEND_EMAIL_HOOK_URI SUPABA
   fi
 done
 
-resend_key="$(read_env RESEND_API_KEY)"
+postal_key="$(read_env NORVA_POSTAL_WIRE_KEY)"
 hook_secret="$(read_env SEND_EMAIL_HOOK_SECRET)"
 hook_uri="$(read_env AUTH_SEND_EMAIL_HOOK_URI)"
 public_url="$(read_env SUPABASE_PUBLIC_URL)"
 auth_email_from="$(read_env AUTH_EMAIL_FROM)"
 
-if [[ ! "$resend_key" =~ ^re_[A-Za-z0-9_-]{20,}$ ]]; then
-  echo "auth_email_transport=fail reason=invalid_resend_sending_key" >&2
+if [[ ! "$postal_key" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "auth_email_transport=fail reason=invalid_postal_transport_key" >&2
   exit 1
 fi
 if [[ "$auth_email_from" != 'Norva <support@norva.tv>' ]]; then
@@ -149,8 +149,12 @@ for container in norva-edge-functions norva-edge-functions-2; do
     echo "auth_email_transport=fail reason=edge_hook_secret_drift container=$container" >&2
     exit 1
   fi
-  if [[ "$(container_env "$container" RESEND_API_KEY)" != "$resend_key" ]]; then
-    echo "auth_email_transport=fail reason=edge_resend_key_drift container=$container" >&2
+  if [[ "$(container_env "$container" NORVA_POSTAL_WIRE_KEY)" != "$postal_key" ]]; then
+    echo "auth_email_transport=fail reason=edge_postal_key_drift container=$container" >&2
+    exit 1
+  fi
+  if [[ -n "$(container_env "$container" RESEND_API_KEY)" ]]; then
+    echo "auth_email_transport=fail reason=retired_resend_key_present container=$container" >&2
     exit 1
   fi
   if [[ "$(container_env "$container" AUTH_EMAIL_FROM)" != "$auth_email_from" ]]; then

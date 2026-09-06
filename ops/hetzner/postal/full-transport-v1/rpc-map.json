@@ -1,0 +1,17 @@
+{
+  "complete_branded_email_delivery": "complete_postal_branded_email_delivery",
+  "fail_branded_email_delivery": "fail_postal_branded_email_delivery",
+  "complete_support_email_delivery": "complete_postal_support_email_delivery",
+  "fail_support_email_delivery": "fail_postal_support_email_delivery",
+  "complete_account_deletion_email_delivery": "complete_postal_account_deletion_email_delivery",
+  "fail_account_deletion_email_delivery": "fail_postal_account_deletion_email_delivery",
+  "complete_billing_receipt_delivery": "complete_postal_billing_receipt_delivery",
+  "fail_billing_receipt_delivery": "fail_postal_billing_receipt_delivery",
+  "complete_import_notification_delivery": "complete_postal_import_notification_delivery",
+  "fail_import_notification_delivery": "fail_postal_import_notification_delivery",
+  "complete_subtitle_email_delivery": "complete_postal_subtitle_email_delivery",
+  "fail_subtitle_email_delivery": "fail_postal_subtitle_email_delivery",
+  "claim_branded_email_deliveries": "claim_postal_branded_email_deliveries",
+  "defer_branded_email_delivery": "defer_postal_branded_email_delivery",
+  "fail_billing_receipt_delivery_v2": "fail_postal_billing_receipt_delivery_v2"
+}

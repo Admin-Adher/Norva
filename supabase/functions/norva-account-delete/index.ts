@@ -8,6 +8,7 @@
 // A prepared row can never send a false deletion confirmation, and no retry can
 // repeat or roll back the account deletion itself.
 
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
@@ -19,7 +20,7 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
 const REPLY_TO = Deno.env.get("AUTH_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const DELIVERY_BATCH = 5;
@@ -316,10 +317,10 @@ async function deletionAuthenticationGuard(token: string): Promise<
 
 async function sendDeletionEmail(claim: DeletionDeliveryClaim): Promise<ResendResult> {
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await requestEmailProvider("postal:send", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": "Norva-Account-Delete/2.0",
         "Idempotency-Key": claim.delivery_key,
@@ -368,7 +369,7 @@ async function sendDeletionEmail(claim: DeletionDeliveryClaim): Promise<ResendRe
 }
 
 async function drainDeletionEmailOutbox(db: SupabaseClient): Promise<Record<string, number | boolean>> {
-  if (!RESEND_API_KEY) {
+  if (!NORVA_POSTAL_WIRE_KEY) {
     return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, lease_lost: 0 };
   }
 
@@ -413,10 +414,10 @@ async function drainDeletionEmailOutbox(db: SupabaseClient): Promise<Record<stri
       }
     }
     if (sent.accepted && sent.emailId) {
-      const { data: completed, error: completeError } = await db.rpc("complete_account_deletion_email_delivery", {
+      const { data: completed, error: completeError } = await db.rpc("complete_postal_account_deletion_email_delivery", {
         p_delivery_key: claim.delivery_key,
         p_lease_token: claim.lease_token,
-        p_resend_email_id: sent.emailId,
+        p_postal_delivery_id: sent.emailId,
         p_http_status: sent.status,
         p_response: sent.response,
       });
@@ -432,7 +433,7 @@ async function drainDeletionEmailOutbox(db: SupabaseClient): Promise<Record<stri
       continue;
     }
 
-    const { data: failed, error: failError } = await db.rpc("fail_account_deletion_email_delivery", {
+    const { data: failed, error: failError } = await db.rpc("fail_postal_account_deletion_email_delivery", {
       p_delivery_key: claim.delivery_key,
       p_lease_token: claim.lease_token,
       p_http_status: sent.status,

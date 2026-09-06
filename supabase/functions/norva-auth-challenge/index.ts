@@ -13,6 +13,7 @@
  *
  * Raw emails and codes are never logged or stored in Postgres.
  */
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import {
   INGRESS_AUDIENCE_AUTH_CHALLENGE,
   MAX_EMAIL_LENGTH,
@@ -332,13 +333,14 @@ function escapeHtml(value: string): string {
   })[char] as string);
 }
 
-async function sendChallenge(email: string, code: string, challengeId: string): Promise<boolean> {
-  const key = Deno.env.get("RESEND_API_KEY") ?? "";
+export async function sendChallenge(email: string, code: string, challengeId: string): Promise<boolean> {
+  const key = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
   if (!key) return false;
   const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
   const replyTo = Deno.env.get("AUTH_EMAIL_REPLY_TO") ?? "support@norva.tv";
   const safeCode = escapeHtml(code);
-  const response = await fetch("https://api.resend.com/emails", {
+  let response: Response;
+  try { response = await requestEmailProvider("postal:send", {
     method: "POST",
     headers: {
       authorization: `Bearer ${key}`,
@@ -361,7 +363,12 @@ async function sendChallenge(email: string, code: string, challengeId: string): 
     }),
     signal: AbortSignal.timeout(8000),
   });
-  return response.ok;
+  } catch { return false; }
+  if (!response.ok) return false;
+  // A positive HTTP response without a provider receipt is not an acknowledged
+  // OTP delivery. Do not expose provider content, codes or recipients in logs.
+  const receipt = await response.json().catch(() => null);
+  return typeof receipt?.id === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(receipt.id);
 }
 
 function randomPassword(): string {

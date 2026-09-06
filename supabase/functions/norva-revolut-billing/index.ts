@@ -26,6 +26,7 @@
 //       body := '{}'::jsonb, timeout_milliseconds := 90000);
 //   $$);
 
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { latestPaywallAttribution, type PaywallAttribution } from "../_shared/paywall-experiments.ts";
@@ -45,7 +46,7 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("S
 const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 const PARTNERS_ENVIRONMENT = revolutEnvironment(REVOLUT_API_BASE);
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
 const REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
 // Each user does 2-3 Revolut round-trips (create + pay [+ refetch]); keep the batch
@@ -277,10 +278,10 @@ async function sendReceiptDelivery(
   request: PreparedReceiptDelivery,
 ): Promise<ReceiptSendResult> {
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await requestEmailProvider("postal:send", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": "Norva-Billing-Email/2.0",
         "Idempotency-Key": deliveryKey,
@@ -335,7 +336,7 @@ async function drainBillingReceiptOutbox(
   db: SupabaseClient,
   errors: unknown[],
 ): Promise<Record<string, number | boolean>> {
-  if (!RESEND_API_KEY) return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, lease_lost: 0 };
+  if (!NORVA_POSTAL_WIRE_KEY) return { configured: false, claimed: 0, sent: 0, retry_scheduled: 0, dead_letter: 0, lease_lost: 0 };
 
   const { data, error } = await db.rpc("claim_billing_receipt_deliveries", {
     p_batch: RECEIPT_DELIVERY_BATCH,
@@ -415,10 +416,10 @@ async function drainBillingReceiptOutbox(
 
     const sent = await sendReceiptDelivery(claim.delivery_key, prepared);
     if (sent.accepted && sent.emailId) {
-      const { data: completed, error: completeError } = await db.rpc("complete_billing_receipt_delivery", {
+      const { data: completed, error: completeError } = await db.rpc("complete_postal_billing_receipt_delivery", {
         p_delivery_key: claim.delivery_key,
         p_lease_token: claim.lease_token,
-        p_resend_email_id: sent.emailId,
+        p_postal_delivery_id: sent.emailId,
         p_http_status: sent.status,
         p_response: sent.response,
       });
@@ -435,7 +436,7 @@ async function drainBillingReceiptOutbox(
       continue;
     }
 
-    const { data: failed, error: failError } = await db.rpc("fail_billing_receipt_delivery_v2", {
+    const { data: failed, error: failError } = await db.rpc("fail_postal_billing_receipt_delivery_v2", {
       p_delivery_key: claim.delivery_key,
       p_lease_token: claim.lease_token,
       p_http_status: sent.status,
@@ -1522,7 +1523,7 @@ async function run(db: SupabaseClient): Promise<Record<string, unknown>> {
     if (errors.length < 5) errors.push({ phase: "checkout_reconciliation", detail: errorText(error).slice(0, 400) });
   }
   let receiptDelivery: Record<string, number | boolean> = {
-    configured: Boolean(RESEND_API_KEY),
+    configured: Boolean(NORVA_POSTAL_WIRE_KEY),
     claimed: 0,
     sent: 0,
     retry_scheduled: 0,

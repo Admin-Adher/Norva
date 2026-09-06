@@ -1,6 +1,6 @@
 // Durable sender for DB-originated branded emails (security alerts + trial reminders).
 // PostgreSQL owns immutable requests and delivery state; this worker owns only
-// authenticated draining and Resend network I/O.
+// authenticated draining and the private Postal transport.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
@@ -11,8 +11,8 @@ type JsonRecord = Record<string, unknown>;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const DELIVERY_BATCH = 4; // below Resend's default five-requests/second limit
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
+const DELIVERY_BATCH = 4; // bounded sequential admissions to the private mail queue
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -80,7 +80,7 @@ function ambiguousResendStatus(status: number | null, retryable: boolean): boole
 
 async function sendDelivery(claim: DeliveryClaim): Promise<ResendResult> {
   return await sendResendDelivery(claim, {
-    apiKey: RESEND_API_KEY,
+    apiKey: NORVA_POSTAL_WIRE_KEY,
     timeoutMs: 8_000,
   }) as ResendResult;
 }
@@ -111,7 +111,7 @@ async function pushAfterAcknowledgement(claim: DeliveryClaim): Promise<void> {
 }
 
 async function drain(): Promise<Record<string, unknown>> {
-  if (!RESEND_API_KEY) {
+  if (!NORVA_POSTAL_WIRE_KEY) {
     const { data: health, error: healthError } = await admin.rpc(
       "branded_email_delivery_health",
     );
@@ -128,7 +128,7 @@ async function drain(): Promise<Record<string, unknown>> {
     };
   }
 
-  const { data, error } = await admin.rpc("claim_branded_email_deliveries", {
+  const { data, error } = await admin.rpc("claim_postal_branded_email_deliveries", {
     p_batch: DELIVERY_BATCH,
     p_lease_seconds: 90,
     p_max_attempts: 12,
@@ -164,12 +164,12 @@ async function drain(): Promise<Record<string, unknown>> {
     const sent = await sendDelivery(claim);
     if (sent.accepted && sent.emailId) {
       const { data: completed, error: completeError } = await admin.rpc(
-        "complete_branded_email_delivery",
+        "complete_postal_branded_email_delivery",
         {
           p_id: claim.id,
           p_delivery_key: claim.delivery_key,
           p_lease_token: claim.lease_token,
-          p_resend_email_id: sent.emailId,
+          p_postal_delivery_id: sent.emailId,
           p_http_status: sent.status,
           p_response: sent.response,
         },
@@ -195,7 +195,7 @@ async function drain(): Promise<Record<string, unknown>> {
     const retryable = (sent.status !== null && sent.status >= 200 && sent.status <= 299) ||
       retryableResendStatus(sent.status, sent.response);
     const { data: failure, error: failError } = await admin.rpc(
-      "fail_branded_email_delivery",
+      "fail_postal_branded_email_delivery",
       {
         p_id: claim.id,
         p_delivery_key: claim.delivery_key,
@@ -224,7 +224,7 @@ async function drain(): Promise<Record<string, unknown>> {
     if (sent.status === 429 && claimIndex < claims.length - 1) {
       const retryAfter = sent.retryAfterSeconds ?? 60;
       for (const deferred of claims.slice(claimIndex + 1)) {
-        await admin.rpc("defer_branded_email_delivery", {
+        await admin.rpc("defer_postal_branded_email_delivery", {
           p_id: deferred.id,
           p_delivery_key: deferred.delivery_key,
           p_lease_token: deferred.lease_token,

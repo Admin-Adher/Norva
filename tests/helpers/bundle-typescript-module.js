@@ -1,9 +1,8 @@
 const { build } = require('esbuild');
 
-// importTypescriptModule transforms one file and imports it as a data URL, which
-// works only while the module has no relative imports: a `./x.ts` cannot resolve
-// against a data: URL. This bundles the graph first, for shared modules that are
-// split across files.
+// Shared implementation for data-URL test imports, including the legacy
+// importTypescriptModule entry point. Bundle local dependencies first because
+// a `./x.ts` cannot resolve against a data: URL.
 //
 // Deno specifiers (npm:, jsr:, https:) are left external. In these modules they
 // only ever carry types, so the TypeScript erasure removes them entirely and

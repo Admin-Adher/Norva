@@ -1,4 +1,6 @@
-const RESEND_ENDPOINT = "https://api.resend.com/emails";
+import { requestEmailProvider } from './email-provider-request.mjs';
+
+const RESEND_ENDPOINT = "postal:send";
 const DEFAULT_TIMEOUT_MS = 8_000;
 
 function stringOrNull(value) {
@@ -76,7 +78,7 @@ export async function sendResendDelivery(
   try {
     const timeout = Math.max(1, Math.min(30_000, Math.trunc(Number(timeoutMs) || DEFAULT_TIMEOUT_MS)));
     const request = buildResendDeliveryRequest(claim, apiKey ?? "", AbortSignal.timeout(timeout));
-    const res = await fetchImpl(request.endpoint, request.init);
+    const res = await requestEmailProvider(request.endpoint, request.init, { fetchImpl });
     const raw = (await res.text()).slice(0, 4_000);
     let parsed = {};
     try { parsed = raw ? JSON.parse(raw) : {}; } catch (_) { parsed = {}; }

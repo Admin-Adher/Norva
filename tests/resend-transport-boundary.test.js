@@ -4,6 +4,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const transport = import('../supabase/functions/_shared/resend-transport.mjs');
+const doubles=import('./helpers/postal-wire-double.mjs');
+const previousDeno=globalThis.Deno;
+test.before(()=>{globalThis.Deno={env:{get:k=>k==='NORVA_POSTAL_WIRE_KEY'?'7'.repeat(64):undefined}};});
+test.after(()=>{globalThis.Deno=previousDeno;});
 
 function response(payload, status, headers = {}) {
   return new Response(typeof payload === 'string' ? payload : JSON.stringify(payload), {
@@ -29,15 +33,16 @@ function claim() {
   };
 }
 
-test('Resend HTTP boundary freezes the reviewed multipart request and accepts only a 2xx provider id', async () => {
+test('Postal HTTP boundary freezes the reviewed multipart request and accepts only a 2xx provider id', async () => {
   const { sendResendDelivery } = await transport;
+  const {postalDouble}=await doubles;
   const calls = [];
   const result = await sendResendDelivery(claim(), {
     apiKey: 're_internal_test_secret_1234567890',
-    fetchImpl: async (url, init) => {
-      calls.push({ url, init });
-      return response({ id: 'email-provider-accepted-1' }, 200);
-    },
+    fetchImpl: postalDouble(async(clear,init)=>{
+      calls.push({clear,init});
+      return {status:200,body:{id:'email-provider-accepted-1'}};
+    }),
   });
 
   assert.deepEqual(result, {
@@ -49,14 +54,13 @@ test('Resend HTTP boundary freezes the reviewed multipart request and accepts on
     retryAfterSeconds: null,
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://api.resend.com/emails');
+  assert.equal(calls[0].clear.kind,'single');
   assert.equal(calls[0].init.method, 'POST');
-  assert.equal(calls[0].init.headers.Authorization, 'Bearer re_internal_test_secret_1234567890');
-  assert.equal(calls[0].init.headers['User-Agent'], 'Norva-Branded-Email/2.0');
-  assert.equal(calls[0].init.headers['Idempotency-Key'], claim().delivery_key);
+  assert.equal(new Headers(calls[0].init.headers).has('Authorization'),false);
+  assert.equal(calls[0].clear.key,claim().delivery_key);
   assert.ok(calls[0].init.signal instanceof AbortSignal);
   assert.equal(calls[0].init.signal.aborted, false);
-  assert.deepEqual(JSON.parse(calls[0].init.body), {
+  assert.deepEqual(calls[0].clear.messages, {
     from: claim().request_from,
     reply_to: claim().request_reply_to,
     to: [claim().recipient_email],
@@ -68,8 +72,9 @@ test('Resend HTTP boundary freezes the reviewed multipart request and accepts on
   });
 });
 
-test('Resend HTTP boundary keeps ambiguous, throttled and timeout outcomes retryable by the durable worker', async () => {
+test('Postal HTTP boundary keeps ambiguous, throttled and timeout outcomes retryable by the durable worker', async () => {
   const { sendResendDelivery } = await transport;
+  const {postalDouble}=await doubles;
   const queued = [
     response({}, 202),
     response({
@@ -78,7 +83,9 @@ test('Resend HTTP boundary keeps ambiguous, throttled and timeout outcomes retry
       ignored: 'must not cross the diagnostic boundary',
     }, 429, { 'retry-after': '120' }),
   ];
-  const fetchImpl = async () => queued.shift();
+  const fetchImpl=postalDouble(async()=>{
+    const r=queued.shift();return{status:r.status,body:await r.json(),...(r.headers.has('retry-after')?{retryAfter:Number(r.headers.get('retry-after'))}:{})};
+  });
 
   const ambiguous = await sendResendDelivery(claim(), {
     apiKey: 'test', fetchImpl,

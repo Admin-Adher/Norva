@@ -115,7 +115,7 @@ test('delivery failures back off and eventually become dead letters', () => {
 test('sender resolves current auth email and uses a stable Resend idempotency key', () => {
   const digest = source.slice(source.indexOf('async function runDigest'), source.indexOf('Deno.serve'));
   assert.match(digest, /claim_import_notification_deliveries/);
-  assert.match(digest, /if \(!RESEND_API_KEY\) throw new Error\("Resend transport is not configured"\)/);
+  assert.match(digest, /if \(!NORVA_POSTAL_WIRE_KEY\) throw new Error\("Postal transport is not configured"\)/);
   assert.match(digest, /db\.auth\.admin\.getUserById\(userId\)/);
   assert.ok(digest.indexOf('claim_import_notification_deliveries') < digest.indexOf('getUserById(userId)'));
   assert.match(digest, /prepare_import_notification_delivery/);
@@ -129,10 +129,10 @@ test('sender resolves current auth email and uses a stable Resend idempotency ke
   assert.match(digest, /prepared\.request_tags/);
   assert.match(source, /"Idempotency-Key": `norva-import-\$\{deliveryKey\}`/);
   assert.match(source, /typeof response\?\.id === "string"/);
-  assert.match(digest, /complete_import_notification_delivery/);
-  assert.match(digest, /p_resend_email_id: result\.emailId/);
+  assert.match(digest, /complete_postal_import_notification_delivery/);
+  assert.match(digest, /p_postal_delivery_id: result\.emailId/);
   assert.match(digest, /p_recipient_email: email/);
-  assert.match(digest, /fail_import_notification_delivery/);
+  assert.match(digest, /fail_postal_import_notification_delivery/);
   assert.match(digest, /skip_import_notification_delivery/);
   assert.doesNotMatch(digest, /\.from\("cloud_import_notifications"\)\s*\.select/);
   assert.doesNotMatch(digest, /update\(\{ status: "sent"/);

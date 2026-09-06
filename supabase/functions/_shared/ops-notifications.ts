@@ -1,3 +1,4 @@
+import { requestEmailProvider } from './email-provider-request.mjs';
 import { groupOpsNotifications, TELEGRAM_CATEGORIES } from './telegram-routing.mjs';
 import { sendTelegram, telegramConfigured, tgEscape, type TelegramCategory } from './telegram.ts';
 
@@ -11,7 +12,7 @@ export async function dispatchOpsNotifications(admin:any, problems:Incident[], o
   const states = (data ?? []) as DeliveryState[];
   const active = new Set(problems.map(p=>p.key));
   const lidActive = problems.some(p=>p.key.startsWith('lid_cascade_'));
-  const resendKey = Deno.env.get('RESEND_API_KEY') ?? '';
+  const resendKey = Deno.env.get('NORVA_POSTAL_WIRE_KEY') ?? '';
   const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
   const results:{category:string;channel:string;recovery:boolean;accepted:boolean;keys:string[]}[]=[];
   async function deliver(category:TelegramCategory,channel:'telegram'|'email',items:Incident[],recovery:boolean) {
@@ -24,7 +25,7 @@ export async function dispatchOpsNotifications(admin:any, problems:Incident[], o
       try {
         const bucket=Math.floor(Date.now()/COOLDOWN);
         const signature=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(items.map(p=>p.key).sort().join('|'))))).map(b=>b.toString(16).padStart(2,'0')).join('');
-        const response=await fetch('https://api.resend.com/emails',{
+        const response=await requestEmailProvider('postal:send',{
           method:'POST',headers:{Authorization:`Bearer ${resendKey}`,'Content-Type':'application/json',
             'Idempotency-Key':`norva-ops-${category}-${recovery?'recovery':'alert'}-${bucket}-${signature}`},
           body:JSON.stringify({from,to:[opsEmail],reply_to:opsEmail,subject:heading,

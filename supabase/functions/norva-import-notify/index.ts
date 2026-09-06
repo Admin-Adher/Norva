@@ -13,6 +13,7 @@
 //       body := '{}'::jsonb, timeout_milliseconds := 60000);
 //   $$);
 
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
@@ -28,7 +29,7 @@ import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const FROM = Deno.env.get("NORVA_IMPORT_EMAIL_FROM") ?? "Norva Updates <updates@norva.tv>";
 const REPLY_TO = Deno.env.get("NORVA_EMAIL_REPLY_TO") ?? "support@norva.tv";
 const SETTLE_SECONDS = 60;   // let a burst (multi-provider add) settle so it digests into one email
@@ -176,10 +177,10 @@ async function sendImportEmail(
   deliveryKey: string,
 ): Promise<ResendResult> {
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await requestEmailProvider("postal:send", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": "Norva-Import-Email/2.0",
         "Idempotency-Key": `norva-import-${deliveryKey}`,
@@ -258,7 +259,7 @@ async function sendPushForGroup(db: SupabaseClient, userId: string, kind: string
 async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
   // A missing transport is an operational outage, not a reason to consume and
   // permanently skip user notifications.
-  if (!RESEND_API_KEY) throw new Error("Resend transport is not configured");
+  if (!NORVA_POSTAL_WIRE_KEY) throw new Error("Postal transport is not configured");
 
   const { data, error } = await db.rpc("claim_import_notification_deliveries", {
     p_group_limit: GROUP_BATCH,
@@ -281,7 +282,7 @@ async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
     httpStatus: number | null = null,
     response: Record<string, unknown> | null = null,
   ): Promise<void> => {
-    const { data: disposition, error: failureError } = await db.rpc("fail_import_notification_delivery", {
+    const { data: disposition, error: failureError } = await db.rpc("fail_postal_import_notification_delivery", {
       p_delivery_key: claim.delivery_key,
       p_notification_ids: claim.notification_ids,
       p_lease_token: claim.lease_token,
@@ -408,13 +409,13 @@ async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
         continue;
       }
 
-      const { data: completed, error: completeError } = await db.rpc("complete_import_notification_delivery", {
+      const { data: completed, error: completeError } = await db.rpc("complete_postal_import_notification_delivery", {
         p_delivery_key: claim.delivery_key,
         p_notification_ids: claim.notification_ids,
         p_lease_token: claim.lease_token,
         p_recipient_email: prepared.recipient_email,
         p_http_status: result.httpStatus,
-        p_resend_email_id: result.emailId,
+        p_postal_delivery_id: result.emailId,
         p_response: result.response,
       });
       if (completeError || completed !== true) {

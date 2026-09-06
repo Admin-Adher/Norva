@@ -303,10 +303,10 @@ test('accepted but unacknowledged sends keep the lease for safe replay', () => {
     source.indexOf('async function cronAuthorized'),
   );
   const accepted = drain.slice(drain.indexOf('if (sent.accepted'), drain.indexOf('const { data: failed'));
-  assert.match(accepted, /complete_account_deletion_email_delivery/);
+  assert.match(accepted, /complete_postal_account_deletion_email_delivery/);
   assert.match(accepted, /accepted_unacknowledged\+\+/);
   assert.match(accepted, /continue;/);
-  assert.doesNotMatch(accepted, /fail_account_deletion_email_delivery/);
+  assert.doesNotMatch(accepted, /fail_postal_account_deletion_email_delivery/);
 });
 
 test('worker stays below the shared Resend limit and propagates a team 429', () => {

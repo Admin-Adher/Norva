@@ -8,7 +8,7 @@
  * default sender entirely.
  *
  * Required secrets (set in the Supabase dashboard → Edge Functions → Secrets):
- *   RESEND_API_KEY          — Resend API key (re_...)
+ *   NORVA_POSTAL_WIRE_KEY          — Private Postal AEAD key
  *   SEND_EMAIL_HOOK_SECRET  — the hook secret Supabase shows when you enable the
  *                             Send Email Hook (looks like: v1,whsec_base64...)
  *   AUTH_EMAIL_FROM         — optional, defaults to "Norva <support@norva.tv>"
@@ -18,7 +18,9 @@
  *   [functions.norva-auth-email] verify_jwt = false   (see supabase/config.toml)
  */
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
+
+const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const HOOK_SECRET_RAW = Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
 const REPLY_TO = Deno.env.get("AUTH_EMAIL_REPLY_TO") ?? "support@norva.tv";
@@ -131,7 +133,7 @@ interface ResendEmailRequest {
 }
 
 export interface ResendAuthRequest {
-  endpoint: "https://api.resend.com/emails" | "https://api.resend.com/emails/batch";
+  endpoint: "postal:send" | "postal:batch";
   idempotencyKey: string;
   body: ResendEmailRequest | ResendEmailRequest[];
   expectedIds: number;
@@ -167,7 +169,7 @@ export function buildResendAuthRequest(emails: OutboundEmail[], deliveryId: stri
   const payloads = emails.map(resendPayload);
   const batch = payloads.length > 1;
   return {
-    endpoint: batch ? "https://api.resend.com/emails/batch" : "https://api.resend.com/emails",
+    endpoint: batch ? "postal:batch" : "postal:send",
     idempotencyKey: `norva-auth-${stableId}-${batch ? "batch" : "single"}`,
     body: batch ? payloads : payloads[0],
     expectedIds: payloads.length,
@@ -460,9 +462,13 @@ export function buildOutboundEmails(payload: AuthEmailHookPayload): OutboundEmai
   return [{ to: newEmail, ...rendered }];
 }
 
-Deno.serve(async (req) => {
+// The injectable adapter is used by the isolated Postal pair proof only. The
+// live entry point below supplies none: its provider remains Resend.
+export function createAuthEmailHandler({ postalPair = null }: {
+  postalPair?: null | ((input: { payload: AuthEmailHookPayload; rawBody: string; emails: OutboundEmail[] }) => Promise<Response | null>);
+} = {}) {
+return async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!RESEND_API_KEY) return json({ error: "RESEND_API_KEY not configured" }, 500);
 
   const body = await req.text();
   if (!(await verifySignature(req.headers, body))) {
@@ -484,6 +490,18 @@ Deno.serve(async (req) => {
     return json({ error: detail }, 400);
   }
 
+  // Selected Postal requests never fall through to a second provider after a
+  // failure. Only an explicit null (not selected) retains the current path.
+  if (postalPair) {
+    try {
+      const response = await postalPair({ payload, rawBody: body, emails });
+      if (response !== null) return response;
+    } catch {
+      return json({ error: "Email queue unavailable", retryable: true }, 503, { "Retry-After": "2" });
+    }
+  }
+  if (!NORVA_POSTAL_WIRE_KEY) return json({ error: "NORVA_POSTAL_WIRE_KEY not configured" }, 500);
+
   // GoTrue creates a fresh Standard Webhooks id for each retry, so webhook-id
   // cannot be the provider idempotency authority. The signed Auth payload stays
   // stable across retries; hashing it prevents a timeout/ambiguous response from
@@ -493,10 +511,10 @@ Deno.serve(async (req) => {
     .map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 48);
   const request = buildResendAuthRequest(emails, deliveryId);
   try {
-    const res = await fetch(request.endpoint, {
+    const res = await requestEmailProvider(request.endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${NORVA_POSTAL_WIRE_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": "Norva-Auth-Email/2.0",
         "Idempotency-Key": request.idempotencyKey,
@@ -537,4 +555,7 @@ Deno.serve(async (req) => {
   }
 
   return json({});
-});
+};
+}
+
+Deno.serve(createAuthEmailHandler());

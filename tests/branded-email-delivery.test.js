@@ -159,12 +159,12 @@ test('Edge worker checks Resend acceptance and preserves ambiguous accepted send
   assert.match(transport, /tags: claim\.request_tags/);
   assert.match(transport, /AbortSignal\.timeout\(timeout\)/);
   assert.match(transport, /accepted: res\.ok && Boolean\(emailId\)/);
-  assert.match(worker, /complete_branded_email_delivery/);
+  assert.match(worker, /complete_postal_branded_email_delivery/);
   assert.match(worker, /accepted_unacknowledged\+\+/);
   const accepted = section(worker, 'if (sent.accepted && sent.emailId)', 'const { data: failure');
-  assert.doesNotMatch(accepted, /fail_branded_email_delivery/);
+  assert.doesNotMatch(accepted, /fail_postal_branded_email_delivery/);
   assert.match(worker, /retryableResendStatus\(sent\.status, sent\.response\)/);
-  assert.match(worker, /fail_branded_email_delivery/);
+  assert.match(worker, /fail_postal_branded_email_delivery/);
 });
 
 test('branded worker respects team rate limits and quarantines stale ambiguous sends', () => {
@@ -187,7 +187,7 @@ test('branded worker respects team rate limits and quarantines stale ambiguous s
 test('worker is cron-authenticated and logs no recipient or message content', () => {
   assert.match(worker, /admin\.rpc\("norva_verify_cron_secret"/);
   assert.match(worker, /authorized !== true/);
-  assert.match(worker, /if \(!RESEND_API_KEY\)[\s\S]*branded_email_delivery_health/);
+  assert.match(worker, /if \(!NORVA_POSTAL_WIRE_KEY\)[\s\S]*branded_email_delivery_health/);
   const logs = worker.match(/console\.error\([^;]+;/gs) || [];
   for (const log of logs) {
     assert.doesNotMatch(log, /recipient_email|request_subject|request_html|request_text/);
