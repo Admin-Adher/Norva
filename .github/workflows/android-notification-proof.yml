@@ -96,6 +96,25 @@ jobs:
         run: |
           set -euo pipefail
           export ANDROID_AVD_HOME="$RUNNER_TEMP/norva-notification-avd"
+          # Android can restore a virtual network after airplane mode. The entire
+          # emulator and its adb server therefore share a new host network
+          # namespace with loopback only. Drop back to the runner user before
+          # starting either program; artifact upload occurs outside the namespace.
+          norva_runner_name="$(id -un)"
+          sudo --preserve-env=ANDROID_HOME,ANDROID_AVD_HOME unshare --net -- bash -c \
+            'set -euo pipefail; ip link set lo up; exec sudo -H -u "$1" --preserve-env=ANDROID_HOME,ANDROID_AVD_HOME bash -s' \
+            norva-offline "$norva_runner_name" <<'OFFLINE_ANDROID'
+          set -euo pipefail
+          check_host_isolation() {
+            local phase="$1"
+            ip -j link show >"proof/host-links-$phase.json"
+            ip -4 route show default >"proof/host-default-ipv4-$phase.txt"
+            ip -6 route show default >"proof/host-default-ipv6-$phase.txt"
+            test ! -s "proof/host-default-ipv4-$phase.txt"
+            test ! -s "proof/host-default-ipv6-$phase.txt"
+            node -e 'const fs=require("node:fs");const a=JSON.parse(fs.readFileSync(process.argv[1]));if(a.length!==1||a[0].ifname!=="lo")throw Error("host_network_not_isolated")' "proof/host-links-$phase.json"
+          }
+          check_host_isolation before
           adb_bin="$ANDROID_HOME/platform-tools/adb"
           aapt_bin="$ANDROID_HOME/build-tools/35.0.0/aapt"
           emulator_bin="$ANDROID_HOME/emulator/emulator"
@@ -149,7 +168,10 @@ jobs:
           test -s proof/notification-status-mark-proof.png
           sha256sum proof/notification-status-mark-proof.png >proof/status-icon-sha256.txt
           "$adb_bin" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -F 'Active default network:' >proof/network-state-after.txt
-          grep -Eq 'Active default network: (none|null)' proof/network-state-after.txt
+          # A guest network ID is not evidence of Internet access. The enclosing
+          # namespace must still have only loopback and no IPv4/IPv6 default route.
+          check_host_isolation after
+          OFFLINE_ANDROID
 
       - name: Retain bounded test evidence
         if: always()
