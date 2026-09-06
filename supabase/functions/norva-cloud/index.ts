@@ -1,6 +1,6 @@
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DISCOVERY_PLAYLIST_URL, discoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -746,6 +746,7 @@ async function route(
       const input = await readJson(req.clone());
       const inputType = stringOr(input.sourceType ?? input.source_type ?? input.type, "");
       if (inputType === "m3u" && buildSourceConfig(inputType, input).playlistUrl === DISCOVERY_PLAYLIST_URL) {
+        if (!DISCOVERY_SELECTION_ENABLED) throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
         await requireCloudAccess(user.id, db, "source_sync");
         const selectionId = await discoverySourceId(user.id);
         const { data: existing, error } = await db.from("cloud_sources").select("id").eq("id", selectionId).eq("user_id", user.id).maybeSingle();
@@ -1842,6 +1843,9 @@ async function setSourceEnabled(req: Request, id: string, userId: string, db: Su
   // urgent Disable remains available. Newly loaded clients always send the
   // explicit desired state and therefore retain retry idempotence.
   const desired = hasDesiredState ? body.enabled === true : !current;
+  if (desired && !DISCOVERY_SELECTION_ENABLED && id === await discoverySourceId(userId)) {
+    throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
+  }
   const legacyToggle = !hasDesiredState;
   const sourceType = stringOr((cur as JsonRecord | null)?.source_type, "");
   const syncStatus = stringOr((cur as JsonRecord | null)?.sync_status, "idle");

@@ -15,13 +15,13 @@ test('M3U titles preserve commas and never include the tail of quoted names or a
 });
 
 test('selection imports VOD and live in separate sections, deduplicating shared URLs without colliding tvg-ids', async () => {
-  const { fetchDiscoverySelection, discoveryCatalogFields } = await import(modulePath);
+  const { fetchDiscoveryCandidates, discoveryCatalogFields } = await import(modulePath);
   const feeds = [
     { id: 'vod', name: 'VOD', kind: 'movie', url: 'vod' },
     { id: 'tv', name: 'TV', kind: 'live', url: 'tv' },
     { id: 'tv-other', name: 'Other', kind: 'live', url: 'other' },
   ];
-  const playlist = await fetchDiscoverySelection({ feeds, fetchPlaylist: async url => result(url === 'vod'
+  const playlist = await fetchDiscoveryCandidates({ feeds, fetchPlaylist: async url => result(url === 'vod'
     ? [entry('https://media.example/film.mp4')]
     : url === 'tv' ? [entry('https://tv.example/1.m3u8'), entry('https://tv.example/2.m3u8')]
       : [entry('https://tv.example/1.m3u8')]) });
@@ -35,10 +35,10 @@ test('selection imports VOD and live in separate sections, deduplicating shared 
 });
 
 test('regional Pluto copies and rotating JWTs keep one stable programme identity', async () => {
-  const { fetchDiscoverySelection, discoveryCatalogFields } = await import(modulePath);
+  const { fetchDiscoveryCandidates, discoveryCatalogFields } = await import(modulePath);
   const url = 'https://stitch.pluto.tv/v2/stitch/hls/episode/6389ff50753d2100141e055d/master.m3u8';
   const feeds = ['fr', 'us'].map(region => ({ id: `pluto-vod-${region}`, kind: 'movie', name: region, url: region }));
-  const load = token => fetchDiscoverySelection({ feeds, fetchPlaylist: async () => result([entry(`${url}?jwt=${token}`)]) });
+  const load = token => fetchDiscoveryCandidates({ feeds, fetchPlaylist: async () => result([entry(`${url}?jwt=${token}`)]) });
   const a = await load('first'), b = await load('next');
   assert.equal(a.items.length, 6);
   assert.equal(a.sources[1].duplicates, 1);
@@ -48,14 +48,14 @@ test('regional Pluto copies and rotating JWTs keep one stable programme identity
 
 test('the curated Xumo feed imports only its two reviewed channels as live TV and retains provider parameters', async () => {
   const { readFileSync } = require('node:fs');
-  const { DISCOVERY_SOURCES, fetchDiscoverySelection, discoveryCatalogFields } = await import(modulePath);
+  const { DISCOVERY_REVIEW_SOURCES, fetchDiscoveryCandidates, discoveryCatalogFields } = await import(modulePath);
   const { readM3uPlaylistStream } = await import('../supabase/functions/_shared/m3u-playlist-stream.mjs');
-  const feed = DISCOVERY_SOURCES.find(source => source.id === 'xumo-curated');
+  const feed = DISCOVERY_REVIEW_SOURCES.find(source => source.id === 'xumo-curated');
   assert.ok(feed);
-  const text = readFileSync('public/catalog/xumo-live.m3u', 'utf8');
+  const text = readFileSync('tests/fixtures/xumo-live.m3u', 'utf8');
   const urls = text.split(/\r?\n/).filter(line => line.startsWith('https://'));
   const parsed = await readM3uPlaylistStream(new Response(text).body);
-  const selection = await fetchDiscoverySelection({ feeds: [feed], fetchPlaylist: async url => {
+  const selection = await fetchDiscoveryCandidates({ feeds: [feed], fetchPlaylist: async url => {
     assert.equal(url, 'https://norva.tv/catalog/xumo-live.m3u');
     return { ...parsed, response: { ok: true } };
   } });
@@ -76,10 +76,10 @@ test('the curated Xumo feed imports only its two reviewed channels as live TV an
 });
 
 test('a failing playlist is visible in the report and cannot prevent other feeds importing', async () => {
-  const { fetchDiscoverySelection } = await import(modulePath);
+  const { fetchDiscoveryCandidates } = await import(modulePath);
   let active = 0, peak = 0;
   const feeds = Array.from({ length: 9 }, (_, i) => ({ id: `test-${i}`, name: 'Test', kind: 'live', url: String(i) }));
-  const playlist = await fetchDiscoverySelection({ feeds, fetchPlaylist: async url => {
+  const playlist = await fetchDiscoveryCandidates({ feeds, fetchPlaylist: async url => {
     active++; peak = Math.max(peak, active);
     await new Promise(resolve => setImmediate(resolve)); active--;
     if (url === '2') throw new Error('network details must not escape');
@@ -100,8 +100,8 @@ test('credential-bearing and private links are rejected; Pluto identity is restr
 });
 
 test('Samsung is removed from Selection and its delivery URLs cannot return through aggregate feeds', async () => {
-  const { DISCOVERY_SOURCES, discoveryMediaKey, isSamsungTvPlusUrl } = await import(modulePath);
-  assert.ok(!DISCOVERY_SOURCES.some(feed => feed.id === 'samsungtvplus'));
+  const { DISCOVERY_REVIEW_SOURCES, discoveryMediaKey, isSamsungTvPlusUrl } = await import(modulePath);
+  assert.ok(!DISCOVERY_REVIEW_SOURCES.some(feed => feed.id === 'samsungtvplus'));
   const samsungUrls = [
     'https://jmp2.uk/stvp-FRAJ4000015CZ.m3u8',
     'https://jmp2.uk/stvp-FRAJ4000015CZ',
@@ -122,7 +122,7 @@ test('Samsung is removed from Selection and its delivery URLs cannot return thro
 });
 
 test('Samsung exclusion uses provider boundaries and preserves alternate providers and personal playlists', async () => {
-  const { fetchDiscoverySelection, discoveryCatalogFields, isSamsungTvPlusUrl } = await import(modulePath);
+  const { fetchDiscoveryCandidates, discoveryCatalogFields, isSamsungTvPlusUrl } = await import(modulePath);
   const { readM3uPlaylistStream } = await import('../supabase/functions/_shared/m3u-playlist-stream.mjs');
   const retained = [
     'https://jmp2.uk/rok-example',
@@ -140,7 +140,7 @@ test('Samsung exclusion uses provider boundaries and preserves alternate provide
   for (const url of retained) assert.equal(isSamsungTvPlusUrl(url), false, url);
   assert.equal(isSamsungTvPlusUrl('not a URL'), false);
   const excluded = 'https://jmp2.uk/stvp-FRAJ4000015CZ';
-  const playlist = await fetchDiscoverySelection({
+  const playlist = await fetchDiscoveryCandidates({
     feeds: [{ id: 'free-tv', kind: 'live', name: 'Free-TV', url: 'aggregate' }],
     fetchPlaylist: async () => result([entry(excluded, 'France 24'), ...retained.map(url => entry(url, 'France 24'))]),
   });
@@ -155,18 +155,18 @@ test('Samsung exclusion uses provider boundaries and preserves alternate provide
 });
 
 test('expiring playback URLs refresh only for the owned selection and exact persisted media identity', async () => {
-  const { resolveDiscoveryTarget, discoveryMediaKey } = await import(modulePath);
+  const { resolveDiscoveryCandidateTarget, discoveryMediaKey } = await import(modulePath);
   const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
   const targetUrl = 'https://stitch.pluto.tv/v2/stitch/hls/episode/6389ff50753d2100141e055d/master.m3u8?jwt=old';
   const renewed = targetUrl.replace('old', 'new');
   const metadata = { discoveryFeed: 'pluto-vod-fr', discoveryMediaKey: discoveryMediaKey({ id: 'pluto-vod-fr' }, targetUrl) };
   let calls = 0;
   const options = { userId: 'owner', sourceId: await discoverySourceId('owner'), targetUrl, metadata, fetchPlaylist: async () => { calls++; return result([entry(renewed)]); }, now: 1000 };
-  assert.equal(await resolveDiscoveryTarget({ ...options, sourceId: 'unrelated' }), targetUrl);
+  assert.equal(await resolveDiscoveryCandidateTarget({ ...options, sourceId: 'unrelated' }), targetUrl);
   assert.equal(calls, 0);
-  assert.equal(await resolveDiscoveryTarget(options), renewed);
-  assert.equal(await resolveDiscoveryTarget({ ...options, now: 1001 }), renewed);
+  assert.equal(await resolveDiscoveryCandidateTarget(options), renewed);
+  assert.equal(await resolveDiscoveryCandidateTarget({ ...options, now: 1001 }), renewed);
   assert.equal(calls, 1);
-  await assert.rejects(resolveDiscoveryTarget({ ...options, metadata: { ...metadata, discoveryMediaKey: 'forged' } }), /identity/);
-  await assert.rejects(resolveDiscoveryTarget({ ...options, now: 100000, fetchPlaylist: async () => result([entry('https://other.example/file')]) }), /no longer/);
+  await assert.rejects(resolveDiscoveryCandidateTarget({ ...options, metadata: { ...metadata, discoveryMediaKey: 'forged' } }), /identity/);
+  await assert.rejects(resolveDiscoveryCandidateTarget({ ...options, now: 100000, fetchPlaylist: async () => result([entry('https://other.example/file')]) }), /no longer/);
 });

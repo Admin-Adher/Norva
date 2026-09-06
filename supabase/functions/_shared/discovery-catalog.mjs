@@ -1,6 +1,11 @@
 // Curated independently of user playlists. Additions require a playable full film,
 // attribution and a source-specific redistribution licence; never scrape credentials.
 export const DISCOVERY_PLAYLIST_URL = 'https://norva.tv/catalog/discovery.m3u';
+// All providers are withdrawn while the full Selection quality review is open.
+export const DISCOVERY_SELECTION_ENABLED = false;
+export function assertDiscoverySelectionAvailable() {
+  if (!DISCOVERY_SELECTION_ENABLED) throw new Error('Norva Selection is temporarily unavailable');
+}
 export async function discoverySourceId(userId) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('norva-selection-v1:' + userId));
   const hex = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -32,6 +37,7 @@ export function discoveryMovieFields(playlistUrl, mediaUrl) {
 }
 
 export function discoveryPlaylist() {
+  if (!DISCOVERY_SELECTION_ENABLED) return '#EXTM3U\n';
   return '#EXTM3U\n' + DISCOVERY_FILMS.map(film =>
     `#EXTINF:${film.duration} tvg-id="norva-discovery:${film.id}" tvg-logo="${film.poster}" group-title="Norva Selection",${film.title}\n${film.url}\n`
   ).join('');

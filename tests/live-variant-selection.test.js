@@ -303,7 +303,7 @@ function publicHlsPriorityFixture(streamId) {
     order: () => Array.from(list.getInitialLiveResolveCandidates(channel), candidate => candidate.streamId) };
 }
 
-const reviewedPublicLiveIds = fs.readFileSync(path.join(__dirname, '..', 'public/catalog/xumo-live.m3u'), 'utf8')
+const reviewedPublicLiveIds = fs.readFileSync(path.join(__dirname, '..', 'tests/fixtures/xumo-live.m3u'), 'utf8')
   .split(/\r?\n/).filter(line => line.startsWith('https://')).map(url =>
     'norva-discovery:live:' + require('node:crypto').createHash('sha256').update(`live:${new URL(url).href}`).digest('hex'));
 

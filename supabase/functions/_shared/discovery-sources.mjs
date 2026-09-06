@@ -1,4 +1,4 @@
-import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, discoveryMovieFields, discoverySourceId } from './discovery-catalog.mjs';
+import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, assertDiscoverySelectionAvailable, discoveryMovieFields, discoverySourceId } from './discovery-catalog.mjs';
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
 import { matchesSelectionLiveQuarantine, SELECTION_LIVE_QUARANTINE } from './selection-live-quarantine.mjs';
 
@@ -7,7 +7,8 @@ import { matchesSelectionLiveQuarantine, SELECTION_LIVE_QUARANTINE } from './sel
 const github = 'https://raw.githubusercontent.com/';
 const fast = `${github}insa-ship-it/app-m3u-generator/main/playlists/`;
 const pluto = 'https://github.com/OwnerPlugins/pluto-tv-m3u';
-export const DISCOVERY_SOURCES = Object.freeze([
+// Historical candidates are retained for reproducible audits; they are not active feeds.
+export const DISCOVERY_REVIEW_SOURCES = Object.freeze([
   { id: 'publicdomain', name: 'PublicDomainM3U', kind: 'movie', url: `${github}OnlineM3U/publicdomainm3u/main/movies.m3u`, website: 'https://github.com/OnlineM3U/publicdomainm3u' },
   ...'AR AT BO BR CA CH CL CO CR DE DK DO EC ES FR GB GT HN IT MX NI NO PA PE PY SE SV US UY VE'.split(' ').map(region => ({
     id: `pluto-vod-${region.toLowerCase()}`, name: `Pluto VOD · ${region}`, kind: 'movie', region,
@@ -20,19 +21,20 @@ export const DISCOVERY_SOURCES = Object.freeze([
   })),
   { id: 'xumo-curated', name: 'Xumo', kind: 'live', url: 'https://norva.tv/catalog/xumo-live.m3u', website: 'https://play.xumo.com/' },
 ].map(Object.freeze));
+export const DISCOVERY_SOURCES = Object.freeze(DISCOVERY_SELECTION_ENABLED ? [...DISCOVERY_REVIEW_SOURCES] : []);
 
 // Previously researched or retired sources remain documented outside the active feeds.
 export const DISCOVERY_RESEARCH = Object.freeze([
-  { name: 'IPTV-org general playlist', website: 'https://github.com/iptv-org/iptv', status: 'Removed from Selection', detail: 'The general playlist was retired after playback checks. The separate Movies playlist remains included as live cinema channels, not on-demand films.' },
+  { name: 'IPTV-org general playlist', website: 'https://github.com/iptv-org/iptv', status: 'Removed from Selection', detail: 'The general playlist was retired after playback checks. The separate Movies playlist is also withdrawn during the full review; it contains live cinema channels, not on-demand films.' },
   { name: 'Samsung TV Plus', website: 'https://github.com/insa-ship-it/app-m3u-generator', status: 'Removed from Selection', detail: 'Removed after playback checks. Samsung delivery URLs are also excluded from the aggregate playlists in Norva Selection.' },
   { name: 'm3u8-xtream-playlist', website: 'https://github.com/m3u8-xtream/m3u8-xtream-playlist', status: 'Unavailable', detail: 'The movies and series endpoint does not resolve. Its public TV links are already covered by IPTV-org.' },
   { name: 'Movies Deluxe', website: 'https://github.com/select/movies-deluxe', status: 'Requires a connector', detail: '26,700 records referencing Archive.org and YouTube pages, including clips and incorrect matches; these are not direct media URLs.' },
-  { name: 'PublicDomainM3U series', website: 'https://github.com/OnlineM3U/publicdomainm3u', status: 'Requires a series adapter', detail: 'One episode. The films playlist is included above.' },
+  { name: 'PublicDomainM3U series', website: 'https://github.com/OnlineM3U/publicdomainm3u', status: 'Requires a series adapter', detail: 'One episode in the earlier audit. Both films and series are withdrawn during the full review.' },
   { name: 'FastChannels', website: 'https://github.com/kineticman/FastChannels', status: 'Generator', detail: 'Self-hosted connectors, not an additional ready-to-play catalogue.' },
   { name: 'yt-movies-m3u', website: 'https://github.com/bplaytv/yt-movies-m3u', status: 'Requires a YouTube player', detail: 'YouTube content needs its official player integration.' },
   { name: 'm3u8_creator', website: 'https://github.com/bitsbb01/m3u8_creator', status: 'Generator', detail: 'Playlist generation tool, not a separate content provider.' },
   { name: 'Free Official YouTube Content', website: 'https://github.com/SuperAB123/Free-Official-Youtube-Content', status: 'Directory', detail: 'Official international YouTube channels; not an M3U feed.' },
-  { name: 'Internet Archive', website: 'https://archive.org/details/movies', status: 'Media host', detail: 'Hosts the Blender films and PublicDomainM3U media already included.' },
+  { name: 'Internet Archive', website: 'https://archive.org/details/movies', status: 'Media host', detail: 'Hosts the previously included Blender films and PublicDomainM3U media. These are withdrawn during the full review.' },
   { name: 'Sita Sings the Blues', website: 'https://www.sitasingstheblues.com/license.html', status: 'Individual film under review', detail: 'The creator specifies music exceptions alongside the film licence.' },
   { name: 'VOD-Movies-Playlist-M3U', website: 'https://github.com/vigarepo2/VOD-Movies-Playlist-M3U', status: 'No usable VOD feed', detail: 'The advertised VOD file has no entries; another file contains unidentified television streams.' },
 ]);
@@ -109,7 +111,13 @@ export function discoveryCatalogFields(playlistUrl, item) {
 
 // Bounded batches avoid holding all 30 regional Pluto documents in memory.
 // A failed feed is recorded separately and does not hide the working feeds.
-export async function fetchDiscoverySelection({ fetchPlaylist = fetchM3uPlaylistStream, feeds = DISCOVERY_SOURCES, heartbeat = async () => {} } = {}) {
+export async function fetchDiscoverySelection(options = {}) {
+  assertDiscoverySelectionAvailable();
+  return fetchDiscoveryCandidates({ ...options, feeds: DISCOVERY_SOURCES });
+}
+
+// Audit-only parser. Production imports must use the availability-checked wrapper.
+export async function fetchDiscoveryCandidates({ fetchPlaylist = fetchM3uPlaylistStream, feeds = [], heartbeat = async () => {} } = {}) {
   feeds = feeds.filter(feed => feed.id !== 'iptv-org');
   const items = bundledFilms();
   const seen = new Set(DISCOVERY_FILMS.map(film => `movie:${film.url}`));
@@ -165,7 +173,12 @@ export async function fetchDiscoverySelection({ fetchPlaylist = fetchM3uPlaylist
 const playbackFeeds = new Map();
 // Only an owned Norva Selection row may refresh an expiring upstream reference.
 // Never accept a feed URL or content identity from a client's playback hint.
-export async function resolveDiscoveryTarget({ sourceId, userId, metadata, targetUrl, fetchPlaylist = fetchM3uPlaylistStream, now = Date.now() }) {
+export async function resolveDiscoveryTarget(options) {
+  if (options.sourceId === await discoverySourceId(options.userId)) assertDiscoverySelectionAvailable();
+  return resolveDiscoveryCandidateTarget(options);
+}
+
+export async function resolveDiscoveryCandidateTarget({ sourceId, userId, metadata, targetUrl, fetchPlaylist = fetchM3uPlaylistStream, now = Date.now() }) {
   if (sourceId === await discoverySourceId(userId) && isRetiredGeneralDiscoveryItem(metadata)) {
     throw new Error('Selection programme is temporarily unavailable');
   }
@@ -174,7 +187,7 @@ export async function resolveDiscoveryTarget({ sourceId, userId, metadata, targe
       && await quarantinedLiveMedia(metadata.discoveryFeed, metadata.discoveryMediaKey, targetUrl)) {
     throw new Error('Selection programme is temporarily unavailable');
   }
-  const feed = DISCOVERY_SOURCES.find(source => source.id === metadata?.discoveryFeed && source.refreshOnPlay);
+  const feed = DISCOVERY_REVIEW_SOURCES.find(source => source.id === metadata?.discoveryFeed && source.refreshOnPlay);
   if (!feed || sourceId !== await discoverySourceId(userId)) return targetUrl;
   const key = discoveryMediaKey(feed, targetUrl);
   if (!key || key !== metadata.discoveryMediaKey) throw new Error('Selection media identity mismatch');

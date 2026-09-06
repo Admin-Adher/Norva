@@ -1,339 +1,200 @@
 {
-  "sources": [
+  "status": "under_review",
+  "sources": [],
+  "withdrawn": [
     {
       "name": "Blender Open Movies",
       "kind": "movie",
-      "website": "https://studio.blender.org/films/",
-      "bundledFilms": 5
+      "website": "https://studio.blender.org/films/"
     },
     {
-      "id": "publicdomain",
       "name": "PublicDomainM3U",
       "kind": "movie",
-      "url": "https://raw.githubusercontent.com/OnlineM3U/publicdomainm3u/main/movies.m3u",
       "website": "https://github.com/OnlineM3U/publicdomainm3u"
     },
     {
-      "id": "pluto-vod-ar",
       "name": "Pluto VOD · AR",
       "kind": "movie",
-      "region": "AR",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-AR.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-at",
       "name": "Pluto VOD · AT",
       "kind": "movie",
-      "region": "AT",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-AT.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-bo",
       "name": "Pluto VOD · BO",
       "kind": "movie",
-      "region": "BO",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-BO.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-br",
       "name": "Pluto VOD · BR",
       "kind": "movie",
-      "region": "BR",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-BR.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-ca",
       "name": "Pluto VOD · CA",
       "kind": "movie",
-      "region": "CA",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-CA.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-ch",
       "name": "Pluto VOD · CH",
       "kind": "movie",
-      "region": "CH",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-CH.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-cl",
       "name": "Pluto VOD · CL",
       "kind": "movie",
-      "region": "CL",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-CL.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-co",
       "name": "Pluto VOD · CO",
       "kind": "movie",
-      "region": "CO",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-CO.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-cr",
       "name": "Pluto VOD · CR",
       "kind": "movie",
-      "region": "CR",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-CR.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-de",
       "name": "Pluto VOD · DE",
       "kind": "movie",
-      "region": "DE",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-DE.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-dk",
       "name": "Pluto VOD · DK",
       "kind": "movie",
-      "region": "DK",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-DK.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-do",
       "name": "Pluto VOD · DO",
       "kind": "movie",
-      "region": "DO",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-DO.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-ec",
       "name": "Pluto VOD · EC",
       "kind": "movie",
-      "region": "EC",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-EC.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-es",
       "name": "Pluto VOD · ES",
       "kind": "movie",
-      "region": "ES",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-ES.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-fr",
       "name": "Pluto VOD · FR",
       "kind": "movie",
-      "region": "FR",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-FR.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-gb",
       "name": "Pluto VOD · GB",
       "kind": "movie",
-      "region": "GB",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-GB.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-gt",
       "name": "Pluto VOD · GT",
       "kind": "movie",
-      "region": "GT",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-GT.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-hn",
       "name": "Pluto VOD · HN",
       "kind": "movie",
-      "region": "HN",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-HN.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-it",
       "name": "Pluto VOD · IT",
       "kind": "movie",
-      "region": "IT",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-IT.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-mx",
       "name": "Pluto VOD · MX",
       "kind": "movie",
-      "region": "MX",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-MX.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-ni",
       "name": "Pluto VOD · NI",
       "kind": "movie",
-      "region": "NI",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-NI.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-no",
       "name": "Pluto VOD · NO",
       "kind": "movie",
-      "region": "NO",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-NO.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-pa",
       "name": "Pluto VOD · PA",
       "kind": "movie",
-      "region": "PA",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-PA.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-pe",
       "name": "Pluto VOD · PE",
       "kind": "movie",
-      "region": "PE",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-PE.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-py",
       "name": "Pluto VOD · PY",
       "kind": "movie",
-      "region": "PY",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-PY.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-se",
       "name": "Pluto VOD · SE",
       "kind": "movie",
-      "region": "SE",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-SE.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-sv",
       "name": "Pluto VOD · SV",
       "kind": "movie",
-      "region": "SV",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-SV.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-us",
       "name": "Pluto VOD · US",
       "kind": "movie",
-      "region": "US",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-US.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-uy",
       "name": "Pluto VOD · UY",
       "kind": "movie",
-      "region": "UY",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-UY.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "pluto-vod-ve",
       "name": "Pluto VOD · VE",
       "kind": "movie",
-      "region": "VE",
-      "url": "https://raw.githubusercontent.com/OwnerPlugins/pluto-tv-m3u/main/pluto-vod-VE.m3u",
-      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u",
-      "refreshOnPlay": true
+      "website": "https://github.com/OwnerPlugins/pluto-tv-m3u"
     },
     {
-      "id": "iptv-org-movies",
       "name": "IPTV-org Movies",
       "kind": "live",
-      "url": "https://iptv-org.github.io/iptv/categories/movies.m3u",
       "website": "https://github.com/iptv-org/iptv"
     },
     {
-      "id": "free-tv",
       "name": "Free-TV",
       "kind": "live",
-      "url": "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8",
       "website": "https://github.com/Free-TV/IPTV"
     },
     {
-      "id": "plutotv",
       "name": "Pluto TV",
       "kind": "live",
-      "url": "https://raw.githubusercontent.com/insa-ship-it/app-m3u-generator/main/playlists/plutotv_all.m3u",
-      "website": "https://github.com/insa-ship-it/app-m3u-generator",
-      "refreshOnPlay": false
+      "website": "https://github.com/insa-ship-it/app-m3u-generator"
     },
     {
-      "id": "plex",
       "name": "Plex",
       "kind": "live",
-      "url": "https://raw.githubusercontent.com/insa-ship-it/app-m3u-generator/main/playlists/plex_all.m3u",
-      "website": "https://github.com/insa-ship-it/app-m3u-generator",
-      "refreshOnPlay": true
+      "website": "https://github.com/insa-ship-it/app-m3u-generator"
     },
     {
-      "id": "roku",
       "name": "Roku",
       "kind": "live",
-      "url": "https://raw.githubusercontent.com/insa-ship-it/app-m3u-generator/main/playlists/roku_all.m3u",
-      "website": "https://github.com/insa-ship-it/app-m3u-generator",
-      "refreshOnPlay": false
+      "website": "https://github.com/insa-ship-it/app-m3u-generator"
     },
     {
-      "id": "tubi",
       "name": "Tubi",
       "kind": "live",
-      "url": "https://raw.githubusercontent.com/insa-ship-it/app-m3u-generator/main/playlists/tubi_all.m3u",
-      "website": "https://github.com/insa-ship-it/app-m3u-generator",
-      "refreshOnPlay": false
+      "website": "https://github.com/insa-ship-it/app-m3u-generator"
     },
     {
-      "id": "xumo-curated",
       "name": "Xumo",
       "kind": "live",
-      "url": "https://norva.tv/catalog/xumo-live.m3u",
       "website": "https://play.xumo.com/"
     }
   ],
@@ -342,7 +203,7 @@
       "name": "IPTV-org general playlist",
       "website": "https://github.com/iptv-org/iptv",
       "status": "Removed from Selection",
-      "detail": "The general playlist was retired after playback checks. The separate Movies playlist remains included as live cinema channels, not on-demand films."
+      "detail": "The general playlist was retired after playback checks. The separate Movies playlist is also withdrawn during the full review; it contains live cinema channels, not on-demand films."
     },
     {
       "name": "Samsung TV Plus",
@@ -366,7 +227,7 @@
       "name": "PublicDomainM3U series",
       "website": "https://github.com/OnlineM3U/publicdomainm3u",
       "status": "Requires a series adapter",
-      "detail": "One episode. The films playlist is included above."
+      "detail": "One episode in the earlier audit. Both films and series are withdrawn during the full review."
     },
     {
       "name": "FastChannels",
@@ -396,7 +257,7 @@
       "name": "Internet Archive",
       "website": "https://archive.org/details/movies",
       "status": "Media host",
-      "detail": "Hosts the Blender films and PublicDomainM3U media already included."
+      "detail": "Hosts the previously included Blender films and PublicDomainM3U media. These are withdrawn during the full review."
     },
     {
       "name": "Sita Sings the Blues",

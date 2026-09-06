@@ -11,11 +11,11 @@ const edge = fs.readFileSync(path.join(root, 'supabase/functions/norva-playback/
 const policy = import('../supabase/functions/_shared/selection-live-delivery.mjs');
 const fixture = (async () => {
   const { readM3uPlaylistStream } = await import('../supabase/functions/_shared/m3u-playlist-stream.mjs');
-  const { DISCOVERY_SOURCES, fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
+  const { DISCOVERY_REVIEW_SOURCES, fetchDiscoveryCandidates, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
   const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
-  const parsed = await readM3uPlaylistStream(new Response(fs.readFileSync(path.join(root, 'public/catalog/xumo-live.m3u'), 'utf8')).body);
-  const selection = await fetchDiscoverySelection({
-    feeds: DISCOVERY_SOURCES.filter(feed => feed.id === 'xumo-curated'),
+  const parsed = await readM3uPlaylistStream(new Response(fs.readFileSync(path.join(root, 'tests/fixtures/xumo-live.m3u'), 'utf8')).body);
+  const selection = await fetchDiscoveryCandidates({
+    feeds: DISCOVERY_REVIEW_SOURCES.filter(feed => feed.id === 'xumo-curated'),
     fetchPlaylist: async () => ({ ...parsed, response: { ok: true } }),
   });
   const rows = selection.items.map(item => discoveryCatalogFields('https://norva.tv/catalog/discovery.m3u', item))
