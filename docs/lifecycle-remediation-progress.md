@@ -5,10 +5,10 @@
 Work resumed in isolated branch `codex/lifecycle-resume-20260906` from `origin/main` `4ed43231`. Previously deployed telemetry, failure-copy and dormant welcome increments were reconciled into this branch. The original dirty checkout and the earlier remediation worktree remain preserved.
 
 - Postal is the live Norva email transport; this does not activate any behavioral audience. The four journeys are still draft/0%, emergency stop is on, the independent signup welcome gate is disabled, and behavioral outbox/receipt counts remain zero.
-- Timezone provenance and its FCM-independent authenticated context RPC are now installed on Hetzner; web publication is tracked separately below.
+- Timezone provenance and its FCM-independent authenticated context RPC are installed on Hetzner. Web commit `2df5768e974d5a25a0aa005f81e7d3209de4e1a1` is on `main`; Cloudflare CI `34031952452` succeeded and both live JavaScript hashes match the release.
 - Local full Node suite: **3,701 passed, 0 failed, 8 skipped** (3,709 total). The skips remain unproven runtime scenarios, not successes. Generated locale validation, region model and JS/TS syntax checks pass. A localization-sensitive test now scopes assertions to the real connection section rather than a brittle character-count limit; no provider UI behavior was changed for that test.
 - Real PostgreSQL 17 synthetic integration proof passed. The live controlled-account RPC smoke also passed in a transaction that was explicitly rolled back, without changing the account timezone, creating a token, claiming a job or sending an email.
-- USB ADB currently lists no device. Actual receipt, tap, foreground/background, deduplication and conversion-cancellation proofs are still missing.
+- The reconnected USB phone runs Android Norva 1.3.17 (code 30), with notification permission granted. After reopening the deployed web shell, production recorded Europe/Paris with `device` provenance. One authorized generic push was accepted by FCM and actually observed in the phone's notification shade while Norva was backgrounded. The user must perform the tap; lifecycle-specific deep links, foreground behavior, deduplication and conversion cancellation remain unproven.
 - Still outstanding: shared input validation/settings guidance completion, conditional +24h no-push email and its final Postal authorization, controlled import/first-play attestation, real internal sends, then separately authorized pilot and mature J+7/J+14 results. Do not activate the pilot or revive paused Codex monitoring.
 
 Evidence outputs are under `outputs/01a05135-6828-78c2-aeae-17738180c47a/lifecycle-followup-20260906/` in the original workspace (not committed customer data).
@@ -20,7 +20,7 @@ Working branch: `codex/lifecycle-remediation-20260905`, isolated worktree based 
 - [ ] Confirmed-signup welcome independent of entitlements, durable idempotence, no automatic historical blast.
 - [ ] Import failure email distinguishes permanent action-required failures from genuinely scheduled retries.
 - [ ] Shared browser/server input classification, including emails, names, malformed domains, valid DNS/IP and complete Xtream access; app-only guidance in the settings modal.
-- [ ] Verified device timezone/provenance and safe scheduling for unknown timezones.
+- [x] Verified device timezone/provenance and safe scheduling for unknown timezones (SQL and real phone context evidence below; no outbound journey enabled).
 - [ ] Conditional no-source email at +24 h when push unavailable, preserving caps, quiet hours, conversion cancellation and no duplicates.
 - [ ] Real controlled import/first-play attestation.
 - [ ] Authorized internal email/push, real-device deep link, receipt, foreground/background, post-conversion and offline-delay checks.
@@ -115,3 +115,28 @@ At 11:59 UTC, 439 user states had matching legacy device evidence and 238 remain
 `PRODUCTION_TIMEZONE_RPC_SMOKE_ROLLED_BACK_OK` verifies a real controlled account can record Asia/Dhaka without push, rejects an invalid timezone without overwriting the good observation, preserves token counts, restricts execution to service role and leaves every journey stopped. The transaction was rolled back. This is not proof of browser/Android transport or receipt.
 
 Deployment helpers: `ops/hetzner/scripts/deploy-lifecycle-context-20260906.py` and `ops/hetzner/scripts/deploy-lifecycle-timezone-20260906.py`. Web publication and live asset verification remain separate gates; the conditional +24h email is not deployed by this increment.
+
+### Web release and real phone context — 2026-09-06
+
+Commit `2df5768e974d5a25a0aa005f81e7d3209de4e1a1` was pushed to `main`. GitHub/Cloudflare workflow `34031952452` completed successfully at 12:03:58 UTC, including the full Node suite and Pages deployment. Direct HTTP checks verified the HTML references and the actual served bytes, not only the CI result:
+
+- `app.js`: `0e2ba9778e9424f2e9921f71b328ec4d909ae47434e3e3b28a9bfb152e3cc40c`.
+- `cloudApi.js`: `2263d2b70e4d49f4fb2cfbc05cdfe6fd9e5559b054cede3560939cca18336b0b`.
+
+The controlled admin identity was verified in the device UI. Only Norva was stopped and reopened to load the release; app data, account, consent and notification permissions were not reset. Production then recorded `Europe/Paris`, provenance `device`, observed at `2026-09-06T12:06:13.915787Z`, with verified timezone=true and one recent granted Android token on 1.3.17. This proves real device reporting. FCM-independent operation is covered separately by code/unit tests and the rolled-back SQL smoke, not inferred from this phone which also has push.
+
+The tool refused automatic VIEW/deep-link navigation. That action was not retried or circumvented. The user must tap the link/notification for the real opening proof.
+
+### Postal verification preserved across the Cloud overlay
+
+The old read-only diagnostic required the former runtime folder literally and would misclassify the legitimate lifecycle release. Its replacement allowlists the two reviewed roots and compares all 139 files: only the exact reviewed Cloud before/after hashes may differ, and every other byte (including all email senders/shared transports) must match. Missing, added, symlinked or unexpectedly modified files fail closed. Both replicas must use the same root and be running. Seven Python fixtures passed on Linux; on Windows six passed and the symlink case was skipped because creating symlinks is unavailable. The 13 Postal transport tests and the FCM boundary test also passed.
+
+The live verifier passed at 12:20 UTC on both replicas: eight sending boundaries on Postal, no Resend key in either Edge environment, private gateway healthy/enabled, old Resend contact worker stopped with no automatic restart, and zero pending Resend outbox items. Eight messages were recorded as sent by the Postal transport and three auth messages as canceled. Those aggregate states are not an inbox-placement or customer-read guarantee. The diagnostic replacement restarted no service and sent no email. Its exact predecessor is preserved on the server.
+
+### One controlled background push — 2026-09-06
+
+The user authorized internal tests on their connected admin phone. A bounded operator test checked exactly one confirmed controlled account and one fresh, granted Android 1.3.17 token. It verified both running FCM source hashes and used a bundle of that exact production sender. Credentials and the token remained in memory over private stdin and were not printed or persisted. The journal stores only a token hash and a provider-receipt hash. It was created exclusively before the external request; any ambiguous result permanently prevents automatic retry for this test.
+
+One generic notification, **Norva internal notification test**, was accepted by FCM HTTP 200 at `2026-09-06T12:24:14.502722Z`. With Norva in the background, Android's rendered notification shade then exposed the exact title and benign internal-test text. This is actual phone receipt, beyond FCM acceptance. It contains no lifecycle delivery ID, source URL, credentials or invented conversion; it does not manufacture lifecycle receipts or bypass journey eligibility. TTL is 300 seconds, with a test-specific collapse key.
+
+No email was initiated by this test and no customer journey or pilot was enabled. The four journeys remain draft/0% with emergency stop on. Actual user tap and opening, lifecycle deep-link routing, foreground/offline replay, duplicate suppression and conversion cancellation are separate pending checks. A single observed notification is not sufficient to certify all of them.

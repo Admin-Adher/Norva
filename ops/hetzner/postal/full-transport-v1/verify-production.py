@@ -2,6 +2,41 @@
 import hashlib,json,os,socket,subprocess,urllib.request,urllib.error
 from pathlib import Path
 R=Path('/home/adrien/.norva/postal-full-service-v1');E=Path('/home/adrien/.norva/postal-full-edge-20260906-v1')
+RELEASES = {
+ E / 'functions': {},
+ Path('/home/adrien/.norva/lifecycle-context-20260906-r1/functions'): {
+  'norva-cloud/index.ts': (
+   '860c6c790e1837b4248014de9da9fdfa6eb078bab9072abe1a132186e5ffb5bb',
+   'f524d4687f40e8f1ff1815a9e38e89606ab5959e82e55acc0fec185d0b2de36f',
+  ),
+ },
+}
+
+def inventory(root):
+ if not root.is_dir() or root.resolve() != root:
+  raise RuntimeError('untrusted_release_root')
+ result = {}
+ for entry in root.rglob('*'):
+  if entry.is_symlink(): raise RuntimeError('release_symlink')
+  if entry.is_file(): result[entry.relative_to(root).as_posix()] = entry.read_bytes()
+ if not result: raise RuntimeError('empty_release')
+ return result
+
+def verify_release(source, baseline=None):
+ """Only an explicitly reviewed Cloud overlay may differ; every other byte is fixed."""
+ baseline = baseline or E / 'functions'
+ if source not in RELEASES: raise RuntimeError('unapproved_release')
+ before, after = inventory(baseline), inventory(source)
+ if before.keys() != after.keys(): raise RuntimeError('release_inventory_mismatch')
+ changes = RELEASES[source]
+ if not changes.keys() <= before.keys(): raise RuntimeError('reviewed_overlay_missing')
+ for name in before:
+  if name in changes:
+   normalized = lambda value: hashlib.sha256(value.replace(b'\r\n', b'\n')).hexdigest()
+   if (normalized(before[name]), normalized(after[name])) != changes[name]:
+    raise RuntimeError('reviewed_overlay_hash_mismatch')
+  elif before[name] != after[name]: raise RuntimeError('unreviewed_runtime_change')
+ return {'verifiedFiles': len(before), 'reviewedNonMailOverlays': len(changes)}
 def run(a,data=None):
  p=subprocess.run(a,input=data,capture_output=True,timeout=30)
  if p.returncode:raise RuntimeError('verification_command_failed')
@@ -9,17 +44,21 @@ def run(a,data=None):
 def inspect(n):return json.loads(run(['docker','inspect',n]))[0]
 def sql(q):return run(['docker','exec','-i','norva-db','psql','-X','-At','-q','-v','ON_ERROR_STOP=1','-U','supabase_admin','-d','postgres'],q.encode()).decode().strip()
 assert socket.gethostname()=='norva-db'and os.geteuid()==1000
-out={'replicas':[]}
+out={'replicas':[]};sources=set()
 for name in ['norva-edge-functions','norva-edge-functions-2']:
  c=inspect(name);env=dict(e.split('=',1)for e in c['Config']['Env']if '='in e)
  source=Path(next(m['Source']for m in c['Mounts']if m['Destination']=='/home/deno/functions'))
  senders=['norva-auth-email','norva-auth-challenge','norva-support','norva-account-delete','norva-import-notify','norva-revolut-billing','norva-provider-access-notify','norva-playback']
- assert source==E/'functions'and not env.get('RESEND_API_KEY')and len(env.get('NORVA_POSTAL_WIRE_KEY',''))==64
+ proof=verify_release(source);sources.add(source)
+ assert c['State']['Running']and not env.get('RESEND_API_KEY')and len(env.get('NORVA_POSTAL_WIRE_KEY',''))==64
  for n in senders:
   code=(source/n/'index.ts').read_text();assert 'requestEmailProvider'in code and 'https://api.resend.com/emails'not in code and 'RESEND_API_KEY'not in code
  shared=(source/'_shared/email-provider-request.mjs').read_text();assert 'http://norva-private-mail-gateway:18185/v1/mail'in shared
- out['replicas'].append({'name':name,'running':c['State']['Running'],'sendingBoundariesOnPostal':len(senders),'resendKeyPresent':False,'source':str(source)})
+ out['replicas'].append({'name':name,'running':c['State']['Running'],**proof,'sendingBoundariesOnPostal':len(senders),'resendKeyPresent':False,'source':str(source)})
+assert len(sources)==1
 gateway=inspect('norva-private-mail-gateway');assert not gateway['HostConfig']['PortBindings']
+assert gateway['State']['Running']and len(gateway['Mounts'])==1 and gateway['Mounts'][0]['Destination']=='/bridge'
+assert gateway['HostConfig']['RestartPolicy']['Name']=='unless-stopped'
 out['privateGateway']={'noPublicPorts':True,'noSecretsMount':len(gateway['Mounts'])==1 and gateway['Mounts'][0]['Destination']=='/bridge','restart':gateway['HostConfig']['RestartPolicy']['Name']}
 retired=inspect('norva-resend-contact-worker');assert not retired['State']['Running']and retired['HostConfig']['RestartPolicy']['Name']=='no'
 out['resendContactWorkerStopped']=True
