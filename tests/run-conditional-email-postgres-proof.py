@@ -51,7 +51,8 @@ try:
             assert result.returncode != 0 and fixture['expected_error'] in result.stderr, 'Expected refusal missing'
         print(json.dumps({'fixture': fixture['name'], 'passed': True,
                           'sha256': hashlib.sha256(content.encode()).hexdigest(),
-                          'result': result.stdout[-400:]}), flush=True)
+                          'result': result.stdout[-4000:] if fixture['name'] == 'final-guard-hashes'
+                          else result.stdout[-400:]}), flush=True)
 finally:
     if created:
         metadata = json.loads(run(['docker', 'inspect', name]).stdout)[0]

@@ -285,3 +285,34 @@ The release was saved to Publishing overview. Clicking **Send 1 change for revie
 The user must decide whether to restart the ongoing examination now. Neither approval nor public availability of 1.3.20 is claimed. Managed publishing remains disabled and unchanged. The Codex browser is left at [Publishing overview](https://play.google.com/console/u/0/developers/9171806241352337007/app/4975180457448603282/publishing).
 
 The reconnected physical phone was again visible over ADB, still Play-installed **1.3.17 / code 30**. No installation, consent change, push/email send, lifecycle pilot, Ads mutation or paused-schedule resumption was performed. Real notification appearance and tap/deep-link acceptance remain to be tested after a Play-signed update is available.
+
+## 10. Dormant lifecycle verification refreshed — 6 September, 16:57 UTC
+
+**Scope: read-only production audit and operator-test correction only.** No runtime migration, service restart, message, welcome activation, behavioral pilot, Ads change or schedule resumption was performed in this increment. The decision to restart Play review with **1.3.20** is still pending; section 9 is unchanged.
+
+### Live evidence, not activation
+
+- At 16:39 UTC all four journeys remained `draft` / 0%, `emergency_stop=true`, `audience_mode=internal_test`; welcome remained disabled. Welcome sent markers, behavioral outbox and delivery receipts were empty. Import acceptance attestations remained **0**, so real controlled import/phone acceptance is still missing.
+- Actual lifecycle cron HTTP responses at **16:00, 16:15 and 16:30 UTC** were HTTP 200 with `ok=true`, zero welcome/behavioral messages queued or accepted and zero reported errors. Scheduler success was checked separately; no worker was invoked manually.
+- Normal transactional Postal transport was enabled, with the test-only restriction off. That is **not** activation of lifecycle communications. Private receipt states alone do not establish inbox placement, human receipt or engagement.
+- At 16:54 UTC the lifecycle store contained **1,683 product observations**, all with `delivery_id=null` and `experiment_arm=outside_rollout`: 861 source-form openings, 738 source attempts, 80 import-success events, one first-play event and three resume events. These are **event counts, not distinct users or controlled acceptance tests**. There were zero experiment versions, message outbox rows, delivery events and behavioral content notifications.
+- Both live function replicas used `/home/adrien/.norva/selection-provider-audio-tags-20260906-r3/functions`. The strict source parser, import/lifecycle email templates, lifecycle worker and Xtream worker retained their verified normalized hashes. The import-notify file had a different file hash; direct comparison showed only relocation of the unchanged `requestEmailProvider` import to the beginning of the file. The Postal boundary and failure projection were preserved. No unrelated runtime files were overwritten to make an old hash match.
+
+### Why the old operator check failed
+
+`behavioral_lifecycle_pre_activation_readiness.sql` still required a fixed **4,320-minute** no-source email step, despite the installed conditional-cadence migration setting the existing step to **1,440 minutes** and deferring it to 72 hours when a fresh granted push token exists. It also rejected every observed product event as an outbound backlog. Those checks described the original empty installation, not the current dormant service receiving organic activity.
+
+The corrected **read-only** check now requires the reviewed 1,440-minute step **and all ten exact conditional-email function bodies**, including final Postal authorization and bounded pending handling. It checks function owner, invoker/definer mode and search path; the three helpers must remain inaccessible to browser, service and Postal-worker roles. The wrapper also pins the conditional migration SHA256. The expected function fingerprints were reproduced from the actual migration/Postal sources in an isolated PostgreSQL instance, rather than adopted from live production.
+
+Only seven explicitly named product-event types may coexist with a dormant installation, with no delivery binding and no treatment/holdout assignment. Message/deep-link events, any delivery binding, experiment history, nonempty outbox, active runtime, unsafe copy or privilege drift still cause refusal. No historical rows were deleted or changed.
+
+### Verification and reproducibility
+
+- **32 focused Node tests passed**, no failures/skips; Bash syntax, Python syntax and `git diff --check` passed.
+- `tests/Invoke-ConditionalEmailProof.ps1` reconstructed the real engine, hardening, timezone and Postal/conditional-email code in a disposable **PostgreSQL 17** container: `--network none`, 512 MiB memory, one CPU, 128 PIDs, 384 MiB tmpfs. No email process, live data copy or production SQL mutation was used. Only the tool-created, purpose-labelled container was removed after verification.
+- The existing +24/+72 runtime integration passed, including permission changes, the bounded pending interval, consent, suppression, quiet hours, frequency caps, expiry and source-trigger cancellation. A synthetic product interaction through the real product-event RPC was preserved and correctly accepted by the dormant gate.
+- **Eight deliberately invalid configurations were rejected**: old fixed delay, early-return helper, bypassed final SMTP eligibility, exposed helper, changed definer mode, enabled runtime, historical message event and historical treatment assignment. The intact gate passed again after all isolated transactions rolled back. A repeated migration and an anonymous helper call remained refused.
+- At **16:57 UTC** the complete corrected SQL ran against `norva-db` under both `PGOPTIONS=default_transaction_read_only=on` and `BEGIN TRANSACTION READ ONLY`. Result: `BEHAVIORAL_LIFECYCLE_PRE_ACTIVATION_READY`, 10 baseline relations, 15 baseline RPCs, 12 triggers, four journeys, 11 steps, 682 projected lifecycle profiles, runtime stopped in internal-test mode. The ten additional conditional binding checks run before that result; the legacy artifact count fields are unchanged.
+- Normalized SHA256: readiness SQL `9fe4e03b22bb318cef7fa799348cb2212b973bbbd968ddd7ac9ac94f7413679a`; wrapper `90718c5c2cf5ccd4d261e261c4b6565f8d4cb2081b749dd15212c57114e23e00`. The test fixture hash includes its extra `SET ROLE` preamble and therefore differs from the source-file hash.
+
+**Interpretation:** the installed dormant configuration and its operator checks are consistent. This does not certify actual welcome receipt, Gmail/Outlook rendering, Android notification appearance/tap, controlled catalogue import/first play, conversion lift or permission to launch a pilot. The real-device and fresh-account acceptance steps, explicit pilot authorization, and mature J+7/J+14 analysis remain open.

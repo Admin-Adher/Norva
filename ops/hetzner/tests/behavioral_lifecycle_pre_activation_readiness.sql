@@ -2,6 +2,8 @@
 
 -- This gate is deliberately read-only. It proves that the lifecycle schema is
 -- installed in its fail-closed state before any Edge restart or audience test.
+-- Requires the reviewed conditional-email migration as well as the engine.
+-- A successful result is NOT evidence of receipt or permission to start a pilot.
 begin transaction read only;
 
 do $gate$
@@ -48,6 +50,45 @@ begin
   where to_regprocedure(signature) is null;
   if coalesce(cardinality(v_missing), 0) <> 0 then
     raise exception 'lifecycle readiness: missing RPCs: %', v_missing;
+  end if;
+
+  -- Fingerprints reproduced by Invoke-ConditionalEmailProof.ps1 from the actual
+  -- migrations in disposable PostgreSQL, not learned from the production DB.
+  -- Changing the step to 1440 alone must never allow an unconditional J+1 send.
+  select array_agg(expected.signature order by expected.signature) into v_invalid
+  from (values
+    ('norva_postal_full.behavioral_email_not_before(uuid,timestamptz)', '8cb6e84a9072807b1cf50d51d7f1dec5', false, 'search_path=pg_catalog'),
+    ('norva_postal_full.behavioral_pending_window(uuid,timestamptz)', '261c63f28eaac82c08abc01878affa6e', false, 'search_path=pg_catalog'),
+    ('norva_postal_full.defer_behavioral_pending(uuid,text,uuid,integer,jsonb)', '746803016d63026af23aef1b960da9b0', false, 'search_path=pg_catalog'),
+    ('public.norva_enqueue_behavioral_email(uuid,uuid,text,text,text,text,text,text,jsonb,jsonb)', 'f02faf87076594e18e42d3003048e784', true, 'search_path=""'),
+    ('public.norva_authorize_behavioral_email_enqueue(uuid,uuid)', 'e50866233bcc965cf3cb0acf72ad41af', true, 'search_path=""'),
+    ('public.authorize_branded_email_delivery(uuid,text,uuid)', 'fe9231591140d539ff8ad463b3f8d2c8', true, 'search_path=""'),
+    ('norva_postal_full.eligibility(text,text,boolean,text)', '7265f20fd0e79d5dace76fdddf25a201', true, 'search_path=pg_catalog'),
+    ('public.claim_postal_branded_email_deliveries(integer,integer,integer)', 'dee5c9349aad826c1742e5f61d2a046f', true, 'search_path=pg_catalog, public'),
+    ('public.fail_postal_branded_email_delivery(uuid,text,uuid,integer,text,jsonb,boolean,integer,integer)', 'ebe8e515717234aa1077975f49792244', true, 'search_path=pg_catalog, public'),
+    ('public.fail_postal_branded_email_delivery(uuid,text,uuid,integer,text,jsonb,boolean,integer,integer,boolean)', 'b10b9b3d315d02649570e9011b77ef27', true, 'search_path=pg_catalog, public')
+  ) as expected(signature, body_md5, definer, path_setting)
+  left join pg_catalog.pg_proc p on p.oid = to_regprocedure(expected.signature)
+  where p.oid is null
+     or md5(replace(p.prosrc, chr(13), '')) <> expected.body_md5
+     or p.prosecdef is distinct from expected.definer
+     or pg_get_userbyid(p.proowner) <> 'supabase_admin'
+     or p.proconfig is distinct from array[expected.path_setting]::text[];
+  if coalesce(cardinality(v_invalid), 0) <> 0 then
+    raise exception 'lifecycle readiness: conditional-email functions missing or drifted: %', v_invalid;
+  end if;
+
+  select array_agg(role_name || ':' || signature order by role_name, signature)
+    into v_invalid
+  from unnest(array['anon', 'authenticated', 'service_role', 'norva_postal_full_worker']::text[]) as roles(role_name)
+  cross join unnest(array[
+    'norva_postal_full.behavioral_email_not_before(uuid,timestamptz)',
+    'norva_postal_full.behavioral_pending_window(uuid,timestamptz)',
+    'norva_postal_full.defer_behavioral_pending(uuid,text,uuid,integer,jsonb)'
+  ]::text[]) as helpers(signature)
+  where has_function_privilege(role_name, signature, 'EXECUTE');
+  if coalesce(cardinality(v_invalid), 0) <> 0 then
+    raise exception 'lifecycle readiness: conditional-email private helper exposed: %', v_invalid;
   end if;
 
   if to_regprocedure(
@@ -273,7 +314,7 @@ begin
     from (values
       ('no_source', 'context_help', 1, 'in_app', 15, 'Connect your TV service', 'Add your M3U link or Xtream details to build your catalogue.', 'Connect a source', '/app.html#settings/sources', 259200, false),
       ('no_source', 'day_one_push', 2, 'push', 1440, 'Your Norva catalogue is one step away', 'Connect your M3U link or Xtream details to start watching.', 'Connect a source', '/app.html#settings/sources', 172800, false),
-      ('no_source', 'day_three_email', 3, 'email', 4320, 'Need help connecting your TV service?', 'Open the source screen and use the M3U link or Xtream details supplied by your TV service.', 'Open source setup', '/app.html#settings/sources', 259200, false),
+      ('no_source', 'day_three_email', 3, 'email', 1440, 'Need help connecting your TV service?', 'Open the source screen and use the M3U link or Xtream details supplied by your TV service.', 'Open source setup', '/app.html#settings/sources', 259200, false),
       ('import_unresolved', 'error_help', 1, 'in_app', 0, 'Let’s fix this connection', 'Review the source format and try again from the same import screen.', 'Review source', '/app.html#settings/sources', 86400, false),
       ('import_unresolved', 'two_hour_push', 2, 'push', 120, 'Your source still needs attention', 'Return to Norva to review the M3U or Xtream details and retry safely.', 'Review source', '/app.html#settings/sources', 86400, false),
       ('import_unresolved', 'day_one_email', 3, 'email', 1440, 'How to finish your Norva import', 'Choose M3U when you received a playlist link, or Xtream when you received a server address, username and password.', 'Finish the import', '/app.html#settings/sources', 172800, false),
@@ -318,7 +359,22 @@ begin
   if exists (select 1 from public.behavioral_lifecycle_experiment_versions)
      or exists (select 1 from public.behavioral_lifecycle_outbox)
      or exists (select 1 from public.behavioral_lifecycle_delivery_events)
-     or exists (select 1 from public.behavioral_lifecycle_funnel_events)
+     or exists (
+       -- Real product observations continue while journeys are stopped. They
+       -- are not a send backlog. Keep the history intact; reject every message
+       -- event, delivery binding or treatment/holdout assignment, even if its
+       -- outbox row has since been removed. This never certifies a pilot.
+       select 1 from public.behavioral_lifecycle_funnel_events f
+       where f.delivery_id is not null
+          or f.event_name not in (
+            'source_form_opened', 'source_attempted', 'import_success',
+            'first_play', 'playback_resumed', 'trial_started', 'subscription_started'
+          )
+          or not (
+            (f.journey_key is null and f.experiment_arm is null)
+            or (f.journey_key is not null and f.experiment_arm is not distinct from 'outside_rollout')
+          )
+     )
      or exists (
        select 1 from public.cloud_content_events
        where kind = 'behavioral_lifecycle'

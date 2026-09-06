@@ -136,6 +136,22 @@ test('pre-activation readiness gate is read-only and proves the reviewed dormant
   const normalizedHardeningMigration = hardeningMigrationBytes.toString('utf8').replace(/\r/g, '');
   const actualHardeningDigest = crypto.createHash('sha256').update(normalizedHardeningMigration).digest('hex');
   assert.equal(expectedHardeningDigest, actualHardeningDigest);
+  const expectedConditionalDigest = gateScript.match(/EXPECTED_CONDITIONAL_EMAIL_MIGRATION_SHA256='([0-9a-f]{64})'/)?.[1];
+  const conditionalMigration = read('supabase/migrations/20260906125303_no_source_conditional_email_postal.sql');
+  assert.equal(expectedConditionalDigest, crypto.createHash('sha256').update(conditionalMigration).digest('hex'));
+  assert.match(gateSql, /conditional-email functions missing or drifted/);
+  assert.match(gateSql, /conditional-email private helper exposed/);
+  assert.match(gateSql, /md5\(replace\(p\.prosrc, chr\(13\), ''\)\)/);
+  assert.match(gateSql, /p\.prosecdef is distinct from expected\.definer/);
+  assert.match(gateSql, /p\.proconfig is distinct from array\[expected\.path_setting\]/);
+  assert.match(gateSql, /\('no_source', 'day_three_email', 3, 'email', 1440/);
+  assert.doesNotMatch(gateSql, /\('no_source', 'day_three_email', 3, 'email', 4320/);
+  for (const binding of [
+    'behavioral_email_not_before', 'behavioral_pending_window', 'defer_behavioral_pending',
+    'norva_enqueue_behavioral_email', 'norva_authorize_behavioral_email_enqueue',
+    'authorize_branded_email_delivery', 'eligibility', 'claim_postal_branded_email_deliveries',
+    'fail_postal_branded_email_delivery',
+  ]) assert.ok(gateSql.includes(binding), `missing conditional cadence binding: ${binding}`);
   assert.match(hardeningMigration, /revoke all on table public\.behavioral_lifecycle_import_readiness\s+from service_role/i);
   assert.match(hardeningMigration, /grant select, insert on table public\.behavioral_lifecycle_import_readiness\s+to service_role/i);
   assert.match(overviewDigestMigration, /extensions\.digest\(x\.actor_id::text, ''sha256''\)/i);
@@ -159,6 +175,9 @@ test('pre-activation readiness gate is read-only and proves the reviewed dormant
   assert.match(gateSql, /rollout_percent <> 0/);
   assert.match(gateSql, /expected exactly eleven reviewed steps/);
   assert.match(gateSql, /pre-activation message or experiment backlog is not empty/);
+  assert.match(gateSql, /f\.delivery_id is not null/);
+  assert.match(gateSql, /f\.event_name not in \(/);
+  assert.match(gateSql, /f\.experiment_arm is not distinct from 'outside_rollout'/);
   assert.match(gateSql, /import attestation is not append-only/);
   assert.match(gateSql, /admin overview digest schema is unsafe/);
   assert.doesNotMatch(
