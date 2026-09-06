@@ -338,7 +338,7 @@ test('session creation derives the global account hash only from an owned server
   assert.doesNotMatch(create, /body\.targetUrl|body\.target_url/);
   assert.match(resolve, /hint\.sourceType === "xtream"/);
   assert.match(resolve, /loadSourceConfig\(sourceId, userId, db\)/);
-  assert.match(resolve, /providerAccountScope:\s*selectionLiveDelivery\s*\? `user-source:\$\{userId\}:\$\{sourceId\}:\$\{selectionLiveDelivery\.providerAccountScopeSuffix\}`\s*: `user-source:\$\{userId\}:\$\{sourceId\}`/);
+  assert.match(resolve, /providerAccountScope:\s*selectionLiveDelivery\s*\? `user-source:\$\{userId\}:\$\{sourceId\}:\$\{selectionLiveDelivery\.providerAccountScopeSuffix\}`\s*: selectionVodDelivery\s*\? `user-source:\$\{userId\}:\$\{sourceId\}:\$\{selectionVodDelivery\.providerAccountScopeSuffix\}`\s*: `user-source:\$\{userId\}:\$\{sourceId\}`/);
   assert.match(resolve, /const selectionLiveDelivery = await resolveSelectionLiveDelivery\(\{\s*sourceId, userId, itemType, itemId, ownedItem, targetUrl,\s*\}\)/);
   assert.doesNotMatch(resolve, /(?:requestHint|ownedHint|hint)\.providerAccountScopeSuffix/);
   assert.match(create, /"providerAccountScope" in resolved[\s\S]{0,200}sha256Hex\(providerAccountScope\)/);

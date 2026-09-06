@@ -1351,13 +1351,16 @@ async function isCuratedLiveOnlyHome(userId: string, database: typeof db): Promi
   const { data, error } = await database.from("cloud_catalog_visible_sources")
     .select("id").eq("user_id", userId).limit(2);
   if (error) throw catalogTitleReadUnavailable();
-  return data?.length === 1 && data[0].id === await discoverySourceId(userId);
+  if (data?.length !== 1 || data[0].id !== await discoverySourceId(userId)) return false;
+  const { data: titles, error: titlesError } = await database.from("cloud_catalog_visible_titles")
+    .select("id").eq("user_id", userId).in("item_type", ["movie", "series"]).limit(1);
+  if (titlesError) throw catalogTitleReadUnavailable();
+  return !titles?.length;
 }
 
 async function listHomeRails(req: Request, url: URL, userId: string) {
-  // The reviewed source contains only Live TV. Do not page through thousands
-  // of withdrawn VOD titles to discover an already-known empty movie library.
-  // The tenant-visible source view and response epoch fence remain authoritative.
+  // Preserve the cheap empty-TV home only while the tenant-visible catalogue
+  // contains no VOD. Adding Selection films must immediately restore movie rails.
   if (await isCuratedLiveOnlyHome(userId, db)) {
     return { contract: "norva.home.rails.v1", rails: [], liveOnly: true };
   }

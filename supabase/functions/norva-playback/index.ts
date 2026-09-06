@@ -1,4 +1,6 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
+import { discoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
 import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
 import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -2156,6 +2158,10 @@ async function createPlaybackSessionCore(
     clientMetadata,
     playbackHint: requestedPlaybackHint,
   });
+  const serverSelectionVodRelay = shouldUseSelectionVodRelay({
+    delivery: "selectionVodDelivery" in resolved ? resolved.selectionVodDelivery : null,
+    targetUrl, itemType, clientMode, body,
+  });
   const authoritativeVodTier = itemType === "movie"
     ? authoritativeVodGatewayTier(resolved.playbackHint, resolvedContainerObservation)
     : null;
@@ -2180,6 +2186,8 @@ async function createPlaybackSessionCore(
   const mode = serverDirectPublicHls
     ? "direct"
     : serverDemotedAutomaticMp4
+    ? "relay"
+    : serverSelectionVodRelay
     ? "relay"
     : serverPromotedRelay
     ? "transcode"
@@ -6832,14 +6840,18 @@ async function resolvePlaybackTarget(
     // authenticated owner and owned source instead of deriving a global key
     // from an opaque catalogue URL.
     const targetUrl = await resolveDiscoveryTarget({
-      sourceId, userId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
+      sourceId, userId, itemId, metadata: ownedMetadata, targetUrl: hint.targetUrl,
     }).catch(() => { throw new HttpError(502, "Selection programme is temporarily unavailable"); });
     const selectionLiveDelivery = await resolveSelectionLiveDelivery({
       sourceId, userId, itemType, itemId, ownedItem, targetUrl,
     });
+    const selectionVodDelivery = itemType === "movie" && typeof ownedMetadata.selectionVodId === "string" ? await resolveSelectionVodDelivery({
+      sourceId, expectedSourceId: await discoverySourceId(userId), itemType, itemId, ownedItem, targetUrl,
+    }) : null;
     return {
       targetUrl,
       selectionLiveDelivery,
+      selectionVodDelivery,
       playbackHint: storedPlaybackHint,
       // The server-verified descriptor retains Xumo's shared feed boundary.
       // Test canaries use an exact public-media boundary so one unrelated
@@ -6847,6 +6859,8 @@ async function resolvePlaybackTarget(
       // replacement/takeover remain; no scope suffix comes from request hints.
       providerAccountScope: selectionLiveDelivery
         ? `user-source:${userId}:${sourceId}:${selectionLiveDelivery.providerAccountScopeSuffix}`
+        : selectionVodDelivery
+        ? `user-source:${userId}:${sourceId}:${selectionVodDelivery.providerAccountScopeSuffix}`
         : `user-source:${userId}:${sourceId}`,
       itemCas,
       containerObservation,
