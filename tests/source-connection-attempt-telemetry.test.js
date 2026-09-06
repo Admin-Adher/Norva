@@ -136,7 +136,9 @@ test('browser-side classifier emits only a root domain, host hash and bounded sh
   const parseXtream = context.parseXtreamLink;
   assert.equal(parseXtream.call(context, 'nooor'), null);
   assert.equal(parseXtream.call(context, 'https://nooor'), null);
-  assert.equal(parseXtream.call(context, 'http://provider:8080').serverUrl, 'http://provider:8080');
+  // A port does not turn a bare application/provider name into a real hostname.
+  assert.equal(parseXtream.call(context, 'http://provider:8080'), null);
+  assert.equal(parseXtream.call(context, 'http://provider.test:8080').serverUrl, 'http://provider.test:8080');
   assert.equal(parseXtream.call(context, 'https://panel.test').serverUrl, 'https://panel.test');
 
   const diagnostic = await context.sourceAttemptDiagnostic.call(context, {

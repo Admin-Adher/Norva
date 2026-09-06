@@ -1,4 +1,18 @@
 {
+  "ui_web_source_email_not_url": {
+    "source": "This is an email or app login, not a provider URL. Ask your provider for a complete M3U link or Xtream server details.",
+    "refs": ["public/js/components/SourceManager.js"],
+    "en": "This is an email or app login, not a provider URL. Ask your provider for a complete M3U link or Xtream server details.",
+    "fr": "C’est une adresse email ou un identifiant d’application, pas une URL de fournisseur. Demandez à votre fournisseur un lien M3U complet ou les informations du serveur Xtream.",
+    "pt-BR": "Isto é um email ou login de aplicativo, não uma URL do provedor. Peça ao seu provedor um link M3U completo ou os dados do servidor Xtream.",
+    "es": "Esto es un correo electrónico o un usuario de una aplicación, no una URL del proveedor. Pide a tu proveedor un enlace M3U completo o los datos del servidor Xtream.",
+    "hi": "यह ईमेल या ऐप का लॉगिन है, प्रदाता का URL नहीं। अपने प्रदाता से पूरा M3U लिंक या Xtream सर्वर की जानकारी माँगें।",
+    "tr": "Bu bir e-posta veya uygulama girişidir, sağlayıcı URL’si değildir. Sağlayıcınızdan tam M3U bağlantısını veya Xtream sunucu bilgilerini isteyin.",
+    "bn": "এটি একটি ইমেইল বা অ্যাপের লগইন, প্রদানকারীর URL নয়। আপনার প্রদানকারীর কাছে সম্পূর্ণ M3U লিংক বা Xtream সার্ভারের তথ্য চান।",
+    "ar": "هذا بريد إلكتروني أو بيانات دخول لتطبيق، وليس رابط المزوّد. اطلب من المزوّد رابط M3U كاملاً أو بيانات خادم Xtream.",
+    "id": "Ini adalah email atau login aplikasi, bukan URL penyedia. Minta tautan M3U lengkap atau detail server Xtream kepada penyedia Anda.",
+    "fil": "Ito ay email o login sa app, hindi URL ng provider. Hingin sa iyong provider ang kumpletong M3U link o mga detalye ng Xtream server."
+  },
   "ui_web_f7d909a256a1": {
     "source": "We use analytics, including privacy-masked session replay, and advertising cookies to understand friction and improve Norva. You can accept or decline — this won’t affect how the site works.",
     "refs": [

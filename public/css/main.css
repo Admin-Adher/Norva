@@ -4476,6 +4476,46 @@ video::cue {
   gap: var(--space-lg);
 }
 
+.source-add-modal [data-source-connection-view] {
+  display: grid;
+  gap: var(--space-lg);
+  min-width: 0;
+}
+
+.source-add-modal [data-source-connection-view][hidden],
+.source-add-modal .source-format-switcher[hidden],
+.source-add-modal .modal-footer[hidden],
+.source-input-error[hidden] {
+  display: none !important;
+}
+
+.source-add-modal .form-input {
+  min-height: 44px;
+  font-size: 1rem;
+}
+
+.source-input-error {
+  margin-top: var(--space-sm);
+  color: var(--color-error-text);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.source-add-modal .form-input[aria-invalid="true"] {
+  border-color: var(--color-error);
+}
+
+.source-provider-help h2 {
+  font-size: 1.25rem;
+  line-height: 1.3;
+}
+
+.source-provider-help h2:focus-visible {
+  outline: 2px solid var(--color-accent) !important;
+  outline-offset: 4px;
+}
+
 .source-add-modal .source-format-switcher {
   padding: var(--space-md);
   border: 1px solid var(--color-border);
