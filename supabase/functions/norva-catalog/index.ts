@@ -4125,7 +4125,15 @@ async function listLiveLogicalChannels(url: URL, userId: string) {
     catalog.count = catalog.channels.length;
     catalog.groups = liveGroupsFromChannels(catalog.channels);
   }
-  return { ...catalog, materialized: false };
+  // A different lineup country can require the raw-row fallback. Apply the
+  // same page bounds as the materialized route before copying/sanitizing the
+  // response; Selection contains thousands of channels and nested variants.
+  const limit = boundedInt(url.searchParams.get("limit"), LIVE_PAGE_SIZE, 1, LIVE_PAGE_SIZE);
+  const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
+  const total = catalog.channels.length;
+  const channels = catalog.channels.slice(offset, offset + limit);
+  return { ...catalog, channels, count: channels.length, total, limit, offset,
+    hasMore: offset + channels.length < total, materialized: false };
 }
 
 async function listLiveChannelVariants(url: URL, userId: string, logicalId: string) {
