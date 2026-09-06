@@ -274,6 +274,7 @@ Deno.serve(async (req) => {
       const force = url.searchParams.get("force") === "1";
       const responseSnapshot = await readCatalogAccessSnapshot(segments[1], user.id, supabase, false);
       const result = await syncCloudSource(segments[1], user.id, supabase, url.searchParams.get("country"), { force });
+      await adoptActiveCatalogUserVisibilityEpoch(supabase, segments[1], user.id, responseSnapshot);
       await assertCatalogSnapshotCurrent(segments[1], user.id, responseSnapshot, supabase);
       catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, result);
@@ -317,6 +318,7 @@ Deno.serve(async (req) => {
       if (!src) throw new HttpError(404, "Source not found");
       const responseSnapshot = await readCatalogAccessSnapshot(sourceId, String(src.user_id), supabase, false);
       const result = await syncCloudSource(sourceId, String(src.user_id), supabase, url.searchParams.get("country"), { force: true });
+      await adoptActiveCatalogUserVisibilityEpoch(supabase, sourceId, String(src.user_id), responseSnapshot);
       await assertCatalogSnapshotCurrent(sourceId, String(src.user_id), responseSnapshot, supabase);
       catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, { adminResync: true, sourceId, ...(result as JsonRecord) });
@@ -4505,6 +4507,9 @@ async function replaceSourceItems(
       });
       if (error) throwDb(error, "Unable to prune obsolete Selection items");
       const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
+      // Deleting old variants advances the account cache epoch. Retain the
+      // generation/config/source fence while adopting our committed prune.
+      if (removed > 0) await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expectedSnapshot);
       if (removed < 100) break;
       if (guard === 599) throw new Error("Selection prune exceeded its bounded batch budget");
     }

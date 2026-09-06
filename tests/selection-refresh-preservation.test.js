@@ -17,14 +17,21 @@ function loadFunction(source, name, next, context) {
 }
 
 const snapshot = { generationId: 'generation', headRevision: 3 };
-function persistenceHarness(engine, failBatch = 0) {
+function persistenceHarness(engine, failBatch = 0, replacedOnPrune = false) {
   const rows = new Map([['keep', { id: 'stable-id', external_id: 'keep', title: 'Old title' }], ['obsolete', { id: 'old-id', external_id: 'obsolete' }]]);
   const calls = [];
   let batches = 0;
+  let epoch = 1;
+  let adoptions = 0;
+  const fence = { ...snapshot, userVisibilityEpoch: '1' };
   const context = {
     Date,
-    assertCatalogSnapshotCurrent: async () => {},
-    catalogGenerationRpcFence: fence => ({ p_generation_id: fence.generationId, p_head_revision: fence.headRevision }),
+    assertCatalogSnapshotCurrent: async () => { assert.equal(fence.userVisibilityEpoch, String(epoch)); },
+    adoptActiveCatalogUserVisibilityEpoch: async (_db, _source, _user, current) => {
+      if (replacedOnPrune) throw Error('catalog generation changed');
+      current.userVisibilityEpoch = String(epoch); adoptions++;
+    },
+    catalogGenerationRpcFence: fence => ({ p_generation_id: fence.generationId, p_head_revision: fence.headRevision, p_user_visibility_epoch: fence.userVisibilityEpoch }),
     withCatalogGenerationRows: (items, fence) => items.map(item => ({ ...item, generation_id: fence.generationId, write_head_revision: fence.headRevision })),
     throwDb: (error, message) => { throw new Error(`${message}: ${error.message}`); },
     clearCatalogGenerationMediaItems: async () => { calls.push({ op: 'clear' }); rows.clear(); },
@@ -47,6 +54,7 @@ function persistenceHarness(engine, failBatch = 0) {
       } };
     },
     async rpc(name, args) {
+      if (name.includes('prune')) assert.equal(args.p_user_visibility_epoch, String(epoch), 'each prune must use the newly committed cache epoch');
       calls.push({ op: name.includes('prune') ? 'prune' : 'clear', args });
       let removed = 0;
       for (const [id, row] of rows) {
@@ -55,14 +63,24 @@ function persistenceHarness(engine, failBatch = 0) {
           rows.delete(id); removed++;
         }
       }
+      if (name.includes('prune') && removed) epoch++;
       return { data: removed };
     },
   };
   const persist = loadFunction(read(engine), 'replaceSourceItems', engine === 'norva-cloud' ? 'clearCatalogGenerationMediaItems' : 'getRuntimeConfig', context);
-  return { rows, calls, run: (items, preserve = true) => persist('source', 'owner', items, db, snapshot, async () => {}, preserve) };
+  return { rows, calls, adoptions: () => adoptions, run: (items, preserve = true) => persist('source', 'owner', items, db, fence, async () => {}, preserve) };
 }
 
 for (const engine of ['norva-source-sync', 'norva-cloud']) {
+  test(`${engine}: multi-batch Selection reclassification adopts its own prune and rejects a replaced generation`, async () => {
+    const h = persistenceHarness(engine);
+    for (let i = 0; i < 260; i++) h.rows.set(`obsolete-${i}`, { id: `obsolete-${i}` });
+    await h.run([{ external_id: 'keep', title: 'Kept film' }]);
+    assert.equal(h.rows.size, 1);
+    assert.equal(h.adoptions(), 3);
+    const changed = persistenceHarness(engine, 0, true);
+    await assert.rejects(changed.run([{ external_id: 'keep' }]), /catalog generation changed/);
+  });
   test(`${engine}: Selection saves every batch before pruning and preserves retained IDs`, async () => {
     const h = persistenceHarness(engine);
     const items = [{ external_id: 'keep', title: 'Correct title' }, ...Array.from({ length: 500 }, (_, i) => ({ external_id: `item-${i}` }))];

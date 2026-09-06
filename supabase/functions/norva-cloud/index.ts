@@ -2,6 +2,7 @@ import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/disc
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
+import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -3611,6 +3612,7 @@ async function replaceSourceItems(
       });
       if (error) throwDb(error, "Unable to prune obsolete Selection items");
       const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
+      if (removed > 0) await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
       if (removed < 100) break;
       if (guard === 599) throw new Error("Selection prune exceeded its bounded batch budget");
     }
