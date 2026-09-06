@@ -368,8 +368,13 @@ public class PlayerActivity extends Activity {
     private static final long HEARTBEAT_INTERVAL_MS = 5_000L;
     private static final long PLAYBACK_AUTH_RESPONSE_TIMEOUT_MS = 5_000L;
     private static final long HEALTHY_RECOVERY_RESET_MS = 60_000L;
+    private final tv.norva.playback.NativeLiveWindowRecovery liveWindowRecovery =
+            new tv.norva.playback.NativeLiveWindowRecovery();
     private final Runnable healthyRecoveryReset = new Runnable() {
-        @Override public void run() { playRetries = 0; }
+        @Override public void run() {
+            playRetries = 0;
+            liveWindowRecovery.reset();
+        }
     };
     // A stream that connects but never delivers playable bytes throws NO
     // PlaybackException, so it never reaches the onPlayerError recovery ladder. Drive
@@ -748,6 +753,24 @@ public class PlayerActivity extends Activity {
                     showProviderAccountConflict(true);
                     return;
                 }
+                MediaItem currentItem = player == null ? null : player.getCurrentMediaItem();
+                if (currentItem != null && currentItem.localConfiguration != null
+                        && liveWindowRecovery.tryAcquire(error.errorCode,
+                                currentItem.localConfiguration.uri.toString(), itemType)) {
+                    errHandler.removeCallbacks(healthyRecoveryReset);
+                    clearPendingDelayedRecovery();
+                    stopPlaybackHeartbeat();
+                    firstFrameForCurrentRoute = false;
+                    recoveryInProgress = true;
+                    transitionTo(PlaybackUiState.RECOVERING, false);
+                    android.util.Log.i("NorvaPlayer", "Recovering expired public HLS live window");
+                    player.seekToDefaultPosition();
+                    player.prepare();
+                    boolean mayPlay = shouldAllowPlayback(playbackActive, isInPipMode());
+                    player.setPlayWhenReady(mayPlay);
+                    if (!mayPlay) resumePlaybackOnResume = true;
+                    return;
+                }
                 // Direct provider play can be refused for this device's residential IP
                 // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
                 // accepted. A single-slot panel can also answer "busy" with a non-media
@@ -834,7 +857,8 @@ public class PlayerActivity extends Activity {
             }
         });
 
-        MediaItem.Builder mediaItem = new MediaItem.Builder().setUri(url);
+        MediaItem.Builder mediaItem = tv.norva.playback.NativeStreamMediaItem
+                .fromUri(url, itemType).buildUpon();
         if (isLocal) {
             // The file extension is hidden (.enc); give ExoPlayer a MIME hint so
             // it picks the right extractor (it also sniffs the decrypted bytes).
@@ -3177,7 +3201,7 @@ public class PlayerActivity extends Activity {
             org.json.JSONObject preferences = payload.optJSONObject("playbackPreferences");
             if (preferences != null) cloudPlaybackPreferencesJson = preferences.toString();
             long requestedPosition = Math.max(0L, payload.optLong("resumeSeconds", 0L) * 1000L);
-            originalMediaItem = new MediaItem.Builder().setUri(nextUrl).build();
+            originalMediaItem = tv.norva.playback.NativeStreamMediaItem.fromUri(nextUrl, itemType);
             prepareMediaItem(
                     originalMediaItem,
                     requestedPosition,
@@ -3257,6 +3281,7 @@ public class PlayerActivity extends Activity {
 
     /** A manual retry must resolve a new provider/Gateway session, not reuse a stale signed URL. */
     private void retryPlayback() {
+        liveWindowRecovery.reset();
         NativePlayerUiTelemetry.log(this, "player_error_action", "retry", "error", "manual");
         if (!isLocal && !hasUsableNetwork()) {
             showPlaybackFailure(
@@ -3454,7 +3479,7 @@ public class PlayerActivity extends Activity {
         errHandler.removeCallbacks(bufferWatchdog);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         prepareMediaItem(
-                new MediaItem.Builder().setUri(fallbackUrl).build(),
+                tv.norva.playback.NativeStreamMediaItem.fromUri(fallbackUrl, itemType),
                 recoverPositionMs(),
                 PlaybackUiState.RECOVERING);
     }

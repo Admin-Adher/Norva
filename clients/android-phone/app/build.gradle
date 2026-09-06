@@ -19,8 +19,8 @@ namespace "tv.norva.phone"
         applicationId "tv.norva.phone"
         minSdk 23
         targetSdk 36
-        versionCode 31
-        versionName "1.3.18"
+        versionCode 32
+        versionName "1.3.19"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so

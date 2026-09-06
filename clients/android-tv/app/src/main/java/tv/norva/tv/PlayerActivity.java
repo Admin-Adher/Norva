@@ -270,8 +270,13 @@ public class PlayerActivity extends Activity {
             1_000L, 2_000L, 3_500L, 5_000L, 8_000L, 12_000L, 15_000L
     };
     private int liveReconnectAttempts = 0;
+    private final tv.norva.playback.NativeLiveWindowRecovery liveWindowRecovery =
+            new tv.norva.playback.NativeLiveWindowRecovery();
     private final Runnable healthyRecoveryReset = new Runnable() {
-        @Override public void run() { playRetries = 0; }
+        @Override public void run() {
+            playRetries = 0;
+            liveWindowRecovery.reset();
+        }
     };
 
     // End-of-stream: "À suivre" overlay (series binge) and exit reporting.
@@ -833,6 +838,22 @@ public class PlayerActivity extends Activity {
                     showProviderAccountConflict(true);
                     return;
                 }
+                MediaItem currentItem = player == null ? null : player.getCurrentMediaItem();
+                if (currentItem != null && currentItem.localConfiguration != null
+                        && liveWindowRecovery.tryAcquire(code,
+                                currentItem.localConfiguration.uri.toString(), itemType)) {
+                    // The old position has left the live window. Recover within
+                    // this session; do not restart a provider/gateway ladder.
+                    handler.removeCallbacks(healthyRecoveryReset);
+                    spinner.setVisibility(View.VISIBLE);
+                    errorView.setText(getString(R.string.player_live_reconnecting));
+                    errorView.setVisibility(View.VISIBLE);
+                    android.util.Log.i(TAG, "Recovering expired public HLS live window");
+                    player.seekToDefaultPosition();
+                    player.prepare();
+                    applyPlaybackIntent();
+                    return;
+                }
                 final String diagnostic = diagnose(error);
                 // Keep provider/ExoPlayer internals available to support without
                 // exposing hosts, exception classes or stack details on the TV.
@@ -891,9 +912,9 @@ public class PlayerActivity extends Activity {
 
         playRetries = 0;
         if (initialStartPositionMs > 0L) {
-            player.setMediaItem(MediaItem.fromUri(url), initialStartPositionMs);
+            player.setMediaItem(tv.norva.playback.NativeStreamMediaItem.fromUri(url, itemType), initialStartPositionMs);
         } else {
-            player.setMediaItem(MediaItem.fromUri(url));
+            player.setMediaItem(tv.norva.playback.NativeStreamMediaItem.fromUri(url, itemType));
         }
         player.prepare();
         applyPlaybackIntent();
@@ -1285,6 +1306,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void retryPlayback() {
+        liveWindowRecovery.reset();
         boolean restoreControlsFocus = controlsVisibleBeforeError;
         controlsVisibleBeforeError = false;
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
@@ -1527,8 +1549,8 @@ public class PlayerActivity extends Activity {
                 @Override public void run() {
                     if (player == null || freshStreamRequested
                             || scheduledGeneration != recoveryGeneration) return;
-                    MediaItem item = current != null ? current : MediaItem.fromUri(
-                            fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl);
+                    MediaItem item = current != null ? current : tv.norva.playback.NativeStreamMediaItem.fromUri(
+                            fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl, itemType);
                     player.setMediaItem(item, position);
                     player.prepare();
                     applyPlaybackIntent();
@@ -1580,7 +1602,7 @@ public class PlayerActivity extends Activity {
                 fallbackTried = false;
                 playRetries = 0;
                 streamHost = hostOf(originalUrl);
-                player.setMediaItem(MediaItem.fromUri(originalUrl));
+                player.setMediaItem(tv.norva.playback.NativeStreamMediaItem.fromUri(originalUrl, itemType));
                 player.prepare();
                 applyPlaybackIntent();
             }
@@ -1710,7 +1732,7 @@ public class PlayerActivity extends Activity {
             errorView.setVisibility(View.GONE);
             if (errorPanel != null) errorPanel.setVisibility(View.GONE);
             spinner.setVisibility(View.VISIBLE);
-            player.setMediaItem(MediaItem.fromUri(nextUrl), requestedPosition);
+            player.setMediaItem(tv.norva.playback.NativeStreamMediaItem.fromUri(nextUrl, itemType), requestedPosition);
             player.prepare();
             applyPlaybackIntent();
         } catch (Exception error) {
@@ -1742,7 +1764,7 @@ public class PlayerActivity extends Activity {
         errorView.setVisibility(View.GONE);
         spinner.setVisibility(View.VISIBLE);
         long position = recoverPositionMs();
-        player.setMediaItem(MediaItem.fromUri(fallbackUrl), position);
+        player.setMediaItem(tv.norva.playback.NativeStreamMediaItem.fromUri(fallbackUrl, itemType), position);
         player.prepare();
         applyPlaybackIntent();
     }

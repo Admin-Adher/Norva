@@ -354,14 +354,14 @@ test('Android TV remains direct-first and only activates Gateway as fallback', (
   const fallback = javaMethod(player, 'private void switchToFallback()');
 
   assert.match(create, /originalUrl\s*=\s*url/);
-  assert.match(build, /setMediaItem\(MediaItem\.fromUri\(url\)\)/);
+  assert.match(build, /setMediaItem\(tv\.norva\.playback\.NativeStreamMediaItem\.fromUri\(url, itemType\)\)/);
   assert.doesNotMatch(
     build,
-    /setMediaItem\(MediaItem\.fromUri\(fallbackUrl\)\)/,
+    /setMediaItem\(tv\.norva\.playback\.NativeStreamMediaItem\.fromUri\(fallbackUrl, itemType\)\)/,
     'the initial media item must be the residential/provider URL',
   );
   assert.match(fallback, /fallbackTried\s*=\s*true/);
-  assert.match(fallback, /MediaItem\.fromUri\(fallbackUrl\)/);
+  assert.match(fallback, /NativeStreamMediaItem\.fromUri\(fallbackUrl, itemType\)/);
   assert.match(
     player,
     /!everReady\s*&&\s*!fallbackTried[\s\S]{0,240}switchToFallback\(\)/,
@@ -634,7 +634,7 @@ test('Android TV chooses Resume or Start over before prepare and never seeks aft
     /buildPlayer\(originalUrl\)/,
     'the chosen start position must be known before the player is prepared',
   );
-  assert.match(build, /setMediaItem\(MediaItem\.fromUri\(url\),\s*initialStartPositionMs\)/);
+  assert.match(build, /setMediaItem\(tv\.norva\.playback\.NativeStreamMediaItem\.fromUri\(url, itemType\),\s*initialStartPositionMs\)/);
   assert.doesNotMatch(
     build,
     /STATE_READY[\s\S]{0,600}seekTo\(target\)/,

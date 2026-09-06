@@ -406,7 +406,7 @@ test('Android TV keeps a dropped live socket inside the native player', () => {
   assert.match(source, /private int liveReconnectAttempts = 0/);
   assert.match(recovery, /if \(isLiveContent\(\)\) \{\s*scheduleLiveReconnect\(reason\);\s*return;/);
   assert.match(recovery, /private void scheduleLiveReconnect\(final String reason\)/);
-  assert.match(recovery, /player\.setMediaItem\(MediaItem\.fromUri\(originalUrl\)\)/);
+  assert.match(recovery, /player\.setMediaItem\(tv\.norva\.playback\.NativeStreamMediaItem\.fromUri\(originalUrl, itemType\)\)/);
   assert.doesNotMatch(
     section(source, 'private void scheduleLiveReconnect(final String reason)', 'private void requestFreshStream(String reason)'),
     /finish\(\)/,
