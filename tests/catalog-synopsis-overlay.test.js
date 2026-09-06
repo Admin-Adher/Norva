@@ -19,7 +19,7 @@ test('synopsis overlay remains active while the risky full display cutover is of
   assert.match(src, /Permanent safe read path for title text removed by cloud_titles self-thinning/);
 });
 
-test('shared text is catalog-validated, item-type scoped, projected, and fill-only', () => {
+test('shared text is catalog-validated, item-type scoped, and projected', () => {
   const src = read('supabase/functions/norva-catalog/index.ts');
   const start = src.indexOf('async function applyCatalogTextOverlay(');
   const end = src.indexOf('// Full display overlay remains guarded', start);
@@ -31,16 +31,16 @@ test('shared text is catalog-validated, item-type scoped, projected, and fill-on
   assert.match(block, /\.eq\("item_type", itemType\)/);
   assert.match(block, /base_overview:metadata->tmdb->>overview/);
   assert.match(block, /loc_overview:metadata->i18n->\$\{lang\}->>overview/);
-  assert.match(block, /if \(!existingOverview && baseOverview\)/);
+  assert.match(block, /if \(baseOverview\)/);
   assert.doesNotMatch(block, /row\.(release_year|poster_url|backdrop_url)\s*=/);
 });
 
-test('empty cloud strings fall back and existing provider summaries are preserved', () => {
+test('validated TMDB summaries replace provider text with provider fallback when absent', () => {
   const src = read('supabase/functions/norva-catalog/index.ts');
   assert.match(src, /stringOrNull\(tmdb\.overview\) \?\? stringOrNull\(metadata\.overview\)/);
   assert.match(src, /stringOrNull\(rowTmdb\.overview\)\s*\?\? stringOrNull\(row\.overview\)/);
-  assert.match(src, /const resolvedOverview = cat\.localizedOverview\s*\?\? existingOverview\s*\?\? cat\.fallbackOverview/);
-  assert.match(src, /\?\? providerOverview\s*\?\? stringOrNull\(title\.__catalog_base_overview\)/);
+  assert.match(src, /preferredTmdbSynopsis\(cat\.localizedOverview, cat\.fallbackOverview, existingOverview\)/);
+  assert.match(src, /\?\? stringOrNull\(title\.__catalog_base_overview\)\s*\?\? stringOrNull\(metadata\.overview\)\s*\?\? providerOverview/);
 });
 
 test('all title rails forward the requested synopsis language', () => {
@@ -72,7 +72,7 @@ test('flat grids avoid movie-series id collisions and support localized synopsis
   assert.match(block, /trusted:metadata->tmdbValidation->>valid/);
   assert.match(block, /\.eq\("item_type", itemType\)/);
   assert.match(block, /loc_overview:metadata->i18n->\$\{lang\}->>overview/);
-  assert.match(block, /if \(resolvedOverview && \(cat\.localizedOverview \|\| !existingOverview\)\)/);
+  assert.match(block, /if \(resolvedOverview\)/);
 });
 
 test('zero external budgets still reuse provider and TMDB caches for new accounts', () => {

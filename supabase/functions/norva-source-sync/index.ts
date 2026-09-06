@@ -1,4 +1,6 @@
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
+import { maintainCatalogBackgroundOwners } from "../_shared/catalog-background-owner-workflow.mjs";
+import { acceptAutomaticTmdbSearchMatch } from "../_shared/tmdb-enrichment-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -226,6 +228,9 @@ Deno.serve(async (req) => {
       if (segments[1] === "resume-stuck") {
         return json(req, await cronResumeStuck(supabase));
       }
+      if (segments[1] === "catalog-owner-maintenance") {
+        return json(req, await maintainCatalogBackgroundOwners(supabase));
+      }
       // Backfill release_year from TMDB for unverified titles. One batch per call
       // (cursor-resumable); drive it in a loop until {done:true}.
       if (segments[1] === "backfill-years") {
@@ -242,10 +247,8 @@ Deno.serve(async (req) => {
         return json(req, await cronRevalidate(supabase, limit, reset, concurrency));
       }
       // Search-match titles that have no provider TMDB id (TMDB search + confirm).
-      // Caps raised for backlog burn-down: ~459k browsable titles were never
-      // attempted at the old 300/run cap (~65 days to clear). A run at limit=1000,
-      // conc=15 is ~1.2k TMDB calls in ~35s (well under the 120s cron timeout and
-      // TMDB's ~50 req/s), so the nightly schedule clears the backlog in days.
+      // Scheduled throughout the day; owner maintenance independently prepares
+      // new imports. Claims and acknowledgements retain progress across runs.
       if (segments[1] === "search-match") {
         const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 1500);
         const reset = url.searchParams.get("reset") === "1";
@@ -1797,7 +1800,7 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
             row.releaseYear != null ? String(row.releaseYear) : null,
             row.posterUrl,
           );
-          outcomes[index] = match ? {
+          outcomes[index] = acceptAutomaticTmdbSearchMatch(row, match) && match ? {
             matched: true,
             providerTmdbId: match.tmdbId,
             title: match.title || row.title,

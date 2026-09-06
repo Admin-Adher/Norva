@@ -1,3 +1,4 @@
+import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 // SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
 // supabase/functions tree, so sibling ../_shared imports stay available. A push
 // to main validates this code but does not reload production: update the server
@@ -872,8 +873,11 @@ function applyFlatMediaGenerationTitle(
     title.__catalog_base_overview,
   );
   const existingOverview = boundedProviderOverview(row.overview, row.description, row.plot);
-  const resolvedOverview = stringOrNull(localized.overview)
-    ?? (fullOverlayEnabled ? projectedOverview ?? existingOverview : existingOverview ?? projectedOverview);
+  const trustedTmdb = recordOrEmpty(titleMetadata.tmdbValidation).valid === true;
+  const resolvedOverview = trustedTmdb
+    ? preferredTmdbSynopsis(stringOrNull(localized.overview), projectedOverview, existingOverview)
+    : stringOrNull(localized.overview)
+      ?? (fullOverlayEnabled ? projectedOverview ?? existingOverview : existingOverview ?? projectedOverview);
   if (resolvedOverview) {
     row.overview = resolvedOverview;
     row.description = resolvedOverview;
@@ -1226,12 +1230,10 @@ async function attachMediaLanguages(
         ?? stringOrNull(row.overview)
         ?? stringOrNull(row.description)
         ?? stringOrNull(row.plot);
-      // A requested-language translation wins consistently on grids and rails.
-      // Otherwise the provider text wins and the catalogue remains fill-only.
-      const resolvedOverview = cat.localizedOverview
-        ?? existingOverview
-        ?? cat.fallbackOverview;
-      if (resolvedOverview && (cat.localizedOverview || !existingOverview)) {
+      // This map contains validated TMDB identities only. Prefer its synopsis
+      // even without a translation, before a technical/provider description.
+      const resolvedOverview = preferredTmdbSynopsis(cat.localizedOverview, cat.fallbackOverview, existingOverview);
+      if (resolvedOverview) {
         row.overview = resolvedOverview; row.description = resolvedOverview; row.plot = resolvedOverview;
         row.tmdb = { ...rowTmdb, overview: resolvedOverview };
       }
@@ -2017,6 +2019,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
   const hasStrictLanguageFilter = Boolean(audioIso || subIso);
   const needsLanguagePage = Boolean(
+    (requestedBuckets.length > 0 && !langSort) ||
     providerAudioFacet(audioIso) ||
     (sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso)) ||
       (!sourceId && hasStrictLanguageFilter && !langSort),
@@ -3633,9 +3636,8 @@ async function applyCatalogTextOverlay(
 
     const existingOverview = stringOrNull(tmdb.overview) ?? stringOrNull(metadata.overview);
     const baseOverview = text.baseOverview ?? text.englishOverview;
-    if (!existingOverview && baseOverview) {
-      // Keep the shared fallback separate from per-user/provider metadata so
-      // titleRailItem can prefer a provider synopsis when no translation exists.
+    if (baseOverview) {
+      // Keep validated TMDB text separate from provider routing metadata.
       row.__catalog_base_overview = baseOverview;
     }
 
@@ -3811,9 +3813,9 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     variantMetadata.plot,
   );
   const overview = stringOrNull(tmdb.overview)
+    ?? stringOrNull(title.__catalog_base_overview)
     ?? stringOrNull(metadata.overview)
-    ?? providerOverview
-    ?? stringOrNull(title.__catalog_base_overview);
+    ?? providerOverview;
   // Localized display: serve the user's language from the per-title i18n when
   // present, else the catalogue default (i18n is stored by the enrichment).
   const i18n = recordOrEmpty(metadata.i18n);
