@@ -1,3 +1,4 @@
+import { curatedChannelForMetadata, curatedChannelExternalId } from './selection-curated-channels.mjs';
 import { discoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_LIVE_DIRECT_CANARIES } from './selection-live-direct-canaries.mjs';
 
@@ -92,6 +93,17 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
     if (itemType !== 'live' || typeof userId !== 'string' || !userId || !ownedItem) return null;
     const metadata = record(ownedItem.metadata);
     const hint = record(ownedItem.playback_hint);
+    const curated = curatedChannelForMetadata(metadata, targetUrl);
+    if (curated) {
+      if (hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hint.targetUrl !== targetUrl
+        || hasExplicitCanarySelection(hint) || sourceId !== await discoverySourceId(userId)
+        || itemId !== await curatedChannelExternalId(curated)) return null;
+      const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: metadata.tvgId, targetUrl,
+        providerAccountScopeSuffix: `public-media:${itemId.slice('norva-discovery:live:'.length)}` });
+      verifiedDeliveries.add(delivery);
+      canaryDeliveries.add(delivery);
+      return delivery;
+    }
     if (metadata.discoveryFeed === 'plex') {
       const part = metadata.tvgId;
       if (typeof part !== 'string' || !/^[a-f0-9]{24}-[a-f0-9]{24}$/.test(part)

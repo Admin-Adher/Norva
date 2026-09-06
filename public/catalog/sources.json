@@ -1,6 +1,49 @@
 {
-  "status": "under_review",
-  "sources": [],
+  "status": "active",
+  "sources": [
+    {
+      "id": "rakuten-reviewed",
+      "name": "Rakuten TV",
+      "kind": "live",
+      "website": "https://www.rakuten.tv/",
+      "channels": 4
+    },
+    {
+      "id": "stingray-reviewed",
+      "name": "Stingray",
+      "kind": "live",
+      "website": "https://www.stingray.com/",
+      "channels": 3
+    },
+    {
+      "id": "stirr-reviewed",
+      "name": "STIRR",
+      "kind": "live",
+      "website": "https://stirr.com/",
+      "channels": 2
+    },
+    {
+      "id": "distro-reviewed",
+      "name": "DistroTV",
+      "kind": "live",
+      "website": "https://www.distro.tv/",
+      "channels": 1
+    },
+    {
+      "id": "redbull-reviewed",
+      "name": "Red Bull TV",
+      "kind": "live",
+      "website": "https://www.redbull.com/int-en/live",
+      "channels": 1
+    },
+    {
+      "id": "fls-reviewed",
+      "name": "Free Live Sports",
+      "kind": "live",
+      "website": "https://www.freelivesports.tv/",
+      "channels": 3
+    }
+  ],
   "withdrawn": [
     {
       "name": "Blender Open Movies",

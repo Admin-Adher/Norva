@@ -1,4 +1,5 @@
-import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, assertDiscoverySelectionAvailable, discoveryMovieFields, discoverySourceId } from './discovery-catalog.mjs';
+import { SELECTION_CURATED_CHANNELS, SELECTION_CURATED_PROVIDERS, SELECTION_CURATED_REVISION, curatedChannelForMetadata, curatedChannelExternalId } from './selection-curated-channels.mjs';
+import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, assertDiscoverySelectionAvailable, discoveryMovieFields, discoverySourceId, retiredDiscoverySourceId } from './discovery-catalog.mjs';
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
 import { matchesSelectionLiveQuarantine, SELECTION_LIVE_QUARANTINE } from './selection-live-quarantine.mjs';
 
@@ -21,7 +22,7 @@ export const DISCOVERY_REVIEW_SOURCES = Object.freeze([
   })),
   { id: 'xumo-curated', name: 'Xumo', kind: 'live', url: 'https://norva.tv/catalog/xumo-live.m3u', website: 'https://play.xumo.com/' },
 ].map(Object.freeze));
-export const DISCOVERY_SOURCES = Object.freeze(DISCOVERY_SELECTION_ENABLED ? [...DISCOVERY_REVIEW_SOURCES] : []);
+export const DISCOVERY_SOURCES = Object.freeze(DISCOVERY_SELECTION_ENABLED ? [...SELECTION_CURATED_PROVIDERS] : []);
 
 // Previously researched or retired sources remain documented outside the active feeds.
 export const DISCOVERY_RESEARCH = Object.freeze([
@@ -111,9 +112,23 @@ export function discoveryCatalogFields(playlistUrl, item) {
 
 // Bounded batches avoid holding all 30 regional Pluto documents in memory.
 // A failed feed is recorded separately and does not hide the working feeds.
-export async function fetchDiscoverySelection(options = {}) {
+export async function fetchDiscoverySelection({ heartbeat = async () => {} } = {}) {
   assertDiscoverySelectionAvailable();
-  return fetchDiscoveryCandidates({ ...options, feeds: DISCOVERY_SOURCES });
+  await heartbeat();
+  const items = await Promise.all(SELECTION_CURATED_CHANNELS.map(async channel => {
+    const group = `${channel.provider} · ${channel.group}`;
+    const tvgId = `norva-selection:${channel.id}`;
+    const metadata = { selectionRevision: SELECTION_CURATED_REVISION, selectionChannelId: channel.id,
+      tvgId, group, categoryName: group, container: 'm3u8', containerExtension: 'm3u8',
+      discoveryFeed: channel.feedId, discoveryMediaKey: channel.url, discoverySource: channel.website,
+      ...(channel.country ? { country: channel.country } : {}) };
+    const fields = { item_type: 'live', external_id: await curatedChannelExternalId(channel), title: channel.title,
+      parent_external_id: group, subtitle: group, poster_url: null, metadata,
+      playback_hint: { sourceType: 'm3u', targetUrl: channel.url, container: 'm3u8', containerExtension: 'm3u8' } };
+    return { title: channel.title, url: channel.url, tvgId, group, logo: '', [trusted]: fields };
+  }));
+  return { items, sources: DISCOVERY_SOURCES.map(source => ({ id: source.id, status: 'loaded', discovered: source.channels, included: source.channels })),
+    bytesRead: 0, headerDetected: true, truncated: false, truncationReason: null };
 }
 
 // Audit-only parser. Production imports must use the availability-checked wrapper.
@@ -174,8 +189,11 @@ const playbackFeeds = new Map();
 // Only an owned Norva Selection row may refresh an expiring upstream reference.
 // Never accept a feed URL or content identity from a client's playback hint.
 export async function resolveDiscoveryTarget(options) {
-  if (options.sourceId === await discoverySourceId(options.userId)) assertDiscoverySelectionAvailable();
-  return resolveDiscoveryCandidateTarget(options);
+  if (options.sourceId === await retiredDiscoverySourceId(options.userId)) throw new Error('Selection programme is temporarily unavailable');
+  if (options.sourceId !== await discoverySourceId(options.userId)) return options.targetUrl;
+  assertDiscoverySelectionAvailable();
+  if (!curatedChannelForMetadata(options.metadata, options.targetUrl)) throw new Error('Selection programme is temporarily unavailable');
+  return options.targetUrl;
 }
 
 export async function resolveDiscoveryCandidateTarget({ sourceId, userId, metadata, targetUrl, fetchPlaylist = fetchM3uPlaylistStream, now = Date.now() }) {

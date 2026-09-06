@@ -1,6 +1,6 @@
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -1414,8 +1414,9 @@ async function listSources(userId: string, db: SupabaseClient) {
   if (error) throwDb(error, "Unable to list sources");
   // Withdrawn Selection stays archived server-side without an unusable Enable
   // action in the ordinary paused-provider onboarding or source manager.
+  const retiredId = await retiredDiscoverySourceId(userId);
   const withdrawnId = DISCOVERY_SELECTION_ENABLED ? null : await discoverySourceId(userId);
-  return { sources: (data ?? []).filter(source => source.id !== withdrawnId).map(sanitizeSource) };
+  return { sources: (data ?? []).filter(source => source.id !== retiredId && source.id !== withdrawnId).map(sanitizeSource) };
 }
 
 async function listVisibleSources(userId: string, db: SupabaseClient) {
@@ -1846,7 +1847,8 @@ async function setSourceEnabled(req: Request, id: string, userId: string, db: Su
   // urgent Disable remains available. Newly loaded clients always send the
   // explicit desired state and therefore retain retry idempotence.
   const desired = hasDesiredState ? body.enabled === true : !current;
-  if (desired && !DISCOVERY_SELECTION_ENABLED && id === await discoverySourceId(userId)) {
+  if (desired && (id === await retiredDiscoverySourceId(userId)
+    || (!DISCOVERY_SELECTION_ENABLED && id === await discoverySourceId(userId)))) {
     throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
   }
   const legacyToggle = !hasDesiredState;

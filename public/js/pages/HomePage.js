@@ -1301,6 +1301,14 @@ class HomePage {
                         ${manager?.getProviderAccessTermsFields?.({ prefix: 'home-provider-access', onboarding: true, deferred: true }) || ''}
                         <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit" data-i18n="ui_web_5d329e5a79c1">Check playlist</button>
                     </form>
+                    ${this.app?.currentUser?.cloud ? `<section class="setup-discovery" aria-labelledby="home-discovery-title">
+                        <h2 id="home-discovery-title" data-i18n="ui_discovery_title">No catalogue? Start with our selection.</h2>
+                        <p data-i18n="ui_discovery_live_description">Enjoy a selection of live TV channels in Norva, without adding a provider.</p>
+                        <button type="button" class="btn btn-secondary" id="home-discovery-start" data-i18n="ui_discovery_continue">Continue with this selection</button>
+                        <p class="setup-discovery-terms" data-i18n="ui_discovery_terms">Included in your 7-day trial, then in your Norva subscription.</p>
+                        <a href="/catalog/credits.html" target="_blank" rel="noopener" data-i18n="ui_discovery_live_credits">Channels and sources</a>
+                        <p id="home-discovery-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                    </section>` : ''}
                 </div>
             </section>
         `;

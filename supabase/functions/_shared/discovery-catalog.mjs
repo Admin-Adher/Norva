@@ -1,13 +1,16 @@
+import { curatedSelectionPlaylist } from './selection-curated-channels.mjs';
 // Curated independently of user playlists. Additions require a playable full film,
 // attribution and a source-specific redistribution licence; never scrape credentials.
 export const DISCOVERY_PLAYLIST_URL = 'https://norva.tv/catalog/discovery.m3u';
-// All providers are withdrawn while the full Selection quality review is open.
-export const DISCOVERY_SELECTION_ENABLED = false;
+// Only the reviewed channel allowlist is active. The old aggregate catalogue stays archived.
+export const DISCOVERY_SELECTION_ENABLED = true;
 export function assertDiscoverySelectionAvailable() {
   if (!DISCOVERY_SELECTION_ENABLED) throw new Error('Norva Selection is temporarily unavailable');
 }
-export async function discoverySourceId(userId) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('norva-selection-v1:' + userId));
+export function discoverySourceId(userId) { return selectionSourceIdentity('norva-selection-curated-v1:', userId); }
+export function retiredDiscoverySourceId(userId) { return selectionSourceIdentity('norva-selection-v1:', userId); }
+async function selectionSourceIdentity(prefix, userId) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(prefix + userId));
   const hex = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
@@ -37,8 +40,5 @@ export function discoveryMovieFields(playlistUrl, mediaUrl) {
 }
 
 export function discoveryPlaylist() {
-  if (!DISCOVERY_SELECTION_ENABLED) return '#EXTM3U\n';
-  return '#EXTM3U\n' + DISCOVERY_FILMS.map(film =>
-    `#EXTINF:${film.duration} tvg-id="norva-discovery:${film.id}" tvg-logo="${film.poster}" group-title="Norva Selection",${film.title}\n${film.url}\n`
-  ).join('');
+  return DISCOVERY_SELECTION_ENABLED ? curatedSelectionPlaylist() : '#EXTM3U\n';
 }

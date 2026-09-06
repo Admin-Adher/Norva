@@ -23976,5 +23976,37 @@
     "ar": "أنت",
     "id": "Anda",
     "fil": "Ikaw"
+  },
+  "ui_discovery_live_description": {
+    "source": "Enjoy a selection of live TV channels in Norva, without adding a provider.",
+    "refs": [
+      "public/js/pages/HomePage.js"
+    ],
+    "en": "Enjoy a selection of live TV channels in Norva, without adding a provider.",
+    "fr": "Profitez d’une sélection de chaînes TV dans Norva, sans ajouter de fournisseur.",
+    "pt-BR": "Aproveite uma seleção de canais de TV ao vivo no Norva, sem adicionar um provedor.",
+    "es": "Disfruta de una selección de canales de TV en directo en Norva, sin añadir un proveedor.",
+    "hi": "प्रदाता जोड़े बिना, Norva में चुनिंदा लाइव टीवी चैनलों का आनंद लें।",
+    "tr": "Sağlayıcı eklemeden Norva’daki seçili canlı TV kanallarının keyfini çıkarın.",
+    "bn": "প্রদানকারী যোগ না করেই Norva-তে বাছাই করা লাইভ টিভি চ্যানেল উপভোগ করুন।",
+    "ar": "استمتع بمجموعة مختارة من القنوات التلفزيونية المباشرة في Norva دون إضافة مزود.",
+    "id": "Nikmati pilihan saluran TV langsung di Norva tanpa menambahkan penyedia.",
+    "fil": "Manood ng mga piling live TV channel sa Norva nang hindi nagdaragdag ng provider."
+  },
+  "ui_discovery_live_credits": {
+    "source": "Channels and sources",
+    "refs": [
+      "public/js/pages/HomePage.js"
+    ],
+    "en": "Channels and sources",
+    "fr": "Chaînes et sources",
+    "pt-BR": "Canais e fontes",
+    "es": "Canales y fuentes",
+    "hi": "चैनल और स्रोत",
+    "tr": "Kanallar ve kaynaklar",
+    "bn": "চ্যানেল ও উৎস",
+    "ar": "القنوات والمصادر",
+    "id": "Saluran dan sumber",
+    "fil": "Mga channel at source"
   }
 }

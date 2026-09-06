@@ -8,8 +8,10 @@ const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;',
 writeFileSync(new URL('credits.html', root), `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Norva Selection — Credits</title><link rel="stylesheet" href="/css/main.css"></head>
 <body><main class="discovery-credits"><a href="/app#home">Norva</a><h1>Norva Selection — Credits</h1>
-<p>Norva Selection is temporarily unavailable while all providers are reviewed. No films or live television feeds are currently included.</p>
-<p>You can continue using Norva with your own TV provider. Your Norva subscription and eligible trial terms remain unchanged.</p>
+<p>Norva Selection includes a small selection of live TV channels checked for playback. Availability can vary by country and over time.</p>
+<p>Included in your eligible 7-day trial, then in your Norva subscription. You can also add your own TV provider.</p>
+<h2>Selected live TV channels</h2>
+<ul>${DISCOVERY_SOURCES.map(source => `<li><a href="${source.website}">${escape(source.name)}</a> — ${source.channels} channels</li>`).join('')}</ul>
 <h2>Withdrawn sources under review</h2>
 <p>The following references document the previous selection. They are not active feeds or playback recommendations.</p>
 <ul>${DISCOVERY_REVIEW_SOURCES.map(source => `<li><a href="${source.website}">${escape(source.name)}</a> — withdrawn</li>`).join('')}</ul>
@@ -21,7 +23,7 @@ ${DISCOVERY_FILMS.map(film => `<section><h2>${escape(film.title)} (${film.year})
 <a href="/app#home">Return to Norva</a></main></body></html>\n`);
 writeFileSync(new URL('sources.json', root), JSON.stringify({
   status: DISCOVERY_SELECTION_ENABLED ? 'active' : 'under_review',
-  sources: DISCOVERY_SELECTION_ENABLED ? [{ name: 'Blender Open Movies', kind: 'movie', website: 'https://studio.blender.org/films/', bundledFilms: DISCOVERY_FILMS.length }, ...DISCOVERY_SOURCES] : [],
+  sources: DISCOVERY_SELECTION_ENABLED ? DISCOVERY_SOURCES : [],
   withdrawn: [{ name: 'Blender Open Movies', kind: 'movie', website: 'https://studio.blender.org/films/' }, ...DISCOVERY_REVIEW_SOURCES.map(({ name, kind, website }) => ({ name, kind, website }))],
   research: DISCOVERY_RESEARCH,
 }, null, 2) + '\n');
