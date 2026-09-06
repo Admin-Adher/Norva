@@ -24,7 +24,7 @@ function decision(input, delivery) {
     body: { gatewayAutoMode: true, publicHlsDirectSessionGuard: true, playbackHint: { gatewayMode: 'remux' } },
     clientMetadata: { clientSurface: 'web', appMode: 'cloud' } };
 }
-test('all three reviewed Plex parts keep the complete refreshed target and stable account scope', async () => {
+test('reviewed Plex parts keep the complete refreshed target and stable account scope', async () => {
   for (const part of Object.keys(parts)) {
     const { input, resolver, shouldUseSelectionLiveDirect } = await setup(part);
     const before = JSON.stringify(input);
@@ -55,7 +55,7 @@ test('a reviewed channel may use another owned regional part without changing re
   other.ownedItem.metadata.discoveryMediaKey = otherKey;
   other.itemId = `norva-discovery:live:${sha(`live:${otherKey}`)}`;
   other.ownedItem.playback_hint.targetUrl = other.targetUrl = otherKey + '?X-Plex-Token=token';
-  assert.equal(await resolver(other), null, 'unreviewed Plex programmes remain outside direct delivery');
+  assert.ok(await resolver(other), 'the transport applies to every canonical owned Plex programme');
 });
 test('ownership, Selection identity, persisted part, feed and attribution must all agree', async () => {
   const { input, resolver, resolveSelectionLiveDelivery } = await setup();
@@ -76,23 +76,20 @@ test('ownership, Selection identity, persisted part, feed and attribution must a
   for (const change of changes) { const value = structuredClone(input); change(value); assert.equal(await resolver(value), null); }
 });
 
-test('protocol review accepts another canonical programme only for the server-configured canary owner', async () => {
-  const { input, resolver, createSelectionLiveDeliveryResolver, shouldUseSelectionLiveDirect } = await setup('697140a85d851f5e69414688-ffffffffffffffffffffffff');
-  assert.equal(await resolver(input), null);
-  const owners = [sha(input.userId)];
-  const canary = createSelectionLiveDeliveryResolver({ plexProtocolCanaryOwners: owners });
-  owners.length = 0;
-  const delivery = await canary(input);
-  assert.ok(delivery, 'server configuration is snapshotted');
+test('canonical programmes use the reviewed protocol for independent owners without widening source or session authority', async () => {
+  const { input, resolver, shouldUseSelectionLiveDirect } = await setup('697140a85d851f5e69414688-ffffffffffffffffffffffff');
+  const delivery = await resolver(input);
+  assert.ok(delivery);
   assert.equal(shouldUseSelectionLiveDirect(decision(input, delivery)), true);
   const another = structuredClone(input);
   another.userId = 'independent-owner';
+  assert.equal(await resolver(another), null, 'another owner cannot reuse the first source');
   const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
   another.sourceId = await discoverySourceId(another.userId);
-  assert.equal(await canary(another), null, 'protocol canary does not grant other owners');
+  assert.ok(await resolver(another), 'another owner may play the same programme from their own Selection');
   const forged = structuredClone(input);
   forged.ownedItem.metadata.discoveryFeed = 'personal';
-  assert.equal(await canary(forged), null, 'canary does not waive provenance');
+  assert.equal(await resolver(forged), null, 'protocol delivery does not waive provenance');
   const request = decision(input, delivery);
   request.body.publicHlsDirectSessionGuard = false;
   assert.equal(shouldUseSelectionLiveDirect(request), false);

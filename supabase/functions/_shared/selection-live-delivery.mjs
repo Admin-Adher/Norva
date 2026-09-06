@@ -16,20 +16,10 @@ const PUBLIC_HLS_CHANNELS = Object.freeze({
     itemId: 'norva-discovery:live:b9dd1102ab7b431fe392cb4e49f7471eff4e714945547c1c300c42bf96610199',
   }),
 });
-// Reviewed programmes after Web, Android phone and TV playback checks. Plex refreshes its anonymous
-// token before playback; bind the full regional provider part and every non-token
-// URL component to the owned row. The second part identifies the reviewed channel.
-// The browser keeps long nested HLS URLs intact, unlike FFmpeg 5.1's URL buffer.
-const PLEX_REVIEWED_CHANNELS = Object.freeze([
-  '66be944f8711311880995280', // Action Hollywood Movies
-  '68a799722895f21006e758e4', // TV5MONDE Info
-  '6245f06793b402a3d1097787', // Euronews Francais
-]);
-// Temporary protocol-wide review on the existing test owner. Source ownership,
-// regional part and full URL identity still have to pass before this applies.
-const PLEX_PROTOCOL_CANARY_OWNERS = Object.freeze([
-  'a7da1be5077b8c10cd7a5c177554d38e9d48bf060d17047e77da02928f011c12',
-]);
+// Plex's canonical HLS endpoint uses long nested URLs that the browser preserves,
+// unlike FFmpeg 5.1's URL buffer. Apply the reviewed transport to every owned
+// programme using this protocol; programme availability is still provider-owned.
+// Token refresh must preserve the full regional part and every other URL component.
 const verifiedDeliveries = new WeakSet();
 const canaryDeliveries = new WeakSet();
 const record = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -96,26 +86,21 @@ function canarySnapshot(manifest) {
 
 // Injection is for server wiring and isolated tests, never a request field.
 // Snapshot the manifest once: mutating a caller's object cannot grant a lane.
-export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES,
-  plexProtocolCanaryOwners = PLEX_PROTOCOL_CANARY_OWNERS } = {}) {
+export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES } = {}) {
   const canaries = canarySnapshot(canaryManifest);
-  const plexOwners = new Set(Array.isArray(plexProtocolCanaryOwners) && plexProtocolCanaryOwners.length <= 16
-    ? plexProtocolCanaryOwners.filter(value => typeof value === 'string' && digestPattern.test(value)) : []);
   return async function resolveSelectionLiveDelivery({ sourceId, userId, itemType, itemId, ownedItem, targetUrl }) {
     if (itemType !== 'live' || typeof userId !== 'string' || !userId || !ownedItem) return null;
     const metadata = record(ownedItem.metadata);
     const hint = record(ownedItem.playback_hint);
     if (metadata.discoveryFeed === 'plex') {
       const part = metadata.tvgId;
-      const channelId = typeof part === 'string' ? part.match(/^[a-f0-9]{24}-([a-f0-9]{24})$/)?.[1] : null;
-      if (!channelId
+      if (typeof part !== 'string' || !/^[a-f0-9]{24}-[a-f0-9]{24}$/.test(part)
         || metadata.discoverySource !== 'https://github.com/insa-ship-it/app-m3u-generator'
         || hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hasExplicitCanarySelection(hint)
         || sourceId !== await discoverySourceId(userId)) return null;
       const key = exactPlexPart(targetUrl, part);
       if (!key || exactPlexPart(hint.targetUrl, part) !== key || metadata.discoveryMediaKey !== key
         || itemId !== `norva-discovery:live:${await sha256(`live:${key}`)}`) return null;
-      if (!PLEX_REVIEWED_CHANNELS.includes(channelId) && !plexOwners.has(await sha256(userId))) return null;
       const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: part, targetUrl,
         providerAccountScopeSuffix: `public-media:${itemId.slice('norva-discovery:live:'.length)}` });
       verifiedDeliveries.add(delivery);
