@@ -22,8 +22,6 @@ jobs:
     name: Resource-only proof on fresh offline Android 35
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      ANDROID_AVD_HOME: ${{ runner.temp }}/norva-notification-avd
     steps:
       - name: Validate and download the exact reviewed APK pair
         env:
@@ -73,6 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/norva-notification-avd"
           sdkmanager_bin="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           avdmanager_bin="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
           "$sdkmanager_bin" --version >proof/sdkmanager-version.txt
@@ -96,6 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/norva-notification-avd"
           adb_bin="$ANDROID_HOME/platform-tools/adb"
           aapt_bin="$ANDROID_HOME/build-tools/35.0.0/aapt"
           emulator_bin="$ANDROID_HOME/emulator/emulator"
