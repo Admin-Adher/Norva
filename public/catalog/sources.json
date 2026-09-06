@@ -42,6 +42,18 @@
       "kind": "live",
       "website": "https://www.freelivesports.tv/",
       "channels": 3
+    },
+    {
+      "id": "babuperumana-vod",
+      "name": "Babuperumana",
+      "kind": "movie",
+      "website": "https://github.com/Babuperumana/movies_m3u"
+    },
+    {
+      "id": "sulthanpamenan-vod",
+      "name": "Sulthanpamenan",
+      "kind": "movie",
+      "website": "https://github.com/sulthanpamenan/vod-playlist"
     }
   ],
   "withdrawn": [

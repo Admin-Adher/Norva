@@ -10,12 +10,17 @@ test('live-only Home shortcut requires exactly the tenant-visible curated source
   const start=code.indexOf('async function isCuratedLiveOnlyHome('),end=code.indexOf('async function listHomeRails(',start);
   const context=vm.createContext({DISCOVERY_SELECTION_ENABLED:true,discoverySourceId,catalogTitleReadUnavailable:()=>Error('unavailable')});
   vm.runInContext(stripTypeScriptTypes(code.slice(start,end),{mode:'strip'}),context);
-  let rows=[],error=null;
-  const db={from(table){assert.equal(table,'cloud_catalog_visible_sources');return {select(s){assert.equal(s,'id');return this;},eq(k,v){assert.equal(k,'user_id');assert.equal(v,'owner');return this;},limit:async n=>{assert.equal(n,2);return {data:rows,error};}}}};
+  let rows=[],error=null,titles=[],titlesError=null;
+  const db={from(table){assert.ok(['cloud_catalog_visible_sources','cloud_catalog_visible_titles'].includes(table));return {
+    select(s){assert.equal(s,'id');return this;},eq(k,v){assert.equal(k,'user_id');assert.equal(v,'owner');return this;},
+    in(k,v){assert.equal(k,'item_type');assert.deepEqual(Array.from(v),['movie','series']);return this;},
+    limit:async n=>{assert.equal(n,table==='cloud_catalog_visible_sources'?2:1);return table==='cloud_catalog_visible_sources'?{data:rows,error}:{data:titles,error:titlesError};}}}};
   for (const ids of [[],['personal'],[await retiredDiscoverySourceId('owner')],[await discoverySourceId('other')],[await discoverySourceId('owner'),'personal']]) {
     rows=ids.map(id=>({id}));assert.equal(await context.isCuratedLiveOnlyHome('owner',db),false);
   }
   rows=[{id:await discoverySourceId('owner')}];assert.equal(await context.isCuratedLiveOnlyHome('owner',db),true);
+  titles=[{id:'selection-film'}];assert.equal(await context.isCuratedLiveOnlyHome('owner',db),false);
+  titles=[];titlesError={code:'unavailable'};await assert.rejects(context.isCuratedLiveOnlyHome('owner',db),/unavailable/);titlesError=null;
   error={code:'database-unavailable'};await assert.rejects(context.isCuratedLiveOnlyHome('owner',db),/unavailable/);
   const {sanitizeCatalogMediaPayload}=await import('../supabase/functions/_shared/catalog-public-view.mjs');
   assert.equal(sanitizeCatalogMediaPayload({contract:'norva.home.rails.v1',rails:[],liveOnly:true}).liveOnly,true);
@@ -26,7 +31,7 @@ test('current import is the reviewed allowlist only, regardless of requested agg
   const { SELECTION_CURATED_CHANNELS } = await import('../supabase/functions/_shared/selection-curated-channels.mjs');
   const { fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
   let fetches = 0;
-  const result = await fetchDiscoverySelection({ feeds: [{ id:'unreviewed',kind:'movie',url:'https://example.test/all.m3u' }], fetchPlaylist: async () => { fetches++; } });
+  const result = await fetchDiscoverySelection({ includeVod: false, feeds: [{ id:'unreviewed',kind:'movie',url:'https://example.test/all.m3u' }], fetchPlaylist: async () => { fetches++; } });
   const rows = result.items.map(item => discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item));
   assert.equal(fetches,0);
   assert.equal(rows.length,14);
@@ -37,8 +42,9 @@ test('current import is the reviewed allowlist only, regardless of requested agg
   assert.notEqual(await discoverySourceId('owner'),await retiredDiscoverySourceId('owner'));
   assert.equal(fs.readFileSync('public/catalog/discovery.m3u','utf8').replace(/\r\n/g,'\n'),discoveryPlaylist());
   const registry = JSON.parse(fs.readFileSync('public/catalog/sources.json','utf8'));
-  assert.equal(registry.sources.reduce((sum,s)=>sum+s.channels,0),14);
-  assert.ok(registry.sources.every(s => s.kind === 'live' && !s.url));
+  assert.equal(registry.sources.filter(s=>s.kind==='live').reduce((sum,s)=>sum+s.channels,0),14);
+  assert.equal(registry.sources.filter(s=>s.kind==='movie').length,2);
+  assert.ok(registry.sources.every(s => !s.url));
   assert.equal(fs.readFileSync('public/catalog/xumo-live.m3u','utf8').trim(),'#EXTM3U');
   for (const channel of SELECTION_CURATED_CHANNELS.filter(c=>c.feedId==='fls-reviewed')) {
     for (const [key,value] of new URL(channel.url).searchParams) if (/^(ads\.)?(did|device_id)$/.test(key)) assert.equal(value,'');
@@ -51,7 +57,7 @@ test('retired playback remains closed and current playback rejects unreviewed or
   const { resolveDiscoveryTarget, fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
   const userId='owner';
   const sourceId=await discoverySourceId(userId);
-  const rows=(await fetchDiscoverySelection()).items.map(item=>discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item));
+  const rows=(await fetchDiscoverySelection({ includeVod: false })).items.map(item=>discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item));
   for (const row of rows) {
     const input={userId,sourceId,metadata:row.metadata,targetUrl:row.playback_hint.targetUrl};
     assert.equal(await resolveDiscoveryTarget(input),input.targetUrl);
@@ -71,7 +77,7 @@ test('reviewed direct HLS requires the complete owned identity and never grants 
   const { fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
   const { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } = await import('../supabase/functions/_shared/selection-live-delivery.mjs');
   const userId='owner';
-  for (const item of (await fetchDiscoverySelection()).items) {
+  for (const item of (await fetchDiscoverySelection({ includeVod: false })).items) {
     const row=discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item);
     const input={userId,sourceId:await discoverySourceId(userId),itemType:'live',itemId:row.external_id,ownedItem:row,targetUrl:row.playback_hint.targetUrl};
     const delivery=await resolveSelectionLiveDelivery(input);

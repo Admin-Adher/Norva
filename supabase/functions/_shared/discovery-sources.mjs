@@ -2,6 +2,7 @@ import { SELECTION_CURATED_CHANNELS, SELECTION_CURATED_PROVIDERS, SELECTION_CURA
 import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, assertDiscoverySelectionAvailable, discoveryMovieFields, discoverySourceId, retiredDiscoverySourceId } from './discovery-catalog.mjs';
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
 import { matchesSelectionLiveQuarantine, SELECTION_LIVE_QUARANTINE } from './selection-live-quarantine.mjs';
+import { SELECTION_VOD_FEEDS, fetchSelectionVod, resolveSelectionVodTarget } from './selection-vod.mjs';
 
 // Public playlist references, not credentials or a promise of worldwide playback.
 // Keep provider URLs intact: their advertising and territorial controls still apply.
@@ -22,7 +23,7 @@ export const DISCOVERY_REVIEW_SOURCES = Object.freeze([
   })),
   { id: 'xumo-curated', name: 'Xumo', kind: 'live', url: 'https://norva.tv/catalog/xumo-live.m3u', website: 'https://play.xumo.com/' },
 ].map(Object.freeze));
-export const DISCOVERY_SOURCES = Object.freeze(DISCOVERY_SELECTION_ENABLED ? [...SELECTION_CURATED_PROVIDERS] : []);
+export const DISCOVERY_SOURCES = Object.freeze(DISCOVERY_SELECTION_ENABLED ? [...SELECTION_CURATED_PROVIDERS, ...SELECTION_VOD_FEEDS] : []);
 
 // Previously researched or retired sources remain documented outside the active feeds.
 export const DISCOVERY_RESEARCH = Object.freeze([
@@ -112,7 +113,7 @@ export function discoveryCatalogFields(playlistUrl, item) {
 
 // Bounded batches avoid holding all 30 regional Pluto documents in memory.
 // A failed feed is recorded separately and does not hide the working feeds.
-export async function fetchDiscoverySelection({ heartbeat = async () => {} } = {}) {
+export async function fetchDiscoverySelection({ heartbeat = async () => {}, fetchPlaylist = fetchM3uPlaylistStream, includeVod = true } = {}) {
   assertDiscoverySelectionAvailable();
   await heartbeat();
   const items = await Promise.all(SELECTION_CURATED_CHANNELS.map(async channel => {
@@ -127,8 +128,10 @@ export async function fetchDiscoverySelection({ heartbeat = async () => {} } = {
       playback_hint: { sourceType: 'm3u', targetUrl: channel.url, container: 'm3u8', containerExtension: 'm3u8' } };
     return { title: channel.title, url: channel.url, tvgId, group, logo: '', [trusted]: fields };
   }));
-  return { items, sources: DISCOVERY_SOURCES.map(source => ({ id: source.id, status: 'loaded', discovered: source.channels, included: source.channels })),
-    bytesRead: 0, headerDetected: true, truncated: false, truncationReason: null };
+  const vod = includeVod ? await fetchSelectionVod({ heartbeat, fetchPlaylist }) : { items: [], sources: [], bytesRead: 0 };
+  items.push(...vod.items.map(({ item, fields }) => ({ ...item, [trusted]: fields })));
+  return { items, sources: [...SELECTION_CURATED_PROVIDERS.map(source => ({ id: source.id, status: 'loaded', discovered: source.channels, included: source.channels })), ...vod.sources],
+    bytesRead: vod.bytesRead, headerDetected: true, truncated: false, truncationReason: null };
 }
 
 // Audit-only parser. Production imports must use the availability-checked wrapper.
@@ -192,6 +195,7 @@ export async function resolveDiscoveryTarget(options) {
   if (options.sourceId === await retiredDiscoverySourceId(options.userId)) throw new Error('Selection programme is temporarily unavailable');
   if (options.sourceId !== await discoverySourceId(options.userId)) return options.targetUrl;
   assertDiscoverySelectionAvailable();
+  if (SELECTION_VOD_FEEDS.some(feed => feed.id === options.metadata?.discoveryFeed)) return resolveSelectionVodTarget(options);
   if (!curatedChannelForMetadata(options.metadata, options.targetUrl)) throw new Error('Selection programme is temporarily unavailable');
   return options.targetUrl;
 }

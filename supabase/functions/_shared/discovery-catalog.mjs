@@ -2,7 +2,7 @@ import { curatedSelectionPlaylist } from './selection-curated-channels.mjs';
 // Curated independently of user playlists. Additions require a playable full film,
 // attribution and a source-specific redistribution licence; never scrape credentials.
 export const DISCOVERY_PLAYLIST_URL = 'https://norva.tv/catalog/discovery.m3u';
-// Only the reviewed channel allowlist is active. The old aggregate catalogue stays archived.
+// Reviewed channels and the two qualified VOD feeds are active. Retired feeds stay archived.
 export const DISCOVERY_SELECTION_ENABLED = true;
 export function assertDiscoverySelectionAvailable() {
   if (!DISCOVERY_SELECTION_ENABLED) throw new Error('Norva Selection is temporarily unavailable');
