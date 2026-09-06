@@ -501,6 +501,7 @@ function sanitizeRail(value) {
 export function sanitizeCatalogMediaPayload(value) {
   const source = isRecord(value) ? value : {};
   const result = pick(source, ENVELOPE_FIELDS);
+  if (source.contract === 'norva.home.rails.v1' && source.liveOnly === true) result.liveOnly = true;
   if (Array.isArray(source.items)) result.items = source.items.map(sanitizeCatalogMediaItem);
   if (Array.isArray(source.rails)) result.rails = source.rails.map(sanitizeRail);
   return result;

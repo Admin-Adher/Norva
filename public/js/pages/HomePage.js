@@ -2461,7 +2461,12 @@ class HomePage {
         this.railItems = rails;
 
         if (!rails.length) {
-            container.innerHTML = this.renderHomeRailsEmptyState();
+            container.innerHTML = payload.liveOnly === true ? `
+                <section class="dashboard-section home-state-panel" role="status">
+                    <h2 data-i18n="ui_web_314c2bf74b46">Live TV is ready</h2>
+                    <p data-i18n="ui_discovery_live_description">Enjoy a selection of live TV channels in Norva, without adding a provider.</p>
+                    <button type="button" class="btn btn-primary" data-open-live data-i18n="ui_web_bf668349ee26">Open Live</button>
+                </section>` : this.renderHomeRailsEmptyState();
             return;
         }
 

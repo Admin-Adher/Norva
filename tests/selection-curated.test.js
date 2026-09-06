@@ -1,6 +1,25 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const vm = require('node:vm');
+const { stripTypeScriptTypes } = require('node:module');
+
+test('live-only Home shortcut requires exactly the tenant-visible curated source and fails closed on database errors', async () => {
+  const { discoverySourceId, retiredDiscoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
+  const code=fs.readFileSync('supabase/functions/norva-catalog/index.ts','utf8');
+  const start=code.indexOf('async function isCuratedLiveOnlyHome('),end=code.indexOf('async function listHomeRails(',start);
+  const context=vm.createContext({DISCOVERY_SELECTION_ENABLED:true,discoverySourceId,catalogTitleReadUnavailable:()=>Error('unavailable')});
+  vm.runInContext(stripTypeScriptTypes(code.slice(start,end),{mode:'strip'}),context);
+  let rows=[],error=null;
+  const db={from(table){assert.equal(table,'cloud_catalog_visible_sources');return {select(s){assert.equal(s,'id');return this;},eq(k,v){assert.equal(k,'user_id');assert.equal(v,'owner');return this;},limit:async n=>{assert.equal(n,2);return {data:rows,error};}}}};
+  for (const ids of [[],['personal'],[await retiredDiscoverySourceId('owner')],[await discoverySourceId('other')],[await discoverySourceId('owner'),'personal']]) {
+    rows=ids.map(id=>({id}));assert.equal(await context.isCuratedLiveOnlyHome('owner',db),false);
+  }
+  rows=[{id:await discoverySourceId('owner')}];assert.equal(await context.isCuratedLiveOnlyHome('owner',db),true);
+  error={code:'database-unavailable'};await assert.rejects(context.isCuratedLiveOnlyHome('owner',db),/unavailable/);
+  const {sanitizeCatalogMediaPayload}=await import('../supabase/functions/_shared/catalog-public-view.mjs');
+  assert.equal(sanitizeCatalogMediaPayload({contract:'norva.home.rails.v1',rails:[],liveOnly:true}).liveOnly,true);
+});
 
 test('current import is the reviewed allowlist only, regardless of requested aggregate feeds', async () => {
   const { DISCOVERY_PLAYLIST_URL, discoveryPlaylist, discoverySourceId, retiredDiscoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');

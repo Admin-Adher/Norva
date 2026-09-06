@@ -3,6 +3,7 @@
 // to main validates this code but does not reload production: update the server
 // checkout and run ops/hetzner/scripts/04-deploy-edge-functions.sh.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DISCOVERY_SELECTION_ENABLED, discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
@@ -1345,7 +1346,21 @@ async function resolveCatalogProfileId(req: Request, userId: string): Promise<st
   return stringOrNull(data?.id);
 }
 
+async function isCuratedLiveOnlyHome(userId: string, database: typeof db): Promise<boolean> {
+  if (!DISCOVERY_SELECTION_ENABLED) return false;
+  const { data, error } = await database.from("cloud_catalog_visible_sources")
+    .select("id").eq("user_id", userId).limit(2);
+  if (error) throw catalogTitleReadUnavailable();
+  return data?.length === 1 && data[0].id === await discoverySourceId(userId);
+}
+
 async function listHomeRails(req: Request, url: URL, userId: string) {
+  // The reviewed source contains only Live TV. Do not page through thousands
+  // of withdrawn VOD titles to discover an already-known empty movie library.
+  // The tenant-visible source view and response epoch fence remain authoritative.
+  if (await isCuratedLiveOnlyHome(userId, db)) {
+    return { contract: "norva.home.rails.v1", rails: [], liveOnly: true };
+  }
   const limit = boundedInt(url.searchParams.get("limit"), 24, 1, 50);
   const lang = railLang(url);
   const type = url.searchParams.get("type");
