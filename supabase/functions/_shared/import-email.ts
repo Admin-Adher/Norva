@@ -2,7 +2,10 @@
 // idempotency remain owned by norva-import-notify.
 
 const SITE_URL = "https://norva.tv";
-const OPEN_URL = `${SITE_URL}/app.html`;
+// These are static product routes. No source ID, private URL or behavioral
+// delivery ID belongs in a transactional email's navigation link.
+const SOURCES_URL = `${SITE_URL}/app.html#settings/sources`;
+const CATALOG_URL = `${SITE_URL}/app.html#home`;
 const SUPPORT_EMAIL = "support@norva.tv";
 const SUPPORT_URL = `mailto:${SUPPORT_EMAIL}`;
 
@@ -224,6 +227,8 @@ ${providerStatsText(providers)}
 
 We'll send another email when your catalog is ready to watch.
 
+Check import status: ${SOURCES_URL}
+
 Questions? ${SUPPORT_EMAIL}
 © Norva`;
   return {
@@ -237,6 +242,7 @@ Questions? ${SUPPORT_EMAIL}
       intro: `${greetHtml(firstName)}<br><br>Thanks for trusting Norva. We're building your ${providerNamesHtml(providers)} ${many ? "catalogs" : "catalog"} now. Large providers can take a few minutes. You can safely close the app; we'll email you as soon as ${many ? "they are" : "it is"} ready.`,
       providers,
       withStats: false,
+      cta: { label: "Check import status", url: SOURCES_URL },
       note: "We'll send another email when your catalog is ready to watch.",
     }),
   };
@@ -251,7 +257,7 @@ Your ${providerNamesText(providers)} ${many ? "catalogs are" : "catalog is"} rea
 
 ${providerStatsText(providers)}
 
-Open Norva: ${OPEN_URL}
+View my catalog: ${CATALOG_URL}
 
 Questions? ${SUPPORT_EMAIL}
 © Norva`;
@@ -266,7 +272,7 @@ Questions? ${SUPPORT_EMAIL}
       intro: `${greetHtml(firstName)}<br><br>Your ${providerNamesHtml(providers)} ${many ? "catalogs are" : "catalog is"} ready to watch.`,
       providers,
       withStats: true,
-      cta: { label: "Open Norva", url: OPEN_URL },
+      cta: { label: "View my catalog", url: CATALOG_URL },
     }),
   };
 }
@@ -287,7 +293,7 @@ ${providerStatsText(providers)}
 
 ${help}
 
-Open Norva: ${OPEN_URL}
+Review my source: ${SOURCES_URL}
 Contact support: ${SUPPORT_EMAIL}
 
 © Norva`;
@@ -302,7 +308,7 @@ Contact support: ${SUPPORT_EMAIL}
       intro: `${greetHtml(firstName)}<br><br>We ran into a problem importing your ${providerNamesHtml(providers)} ${many ? "catalogs" : "catalog"}. ${esc(guidance)}`,
       providers,
       withStats: false,
-      cta: { label: "Open Norva", url: OPEN_URL },
+      cta: { label: "Review my source", url: SOURCES_URL },
       note: `${help} Need help? ${SUPPORT_EMAIL}`,
     }),
   };

@@ -3,6 +3,8 @@
 
 const SITE_URL = "https://norva.tv";
 const OPEN_URL = `${SITE_URL}/app.html`;
+// Static product route, not a behavioral delivery: do not fabricate a receipt ID.
+const CONNECT_SOURCE_URL = `${OPEN_URL}#settings/sources`;
 const SUBSCRIBE_URL = `${SITE_URL}/subscribe.html`;
 const MANAGE_URL = `${SITE_URL}/subscription.html`;
 const SUPPORT_EMAIL = "support@norva.tv";
@@ -178,9 +180,13 @@ export function renderWelcome(firstName: string | null): Rendered {
 
 Your Norva account is ready. Norva is a multi-screen media player: it includes no content of its own. Connect a compatible source you are authorized to use, and Norva will organize it and keep every screen in sync.
 
-One step to start watching: open Norva and paste the link from the TV service you already use. Norva will build your catalog automatically. No card is needed to connect.
+Open Sources and choose the access your provider supplied:
+- M3U: the full playlist URL, not the provider's homepage.
+- Xtream: the server URL, username and password.
 
-Connect my source: ${OPEN_URL}
+Only have an app login? Ask your provider whether they supply M3U or Xtream access. An email address or app username alone cannot import a catalog. Never email us your password or private playlist URL.
+
+Connect my source: ${CONNECT_SOURCE_URL}
 
 You can watch on Web, Android phone, tablet and Android TV with the same account.
 
@@ -191,8 +197,11 @@ ${transactionalFooter()}`,
       heading: "Welcome to Norva",
       bodyHtml: `<p style="margin:0 0 18px">${greetHtml(firstName)}</p>
         <p style="margin:0 0 18px">Your Norva account is ready. Norva is your <strong style="color:#e3e8f2">multi-screen media player</strong>: it includes no content of its own. Connect a compatible source you're authorized to use, and Norva will organize it and keep every screen in sync.</p>
-        <p style="margin:0"><strong style="color:#e3e8f2">One step to start watching:</strong> open Norva and paste the link from the TV service you already use. Norva will build your catalog automatically. No card is needed to connect.</p>`,
-      cta: { label: "Connect my source", url: OPEN_URL },
+        <p style="margin:0 0 12px"><strong style="color:#e3e8f2">Open Sources and choose your access:</strong><br>
+        <strong style="color:#e3e8f2">M3U:</strong> the full playlist URL, not the provider's homepage.<br>
+        <strong style="color:#e3e8f2">Xtream:</strong> the server URL, username and password.</p>
+        <p style="margin:0">Only have an app login? Ask your provider whether they supply M3U or Xtream access. An email address or app username alone cannot import a catalog. Never email us your password or private playlist URL.</p>`,
+      cta: { label: "Connect my source", url: CONNECT_SOURCE_URL },
       note: "You can watch on Web, Android phone, tablet and Android TV with the same account.",
     }),
   };

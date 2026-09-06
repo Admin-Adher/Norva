@@ -46,7 +46,7 @@ test('catalog import emails have client-safe HTML, coherent plain text and stabl
     assert.match(rendered.text, /Atlas Pro/);
     assert.ok(!rendered.tags.some(({ value }) => /adrien|atlas/i.test(value)));
   }
-  assert.match(cases[1][0].text, /Open Norva: https:\/\/norva\.tv\/app\.html/);
+  assert.match(cases[1][0].text, /View my catalog: https:\/\/norva\.tv\/app\.html#home/);
   assert.match(cases[2][0].text, /support@norva\.tv/);
 });
 
@@ -55,7 +55,7 @@ test('plain-text alternative is derived from the exact frozen import HTML', asyn
   const rendered = templates.renderImportCompleted(null, [{ name: 'Atlas Pro', movies: 42 }]);
   const text = templates.plainTextFromImportHtml(rendered.html);
   assert.match(text, /Your catalog is ready/);
-  assert.match(text, /Open Norva \(https:\/\/norva\.tv\/app\.html\)/);
+  assert.match(text, /View my catalog \(https:\/\/norva\.tv\/app\.html#home\)/);
   assert.match(text, /Atlas Pro/);
   assert.doesNotMatch(text, /Norva catalogs are ready to watch/); // hidden preheader is not duplicated
   assert.doesNotMatch(text, /<[^>]+>/);
