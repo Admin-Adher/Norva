@@ -6,6 +6,7 @@ const sha = value => createHash('sha256').update(value).digest('hex');
 const parts = {
   '6430aa45fc3be5947780904e-66be944f8711311880995280': 'norva-discovery:live:0bbf9a23d453660d92469cba6d1c75b8b4e68736537efd826869a5a9e067120b',
   '6430aa45fc3be5947780904e-68a799722895f21006e758e4': 'norva-discovery:live:52064226a3cb515cff83bf663c3bd24bc2086ddb44df00a93949dd9f91c03082',
+  '5e20b730f2f8d5003d739db7-6245f06793b402a3d1097787': 'norva-discovery:live:1e0c7c690ed9b7627765ff3f593c0eb52fc423b25fe48042b28dcd883b6eadee',
 };
 async function setup(part = Object.keys(parts)[0]) {
   const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
@@ -16,14 +17,14 @@ async function setup(part = Object.keys(parts)[0]) {
     ownedItem: { metadata: { tvgId: part, discoveryFeed: 'plex', discoverySource: 'https://github.com/insa-ship-it/app-m3u-generator', discoveryMediaKey: key },
       playback_hint: { sourceType: 'm3u', container: 'm3u8', targetUrl: key + '?X-Plex-Token=old-SYNTHETIC' } },
     targetUrl: key + '?X-Plex-Token=refreshed-SYNTHETIC' };
-  return { ...policy, input, resolver: policy.createSelectionLiveDeliveryResolver({ plexTrialOwnerSha256: sha(userId) }) };
+  return { ...policy, input, resolver: policy.createSelectionLiveDeliveryResolver() };
 }
 function decision(input, delivery) {
   return { delivery, targetUrl: input.targetUrl, itemType: 'live', clientMode: 'transcode',
     body: { gatewayAutoMode: true, publicHlsDirectSessionGuard: true, playbackHint: { gatewayMode: 'remux' } },
     clientMetadata: { clientSurface: 'web', appMode: 'cloud' } };
 }
-test('both reviewed Plex parts keep the complete refreshed target and stable account scope', async () => {
+test('all three reviewed Plex parts keep the complete refreshed target and stable account scope', async () => {
   for (const part of Object.keys(parts)) {
     const { input, resolver, shouldUseSelectionLiveDirect } = await setup(part);
     const before = JSON.stringify(input);
@@ -54,11 +55,11 @@ test('a reviewed channel may use another owned regional part without changing re
   other.ownedItem.metadata.discoveryMediaKey = otherKey;
   other.itemId = `norva-discovery:live:${sha(`live:${otherKey}`)}`;
   other.ownedItem.playback_hint.targetUrl = other.targetUrl = otherKey + '?X-Plex-Token=token';
-  assert.equal(await resolver(other), null, 'other Plex programmes remain outside this trial');
+  assert.equal(await resolver(other), null, 'unreviewed Plex programmes remain outside direct delivery');
 });
 test('ownership, Selection identity, persisted part, feed and attribution must all agree', async () => {
   const { input, resolver, resolveSelectionLiveDelivery } = await setup();
-  assert.equal(await resolveSelectionLiveDelivery(input), null, 'production owner pin is active');
+  assert.ok(await resolveSelectionLiveDelivery(input), 'reviewed programmes are available to their authenticated Selection owner');
   const changes = [
     x => { x.userId = 'another-owner'; }, x => { x.sourceId = 'personal-source'; },
     x => { x.ownedItem = null; }, x => { x.itemType = 'movie'; }, x => { x.itemType = 'series'; },
@@ -73,6 +74,23 @@ test('ownership, Selection identity, persisted part, feed and attribution must a
     x => { x.ownedItem.playback_hint.quality = '720p'; },
   ];
   for (const change of changes) { const value = structuredClone(input); change(value); assert.equal(await resolver(value), null); }
+});
+
+test('reviewed Plex programmes work for independent owners without accepting another owner source', async () => {
+  const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
+  for (const part of Object.keys(parts)) {
+    const { input, resolver } = await setup(part);
+    const first = await resolver(input);
+    const second = structuredClone(input);
+    second.userId = 'another-authenticated-owner';
+    assert.equal(await resolver(second), null, 'the first owner source cannot be reused');
+    second.sourceId = await discoverySourceId(second.userId);
+    const delivery = await resolver(second);
+    assert.ok(delivery);
+    assert.equal(delivery.targetUrl, second.targetUrl);
+    assert.equal(delivery.providerAccountScopeSuffix, first.providerAccountScopeSuffix,
+      'the media suffix stays stable; the playback resolver separately prefixes the authenticated owner and source');
+  }
 });
 test('only a single anonymous token may rotate; both stored and refreshed URLs are checked', async () => {
   const { input, resolver } = await setup();
@@ -91,7 +109,7 @@ test('only a single anonymous token may rotate; both stored and refreshed URLs a
     assert.equal(await resolver(value), null, which);
   }
 });
-test('Plex trials preserve native routes, explicit conversion and track selection; hints cannot forge authority', async () => {
+test('Plex direct delivery preserves native routes, explicit conversion and track selection; hints cannot forge authority', async () => {
   const { input, resolver, shouldUseSelectionLiveDirect } = await setup();
   const delivery = await resolver(input), base = decision(input, delivery);
   for (const patch of [

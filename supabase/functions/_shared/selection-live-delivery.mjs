@@ -16,12 +16,15 @@ const PUBLIC_HLS_CHANNELS = Object.freeze({
     itemId: 'norva-discovery:live:b9dd1102ab7b431fe392cb4e49f7471eff4e714945547c1c300c42bf96610199',
   }),
 });
-// Two browser trials for the authorized test owner. Plex refreshes its anonymous
+// Reviewed programmes after Web, Android phone and TV playback checks. Plex refreshes its anonymous
 // token before playback; bind the full regional provider part and every non-token
 // URL component to the owned row. The second part identifies the reviewed channel.
 // The browser keeps long nested HLS URLs intact, unlike FFmpeg 5.1's URL buffer.
-const PLEX_TRIAL_OWNER_SHA256 = 'a7da1be5077b8c10cd7a5c177554d38e9d48bf060d17047e77da02928f011c12';
-const PLEX_TRIAL_CHANNELS = Object.freeze(['66be944f8711311880995280', '68a799722895f21006e758e4']);
+const PLEX_REVIEWED_CHANNELS = Object.freeze([
+  '66be944f8711311880995280', // Action Hollywood Movies
+  '68a799722895f21006e758e4', // TV5MONDE Info
+  '6245f06793b402a3d1097787', // Euronews Francais
+]);
 const verifiedDeliveries = new WeakSet();
 const canaryDeliveries = new WeakSet();
 const record = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -88,8 +91,7 @@ function canarySnapshot(manifest) {
 
 // Injection is for server wiring and isolated tests, never a request field.
 // Snapshot the manifest once: mutating a caller's object cannot grant a lane.
-export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES,
-  plexTrialOwnerSha256 = PLEX_TRIAL_OWNER_SHA256 } = {}) {
+export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION_LIVE_DIRECT_CANARIES } = {}) {
   const canaries = canarySnapshot(canaryManifest);
   return async function resolveSelectionLiveDelivery({ sourceId, userId, itemType, itemId, ownedItem, targetUrl }) {
     if (itemType !== 'live' || typeof userId !== 'string' || !userId || !ownedItem) return null;
@@ -98,10 +100,9 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
     if (metadata.discoveryFeed === 'plex') {
       const part = metadata.tvgId;
       const channelId = typeof part === 'string' ? part.match(/^[a-f0-9]{24}-([a-f0-9]{24})$/)?.[1] : null;
-      if (!channelId || !PLEX_TRIAL_CHANNELS.includes(channelId)
+      if (!channelId || !PLEX_REVIEWED_CHANNELS.includes(channelId)
         || metadata.discoverySource !== 'https://github.com/insa-ship-it/app-m3u-generator'
         || hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hasExplicitCanarySelection(hint)
-        || !digestPattern.test(plexTrialOwnerSha256) || await sha256(userId) !== plexTrialOwnerSha256
         || sourceId !== await discoverySourceId(userId)) return null;
       const key = exactPlexPart(targetUrl, part);
       if (!key || exactPlexPart(hint.targetUrl, part) !== key || metadata.discoveryMediaKey !== key
