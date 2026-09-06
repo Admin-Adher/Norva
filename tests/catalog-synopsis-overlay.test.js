@@ -48,7 +48,7 @@ test('all title rails forward the requested synopsis language', () => {
   assert.match(src, /applyCatalogOverlay\(selectedRows, itemType, lang\)/);
   assert.equal((src.match(/applyCatalogOverlay\(pageRows, itemType, lang\)/g) || []).length, 3);
   assert.match(src, /applyCatalogOverlay\(titles, itemType, lang\)/);
-  assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 2);
+  assert.equal((src.match(/applyCatalogOverlay\(titles, itemType, lang\)/g) || []).length, 3);
   assert.match(src, /listVerifiedTitleCandidatePool\(userId, type, lang\)/);
   assert.match(src, /type TitleCandidatesFor = \(itemType: "movie" \| "series"\)/);
   assert.match(src, /const candidatePromises = new Map<"movie" \| "series", Promise<HomeTitleCandidatePool>>/);

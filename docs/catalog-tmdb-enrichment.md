@@ -47,6 +47,12 @@ reuse that owner's active editorial metadata without updating the active payload
 Title IDs, identity keys, versions, favourites and provider routing stay stable.
 Audio/subtitle evidence and declared audio tags are not derived from TMDB.
 
+Flat inventory grids bind each page (100 rows maximum per lookup) through its
+owned active variants and an epoch-fenced title hydration. They receive the same
+TMDB editorial fields as title rails even when the provider supplied no TMDB ID.
+Missing, ambiguous, foreign-source or stale bindings retain the provider display.
+The global/generation overlay isolation rules remain in force.
+
 Category pages use the existing bounded language-page SQL selector with an empty
 language predicate, avoiding a full runtime-title-view hydration before pagination.
 The source, hidden-genre, year, rating and visibility predicates still apply.

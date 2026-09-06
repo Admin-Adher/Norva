@@ -1048,6 +1048,60 @@ function catalogTextStatusEligible(value: unknown): boolean {
   return ["provider_verified", "matched", "manual"].includes(String(value ?? ""));
 }
 
+// Search-matched titles may have no TMDB ID in their raw M3U inventory row.
+// Resolve a bounded page by owned media -> active variant -> title, instead of
+// waiting for legacy reconcile to copy the ID back into provider metadata.
+async function attachOwnedMediaEditorialMetadata(
+  items: Array<Record<string, any>>, userId: string, itemType: string | null, lang: string | null,
+) {
+  if (itemType !== "movie" && itemType !== "series") return;
+  const media = items.filter((row) => /^[0-9a-f-]{36}$/i.test(String(row.id ?? "")) && row.source_id);
+  if (!media.length) return;
+  try {
+    for (let index = 0; index < media.length; index += 100) {
+      const page = media.slice(index, index + 100);
+      const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+        .select("id,media_item_id,title_id,source_id,generation_id,item_type")
+        .eq("user_id", userId).eq("item_type", itemType)
+        .in("media_item_id", page.map((row) => String(row.id))).limit(page.length * 4);
+      if (error) throw error;
+      const variants = (data ?? []) as JsonRecord[];
+      const titleIds = [...new Set(variants.map((row) => String(row.title_id)).filter(Boolean))];
+      if (!titleIds.length) continue;
+      const titles = await hydrateVisibleCatalogTitlesByIds(
+        userId, titleIds, requiredCatalogTitleVisibilityEpoch(userId), false,
+      );
+      await applyCatalogOverlay(titles, itemType, lang);
+      const byTitle = new Map(titles.map((title) => [String(title.id), title]));
+      for (const row of page) {
+        const exact = variants.filter((variant) => variant.media_item_id === row.id &&
+          variant.source_id === row.source_id && variant.item_type === itemType &&
+          stringOrNull(variant.generation_id) === flatMediaGenerationId(row));
+        if (exact.length !== 1) continue;
+        const variant = exact[0];
+        const title = byTitle.get(String(variant.title_id));
+        if (!title || !catalogTextStatusEligible(title.match_status) || !title.provider_tmdb_id ||
+            !Array.isArray(title.visible_source_ids) || !title.visible_source_ids.includes(row.source_id) ||
+            stringOrNull(title.display_generation_id ?? title.displayGenerationId) !== flatMediaGenerationId(row)) continue;
+        const editorial = titleRailItem(title, [{ ...variant, metadata: recordOrEmpty(row.metadata) }], lang);
+        // Copy editorial fields only. Preserve the media/source/variant IDs,
+        // provider routing, declared audio and exact per-file track evidence.
+        for (const field of ["title", "name", "year", "poster_url", "posterUrl", "backdrop_url", "backdropUrl",
+          "overview", "description", "genres", "rating", "vote_average", "runtime", "runtimeMinutes"]) {
+          if (editorial[field] !== undefined && editorial[field] !== null) row[field] = editorial[field];
+        }
+        row.provider_tmdb_id = title.provider_tmdb_id;
+        row.providerTmdbId = title.provider_tmdb_id;
+        row.match_status = title.match_status;
+        row.tmdb = { ...recordOrEmpty(editorial.tmdb), overview: editorial.overview, genres: editorial.genres };
+        row.metadata = { ...recordOrEmpty(row.metadata), providerTmdbId: title.provider_tmdb_id,
+          overview: editorial.overview, tmdb: row.tmdb };
+        if (editorial.overview) row.plot = editorial.overview;
+      }
+    }
+  } catch (_) { /* unavailable/stale ownership keeps the existing provider display */ }
+}
+
 async function attachMediaLanguages(
   items: Array<Record<string, any>>,
   userId: string,
@@ -1058,6 +1112,7 @@ async function attachMediaLanguages(
   // Do this before TMDB/title overlays: exact file evidence exists even for an
   // unmatched provider title, and must remain attached to that one raw row.
   await attachFlatMediaFileLanguages(items, userId, itemType);
+  await attachOwnedMediaEditorialMetadata(items, userId, itemType, lang);
   // Preserve provider-supplied summaries even when the title has no TMDB identity
   // and has never been probed. Promote the compact metadata field to the response
   // shape consumed by movie/series fiches before any catalogue lookup can return.
