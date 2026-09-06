@@ -73,9 +73,9 @@ jobs:
           set -euo pipefail
           sdkmanager_bin="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           avdmanager_bin="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
-          "$sdkmanager_bin" --help >/dev/null
+          "$sdkmanager_bin" --version >proof/sdkmanager-version.txt
           "$sdkmanager_bin" 'platform-tools' 'emulator' 'build-tools;35.0.0' 'system-images;android-35;default;x86_64'
-          "$avdmanager_bin" --help >/dev/null
+          test -x "$avdmanager_bin"
           printf 'no\n' | "$avdmanager_bin" create avd --name Norva_Notification_Proof \
             --package 'system-images;android-35;default;x86_64'
           test -e /dev/kvm
