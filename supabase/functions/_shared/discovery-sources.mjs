@@ -13,7 +13,6 @@ export const DISCOVERY_SOURCES = Object.freeze([
     id: `pluto-vod-${region.toLowerCase()}`, name: `Pluto VOD · ${region}`, kind: 'movie', region,
     url: `${github}OwnerPlugins/pluto-tv-m3u/main/pluto-vod-${region}.m3u`, website: pluto, refreshOnPlay: true,
   })),
-  { id: 'iptv-org', name: 'IPTV-org', kind: 'live', url: 'https://iptv-org.github.io/iptv/index.m3u', website: 'https://github.com/iptv-org/iptv' },
   { id: 'iptv-org-movies', name: 'IPTV-org Movies', kind: 'live', url: 'https://iptv-org.github.io/iptv/categories/movies.m3u', website: 'https://github.com/iptv-org/iptv' },
   { id: 'free-tv', name: 'Free-TV', kind: 'live', url: `${github}Free-TV/IPTV/master/playlist.m3u8`, website: 'https://github.com/Free-TV/IPTV' },
   ...[['plutotv', 'Pluto TV'], ['plex', 'Plex'], ['roku', 'Roku'], ['tubi', 'Tubi']].map(([id, name]) => ({
@@ -24,6 +23,7 @@ export const DISCOVERY_SOURCES = Object.freeze([
 
 // Previously researched or retired sources remain documented outside the active feeds.
 export const DISCOVERY_RESEARCH = Object.freeze([
+  { name: 'IPTV-org general playlist', website: 'https://github.com/iptv-org/iptv', status: 'Removed from Selection', detail: 'The general playlist was retired after playback checks. The separate Movies playlist remains included as live cinema channels, not on-demand films.' },
   { name: 'Samsung TV Plus', website: 'https://github.com/insa-ship-it/app-m3u-generator', status: 'Removed from Selection', detail: 'Removed after playback checks. Samsung delivery URLs are also excluded from the aggregate playlists in Norva Selection.' },
   { name: 'm3u8-xtream-playlist', website: 'https://github.com/m3u8-xtream/m3u8-xtream-playlist', status: 'Unavailable', detail: 'The movies and series endpoint does not resolve. Its public TV links are already covered by IPTV-org.' },
   { name: 'Movies Deluxe', website: 'https://github.com/select/movies-deluxe', status: 'Requires a connector', detail: '26,700 records referencing Archive.org and YouTube pages, including clips and incorrect matches; these are not direct media URLs.' },
@@ -45,6 +45,16 @@ function safeMediaUrl(raw) {
     if ([...url.searchParams.keys()].some(key => /^(username|password)$/i.test(key))) return null;
     return url;
   } catch { return null; }
+}
+
+// The general feed used to run before Movies, so URL deduplication assigned
+// cinema channels to iptv-org. Retain these persisted cinema rows until their
+// next sync assigns iptv-org-movies; never infer cinema from the programme title.
+export function isRetiredGeneralDiscoveryItem(metadata) {
+  if (metadata?.discoveryFeed !== 'iptv-org') return false;
+  const group = String(metadata.group || '');
+  const categories = group.startsWith('IPTV-org · ') ? group.slice('IPTV-org · '.length).split(';') : [];
+  return !categories.includes('Movies');
 }
 
 // Selection curation only: retain the same channels when another provider serves them.
@@ -100,6 +110,7 @@ export function discoveryCatalogFields(playlistUrl, item) {
 // Bounded batches avoid holding all 30 regional Pluto documents in memory.
 // A failed feed is recorded separately and does not hide the working feeds.
 export async function fetchDiscoverySelection({ fetchPlaylist = fetchM3uPlaylistStream, feeds = DISCOVERY_SOURCES, heartbeat = async () => {} } = {}) {
+  feeds = feeds.filter(feed => feed.id !== 'iptv-org');
   const items = bundledFilms();
   const seen = new Set(DISCOVERY_FILMS.map(film => `movie:${film.url}`));
   const sources = [];
@@ -155,6 +166,9 @@ const playbackFeeds = new Map();
 // Only an owned Norva Selection row may refresh an expiring upstream reference.
 // Never accept a feed URL or content identity from a client's playback hint.
 export async function resolveDiscoveryTarget({ sourceId, userId, metadata, targetUrl, fetchPlaylist = fetchM3uPlaylistStream, now = Date.now() }) {
+  if (sourceId === await discoverySourceId(userId) && isRetiredGeneralDiscoveryItem(metadata)) {
+    throw new Error('Selection programme is temporarily unavailable');
+  }
   if (sourceId === await discoverySourceId(userId)
       && typeof metadata?.discoveryMediaKey === 'string'
       && await quarantinedLiveMedia(metadata.discoveryFeed, metadata.discoveryMediaKey, targetUrl)) {

@@ -284,13 +284,6 @@
       "refreshOnPlay": true
     },
     {
-      "id": "iptv-org",
-      "name": "IPTV-org",
-      "kind": "live",
-      "url": "https://iptv-org.github.io/iptv/index.m3u",
-      "website": "https://github.com/iptv-org/iptv"
-    },
-    {
       "id": "iptv-org-movies",
       "name": "IPTV-org Movies",
       "kind": "live",
@@ -345,6 +338,12 @@
     }
   ],
   "research": [
+    {
+      "name": "IPTV-org general playlist",
+      "website": "https://github.com/iptv-org/iptv",
+      "status": "Removed from Selection",
+      "detail": "The general playlist was retired after playback checks. The separate Movies playlist remains included as live cinema channels, not on-demand films."
+    },
     {
       "name": "Samsung TV Plus",
       "website": "https://github.com/insa-ship-it/app-m3u-generator",
