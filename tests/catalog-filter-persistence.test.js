@@ -820,6 +820,60 @@ test('MoviesPage forwards the selected provider to genre item queries', () => {
     });
 });
 
+test('Series categories refresh after enrichment and restore focus to the selected category', async () => {
+    const { Page, context } = loadPage('public/js/pages/SeriesPage.js', 'SeriesPage');
+    let response = [{ bucket: 'autres', label: 'Other', count: 251 }];
+    context.API = { media: { genreSummary: async () => ({ genres: response }) } };
+    const page = Object.create(Page.prototype);
+    let options = [], focused;
+    Object.assign(page, {
+        selectedCloudSourceId: () => null,
+        savedFilters: {},
+        restoreSavedCategories: () => {},
+        categoryMulti: {
+            setOptions: value => { options = value; },
+            list: {
+                contains: element => element === context.document.activeElement,
+                querySelectorAll: () => options.map(option => ({ value: option.value, focus: () => { focused = option.value; } }))
+            }
+        }
+    });
+    await page.loadCloudCategories();
+    assert.equal(options.length, 1);
+    response = [{ bucket: 'action', label: 'Action', count: 22 }, { bucket: 'autres', label: 'Other', count: 89 }];
+    context.document.activeElement = { value: 'autres' };
+    await page.loadCloudCategories();
+    assert.deepEqual(Array.from(options, option => option.label), ['Action · 22', 'Other · 89']);
+    assert.equal(focused, 'autres');
+});
+
+test('a slow Series category response cannot overwrite a newer source or later refresh', async () => {
+    const { Page, context } = loadPage('public/js/pages/SeriesPage.js', 'SeriesPage');
+    const pending = [];
+    context.API = { media: { genreSummary: () => new Promise(resolve => pending.push(resolve)) } };
+    const page = Object.create(Page.prototype);
+    let source = null, options = [];
+    Object.assign(page, {
+        selectedCloudSourceId: () => source,
+        savedFilters: {},
+        restoreSavedCategories: () => {},
+        categoryMulti: { setOptions: value => { options = value; } }
+    });
+    const old = page.loadCloudCategories();
+    source = 'selection';
+    const next = page.loadCloudCategories();
+    pending[1]({ genres: [{ bucket: 'action', label: 'Action', count: 22 }] });
+    await next;
+    pending[0]({ genres: [{ bucket: 'autres', label: 'Other', count: 251 }] });
+    await old;
+    assert.deepEqual(Array.from(options, option => option.label), ['Action · 22']);
+    const abandoned = page.loadCloudCategories();
+    source = null;
+    pending[2]({ genres: [{ bucket: 'drame', label: 'Drama', count: 136 }] });
+    await abandoned;
+    assert.deepEqual(Array.from(options, option => option.label), ['Action · 22']);
+});
+
 test('SeriesPage forwards the selected cloud provider using the catalog source parameter', () => {
     const { Page } = loadPage('public/js/pages/SeriesPage.js', 'SeriesPage');
     const page = Object.create(Page.prototype);

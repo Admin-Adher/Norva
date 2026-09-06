@@ -116,6 +116,11 @@ class SeriesPage {
             }
         });
         this.restoreSavedCategories([]);
+        this.categoryMulti.btn?.addEventListener('click', () => {
+            if (this.isCloudPagedMode() && this.categoryMulti.btn.getAttribute('aria-expanded') === 'true') {
+                void this.loadCloudCategories();
+            }
+        });
 
         this.sourceSelect?.addEventListener('change', async () => {
             // The provider is catalogue scope, not a disposable filter. Persist it
@@ -956,7 +961,7 @@ class SeriesPage {
             this.loadServerSettings(),
             this.loadPlaybackStatuses()
         ];
-        if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
+        if (this.isCloudPagedMode() || (this.savedFilters?.categories?.length && !this._categoriesRestored)) {
             initialLoads.push(this.loadCategories());
         }
         await Promise.all(initialLoads);
@@ -1233,6 +1238,8 @@ class SeriesPage {
     }
 
     async loadCloudCategories() {
+        const requestId = (this._categoryRequestId || 0) + 1;
+        this._categoryRequestId = requestId;
         try {
             this.hiddenCategoryIds = new Set();
             // Mirror Manage Content: list the clean, curated genre buckets (with
@@ -1240,6 +1247,8 @@ class SeriesPage {
             // opens that genre's full grid (see onFiltersChanged).
             const source = this.selectedCloudSourceId();
             const payload = await API.media.genreSummary({ type: 'series', ...(source ? { source } : {}) });
+            // Source changes and later opens win over an older in-flight response.
+            if (requestId !== this._categoryRequestId || source !== this.selectedCloudSourceId()) return;
             const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
             const hiddenBuckets = new Set([
                 ...(Array.isArray(payload?.hidden) ? payload.hidden.map(String) : []),
@@ -1256,8 +1265,15 @@ class SeriesPage {
             const options = genres
                 .filter(g => Number(g.count) > 0 && !hiddenBuckets.has(String(g.bucket)))
                 .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString((globalThis.NorvaI18n?.language || 'en-US'))}` }));
+            const focused = typeof document !== 'undefined' ? document.activeElement : null;
+            const focusedCategory = focused && this.categoryMulti.list?.contains(focused) ? focused.value : null;
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);
+            if (focusedCategory) {
+                const restored = Array.from(this.categoryMulti.list?.querySelectorAll('input[type="checkbox"]') || [])
+                    .find(input => input.value === focusedCategory);
+                (restored || this.categoryMulti.btn)?.focus({ preventScroll: true });
+            }
         } catch (err) {
             console.error('Error loading cloud series genres:', err);
         }
