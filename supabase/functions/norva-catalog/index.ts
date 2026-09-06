@@ -2271,13 +2271,14 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
   };
   const selectionId = itemType === 'movie' ? await discoverySourceId(userId) : null;
   if (selectionId && (!sourceId || sourceId === selectionId)) {
-    const { data: declaredCounts, error: declaredError } = await db.rpc('cloud_selection_provider_audio_counts', {
-      p_user_id: userId, p_source_id: selectionId,
+    const { data: declaredCounts, error: declaredError } = await db.rpc('cloud_selection_audio_catalog_counts', {
+      p_user_id: userId, p_selection_source_id: selectionId, p_source_id: sourceId,
     });
     if (declaredError) throwDb(declaredError, 'Unable to load provider language declarations');
-    value.audio.push(...exactLanguageFacetItems(declaredCounts, itemType).map(facet => ({
-      ...facet, value: `provider-${facet.value}`, language: facet.value, provenance: 'provider_declared',
-    })));
+    for (const facet of exactLanguageFacetItems(declaredCounts, itemType)) {
+      value.audio = value.audio.filter((entry: any) => entry.value !== facet.value);
+      value.audio.push({ ...facet, value: `catalog-${facet.value}`, language: facet.value });
+    }
   }
 
   if (cacheKey) {
@@ -3528,13 +3529,13 @@ async function listVariantsByTitleIds(
   }
   if (userId) await attachExactFileTracks(variantsByTitle, userId);
   if (requiredAudioIso) {
-    const requiredCanonicalIso = canonicalFileLanguage(requiredAudioIso);
+    const requiredCanonicalIso = canonicalFileLanguage(requiredAudioIso) || providerAudioFacet(requiredAudioIso);
     for (const [key, variants] of variantsByTitle) {
       variants.sort((left, right) => {
         const matches = (variant: JsonRecord) => {
           const declaredIso = providerAudioFacet(requiredAudioIso);
-          if (declaredIso) return selectionProviderAudioLanguages(variant).includes(declaredIso) &&
-            !(variant.__file_audio_observed === true && canonicalFileLanguages(variant.__file_audio_languages).length);
+          if (declaredIso && selectionProviderAudioLanguages(variant).includes(declaredIso) &&
+            !(variant.__file_audio_observed === true && canonicalFileLanguages(variant.__file_audio_languages).length)) return true;
           if (!requiredCanonicalIso) return false;
           const orderedTrackMatch = Array.isArray(variant.__file_audio_tracks) &&
             (variant.__file_audio_tracks as JsonRecord[]).some((track) =>

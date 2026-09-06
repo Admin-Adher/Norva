@@ -485,7 +485,7 @@ class MoviesPage {
 
     applyFacetOptions(select, anyLabel, facets, savedValue = '', mediaNoun = 'movies', resetForScope = false) {
         if (!select || !Array.isArray(facets)) return;
-        const current = select.value || savedValue || '';
+        let current = select.value || savedValue || '';
         if (!resetForScope && !facets.length && !current) return;
         const existing = Array.from(select.options || []);
         // The synchronous restore also runs on the 60s refresh timer. If the menu
@@ -503,12 +503,17 @@ class MoviesPage {
                 .filter(option => option.value)
                 .map(option => ({ value: option.value, label: option.text?.trim() || option.value.toUpperCase() }));
         if (current && !options.some(f => f.value === current)) {
+            const language = current.replace(/^(?:provider|catalog)-/, '');
+            const equivalent = options.find(f => f.value.replace(/^(?:provider|catalog)-/, '') === language);
+            if (equivalent) current = equivalent.value;
+        }
+        if (current && !options.some(f => f.value === current)) {
             const previous = existing.find(option => option.value === current)?.text?.trim();
             const name = this.facetLanguageName(current, previous);
             options.push({ value: current, label: `${name} · 0 ${mediaNoun}`, count: 0 });
         }
         const optionHtml = f => {
-            const declared = /^provider-(te|ta|ml|hi|kn|en)$/.exec(f.value);
+            const declared = /^(?:provider|catalog)-(te|ta|ml|hi|kn|en)$/.exec(f.value);
             let label = f.label;
             if (declared) {
                 const locale = document.documentElement.lang || 'en';
@@ -517,11 +522,8 @@ class MoviesPage {
             }
             return `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(label)}</option>`;
         };
-        const exactOptions = options.filter(f => !f.value.startsWith('provider-'));
-        const providerOptions = options.filter(f => f.value.startsWith('provider-'));
         const desired = [`<option value="">${anyLabel}</option>`]
-            .concat(exactOptions.map(optionHtml))
-            .concat(providerOptions.length ? [`<optgroup label="${MediaUtils.escapeHtml(MediaUtils.providerAudioStatusLabel())}">${providerOptions.map(optionHtml).join('')}</optgroup>`] : [])
+            .concat(options.map(optionHtml))
             .join('');
         if (select.innerHTML === desired && savedValue && !select.value
             && options.some(f => f.value === savedValue)) {
@@ -1940,8 +1942,7 @@ class MoviesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = this.displayLanguageStatus(
             MediaUtils.versionLanguageBadge(movie, this.getPreferences()));
-        const languageBadgeTitle = MediaUtils.providerAudioLanguages(movie).length
-            ? `${languageBadge} — ${MediaUtils.providerAudioStatusLabel()}` : languageBadge;
+        const languageBadgeTitle = languageBadge;
         // "New" corner badge for titles added in the last two weeks (unwatched).
         const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -3048,7 +3049,6 @@ class MoviesPage {
             ...this.getMovieGenres(displayMovie).slice(0, 3),
             version.quality,
             this.displayLanguageStatus(MediaUtils.versionLanguageBadge(movie, this.getPreferences())),
-            MediaUtils.providerAudioLanguages(movie).length ? MediaUtils.providerAudioStatusLabel() : '',
             ordered.length > 1 ? `${ordered.length} versions` : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);
