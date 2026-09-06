@@ -112,6 +112,38 @@ test('a resolver failure replaces pending feedback with its terminal error', asy
   assert.equal(list._pendingPlaybackSelection, null);
 });
 
+test('a terminal HLS provider failure ends loading without labelling the channel permanently broken', async () => {
+  const { player, list, rows, errorContent, window } = harness();
+  let brokenReports = 0;
+  window.PlaybackHealth = { report: () => { brokenReports++; return Promise.resolve(); } };
+  await list.selectChannel({ channelId: 'a', renderId: 'a' });
+  player.currentUrl = 'https://example.test/live.m3u8';
+  player.tryCurrentVariantFallback = () => false;
+  player.handlePlaybackError('manifestLoadError');
+  assert.equal(player._switchSplash.classList.contains('hidden'), true);
+  assert.equal(player.overlay.classList.contains('hidden'), false);
+  assert.match(errorContent.innerHTML, /Failed to play channel/);
+  assert.doesNotMatch(errorContent.innerHTML, /manifestLoadError/);
+  assert.equal(rows.a.getAttribute('aria-busy'), undefined);
+  assert.equal(list._pendingPlaybackSelection, null);
+  assert.equal(brokenReports, 0);
+  await list.selectChannel({ channelId: 'b', renderId: 'b' });
+  assert.equal(player.overlay.classList.contains('hidden'), true);
+  assert.equal(player._switchSplashName.textContent, 'Second channel');
+});
+
+test('a pending fallback keeps its loading feedback instead of showing a terminal error', async () => {
+  const { player, list, errorContent } = harness();
+  await list.selectChannel({ channelId: 'a', renderId: 'a' });
+  player.currentUrl = 'https://example.test/live.m3u8';
+  player.tryCurrentVariantFallback = () => true;
+  player.handlePlaybackError('manifestLoadError');
+  assert.equal(player._switchSplash.classList.contains('hidden'), false);
+  assert.ok(list._pendingPlaybackSelection);
+  assert.equal(errorContent.innerHTML, '');
+  list.failPendingPlaybackSelection(1);
+});
+
 test('route exit cancels the visible pending state and never resolves the abandoned channel', async () => {
   let resolved = 0;
   const { player, list, rows } = harness(async () => { resolved++; });

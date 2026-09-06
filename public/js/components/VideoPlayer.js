@@ -2525,6 +2525,14 @@ class VideoPlayer {
             } catch (_) {}
         }
 
+        // A terminal HLS failure may never emit a media-element error. End the
+        // current loading intent even when this provider failure is transient
+        // and must not mark the channel permanently broken. Fallbacks returned
+        // above; showError also rejects an outgoing selection's stale error.
+        if (this.isLivePlayback() && this._pendingLiveSelection) {
+            this.showError('<norva-i18n data-i18n="ui_web_fb8c8c2687f1">Failed to play channel</norva-i18n><br><norva-i18n data-i18n="ui_web_79fef368337c">Try another channel.</norva-i18n>');
+        }
+
         if (!willMarkBroken) {
             console.warn('[Player] Live startup failed without marking channel broken:', reason);
             return;
