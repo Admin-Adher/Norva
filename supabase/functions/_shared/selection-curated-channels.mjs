@@ -142,6 +142,76 @@ export const SELECTION_CURATED_CHANNELS = Object.freeze([
     "group": "Sports",
     "country": "",
     "url": "https://d856dff4.wurl.com/master/f36d25e7e52f1ba8d7e56eb859c636563214f541/U3BvcnRzVHJpYmFsLWdiX1BGTE1NQV9ITFM/playlist.m3u8?ads.wurl_channel=1309&ads.wurl_name=PFLMMA&ads.channel_name=Professional%20Fighters%20League%20PFL&ads.content_genre=MMA%2CMartial%20Arts%2CSport&ads.ic=IAB17%2CIAB17-20&ads.rating=PG-13&ads.language=US&provider=FreeLiveSports&ads.us_privacy=&ads.gdpr=1&ads.consent=&ads.coppa=0&ads.content_livestream=1&ads.content_url=https%3A%2F%2Fnorva.tv%2F&ads.dnt=1&ads.device_id="
+  },
+  {
+    "id": "atv-be",
+    "title": "ATV",
+    "feedId": "atv-reviewed",
+    "provider": "ATV",
+    "website": "https://iptv-org.github.io/iptv/countries/be.m3u",
+    "group": "General",
+    "country": "BE",
+    "url": "https://live.zendzend.com/mpegts/29375_107244/media_mpegts_0.m3u8"
+  },
+  {
+    "id": "al24-news",
+    "title": "AL24 News",
+    "feedId": "al24-reviewed",
+    "provider": "AL24 News",
+    "website": "https://iptv-org.github.io/iptv/countries/dz.m3u",
+    "group": "News",
+    "country": "DZ",
+    "url": "https://cdn.live.easybroadcast.io/abr_corp/66_al24_u4yga6h/corp/66_al24_u4yga6h_240p/chunks.m3u8"
+  },
+  {
+    "id": "el-heddaf-tv",
+    "title": "El-Heddaf TV",
+    "feedId": "elheddaf-reviewed",
+    "provider": "El-Heddaf TV",
+    "website": "https://iptv-org.github.io/iptv/countries/dz.m3u",
+    "group": "Sports",
+    "country": "DZ",
+    "url": "https://live.elheddaftv.com:8081/elheddaftv/index.m3u8"
+  },
+  {
+    "id": "rakuten-topmovies-es",
+    "title": "Rakuten Top Movies Spain",
+    "feedId": "rakuten-reviewed",
+    "provider": "Rakuten TV",
+    "website": "https://www.rakuten.tv/",
+    "group": "Cinema",
+    "country": "ES",
+    "url": "https://ff335120300e4742a2b135ee9a9e7df8.mediatailor.eu-west-1.amazonaws.com/v1/master/0547f18649bd788bec7b67b746e47670f558b6b2/production-LiveChannel-5983/master.m3u8"
+  },
+  {
+    "id": "red-bull-tv-es",
+    "title": "Red Bull TV ES",
+    "feedId": "redbull-reviewed",
+    "provider": "Red Bull TV",
+    "website": "https://www.redbull.com/int-en/live",
+    "group": "Sports",
+    "country": "ES",
+    "url": "https://886bd3fbc782459f8de7555d32d7e9ce.mediatailor.us-west-2.amazonaws.com/v1/master/ba62fe743df0fe93366eba3a257d792884136c7f/LINEAR-957-WORBLATAMESFAST-WHALETVPLUS/957/whaletvplus/hls/master/playlist.m3u8"
+  },
+  {
+    "id": "kronehit-at",
+    "title": "Kronehit",
+    "feedId": "kronehit-reviewed",
+    "provider": "Kronehit",
+    "website": "https://github.com/iptv-com/iptv/blob/main/lists/world.m3u",
+    "group": "Music",
+    "country": "AT",
+    "url": "https://bitcdn-kronehit.bitmovin.com/v2/hls/playlist.m3u8"
+  },
+  {
+    "id": "dw-news",
+    "title": "DW News",
+    "feedId": "dw-reviewed",
+    "provider": "DW",
+    "website": "https://github.com/Free-TV/IPTV",
+    "group": "News",
+    "country": "DE",
+    "url": "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8"
   }
 ].map(Object.freeze));
 export const SELECTION_CURATED_PROVIDERS = Object.freeze([...new Set(SELECTION_CURATED_CHANNELS.map(c => c.feedId))].map(id => {
