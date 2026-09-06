@@ -1,0 +1,149 @@
+name: Verify Android notification resources
+
+# Manual evidence collection only: no schedule, deploy, signing or customer send.
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful Build Norva run containing both phone APKs
+        required: true
+        default: '34033658895'
+      expected_commit:
+        description: Exact reviewed source commit of those APKs
+        required: true
+        default: '974a33ff4d79729245861a62158703cd9424fbd7'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resource-proof:
+    name: Resource-only proof on fresh offline Android 35
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate and download the exact reviewed APK pair
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p proof downloaded
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts" > artifacts.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          const run = JSON.parse(fs.readFileSync('run.json'));
+          const artifacts = JSON.parse(fs.readFileSync('artifacts.json')).artifacts;
+          assert.equal(run.status, 'completed');
+          assert.equal(run.conclusion, 'success');
+          assert.equal(run.event, 'push');
+          assert.equal(run.head_repository.full_name, process.env.GITHUB_REPOSITORY);
+          assert.equal(run.head_sha, process.env.EXPECTED_COMMIT);
+          assert.equal(run.name, 'Build Norva');
+          const pair = ['Norva-AndroidPhone', 'Norva-AndroidPhone-instrumentation'].map(name => {
+            const matches = artifacts.filter(a => a.name === name && !a.expired);
+            assert.equal(matches.length, 1, name);
+            const a = matches[0];
+            assert.equal(a.workflow_run.head_sha, run.head_sha);
+            return { id: a.id, name: a.name, archive_digest: a.digest, bytes: a.size_in_bytes };
+          });
+          fs.writeFileSync('proof/provenance.json', JSON.stringify({
+            source_commit: run.head_sha, artifact_run_id: run.id, artifacts: pair,
+            scope: 'resource_tests_only_not_push_receipt_or_play_release',
+          }, null, 2) + '\n');
+          NODE
+          gh run download "$ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name Norva-AndroidPhone --name Norva-AndroidPhone-instrumentation --dir downloaded
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare the official SDK and a new disposable AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager_bin="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          avdmanager_bin="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+          "$sdkmanager_bin" --help >/dev/null
+          "$sdkmanager_bin" 'platform-tools' 'emulator' 'build-tools;35.0.0' 'system-images;android-35;default;x86_64'
+          "$avdmanager_bin" --help >/dev/null
+          printf 'no\n' | "$avdmanager_bin" create avd --name Norva_Notification_Proof \
+            --package 'system-images;android-35;default;x86_64'
+          test -e /dev/kvm
+          # Only this disposable runner's user receives access; no world-writable KVM.
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
+      - name: Execute only the three branding resource tests offline
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          adb_bin="$ANDROID_HOME/platform-tools/adb"
+          aapt_bin="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          emulator_bin="$ANDROID_HOME/emulator/emulator"
+          export ANDROID_SERIAL=emulator-5580
+          "$emulator_bin" -avd Norva_Notification_Proof -port 5580 -no-window -no-audio \
+            -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect >proof/emulator.log 2>&1 &
+          emulator_pid=$!
+          trap '"$adb_bin" -s emulator-5580 emu kill >/dev/null 2>&1 || true; wait "$emulator_pid" || true' EXIT
+          timeout 150 "$adb_bin" -s "$ANDROID_SERIAL" wait-for-device
+          booted=0
+          for attempt in $(seq 1 90); do
+            if [[ "$("$adb_bin" -s "$ANDROID_SERIAL" shell getprop sys.boot_completed | tr -d '\r')" == '1' ]]; then
+              booted=1
+              break
+            fi
+            sleep 2
+          done
+          test "$booted" -eq 1
+          "$adb_bin" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode enable
+          "$adb_bin" -s "$ANDROID_SERIAL" shell svc wifi disable
+          "$adb_bin" -s "$ANDROID_SERIAL" shell svc data disable
+          sleep 2
+          test "$("$adb_bin" -s "$ANDROID_SERIAL" shell settings get global airplane_mode_on | tr -d '\r')" = '1'
+          "$adb_bin" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -F 'Active default network:' >proof/network-state.txt
+          grep -Eq 'Active default network: (none|null)' proof/network-state.txt
+          "$adb_bin" -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk >proof/android-api.txt
+          test "$(tr -d '\r\n' <proof/android-api.txt)" = '35'
+          mapfile -t app_paths < <(find downloaded/Norva-AndroidPhone -type f -name '*.apk')
+          mapfile -t test_paths < <(find downloaded/Norva-AndroidPhone-instrumentation -type f -name '*.apk')
+          test "${#app_paths[@]}" -eq 1
+          test "${#test_paths[@]}" -eq 1
+          app="${app_paths[0]}"
+          tests="${test_paths[0]}"
+          "$aapt_bin" dump badging "$app" | grep -E "^package: name='tv.norva.phone' " >proof/app-package.txt
+          "$aapt_bin" dump badging "$tests" | grep -E "^package: name='tv.norva.phone.test' " >proof/test-package.txt
+          sha256sum "$app" "$tests" >proof/apk-sha256.txt
+          "$adb_bin" -s "$ANDROID_SERIAL" install "$app"
+          "$adb_bin" -s "$ANDROID_SERIAL" install "$tests"
+          "$adb_bin" -s "$ANDROID_SERIAL" shell am instrument -w \
+            -e class tv.norva.phone.NotificationBrandingInstrumentedTest \
+            tv.norva.phone.test/androidx.test.runner.AndroidJUnitRunner | tee proof/instrumentation.txt
+          grep -Eq '^OK \(3 tests\)' proof/instrumentation.txt
+          ! grep -Eq 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' proof/instrumentation.txt
+          "$adb_bin" -s "$ANDROID_SERIAL" exec-out run-as tv.norva.phone \
+            cat files/notification-status-mark-proof.png >proof/notification-status-mark-proof.png
+          test -s proof/notification-status-mark-proof.png
+          sha256sum proof/notification-status-mark-proof.png >proof/status-icon-sha256.txt
+          "$adb_bin" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -F 'Active default network:' >proof/network-state-after.txt
+          grep -Eq 'Active default network: (none|null)' proof/network-state-after.txt
+
+      - name: Retain bounded test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Norva-notification-resource-proof
+          path: proof/
+          if-no-files-found: error
+          retention-days: 1
