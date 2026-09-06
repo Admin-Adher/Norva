@@ -316,3 +316,13 @@ Only seven explicitly named product-event types may coexist with a dormant insta
 - Normalized SHA256: readiness SQL `9fe4e03b22bb318cef7fa799348cb2212b973bbbd968ddd7ac9ac94f7413679a`; wrapper `90718c5c2cf5ccd4d261e261c4b6565f8d4cb2081b749dd15212c57114e23e00`. The test fixture hash includes its extra `SET ROLE` preamble and therefore differs from the source-file hash.
 
 **Interpretation:** the installed dormant configuration and its operator checks are consistent. This does not certify actual welcome receipt, Gmail/Outlook rendering, Android notification appearance/tap, controlled catalogue import/first play, conversion lift or permission to launch a pilot. The real-device and fresh-account acceptance steps, explicit pilot authorization, and mature J+7/J+14 analysis remain open.
+
+## 11. Release-test consistency — 6 September, 17:03 UTC
+
+CI for `ac659e44` completed with two regression failures: `native-billing-offerings.test.js` and `provider-access-android-release.test.js` still required phone **32 / 1.3.19**, while the actual reviewed release is **33 / 1.3.20**. Build run `34047188380` and Pages run `34047188364` stopped at their regression step; their later build/deploy steps did not pass. The prior focused-test success is not presented as full CI success.
+
+Both phone version assertions were updated to the exact signed release coordinates. No test was skipped or removed; all billing, origin/account binding and fixed-route push assertions remain. The separate TV **32 / 3.8.19-hybrid** expectations were deliberately left unchanged. There is no application, Gradle, resource or release-workflow diff, so the already-verified phone AAB from section 9 is unchanged and no replacement bundle is required by this test-only correction.
+
+The full local Node suite then passed **3,729 / 3,737 tests**, with **8 skipped and 0 failed**. This supersedes the older local totals at the top of this document; it does not turn the skipped cases into acceptance evidence. The new CI result must be checked separately after publication.
+
+ADB still detects the user's phone with **1.3.17 / code 30** and granted notification permission. No install, consent reset, notification send or automatic navigation was performed. Play review restart still requires the pending user decision.
