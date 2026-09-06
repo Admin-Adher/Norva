@@ -1290,7 +1290,7 @@ export async function searchTmdbMatch(
   const providerPosterPath = tmdbPosterPath(posterHint);
 
   type Pick = { id: string; score: number; posterConfirmed: boolean };
-  const seriesCandidates = new Map<string, Pick>();
+  const searchCandidates = new Map<string, Pick>();
   const pickBest = (results: JsonRecord[]): Pick | null => {
     let best: Pick | null = null;
     for (const result of results.slice(0, 20)) {
@@ -1306,10 +1306,8 @@ export async function searchTmdbMatch(
       );
       const posterConfirmed = Boolean(providerPosterPath) && tmdbPosterPath(rec.poster_path) === providerPosterPath;
       const score = posterConfirmed ? Math.max(titleScore, 1) : titleScore;
-      if (itemType === "series") {
-        const previous = seriesCandidates.get(id);
-        if (!previous || score > previous.score) seriesCandidates.set(id, { id, score, posterConfirmed });
-      }
+      const previous = searchCandidates.get(id);
+      if (!previous || score > previous.score) searchCandidates.set(id, { id, score, posterConfirmed });
       // A poster-confirmed candidate always outranks a merely title-scored one.
       if (!best || (posterConfirmed && !best.posterConfirmed) ||
           (posterConfirmed === best.posterConfirmed && score > best.score)) {
@@ -1360,20 +1358,27 @@ export async function searchTmdbMatch(
     if (primary && (best.posterConfirmed || primary.confidence >= 0.9)) return primary;
   }
 
-  // TV search also indexes aliases that are absent from its compact results.
+  // Search also indexes aliases that are absent from its compact results.
   // A display name such as "TamilRockerz" can therefore score poorly against
   // the exact indexed alias "Tamil Rockerz". Inspect at most three candidates
   // across all locales, and require the existing strong automatic-match gate
   // on their full titles. A weak or unrelated search hit never gains trust.
-  if (itemType === "series") {
-    for (const candidate of [...seriesCandidates.values()].sort((a, b) => b.score - a.score).slice(0, 3)) {
+  const aliasMatches: Array<TmdbValidation & { tmdbId: string }> = [];
+  for (const candidate of [...searchCandidates.values()].sort((a, b) => b.score - a.score).slice(0, 3)) {
       if (inspected.has(candidate.id)) continue;
       const validation = await validateTmdbCandidate(apiKey, {
         itemType, tmdbId: candidate.id, title: rawTitle, year: effYear,
       });
-      if (validation.valid && validation.confidence >= 0.9) return { ...validation, tmdbId: candidate.id };
-    }
+      if (validation.valid && validation.confidence >= 0.9) {
+        const match = { ...validation, tmdbId: candidate.id };
+        if (itemType === "series") return match;
+        aliasMatches.push(match);
+      }
   }
+  // A film alias can belong to a remake or an unreleased duplicate. Only a
+  // single strong candidate can rescue a failed primary title match.
+  if (aliasMatches.length === 1) return aliasMatches[0];
+  if (aliasMatches.length > 1) return null;
   return primary;
 }
 
