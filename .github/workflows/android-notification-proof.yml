@@ -105,6 +105,7 @@ jobs:
             'set -euo pipefail; ip link set lo up; exec sudo -H -u "$1" --preserve-env=ANDROID_HOME,ANDROID_AVD_HOME bash -s' \
             norva-offline "$norva_runner_name" <<'OFFLINE_ANDROID'
           set -euo pipefail
+          run_offline_android() {
           check_host_isolation() {
             local phase="$1"
             ip -j link show >"proof/host-links-$phase.json"
@@ -171,7 +172,47 @@ jobs:
           # A guest network ID is not evidence of Internet access. The enclosing
           # namespace must still have only loopback and no IPv4/IPv6 default route.
           check_host_isolation after
+          }
+          # Parse the complete function before execution, then prevent adb shell
+          # from consuming the surrounding bash script's stdin.
+          run_offline_android </dev/null
           OFFLINE_ANDROID
+
+      - name: Verify complete evidence outside the emulator shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const read = name => fs.readFileSync('proof/' + name, 'utf8');
+          assert.equal(read('android-api.txt').trim(), '35');
+          assert.match(read('instrumentation.txt'), /^OK \(3 tests\)/m);
+          assert.match(read('instrumentation.txt'), /tv\.norva\.phone\.NotificationBrandingInstrumentedTest/);
+          for (const phase of ['before', 'after']) {
+            const links = JSON.parse(read('host-links-' + phase + '.json'));
+            assert.equal(links.length, 1);
+            assert.equal(links[0].ifname, 'lo');
+            for (const version of ['ipv4', 'ipv6']) {
+              assert.equal(read('host-default-' + version + '-' + phase + '.txt').trim(), '');
+            }
+          }
+          const png = fs.readFileSync('proof/notification-status-mark-proof.png');
+          assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+          assert.equal(png.readUInt32BE(16), 72);
+          assert.equal(png.readUInt32BE(20), 72);
+          const hash = crypto.createHash('sha256').update(png).digest('hex');
+          assert(read('status-icon-sha256.txt').startsWith(hash));
+          assert.match(read('app-package.txt'), /^package: name='tv\.norva\.phone' /);
+          assert.match(read('test-package.txt'), /^package: name='tv\.norva\.phone\.test' /);
+          assert.equal(read('apk-sha256.txt').trim().split('\n').length, 2);
+          fs.writeFileSync('proof/complete.json', JSON.stringify({
+            resource_tests: 3, api: 35, host_network_isolated_before_and_after: true,
+            icon_sha256: hash, actual_push_receipt_proven: false, play_release_proven: false,
+          }, null, 2) + '\n');
+          console.log('COMPLETE_RESOURCE_PROOF: 3 Android tests and independent artifact checks passed.');
+          NODE
 
       - name: Retain bounded test evidence
         if: always()
