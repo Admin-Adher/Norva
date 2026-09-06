@@ -5,9 +5,10 @@ const modules=Promise.all([import(base+'model.mjs'),import(base+'store.mjs'),imp
 const mail=(to='controlled@example.test')=>({from:'Norva <support@norva.tv>',to:[to],reply_to:'support@norva.tv',subject:'Controlled fixture',html:'<p>Fixture</p>',text:'Fixture',tags:[{name:'flow',value:'support_reply'}]});
 async function fixture(t,auth=false){const [{validateRequest},{MailStore},worker,wire]=await modules;
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'norva-mail-proof-'));const key=crypto.randomBytes(32).toString('hex');
- const store=new MailStore(path.join(dir,'mail.sqlite'),key);t.after(()=>store.close());
+ const store=new MailStore(path.join(dir,'mail.sqlite'),key);let closed=false;
+ const close=()=>{if(!closed){store.close();closed=true;}};t.after(close);
  const input={kind:'single',key:auth?'norva-auth-fixture-single':'fixture-key',messages:mail()};
- return {store,key,input,validateRequest,worker,wire,dir};}
+ return {store,close,key,input,validateRequest,worker,wire,dir};}
 test('atomic auth pair binds two distinct recipients and dedupes signed content',async t=>{
  const f=await fixture(t,true);f.input.kind='batch';f.input.messages=[mail('old@example.test'),mail('new@example.test')];
  const r=f.validateRequest(f.input),a=f.store.accept(r),b=f.store.accept(f.validateRequest({...f.input,key:'norva-auth-another-webhook'}));
@@ -89,4 +90,48 @@ test('expiry and disabled gate never send',async t=>{
  const f=await fixture(t);f.store.accept(f.validateRequest(f.input));const opt={store:f.store,runner:async()=>{throw Error('no send');},authorize:async()=>{throw Error('no authorization');}};
  assert.equal(await f.worker.workOne({...opt,enabled:false}),'disabled');f.store.db.exec('update jobs set expires=0');
  assert.equal(await f.worker.workOne({...opt,enabled:true}),'expired');
+});
+
+test('only bound no-source business email gets a 72h spool, never auth or other flows',async t=>{
+ const f=await fixture(t);let now=1800000000000;f.store.now=()=>now;
+ const cases=[
+  ['norva-branded-70000000-0000-0000-0000-000000000001','behavioral_no_source',72*3600000],
+  ['norva-branded-70000000-0000-0000-0000-000000000002','behavioral_import_unresolved',24*3600000],
+  ['ordinary-key','behavioral_no_source',24*3600000],
+  ['norva-auth-ttl-fixture','behavioral_no_source',15*60000],
+ ];
+ for(const [key,flow,ttl]of cases){
+  const [job]=f.store.accept(f.validateRequest({kind:'single',key,messages:{...mail(),tags:[{name:'flow',value:flow}]}}));
+  assert.equal(f.store.db.prepare('select expires-created as ttl from jobs where id=?').get(job.id).ttl,ttl);
+ }
+});
+
+test('a newly granted push defers a held email past 24h, then resumes the same job once',async t=>{
+ const f=await fixture(t);let now=1800000000000;f.store.now=()=>now;
+ const request=f.validateRequest({kind:'single',key:'norva-branded-70000000-0000-0000-0000-000000000003',
+  messages:{...mail(),tags:[{name:'flow',value:'behavioral_no_source'}]}});
+ const [job]=f.store.accept(request);let checks=0;const calls=[];
+ const runner=async v=>{calls.push(v.mode);return v.mode==='hold'?{held:true,messageId:19}:{state:'Sent',secure:true};};
+ assert.equal(await f.worker.workOne({store:f.store,runner,authorize:async()=>++checks===1?'allow':'defer',enabled:true}),'deferred');
+ assert.deepEqual(calls,['hold']);assert.equal(f.store.db.prepare('select attempts from jobs').get().attempts,0);
+ f.close();
+ now+=52*3600000;
+ const {MailStore}=await import(base+'store.mjs');const reopened=new MailStore(path.join(f.dir,'mail.sqlite'),f.key,{now:()=>now});t.after(()=>reopened.close());
+ assert.equal(reopened.accept(request)[0].id,job.id);
+ assert.equal(await f.worker.workOne({store:reopened,runner,authorize:async()=> 'allow',enabled:true}),'sent');
+ assert.deepEqual(calls,['hold','dispatch']);
+ assert.equal(await f.worker.workOne({store:reopened,runner,authorize:async()=> 'allow',enabled:true}),'idle');
+ assert.equal(reopened.db.prepare('select cipher from jobs where id=?').get(job.id).cipher,null);
+});
+
+test('deferred no-source email still cancels after conversion and has a hard expiry',async t=>{
+ const f=await fixture(t);let now=1800000000000;f.store.now=()=>now;
+ for(const suffix of ['4','5'])f.store.accept(f.validateRequest({kind:'single',
+  key:'norva-branded-70000000-0000-0000-0000-00000000000'+suffix,
+  messages:{...mail(),tags:[{name:'flow',value:'behavioral_no_source'}]}}));
+ const runner=async()=>{throw Error('No provider call is allowed');};
+ assert.equal(await f.worker.workOne({store:f.store,runner,authorize:async()=> 'cancel',enabled:true}),'canceled');
+ now+=72*3600000+1;
+ assert.equal(await f.worker.workOne({store:f.store,runner,authorize:async()=>{throw Error('expired');},enabled:true}),'expired');
+ assert.equal(f.store.next(),undefined);
 });

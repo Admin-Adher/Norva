@@ -40,7 +40,12 @@ export class MailStore{
     const h=this.hash('job:'+request.authority+':'+slot);const id='postal_'+h.slice(0,8)+'-'+h.slice(8,12)+'-4'+h.slice(13,16)+'-8'+h.slice(17,20)+'-'+h.slice(20,32);
     this.db.prepare(`INSERT INTO jobs(id,batch_key,slot,cipher,content_hash,created,expires,recipient_hash,auth,flow)
       VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id,k,slot,this.seal(id,{message:m,deliveryKey:request.key}),request.digest,now,
-       now+(m.auth?15*60000:24*3600000),this.hash(m.to),m.auth?1:0,m.flow);});
+       // A push permission granted after enqueue can defer this one email
+       // from +24h to J+3. SQL still enforces its absolute journey expiry and
+       // conversion gates; auth and every other flow keep their existing TTL.
+       now+(m.auth?15*60000:
+        m.flow==='behavioral_no_source'&&/^norva-branded-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(request.key)?72*3600000:24*3600000),
+       this.hash(m.to),m.auth?1:0,m.flow);});
    return this.batch(k);
   });
  }
