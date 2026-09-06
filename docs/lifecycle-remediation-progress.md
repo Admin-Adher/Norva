@@ -259,3 +259,29 @@ The tested app is the **debug** APK `1.3.19` / code `32`, not the phone's Play-i
 The complete downloaded evidence is under `outputs/01a05135-6828-78c2-aeae-17738180c47a/lifecycle-followup-20260906/android-branding-ci/34044511269/` in the original workspace, including `complete.json`, `instrumentation.txt`, APK provenance/hashes, the PNG and network evidence. Failed/incomplete runs are preserved in separate run-numbered folders, not overwritten or combined with this accepted proof. No physical-device install, customer communication, Play publication, production runtime change or paused-automation resumption occurred during this verification.
 
 Even a passing resource run will not prove a real FCM receipt, visual notification layout on this Android 16 phone, tap/deep-link behavior, duplicate suppression, a signed production release or lifecycle conversion. Those remain distinct acceptance gates.
+
+## Ninth increment — signed Android 1.3.20 prepared in Play, 2026-09-06
+
+The user explicitly requested production publication of the notification-branding correction. Live Play Console inspection found **32 (1.3.19) already in review**, built earlier from `7ba23db7` by signed release run `34004459415`, before the icon correction. The phone-only version was therefore incremented to **33 (1.3.20)** in commit `d7f20190`. A concurrent unrelated main-branch change was preserved by a normal merge; the published and compiled source is `3bc43e3aa897d29f0a1b0db13120030f1c810a03`. The Android phone/common trees and release workflow differ from the already instrumented `974a33ff` only by this version increment. The original checkout and existing CRLF-only worktree entries were preserved.
+
+### Signed bundle proof
+
+- All **7 focused Node contracts** passed again.
+- Existing signed release workflow [`34045302983`](https://github.com/Admin-Adher/Norva/actions/runs/34045302983) completed successfully at 16:26:14 UTC, with the expected source SHA. Phone unit-test/bundle build, Firebase configuration step and artifact upload succeeded. The existing workflow also builds a TV artifact, but **only the phone artifact was downloaded and imported into Play; no TV publication occurred**.
+- Phone AAB: 14,451,665 bytes, SHA256 `540b7e1db75e9e9e5fd69fbf00ec019d3d6868b7ecd500e9a6efa7444ba3aa81`. Reported GitHub artifact ZIP digest (distinct from the extracted AAB hash): `sha256:8e066b8a0b8c96ba9eefe1ab417a9b4d01617d1b49ab8686a4ea6f0b5367adc9`.
+- Official bundletool 1.18.3 validated the bundle. The decoded manifest confirms `tv.norva.phone`, code 33, version 1.3.20, no debuggable flag, dedicated `ic_norva_notification` and `norva_accent` FCM metadata. The resource table contains the icon and Firebase configuration for `norva-ecosystem`; credential values were not exported.
+- JAR signature verification returned `jar verified.` / exit 0. The upload certificate SHA256 is `00:82:F3:1A:9F:05:D6:E6:CE:07:FC:9D:4D:8B:30:E8:1F:FD:C1:CC:EB:A6:A9:85:C2:DA:FE:E0:21:40:96:21`. Self-signed-chain, missing timestamp and ZIP/JarInputStream ordering warnings are preserved in the report, not hidden. Play accepted the bundle and proceeded to release review without a signing error. A failed CI-log download did not affect the successful build or artifact download; no unavailable test-count detail is inferred from that log.
+- Local reproducible read-only inspection and JSON proof are under `outputs/01a05135-6828-78c2-aeae-17738180c47a/lifecycle-followup-20260906/android-release-1.3.20/` in the original workspace (`verify-bundle.cjs`, `bundle-verification.json`, signed AAB and pinned bundletool). This artifact check does not install the app or send a notification.
+
+### Play state and explicit remaining decision
+
+Release **19**, in existing production track `4697267819881470764` of the phone app, contains only **33 (1.3.20)**. Release notes describe the notification-logo improvement in all nine existing listing languages. Existing countries are preserved, staged rollout is 100%, and Play reports **zero lost supported devices**. Two non-blocking warnings remain: absent R8 deobfuscation mapping (minification remains disabled) and absent native debug symbols; neither was suppressed or addressed by an unrelated build-policy change.
+
+The release was saved to Publishing overview. Clicking **Send 1 change for review** opened a new explicit warning: sending now would **cancel and restart the examination already in progress since 6 September**, lengthening the wait. **Restart review was not clicked.** The dialog was cancelled to preserve the existing submission. Live Publishing overview still shows:
+
+- **32 (1.3.19): changes in review.**
+- **33 (1.3.20): changes not yet sent for review**, ready for submission; automated quick checks were running at the last observation.
+
+The user must decide whether to restart the ongoing examination now. Neither approval nor public availability of 1.3.20 is claimed. Managed publishing remains disabled and unchanged. The Codex browser is left at [Publishing overview](https://play.google.com/console/u/0/developers/9171806241352337007/app/4975180457448603282/publishing).
+
+The reconnected physical phone was again visible over ADB, still Play-installed **1.3.17 / code 30**. No installation, consent change, push/email send, lifecycle pilot, Ads mutation or paused-schedule resumption was performed. Real notification appearance and tap/deep-link acceptance remain to be tested after a Play-signed update is available.
