@@ -42,7 +42,8 @@ test('TMDB transport errors stay inflight instead of becoming definitive misses'
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   assert.match(sourceSync, /let tmdbFailureHalted = false/);
   assert.match(sourceSync, /while \(!tmdbFailureHalted && next < rows\.length\)/);
-  assert.match(sourceSync, /catch \(_\) \{[\s\S]*tmdbFailureHalted = true/);
+  assert.match(sourceSync, /catch \(error\) \{\s*if \(isMissingTmdbTitle\(error\)\)/);
+  assert.match(sourceSync, /outcomes\[index\] = \{ matched: false \};[\s\S]*else \{\s*tmdbFailureHalted = true/);
   assert.match(sourceSync, /tmdbFailureHalted,/);
 });
 

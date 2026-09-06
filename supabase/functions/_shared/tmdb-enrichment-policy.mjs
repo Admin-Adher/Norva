@@ -11,3 +11,7 @@ export function acceptAutomaticTmdbSearchMatch(row, match) {
 export function preferredTmdbSynopsis(localized, fallback, provider) {
   return [localized, fallback, provider].find(value => typeof value === 'string' && value.trim())?.trim() || null;
 }
+
+export function isMissingTmdbTitle(error) {
+  return error?.name === 'TmdbRequestError' && error.status === 404 && error.retryable === false;
+}

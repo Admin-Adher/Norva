@@ -19,3 +19,12 @@ test('synopses prefer the requested TMDB translation, then TMDB fallback, then p
   assert.equal(synopsis(null, '', 'Provider summary'), 'Provider summary');
   assert.equal(synopsis(null, null, null), null);
 });
+test('a missing TMDB ID is terminal without mistaking an outage or auth failure for absence', async () => {
+  const { isMissingTmdbTitle: missing } = await import('../supabase/functions/_shared/tmdb-enrichment-policy.mjs');
+  assert.equal(missing({ name: 'TmdbRequestError', status: 404, retryable: false }), true);
+  for (const status of [401, 403, 429, 500, 503, null]) {
+    assert.equal(missing({ name: 'TmdbRequestError', status, retryable: false }), false);
+  }
+  assert.equal(missing({ name: 'TmdbRequestError', status: 404, retryable: true }), false);
+  assert.equal(missing(new Error('404')), false);
+});

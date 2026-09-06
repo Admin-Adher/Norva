@@ -19,8 +19,9 @@ to prepare their account or a visit to a film detail page.
 The scheduler migration reuses the installed endpoint and secret lookup. It does
 not reset a global cursor or discard inflight outcomes. Interrupted owner jobs
 release their exact checkpoint; uncertain commits recover through lease expiry
-and CAS. Failed TMDB requests remain retryable. A genuine unmatched result is
-attempt-stamped by the existing worker (90-day retry interval).
+and CAS. Transient/auth/rate-limit failures remain retryable. A genuine unmatched
+result or a definitive TMDB 404 is attempt-stamped (90-day retry interval), so a
+deleted provider reference cannot indefinitely pin the shared validation page.
 
 Background owner maintenance had previously been available only as an operator
 script. A September 6 audit found 84 catalogue owners but only 5 owner pointers;

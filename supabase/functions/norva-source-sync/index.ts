@@ -1,6 +1,6 @@
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { maintainCatalogBackgroundOwners } from "../_shared/catalog-background-owner-workflow.mjs";
-import { acceptAutomaticTmdbSearchMatch } from "../_shared/tmdb-enrichment-policy.mjs";
+import { acceptAutomaticTmdbSearchMatch, isMissingTmdbTitle } from "../_shared/tmdb-enrichment-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL } from "../_shared/discovery-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -1613,9 +1613,15 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
               revalidatedAt: new Date().toISOString(),
             },
           } : { matched: false };
-        } catch (_) {
-          tmdbFailureHalted = true;
-          // Transient TMDB failure remains durably inflight.
+        } catch (error) {
+          if (isMissingTmdbTitle(error)) {
+            // A missing provider ID is a terminal attempt for this title, not
+            // a TMDB outage that should pin every catalogue behind this page.
+            outcomes[index] = { matched: false };
+          } else {
+            tmdbFailureHalted = true;
+            // Auth, rate-limit and transient failures remain durably inflight.
+          }
         }
       }
     };
