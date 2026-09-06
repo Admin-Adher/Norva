@@ -569,6 +569,11 @@ class WatchPage {
         });
         const codecProfile = this.cloneForResumeStorage(content.codecProfile || content.codec_profile);
         if (codecProfile) copy.codecProfile = codecProfile;
+        const providerAudioLanguages = window.MediaUtils?.providerAudioLanguages?.(content) || [];
+        if (providerAudioLanguages.length) {
+            copy.providerAudioLanguages = [...providerAudioLanguages];
+            copy.providerAudioLanguageStatus = 'provider_declared';
+        }
 
         if (Array.isArray(content.versions)) {
             copy.versions = content.versions.map(version => {
@@ -584,6 +589,8 @@ class WatchPage {
                     type: version.type,
                     label: version.label,
                     rawTitle: version.rawTitle || version.raw_title || null,
+                    providerAudioLanguages: window.MediaUtils?.providerAudioLanguages?.(version) || [],
+                    providerAudioLanguageStatus: 'provider_declared',
                     codecProfile: codecProfile || null,
                     audioTracks: Array.isArray(audioTracks) ? audioTracks : null,
                     audioTracksScope: Array.isArray(audioTracks)
@@ -4407,10 +4414,8 @@ class WatchPage {
         if (!normalized || normalized === 'und') return null;
 
         try {
-            // Norva's UI is English everywhere — render language names in English
-            // regardless of the browser locale (otherwise an "eng" track shows as
-            // "Anglais" on a French browser).
-            const displayNames = new Intl.DisplayNames(['en'], { type: 'language' });
+            const locale = typeof document !== 'undefined' ? document.documentElement?.lang || 'en' : 'en';
+            const displayNames = new Intl.DisplayNames([locale], { type: 'language' });
             const label = displayNames.of(normalized);
             if (label) return label.charAt(0).toUpperCase() + label.slice(1);
         } catch (_) {
@@ -8632,6 +8637,11 @@ class WatchPage {
                 this.content.containerExtension = nextContainer;
                 this.content.container_extension = nextContainer;
                 this.content.rawTitle = next.rawTitle || next.raw_title || this.content.rawTitle || null;
+                // A sibling file must never inherit the previous dub's declaration.
+                this.content.providerAudioLanguages = window.MediaUtils?.providerAudioLanguages?.(next) || [];
+                this.content.providerAudioLanguageStatus = 'provider_declared';
+                delete this.content.provider_audio_languages;
+                delete this.content.provider_audio_language_status;
                 this.content.codecProfile = nextCodecProfile;
                 this.content.versionIndex = nextIndex;
                 this.content.version_index = nextIndex;
@@ -9819,17 +9829,24 @@ class WatchPage {
         }
     }
 
-    // Title of the episode currently playing — carries the per-episode version tag
-    // (e.g. "...VOSTFR"), which the series title itself usually doesn't.
-    currentEpisodeRawTitle() {
+    // Resolve the physical file first: Selection season/part files deliberately
+    // have no episode number, and two parts can share a season/episode number.
+    currentEpisodeMetadata() {
         try {
-            if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
+            if (!this.seriesInfo?.episodes) return null;
+            const id = this.content?.id || this.content?.externalId || this.content?.external_id;
+            if (id) return this.findEpisodeById(id);
+            if (!this.currentSeason || !this.currentEpisode) return null;
             const eps = this.seriesInfo.episodes[this.currentSeason] || [];
-            const ep = eps.find((e) => parseInt(e.episode_num) === parseInt(this.currentEpisode));
-            return ep ? (ep.title || ep.name || null) : null;
+            return eps.find((e) => parseInt(e.episode_num) === parseInt(this.currentEpisode)) || null;
         } catch (_) {
             return null;
         }
+    }
+
+    currentEpisodeRawTitle() {
+        const ep = this.currentEpisodeMetadata();
+        return ep?.rawTitle || ep?.raw_title || ep?.title || ep?.name || null;
     }
 
     // Player-menu fallback when no real per-track language is known: infer the audio VERSION
@@ -9840,6 +9857,13 @@ class WatchPage {
     // otherwise to a plain "VO". We never assume a specific language from the VOSTFR tag.
     playingAudioVersionLabel() {
         try {
+            // Display-only fallback from the selected file's curated declaration.
+            // Never create a track/index, a verified language or a saved audio
+            // preference from it. Multiple declared languages cannot name one track.
+            const item = this.currentEpisodeMetadata() || this.content || {};
+            const languages = window.MediaUtils?.providerAudioLanguages?.(item) || [];
+            if (languages.length === 1) return this.getLanguageDisplayName(languages[0]);
+            if (languages.length > 1) return null;
             // Provider filename tags are useful immediately, but remain explicitly
             // labelled as provider evidence until an embedded tag or Whisper wins.
             const name = this.currentEpisodeRawTitle() || this.content?.rawTitle
@@ -14214,6 +14238,9 @@ class WatchPage {
                     containerExtension: this.containerExtension,
                     durationHint: duration,
                     playbackPreferences: this.getPlaybackPreferences(),
+                    // Keep declarations separate from observed tracks across resume.
+                    providerAudioLanguages: window.MediaUtils?.providerAudioLanguages?.(this.currentEpisodeMetadata() || this.content) || [],
+                    providerAudioLanguageStatus: 'provider_declared',
                     // Optional, non-destructive stable identity. Legacy rows remain
                     // valid without it; JSON merge keeps it on delta heartbeats.
                     ...(titleId ? { titleId } : {}),

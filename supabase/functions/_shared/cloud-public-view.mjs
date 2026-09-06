@@ -1,3 +1,5 @@
+import { publicProviderAudioLanguages } from './selection-provider-languages.mjs';
+
 const PROFILE_FIELDS = Object.freeze([
   "display_name",
   "avatar_url",
@@ -1010,6 +1012,11 @@ function sanitizePlaybackPreferences(value) {
 export function sanitizeHistoryData(value) {
   const source = isRecord(value) ? value : {};
   const result = pick(source, HISTORY_DATA_FIELDS);
+  const providerAudioLanguages = publicProviderAudioLanguages(source);
+  if (providerAudioLanguages.length) {
+    result.providerAudioLanguages = providerAudioLanguages;
+    result.providerAudioLanguageStatus = 'provider_declared';
+  }
   const playbackPreferences = sanitizePlaybackPreferences(source.playbackPreferences ?? source.playback_preferences);
   if (Object.keys(playbackPreferences).length) result.playbackPreferences = playbackPreferences;
   const nextEpisode = pick(source.nextEpisode ?? source.next_episode, NEXT_EPISODE_FIELDS);

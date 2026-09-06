@@ -53,6 +53,10 @@ test('series details expose real units without URLs; playback enforces owner, pa
   assert.equal(info.episodes[1].length, 1);
   assert.equal(info.episodes[2].length, 2);
   assert.equal(info.episodes[1][0].episode_num, null);
+  assert.deepEqual(info.episodes[1][0].providerAudioLanguages, ['te']);
+  assert.equal(info.episodes[1][0].providerAudioLanguageStatus, 'provider_declared');
+  assert.equal(info.episodes[1][0].audioLanguages, undefined);
+  assert.equal(info.episodes[1][0].audioTracks, undefined);
   assert.ok(!JSON.stringify(info).includes('workers.dev'));
   await assert.rejects(loadSelectionSeriesInfo({ ...args, generationId: 'old' }));
   assert.equal(await loadSelectionSeriesInfo({ ...args, userId: 'other' }), null);

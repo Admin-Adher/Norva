@@ -3183,6 +3183,9 @@ class HomePage {
             title,
             raw_title: variant.raw_title || variant.rawTitle || title,
             rawTitle: variant.rawTitle || variant.raw_title || title,
+            // Declarations, like track maps, belong to the selected file.
+            providerAudioLanguages: variant.providerAudioLanguages || variant.provider_audio_languages || null,
+            providerAudioLanguageStatus: variant.providerAudioLanguageStatus || variant.provider_audio_language_status || null,
             stream_icon: poster,
             poster_url: poster,
             posterUrl: poster,
@@ -3527,6 +3530,8 @@ class HomePage {
             title: this.displayTitle(item),
             rawTitle: item.raw_title || item.rawTitle || item.name || item.title
                 || data.rawTitle || data.raw_title || null,
+            providerAudioLanguages: item.providerAudioLanguages || item.provider_audio_languages || data.providerAudioLanguages || data.provider_audio_languages || null,
+            providerAudioLanguageStatus: item.providerAudioLanguageStatus || item.provider_audio_language_status || data.providerAudioLanguageStatus || data.provider_audio_language_status || null,
             subtitle: type === 'episode'
                 ? MediaUtils.formatEpisodeDisplayLabel(data.subtitle || '', {
                     season: data.currentSeason,

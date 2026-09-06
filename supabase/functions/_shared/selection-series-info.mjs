@@ -1,6 +1,7 @@
 import { discoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_VOD_FEEDS, SELECTION_VOD_REVISION } from './selection-vod.mjs';
 import { isSelectionSeriesUnit, selectionSeriesIdentity, selectionSeriesExternalId } from './selection-series.mjs';
+import { selectionProviderAudioLanguages } from './selection-provider-languages.mjs';
 
 export async function ownedSelectionSeries(row, seriesId) {
   const metadata = row?.metadata;
@@ -31,9 +32,11 @@ export async function loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, 
       || row.metadata.discoveryFeed !== parent.metadata.discoveryFeed
       || !/^norva-selection:movie:[a-f0-9]{64}$/.test(row.external_id)) continue;
     const season = String(unit.seasons[0]);
+    const providerAudioLanguages = selectionProviderAudioLanguages(row);
     (episodes[season] ||= []).push({ id: row.external_id, title: row.title,
       season: unit.seasons[0], episode_num: unit.kind === 'episode' ? unit.episode : null,
       container_extension: 'm3u8', selectionUnit: unit,
+      ...(providerAudioLanguages.length ? { providerAudioLanguages, providerAudioLanguageStatus: 'provider_declared' } : {}),
       info: { movie_image: row.poster_url || parent.poster_url || null },
       playbackHint: { container: 'm3u8', streamType: 'series', audioSeriesId: seriesId } });
   }
