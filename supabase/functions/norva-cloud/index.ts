@@ -1412,7 +1412,10 @@ async function listSources(userId: string, db: SupabaseClient) {
     .is("deleted_at", null) // hide soft-deleted sources awaiting the reaper
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list sources");
-  return { sources: (data ?? []).map(sanitizeSource) };
+  // Withdrawn Selection stays archived server-side without an unusable Enable
+  // action in the ordinary paused-provider onboarding or source manager.
+  const withdrawnId = DISCOVERY_SELECTION_ENABLED ? null : await discoverySourceId(userId);
+  return { sources: (data ?? []).filter(source => source.id !== withdrawnId).map(sanitizeSource) };
 }
 
 async function listVisibleSources(userId: string, db: SupabaseClient) {
