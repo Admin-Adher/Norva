@@ -34,15 +34,15 @@ test('current import is the reviewed allowlist only, regardless of requested agg
   const result = await fetchDiscoverySelection({ includeVod: false, feeds: [{ id:'unreviewed',kind:'movie',url:'https://example.test/all.m3u' }], fetchPlaylist: async () => { fetches++; } });
   const rows = result.items.map(item => discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item));
   assert.equal(fetches,0);
-  assert.equal(rows.length,24);
-  assert.equal(new Set(rows.map(row => row.external_id)).size,24);
+  assert.equal(rows.length,21);
+  assert.equal(new Set(rows.map(row => row.external_id)).size,21);
   assert.ok(rows.every(row => row.item_type === 'live'));
   assert.deepEqual(rows.map(row => row.playback_hint.targetUrl),SELECTION_CURATED_CHANNELS.map(c => c.url));
-  assert.equal(discoveryPlaylist().split('#EXTINF:').length-1,24);
+  assert.equal(discoveryPlaylist().split('#EXTINF:').length-1,21);
   assert.notEqual(await discoverySourceId('owner'),await retiredDiscoverySourceId('owner'));
   assert.equal(fs.readFileSync('public/catalog/discovery.m3u','utf8').replace(/\r\n/g,'\n'),discoveryPlaylist());
   const registry = JSON.parse(fs.readFileSync('public/catalog/sources.json','utf8'));
-  assert.equal(registry.sources.filter(s=>s.kind==='live').reduce((sum,s)=>sum+s.channels,0),24);
+  assert.equal(registry.sources.filter(s=>s.kind==='live').reduce((sum,s)=>sum+s.channels,0),21);
   assert.equal(registry.sources.filter(s=>s.kind==='movie').length,2);
   assert.ok(registry.sources.every(s => !s.url));
   assert.equal(fs.readFileSync('public/catalog/xumo-live.m3u','utf8').trim(),'#EXTM3U');
@@ -81,40 +81,11 @@ test('reviewed direct HLS requires the complete owned identity and never grants 
     const row=discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item);
     const input={userId,sourceId:await discoverySourceId(userId),itemType:'live',itemId:row.external_id,ownedItem:row,targetUrl:row.playback_hint.targetUrl};
     const delivery=await resolveSelectionLiveDelivery(input);
-    const { SELECTION_CURATED_CHANNELS } = await import('../supabase/functions/_shared/selection-curated-channels.mjs');
-    const expectedTransport=SELECTION_CURATED_CHANNELS.find(c=>c.id===row.metadata.selectionChannelId).transport || 'public-hls-direct';
-    assert.equal(delivery?.transport,expectedTransport);
+    assert.equal(delivery?.transport,'public-hls-direct');
     const decision={delivery,targetUrl:input.targetUrl,itemType:'live',clientMode:'transcode',body:{gatewayAutoMode:true,publicHlsDirectSessionGuard:true},clientMetadata:{clientSurface:'web',appMode:'cloud'}};
-    assert.equal(shouldUseSelectionLiveDirect(decision),expectedTransport==='public-hls-direct');
+    assert.equal(shouldUseSelectionLiveDirect(decision),true);
     assert.equal(shouldUseSelectionLiveDirect({...decision,delivery:{...delivery}}),false);
     assert.equal(shouldUseSelectionLiveDirect({...decision,body:{...decision.body,forceVideoTranscode:true}}),false);
     for (const changes of [{sourceId:'personal'},{userId:'other'},{itemId:'spoof'},{ownedItem:null},{targetUrl:input.targetUrl+'?x=1'}]) assert.equal(await resolveSelectionLiveDelivery({...input,...changes}),null);
-  }
-});
-
-test('HTTP and CORS-limited reviewed channels use the revocable relay only through owned server descriptors', async () => {
-  const { discoverySourceId, DISCOVERY_PLAYLIST_URL } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
-  const { fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
-  const { resolveSelectionLiveDelivery, shouldUseSelectionLiveRelay } = await import('../supabase/functions/_shared/selection-live-delivery.mjs');
-  const relayIds=new Set(['canal-uol-br','tv-vicosa-br','tf1-hd-fr']);
-  for (const item of (await fetchDiscoverySelection({includeVod:false})).items) {
-    const row=discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item);
-    const input={userId:'owner',sourceId:await discoverySourceId('owner'),itemType:'live',itemId:row.external_id,ownedItem:row,targetUrl:row.playback_hint.targetUrl};
-    const delivery=await resolveSelectionLiveDelivery(input);
-    const decision={delivery,targetUrl:input.targetUrl,itemType:'live',clientMode:'transcode',body:{gatewayAutoMode:true}};
-    const allowed=relayIds.has(row.metadata.selectionChannelId);
-    assert.equal(shouldUseSelectionLiveRelay(decision),allowed);
-    for (const mode of ['relay','direct']) assert.equal(shouldUseSelectionLiveRelay({...decision,clientMode:mode}),allowed);
-    assert.equal(shouldUseSelectionLiveRelay({...decision,delivery:{...delivery}}),false);
-    assert.equal(shouldUseSelectionLiveRelay({...decision,targetUrl:input.targetUrl+'?changed=1'}),false);
-    assert.equal(shouldUseSelectionLiveRelay({...decision,itemType:'movie'}),false);
-    assert.equal(shouldUseSelectionLiveRelay({...decision,body:{gatewayAutoMode:false}}),false);
-    for (const force of [{forceVideoTranscode:true},{engine_pipe:1},{live_force_transcode:'true'},{audioStreamIndex:1},{gatewayMode:'transcode'}]) {
-      assert.equal(shouldUseSelectionLiveRelay({...decision,body:{gatewayAutoMode:true,...force}}),false);
-      assert.equal(shouldUseSelectionLiveRelay({...decision,playbackHint:force}),false);
-    }
-    for (const changes of [{sourceId:'personal'},{userId:'other'},{ownedItem:null},{itemId:'spoof'}]) {
-      assert.equal(shouldUseSelectionLiveRelay({...decision,delivery:await resolveSelectionLiveDelivery({...input,...changes})}),false);
-    }
   }
 });

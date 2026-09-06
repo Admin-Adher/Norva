@@ -144,28 +144,6 @@ export const SELECTION_CURATED_CHANNELS = Object.freeze([
     "url": "https://d856dff4.wurl.com/master/f36d25e7e52f1ba8d7e56eb859c636563214f541/U3BvcnRzVHJpYmFsLWdiX1BGTE1NQV9ITFM/playlist.m3u8?ads.wurl_channel=1309&ads.wurl_name=PFLMMA&ads.channel_name=Professional%20Fighters%20League%20PFL&ads.content_genre=MMA%2CMartial%20Arts%2CSport&ads.ic=IAB17%2CIAB17-20&ads.rating=PG-13&ads.language=US&provider=FreeLiveSports&ads.us_privacy=&ads.gdpr=1&ads.consent=&ads.coppa=0&ads.content_livestream=1&ads.content_url=https%3A%2F%2Fnorva.tv%2F&ads.dnt=1&ads.device_id="
   },
   {
-    "id": "canal-uol-br",
-    "title": "Canal UOL",
-    "feedId": "uol-reviewed",
-    "provider": "Canal UOL",
-    "website": "https://github.com/iptv-com/iptv/blob/main/lists/brazil.m3u",
-    "group": "News",
-    "country": "BR",
-    "url": "https://video24.mais.uol.com.br/live/6146.m3u8",
-    "transport": "public-hls-relay"
-  },
-  {
-    "id": "tv-vicosa-br",
-    "title": "TV Viçosa",
-    "feedId": "vicosa-reviewed",
-    "provider": "TV Viçosa",
-    "website": "https://github.com/iptv-com/iptv/blob/main/lists/brazil.m3u",
-    "group": "General",
-    "country": "BR",
-    "url": "http://wz4.dnip.com.br/fratevitv/fratevitv.sdp/playlist.m3u8",
-    "transport": "public-hls-relay"
-  },
-  {
     "id": "atv-be",
     "title": "ATV",
     "feedId": "atv-reviewed",
@@ -194,17 +172,6 @@ export const SELECTION_CURATED_CHANNELS = Object.freeze([
     "group": "Sports",
     "country": "DZ",
     "url": "https://live.elheddaftv.com:8081/elheddaftv/index.m3u8"
-  },
-  {
-    "id": "tf1-hd-fr",
-    "title": "TF1 HD",
-    "feedId": "tf1-reviewed",
-    "provider": "TF1",
-    "website": "https://iptv-org.github.io/iptv/countries/fr.m3u",
-    "group": "General",
-    "country": "FR",
-    "url": "http://151.80.18.177:86/TF1_HD/index.m3u8",
-    "transport": "public-hls-relay"
   },
   {
     "id": "rakuten-topmovies-es",

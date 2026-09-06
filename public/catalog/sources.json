@@ -44,20 +44,6 @@
       "channels": 3
     },
     {
-      "id": "uol-reviewed",
-      "name": "Canal UOL",
-      "kind": "live",
-      "website": "https://github.com/iptv-com/iptv/blob/main/lists/brazil.m3u",
-      "channels": 1
-    },
-    {
-      "id": "vicosa-reviewed",
-      "name": "TV Viçosa",
-      "kind": "live",
-      "website": "https://github.com/iptv-com/iptv/blob/main/lists/brazil.m3u",
-      "channels": 1
-    },
-    {
       "id": "atv-reviewed",
       "name": "ATV",
       "kind": "live",
@@ -76,13 +62,6 @@
       "name": "El-Heddaf TV",
       "kind": "live",
       "website": "https://iptv-org.github.io/iptv/countries/dz.m3u",
-      "channels": 1
-    },
-    {
-      "id": "tf1-reviewed",
-      "name": "TF1",
-      "kind": "live",
-      "website": "https://iptv-org.github.io/iptv/countries/fr.m3u",
       "channels": 1
     },
     {

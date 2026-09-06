@@ -27,18 +27,12 @@ https://amg01444-amg01444c2-freelivesports-emea-11541.playouts.now.amagi.tv/ts-e
 https://b44f955a.wurl.com/master/f36d25e7e52f1ba8d7e56eb859c636563214f541/U3BvcnRzVHJpYmFsLWV1X01hbkNpdHkyNDdfSExT/playlist.m3u8?ads.wurl_channel=2284&ads.wurl_name=ManCity247&ads.channel_name=Man%20City%2024%2F7&ads.content_genre=Football%2CSport&ads.ic=IAB17%2CIAB17-12&ads.rating=G&ads.language=US&provider=FreeLiveSports&ads.us_privacy=&ads.gdpr=1&ads.consent=&ads.coppa=0&ads.content_livestream=1&ads.content_url=https%3A%2F%2Fnorva.tv%2F&ads.dnt=1&ads.did=
 #EXTINF:-1 tvg-id="norva-selection:pfl" group-title="Free Live Sports · Sports",PFL
 https://d856dff4.wurl.com/master/f36d25e7e52f1ba8d7e56eb859c636563214f541/U3BvcnRzVHJpYmFsLWdiX1BGTE1NQV9ITFM/playlist.m3u8?ads.wurl_channel=1309&ads.wurl_name=PFLMMA&ads.channel_name=Professional%20Fighters%20League%20PFL&ads.content_genre=MMA%2CMartial%20Arts%2CSport&ads.ic=IAB17%2CIAB17-20&ads.rating=PG-13&ads.language=US&provider=FreeLiveSports&ads.us_privacy=&ads.gdpr=1&ads.consent=&ads.coppa=0&ads.content_livestream=1&ads.content_url=https%3A%2F%2Fnorva.tv%2F&ads.dnt=1&ads.device_id=
-#EXTINF:-1 tvg-id="norva-selection:canal-uol-br" group-title="Canal UOL · News",Canal UOL
-https://video24.mais.uol.com.br/live/6146.m3u8
-#EXTINF:-1 tvg-id="norva-selection:tv-vicosa-br" group-title="TV Viçosa · General",TV Viçosa
-http://wz4.dnip.com.br/fratevitv/fratevitv.sdp/playlist.m3u8
 #EXTINF:-1 tvg-id="norva-selection:atv-be" group-title="ATV · General",ATV
 https://live.zendzend.com/mpegts/29375_107244/media_mpegts_0.m3u8
 #EXTINF:-1 tvg-id="norva-selection:al24-news" group-title="AL24 News · News",AL24 News
 https://cdn.live.easybroadcast.io/abr_corp/66_al24_u4yga6h/corp/66_al24_u4yga6h_240p/chunks.m3u8
 #EXTINF:-1 tvg-id="norva-selection:el-heddaf-tv" group-title="El-Heddaf TV · Sports",El-Heddaf TV
 https://live.elheddaftv.com:8081/elheddaftv/index.m3u8
-#EXTINF:-1 tvg-id="norva-selection:tf1-hd-fr" group-title="TF1 · General",TF1 HD
-http://151.80.18.177:86/TF1_HD/index.m3u8
 #EXTINF:-1 tvg-id="norva-selection:rakuten-topmovies-es" group-title="Rakuten TV · Cinema",Rakuten Top Movies Spain
 https://ff335120300e4742a2b135ee9a9e7df8.mediatailor.eu-west-1.amazonaws.com/v1/master/0547f18649bd788bec7b67b746e47670f558b6b2/production-LiveChannel-5983/master.m3u8
 #EXTINF:-1 tvg-id="norva-selection:red-bull-tv-es" group-title="Red Bull TV · Sports",Red Bull TV ES
