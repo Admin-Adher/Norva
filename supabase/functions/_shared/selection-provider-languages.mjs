@@ -10,7 +10,7 @@ export function providerAudioFacet(value) {
 export function selectionProviderAudioLanguages(item = {}) {
   const metadata = item.metadata || {};
   const id = item.external_id || item.externalId || item.item_id || item.itemId || '';
-  if (!/^norva-selection:movie:[a-f0-9]{64}$/.test(id)
+  if (!/^norva-selection:(?:movie|series):[a-f0-9]{64}$/.test(id)
       || metadata.selectionRevision !== 'selection-vod-20260906-v1'
       || metadata.discoveryFeed !== 'babuperumana-vod') return [];
   const match = /^Movies \/ (Telugu|Tamil|Malayalam|Hindi|Kannada|English)(?: \/ (?:19|20)\d{2})?$/.exec(metadata.selectionVodGroup || '');

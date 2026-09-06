@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
+import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import {
   type ActiveCatalogGeneration,
   assertActiveCatalogGenerationCurrent,
@@ -433,6 +434,12 @@ async function getXtreamSeriesInfo(
 ) {
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
+
+  const selection = await loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, generationId: expectedSnapshot.generationId });
+  if (selection) {
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+    return { payload: selection, exactInventorySafe: false };
+  }
 
   const loadedSource = await loadSourceConfig(sourceId, userId, db, expectedSnapshot);
   const config = loadedSource.config;

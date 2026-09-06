@@ -1,4 +1,5 @@
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
+import { selectionSeriesUnit, selectionSeriesIdentity, selectionSeriesExternalId } from './selection-series.mjs';
 
 export const SELECTION_VOD_REVISION = 'selection-vod-20260906-v1';
 export const SELECTION_VOD_FEEDS = Object.freeze([
@@ -76,6 +77,7 @@ async function loadFeed(feed, fetchPlaylist) {
 
 export async function fetchSelectionVod({ fetchPlaylist = fetchM3uPlaylistStream, heartbeat = async () => {} } = {}) {
   const items = [], sources = [];
+  const parents = new Map();
   let bytesRead = 0;
   for (const feed of SELECTION_VOD_FEEDS) {
     await heartbeat();
@@ -96,6 +98,27 @@ export async function fetchSelectionVod({ fetchPlaylist = fetchM3uPlaylistStream
           ...(year ? { year: Number(year) } : {}),
           plot: `${feed.name}\n${feed.website}\nhttps://norva.tv/catalog/credits.html` },
         playback_hint: { sourceType: 'm3u', targetUrl: item.url, container: 'm3u8', containerExtension: 'm3u8' } };
+      const unit = selectionSeriesUnit(item.title);
+      if (unit) {
+        const seriesId = selectionSeriesExternalId(await selectionSeriesIdentity(feed.id, unit.baseTitle, item.group));
+        fields.item_type = 'episode';
+        fields.parent_external_id = seriesId;
+        fields.metadata.selectionUnit = unit;
+        fields.metadata.selectionParentId = seriesId;
+        if (!parents.has(seriesId)) {
+          const parent = { item: { ...item, title: unit.baseTitle, url: '', tvgId: seriesId }, fields: {
+            item_type: 'series', external_id: seriesId, title: unit.baseTitle,
+            parent_external_id: `${feed.name} · Séries`, subtitle: group, poster_url: poster,
+            // A season release year is not the series' first-air year.
+            metadata: { selectionRevision: SELECTION_VOD_REVISION, selectionSeriesTitle: unit.baseTitle,
+              selectionVodGroup: item.group, discoveryFeed: feed.id, discoverySource: feed.website,
+              seriesDelivery: 'selection', group, categoryName: `${feed.name} · Séries`, plot: fields.metadata.plot },
+            playback_hint: { sourceType: 'm3u' },
+          } };
+          parents.set(seriesId, parent);
+          items.push(parent);
+        }
+      }
       items.push({ item, fields });
     }
     sources.push({ id: feed.id, status: 'loaded', discovered: loaded.discovered, included: loaded.entries.size,
@@ -133,7 +156,9 @@ export async function resolveSelectionVodTarget({ metadata, itemId, targetUrl,
 }
 
 export async function resolveSelectionVodDelivery({ sourceId, expectedSourceId, itemType, itemId, ownedItem, targetUrl }) {
-  if (sourceId !== expectedSourceId || itemType !== 'movie' || !ownedItem) return null;
+  if (sourceId !== expectedSourceId || !['movie', 'series'].includes(itemType) || !ownedItem) return null;
+  if (itemType === 'series' && (!selectionSeriesUnit(ownedItem.metadata?.selectionVodTitle)
+    || ownedItem.metadata?.selectionParentId !== ownedItem.parent_external_id)) return null;
   try {
     const { feed, identity } = await ownedIdentity(ownedItem.metadata, itemId);
     const hint = ownedItem.playback_hint;
@@ -146,7 +171,7 @@ export async function resolveSelectionVodDelivery({ sourceId, expectedSourceId, 
 }
 
 export function shouldUseSelectionVodRelay({ delivery, targetUrl, itemType, clientMode, body }) {
-  if (!verifiedDeliveries.has(delivery) || delivery.targetUrl !== targetUrl || itemType !== 'movie') return false;
+  if (!verifiedDeliveries.has(delivery) || delivery.targetUrl !== targetUrl || !['movie', 'series'].includes(itemType)) return false;
   // A requested conversion remains a conversion. Only the normal automatic
   // playback route uses byte-preserving HLS with the existing revocable relay.
   if (body.enginePipe === true || body.engine_pipe === true) return false;

@@ -37,7 +37,7 @@ test('TMDB transport errors stay inflight instead of becoming definitive misses'
   assert.doesNotMatch(block, /\.catch\(\(\) => null\)/);
   assert.match(projection, /response\.status === 429 \|\| response\.status >= 500/);
   assert.match(projection, /only a real HTTP 200 with results:\[\] may be stamped as a definitive miss/);
-  assert.match(projection, /function normalizeMatchTitle[\s\S]*stripProviderSearchPrefix[\s\S]*replace\(\/\[’'\]\//);
+  assert.match(projection, /function normalizeMatchTitle[\s\S]*cleanTmdbSearchQuery[\s\S]*replace\(\/\[’'\]\//);
 
   const sourceSync = read('supabase/functions/norva-source-sync/index.ts');
   assert.match(sourceSync, /let tmdbFailureHalted = false/);
@@ -67,6 +67,6 @@ test('source-sync health proves the exact TMDB policy deployed by every replica'
 
   assert.match(sourceSync, /version: 19/);
   assert.match(sourceSync, /tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION/);
-  assert.match(deploy, /EXPECTED_TMDB_SEARCH_POLICY=promax-multilang-v2/);
+  assert.match(deploy, /EXPECTED_TMDB_SEARCH_POLICY=catalog-title-tags-v3/);
   assert.match(deploy, /tmdbSearchPolicy/);
 });

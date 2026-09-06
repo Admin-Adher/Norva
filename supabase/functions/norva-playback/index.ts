@@ -1,6 +1,7 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
+import { resolveOwnedSelectionEpisode } from "../_shared/selection-series-info.mjs";
 import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
 import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -6679,6 +6680,7 @@ async function resolvePlaybackTarget(
   let item: { playback_hint?: unknown; metadata?: unknown } | null = null;
   let ownedItem: {
     id?: unknown;
+    parent_external_id?: unknown;
     updated_at?: unknown;
     playback_hint?: unknown;
     metadata?: unknown;
@@ -6717,6 +6719,16 @@ async function resolvePlaybackTarget(
     if (!item) item = data;
   }
   if (!item) {
+    if (itemType === "series" || itemType === "movie") {
+      // Existing movie history keeps its physical Selection file ID after the
+      // catalogue moves a season to Series. Resolve only an owned current file.
+      const selectionEpisode = await resolveOwnedSelectionEpisode({ db, sourceId, userId, itemId,
+        parentId: stringOrNull(requestHint.audioSeriesId ?? requestHint.parentSeriesId) });
+      if (selectionEpisode) { ownedItem = selectionEpisode; item = selectionEpisode; }
+    }
+  }
+  if (!item) {
+    if (sourceId === await discoverySourceId(userId)) throw new HttpError(404, "Media item not found");
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
       const requestContainer = containerObservation?.container ?? stringOr(requestHint.container, "mp4");
@@ -6845,7 +6857,7 @@ async function resolvePlaybackTarget(
     const selectionLiveDelivery = await resolveSelectionLiveDelivery({
       sourceId, userId, itemType, itemId, ownedItem, targetUrl,
     });
-    const selectionVodDelivery = itemType === "movie" && typeof ownedMetadata.selectionVodId === "string" ? await resolveSelectionVodDelivery({
+    const selectionVodDelivery = (itemType === "movie" || itemType === "series") && typeof ownedMetadata.selectionVodId === "string" ? await resolveSelectionVodDelivery({
       sourceId, expectedSourceId: await discoverySourceId(userId), itemType, itemId, ownedItem, targetUrl,
     }) : null;
     return {

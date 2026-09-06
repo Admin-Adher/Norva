@@ -4357,7 +4357,8 @@ async function syncM3uSource(
   }
 
   const movieCount = rows.filter(row => row.item_type === "movie").length;
-  const liveCount = rows.length - movieCount;
+  const seriesCount = rows.filter(row => row.item_type === "series").length;
+  const liveCount = rows.filter(row => row.item_type === "live").length;
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
 
   // Change-detection (same as Xtream): skip the rebuild when the playlist's
@@ -4371,6 +4372,7 @@ async function syncM3uSource(
     return {
       live: liveCount,
       movies: movieCount,
+    series: seriesCount,
       total: rows.length,
       contentSignature,
       changed,
@@ -4390,13 +4392,14 @@ async function syncM3uSource(
     await reportProgress({
       stage: "unchanged",
       percent: 100,
-      counts: { live: liveCount, movies: movieCount, series: 0, total: rows.length },
+      counts: { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length },
       steps: { import: { status: "done", count: rows.length }, finalize: { status: "done" } },
     });
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
     return {
       live: liveCount,
       movies: movieCount,
+    series: seriesCount,
       total: rows.length,
       contentSignature,
       skipped: true,
@@ -4409,11 +4412,12 @@ async function syncM3uSource(
   await reportProgress({
     stage: "importing",
     percent: 62,
-    counts: { live: liveCount, movies: movieCount, series: 0, total: rows.length },
-    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: 0, total: categoryCount },
+    counts: { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length },
+    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: seriesCount ? categoryCount : 0, total: categoryCount },
     steps: {
       channels: { status: "done", count: liveCount },
       movies: { status: "done", count: movieCount },
+      series: { status: "done", count: seriesCount },
       categories: { status: "done", count: categoryCount },
       import: { status: "running", count: rows.length },
     },
@@ -4437,6 +4441,7 @@ async function syncM3uSource(
   return {
     live: liveCount,
     movies: movieCount,
+    series: seriesCount,
     total: rows.length,
     liveCategories: liveCount ? categoryCount : 0,
     movieCategories: movieCount ? categoryCount : 0,

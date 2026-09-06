@@ -24008,5 +24008,70 @@
     "ar": "القنوات والمصادر",
     "id": "Saluran dan sumber",
     "fil": "Mga channel at source"
+  },
+  "ui_selection_seasons": {
+    "source": "Seasons {{p0}}",
+    "en": "Seasons {{p0}}",
+    "fr": "Saisons {{p0}}",
+    "pt-BR": "Temporadas {{p0}}",
+    "es": "Temporadas {{p0}}",
+    "hi": "सीज़न {{p0}}",
+    "tr": "Sezonlar {{p0}}",
+    "bn": "সিজন {{p0}}",
+    "ar": "المواسم {{p0}}",
+    "id": "Musim {{p0}}",
+    "fil": "Mga season {{p0}}"
+  },
+  "ui_selection_part": {
+    "source": "Part {{p0}}",
+    "en": "Part {{p0}}",
+    "fr": "Partie {{p0}}",
+    "pt-BR": "Parte {{p0}}",
+    "es": "Parte {{p0}}",
+    "hi": "भाग {{p0}}",
+    "tr": "Kısım {{p0}}",
+    "bn": "পর্ব {{p0}}",
+    "ar": "الجزء {{p0}}",
+    "id": "Bagian {{p0}}",
+    "fil": "Bahagi {{p0}}"
+  },
+  "ui_selection_play": {
+    "source": "Play {{p0}}",
+    "en": "Play {{p0}}",
+    "fr": "Lire {{p0}}",
+    "pt-BR": "Reproduzir {{p0}}",
+    "es": "Reproducir {{p0}}",
+    "hi": "{{p0}} चलाएँ",
+    "tr": "{{p0}} oynat",
+    "bn": "{{p0}} চালান",
+    "ar": "تشغيل {{p0}}",
+    "id": "Putar {{p0}}",
+    "fil": "I-play ang {{p0}}"
+  },
+  "ui_selection_resume": {
+    "source": "Resume {{p0}}",
+    "en": "Resume {{p0}}",
+    "fr": "Reprendre {{p0}}",
+    "pt-BR": "Retomar {{p0}}",
+    "es": "Reanudar {{p0}}",
+    "hi": "{{p0}} फिर से शुरू करें",
+    "tr": "{{p0}} sürdür",
+    "bn": "{{p0}} আবার চালু করুন",
+    "ar": "استئناف {{p0}}",
+    "id": "Lanjutkan {{p0}}",
+    "fil": "Ipagpatuloy ang {{p0}}"
+  },
+  "ui_selection_videos": {
+    "source": "{{p0}} videos",
+    "en": "{{p0}} videos",
+    "fr": "{{p0}} vidéos",
+    "pt-BR": "{{p0}} vídeos",
+    "es": "{{p0}} vídeos",
+    "hi": "{{p0}} वीडियो",
+    "tr": "{{p0}} video",
+    "bn": "{{p0}} ভিডিও",
+    "ar": "{{p0}} فيديو",
+    "id": "{{p0}} video",
+    "fil": "{{p0}} video"
   }
 }

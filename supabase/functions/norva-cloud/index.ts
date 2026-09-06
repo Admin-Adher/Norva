@@ -1,6 +1,7 @@
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -3521,16 +3522,18 @@ async function syncM3uSource(
   }
 
   const movieCount = rows.filter(row => row.item_type === "movie").length;
-  const liveCount = rows.length - movieCount;
+  const seriesCount = rows.filter(row => row.item_type === "series").length;
+  const liveCount = rows.filter(row => row.item_type === "live").length;
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
   await reportProgress({
     stage: "importing",
     percent: 62,
-    counts: { live: liveCount, movies: movieCount, series: 0, total: rows.length },
-    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: 0, total: categoryCount },
+    counts: { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length },
+    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: seriesCount ? categoryCount : 0, total: categoryCount },
     steps: {
       channels: { status: "done", count: liveCount },
       movies: { status: "done", count: movieCount },
+      series: { status: "done", count: seriesCount },
       categories: { status: "done", count: categoryCount },
       import: { status: "running", count: rows.length },
     },
@@ -3552,10 +3555,10 @@ async function syncM3uSource(
   const liveCatalog = await refreshMaterializedLiveCatalog(db, {
     sourceId, userId, rows: savedRows.filter(row => row.item_type === "live"), generation, heartbeat,
   });
-  if (movieCount > 0) {
+  if (movieCount > 0 || seriesCount > 0) {
     await refreshVodTitleProjection({
       sourceId, userId, db, generation,
-      rows: savedRows.filter(row => row.item_type === "movie"),
+      rows: savedRows.filter(row => row.item_type === "movie" || row.item_type === "series"),
       xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
       assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
     });
@@ -3563,6 +3566,7 @@ async function syncM3uSource(
   return {
     live: liveCount,
     movies: movieCount,
+    series: seriesCount,
     total: rows.length,
     liveCatalog,
     discoverySources: "sources" in playlist ? playlist.sources : undefined,
@@ -3664,6 +3668,13 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   const configRevision = sourceSnapshotConfigRevision(visibleSource);
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
+
+  if (seriesId.startsWith("norva-selection:series:") && sourceId === await discoverySourceId(userId)) {
+    const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+    const selection = await loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, generationId: generation.generationId });
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    return selection;
+  }
 
   const loadedSource = await loadSourceConfigEnvelope(sourceId, userId, db);
   const sourceConfig = loadedSource.config;

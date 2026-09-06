@@ -41,7 +41,7 @@ const PREFIX_LOCALES = Object.freeze({
   SO: "so-SO",
 });
 
-export const TMDB_SEARCH_POLICY_VERSION = "promax-multilang-v2";
+export const TMDB_SEARCH_POLICY_VERSION = "catalog-title-tags-v3";
 
 export function providerTitlePrefix(value) {
   const raw = String(value || "");
@@ -64,12 +64,29 @@ export function stripProviderSearchPrefix(value) {
 
 export function cleanTmdbSearchQuery(value) {
   return stripProviderSearchPrefix(value)
-    .replace(/[\[({][^\])}]*[\])}]/g, " ")
-    .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
-    .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
+    .replace(/[\[({]([^\])}]*)[\])}]/g, (_, content) => {
+      // Keep lexical subtitles: "14 Days (Girlfriend Intlo)" is one title.
+      return /^(?:(?:19|20)\d{2}|Telugu|Tamil|Malayalam|Hindi|Kannada|English|Multi(?:\s*Audio)?|Dubbed|HDRip|WEB[ .-]?(?:DL|Rip)|Blu[ .-]?Ray|\d{3,4}p|4K|HD|SD|VF|VOSTFR)$/i.test(content.trim()) ? ' ' : ` ${content} `;
+    })
+    .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|hdrip|brrip|bdrip|web[ .-]?(?:dl|rip)|blu[ .-]?ray|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
+    .replace(/\s+(?:Telugu|Tamil|Malayalam|Hindi|Kannada|English)(?:\s+Dubbed)?\s*$/i, ' ')
+    .replace(/\s+Dubbed\s*$/i, ' ')
+    .replace(/\s+((?:19|20)\d{2})\s*$/, " ")
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Prefer an explicit release date, then the last suffix year. A numeric movie
+// title ("2012") is never itself treated as a release year.
+export function tmdbSearchYear(value, fallback = null) {
+  const raw = stripProviderSearchPrefix(value);
+  const bracket = /\((19\d{2}|20\d{2})\)/.exec(raw);
+  if (bracket && bracket.index > 0) return Number(bracket[1]);
+  const cleaned = raw.replace(/[\[({][^\])}]*[\])}]/g, ' ')
+    .replace(/\b(?:HDRip|WEB[ .-]?(?:DL|Rip)|Blu[ .-]?Ray|Telugu|Tamil|Malayalam|Hindi|Kannada|English|Dubbed|\d{3,4}p)\b/gi, ' ').trim();
+  const suffix = /\s+(19\d{2}|20\d{2})$/.exec(cleaned);
+  return suffix ? Number(suffix[1]) : fallback;
 }
 
 export function tmdbSearchLocalesForTitle(value, configuredLanguage = "fr-FR") {

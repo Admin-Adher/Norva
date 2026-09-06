@@ -18,6 +18,7 @@ import {
   cleanTmdbSearchQuery,
   stripProviderSearchPrefix,
   tmdbSearchLocalesForTitle,
+  tmdbSearchYear,
 } from "./tmdb-search-policy.mjs";
 
 type JsonRecord = Record<string, unknown>;
@@ -191,7 +192,8 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     const externalId = stringOr(row.external_id, "");
     const title = stringOr(row.title, "Norva");
     const itemType = row.item_type === "series" ? "series" : "movie";
-    const releaseYear = extractYear(title, metadata.year ?? metadata.releaseYear ?? metadata.release_date);
+    const releaseYear = itemType === "series" && metadata.seriesDelivery === "selection"
+      ? null : extractYear(title, metadata.year ?? metadata.releaseYear ?? metadata.release_date);
     const providerOverview = boundedProviderOverview(
       metadata.overview,
       metadata.description,
@@ -1280,7 +1282,8 @@ export async function searchTmdbMatch(
   // soon as the same strong gate used below is met.
   const languages = tmdbSearchLocalesForTitle(rawTitle, tmdbSearchLanguage());
   // Recover a year from the title when the row has none — most unmatched rows do.
-  const effYear = year ?? extractTitleYear(rawTitle);
+  const searchYear = tmdbSearchYear(rawTitle, year);
+  const effYear = searchYear ? String(searchYear) : null;
   const providerPosterPath = tmdbPosterPath(posterHint);
 
   type Pick = { id: string; score: number; posterConfirmed: boolean };
@@ -1320,7 +1323,7 @@ export async function searchTmdbMatch(
     for (const language of languages) {
       const candidate = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, candidateYear));
       bestAcrossLocales = betterPick(bestAcrossLocales, candidate);
-      if (candidate?.posterConfirmed || (candidate?.score ?? 0) >= 0.72) return candidate;
+      if (candidate?.posterConfirmed || (candidate?.score ?? 0) >= 0.9) return candidate;
     }
     return bestAcrossLocales;
   };
@@ -1328,7 +1331,7 @@ export async function searchTmdbMatch(
   // Pass 1: locale-aware search with the year when known.
   let best = await searchAcrossLocales(effYear);
   // Pass 2: drop the year if it filtered the right result out (provider year off by 1+).
-  if ((!best || (!best.posterConfirmed && best.score < 0.72)) && effYear) {
+  if ((!best || (!best.posterConfirmed && best.score < 0.9)) && effYear) {
     best = betterPick(best, await searchAcrossLocales(null));
   }
   // Demand a strong title match (search is fuzzier than a provider-supplied id) — UNLESS the
@@ -1381,10 +1384,8 @@ function titleConfidence(providerTitle: string, tmdbTitle: string, providerYear:
 // apostrophes before tokenization ("Charlies" and "Charlie's" are equivalent),
 // without changing identity_key or re-keying an existing catalogue.
 function normalizeMatchTitle(value: string, year: string | null = null) {
-  return normalizeTitle(
-    stripProviderSearchPrefix(String(value || "")).replace(/[’']/g, ""),
-    year,
-  );
+  return stripDiacritics(cleanTmdbSearchQuery(String(value || "").replace(/[’']/g, "")))
+    .toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function tokenOverlap(a: string, b: string) {
