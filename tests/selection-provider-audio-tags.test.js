@@ -46,12 +46,12 @@ test('provider badge is provisional and an observed language supersedes it', () 
   vm.runInNewContext(fs.readFileSync(path.join(root, 'public/js/utils/mediaUtils.js'), 'utf8'), context);
   const media = context.window.MediaUtils;
   const film = { providerAudioLanguages: ['hi'], providerAudioLanguageStatus: 'provider_declared', audioLanguageValidationStatus: 'not_analyzed' };
-  assert.equal(media.versionLanguageBadge(film), 'Hindi · provider');
+  assert.equal(media.versionLanguageBadge(film), 'Hindi');
   assert.equal(media.providerAudioStatusLabel(), 'Language announced by the provider');
   assert.equal(media.analyzeLanguageCompatibility(film, { preferredAudioLanguage: 'hi' }).audio.state, 'unknown');
   const observed = { ...film, audioTracksScope: 'file', audioLanguageValidationStatus: 'probed', audioTracks: [{ index: 1, lang: 'en' }] };
   assert.equal(media.providerAudioLanguages(observed).length, 0);
   assert.doesNotMatch(media.versionLanguageBadge(observed), /Hindi|provider/);
   assert.doesNotMatch(media.versionDescriptor(film).headline, /confirmed|verified/i);
-  assert.match(media.versionDescriptor(film).meta, /Language announced by the provider/);
+  assert.doesNotMatch(media.versionDescriptor(film).meta, /Language announced by the provider/);
 });

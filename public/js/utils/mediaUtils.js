@@ -1063,7 +1063,7 @@ const MediaUtils = (() => {
         const locale = documentLanguage();
         const names = new Intl.DisplayNames([locale], { type: 'language' });
         const language = codes.map(code => names.of(code) || code.toUpperCase()).join(' / ');
-        return globalThis.NorvaI18n?.t('ui_web_provider_audio_badge', { defaultValue: '{{language}} · provider', language }) ?? `${language} · provider`;
+        return language;
     }
 
     function documentLanguage() {
@@ -1965,7 +1965,7 @@ const MediaUtils = (() => {
         const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== prefixAudioLabel
             ? marketLabel
             : '';
-        const metaParts = [providerAudioLanguages(item).length ? providerAudioStatusLabel() : '', subtitleLabel, inferredMarket, provider, container];
+        const metaParts = [subtitleLabel, inferredMarket, provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Demote constants, but never repeat the headline in the meta line (e.g. an "NF"
         // market whose provider is also literally named "Netflix").

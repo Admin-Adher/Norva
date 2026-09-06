@@ -3,7 +3,7 @@ const LANGUAGES = Object.freeze({ Telugu: 'te', Tamil: 'ta', Malayalam: 'ml', Hi
 const CODES = new Set(Object.values(LANGUAGES));
 
 export function providerAudioFacet(value) {
-  const match = /^provider-(te|ta|ml|hi|kn|en)$/.exec(String(value || '').trim().toLowerCase());
+  const match = /^(?:provider|catalog)-(te|ta|ml|hi|kn|en)$/.exec(String(value || '').trim().toLowerCase());
   return match ? match[1] : null;
 }
 
