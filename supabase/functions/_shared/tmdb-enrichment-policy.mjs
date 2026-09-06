@@ -4,6 +4,10 @@ import { tmdbSearchYear } from './tmdb-search-policy.mjs';
 // confirmation before replacing editorial metadata; exact artwork is stronger.
 export function acceptAutomaticTmdbSearchMatch(row, match) {
   if (!match?.valid || !match.tmdbId) return false;
+  // Keep an editorial rejection attached to the catalogue row: a later retry
+  // must not restore a known homonym just because its alias is an exact match.
+  const rejectedIds = row.metadata?.tmdbSearchReview?.rejectedTmdbIds;
+  if (Array.isArray(rejectedIds) && rejectedIds.some(id => String(id) === String(match.tmdbId))) return false;
   if (row.itemType === 'movie' && selectionSeriesUnit(row.originalTitle || row.title || '')) return false;
   if (match.reason === 'poster_path_confirmed') return true;
   if (!Number.isFinite(match.confidence) || match.confidence < 0.9) return false;

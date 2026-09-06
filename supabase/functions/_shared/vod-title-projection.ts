@@ -1077,9 +1077,12 @@ export async function validateTmdbCandidate(
     ? recordOrEmpty(details.translations).translations as JsonRecord[]
     : [];
   const i18n = buildI18nFromTmdbTranslations(details);
-  const altTitles = (Array.isArray(recordOrEmpty(details.alternative_titles).titles)
-    ? recordOrEmpty(details.alternative_titles).titles as JsonRecord[]
-    : []).map((t) => stringOr(recordOrEmpty(t).title, "")).filter(Boolean);
+  // TMDB uses `titles` for movies and `results` for TV alternative titles.
+  const alternatives = recordOrEmpty(details.alternative_titles);
+  const altTitles = [
+    ...(Array.isArray(alternatives.titles) ? alternatives.titles as JsonRecord[] : []),
+    ...(Array.isArray(alternatives.results) ? alternatives.results as JsonRecord[] : []),
+  ].map((t) => stringOr(recordOrEmpty(t).title, "")).filter(Boolean);
   const translationTitles = translations
     .map((t) => { const d = recordOrEmpty(recordOrEmpty(t).data); return stringOr(d.title ?? d.name, ""); })
     .filter(Boolean);
@@ -1287,6 +1290,7 @@ export async function searchTmdbMatch(
   const providerPosterPath = tmdbPosterPath(posterHint);
 
   type Pick = { id: string; score: number; posterConfirmed: boolean };
+  const seriesCandidates = new Map<string, Pick>();
   const pickBest = (results: JsonRecord[]): Pick | null => {
     let best: Pick | null = null;
     for (const result of results.slice(0, 20)) {
@@ -1302,6 +1306,10 @@ export async function searchTmdbMatch(
       );
       const posterConfirmed = Boolean(providerPosterPath) && tmdbPosterPath(rec.poster_path) === providerPosterPath;
       const score = posterConfirmed ? Math.max(titleScore, 1) : titleScore;
+      if (itemType === "series") {
+        const previous = seriesCandidates.get(id);
+        if (!previous || score > previous.score) seriesCandidates.set(id, { id, score, posterConfirmed });
+      }
       // A poster-confirmed candidate always outranks a merely title-scored one.
       if (!best || (posterConfirmed && !best.posterConfirmed) ||
           (posterConfirmed === best.posterConfirmed && score > best.score)) {
@@ -1336,17 +1344,37 @@ export async function searchTmdbMatch(
   }
   // Demand a strong title match (search is fuzzier than a provider-supplied id) — UNLESS the
   // poster confirms identity, which is stronger than any title heuristic.
-  if (!best || (!best.posterConfirmed && best.score < 0.72)) return null;
-
   // validateTmdbCandidate re-checks across ALL languages (translations + alt titles), so it
   // confirms the pick regardless of which title field the search matched on. A poster-confirmed
   // pick passes its title gate too (the artwork already proves identity).
-  const validation = await validateTmdbCandidate(
-    apiKey,
-    { itemType, tmdbId: best.id, title: rawTitle, year: effYear },
-    best.posterConfirmed,
-  );
-  return validation.valid ? { ...validation, tmdbId: best.id } : null;
+  let primary: (TmdbValidation & { tmdbId: string }) | null = null;
+  const inspected = new Set<string>();
+  if (best && (best.posterConfirmed || best.score >= 0.72)) {
+    inspected.add(best.id);
+    const validation = await validateTmdbCandidate(
+      apiKey,
+      { itemType, tmdbId: best.id, title: rawTitle, year: effYear },
+      best.posterConfirmed,
+    );
+    if (validation.valid) primary = { ...validation, tmdbId: best.id };
+    if (primary && (best.posterConfirmed || primary.confidence >= 0.9)) return primary;
+  }
+
+  // TV search also indexes aliases that are absent from its compact results.
+  // A display name such as "TamilRockerz" can therefore score poorly against
+  // the exact indexed alias "Tamil Rockerz". Inspect at most three candidates
+  // across all locales, and require the existing strong automatic-match gate
+  // on their full titles. A weak or unrelated search hit never gains trust.
+  if (itemType === "series") {
+    for (const candidate of [...seriesCandidates.values()].sort((a, b) => b.score - a.score).slice(0, 3)) {
+      if (inspected.has(candidate.id)) continue;
+      const validation = await validateTmdbCandidate(apiKey, {
+        itemType, tmdbId: candidate.id, title: rawTitle, year: effYear,
+      });
+      if (validation.valid && validation.confidence >= 0.9) return { ...validation, tmdbId: candidate.id };
+    }
+  }
+  return primary;
 }
 
 async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tmdbId: string) {

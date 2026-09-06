@@ -41,7 +41,7 @@ const PREFIX_LOCALES = Object.freeze({
   SO: "so-SO",
 });
 
-export const TMDB_SEARCH_POLICY_VERSION = "catalog-title-tags-v3";
+export const TMDB_SEARCH_POLICY_VERSION = "catalog-series-aliases-v4";
 
 export function providerTitlePrefix(value) {
   const raw = String(value || "");
