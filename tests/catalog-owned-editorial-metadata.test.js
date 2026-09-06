@@ -26,7 +26,10 @@ function fixture({ foreign = false, stale = false, ambiguous = false } = {}) {
       assert.equal(user, 'owner'); assert.equal(ids[0], titleId); assert.equal(epoch, '42');
       if (stale) throw new Error('visibility epoch changed'); return [title];
     },
-    async applyCatalogOverlay(rows, type, language) { assert.equal(type, 'movie'); assert.equal(language, 'fr'); },
+    async applyCatalogOverlay(rows, type, language) {
+      assert.equal(type, 'movie'); assert.equal(language, 'fr');
+      for (const row of rows) { delete row.display_generation_id; delete row.visible_source_ids; }
+    },
     catalogTextStatusEligible: status => status === 'provider_verified',
     flatMediaGenerationId: item => item.generation_id,
     stringOrNull: value => value || null, recordOrEmpty: value => value || {},

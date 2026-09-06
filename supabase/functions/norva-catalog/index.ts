@@ -1071,6 +1071,12 @@ async function attachOwnedMediaEditorialMetadata(
       const titles = await hydrateVisibleCatalogTitlesByIds(
         userId, titleIds, requiredCatalogTitleVisibilityEpoch(userId), false,
       );
+      // The public overlay deliberately removes internal generation proofs.
+      // Capture them out-of-band before serialization, as the P binder does.
+      const owners = new Map(titles.map((title) => [String(title.id), {
+        sources: Array.isArray(title.visible_source_ids) ? [...title.visible_source_ids] : [],
+        generation: stringOrNull(title.display_generation_id ?? title.displayGenerationId),
+      }]));
       await applyCatalogOverlay(titles, itemType, lang);
       const byTitle = new Map(titles.map((title) => [String(title.id), title]));
       for (const row of page) {
@@ -1080,9 +1086,9 @@ async function attachOwnedMediaEditorialMetadata(
         if (exact.length !== 1) continue;
         const variant = exact[0];
         const title = byTitle.get(String(variant.title_id));
+        const owner = owners.get(String(variant.title_id));
         if (!title || !catalogTextStatusEligible(title.match_status) || !title.provider_tmdb_id ||
-            !Array.isArray(title.visible_source_ids) || !title.visible_source_ids.includes(row.source_id) ||
-            stringOrNull(title.display_generation_id ?? title.displayGenerationId) !== flatMediaGenerationId(row)) continue;
+            !owner?.sources.includes(row.source_id) || owner.generation !== flatMediaGenerationId(row)) continue;
         const editorial = titleRailItem(title, [{ ...variant, metadata: recordOrEmpty(row.metadata) }], lang);
         // Copy editorial fields only. Preserve the media/source/variant IDs,
         // provider routing, declared audio and exact per-file track evidence.
