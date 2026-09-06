@@ -1,5 +1,6 @@
 import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, discoveryMovieFields, discoverySourceId } from './discovery-catalog.mjs';
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
+import { matchesSelectionLiveQuarantine, SELECTION_LIVE_QUARANTINE } from './selection-live-quarantine.mjs';
 
 // Public playlist references, not credentials or a promise of worldwide playback.
 // Keep provider URLs intact: their advertising and territorial controls still apply.
@@ -76,6 +77,15 @@ async function hash(value) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+async function quarantinedLiveMedia(feedId, key, targetUrl) {
+  if (!SELECTION_LIVE_QUARANTINE.some(entry => entry.feedId === feedId)) return false;
+  const externalId = `norva-discovery:live:${await hash(`live:${key}`)}`;
+  if (!SELECTION_LIVE_QUARANTINE.some(entry => entry.externalId === externalId)) return false;
+  const url = safeMediaUrl(targetUrl);
+  return !!url && matchesSelectionLiveQuarantine({ feedId, externalId,
+    mediaKeySha256: await hash(key), targetUrlSha256: await hash(url.href) });
+}
+
 const trusted = Symbol('server-created discovery item');
 function bundledFilms() {
   return DISCOVERY_FILMS.map(film => ({ title: film.title, url: film.url, tvgId: `norva-discovery:${film.id}`, logo: film.poster, group: 'Blender Open Movies', [trusted]: discoveryMovieFields(DISCOVERY_PLAYLIST_URL, film.url) }));
@@ -115,6 +125,7 @@ export async function fetchDiscoverySelection({ fetchPlaylist = fetchM3uPlaylist
         const key = discoveryMediaKey(feed, entry.url);
         if (!key) { rejected++; continue; }
         const identity = `${feed.kind}:${key}`;
+        if (feed.kind === 'live' && await quarantinedLiveMedia(feed.id, key, entry.url)) { rejected++; continue; }
         if (seen.has(identity)) { duplicates++; continue; }
         if (items.length >= 60_000) { truncated = true; break; }
         seen.add(identity);
@@ -144,6 +155,11 @@ const playbackFeeds = new Map();
 // Only an owned Norva Selection row may refresh an expiring upstream reference.
 // Never accept a feed URL or content identity from a client's playback hint.
 export async function resolveDiscoveryTarget({ sourceId, userId, metadata, targetUrl, fetchPlaylist = fetchM3uPlaylistStream, now = Date.now() }) {
+  if (sourceId === await discoverySourceId(userId)
+      && typeof metadata?.discoveryMediaKey === 'string'
+      && await quarantinedLiveMedia(metadata.discoveryFeed, metadata.discoveryMediaKey, targetUrl)) {
+    throw new Error('Selection programme is temporarily unavailable');
+  }
   const feed = DISCOVERY_SOURCES.find(source => source.id === metadata?.discoveryFeed && source.refreshOnPlay);
   if (!feed || sourceId !== await discoverySourceId(userId)) return targetUrl;
   const key = discoveryMediaKey(feed, targetUrl);
