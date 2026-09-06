@@ -22,6 +22,8 @@ jobs:
     name: Resource-only proof on fresh offline Android 35
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      ANDROID_AVD_HOME: ${{ runner.temp }}/norva-notification-avd
     steps:
       - name: Validate and download the exact reviewed APK pair
         env:
@@ -76,8 +78,13 @@ jobs:
           "$sdkmanager_bin" --version >proof/sdkmanager-version.txt
           "$sdkmanager_bin" 'platform-tools' 'emulator' 'build-tools;35.0.0' 'system-images;android-35;default;x86_64'
           test -x "$avdmanager_bin"
+          mkdir -p "$ANDROID_AVD_HOME"
           printf 'no\n' | "$avdmanager_bin" create avd --name Norva_Notification_Proof \
-            --package 'system-images;android-35;default;x86_64'
+            --package 'system-images;android-35;default;x86_64' \
+            --path "$ANDROID_AVD_HOME/Norva_Notification_Proof.avd"
+          test -f "$ANDROID_AVD_HOME/Norva_Notification_Proof.ini"
+          "$ANDROID_HOME/emulator/emulator" -list-avds >proof/avd-list.txt
+          grep -Fxq 'Norva_Notification_Proof' proof/avd-list.txt
           test -e /dev/kvm
           # Only this disposable runner's user receives access; no world-writable KVM.
           sudo chown "$(id -u):$(id -g)" /dev/kvm
@@ -97,6 +104,11 @@ jobs:
             -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect >proof/emulator.log 2>&1 &
           emulator_pid=$!
           trap '"$adb_bin" -s emulator-5580 emu kill >/dev/null 2>&1 || true; wait "$emulator_pid" || true' EXIT
+          sleep 2
+          if ! kill -0 "$emulator_pid" 2>/dev/null; then
+            tail -n 40 proof/emulator.log
+            exit 1
+          fi
           timeout 150 "$adb_bin" -s "$ANDROID_SERIAL" wait-for-device
           booted=0
           for attempt in $(seq 1 90); do
