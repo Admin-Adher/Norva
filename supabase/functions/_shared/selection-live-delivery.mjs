@@ -98,7 +98,7 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
       if (hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hint.targetUrl !== targetUrl
         || hasExplicitCanarySelection(hint) || sourceId !== await discoverySourceId(userId)
         || itemId !== await curatedChannelExternalId(curated)) return null;
-      const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: metadata.tvgId, targetUrl,
+      const delivery = Object.freeze({ transport: curated.transport || 'public-hls-direct', channelId: metadata.tvgId, targetUrl,
         providerAccountScopeSuffix: `public-media:${itemId.slice('norva-discovery:live:'.length)}` });
       verifiedDeliveries.add(delivery);
       canaryDeliveries.add(delivery);
@@ -156,7 +156,7 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
 export const resolveSelectionLiveDelivery = createSelectionLiveDeliveryResolver();
 
 export function shouldUseSelectionLiveDirect({ delivery, targetUrl, itemType, clientMode, body, clientMetadata, playbackHint }) {
-  if (!verifiedDeliveries.has(delivery) || delivery.targetUrl !== targetUrl ||
+  if (!verifiedDeliveries.has(delivery) || delivery.transport !== 'public-hls-direct' || delivery.targetUrl !== targetUrl ||
       itemType !== 'live' || clientMode !== 'transcode' ||
       body.gatewayAutoMode !== true || body.publicHlsDirectSessionGuard !== true ||
       !['web', 'mobile-web', 'pwa'].includes(clientMetadata.clientSurface) ||
@@ -175,6 +175,23 @@ export function shouldUseSelectionLiveDirect({ delivery, targetUrl, itemType, cl
         enabled(hint.forceVideoTranscode ?? hint.force_video_transcode) ||
         enabled(hint.enginePipe ?? hint.engine_pipe) ||
         enabled(hint.requiresRelay ?? hint.requires_relay)) return false;
+  }
+  return true;
+}
+
+// Only the server-owned channel registry can select this lane. HTTP or missing
+// browser CORS requires Norva's revocable HLS relay, without changing the media.
+export function shouldUseSelectionLiveRelay({ delivery, targetUrl, itemType, clientMode, body, playbackHint }) {
+  if (!verifiedDeliveries.has(delivery) || delivery.transport !== 'public-hls-relay'
+    || delivery.targetUrl !== targetUrl || itemType !== 'live') return false;
+  if (!['direct', 'relay', 'transcode'].includes(clientMode)
+    || (clientMode === 'transcode' && body.gatewayAutoMode !== true)) return false;
+  for (const hint of [body, record(body.playbackHint), record(body.playback_hint), record(playbackHint)]) {
+    const mode = token(hint.gatewayMode ?? hint.gateway_mode);
+    if (hasExplicitCanarySelection(hint) || (mode && mode !== 'remux')
+      || enabled(hint.liveForceTranscode ?? hint.live_force_transcode)
+      || enabled(hint.forceVideoTranscode ?? hint.force_video_transcode)
+      || enabled(hint.enginePipe ?? hint.engine_pipe)) return false;
   }
   return true;
 }

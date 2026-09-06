@@ -1,7 +1,7 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
-import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
+import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect, shouldUseSelectionLiveRelay } from "../_shared/selection-live-delivery.mjs";
 import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -2162,6 +2162,10 @@ async function createPlaybackSessionCore(
     delivery: "selectionVodDelivery" in resolved ? resolved.selectionVodDelivery : null,
     targetUrl, itemType, clientMode, body,
   });
+  const serverSelectionLiveRelay = shouldUseSelectionLiveRelay({
+    delivery: "selectionLiveDelivery" in resolved ? resolved.selectionLiveDelivery : null,
+    targetUrl, itemType, clientMode, body, playbackHint: requestedPlaybackHint,
+  });
   const authoritativeVodTier = itemType === "movie"
     ? authoritativeVodGatewayTier(resolved.playbackHint, resolvedContainerObservation)
     : null;
@@ -2187,7 +2191,7 @@ async function createPlaybackSessionCore(
     ? "direct"
     : serverDemotedAutomaticMp4
     ? "relay"
-    : serverSelectionVodRelay
+    : serverSelectionVodRelay || serverSelectionLiveRelay
     ? "relay"
     : serverPromotedRelay
     ? "transcode"

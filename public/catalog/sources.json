@@ -6,7 +6,7 @@
       "name": "Rakuten TV",
       "kind": "live",
       "website": "https://www.rakuten.tv/",
-      "channels": 4
+      "channels": 5
     },
     {
       "id": "stingray-reviewed",
@@ -34,7 +34,7 @@
       "name": "Red Bull TV",
       "kind": "live",
       "website": "https://www.redbull.com/int-en/live",
-      "channels": 1
+      "channels": 2
     },
     {
       "id": "fls-reviewed",
@@ -42,6 +42,62 @@
       "kind": "live",
       "website": "https://www.freelivesports.tv/",
       "channels": 3
+    },
+    {
+      "id": "uol-reviewed",
+      "name": "Canal UOL",
+      "kind": "live",
+      "website": "https://github.com/iptv-com/iptv/blob/main/lists/brazil.m3u",
+      "channels": 1
+    },
+    {
+      "id": "vicosa-reviewed",
+      "name": "TV Viçosa",
+      "kind": "live",
+      "website": "https://github.com/iptv-com/iptv/blob/main/lists/brazil.m3u",
+      "channels": 1
+    },
+    {
+      "id": "atv-reviewed",
+      "name": "ATV",
+      "kind": "live",
+      "website": "https://iptv-org.github.io/iptv/countries/be.m3u",
+      "channels": 1
+    },
+    {
+      "id": "al24-reviewed",
+      "name": "AL24 News",
+      "kind": "live",
+      "website": "https://iptv-org.github.io/iptv/countries/dz.m3u",
+      "channels": 1
+    },
+    {
+      "id": "elheddaf-reviewed",
+      "name": "El-Heddaf TV",
+      "kind": "live",
+      "website": "https://iptv-org.github.io/iptv/countries/dz.m3u",
+      "channels": 1
+    },
+    {
+      "id": "tf1-reviewed",
+      "name": "TF1",
+      "kind": "live",
+      "website": "https://iptv-org.github.io/iptv/countries/fr.m3u",
+      "channels": 1
+    },
+    {
+      "id": "kronehit-reviewed",
+      "name": "Kronehit",
+      "kind": "live",
+      "website": "https://github.com/iptv-com/iptv/blob/main/lists/world.m3u",
+      "channels": 1
+    },
+    {
+      "id": "dw-reviewed",
+      "name": "DW",
+      "kind": "live",
+      "website": "https://github.com/Free-TV/IPTV",
+      "channels": 1
     },
     {
       "id": "babuperumana-vod",

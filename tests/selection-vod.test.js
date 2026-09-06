@@ -18,7 +18,7 @@ test('Selection imports both approved movie feeds, pins nested hosts, retains SD
   assert.equal(seen.length, 2);
   assert.ok(seen.every(url => !url.includes('attacker')));
   const rows = data.items.map(item => discoveryCatalogFields(DISCOVERY_PLAYLIST_URL, item));
-  assert.equal(rows.filter(row => row.item_type === 'live').length, 14);
+  assert.equal(rows.filter(row => row.item_type === 'live').length, 24);
   assert.equal(rows.filter(row => row.item_type === 'movie').length, 2);
   assert.ok(rows.filter(row => row.item_type === 'movie').every(row => row.playback_hint.container === 'm3u8'));
   assert.equal(data.sources.find(source => source.id === 'babuperumana-vod').rejected, 2);
@@ -33,7 +33,7 @@ test('one failed movie feed cannot block the other movies or reviewed Live chann
     if (url.includes('Babuperumana')) throw Error('private diagnostic');
     return playlist([movie('Film', dm('token'))]);
   } });
-  assert.equal(data.items.length, 15);
+  assert.equal(data.items.length, 25);
   assert.equal(discoveryCatalogFields(DISCOVERY_PLAYLIST_URL, data.items.at(-1)).item_type, 'movie');
   assert.equal(data.sources.find(source => source.id === 'babuperumana-vod').status, 'unavailable');
   assert.ok(!JSON.stringify(data.sources).includes('private diagnostic'));
