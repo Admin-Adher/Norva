@@ -1046,9 +1046,33 @@ const MediaUtils = (() => {
         return (scores.length ? Math.max(...scores) : 0) + scoreGenrePreferences(item, normalizedPrefs);
     }
 
+    function providerAudioLanguages(item = {}) {
+        if (hasDisplayableAudioLanguage(item)) return [];
+        if ((item.providerAudioLanguageStatus || item.provider_audio_language_status) !== 'provider_declared') return [];
+        const raw = item.providerAudioLanguages || item.provider_audio_languages;
+        return Array.isArray(raw) ? [...new Set(raw.filter(code => ['te', 'ta', 'ml', 'hi', 'kn', 'en'].includes(code)))] : [];
+    }
+
+    function providerAudioStatusLabel() {
+        return globalThis.NorvaI18n?.t('ui_web_provider_audio_status', { defaultValue: 'Language announced by the provider' }) ?? 'Language announced by the provider';
+    }
+
+    function providerAudioBadge(item) {
+        const codes = providerAudioLanguages(item);
+        if (!codes.length) return '';
+        const locale = documentLanguage();
+        const names = new Intl.DisplayNames([locale], { type: 'language' });
+        const language = codes.map(code => names.of(code) || code.toUpperCase()).join(' / ');
+        return globalThis.NorvaI18n?.t('ui_web_provider_audio_badge', { defaultValue: '{{language}} · provider', language }) ?? `${language} · provider`;
+    }
+
+    function documentLanguage() {
+        return typeof document !== 'undefined' ? document.documentElement?.lang || 'en' : 'en';
+    }
+
     function versionLanguageBadge(item, prefs = {}) {
         const validation = audioLanguageValidationStatus(item);
-        if (!hasDisplayableAudioLanguage(validation)) return (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending');
+        if (!hasDisplayableAudioLanguage(validation)) return providerAudioBadge(item) || (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending');
         const analysis = analyzeLanguageCompatibility(item, prefs);
         const candidates = [];
         let audioCandidate = '';
@@ -1936,12 +1960,12 @@ const MediaUtils = (() => {
         // exact observed soundtrack. Prefix/category/platform text is metadata,
         // never audio evidence; "Netflix" and "Arabic subtitles" are not audio.
         const headline = !hasDisplayableAudioLanguage(audioValidation)
-            ? (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending')
+            ? providerAudioBadge(item) || (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending')
             : observedAudio || (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
         const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== prefixAudioLabel
             ? marketLabel
             : '';
-        const metaParts = [subtitleLabel, inferredMarket, provider, container];
+        const metaParts = [providerAudioLanguages(item).length ? providerAudioStatusLabel() : '', subtitleLabel, inferredMarket, provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Demote constants, but never repeat the headline in the meta line (e.g. an "NF"
         // market whose provider is also literally named "Netflix").
@@ -1994,6 +2018,7 @@ const MediaUtils = (() => {
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         audioLanguageValidationStatus,
+        providerAudioLanguages, providerAudioStatusLabel, providerAudioBadge,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         versionDescriptor,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,

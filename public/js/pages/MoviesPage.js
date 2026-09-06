@@ -507,8 +507,21 @@ class MoviesPage {
             const name = this.facetLanguageName(current, previous);
             options.push({ value: current, label: `${name} · 0 ${mediaNoun}`, count: 0 });
         }
+        const optionHtml = f => {
+            const declared = /^provider-(te|ta|ml|hi|kn|en)$/.exec(f.value);
+            let label = f.label;
+            if (declared) {
+                const locale = document.documentElement.lang || 'en';
+                const name = new Intl.DisplayNames([locale], { type: 'language' }).of(declared[1]);
+                label = `${name} · ${new Intl.NumberFormat(locale).format(f.count || 0)}`;
+            }
+            return `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(label)}</option>`;
+        };
+        const exactOptions = options.filter(f => !f.value.startsWith('provider-'));
+        const providerOptions = options.filter(f => f.value.startsWith('provider-'));
         const desired = [`<option value="">${anyLabel}</option>`]
-            .concat(options.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
+            .concat(exactOptions.map(optionHtml))
+            .concat(providerOptions.length ? [`<optgroup label="${MediaUtils.escapeHtml(MediaUtils.providerAudioStatusLabel())}">${providerOptions.map(optionHtml).join('')}</optgroup>`] : [])
             .join('');
         if (select.innerHTML === desired && savedValue && !select.value
             && options.some(f => f.value === savedValue)) {
@@ -1927,6 +1940,8 @@ class MoviesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = this.displayLanguageStatus(
             MediaUtils.versionLanguageBadge(movie, this.getPreferences()));
+        const languageBadgeTitle = MediaUtils.providerAudioLanguages(movie).length
+            ? `${languageBadge} — ${MediaUtils.providerAudioStatusLabel()}` : languageBadge;
         // "New" corner badge for titles added in the last two weeks (unwatched).
         const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -1942,7 +1957,7 @@ class MoviesPage {
                 </div>
                 ${groupBroken ? '<span class="playback-badge" title="Playback failed" data-i18n-title="ui_web_0535388758c1">⚠</span>' : ''}
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version" data-i18n-title="ui_web_70428a34013f" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(versionCount)}) || "{}")}">${versionCount} versions</button>` : ''}
-                ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
+                ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}" title="${MediaUtils.escapeHtml(languageBadgeTitle)}" aria-label="${MediaUtils.escapeHtml(languageBadgeTitle)}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched" data-i18n-title="ui_web_1ca8c1c0de6f">✓</span>' : ''}
                 ${watch.status === 'inprogress' ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.round(watch.ratio * 100)}%"></div></div>` : ''}
                 <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}" title="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
@@ -3033,6 +3048,7 @@ class MoviesPage {
             ...this.getMovieGenres(displayMovie).slice(0, 3),
             version.quality,
             this.displayLanguageStatus(MediaUtils.versionLanguageBadge(movie, this.getPreferences())),
+            MediaUtils.providerAudioLanguages(movie).length ? MediaUtils.providerAudioStatusLabel() : '',
             ordered.length > 1 ? `${ordered.length} versions` : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);

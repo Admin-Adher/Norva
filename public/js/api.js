@@ -1389,6 +1389,8 @@ const CloudAdapter = (() => {
             codecProfile,
             audio_tracks: audioTracks,
             audioTracks,
+            providerAudioLanguages: raw.providerAudioLanguages || raw.provider_audio_languages || [],
+            providerAudioLanguageStatus: raw.providerAudioLanguageStatus || raw.provider_audio_language_status || null,
             audio_tracks_scope: audioTracks !== null ? 'file' : null,
             audioTracksScope: audioTracks !== null ? 'file' : null,
             audio_probed_at: raw.audio_probed_at || raw.audioProbedAt || null,

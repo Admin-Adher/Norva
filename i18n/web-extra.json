@@ -1,4 +1,32 @@
 {
+  "ui_web_provider_audio_status": {
+    "source": "Language announced by the provider",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "Language announced by the provider",
+    "fr": "Langue annoncée par le fournisseur",
+    "pt-BR": "Idioma informado pelo provedor",
+    "es": "Idioma indicado por el proveedor",
+    "hi": "प्रदाता द्वारा बताई गई भाषा",
+    "tr": "Sağlayıcının belirttiği dil",
+    "bn": "প্রদানকারীর উল্লেখ করা ভাষা",
+    "ar": "اللغة المعلنة من المزود",
+    "id": "Bahasa yang dinyatakan penyedia",
+    "fil": "Wikang ipinahayag ng provider"
+  },
+  "ui_web_provider_audio_badge": {
+    "source": "{{language}} · provider",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "{{language}} · provider",
+    "fr": "{{language}} · fournisseur",
+    "pt-BR": "{{language}} · provedor",
+    "es": "{{language}} · proveedor",
+    "hi": "{{language}} · प्रदाता",
+    "tr": "{{language}} · sağlayıcı",
+    "bn": "{{language}} · প্রদানকারী",
+    "ar": "{{language}} · المزود",
+    "id": "{{language}} · penyedia",
+    "fil": "{{language}} · provider"
+  },
   "ui_web_e508df1e1204": {
     "source": "Nothing new right now",
     "refs": [

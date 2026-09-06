@@ -3,6 +3,7 @@ import {
   sanitizeMediaMetadata,
   sanitizePlaybackHint,
 } from "./cloud-public-view.mjs";
+import { publicProviderAudioLanguages } from "./selection-provider-languages.mjs";
 
 // Catalog reads combine rows from RPCs, materialized views, and provider-global
 // overlays. Keep their public representation here so a newly-added database or
@@ -408,6 +409,13 @@ export function sanitizeCatalogVariant(value) {
   const source = isRecord(value) ? value : {};
   const result = pick(source, MEDIA_SCALAR_FIELDS);
   applyPublicImages(result, source);
+  const providerAudio = publicProviderAudioLanguages(source);
+  if (providerAudio.length) {
+    result.provider_audio_languages = providerAudio;
+    result.providerAudioLanguages = providerAudio;
+    result.provider_audio_language_status = 'provider_declared';
+    result.providerAudioLanguageStatus = 'provider_declared';
+  }
 
   const hint = sanitizePlaybackHint(source.playback_hint ?? source.playbackHint);
   if (Object.keys(hint).length) {

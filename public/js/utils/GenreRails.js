@@ -86,11 +86,14 @@
     function cardHtml(item, railIndex, itemIndex) {
         const variantCount = Number(item.variantCount || item.variant_count || (item.data && item.data.variantCount) || 0);
         const t = titleOf(item);
+        const providerBadge = window.MediaUtils?.providerAudioBadge(item) || '';
+        const providerStatus = providerBadge ? window.MediaUtils.providerAudioStatusLabel() : '';
         return `
             <div class="dashboard-card" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     <img src="${esc(posterOf(item))}" alt="${esc(t)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(variantCount)}) || "{}")}">${variantCount} versions</div>` : ''}
+                    ${providerBadge ? `<span class="home-card-language-badge" title="${esc(providerStatus)}" aria-label="${esc(providerBadge + ' — ' + providerStatus)}">${esc(providerBadge)}</span>` : ''}
                     <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
                 </div>
                 <div class="card-info">

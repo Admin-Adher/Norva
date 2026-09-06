@@ -4,6 +4,7 @@
 // checkout and run ops/hetzner/scripts/04-deploy-edge-functions.sh.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { providerAudioFacet, selectionProviderAudioLanguages } from "../_shared/selection-provider-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
@@ -1766,7 +1767,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 
 function normalizeFacet(value: string | null): string | null {
   const v = (value || "").toLowerCase().trim();
-  return /^[a-z]{2,10}$/.test(v) ? v : null;
+  return /^[a-z]{2,10}$/.test(v) || providerAudioFacet(v) ? v : null;
 }
 // Filter-bar decade value -> inclusive release_year range. Mirrors the client's
 // Year dropdown: a decade start ("2020", "2010", …) or "old" (before 1990).
@@ -1833,6 +1834,7 @@ function publicFileTrackLanguages(value: unknown): string[] {
 // owned by this user (file_audio_languages / file_subtitle_languages). Legacy or
 // global title hints never drive strict filters.
 function audioFacetIso(facet: string | null): string | null {
+  if (providerAudioFacet(facet)) return facet;
   return canonicalFileLanguage(facet);
 }
 function titleVersionLanguages(title: JsonRecord): string[] {
@@ -2015,6 +2017,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
   const hasStrictLanguageFilter = Boolean(audioIso || subIso);
   const needsLanguagePage = Boolean(
+    providerAudioFacet(audioIso) ||
     (sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso)) ||
       (!sourceId && hasStrictLanguageFilter && !langSort),
   );
@@ -2266,6 +2269,16 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     audio: exactLanguageFacetItems(d.audio, itemType),
     subtitles: exactLanguageFacetItems(d.subtitles, itemType),
   };
+  const selectionId = itemType === 'movie' ? await discoverySourceId(userId) : null;
+  if (selectionId && (!sourceId || sourceId === selectionId)) {
+    const { data: declaredCounts, error: declaredError } = await db.rpc('cloud_selection_provider_audio_counts', {
+      p_user_id: userId, p_source_id: selectionId,
+    });
+    if (declaredError) throwDb(declaredError, 'Unable to load provider language declarations');
+    value.audio.push(...exactLanguageFacetItems(declaredCounts, itemType).map(facet => ({
+      ...facet, value: `provider-${facet.value}`, language: facet.value, provenance: 'provider_declared',
+    })));
+  }
 
   if (cacheKey) {
     FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
@@ -3519,6 +3532,9 @@ async function listVariantsByTitleIds(
     for (const [key, variants] of variantsByTitle) {
       variants.sort((left, right) => {
         const matches = (variant: JsonRecord) => {
+          const declaredIso = providerAudioFacet(requiredAudioIso);
+          if (declaredIso) return selectionProviderAudioLanguages(variant).includes(declaredIso) &&
+            !(variant.__file_audio_observed === true && canonicalFileLanguages(variant.__file_audio_languages).length);
           if (!requiredCanonicalIso) return false;
           const orderedTrackMatch = Array.isArray(variant.__file_audio_tracks) &&
             (variant.__file_audio_tracks as JsonRecord[]).some((track) =>
@@ -3885,6 +3901,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     // audio language instead of guessing from the title. Already on the cloud_titles row.
     audio_languages: observedAudioLanguages,
     audioLanguages: observedAudioLanguages,
+    providerAudioLanguages: selectionProviderAudioLanguages(defaultVariant),
+    providerAudioLanguageStatus: 'provider_declared',
     audio_verified_languages: verifiedAudioLanguages,
     audioVerifiedLanguages: verifiedAudioLanguages,
     audio_language_validation_status: titleAudioValidationStatus,
