@@ -13,7 +13,7 @@ async function setup(part = Object.keys(parts)[0]) {
   const policy = await import('../supabase/functions/_shared/selection-live-delivery.mjs');
   const userId = 'synthetic-plex-trial-owner';
   const key = `https://epg.provider.plex.tv/library/parts/${part}/`;
-  const input = { userId, sourceId: await discoverySourceId(userId), itemType: 'live', itemId: parts[part],
+  const input = { userId, sourceId: await discoverySourceId(userId), itemType: 'live', itemId: parts[part] || `norva-discovery:live:${sha(`live:${key}`)}`,
     ownedItem: { metadata: { tvgId: part, discoveryFeed: 'plex', discoverySource: 'https://github.com/insa-ship-it/app-m3u-generator', discoveryMediaKey: key },
       playback_hint: { sourceType: 'm3u', container: 'm3u8', targetUrl: key + '?X-Plex-Token=old-SYNTHETIC' } },
     targetUrl: key + '?X-Plex-Token=refreshed-SYNTHETIC' };
@@ -74,6 +74,28 @@ test('ownership, Selection identity, persisted part, feed and attribution must a
     x => { x.ownedItem.playback_hint.quality = '720p'; },
   ];
   for (const change of changes) { const value = structuredClone(input); change(value); assert.equal(await resolver(value), null); }
+});
+
+test('protocol review accepts another canonical programme only for the server-configured canary owner', async () => {
+  const { input, resolver, createSelectionLiveDeliveryResolver, shouldUseSelectionLiveDirect } = await setup('697140a85d851f5e69414688-ffffffffffffffffffffffff');
+  assert.equal(await resolver(input), null);
+  const owners = [sha(input.userId)];
+  const canary = createSelectionLiveDeliveryResolver({ plexProtocolCanaryOwners: owners });
+  owners.length = 0;
+  const delivery = await canary(input);
+  assert.ok(delivery, 'server configuration is snapshotted');
+  assert.equal(shouldUseSelectionLiveDirect(decision(input, delivery)), true);
+  const another = structuredClone(input);
+  another.userId = 'independent-owner';
+  const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
+  another.sourceId = await discoverySourceId(another.userId);
+  assert.equal(await canary(another), null, 'protocol canary does not grant other owners');
+  const forged = structuredClone(input);
+  forged.ownedItem.metadata.discoveryFeed = 'personal';
+  assert.equal(await canary(forged), null, 'canary does not waive provenance');
+  const request = decision(input, delivery);
+  request.body.publicHlsDirectSessionGuard = false;
+  assert.equal(shouldUseSelectionLiveDirect(request), false);
 });
 
 test('reviewed Plex programmes work for independent owners without accepting another owner source', async () => {
