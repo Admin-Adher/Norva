@@ -22,3 +22,10 @@ generation and owning user. Selection parent language groups stay internal
 declarations; observed file audio takes precedence and no subtitle track is
 inferred. The four-argument counts RPC leaves the old movie RPC available during
 rolling deployment. Categories continue to use the existing TMDB genre buckets.
+
+The player also uses physical file IDs for Selection season/part navigation,
+active state and menus, because bundle files have no invented episode number.
+The same translated unit label is shared with the catalogue detail view.
+TMDB source recovery accepts an expired cooperative lease with an empty inflight
+page under the checkpoint row lock. Active leases and inflight pages still block
+requeue; the global cursor, lease sequence and owner snapshot are never reset.

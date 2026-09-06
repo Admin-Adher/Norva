@@ -13430,6 +13430,25 @@ class WatchPage {
 
     // === Series Episodes ===
 
+    isCurrentEpisode(ep, season) {
+        if (ep?.selectionUnit) return String(ep.id) === String(this.content?.id || this.content?.externalId || '');
+        return parseInt(season) === parseInt(this.currentSeason) &&
+            parseInt(ep?.episode_num) === parseInt(this.currentEpisode);
+    }
+
+    selectionAdjacentEpisode(direction) {
+        const files = Object.keys(this.seriesInfo?.episodes || {})
+            .sort((a, b) => Number(a) - Number(b))
+            .flatMap(seasonNum => this.seriesInfo.episodes[seasonNum].map(ep => ({ ...ep, seasonNum })));
+        const index = files.findIndex(ep => this.isCurrentEpisode(ep, ep.seasonNum));
+        return index < 0 ? null : files[index + direction] || null;
+    }
+
+    episodePlaybackSubtitle(ep, season) {
+        return MediaUtils.selectionUnitLabel?.(ep) ||
+            `S${season} E${ep.episode_num} - ${ep.title || `Episode ${ep.episode_num}`}`;
+    }
+
     renderEpisodes() {
         if (!this.seriesInfo?.episodes || !this.seasonsContainer) return;
 
@@ -13446,20 +13465,22 @@ class WatchPage {
                             <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
                         </svg>
                         <span class="watch-season-name" data-i18n="ui_web_883c5a88c0bf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(seasonNum)}) || "{}")}">Season ${seasonNum}</span>
-                        <span class="watch-season-count" data-i18n="ui_web_6c182c7f810a" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p2":(episodes.length)}) || "{}")}">${episodes.length} episodes</span>
+                        ${this.seriesInfo.seriesDelivery === 'selection'
+                            ? `<span class="watch-season-count">${globalThis.NorvaI18n?.t('ui_selection_videos', { defaultValue: '{{p0}} videos', p0: episodes.length }) ?? `${episodes.length} videos`}</span>`
+                            : `<span class="watch-season-count" data-i18n="ui_web_6c182c7f810a" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p2":(episodes.length)}) || "{}")}">${episodes.length} episodes</span>`}
                     </div>
                     <div class="watch-episode-list">
                         ${episodes.map(ep => {
-                const isActive = parseInt(seasonNum) === parseInt(this.currentSeason) &&
-                    parseInt(ep.episode_num) === parseInt(this.currentEpisode);
+                const isActive = this.isCurrentEpisode(ep, seasonNum);
+                const unitLabel = MediaUtils.selectionUnitLabel?.(ep);
                 return `
                                 <div class="watch-episode-item ${isActive ? 'active' : ''}" 
                                      data-episode-id="${ep.id}" 
                                      data-season="${seasonNum}"
-                                     data-episode="${ep.episode_num}"
+                                     data-episode="${ep.episode_num ?? ''}"
                                      data-container="${ep.container_extension || 'mp4'}">
-                                    <span class="watch-episode-num">E${ep.episode_num}</span>
-                                    <span class="watch-episode-title">${ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`)}</span>
+                                    ${unitLabel ? '' : `<span class="watch-episode-num">E${ep.episode_num}</span>`}
+                                    <span class="watch-episode-title">${unitLabel ? MediaUtils.escapeHtml(unitLabel) : (ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`))}</span>
                                     <span class="watch-episode-duration">${ep.duration || ''}</span>
                                 </div>
                             `;
@@ -13538,7 +13559,7 @@ class WatchPage {
                 type: 'series',
                 id: episodeId,
                 title: outgoingContent.title,
-                subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
+                subtitle: this.episodePlaybackSubtitle({ ...episode, title: episodeTitle, episode_num: episodeNum }, seasonNum),
                 poster: outgoingContent.poster,
                 description: outgoingContent.description,
                 year: outgoingContent.year,
@@ -13671,6 +13692,7 @@ class WatchPage {
     }
 
     getNextEpisode() {
+        if (this.seriesInfo?.seriesDelivery === 'selection') return this.selectionAdjacentEpisode(1);
         if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
 
         const seasons = Object.keys(this.seriesInfo.episodes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -13705,6 +13727,7 @@ class WatchPage {
     }
 
     getPreviousEpisode() {
+        if (this.seriesInfo?.seriesDelivery === 'selection') return this.selectionAdjacentEpisode(-1);
         if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
 
         const seasons = Object.keys(this.seriesInfo.episodes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -13758,7 +13781,7 @@ class WatchPage {
         const autoCountdown = options.autoCountdown !== false;
         this.nextEpisodePanel.classList.toggle('no-countdown', !autoCountdown);
         this.nextEpisodePanel.setAttribute('aria-hidden', 'false');
-        this.nextEpisodeTitle.textContent = `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(nextEp.episode_num)}) : `Episode ${nextEp.episode_num}`)}`;
+        this.nextEpisodeTitle.textContent = this.episodePlaybackSubtitle(nextEp, nextEp.seasonNum);
         // Richer panel (Netflix parity): a still, a one-line synopsis, and the
         // Cancel button reads "Watch Credits" so dismissing is an explicit choice.
         if (this.nextEpisodeStill) {
@@ -13912,7 +13935,7 @@ class WatchPage {
                 type: 'series',
                 id: ep.id,
                 title: outgoingContent.title,
-                subtitle: `S${ep.seasonNum} E${ep.episode_num} - ${ep.title || `Episode ${ep.episode_num}`}`,
+                subtitle: this.episodePlaybackSubtitle(ep, ep.seasonNum),
                 poster: outgoingContent.poster,
                 description: outgoingContent.description,
                 year: outgoingContent.year,
@@ -13994,11 +14017,11 @@ class WatchPage {
             if (!list.length) continue;
             if (seasons.length > 1) html += `<div class="watch-ep-season" data-i18n="ui_web_9e42662ef1b7" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(esc(season))}) || "{}")}">Season ${esc(season)}</div>`;
             for (const ep of list) {
-                const isCurrent = String(season) === String(this.currentSeason)
-                    && parseInt(ep.episode_num) === parseInt(this.currentEpisode);
-                html += `<button class="watch-ep-option${isCurrent ? ' active' : ''}" data-season="${esc(season)}" data-ep="${esc(ep.episode_num)}">
-                    <span class="watch-ep-num">${esc(ep.episode_num)}</span>
-                    <span class="watch-ep-title">${esc(ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`))}</span>
+                const isCurrent = this.isCurrentEpisode(ep, season);
+                const unitLabel = MediaUtils.selectionUnitLabel?.(ep);
+                html += `<button class="watch-ep-option${isCurrent ? ' active' : ''}" data-season="${esc(season)}" data-ep="${esc(ep.episode_num)}" data-episode-id="${esc(ep.id)}">
+                    ${unitLabel ? '' : `<span class="watch-ep-num">${esc(ep.episode_num)}</span>`}
+                    <span class="watch-ep-title">${esc(unitLabel || ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`))}</span>
                 </button>`;
             }
         }
@@ -14007,7 +14030,8 @@ class WatchPage {
             btn.addEventListener('click', () => {
                 const season = btn.dataset.season;
                 const epNum = parseInt(btn.dataset.ep);
-                const ep = (this.seriesInfo.episodes[season] || []).find(e => parseInt(e.episode_num) === epNum);
+                const ep = (this.seriesInfo.episodes[season] || []).find(e => btn.dataset.episodeId
+                    ? String(e.id) === btn.dataset.episodeId : parseInt(e.episode_num) === epNum);
                 this.closeEpisodesMenu();
                 if (ep) this.playEpisode({ ...ep, seasonNum: season });
             });

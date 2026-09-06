@@ -484,7 +484,7 @@ class SeriesPage {
 
     applyFacetOptions(select, anyLabel, facets, savedValue = '', mediaNoun = 'series', resetForScope = false) {
         if (!select || !Array.isArray(facets)) return;
-        const current = select.value || savedValue || '';
+        let current = select.value || savedValue || '';
         if (!resetForScope && !facets.length && !current) return;
         const existing = Array.from(select.options || []);
         if (!resetForScope && !facets.length && existing.some(option => option.value === current)) {
@@ -499,12 +499,27 @@ class SeriesPage {
                 .filter(option => option.value)
                 .map(option => ({ value: option.value, label: option.text?.trim() || option.value.toUpperCase() }));
         if (current && !options.some(f => f.value === current)) {
+            const language = current.replace(/^(?:provider|catalog)-/, '');
+            const equivalent = options.find(f => f.value.replace(/^(?:provider|catalog)-/, '') === language);
+            if (equivalent) current = equivalent.value;
+        }
+        if (current && !options.some(f => f.value === current)) {
             const previous = existing.find(option => option.value === current)?.text?.trim();
             const name = this.facetLanguageName(current, previous);
             options.push({ value: current, label: `${name} · 0 ${mediaNoun}`, count: 0 });
         }
+        const optionHtml = f => {
+            const declared = /^(?:provider|catalog)-(te|ta|ml|hi|kn|en)$/.exec(f.value);
+            let label = f.label;
+            if (declared) {
+                const locale = document.documentElement.lang || 'en';
+                const name = new Intl.DisplayNames([locale], { type: 'language' }).of(declared[1]);
+                label = `${name} · ${new Intl.NumberFormat(locale).format(f.count || 0)}`;
+            }
+            return `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(label)}</option>`;
+        };
         const desired = [`<option value="">${anyLabel}</option>`]
-            .concat(options.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
+            .concat(options.map(optionHtml))
             .join('');
         if (select.innerHTML === desired && savedValue && !select.value
             && options.some(f => f.value === savedValue)) {
@@ -2836,15 +2851,8 @@ class SeriesPage {
     }
 
     selectionUnitLabel(ep) {
-        const unit = ep?.selectionUnit;
-        if (!unit || !Array.isArray(unit.seasons) || !unit.seasons.length) return '';
-        const t = (key, fallback, p0) => globalThis.NorvaI18n?.t(key, { defaultValue: fallback, p0 }) ?? fallback.replace('{{p0}}', p0);
-        const labels = [unit.seasons.length > 1
-            ? t('ui_selection_seasons', 'Seasons {{p0}}', unit.seasons.join('–'))
-            : t('ui_web_9e42662ef1b7', 'Season {{p0}}', unit.seasons[0])];
-        if (unit.episode) labels.push(t('ui_web_82ab493e3310', 'Episode {{p0}}', unit.episode));
-        if (unit.part) labels.push(t('ui_selection_part', 'Part {{p0}}', unit.part));
-        return labels.join(' · ');
+        if (!ep?.selectionUnit) return '';
+        return MediaUtils.selectionUnitLabel?.(ep) || '';
     }
 
     selectionUnitAction(row, resume = false) {

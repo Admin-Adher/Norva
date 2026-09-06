@@ -70,3 +70,12 @@ test('source-sync health proves the exact TMDB policy deployed by every replica'
   assert.match(deploy, /EXPECTED_TMDB_SEARCH_POLICY=catalog-title-tags-v3/);
   assert.match(deploy, /tmdbSearchPolicy/);
 });
+test('source recovery recognizes cooperative yield without resetting the durable checkpoint', () => {
+  const sql = require('node:fs').readFileSync(require('node:path').join(__dirname,
+    '../supabase/migrations/20260906193634_catalog_search_requeue_yielded_worker.sql'), 'utf8');
+  assert.match(sql, /v_checkpoint\.state not in \('pending','processing'\)/);
+  assert.match(sql, /v_checkpoint\.lease_until, '-infinity'::timestamptz\) > statement_timestamp\(\)/);
+  assert.match(sql, /jsonb_array_length\(coalesce\(v_checkpoint\.inflight_items, '\[\]'::jsonb\)\) > 0/);
+  assert.match(sql, /for update/);
+  assert.doesNotMatch(sql, /update public\.cloud_catalog_background_mode_checkpoints/);
+});

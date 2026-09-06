@@ -18,7 +18,8 @@ for (const name of ['MoviesPage', 'SeriesPage']) {
     const context = {
       window: {}, console,
       API: { sources: { getAll: async () => sources } },
-      document: { createElement: () => ({}) },
+      document: { createElement: () => ({}), documentElement: { lang: 'fr' } },
+      MediaUtils: { escapeHtml: value => String(value) }, Intl,
     };
     vm.runInNewContext(fs.readFileSync(path.join(root, `public/js/pages/${name}.js`), 'utf8'), context);
     const page = Object.create(context.window[name].prototype);
@@ -41,6 +42,14 @@ for (const name of ['MoviesPage', 'SeriesPage']) {
     await page.loadSources();
     assert.deepEqual(Array.from(page.sources, s => s.id), [1]);
     assert.equal(page.sourceSelect.value, '');
+
+    const audio = { value: 'provider-hi', innerHTML: '', options: [{ value: 'provider-hi', text: 'Hindi' }] };
+    page.applyFacetOptions(audio, 'Tout', [{ value: 'catalog-hi', label: 'Hindi · 14 series', count: 14 }]);
+    assert.equal(audio.value, 'catalog-hi');
+    assert.match(audio.innerHTML, /hindi · 14/);
+    assert.doesNotMatch(audio.innerHTML, /provider-hi|series/);
+    page.applyFacetOptions(audio, 'Tout', [{ value: 'hi', label: 'Hindi', count: 14 }]);
+    assert.equal(audio.value, 'hi');
   });
 }
 

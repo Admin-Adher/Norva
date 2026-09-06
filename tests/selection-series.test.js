@@ -68,7 +68,8 @@ test('series details expose real units without URLs; playback enforces owner, pa
 });
 
 test('selection bundles have honest translated labels and never receive TMDB episode overlays', async () => {
-  const context = { window: {}, console, MediaUtils: {}, setTimeout, clearTimeout };
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(fs.readFileSync('public/js/utils/mediaUtils.js', 'utf8'), context);
   vm.runInNewContext(fs.readFileSync('public/js/pages/SeriesPage.js', 'utf8'), context);
   const page = Object.create(context.window.SeriesPage.prototype);
   const { selectionSeriesUnit } = await import('../supabase/functions/_shared/selection-series.mjs');
@@ -83,4 +84,39 @@ test('selection bundles have honest translated labels and never receive TMDB epi
   page.seasonsContainer = {};
   Object.defineProperty(page, 'currentSeries', { get() { throw Error('bundle must not request TMDB episode data'); } });
   await page.enrichSeasonWithTmdb('1');
+});
+
+test('the player identifies season bundles by file id and can select and advance between parts', () => {
+  const context = { window: {}, console, setTimeout, clearTimeout };
+  vm.runInNewContext(fs.readFileSync('public/js/utils/mediaUtils.js', 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync('public/js/pages/WatchPage.js', 'utf8'), context);
+  const page = Object.create(context.window.WatchPage.prototype);
+  const a = { id: 'file-a', episode_num: null, selectionUnit: { kind: 'part', seasons: [1], part: 1 } };
+  const b = { id: 'file-b', episode_num: null, selectionUnit: { kind: 'part', seasons: [1], part: 2 } };
+  const c = { id: 'file-c', episode_num: null, selectionUnit: { kind: 'season', seasons: [2] } };
+  page.seriesInfo = { seriesDelivery: 'selection', episodes: { 1: [a, b], 2: [c] } };
+  page.content = { id: 'file-a' };
+  page.currentSeason = '1'; page.currentEpisode = null;
+  assert.equal(page.isCurrentEpisode(a, '1'), true);
+  assert.equal(page.isCurrentEpisode(b, '1'), false);
+  assert.equal(page.getNextEpisode().id, 'file-b');
+  assert.equal(page.getPreviousEpisode(), null);
+  page.content.id = 'file-b';
+  assert.equal(page.getNextEpisode().id, 'file-c');
+  assert.equal(page.getPreviousEpisode().id, 'file-a');
+  assert.equal(page.episodePlaybackSubtitle(b, '1'), 'Season 1 · Part 2');
+
+  page.seasonsContainer = { innerHTML: '', querySelectorAll: () => [] };
+  page.renderEpisodes();
+  assert.doesNotMatch(page.seasonsContainer.innerHTML, /Enull|Eundefined|Episode null|2 episodes/);
+  assert.match(page.seasonsContainer.innerHTML, /2 videos/);
+  const btn = { dataset: { season: '1', ep: '', episodeId: 'file-b' }, addEventListener(_, fn) { this.click = fn; } };
+  page.episodesNavList = { innerHTML: '', querySelectorAll: () => [btn], querySelector: () => null };
+  page.closeEpisodesMenu = () => {};
+  let selected;
+  page.playEpisode = ep => { selected = ep; };
+  page.renderEpisodesMenu();
+  btn.click();
+  assert.equal(selected.id, 'file-b');
+  assert.equal(page.episodePlaybackSubtitle({ episode_num: 3, title: 'Arrival' }, 1), 'S1 E3 - Arrival');
 });

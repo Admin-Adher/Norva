@@ -507,6 +507,18 @@ const MediaUtils = (() => {
     // downloads. Coordinates are structured metadata ("S1 · E2"); a genuine
     // editorial title is appended once, while a provider-only/generic title is not
     // repeated as "S1 · E2 · Episode 2".
+    function selectionUnitLabel(ep) {
+        const unit = ep?.selectionUnit;
+        if (!unit || !Array.isArray(unit.seasons) || !unit.seasons.length) return '';
+        const t = (key, fallback, p0) => globalThis.NorvaI18n?.t(key, { defaultValue: fallback, p0 }) ?? fallback.replace('{{p0}}', p0);
+        const labels = [unit.seasons.length > 1
+            ? t('ui_selection_seasons', 'Seasons {{p0}}', unit.seasons.join('–'))
+            : t('ui_web_9e42662ef1b7', 'Season {{p0}}', unit.seasons[0])];
+        if (unit.episode) labels.push(t('ui_web_82ab493e3310', 'Episode {{p0}}', unit.episode));
+        if (unit.part) labels.push(t('ui_selection_part', 'Part {{p0}}', unit.part));
+        return labels.join(' · ');
+    }
+
     function formatEpisodeDisplayLabel(value, { season = '', episode = '' } = {}) {
         let raw = String(value || '').trim();
         const prefix = raw.match(/^\s*S(?:eason)?\s*0*(\d{1,3})\s*(?:[·:./|\-]\s*)?E(?:pisode)?\s*0*(\d{1,4})\s*(?:[-–—·:|]\s*)?/i);
@@ -2011,7 +2023,7 @@ const MediaUtils = (() => {
     return {
         skeletonCards,
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
-        cleanEpisodeReleaseName, formatEpisodeDisplayLabel,
+        cleanEpisodeReleaseName, formatEpisodeDisplayLabel, selectionUnitLabel,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
         resolveContentLanguage,
