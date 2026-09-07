@@ -6,6 +6,7 @@ import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { providerAudioFacet, selectionProviderAudioLanguages } from "../_shared/selection-provider-languages.mjs";
+import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
@@ -1118,6 +1119,7 @@ async function attachMediaLanguages(
   // Do this before TMDB/title overlays: exact file evidence exists even for an
   // unmatched provider title, and must remain attached to that one raw row.
   await attachFlatMediaFileLanguages(items, userId, itemType);
+  await attachFlatSelectionSeriesLanguages(items, userId, itemType);
   await attachOwnedMediaEditorialMetadata(items, userId, itemType, lang);
   // Preserve provider-supplied summaries even when the title has no TMDB identity
   // and has never been probed. Promote the compact metadata field to the response
@@ -1207,14 +1209,14 @@ async function attachMediaLanguages(
     if (hit) {
       // A tenant observation belongs to this exact provider file. Never replace
       // it with the grouped title union merely because the title has a TMDB id.
-      if (row.audio_languages_scope !== "file" && row.audioLanguagesScope !== "file") {
+      if (!["file", "series"].includes(row.audio_languages_scope ?? row.audioLanguagesScope)) {
         row.audio_languages = hit.audio; row.audioLanguages = hit.audio;
       }
       row.version_languages = hit.version; row.versionLanguages = hit.version;
       // Ordered map (absolute-stream order, null-lang entries kept for position) — the
       // player maps engine streams -> languages from this, no probe. Only set when present
       // so titles without a crawled map fall through to the live-probe path unchanged.
-      if (hit.tracks.length) { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
+      if (hit.tracks.length && itemType !== "series") { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
     }
     // P art was applied from its exact hydrated generation above. Only G may use
     // the unmarked visible-title art map.
@@ -3363,6 +3365,9 @@ function attachFileLanguageObservation(variant: JsonRecord, observation: JsonRec
 // a different dub/file; absolute stream indices are only valid at
 // (provider identity, item type, external id) granularity.
 async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>, userId: string) {
+  try {
+    await attachSelectionSeriesLanguages(db, [...variantsByTitle.values()].flat(), userId);
+  } catch (_) { /* Missing episode summaries must not block catalogue browsing. */ }
   // A series variant is the parent series id, not an episode file id. Legacy
   // crawler rows keyed (series, seriesId) describe an arbitrary first episode
   // and must never be exposed as file-scoped tracks.
@@ -3469,6 +3474,30 @@ function flatMediaVariantKey(row: Record<string, any>): string | null {
 // Join those owned rows back to their exact movie variants, then attach exact-file
 // codec/playback facts plus the tenant-local language SET. No sibling fallback and
 // no stream index is manufactured here.
+async function attachFlatSelectionSeriesLanguages(items: JsonRecord[], userId: string, itemType: string | null) {
+  if (itemType !== "series" || !items.length) return;
+  try {
+    const sourceId = await discoverySourceId(userId);
+    const selected = items.filter(item => item.source_id === sourceId &&
+      recordOrEmpty(item.metadata).seriesDelivery === "selection");
+    for (let start = 0; start < selected.length; start += 100) {
+      const batch = selected.slice(start, start + 100);
+      const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+        .select("id,user_id,source_id,media_item_id,item_type,external_id,metadata")
+        .eq("user_id", userId).eq("source_id", sourceId).eq("item_type", "series")
+        .in("media_item_id", batch.map(item => item.id));
+      if (error) throw error;
+      const variants = (data ?? []) as JsonRecord[];
+      await attachSelectionSeriesLanguages(db, variants, userId);
+      const byFile = new Map(variants.map(variant => [flatMediaVariantKey(variant), variant]));
+      for (const item of batch) {
+        const variant = byFile.get(flatMediaVariantKey(item));
+        if (variant) Object.assign(item, selectionSeriesLanguageFields(variant.__series_languages));
+      }
+    }
+  } catch (_) { /* A failed language lookup must not hide the series catalogue. */ }
+}
+
 async function attachFlatMediaFileLanguages(
   items: Array<Record<string, any>>,
   userId: string,
@@ -4171,6 +4200,7 @@ function titleVariantItem(variant: JsonRecord) {
     last_observed_ttff_ms: variant.last_observed_ttff_ms,
     lastObservedTtffMs: variant.last_observed_ttff_ms,
     metadata: recordOrEmpty(variant.metadata),
+    ...selectionSeriesLanguageFields(variant.__series_languages),
   });
 }
 

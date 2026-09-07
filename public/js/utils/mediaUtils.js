@@ -1863,7 +1863,8 @@ const MediaUtils = (() => {
         const observed = isAudio
             ? (item.audioLanguagesObserved === true || item.audio_languages_observed === true)
             : (item.subtitleLanguagesObserved === true || item.subtitle_languages_observed === true);
-        if (scope !== 'file' || !Array.isArray(direct)) {
+        const seriesSummary = scope === 'series' && String(item.item_type || item.itemType || item.type || '') === 'series';
+        if ((scope !== 'file' && !seriesSummary) || !Array.isArray(direct)) {
             return { languages: [], known: false, source: 'none' };
         }
         if (isAudio && !hasDisplayableAudioLanguage(item)) {
