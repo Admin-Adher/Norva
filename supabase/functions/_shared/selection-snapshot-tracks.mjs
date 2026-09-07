@@ -131,3 +131,27 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
   await assertSourceCurrent();
   return {seeded};
 }
+
+// Series catalogue badges/facets use an unordered union of owned episode
+// observations. The database validates the active parent/file binding and the
+// audited media URL hash; ordered track maps remain attached to each episode.
+export async function hydrateSelectionSnapshotSeriesTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
+  if (sourceId !== await discoverySourceId(userId)) return {seeded:0};
+  const parentIds = [...new Set(rows.filter(row => row.item_type === 'series'
+    && row.metadata?.seriesDelivery === 'selection'
+    && /^norva-selection:series:[a-f0-9]{64}$/.test(row.external_id)).map(row => row.external_id))];
+  if (!parentIds.length) return {seeded:0};
+  if (!generationFence?.p_generation_id) throw new Error('Selection series hydration requires a catalogue generation');
+  let seeded = 0;
+  for (let offset=0; offset<parentIds.length; offset+=50) {
+    await assertSourceCurrent();
+    const {data,error} = await db.rpc('hydrate_selection_episode_file_languages', {
+      p_user_id:userId,p_source_id:sourceId,...generationFence,
+      p_parent_series_ids:parentIds.slice(offset,offset+50),
+    });
+    if (error) throw error;
+    seeded += Number(data) || 0;
+    await assertSourceCurrent();
+  }
+  return {seeded};
+}

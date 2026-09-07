@@ -14,7 +14,7 @@ import {
   withSourceDirectFallbackLease,
 } from "./provider-direct-fallback-lease.mjs";
 import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
-import { hydrateSelectionSnapshotMovieTracks } from "./selection-snapshot-tracks.mjs";
+import { hydrateSelectionSnapshotMovieTracks, hydrateSelectionSnapshotSeriesTracks } from "./selection-snapshot-tracks.mjs";
 import {
   cleanTmdbSearchQuery,
   stripProviderSearchPrefix,
@@ -363,6 +363,13 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
     assertSourceCurrent: options.assertSourceCurrent,
   });
+  if (options.generation.kind === "active") {
+    await hydrateSelectionSnapshotSeriesTracks({
+      db: options.db, userId: options.userId, sourceId: options.sourceId,
+      rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
+      assertSourceCurrent: options.assertSourceCurrent,
+    });
+  }
 
   // Exact per-file track caches are shared across accounts by provider identity.
   // Once the movie variants exist, hydrate each grouped title's language UNION

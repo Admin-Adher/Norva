@@ -11997,6 +11997,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 10px;
   align-items: baseline;
+  min-height: 44px;
   width: 100%;
   padding: var(--space-sm) var(--space-md);
   background: none;
@@ -12009,7 +12010,13 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 .watch-ep-option:hover { background: rgba(255, 255, 255, 0.1); }
 .watch-ep-option.active { color: var(--color-accent); }
 .watch-ep-num { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.watch-ep-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-ep-title {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* Selection labels already include the episode number, so no number cell is rendered. */
+.watch-ep-title:only-child { grid-column: 1 / -1; }
 .watch-ep-option.active .watch-ep-num { color: var(--color-accent); }
 .captions-menu-empty { padding: var(--space-md); color: var(--color-text-muted); font-size: 0.85rem; }
 
