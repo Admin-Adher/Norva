@@ -1,4 +1,5 @@
 import { connect } from "cloudflare:sockets";
+import { preserveRelayResponseLength } from "./relayResponseLength.mjs";
 import {
   classifyRelayPlaybackGeneration,
   classifyRelaySessionClaims,
@@ -604,9 +605,9 @@ async function relayPlaybackSessionActive(env, claims) {
 function withRelayPlaybackLiveness(response, request, env, claims) {
   if (request.method === "HEAD" || !response.body) return response;
   return new Response(
-    createRevocableRelayStream(response.body, {
+    preserveRelayResponseLength(createRevocableRelayStream(response.body, {
       isActive: () => relayPlaybackSessionActive(env, claims),
-    }),
+    }), response.headers),
     {
       status: response.status,
       statusText: response.statusText,
@@ -746,7 +747,7 @@ async function proxyPlayback(request, env, claims, ctx) {
   if (request.method === "HEAD" || !isHlsPlaylist(targetUrl, upstream.headers)) {
     // Advertise range support so the player enables client-side seeking.
     if (!responseHeaders.has("Accept-Ranges")) responseHeaders.set("Accept-Ranges", "bytes");
-    return new Response(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), {
+    return new Response(preserveRelayResponseLength(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), upstream.headers), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -755,7 +756,7 @@ async function proxyPlayback(request, env, claims, ctx) {
 
   const contentLength = Number.parseInt(upstream.headers.get("content-length") ?? "0", 10);
   if (Number.isFinite(contentLength) && contentLength > 2_000_000) {
-    return new Response(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), {
+    return new Response(preserveRelayResponseLength(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), upstream.headers), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
