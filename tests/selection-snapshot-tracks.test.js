@@ -41,3 +41,18 @@ test('Selection tracks are exact snapshot data; URL pins and canonical ownership
   db.rpc=async()=>({error:new Error('stale generation')});
   await assert.rejects(hydrateSelectionSnapshotMovieTracks(args),/stale generation/);
 });
+
+ test('Selection playback tags bind the owned source and physical URL and expose the measured episode duration', async()=>{
+  const {fetchSelectionVod}=await import('../supabase/functions/_shared/selection-vod.mjs');
+  const {discoverySourceId}=await import('../supabase/functions/_shared/discovery-catalog.mjs');
+  const {selectionSnapshotPlaybackTags}=await import('../supabase/functions/_shared/selection-snapshot-tracks.mjs');
+  const rows=(await fetchSelectionVod({fetchPlaylist:async()=>{throw Error('unavailable')}})).items.map(r=>r.fields);
+  const row=rows.find(r=>r.metadata.selectionVodTitle==='Suits S02E01');assert.ok(row);
+  const args={userId:'owner',sourceId:await discoverySourceId('owner'),itemId:row.external_id,targetUrl:row.playback_hint.targetUrl};
+  const tags=await selectionSnapshotPlaybackTags(args);assert.deepEqual(tags.audioLanguages,['es']);
+  assert.ok(tags.codecProfile.durationSeconds>2500);assert.ok(tags.codecProfile.probedAt);assert.equal(tags.codecProfile.probeSource,'selection-container-audit');
+  assert.ok(!JSON.stringify(tags).includes('https://'));
+  assert.deepEqual(await selectionSnapshotPlaybackTags({...args,userId:'foreign'}),{});
+  assert.deepEqual(await selectionSnapshotPlaybackTags({...args,targetUrl:'https://unreviewed.example/other.mp4'}),{});
+  assert.deepEqual(await selectionSnapshotPlaybackTags({...args,itemId:'unknown'}),{});
+ });

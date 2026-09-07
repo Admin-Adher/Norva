@@ -19,7 +19,7 @@ function snapshot() {
         result.set(id, { url:entry.url, audioTracks, subtitleTracks, hasSubtitle, quality:entry.quality,
           audioLanguages:[...new Set(audioTracks.map(t=>t.lang).filter(Boolean))],
           subtitleLanguages:[...new Set(subtitleTracks.map(t=>t.lang).filter(Boolean))],
-          duration:entry.duration, codecProfile:profile });
+          duration:entry.duration, probedAt:entry.validation?.containerMetadataCheckedAt, codecProfile:profile });
       }));
     }
     return result;
@@ -37,7 +37,16 @@ export async function selectionSnapshotFileTags(externalId) {
     ...(entry.hasSubtitle ? { subtitleTracks:entry.subtitleTracks, subtitleTracksScope:'file',
       subtitleLanguages:entry.subtitleLanguages, subtitleLanguagesScope:'file' } : {}),
     ...(entry.quality ? {quality:entry.quality} : {}),
-    ...(entry.duration ? {duration:entry.duration} : {}), codecProfile:entry.codecProfile };
+    ...(entry.duration ? {duration:entry.duration} : {}), codecProfile:{...entry.codecProfile, ...(entry.probedAt ? {probeSource:'selection-container-audit',probedAt:entry.probedAt} : {})} };
+}
+
+// The playback resolver already proved the current owned episode. Bind the
+// immutable audit to both that physical file id and its resolved URL.
+export async function selectionSnapshotPlaybackTags({userId,sourceId,itemId,targetUrl}) {
+  if(sourceId!==await discoverySourceId(userId))return {};
+  const file=(await snapshot()).get(itemId);
+  if(!file||file.url!==targetUrl)return {};
+  return selectionSnapshotFileTags(itemId);
 }
 
 // Reuses the normal exact-file cache/fanout RPCs. No identity is invented for a

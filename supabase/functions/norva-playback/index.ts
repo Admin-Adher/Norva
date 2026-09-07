@@ -1,6 +1,7 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { discoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
+import { selectionSnapshotPlaybackTags } from "../_shared/selection-snapshot-tracks.mjs";
 import { resolveOwnedSelectionEpisode } from "../_shared/selection-series-info.mjs";
 import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
 import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
@@ -2135,6 +2136,10 @@ async function createPlaybackSessionCore(
     );
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   const targetUrl = resolved.targetUrl;
+  const selectionEpisodeSnapshot = itemType === "series" && !episodeCoordinates
+    ? await selectionSnapshotPlaybackTags({ userId, sourceId, itemId, targetUrl })
+    : {};
+
   const resolvedContainerObservation = "containerObservation" in resolved
     ? recordOrEmpty(resolved.containerObservation)
     : {};
@@ -2603,7 +2608,7 @@ async function createPlaybackSessionCore(
       const exactFileScopedTitle = exactVariantProfile || exactEpisodeTitle;
       const variantProfile = exactVariantProfile
         ? recordOrEmpty(titleRow?.variant_codec_profile)
-        : {};
+        : recordOrEmpty(selectionEpisodeSnapshot.codecProfile);
       const variantAudioRaw = variantProfile.audioTracks ?? variantProfile.audio_tracks;
       const variantSubtitleRaw = variantProfile.subtitles ?? variantProfile.subtitleTracks ?? variantProfile.subtitle_tracks;
       if (!haveAudio && Array.isArray(variantAudioRaw) && variantAudioRaw.length) {
@@ -2727,6 +2732,7 @@ async function createPlaybackSessionCore(
       return {
         session: publicPlaybackSession(session),
         playback: {
+          ...selectionEpisodeSnapshot,
           mode: "relay",
           url: pipe.url,
           tokenExpiresAt: rawTokenExpiresAt,
@@ -2798,6 +2804,7 @@ async function createPlaybackSessionCore(
       return {
         session: publicPlaybackSession(session),
         playback: {
+          ...selectionEpisodeSnapshot,
           mode,
           url: relay.url,
           tokenExpiresAt: relayTransportExpiresAt,
