@@ -2,27 +2,53 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 
-test('only catalogue-validated files import, even when remote catalogues are unavailable', async () => {
+test('qualified server snapshots import beyond playback samples while preserving exact-file exclusions', async () => {
   const { SELECTION_TESTED_VOD, SELECTION_TESTED_VOD_HOLDS, testedSelectionVodUrlAllowed } = await import('../supabase/functions/_shared/selection-tested-vod.mjs');
   const { fetchSelectionVod } = await import('../supabase/functions/_shared/selection-vod.mjs');
+  const { SELECTION_QUALIFIED_VOD } = await import('../supabase/functions/_shared/selection-qualified-vod.mjs');
   const { items, sources } = await fetchSelectionVod({ fetchPlaylist: async () => { throw Error('upstream unavailable'); } });
   const rows = items.map(entry => entry.fields);
   assert.equal(SELECTION_TESTED_VOD.length, 14);
-  assert.equal(rows.filter(row => row.item_type === 'movie').length, 10);
-  assert.equal(rows.filter(row => row.item_type === 'episode').length, 3);
-  assert.equal(rows.filter(row => row.item_type === 'series').length, 3);
-  assert.equal(new Set(rows.map(row => row.external_id)).size, 16);
-  assert.deepEqual(sources.filter(source => source.status === 'loaded').map(source => source.included), [5, 4, 4]);
+  assert.equal(rows.filter(row => row.item_type === 'movie').length, 2104);
+  assert.equal(rows.filter(row => row.item_type === 'episode').length, 225);
+  assert.equal(rows.filter(row => row.item_type === 'series').length, 7);
+  assert.equal(new Set(rows.map(row => row.external_id)).size, rows.length);
+  assert.equal(sources.filter(source => source.status === 'loaded').reduce((n, source) => n + source.included, 0), 2329);
   for (const file of SELECTION_TESTED_VOD) {
     assert.equal(createHash('sha256').update(file.url).digest('hex'), file.validation.urlSha256);
     assert.ok(file.validation.continuousSeconds >= 120);
     assert.equal(file.validation.seeksPassed, 2);
   }
-  assert.ok(rows.every(row => row.metadata.providerTmdbId));
-  assert.ok(!rows.some(row => /pixeldrain|ong-bak/i.test(JSON.stringify(row))));
+  for (const file of SELECTION_QUALIFIED_VOD) {
+    assert.equal(createHash('sha256').update(file.url).digest('hex'), file.validation.urlSha256);
+    assert.equal(file.validation.method, 'server-sampling-and-file-access');
+    assert.equal(file.validation.continuousSeconds, undefined, 'sampling must not claim every file was played');
+    assert.ok([200, 206].includes(file.validation.fileHttpStatus));
+    assert.ok(['mp4', 'mkv'].includes(file.containerExtension));
+  }
+  assert.ok(!rows.some(row => /pixeldrain/.test(row.playback_hint?.targetUrl || '')));
   const episodes = rows.filter(row => row.item_type === 'episode');
-  assert.deepEqual(episodes.map(row => [row.metadata.selectionUnit.baseTitle, row.metadata.selectionUnit.seasons[0], row.metadata.selectionUnit.episode]),
-    [['Suits', 4, 12], ['Peaky Blinders', 4, 2], ['Prison Break', 4, 21]]);
+  const expectedSeasons = {
+    'Suits': { 2: 16, 3: 16, 4: 16, 5: 16, 6: 16 },
+    'Peaky Blinders': { 1: 6, 2: 6, 3: 6, 4: 6, 5: 6, 6: 6 },
+    'Prison Break': { 1: 22, 2: 22, 3: 13 },
+    'Game of Thrones': { 1: 10, 2: 10 },
+    'Spartacus': { 1: 13, 2: 10 },
+    'Jesus of Nazareth': { 1: 4 },
+    'Trump An American Dream': { 1: 4 },
+  };
+  for (const [title, seasons] of Object.entries(expectedSeasons)) {
+    for (const [season, count] of Object.entries(seasons)) {
+      const group = episodes.filter(row => row.metadata.selectionUnit.baseTitle === title && row.metadata.selectionUnit.seasons[0] === Number(season));
+      assert.deepEqual(group.map(row => row.metadata.selectionUnit.episode).sort((a, b) => a - b), Array.from({ length: count }, (_, i) => i + 1), `${title} S${season}`);
+      assert.equal(new Set(group.map(row => row.playback_hint.targetUrl)).size, count, 'one distinct file per episode');
+    }
+  }
+  assert.ok(!episodes.some(row => row.metadata.selectionUnit.baseTitle === 'Suits' && row.metadata.selectionUnit.seasons[0] === 1));
+  assert.ok(!episodes.some(row => row.metadata.selectionUnit.baseTitle === 'Spartacus' && row.metadata.selectionUnit.seasons[0] === 3));
+  assert.ok(!episodes.some(row => /Chernobyl/i.test(row.title)));
+  assert.ok(!rows.some(row => /COBRA KAI T5 SERIE|\(CAM\)/i.test(row.title)));
+  assert.ok(rows.some(row => row.item_type === 'movie' && row.title === 'Chernobyl O Filme'));
   for (const row of episodes) {
     assert.equal(rows.find(parent => parent.external_id === row.parent_external_id)?.item_type, 'series');
     assert.equal(row.playback_hint.container, 'mp4');
@@ -45,9 +71,10 @@ test('tested media remain exact URL pins with owned resolution and never use the
   const { resolveDiscoveryTarget } = await import('../supabase/functions/_shared/discovery-sources.mjs');
   const { discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
   const { items } = await vod.fetchSelectionVod({ fetchPlaylist: async () => { throw Error('unavailable'); } });
+  const neverFetch = () => { throw Error('a static pin must not fetch its repository'); };
   for (const { fields: row } of items.filter(entry => entry.fields.item_type !== 'series')) {
     const input = { userId: 'owner', sourceId: await discoverySourceId('owner'), itemId: row.external_id,
-      metadata: row.metadata, targetUrl: row.playback_hint.targetUrl, fetchPlaylist: () => { throw Error('a static pin must not fetch its repository'); } };
+      metadata: row.metadata, targetUrl: row.playback_hint.targetUrl, fetchPlaylist: neverFetch };
     assert.equal(await resolveDiscoveryTarget(input), input.targetUrl);
     for (const targetUrl of [input.targetUrl + '?unreviewed=1', input.targetUrl.replace('https:', 'http:'), 'https://127.0.0.1/private']) {
       await assert.rejects(resolveDiscoveryTarget({ ...input, targetUrl }), /temporarily unavailable/);

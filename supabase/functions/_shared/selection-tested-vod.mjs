@@ -1,6 +1,8 @@
-// Exact media files that passed the 2026-09-07 Norva web playback audit.
-// These pins do not import the repositories' other entries. Availability and
-// rights are separate: the technical audit did not establish distribution rights.
+import { SELECTION_QUALIFIED_VOD } from './selection-qualified-vod.mjs';
+
+// Individually played anchor files from the 2026-09-07 Norva web audit.
+// The separate qualified snapshot expands these services using representative
+// playback, exact-file access checks and complete-season inventory checks.
 export const SELECTION_TESTED_VOD_FEEDS = Object.freeze([
   { id: 'herbert-tested-vod', name: 'HERBERTM3 · Sélection', kind: 'movie', website: 'https://github.com/HERBERTM3/iptv' },
   { id: 'klysmgt-tested-vod', name: 'KlysmGt · Sélection', kind: 'movie', website: 'https://github.com/JuanEstebanGaleano/KlysmGt' },
@@ -572,10 +574,24 @@ export const SELECTION_TESTED_VOD_HOLDS = Object.freeze({
   'tested-20260907-oracle-es-2': 'catalogue-seek-timeout',
 });
 
+const heldUrls = new Set(SELECTION_TESTED_VOD.filter(entry => SELECTION_TESTED_VOD_HOLDS[entry.tvgId]).map(entry => entry.url));
+const entriesByFeed = new Map();
+const urlsByFeed = new Map();
+for (const feed of SELECTION_TESTED_VOD_FEEDS) {
+  const selected = new Map();
+  for (const entry of [...SELECTION_TESTED_VOD, ...SELECTION_QUALIFIED_VOD]) {
+    if (entry.feedId !== feed.id || SELECTION_TESTED_VOD_HOLDS[entry.tvgId] || heldUrls.has(entry.url) || selected.has(entry.url)) continue;
+    selected.set(entry.url, entry);
+  }
+  entriesByFeed.set(feed.id, Object.freeze([...selected.values()]));
+  urlsByFeed.set(feed.id, new Set(selected.keys()));
+}
+const noEntries = Object.freeze([]);
+
 export function testedSelectionVodEntries(feedId) {
-  return SELECTION_TESTED_VOD.filter(entry => entry.feedId === feedId && !SELECTION_TESTED_VOD_HOLDS[entry.tvgId]);
+  return entriesByFeed.get(feedId) || noEntries;
 }
 
 export function testedSelectionVodUrlAllowed(feedId, url) {
-  return testedSelectionVodEntries(feedId).some(entry => entry.url === url);
+  return urlsByFeed.get(feedId)?.has(url) === true;
 }

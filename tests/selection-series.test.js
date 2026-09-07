@@ -60,10 +60,15 @@ test('series details expose real units without URLs; playback enforces owner, pa
   assert.ok(!JSON.stringify(info).includes('workers.dev'));
   const progressiveParent = rows.find(row => row.title === 'Suits');
   const progressive = await loadSelectionSeriesInfo({ ...args, seriesId: progressiveParent.external_id });
-  assert.equal(progressive.episodes[4].length, 1);
-  assert.equal(progressive.episodes[4][0].episode_num, 12);
+  assert.equal(progressive.episodes[4].length, 16);
+  assert.deepEqual(progressive.episodes[4].map(episode => episode.episode_num), Array.from({ length: 16 }, (_, i) => i + 1));
   assert.equal(progressive.episodes[4][0].container_extension, 'mp4');
   assert.equal(progressive.episodes[4][0].playbackHint.container, 'mp4');
+  const playedAnchor = progressive.episodes[4].find(episode => episode.episode_num === 12);
+  assert.deepEqual(playedAnchor.audioLanguages, ['es']);
+  assert.equal(playedAnchor.audioTracksScope, 'file');
+  assert.deepEqual(playedAnchor.audioTracks.map(track => [track.index, track.lang]), [[1, 'es']]);
+  assert.ok(!JSON.stringify(progressive).includes('jwplatform.com'));
   await assert.rejects(loadSelectionSeriesInfo({ ...args, generationId: 'old' }));
   assert.equal(await loadSelectionSeriesInfo({ ...args, userId: 'other' }), null);
   const fileArgs = { ...args, itemId: info.episodes[1][0].id, parentId: parent.external_id };

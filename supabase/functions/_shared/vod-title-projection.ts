@@ -14,6 +14,7 @@ import {
   withSourceDirectFallbackLease,
 } from "./provider-direct-fallback-lease.mjs";
 import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
+import { hydrateSelectionSnapshotMovieTracks } from "./selection-snapshot-tracks.mjs";
 import {
   cleanTmdbSearchQuery,
   stripProviderSearchPrefix,
@@ -354,6 +355,13 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       options.generation,
     );
   }
+
+  // The curated snapshot already contains bounded container probes. Seed their
+  // exact movie maps for every new Selection owner, preserving later probes.
+  await hydrateSelectionSnapshotMovieTracks({
+    db: options.db, userId: options.userId, sourceId: options.sourceId,
+    rows: savedVariants, assertSourceCurrent: options.assertSourceCurrent,
+  });
 
   // Exact per-file track caches are shared across accounts by provider identity.
   // Once the movie variants exist, hydrate each grouped title's language UNION

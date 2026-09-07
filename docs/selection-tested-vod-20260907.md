@@ -1,3 +1,5 @@
+> Subsequent expansion: see [Qualified VOD expansion](selection-qualified-vod-20260907.md). The counts below describe the original playback samples.
+
 # Individually tested VOD addition — 7 September 2026
 
 The audit pins 14 exact files from HERBERTM3 (5), KlysmGt (5) and Sandro (4).

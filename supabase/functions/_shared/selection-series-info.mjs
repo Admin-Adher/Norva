@@ -2,6 +2,7 @@ import { discoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_VOD_FEEDS, SELECTION_VOD_REVISION } from './selection-vod.mjs';
 import { isSelectionSeriesUnit, selectionSeriesIdentity, selectionSeriesExternalId } from './selection-series.mjs';
 import { selectionProviderAudioLanguages } from './selection-provider-languages.mjs';
+import { selectionSnapshotFileTags } from './selection-snapshot-tracks.mjs';
 
 export async function ownedSelectionSeries(row, seriesId) {
   const metadata = row?.metadata;
@@ -35,9 +36,11 @@ export async function loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, 
     const container = ['mp4', 'mkv', 'm3u8'].includes(row.metadata.containerExtension)
       ? row.metadata.containerExtension : 'm3u8';
     const providerAudioLanguages = selectionProviderAudioLanguages(row);
+    const fileTags = await selectionSnapshotFileTags(row.external_id);
     (episodes[season] ||= []).push({ id: row.external_id, title: row.title,
       season: unit.seasons[0], episode_num: unit.kind === 'episode' ? unit.episode : null,
       container_extension: container, selectionUnit: unit,
+      ...fileTags,
       ...(providerAudioLanguages.length ? { providerAudioLanguages, providerAudioLanguageStatus: 'provider_declared' } : {}),
       info: { movie_image: row.poster_url || parent.poster_url || null },
       playbackHint: { container, containerExtension: container, streamType: 'series', audioSeriesId: seriesId } });
