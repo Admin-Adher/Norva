@@ -414,6 +414,7 @@ test('flat media grid and search keep P display data isolated from global A unde
     preferredTmdbSynopsis: (await import('../supabase/functions/_shared/tmdb-enrichment-policy.mjs')).preferredTmdbSynopsis,
     catalogReadEnabled: () => catalogFlag,
     attachFlatMediaFileLanguages: async () => {},
+    attachFlatSelectionSeriesLanguages: async () => {},
     requiredCatalogTitleVisibilityEpoch: () => '7',
     hydrateVisibleCatalogTitlesByIds: async () => {
       if (hydrationFails) throw new Error('visibility epoch moved');
