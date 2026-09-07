@@ -89,6 +89,24 @@
       "name": "Sulthanpamenan",
       "kind": "movie",
       "website": "https://github.com/sulthanpamenan/vod-playlist"
+    },
+    {
+      "id": "herbert-tested-vod",
+      "name": "HERBERTM3 · Sélection",
+      "kind": "movie",
+      "website": "https://github.com/HERBERTM3/iptv"
+    },
+    {
+      "id": "klysmgt-tested-vod",
+      "name": "KlysmGt · Sélection",
+      "kind": "movie",
+      "website": "https://github.com/JuanEstebanGaleano/KlysmGt"
+    },
+    {
+      "id": "sandro-tested-vod",
+      "name": "Sandro · Sélection",
+      "kind": "movie",
+      "website": "https://github.com/s4f1ixcustom/L00000"
     }
   ],
   "withdrawn": [

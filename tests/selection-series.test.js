@@ -12,7 +12,7 @@ const playlist = async url => ({ headerDetected: true, truncated: false, respons
 test('numbered seasons become a parent series with actual files, retaining stable playback identities', async () => {
   const { fetchSelectionVod, selectionVodIdentity, selectionVodExternalId } = await import('../supabase/functions/_shared/selection-vod.mjs');
   const { items } = await fetchSelectionVod({ fetchPlaylist: playlist });
-  const rows = items.map(row => row.fields);
+  const rows = items.map(row => row.fields).filter(row => !row.metadata.discoveryFeed.endsWith('-tested-vod'));
   assert.equal(rows.filter(row => row.item_type === 'series').length, 2);
   assert.equal(rows.filter(row => row.item_type === 'movie').length, 2);
   assert.equal(rows.filter(row => row.item_type === 'episode').length, 4);
@@ -58,6 +58,12 @@ test('series details expose real units without URLs; playback enforces owner, pa
   assert.equal(info.episodes[1][0].audioLanguages, undefined);
   assert.equal(info.episodes[1][0].audioTracks, undefined);
   assert.ok(!JSON.stringify(info).includes('workers.dev'));
+  const progressiveParent = rows.find(row => row.title === 'Suits');
+  const progressive = await loadSelectionSeriesInfo({ ...args, seriesId: progressiveParent.external_id });
+  assert.equal(progressive.episodes[4].length, 1);
+  assert.equal(progressive.episodes[4][0].episode_num, 12);
+  assert.equal(progressive.episodes[4][0].container_extension, 'mp4');
+  assert.equal(progressive.episodes[4][0].playbackHint.container, 'mp4');
   await assert.rejects(loadSelectionSeriesInfo({ ...args, generationId: 'old' }));
   assert.equal(await loadSelectionSeriesInfo({ ...args, userId: 'other' }), null);
   const fileArgs = { ...args, itemId: info.episodes[1][0].id, parentId: parent.external_id };

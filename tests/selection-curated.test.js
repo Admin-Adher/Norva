@@ -43,7 +43,7 @@ test('current import is the reviewed allowlist only, regardless of requested agg
   assert.equal(fs.readFileSync('public/catalog/discovery.m3u','utf8').replace(/\r\n/g,'\n'),discoveryPlaylist());
   const registry = JSON.parse(fs.readFileSync('public/catalog/sources.json','utf8'));
   assert.equal(registry.sources.filter(s=>s.kind==='live').reduce((sum,s)=>sum+s.channels,0),21);
-  assert.equal(registry.sources.filter(s=>s.kind==='movie').length,2);
+  assert.equal(registry.sources.filter(s=>s.kind==='movie').length,5);
   assert.ok(registry.sources.every(s => !s.url));
   assert.equal(fs.readFileSync('public/catalog/xumo-live.m3u','utf8').trim(),'#EXTM3U');
   for (const channel of SELECTION_CURATED_CHANNELS.filter(c=>c.feedId==='fls-reviewed')) {

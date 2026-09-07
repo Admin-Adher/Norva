@@ -32,13 +32,15 @@ export async function loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, 
       || row.metadata.discoveryFeed !== parent.metadata.discoveryFeed
       || !/^norva-selection:movie:[a-f0-9]{64}$/.test(row.external_id)) continue;
     const season = String(unit.seasons[0]);
+    const container = ['mp4', 'mkv', 'm3u8'].includes(row.metadata.containerExtension)
+      ? row.metadata.containerExtension : 'm3u8';
     const providerAudioLanguages = selectionProviderAudioLanguages(row);
     (episodes[season] ||= []).push({ id: row.external_id, title: row.title,
       season: unit.seasons[0], episode_num: unit.kind === 'episode' ? unit.episode : null,
-      container_extension: 'm3u8', selectionUnit: unit,
+      container_extension: container, selectionUnit: unit,
       ...(providerAudioLanguages.length ? { providerAudioLanguages, providerAudioLanguageStatus: 'provider_declared' } : {}),
       info: { movie_image: row.poster_url || parent.poster_url || null },
-      playbackHint: { container: 'm3u8', streamType: 'series', audioSeriesId: seriesId } });
+      playbackHint: { container, containerExtension: container, streamType: 'series', audioSeriesId: seriesId } });
   }
   for (const files of Object.values(episodes)) files.sort((a, b) =>
     (a.selectionUnit.episode || 0) - (b.selectionUnit.episode || 0)
