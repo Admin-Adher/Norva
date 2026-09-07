@@ -2136,8 +2136,8 @@ async function createPlaybackSessionCore(
     );
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   const targetUrl = resolved.targetUrl;
-  const selectionEpisodeSnapshot = itemType === "series" && !episodeCoordinates
-    ? await selectionSnapshotPlaybackTags({ userId, sourceId, itemId, targetUrl })
+  const selectionFileSnapshot = (itemType === "movie" || itemType === "series") && !episodeCoordinates
+    ? await selectionSnapshotPlaybackTags({ userId, sourceId, itemId, targetUrl, itemType, db })
     : {};
 
   const resolvedContainerObservation = "containerObservation" in resolved
@@ -2608,7 +2608,7 @@ async function createPlaybackSessionCore(
       const exactFileScopedTitle = exactVariantProfile || exactEpisodeTitle;
       const variantProfile = exactVariantProfile
         ? recordOrEmpty(titleRow?.variant_codec_profile)
-        : recordOrEmpty(selectionEpisodeSnapshot.codecProfile);
+        : recordOrEmpty(selectionFileSnapshot.codecProfile);
       const variantAudioRaw = variantProfile.audioTracks ?? variantProfile.audio_tracks;
       const variantSubtitleRaw = variantProfile.subtitles ?? variantProfile.subtitleTracks ?? variantProfile.subtitle_tracks;
       if (!haveAudio && Array.isArray(variantAudioRaw) && variantAudioRaw.length) {
@@ -2732,7 +2732,7 @@ async function createPlaybackSessionCore(
       return {
         session: publicPlaybackSession(session),
         playback: {
-          ...selectionEpisodeSnapshot,
+          ...selectionFileSnapshot,
           mode: "relay",
           url: pipe.url,
           tokenExpiresAt: rawTokenExpiresAt,
@@ -2804,7 +2804,7 @@ async function createPlaybackSessionCore(
       return {
         session: publicPlaybackSession(session),
         playback: {
-          ...selectionEpisodeSnapshot,
+          ...selectionFileSnapshot,
           mode,
           url: relay.url,
           tokenExpiresAt: relayTransportExpiresAt,

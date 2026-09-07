@@ -42,11 +42,35 @@ export async function selectionSnapshotFileTags(externalId) {
 
 // The playback resolver already proved the current owned episode. Bind the
 // immutable audit to both that physical file id and its resolved URL.
-export async function selectionSnapshotPlaybackTags({userId,sourceId,itemId,targetUrl}) {
+export async function selectionSnapshotPlaybackTags({userId,sourceId,itemId,targetUrl,itemType,db}) {
   if(sourceId!==await discoverySourceId(userId))return {};
   const file=(await snapshot()).get(itemId);
   if(!file||file.url!==targetUrl)return {};
-  return selectionSnapshotFileTags(itemId);
+  const tags=await selectionSnapshotFileTags(itemId);
+  if(itemType!=='movie'||!db)return tags;
+  // Later exact-file probes and speech verification outrank the static audit.
+  const result=await db.from('catalog_file_tracks')
+    .select('audio_tracks,subtitle_tracks,audio_probed_at,subtitle_probed_at,audio_lang_verified_at,audio_lang_verification')
+    .eq('server_host','source:'+sourceId).eq('item_type','movie').eq('external_id',itemId).maybeSingle();
+  if(result.error)return {};
+  const cached=result.data;if(!cached)return tags;
+  if(cached.audio_probed_at){
+    const audioTracks=(Array.isArray(cached.audio_tracks)?cached.audio_tracks:[])
+      .filter(t=>Number.isInteger(t.index)).map(t=>({index:t.index,lang:t.lang||null,language:t.lang||null}));
+    tags.audioTracks=audioTracks;
+    tags.audioLanguages=[...new Set(audioTracks.map(t=>t.lang).filter(Boolean))];
+    tags.audioLanguageValidationStatus=cached.audio_lang_verified_at&&tags.audioLanguages.length?'verified':tags.audioLanguages.length?'probed':'pending';
+    tags.audioLanguageVerifiedAt=cached.audio_lang_verified_at||null;
+    tags.audioLanguageVerification=cached.audio_lang_verification||{};
+    tags.codecProfile={...tags.codecProfile,audioTracks};
+  }
+  if(cached.subtitle_probed_at){
+    tags.subtitleTracks=Array.isArray(cached.subtitle_tracks)?cached.subtitle_tracks:[];
+    tags.subtitleLanguages=[...new Set(tags.subtitleTracks.map(t=>t.lang).filter(Boolean))];
+    tags.subtitleTracksScope='file';tags.subtitleLanguagesScope='file';
+    tags.codecProfile={...tags.codecProfile,subtitleTracks:tags.subtitleTracks};
+  }
+  return tags;
 }
 
 // Reuses the normal exact-file cache/fanout RPCs. No identity is invented for a

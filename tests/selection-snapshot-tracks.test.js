@@ -52,6 +52,16 @@ test('Selection tracks are exact snapshot data; URL pins and canonical ownership
   const tags=await selectionSnapshotPlaybackTags(args);assert.deepEqual(tags.audioLanguages,['es']);
   assert.ok(tags.codecProfile.durationSeconds>2500);assert.ok(tags.codecProfile.probedAt);assert.equal(tags.codecProfile.probeSource,'selection-container-audit');
   assert.ok(!JSON.stringify(tags).includes('https://'));
+  let cached={audio_tracks:[{index:1,lang:'en'}],audio_probed_at:'2026-09-08',audio_lang_verified_at:'2026-09-08',audio_lang_verification:{status:'verified'}};
+  let error=null;
+  const db={from(table){assert.equal(table,'catalog_file_tracks');const query={select(){return query},eq(){return query},async maybeSingle(){return {data:cached,error}}};return query;}};
+  const newer=await selectionSnapshotPlaybackTags({...args,itemType:'movie',db});
+  assert.deepEqual(newer.audioLanguages,['en']);assert.equal(newer.audioLanguageValidationStatus,'verified');
+  assert.equal(newer.codecProfile.audioTracks[0].language,'en');
+  cached={audio_tracks:[{index:1,lang:null}],audio_probed_at:'2026-09-08'};
+  const unknown=await selectionSnapshotPlaybackTags({...args,itemType:'movie',db});
+  assert.deepEqual(unknown.audioLanguages,[]);assert.equal(unknown.audioLanguageValidationStatus,'pending');
+  error=new Error('unavailable');assert.deepEqual(await selectionSnapshotPlaybackTags({...args,itemType:'movie',db}),{});
   assert.deepEqual(await selectionSnapshotPlaybackTags({...args,userId:'foreign'}),{});
   assert.deepEqual(await selectionSnapshotPlaybackTags({...args,targetUrl:'https://unreviewed.example/other.mp4'}),{});
   assert.deepEqual(await selectionSnapshotPlaybackTags({...args,itemId:'unknown'}),{});
