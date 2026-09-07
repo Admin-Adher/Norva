@@ -49,14 +49,15 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
   const selected = rows.filter(r => r.item_type === 'movie' && files.get(r.external_id)?.url === r.playback_hint?.targetUrl);
   if (!selected.length) return {seeded:0};
   const key = `source:${sourceId}`, cached = new Set(), observed = new Set();
-  for (let offset=0;offset<selected.length;offset+=500) {
+  // Selection IDs are long hashes: 50 keep PostgREST request URIs below 8 KiB.
+  for (let offset=0;offset<selected.length;offset+=50) {
     await assertSourceCurrent();
     const {data,error}=await db.from('catalog_file_tracks').select('external_id,audio_probed_at,subtitle_probed_at')
-      .eq('server_host',key).eq('item_type','movie').in('external_id',selected.slice(offset,offset+500).map(r=>r.external_id));
+      .eq('server_host',key).eq('item_type','movie').in('external_id',selected.slice(offset,offset+50).map(r=>r.external_id));
     if(error)throw error;
     for(const row of data||[])if(row.audio_probed_at)cached.add(row.external_id);
     const variants=await db.from('cloud_catalog_visible_title_variants').select('id,external_id')
-      .eq('user_id',userId).eq('source_id',sourceId).eq('item_type','movie').in('external_id',selected.slice(offset,offset+500).map(r=>r.external_id));
+      .eq('user_id',userId).eq('source_id',sourceId).eq('item_type','movie').in('external_id',selected.slice(offset,offset+50).map(r=>r.external_id));
     if(variants.error)throw variants.error;
     if(variants.data?.length){
       const observations=await db.from('cloud_title_file_language_observations').select('variant_id,audio_observed')

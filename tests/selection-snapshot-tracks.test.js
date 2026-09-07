@@ -13,7 +13,7 @@ test('Selection tracks are exact snapshot data; URL pins and canonical ownership
   assert.ok(!JSON.stringify(tags).includes('https://'));
   assert.deepEqual(await selectionSnapshotFileTags('unreviewed'),{});
   let cached=false,observed=false;const calls=[];
-  const db={from(table){const q={select(){return q;},eq(){return q;},in(){return q;},then(resolve,reject){return Promise.resolve({data:table==='catalog_file_tracks'?(cached?[{external_id:row.external_id,audio_probed_at:'2026-09-07'}]:[]):table==='cloud_catalog_visible_title_variants'?[{id:'variant',external_id:row.external_id}]:observed?[{variant_id:'variant',audio_observed:true}]:[],error:null}).then(resolve,reject);}};return q;},async rpc(name,args){calls.push({name,args});return {data:1,error:null};}};
+  const db={from(table){const q={select(){return q;},eq(){return q;},in(_column,values){assert.ok(values.length<=50, "long Selection IDs must stay below the proxy URI limit");return q;},then(resolve,reject){return Promise.resolve({data:table==='catalog_file_tracks'?(cached?[{external_id:row.external_id,audio_probed_at:'2026-09-07'}]:[]):table==='cloud_catalog_visible_title_variants'?[{id:'variant',external_id:row.external_id}]:observed?[{variant_id:'variant',audio_observed:true}]:[],error:null}).then(resolve,reject);}};return q;},async rpc(name,args){calls.push({name,args});return {data:1,error:null};}};
   const args={db,userId:'owner',sourceId,rows:[row]};
   assert.deepEqual(await hydrateSelectionSnapshotMovieTracks({...args,sourceId:'foreign'}),{seeded:0});
   assert.deepEqual(await hydrateSelectionSnapshotMovieTracks({...args,rows:[{...row,playback_hint:{targetUrl:'https://unreviewed.example/file.mp4'}}]}),{seeded:0});
@@ -27,4 +27,5 @@ test('Selection tracks are exact snapshot data; URL pins and canonical ownership
   observed=true;calls.length=0;
   assert.deepEqual(await hydrateSelectionSnapshotMovieTracks(args),{seeded:0});
   assert.equal(calls.length,0,'later speech verification and retry state are preserved');
+  await hydrateSelectionSnapshotMovieTracks({...args,rows:rows.filter(r=>r.item_type==='movie'&&r.metadata.codecProfile?.audioTracks?.length).slice(0,120)});
 });
