@@ -1,7 +1,9 @@
 # Individually tested VOD addition — 7 September 2026
 
-This addition pins 14 exact files from HERBERTM3 (5), KlysmGt (5) and Sandro (4).
-It adds 11 movie versions and three physical episodes, grouped under Suits,
+The audit pins 14 exact files from HERBERTM3 (5), KlysmGt (5) and Sandro (4).
+Thirteen are enabled after authenticated catalogue acceptance; Nobody remains
+held because an unbuffered seek does not resume in the gateway route.
+The addition contains 10 movie versions and three physical episodes, grouped under Suits,
 Peaky Blinders and Prison Break. No complete upstream playlist is imported.
 Pixeldrain's five hotlink-denied files and the unavailable Ong-bak 3 file remain excluded.
 
@@ -10,6 +12,24 @@ with forward/backward seeking and teardown. This was a direct-URL media audit;
 normal catalog import and authenticated resolver acceptance are separate release checks.
 Creed II took 18 seconds to start. Ads are accepted, including the advertisement
 observed in the Black Panther file. No availability, native-player or capacity guarantee follows.
+
+Authenticated catalogue acceptance additionally requires 30 seconds of decoded video
+and audio, a seek outside the buffered passage, five seconds of playback after that
+seek, and release of all owned player sessions. A resumed passage cannot validate
+an unbuffered seek to the same position. Invalid automation attempts that never
+launch the selected content are retained separately from media failures.
+
+The acceptance tests exposed a Norva Relay transport defect: wrapping an upstream
+body with the revocation ReadableStream caused Workers to omit Content-Length.
+Some progressive files then exposed only a 0-0 seekable range. Commit e01f9b79
+preserves known identity-encoded lengths using FixedLengthStream, retaining
+revocation and cancellation. A real workerd HTTP regression reproduces the missing
+header and verifies the corrected full and partial responses. Production playback
+now exposes the full duration for Premiere annee, Black Panther, Cheaper by the
+Dozen and Extraction 2; their seeks resume in approximately 1.3-2.4 seconds.
+Extraction 2 took 30.4 seconds to start on this acceptance run; this remains a
+measured startup limitation. Nobody is excluded from both imports and URL resolution
+until a later complete catalogue playback test succeeds.
 
 TMDB identities and release years were checked against its API. Series file labels
 are normalized from their source numbering: Suits T4 chapter 12 becomes S04E12;

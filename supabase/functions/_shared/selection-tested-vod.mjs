@@ -565,10 +565,17 @@ export const SELECTION_TESTED_VOD = Object.freeze([
   }
 ].map(entry => Object.freeze({ ...entry, validation: Object.freeze(entry.validation) })));
 
+// The raw-file audit is not sufficient for activation. These files failed the
+// authenticated catalogue playback check; retain their evidence, but neither
+// import nor resolve them until a later integration check succeeds.
+export const SELECTION_TESTED_VOD_HOLDS = Object.freeze({
+  'tested-20260907-oracle-es-2': 'catalogue-seek-timeout',
+});
+
 export function testedSelectionVodEntries(feedId) {
-  return SELECTION_TESTED_VOD.filter(entry => entry.feedId === feedId);
+  return SELECTION_TESTED_VOD.filter(entry => entry.feedId === feedId && !SELECTION_TESTED_VOD_HOLDS[entry.tvgId]);
 }
 
 export function testedSelectionVodUrlAllowed(feedId, url) {
-  return SELECTION_TESTED_VOD.some(entry => entry.feedId === feedId && entry.url === url);
+  return testedSelectionVodEntries(feedId).some(entry => entry.url === url);
 }
