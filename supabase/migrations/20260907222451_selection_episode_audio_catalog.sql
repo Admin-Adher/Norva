@@ -53,7 +53,7 @@ begin
     or (v_snapshot->>'sourceVisibilityEpoch')::bigint is distinct from p_source_visibility_epoch
     or (v_snapshot->>'userVisibilityEpoch')::bigint is distinct from p_user_visibility_epoch
     or (v_snapshot->>'isCatalogVisible')::boolean is distinct from true then
-    raise exception 'Selection catalogue snapshot changed' using errcode='40001';
+    raise exception 'Selection catalogue snapshot changed' using errcode='PT409';
   end if;
 
   -- Stale episode evidence must not survive a removed file under a kept parent.
