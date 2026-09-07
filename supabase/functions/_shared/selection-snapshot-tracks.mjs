@@ -43,11 +43,12 @@ export async function selectionSnapshotFileTags(externalId) {
 // Reuses the normal exact-file cache/fanout RPCs. No identity is invented for a
 // public M3U source: each account retains its source-scoped key. Existing probes
 // and speech verification win over this preparation snapshot on later imports.
-export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId, rows, assertSourceCurrent = async()=>{} }) {
+export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
   if (sourceId !== await discoverySourceId(userId)) return {seeded:0};
   const files = await snapshot();
   const selected = rows.filter(r => r.item_type === 'movie' && files.get(r.external_id)?.url === r.playback_hint?.targetUrl);
   if (!selected.length) return {seeded:0};
+  if (!generationFence?.p_generation_id) throw new Error('Selection track hydration requires a catalogue generation');
   const key = `source:${sourceId}`, cached = new Set(), observed = new Set();
   // Selection IDs are long hashes: 50 keep PostgREST request URIs below 8 KiB.
   for (let offset=0;offset<selected.length;offset+=50) {
@@ -69,18 +70,29 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
   }
   let seeded=0;
   const pending=selected.filter(row=>!cached.has(row.external_id)||!observed.has(row.external_id));
-  for(let offset=0;offset<pending.length;offset+=4) {
-    await assertSourceCurrent();
-    await Promise.all(pending.slice(offset,offset+4).map(async row=>{
-      const tags=files.get(row.external_id);
-      const args={p_server_host:key,p_item_type:'movie',p_external_id:row.external_id,p_audio_tracks:tags.audioTracks,
-        p_subtitle_tracks:tags.subtitleTracks,p_has_audio:true,p_has_subtitle:tags.hasSubtitle};
-      if(!cached.has(row.external_id)){
-        const {error}=await db.rpc('upsert_catalog_file_tracks',args);if(error)throw error;
-      }
-      const fanout=await db.rpc('norva_fanout_file_tracks_to_users_fenced',args);if(fanout.error)throw fanout.error;
-      seeded++;
-    }));
+  for(let offset=0;offset<pending.length;offset+=50) {
+    const batch=pending.slice(offset,offset+50);
+    for(let index=0;index<batch.length;index+=4) {
+      await assertSourceCurrent();
+      await Promise.all(batch.slice(index,index+4).map(async row=>{
+        if(cached.has(row.external_id))return;
+        const tags=files.get(row.external_id);
+        const {error}=await db.rpc('upsert_catalog_file_tracks',{
+          p_server_host:key,p_item_type:'movie',p_external_id:row.external_id,p_audio_tracks:tags.audioTracks,
+          p_subtitle_tracks:tags.subtitleTracks,p_has_audio:true,p_has_subtitle:tags.hasSubtitle,
+        });
+        if(error)throw error;
+      }));
+      await assertSourceCurrent();
+    }
+    // Use the normal generation-fenced bulk join: one ownership proof and one
+    // language-union recomputation per title, rather than per-file fanout calls.
+    const hydrated=await db.rpc('hydrate_cloud_title_file_languages',{
+      p_user_id:userId,p_source_id:sourceId,...generationFence,
+      p_server_key:key,p_item_type:'movie',p_external_ids:batch.map(row=>row.external_id),
+    });
+    if(hydrated.error)throw hydrated.error;
+    seeded+=batch.length;
     await assertSourceCurrent();
   }
   await assertSourceCurrent();

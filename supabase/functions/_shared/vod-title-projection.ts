@@ -360,7 +360,8 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   // exact movie maps for every new Selection owner, preserving later probes.
   await hydrateSelectionSnapshotMovieTracks({
     db: options.db, userId: options.userId, sourceId: options.sourceId,
-    rows: savedVariants, assertSourceCurrent: options.assertSourceCurrent,
+    rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
+    assertSourceCurrent: options.assertSourceCurrent,
   });
 
   // Exact per-file track caches are shared across accounts by provider identity.
