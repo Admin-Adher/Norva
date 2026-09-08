@@ -91,19 +91,21 @@ test('media page preserves the server logical-title cursor', async () => {
     'the next cursor must advance by titles, not variant rows');
 });
 
-test('Series uses the paged grid for a selected provider and preserves multi-genre OR', () => {
+test('Series uses source-scoped rails for a resolved provider and preserves multi-genre OR', () => {
   const sandbox = { window: { GenreRails: {} }, console };
   vm.createContext(sandbox);
   vm.runInContext(read('public/js/pages/SeriesPage.js'), sandbox, { filename: 'SeriesPage.js' });
   const page = Object.create(sandbox.window.SeriesPage.prototype);
   Object.assign(page, {
     sourceSelect: { value: '900001' },
+    sources: [{ id: '900001', cloudId: '898fe2bc-22fa-4067-ae8a-2f77d5bba6ca' }],
     _isTvMode: () => false,
     isCloudPagedMode: () => true,
     hasActiveFilters: () => false
   });
-  assert.equal(page.shouldShowRails(), false,
-    'a provider-scoped Series view must never fall back to finite global rails');
+  assert.equal(page.shouldShowRails(), true);
+  page.sources = [];
+  assert.equal(page.shouldShowRails(), false, 'an unresolved source must never load global rails');
 
   let openedBuckets = null;
   Object.assign(page, {

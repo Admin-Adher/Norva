@@ -17,6 +17,33 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    // Global rails use the existing materialised read model. A selected source
+    // needs its own complete genre summary and scoped pages: filtering the finite
+    // global preview would silently lose titles and entire genres. Bound reads to
+    // two small pages at a time; See all keeps the endpoint's full pagination.
+    async function load(api, params, isCurrent = () => true) {
+        if (!params.source) return api.genreRails(params);
+        const summary = await api.genreSummary({ type: params.type, source: params.source });
+        const genres = (summary?.genres || []).filter(genre => genre.count > 0 && !genre.hidden);
+        const rails = new Array(genres.length);
+        let next = 0;
+        async function worker() {
+            while (isCurrent() && next < genres.length) {
+                const index = next++;
+                const genre = genres[index];
+                const page = await api.genreItems({ ...params, bucket: genre.bucket, offset: 0 });
+                rails[index] = {
+                    id: `genre-${genre.bucket}`,
+                    title: genre.label,
+                    curation: { kind: 'genre_bucket', bucket: genre.bucket },
+                    items: page?.items || []
+                };
+            }
+        }
+        await Promise.all([worker(), worker()]);
+        return { rails: rails.filter(Boolean) };
+    }
+
     function posterOf(item) {
         const data = item.data || {};
         let url = item.poster_url || item.posterUrl || item.stream_icon || item.cover
@@ -86,13 +113,15 @@
     function cardHtml(item, railIndex, itemIndex) {
         const variantCount = Number(item.variantCount || item.variant_count || (item.data && item.data.variantCount) || 0);
         const t = titleOf(item);
-        const providerBadge = window.MediaUtils?.providerAudioBadge(item) || '';
+        // Match the catalogue grid: observed audio takes precedence over the
+        // provider declaration. TMDB's original language is never audio evidence.
+        const languageBadge = window.MediaUtils?.versionLanguageBadge(item, {}) || '';
         return `
             <div class="dashboard-card" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     <img src="${esc(posterOf(item))}" alt="${esc(t)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(variantCount)}) || "{}")}">${variantCount} versions</div>` : ''}
-                    ${providerBadge ? `<span class="home-card-language-badge">${esc(providerBadge)}</span>` : ''}
+                    ${languageBadge ? `<span class="home-card-language-badge" title="${esc(languageBadge)}" aria-label="${esc(languageBadge)}">${esc(languageBadge)}</span>` : ''}
                     <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
                 </div>
                 <div class="card-info">
@@ -232,5 +261,5 @@
         wireArrows(container);
     }
 
-    window.GenreRails = { render, appendCards, renderCustom };
+    window.GenreRails = { load, render, appendCards, renderCustom };
 })();

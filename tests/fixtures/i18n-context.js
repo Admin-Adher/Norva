@@ -57,6 +57,47 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
             await tick();
             return {locale,kind,up:document.getElementById(prefix+'-thumb-up').textContent.trim(),down:document.getElementById(prefix+'-thumb-down').textContent.trim()};
         },
+        async verifyRails(kind) {
+            const page = Object.create((kind === 'movies' ? MoviesPage : SeriesPage).prototype);
+            const container = document.getElementById(kind + '-grid');
+            const sourceId = '898fe2bc-22fa-4067-ae8a-2f77d5bba6ca';
+            const items = [
+                {title:'Observed audio',audioLanguages:['es'],audioLanguageValidationStatus:'probed',variantCount:2},
+                {title:'Declared audio',providerAudioLanguages:['te'],providerAudioLanguageStatus:'provider_declared'},
+                {title:'Multiple audio',audioLanguages:['es','en'],audioLanguageValidationStatus:'probed'},
+            ];
+            const calls = [];
+            window.API = {media:{
+                genreSummary: async params => {calls.push(params);return {genres:[{bucket:'action',label:'Action',count:1000}]};},
+                genreItems: async params => {calls.push(params);return {items,count:1000,hasMore:true};},
+                genreRails: async params => {calls.push(params);return {rails:[{id:'genre-action',curation:{bucket:'action'},title:'Action',items}]};}
+            }};
+            Object.assign(page,{
+                container, sourceSelect:this.source, sources:[{id:'fixture-source',cloudId:sourceId}],
+                _isTvMode:()=>false,isCloudPagedMode:()=>true,hasActiveFilters:()=>false,
+                currentBucketViewKey:()=>this.source.value, openBucket:rail=>{page.opened=rail.curation.bucket;},
+            });
+            for(const selected of ['', 'fixture-source']) {
+                this.source.value=selected;
+                assert(page.shouldShowRails(),'default source must show rails');
+                await page.renderGenreRails(); await tick(); NorvaI18n.translate(container);
+                const cards=[...container.querySelectorAll('.dashboard-card')];
+                assert(cards.length===3&&container.classList.contains('rail-host'),'missing category cards');
+                for(const [index,card] of cards.entries()) {
+                    const badge=card.querySelector('.home-card-language-badge'), image=card.querySelector('.card-image');
+                    const b=badge.getBoundingClientRect(), r=image.getBoundingClientRect();
+                    assert(badge.textContent===MediaUtils.versionLanguageBadge(items[index],{}),'row/grid audio disagreement');
+                    assert(badge.getAttribute('aria-label')===badge.textContent,'missing accessible audio');
+                    assert(b.width>0&&b.height>0&&b.left>=r.left-1&&b.right<=r.right+1&&b.bottom<=r.bottom+1,'audio badge outside poster');
+                    assert(badge.scrollWidth<=badge.clientWidth+1,'clipped audio badge');
+                }
+                container.querySelector('.genre-see-all').click();
+                assert(page.opened==='action','see all lost genre');
+            }
+            assert(calls.length===3&&calls[1].source===sourceId&&calls[2].source===sourceId,'source scope lost');
+            page._isTvMode=()=>true;assert(!page.shouldShowRails(),'TV must retain its grid');
+            return {rails:1,cards:3,sourceRequests:2};
+        },
         async verify(locale, kind) {
             const labels = await this.prepare(locale,kind);
             assert(document.documentElement.dir === (locale==='ar'?'rtl':'ltr'), 'wrong text direction');
@@ -100,6 +141,7 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
             assert(GenreTaxonomy.displayGenre('Crime')===NorvaI18n.t('ui_web_22611ceccd0b'),'untranslated detail genre');
             if(locale==='fr')assert(NorvaI18n.t('ui_video_count',{count:1})==='1 vidéo','singular video');
             if(locale==='fr') {assert(NorvaI18n.t('ui_season_count',{count:1})==='1 saison','singular season');assert(this.audio.options[1].text==='Espagnol · 1','English language leaked');}
+            await this.verifyRails(kind);
             assert(document.documentElement.scrollWidth<=innerWidth+1,'horizontal page overflow');
             assert(!fixtureErrors.length,fixtureErrors.join('; '));
             return {...labels,passed:true,width:innerWidth};

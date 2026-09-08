@@ -133,6 +133,7 @@ class SeriesPage {
             await this.loadPlaybackStatuses();
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
             if (this._isTvMode() || buckets.length || this.isLanguageFilterActive()) this.onFiltersChanged();
+            else if (this.shouldShowRails()) await this.renderGenreRails();
             else await this.loadSeries();
         });
 
@@ -322,6 +323,7 @@ class SeriesPage {
     }
 
     onFiltersChanged() {
+        this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
         this.persistFilters();
         this.renderActiveFilterChips();
         // Cloud: picking a genre opens that genre's full grid — the same dense,
@@ -544,13 +546,20 @@ class SeriesPage {
         // TV follows the supplied flat-grid mockup. Web/mobile retain the curated
         // genre rails exactly as before.
         return !this._isTvMode() && this.isCloudPagedMode() &&
-            !!window.GenreRails && !this.sourceSelect?.value && !this.hasActiveFilters();
+            !!window.GenreRails && (!this.sourceSelect?.value || !!this.selectedCloudSourceId()) && !this.hasActiveFilters();
     }
 
     async renderGenreRails() {
-        this.railsView = true;
+        const requestId = this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
+        const scopeKey = this.currentBucketViewKey();
+        const isCurrent = () => requestId === this._genreRailsRequestId &&
+            scopeKey === this.currentBucketViewKey() && !this.activeBucket && this.shouldShowRails();
+        this.cloudRequestId = (this.cloudRequestId || 0) + 1;
+        this.isLoading = true;
+        this._viewRenderedAt = 0;
         this.activeBucket = null;
         this.bucketObserver?.disconnect();
+        this.railsView = true;
         if (this.countEl) this.countEl.textContent = '';
         this.resetBtn?.classList.add('hidden');
         if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
@@ -558,10 +567,14 @@ class SeriesPage {
             // Twelve cards cover two desktop/mobile viewports while bounding the
             // hydration and variant joins required before the first rail can paint.
             // TV keeps the longer row for D-pad browsing on a wide screen.
-            const payload = await API.media.genreRails({
+            this.container.classList.remove('rail-host');
+            this.container.innerHTML = MediaUtils.skeletonCards(12);
+            const payload = await window.GenreRails.load(API.media, {
                 type: 'series',
-                limit: this._isTvMode() ? 18 : 12
-            });
+                limit: this._isTvMode() ? 18 : 12,
+                ...(this.selectedCloudSourceId() ? { source: this.selectedCloudSourceId() } : {})
+            }, isCurrent);
+            if (!isCurrent()) return;
             const rails = (payload && payload.rails) || [];
             // Fall back to the flat grid whenever the rails carry NO items — not only when
             // the rails array is empty. A mid-sync / incomplete materialization can return
@@ -584,9 +597,12 @@ class SeriesPage {
             // reaching filterAndRender, freezing an empty/error view on back-nav.
             this._viewRenderedAt = Date.now();
         } catch (err) {
+            if (!isCurrent()) return;
             console.warn('[Series] Genre rails unavailable, falling back to grid:', err);
             this.railsView = false;
             return this.loadSeries();
+        } finally {
+            if (requestId === this._genreRailsRequestId) this.isLoading = false;
         }
     }
 
@@ -617,6 +633,7 @@ class SeriesPage {
 
     // "See all" on a genre rail → a full, paged grid of that genre.
     openBucket(rail) {
+        this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
         this.activeBucket = bucket;
@@ -1264,6 +1281,8 @@ class SeriesPage {
     }
 
     async loadSeries() {
+        this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
+        this.railsView = false;
         if (this.isCloudPagedMode()) {
             return this.loadCloudSeries({ reset: true });
         }
