@@ -45,6 +45,10 @@ function loadPage(relativePath, className) {
             })
         }
     };
+    const mediaOverrides = context.MediaUtils;
+    vm.runInNewContext(read('public/js/utils/mediaUtils.js'), context);
+    Object.assign(context.window.MediaUtils, mediaOverrides);
+    context.MediaUtils = context.window.MediaUtils;
     vm.runInNewContext(read('public/js/utils/CatalogFilterState.js'), context, {
         filename: 'public/js/utils/CatalogFilterState.js'
     });
@@ -320,7 +324,7 @@ for (const spec of [
         assert.equal(audio.value, 'fr');
         assert.equal(
             audio.options.find(option => option.value === 'fr').text,
-            `French · 0 ${spec.key}`
+            'French · 0'
         );
         assert.equal(page.facetLanguageName('fr', audio.options.find(option => option.value === 'fr').text), 'French');
     });

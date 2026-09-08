@@ -27,6 +27,59 @@ public class ContextualLanguageInstrumentedTest {
     @Test public void portraitAllLocalesAndTextSizes() throws Exception { verify(360, 800); }
     @Test public void landscapeAllLocalesAndTextSizes() throws Exception { verify(844, 390); }
 
+    /** Run in gesture and three-button navigation via adb overlay selection. */
+    @Test public void attachedFiltersKeepScopeWithKeyboard() throws Exception {
+        android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        android.app.Activity activity = instrumentation.startActivitySync(new android.content.Intent(
+            instrumentation.getTargetContext(), MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        AtomicReference<WebView> holder = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> {
+            WebView view = new WebView(activity); holder.set(view);
+            view.getSettings().setJavaScriptEnabled(true);
+            view.getSettings().setDomStorageEnabled(true);
+            view.getSettings().setUseWideViewPort(true);
+            view.getSettings().setTextZoom(130);
+            view.setWebViewClient(new WebViewClient() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
+                    String path = request.getUrl().getPath();
+                    try {
+                        String mime = path.endsWith(".html") ? "text/html" : path.endsWith(".css") ? "text/css" : path.endsWith(".js") ? "text/javascript" : "application/octet-stream";
+                        return new WebResourceResponse(mime, "UTF-8", instrumentation.getContext().getAssets().open(path.substring(1)));
+                    } catch (Exception ignored) {
+                        return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+                    }
+                }
+            });
+            activity.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            activity.setContentView(view);
+            view.loadUrl("https://norva-context.test/i18n-context.html");
+        });
+        try {
+            String ready="false";
+            for(int i=0;i<100&&!"true".equals(ready);i++){Thread.sleep(100);ready=evaluate(instrumentation,holder.get(),"window.fixtureReady");}
+            assertEquals("Attached fixture loaded","true",ready);
+            for(String locale:new String[]{"fr","ar"}) for(String kind:new String[]{"movies","series"}) {
+                evaluate(instrumentation,holder.get(),"window.imeReady=false;contextFixture.prepare('"+locale+"','"+kind+"').then(()=>{document.getElementById('"+kind+"-mobile-filters-btn').click();document.getElementById('"+kind+"-category-btn').click();document.getElementById('"+kind+"-category-search').focus();window.imeReady=true;});");
+                for(int i=0;i<100&&!"true".equals(evaluate(instrumentation,holder.get(),"window.imeReady"));i++)Thread.sleep(100);
+                instrumentation.runOnMainSync(() -> {
+                    holder.get().requestFocus();
+                    ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE))
+                        .showSoftInput(holder.get(), android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                });
+                AtomicReference<Boolean> keyboard=new AtomicReference<>(false);
+                for(int i=0;i<50&&!keyboard.get();i++){
+                    Thread.sleep(100);
+                    instrumentation.runOnMainSync(()->{android.view.WindowInsets insets=holder.get().getRootWindowInsets();keyboard.set(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));});
+                }
+                assertTrue("Keyboard visible for "+locale+"/"+kind,keyboard.get());
+                assertEquals("Scope survives both reset orders with keyboard", "\"ok\"",evaluate(instrumentation,holder.get(),
+                    "(()=>{const f=contextFixture;f.source.value='fixture-source';f.categories.setSelected(['comedie']);f.source.value='';f.categories.setSelected([]);if(f.source.value||f.categories.getSelected().size)return 'source/category';f.categories.setSelected(['comedie']);f.source.value='fixture-source';f.categories.setSelected([]);f.source.value='';if(f.source.value||f.categories.getSelected().size)return 'category/source';const sheet=document.getElementById('"+kind+"-filter-bar');if(sheet.inert||sheet.getAttribute('aria-hidden')!=='false')return 'inaccessible sheet';if(document.activeElement.id!=='"+kind+"-category-search')return 'focus lost';return 'ok';})()"));
+                instrumentation.runOnMainSync(()->((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(holder.get().getWindowToken(),0));
+                System.out.println("CONTEXT_KEYBOARD_OK locale="+locale+" media="+kind+" textZoom=130");
+            }
+        } finally { instrumentation.runOnMainSync(()->{holder.get().destroy();activity.finish();}); }
+    }
+
     private void verify(int width, int height) throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         android.content.Context context = instrumentation.getTargetContext();

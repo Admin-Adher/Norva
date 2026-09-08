@@ -20,7 +20,10 @@ for (const name of ['MoviesPage', 'SeriesPage']) {
       API: { sources: { getAll: async () => sources } },
       document: { createElement: () => ({}), documentElement: { lang: 'fr' } },
       MediaUtils: { escapeHtml: value => String(value) }, Intl,
+      NorvaI18n: { language: 'fr', t: (key, options) => options?.defaultValue || key },
     };
+    vm.runInNewContext(fs.readFileSync(path.join(root, 'public/js/utils/mediaUtils.js'), 'utf8'), context);
+    context.MediaUtils = context.window.MediaUtils;
     vm.runInNewContext(fs.readFileSync(path.join(root, `public/js/pages/${name}.js`), 'utf8'), context);
     const page = Object.create(context.window[name].prototype);
     page.sourceSelect = {
@@ -46,7 +49,7 @@ for (const name of ['MoviesPage', 'SeriesPage']) {
     const audio = { value: 'provider-hi', innerHTML: '', options: [{ value: 'provider-hi', text: 'Hindi' }] };
     page.applyFacetOptions(audio, 'Tout', [{ value: 'catalog-hi', label: 'Hindi · 14 series', count: 14 }]);
     assert.equal(audio.value, 'catalog-hi');
-    assert.match(audio.innerHTML, /hindi · 14/);
+    assert.match(audio.innerHTML, /Hindi · 14/);
     assert.doesNotMatch(audio.innerHTML, /provider-hi|series/);
     page.applyFacetOptions(audio, 'Tout', [{ value: 'hi', label: 'Hindi', count: 14 }]);
     assert.equal(audio.value, 'hi');
