@@ -26,6 +26,34 @@
         { id: 'arabe', get label() { return (globalThis.NorvaI18n?.t("ui_web_d3772238ed12", { defaultValue: "Arabic Collection" }) ?? 'Arabic Collection'); } },
         { id: 'autres', get label() { return (globalThis.NorvaI18n?.t("ui_web_f97e9da0e3b8", { defaultValue: "Other" }) ?? 'Other'); } }
     ];
+    // Canonical TMDB genre display names; IDs and classification inputs are untouched.
+    const GENRE_MESSAGE_KEYS = {
+        "action": "ui_web_64cff1319d2f",
+        "adventure": "ui_web_9a3c16424750",
+        "comedy": "ui_web_85f1c8c8e324",
+        "drama": "ui_web_da72bf5bbca4",
+        "sci-fi & fantasy": "ui_web_fb78fb739cfd",
+        "horror": "ui_web_271a22f75d73",
+        "thriller & crime": "ui_web_623cf66ba78f",
+        "romance": "ui_web_3bc3567a7fc6",
+        "family": "ui_web_bd2d677b2ed4",
+        "animation": "ui_web_1dd10f244a62",
+        "crime": "ui_web_22611ceccd0b",
+        "documentary": "ui_web_43f1fc2390a4",
+        "fantasy": "ui_web_542855513e4f",
+        "history": "ui_web_0e7696009337",
+        "music": "ui_web_6eb00b4b2614",
+        "mystery": "ui_web_9ed9b84aa0a7",
+        "science fiction": "ui_web_35624b8800fa",
+        "thriller": "ui_web_9360404e4f35",
+        "war": "ui_web_be8816dbd8b8",
+        "western": "ui_web_d7d2f0ffb02c"
+};
+    function displayGenre(name) {
+        const key = GENRE_MESSAGE_KEYS[String(name || '').trim().toLowerCase()];
+        return key ? (globalThis.NorvaI18n?.t(key, { defaultValue: name }) || name) : name;
+    }
+
     const BUCKET_ORDER = BUCKETS.map((b) => b.id);
 
     function norm(value) {
@@ -227,5 +255,5 @@
         return node('other', 'other', 'Other', 0);
     }
 
-    window.GenreTaxonomy = { BUCKETS, BUCKET_ORDER, classifyTitle, classifyCategory, classifyCategoryNode, label };
+    window.GenreTaxonomy = { BUCKETS, BUCKET_ORDER, classifyTitle, classifyCategory, classifyCategoryNode, label, displayGenre };
 })();

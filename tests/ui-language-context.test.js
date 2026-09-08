@@ -124,7 +124,7 @@ test('actual fiche back actions localize the default but retain search and provi
     for (const [page, key] of [['MoviesPage','ui_movies'], ['SeriesPage','ui_series']]) {
         const source = read(`public/js/pages/${page}.js`);
         const start = source.indexOf('        // Context-aware back label');
-        const body = source.slice(start, source.indexOf('\n\n        //', start + 30));
+        const body = source.slice(start, source.indexOf('\n        }', start) + '\n        }'.length);
         const label = { textContent:'' };
         r.backPage = {detailsPanel:{querySelector:()=>({querySelector:()=>label})}, searchInput:{value:''}};
         for (const {code} of locales) {
@@ -140,4 +140,24 @@ test('actual fiche back actions localize the default but retain search and provi
             }
         }
     }
+});
+
+test('fiche counters and genre display use the UI locale without changing source metadata', () => {
+    const r=runtime(), sourceGenres=['Crime','Drama','Provider genre'];
+    for(const {code} of locales) {
+        r.NorvaI18n.setPreference(code);
+        assert.deepEqual(Array.from(sourceGenres,genre=>r.GenreTaxonomy.displayGenre(genre)),[
+            r.NorvaI18n.t('ui_web_22611ceccd0b'),r.NorvaI18n.t('ui_web_da72bf5bbca4'),'Provider genre'
+        ]);
+        for(const unit of ['season','episode','video','version']) for(const count of [0,1,2,5,12]) {
+            const result=r.NorvaI18n.t('ui_'+unit+'_count',{count});
+            assert.ok(result.includes(String(count)),`${code}/${unit}/${count}`);
+            assert.ok(!result.startsWith('ui_'),`${code}/${unit}`);
+        }
+    }
+    assert.deepEqual(sourceGenres,['Crime','Drama','Provider genre']);
+    r.NorvaI18n.setPreference('fr');
+    assert.equal(r.NorvaI18n.t('ui_video_count',{count:1}), '1 vidéo');
+    assert.equal(r.NorvaI18n.t('ui_episode_count',{count:2}), '2 épisodes');
+    assert.equal(r.NorvaI18n.t('ui_trailer'),'Bande-annonce');
 });

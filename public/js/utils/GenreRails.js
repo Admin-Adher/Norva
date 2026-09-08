@@ -45,7 +45,7 @@
         const year = item.year || data.year || data.releaseYear || '';
         const rating = item.rating || item.vote_average || data.voteAverage || '';
         const genres = Array.isArray(item.genres) ? item.genres : (Array.isArray(data.genres) ? data.genres : []);
-        const parts = [year].concat(genres.slice(0, 2));
+        const parts = [year].concat(genres.slice(0, 2).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre));
         if (rating) parts.push('★ ' + String(rating).slice(0, 3));
         return parts.filter(Boolean).join(' · ');
     }

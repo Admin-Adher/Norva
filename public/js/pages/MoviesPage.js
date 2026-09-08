@@ -3034,10 +3034,10 @@ class MoviesPage {
             this.getItemYear(displayMovie),
             this.getMovieDuration(displayMovie),
             ratingLabel,
-            ...this.getMovieGenres(displayMovie).slice(0, 3),
+            ...this.getMovieGenres(displayMovie).slice(0, 3).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
             version.quality,
             this.displayLanguageStatus(MediaUtils.versionLanguageBadge(movie, this.getPreferences())),
-            ordered.length > 1 ? `${ordered.length} versions` : '',
+            ordered.length > 1 ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(ordered.length), defaultValue: `${ordered.length} versions` }) ?? `${ordered.length} versions`) : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);
 
@@ -3141,7 +3141,7 @@ class MoviesPage {
                     const btn = document.createElement('button');
                     btn.type = 'button';
                     btn.className = 'btn btn-ghost detail-trailer-btn';
-                    btn.innerHTML = '▶ Trailer';
+                    btn.textContent = '▶ ' + (globalThis.NorvaI18n?.t('ui_trailer', { defaultValue: 'Trailer' }) || 'Trailer');
                     btn.addEventListener('click', () =>
                         MediaUtils.openTrailerLightbox(meta.trailerKey, this.getMovieDisplayTitle(displayMovie)));
                     actions.appendChild(btn);

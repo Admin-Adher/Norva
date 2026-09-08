@@ -96,6 +96,8 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
             }
             assert(NorvaI18n.t('ui_season_count',{count:1})!== 'ui_season_count','plural key missing');
             assert(document.getElementById('fixture-season-count').textContent===NorvaI18n.t('ui_season_count',{count:1}),'DOM plural count untranslated');
+            assert(GenreTaxonomy.displayGenre('Crime')===NorvaI18n.t('ui_web_22611ceccd0b'),'untranslated detail genre');
+            if(locale==='fr')assert(NorvaI18n.t('ui_video_count',{count:1})==='1 vidéo','singular video');
             if(locale==='fr') {assert(NorvaI18n.t('ui_season_count',{count:1})==='1 saison','singular season');assert(this.audio.options[1].text==='Espagnol · 1','English language leaked');}
             assert(document.documentElement.scrollWidth<=innerWidth+1,'horizontal page overflow');
             assert(!fixtureErrors.length,fixtureErrors.join('; '));

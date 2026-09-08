@@ -1962,7 +1962,7 @@ class SeriesPage {
         // Hover preview (desktop): bigger art + instant Play (featured episode) / Details.
         card.__norvaHover = () => ({
             title: displayName,
-            meta: [year, series.tmdb?.number_of_seasons ? `${series.tmdb.number_of_seasons} seasons` : '',
+            meta: [year, series.tmdb?.number_of_seasons ? (globalThis.NorvaI18n?.t('ui_season_count', { count: Number(series.tmdb.number_of_seasons), defaultValue: `${series.tmdb.number_of_seasons} seasons` }) ?? `${series.tmdb.number_of_seasons} seasons`) : '',
                 rating ? `★ ${rating}` : ''].filter(Boolean).join(' · '),
             poster,
             backdrop: MediaUtils.safeImageUrl(this.getSeriesBackdrop(series), '') || null,
@@ -2499,8 +2499,8 @@ class SeriesPage {
         const version = MediaUtils.parseVersionInfo(selected?.name || '');
         const meta = [
             this.getSeriesYear(display),
-            display?.tmdb?.number_of_seasons ? `${display.tmdb.number_of_seasons} seasons` : '',
-            ...this.getSeriesGenres(display).slice(0, 2),
+            display?.tmdb?.number_of_seasons ? (globalThis.NorvaI18n?.t('ui_season_count', { count: Number(display.tmdb.number_of_seasons), defaultValue: `${display.tmdb.number_of_seasons} seasons` }) ?? `${display.tmdb.number_of_seasons} seasons`) : '',
+            ...this.getSeriesGenres(display).slice(0, 2).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
             rating ? `★ ${rating}` : '',
             version.quality,
             this.displayLanguageStatus(MediaUtils.versionLanguageBadge(selected, this.getPreferences()))
@@ -3651,8 +3651,8 @@ class SeriesPage {
         if (seriesMetaEarly) {
             const earlyMeta = [
                 this.getSeriesYear(series),
-                (this.currentSeriesGroup?.items?.length > 1) ? `${this.currentSeriesGroup.items.length} versions` : '',
-                ...this.getSeriesGenres(series).slice(0, 3),
+                (this.currentSeriesGroup?.items?.length > 1) ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(this.currentSeriesGroup.items.length), defaultValue: `${this.currentSeriesGroup.items.length} versions` }) ?? `${this.currentSeriesGroup.items.length} versions`) : '',
+                ...this.getSeriesGenres(series).slice(0, 3).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
             ].filter(Boolean);
             seriesMetaEarly.innerHTML = earlyMeta.map(p => `<span>${MediaUtils.escapeHtml(p)}</span>`).join('');
         }
@@ -3703,21 +3703,21 @@ class SeriesPage {
             const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
             const episodeCount = flatEpisodes.length;
             const selectionFiles = info.seriesDelivery === 'selection';
-            const selectionCount = globalThis.NorvaI18n?.t('ui_selection_videos', { defaultValue: '{{p0}} videos', p0: episodeCount }) ?? `${episodeCount} videos`;
+            const selectionCount = (globalThis.NorvaI18n?.t('ui_video_count', { count: Number(episodeCount), defaultValue: `${episodeCount} videos` }) ?? `${episodeCount} videos`);
             const seasonCount = selectionFiles ? new Set(flatEpisodes.flatMap(row => row.episode.selectionUnit?.seasons || [])).size : seasons.length;
             if (tvEpisodeCount) {
-                tvEpisodeCount.textContent = selectionFiles ? selectionCount : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_2fa60079f674", {defaultValue: "{{p0}} episode{{p1}}", p0:(episodeCount),p1:(episodeCount === 1 ? '' : 's')}) : `${episodeCount} episode${episodeCount === 1 ? '' : 's'}`);
+                tvEpisodeCount.textContent = selectionFiles ? selectionCount : (globalThis.NorvaI18n?.t('ui_episode_count', { count: Number(episodeCount), defaultValue: `${episodeCount} episodes` }) ?? `${episodeCount} episodes`);
             }
-            const genres = this.getSeriesGenres(series).slice(0, 3);
+            const genres = this.getSeriesGenres(series).slice(0, 3).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre);
             const rating = this.getSeriesRatingText(series);
             const ratingLabel = rating ? `★ ${rating}` : '';
             const version = MediaUtils.parseVersionInfo(series.name);
             const metaParts = [
                 this.getSeriesYear(series),
-                seasonCount ? `${seasonCount} season${seasonCount > 1 ? 's' : ''}` : '',
-                episodeCount ? (selectionFiles ? selectionCount : `${episodeCount} episodes`) : '',
+                seasonCount ? (globalThis.NorvaI18n?.t('ui_season_count', { count: Number(seasonCount), defaultValue: `${seasonCount} seasons` }) ?? `${seasonCount} seasons`) : '',
+                episodeCount ? (selectionFiles ? selectionCount : (globalThis.NorvaI18n?.t('ui_episode_count', { count: Number(episodeCount), defaultValue: `${episodeCount} episodes` }) ?? `${episodeCount} episodes`)) : '',
                 ratingLabel,
-                (this.currentSeriesGroup?.items?.length > 1) ? `${this.currentSeriesGroup.items.length} versions` : '',
+                (this.currentSeriesGroup?.items?.length > 1) ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(this.currentSeriesGroup.items.length), defaultValue: `${this.currentSeriesGroup.items.length} versions` }) ?? `${this.currentSeriesGroup.items.length} versions`) : '',
                 ...genres,
                 version.quality,
                 this.displayLanguageStatus(MediaUtils.versionLanguageBadge(series, this.getPreferences()))
@@ -4069,7 +4069,7 @@ class SeriesPage {
                     const btn = document.createElement('button');
                     btn.type = 'button';
                     btn.className = 'btn btn-ghost detail-trailer-btn';
-                    btn.innerHTML = '▶ Trailer';
+                    btn.textContent = '▶ ' + (globalThis.NorvaI18n?.t('ui_trailer', { defaultValue: 'Trailer' }) || 'Trailer');
                     btn.addEventListener('click', () =>
                         MediaUtils.openTrailerLightbox(meta.trailerKey, this.getSeriesDisplayTitle(series)));
                     actions.appendChild(btn);
