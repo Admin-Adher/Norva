@@ -24,6 +24,26 @@ public class ContextualLanguageInstrumentedTest {
         return result.get();
     }
 
+    private static void tapSearch(android.app.Instrumentation instrumentation, WebView view, String kind) throws Exception {
+        // Use the rendered DOM bounds and a real touch event, as on a phone.
+        org.json.JSONArray rect = new org.json.JSONArray(evaluate(instrumentation, view,
+            "(()=>{const r=document.getElementById('"+kind+"-category-search').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,r.width,r.height,devicePixelRatio,innerWidth,innerHeight];})()"));
+        assertTrue("Search target is visible",rect.getDouble(2)>0&&rect.getDouble(3)>0
+            &&rect.getDouble(0)>0&&rect.getDouble(0)<rect.getDouble(5)
+            &&rect.getDouble(1)>0&&rect.getDouble(1)<rect.getDouble(6));
+        int[] offset = new int[2];
+        instrumentation.runOnMainSync(() -> view.getLocationOnScreen(offset));
+        float x=(float)(rect.getDouble(0)*rect.getDouble(4)+offset[0]);
+        float y=(float)(rect.getDouble(1)*rect.getDouble(4)+offset[1]);
+        long down=android.os.SystemClock.uptimeMillis();
+        for(int action:new int[]{android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP}) {
+            android.view.MotionEvent event=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,x,y,0);
+            event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+            instrumentation.sendPointerSync(event);event.recycle();
+            if(action==android.view.MotionEvent.ACTION_DOWN)Thread.sleep(40);
+        }
+    }
+
     @Test public void portraitAllLocalesAndTextSizes() throws Exception { verify(360, 800); }
     @Test public void landscapeAllLocalesAndTextSizes() throws Exception { verify(844, 390); }
 
@@ -35,6 +55,7 @@ public class ContextualLanguageInstrumentedTest {
         AtomicReference<WebView> holder = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
             WebView view = new WebView(activity); holder.set(view);
+            view.setFocusableInTouchMode(true);
             view.getSettings().setJavaScriptEnabled(true);
             view.getSettings().setDomStorageEnabled(true);
             view.getSettings().setUseWideViewPort(true);
@@ -62,14 +83,10 @@ public class ContextualLanguageInstrumentedTest {
             for(int i=0;i<100&&!"true".equals(ready);i++){Thread.sleep(100);ready=evaluate(instrumentation,holder.get(),"window.fixtureReady");}
             assertEquals("Attached fixture loaded","true",ready);
             for(String locale:new String[]{"fr","ar"}) for(String kind:new String[]{"movies","series"}) {
-                evaluate(instrumentation,holder.get(),"window.imeReady=false;contextFixture.prepare('"+locale+"','"+kind+"').then(async()=>{document.getElementById('"+kind+"-mobile-filters-btn').click();document.getElementById('"+kind+"-category-btn').click();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));document.getElementById('"+kind+"-category-search').focus();window.imeReady=true;});");
+                evaluate(instrumentation,holder.get(),"window.imeReady=false;contextFixture.prepare('"+locale+"','"+kind+"').then(async()=>{document.getElementById('"+kind+"-mobile-filters-btn').click();document.getElementById('"+kind+"-category-btn').click();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await Promise.all(document.getElementById('"+kind+"-filter-bar').getAnimations().map(animation=>animation.finished.catch(()=>{})));window.imeReady=true;});");
                 for(int i=0;i<100&&!"true".equals(evaluate(instrumentation,holder.get(),"window.imeReady"));i++)Thread.sleep(100);
-                assertEquals("Search focused before IME for "+locale+"/"+kind,
-                    "\""+kind+"-category-search\"",evaluate(instrumentation,holder.get(),"document.activeElement.id"));
-                instrumentation.runOnMainSync(() -> {
-                    ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE))
-                        .showSoftInput(holder.get(), android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
-                });
+                assertEquals("Filter opening animation completed","true",evaluate(instrumentation,holder.get(),"window.imeReady"));
+                tapSearch(instrumentation,holder.get(),kind);
                 AtomicReference<Boolean> keyboard=new AtomicReference<>(false);
                 for(int i=0;i<50&&!keyboard.get();i++){
                     Thread.sleep(100);
@@ -79,6 +96,10 @@ public class ContextualLanguageInstrumentedTest {
                 assertEquals("Scope survives both reset orders with keyboard for "+locale+"/"+kind, "\"ok\"",evaluate(instrumentation,holder.get(),
                     "(()=>{const f=contextFixture;f.source.value='fixture-source';f.categories.setSelected(['comedie']);f.source.value='';f.categories.setSelected([]);if(f.source.value||f.categories.getSelected().size)return 'source/category';f.categories.setSelected(['comedie']);f.source.value='fixture-source';f.categories.setSelected([]);f.source.value='';if(f.source.value||f.categories.getSelected().size)return 'category/source';const sheet=document.getElementById('"+kind+"-filter-bar');if(sheet.inert||sheet.getAttribute('aria-hidden')!=='false')return 'inaccessible sheet';if(document.activeElement.id!=='"+kind+"-category-search')return 'focus lost';return 'ok';})()"));
                 instrumentation.runOnMainSync(()->((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(holder.get().getWindowToken(),0));
+                for(int i=0;i<50&&keyboard.get();i++){
+                    Thread.sleep(100);
+                    instrumentation.runOnMainSync(()->{android.view.WindowInsets insets=holder.get().getRootWindowInsets();keyboard.set(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));});
+                }
                 System.out.println("CONTEXT_KEYBOARD_OK locale="+locale+" media="+kind+" textZoom=130");
             }
         } finally { instrumentation.runOnMainSync(()->{holder.get().destroy();activity.finish();}); }
