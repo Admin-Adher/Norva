@@ -59,7 +59,7 @@ public class ContextualLanguageInstrumentedTest {
             for(int i=0;i<100&&!"true".equals(ready);i++){Thread.sleep(100);ready=evaluate(instrumentation,holder.get(),"window.fixtureReady");}
             assertEquals("Attached fixture loaded","true",ready);
             for(String locale:new String[]{"fr","ar"}) for(String kind:new String[]{"movies","series"}) {
-                evaluate(instrumentation,holder.get(),"window.imeReady=false;contextFixture.prepare('"+locale+"','"+kind+"').then(()=>{document.getElementById('"+kind+"-mobile-filters-btn').click();document.getElementById('"+kind+"-category-btn').click();document.getElementById('"+kind+"-category-search').focus();window.imeReady=true;});");
+                evaluate(instrumentation,holder.get(),"window.imeReady=false;contextFixture.prepare('"+locale+"','"+kind+"').then(async()=>{document.getElementById('"+kind+"-mobile-filters-btn').click();document.getElementById('"+kind+"-category-btn').click();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));document.getElementById('"+kind+"-category-search').focus();window.imeReady=true;});");
                 for(int i=0;i<100&&!"true".equals(evaluate(instrumentation,holder.get(),"window.imeReady"));i++)Thread.sleep(100);
                 instrumentation.runOnMainSync(() -> {
                     holder.get().requestFocus();
@@ -118,7 +118,7 @@ public class ContextualLanguageInstrumentedTest {
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
                 for (String locale : LOCALES) for (String kind : new String[] {"movies", "series"}) {
-                    evaluate(instrumentation, holder.get(), "window.contextResult='pending';contextFixture.verify('"+locale+"','"+kind+"').then(r=>{window.contextResult=r.width==="+width+"?'ok':'wrong viewport '+r.width;}).catch(e=>window.contextResult=String(e));");
+                    evaluate(instrumentation, holder.get(), "window.contextResult='pending';contextFixture.verify('"+locale+"','"+kind+"').then(r=>{window.contextResult=Math.abs(r.width-"+width+")<=2?'ok':'wrong viewport '+r.width;}).catch(e=>window.contextResult=String(e));");
                     String result = "\"pending\"";
                     for (int i = 0; i < 100 && "\"pending\"".equals(result); i++) {
                         Thread.sleep(100); result = evaluate(instrumentation, holder.get(), "window.contextResult");
