@@ -31,6 +31,12 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
             const prefix = kind === 'movies' ? 'movie' : 'series';
             const rating = document.getElementById(prefix + '-title-rating');
             document.getElementById('rating-fixture').append(rating);
+            const seasonCount = document.createElement('span');
+            seasonCount.id = 'fixture-season-count';
+            seasonCount.setAttribute('data-i18n', 'ui_season_count');
+            seasonCount.setAttribute('data-i18n-args', '{"count":1}');
+            seasonCount.textContent = '1 seasons';
+            mount.append(seasonCount);
             let revision = 0;
             control = TitleRatingControl.fromIds({rootId:prefix+'-title-rating',upId:prefix+'-thumb-up',downId:prefix+'-thumb-down',statusId:prefix+'-rating-status',retryId:prefix+'-rating-retry',
                 getApi: () => ({ getExact: async () => ({rating:0}), set: async intent => ({rating:intent.rating,revision:++revision}) }) });
@@ -89,6 +95,7 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
                 assert(open.getAttribute('aria-expanded')==='false','filter sheet did not close');
             }
             assert(NorvaI18n.t('ui_season_count',{count:1})!== 'ui_season_count','plural key missing');
+            assert(document.getElementById('fixture-season-count').textContent===NorvaI18n.t('ui_season_count',{count:1}),'DOM plural count untranslated');
             if(locale==='fr') {assert(NorvaI18n.t('ui_season_count',{count:1})==='1 saison','singular season');assert(this.audio.options[1].text==='Espagnol · 1','English language leaked');}
             assert(document.documentElement.scrollWidth<=innerWidth+1,'horizontal page overflow');
             assert(!fixtureErrors.length,fixtureErrors.join('; '));

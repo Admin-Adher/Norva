@@ -64,8 +64,10 @@ function elementArgs(element, attribute = '') {
     try {
         const parsed = JSON.parse(element.getAttribute('data-i18n' + (attribute ? '-' + attribute : '') + '-args') || '{}');
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-        return Object.fromEntries(Object.entries(parsed).filter(([key, value]) => /^p\d+$/.test(key)
-            && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')));
+        return Object.fromEntries(Object.entries(parsed).filter(([key, value]) => key === 'count'
+            ? typeof value === 'number' && Number.isFinite(value) && value >= 0
+            : /^p\d+$/.test(key)
+                && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')));
     } catch (_) { return {}; }
 }
 function translateRich(element, key) {

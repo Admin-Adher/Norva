@@ -105,3 +105,16 @@ test('French contextual meanings stay distinct from comparison, shopping and clo
         ui_languages_section: 'Langues', ui_display_section: 'Affichage',
     })) assert.equal(r.NorvaI18n.t(key), expected);
 });
+
+test('DOM plural counts survive argument filtering without accepting language overrides', () => {
+    const r = runtime(); r.NorvaI18n.setPreference('fr');
+    for (const [count, expected] of [[1, '1 saison'], [2, '2 saisons']]) {
+        const attrs = {'data-i18n':'ui_season_count','data-i18n-args':JSON.stringify({count,lng:'en',defaultValue:'wrong'})};
+        const element = { nodeType:1, children:[], textContent:count+' seasons',
+            closest:()=>null, matches:()=>true, querySelectorAll:()=>[],
+            hasAttribute:key=>Object.hasOwn(attrs,key), getAttribute:key=>attrs[key]||null,
+            setAttribute:(key,value)=>{attrs[key]=value;} };
+        r.NorvaI18n.translate(element);
+        assert.equal(element.textContent, expected);
+    }
+});
