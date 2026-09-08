@@ -74,4 +74,13 @@
     <string name="ui_discovery_loading" formatted="false">Inihahanda ang iyong mga pinili…</string>
     <string name="ui_discovery_error" formatted="false">Hindi maihanda ang mga pinili. Suriin ang koneksyon at subscription sa Norva, pagkatapos ay subukang muli.</string>
     <string name="ui_discovery_encryption" formatted="false">Naka-encrypt ang mga detalye ng iyong provider.</string>
+    <string name="ui_catalog_section" formatted="false">Katalogo</string>
+    <string name="ui_languages_section" formatted="false">Mga wika</string>
+    <string name="ui_display_section" formatted="false">Pagpapakita</string>
+    <string name="ui_season_count_one" formatted="false">{{count}} season</string>
+    <string name="ui_season_count_other" formatted="false">{{count}} season</string>
+    <string name="ui_season_count_zero" formatted="false">{{count}} season</string>
+    <string name="ui_season_count_two" formatted="false">{{count}} season</string>
+    <string name="ui_season_count_few" formatted="false">{{count}} season</string>
+    <string name="ui_season_count_many" formatted="false">{{count}} season</string>
 </resources>

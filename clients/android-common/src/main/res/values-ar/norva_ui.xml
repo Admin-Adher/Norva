@@ -74,4 +74,13 @@
     <string name="ui_discovery_loading" formatted="false">جارٍ إعداد مختاراتك…</string>
     <string name="ui_discovery_error" formatted="false">تعذّر إعداد المختارات. تحقّق من اتصالك واشتراكك في Norva ثم حاول مجددًا.</string>
     <string name="ui_discovery_encryption" formatted="false">بيانات مزوّدك مشفّرة.</string>
+    <string name="ui_catalog_section" formatted="false">الكتالوج</string>
+    <string name="ui_languages_section" formatted="false">اللغات</string>
+    <string name="ui_display_section" formatted="false">العرض</string>
+    <string name="ui_season_count_one" formatted="false">{{count}} موسم</string>
+    <string name="ui_season_count_other" formatted="false">{{count}} موسمًا</string>
+    <string name="ui_season_count_zero" formatted="false">{{count}} مواسم</string>
+    <string name="ui_season_count_two" formatted="false">{{count}} موسمان</string>
+    <string name="ui_season_count_few" formatted="false">{{count}} مواسم</string>
+    <string name="ui_season_count_many" formatted="false">{{count}} موسمًا</string>
 </resources>

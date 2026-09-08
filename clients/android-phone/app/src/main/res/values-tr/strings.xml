@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">Bu başlık oynatılamadı</string>
+    <string name="player_error_title">Bu yapım oynatılamadı</string>
     <string name="player_error_pane_title">Oynatma sorunu</string>
     <string name="player_retry">Tekrar dene</string>
     <string name="player_back">Geri</string>
@@ -58,7 +58,7 @@
     <string name="player_unlock">Kontrollerin kilidini aç</string>
     <string name="player_controls_locked">Oynatma kontrolleri kilitli</string>
     <string name="player_controls_unlocked">Oynatma kontrollerinin kilidi açıldı</string>
-    <string name="player_seek_forward">10 saniye ileri sar</string>
+    <string name="player_seek_forward">10 saniye ileri</string>
     <string name="player_seek_backward">10 saniye geri</string>
     <string name="player_seek_forward_feedback">+10\'lar</string>
     <string name="player_seek_backward_feedback">−10s</string>

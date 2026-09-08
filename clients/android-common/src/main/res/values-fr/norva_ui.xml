@@ -74,4 +74,13 @@
     <string name="ui_discovery_loading" formatted="false">Préparation de votre sélection…</string>
     <string name="ui_discovery_error" formatted="false">La sélection n’a pas pu être préparée. Vérifiez votre connexion et votre abonnement Norva, puis réessayez.</string>
     <string name="ui_discovery_encryption" formatted="false">Les informations de votre fournisseur sont chiffrées.</string>
+    <string name="ui_catalog_section" formatted="false">Catalogue</string>
+    <string name="ui_languages_section" formatted="false">Langues</string>
+    <string name="ui_display_section" formatted="false">Affichage</string>
+    <string name="ui_season_count_one" formatted="false">{{count}} saison</string>
+    <string name="ui_season_count_other" formatted="false">{{count}} saisons</string>
+    <string name="ui_season_count_zero" formatted="false">{{count}} saisons</string>
+    <string name="ui_season_count_two" formatted="false">{{count}} saisons</string>
+    <string name="ui_season_count_few" formatted="false">{{count}} saisons</string>
+    <string name="ui_season_count_many" formatted="false">{{count}} saisons</string>
 </resources>

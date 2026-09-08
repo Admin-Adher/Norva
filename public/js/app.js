@@ -2518,9 +2518,9 @@ class App {
 
         const sheetBody = document.createElement('div');
         sheetBody.className = 'mobile-filter-body';
-        const catalogSection = this.createMobileFilterSection('Catalog');
-        const languageSection = this.createMobileFilterSection('Languages');
-        const displaySection = this.createMobileFilterSection('Display');
+        const catalogSection = this.createMobileFilterSection('Catalog', 'ui_catalog_section');
+        const languageSection = this.createMobileFilterSection('Languages', 'ui_languages_section');
+        const displaySection = this.createMobileFilterSection('Display', 'ui_display_section');
         sheetBody.append(catalogSection.section, languageSection.section, displaySection.section);
         filterBar.prepend(sheetHeader, sheetBody);
 
@@ -2750,10 +2750,17 @@ class App {
         };
     }
 
-    createMobileFilterSection(title) {
+    createMobileFilterSection(title, translationKey) {
         const section = document.createElement('section');
         section.className = 'mobile-filter-section';
-        section.innerHTML = `<div class="mobile-filter-section-title">${title}</div>`;
+        const heading = document.createElement('div');
+        heading.className = 'mobile-filter-section-title';
+        heading.textContent = title;
+        if (translationKey) {
+            heading.setAttribute('data-i18n', translationKey);
+            heading.textContent = globalThis.NorvaI18n?.t(translationKey, { defaultValue: title }) || title;
+        }
+        section.append(heading);
         const body = document.createElement('div');
         body.className = 'mobile-filter-section-body mobile-filter-section';
         section.append(body);

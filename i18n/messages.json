@@ -874,5 +874,113 @@
     "بيانات مزوّدك مشفّرة.",
     "Detail penyedia Anda dienkripsi.",
     "Naka-encrypt ang mga detalye ng iyong provider."
+  ],
+  "ui_catalog_section": [
+    "Catalog",
+    "Catalogue",
+    "Catálogo",
+    "Catálogo",
+    "कैटलॉग",
+    "Katalog",
+    "ক্যাটালগ",
+    "الكتالوج",
+    "Katalog",
+    "Katalogo"
+  ],
+  "ui_languages_section": [
+    "Languages",
+    "Langues",
+    "Idiomas",
+    "Idiomas",
+    "भाषाएँ",
+    "Diller",
+    "ভাষা",
+    "اللغات",
+    "Bahasa",
+    "Mga wika"
+  ],
+  "ui_display_section": [
+    "Display",
+    "Affichage",
+    "Exibição",
+    "Visualización",
+    "प्रदर्शन",
+    "Görünüm",
+    "প্রদর্শন",
+    "العرض",
+    "Tampilan",
+    "Pagpapakita"
+  ],
+  "ui_season_count_one": [
+    "{{count}} season",
+    "{{count}} saison",
+    "{{count}} temporada",
+    "{{count}} temporada",
+    "{{count}} सीज़न",
+    "{{count}} sezon",
+    "{{count}} সিজন",
+    "{{count}} موسم",
+    "{{count}} musim",
+    "{{count}} season"
+  ],
+  "ui_season_count_other": [
+    "{{count}} seasons",
+    "{{count}} saisons",
+    "{{count}} temporadas",
+    "{{count}} temporadas",
+    "{{count}} सीज़न",
+    "{{count}} sezon",
+    "{{count}} সিজন",
+    "{{count}} موسمًا",
+    "{{count}} musim",
+    "{{count}} season"
+  ],
+  "ui_season_count_zero": [
+    "{{count}} seasons",
+    "{{count}} saisons",
+    "{{count}} temporadas",
+    "{{count}} temporadas",
+    "{{count}} सीज़न",
+    "{{count}} sezon",
+    "{{count}} সিজন",
+    "{{count}} مواسم",
+    "{{count}} musim",
+    "{{count}} season"
+  ],
+  "ui_season_count_two": [
+    "{{count}} seasons",
+    "{{count}} saisons",
+    "{{count}} temporadas",
+    "{{count}} temporadas",
+    "{{count}} सीज़न",
+    "{{count}} sezon",
+    "{{count}} সিজন",
+    "{{count}} موسمان",
+    "{{count}} musim",
+    "{{count}} season"
+  ],
+  "ui_season_count_few": [
+    "{{count}} seasons",
+    "{{count}} saisons",
+    "{{count}} temporadas",
+    "{{count}} temporadas",
+    "{{count}} सीज़न",
+    "{{count}} sezon",
+    "{{count}} সিজন",
+    "{{count}} مواسم",
+    "{{count}} musim",
+    "{{count}} season"
+  ],
+  "ui_season_count_many": [
+    "{{count}} seasons",
+    "{{count}} saisons",
+    "{{count}} temporadas",
+    "{{count}} temporadas",
+    "{{count}} सीज़न",
+    "{{count}} sezon",
+    "{{count}} সিজন",
+    "{{count}} موسمًا",
+    "{{count}} musim",
+    "{{count}} season"
   ]
 }

@@ -74,4 +74,13 @@
     <string name="ui_discovery_loading" formatted="false">Menyiapkan pilihan Anda…</string>
     <string name="ui_discovery_error" formatted="false">Pilihan tidak dapat disiapkan. Periksa koneksi dan langganan Norva Anda, lalu coba lagi.</string>
     <string name="ui_discovery_encryption" formatted="false">Detail penyedia Anda dienkripsi.</string>
+    <string name="ui_catalog_section" formatted="false">Katalog</string>
+    <string name="ui_languages_section" formatted="false">Bahasa</string>
+    <string name="ui_display_section" formatted="false">Tampilan</string>
+    <string name="ui_season_count_one" formatted="false">{{count}} musim</string>
+    <string name="ui_season_count_other" formatted="false">{{count}} musim</string>
+    <string name="ui_season_count_zero" formatted="false">{{count}} musim</string>
+    <string name="ui_season_count_two" formatted="false">{{count}} musim</string>
+    <string name="ui_season_count_few" formatted="false">{{count}} musim</string>
+    <string name="ui_season_count_many" formatted="false">{{count}} musim</string>
 </resources>

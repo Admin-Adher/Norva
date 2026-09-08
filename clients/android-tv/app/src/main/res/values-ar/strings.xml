@@ -8,7 +8,7 @@
     <string name="player_rewind_10">الترجيع 10 ثانية</string>
     <string name="player_play">تشغيل</string>
     <string name="player_pause">إيقاف مؤقت</string>
-    <string name="player_forward_10">تقديم 10 ثانية</string>
+    <string name="player_forward_10">التقديم 10 ثوانٍ</string>
     <string name="player_quality">الجودة</string>
     <string name="player_audio_button">الصوت</string>
     <string name="player_audio_selected_description">الصوت، تم تحديد %1$s.</string>
@@ -37,7 +37,7 @@
     <string name="player_sleep_minutes">%1$d دقيقة</string>
     <string name="player_episodes">الحلقات</string>
     <string name="player_episode_list">قائمة الحلقة</string>
-    <string name="player_next_episode">الحلقة القادمة</string>
+    <string name="player_next_episode">الحلقة التالية</string>
     <string name="player_up_next">التالي</string>
     <string name="player_play_now">العب الآن</string>
     <string name="player_playing_in">يبدأ تشغيل الفيديو خلال %1$d ثانية</string>

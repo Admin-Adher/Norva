@@ -74,4 +74,13 @@
     <string name="ui_discovery_loading" formatted="false">आपका चयन तैयार हो रहा है…</string>
     <string name="ui_discovery_error" formatted="false">चयन तैयार नहीं हो सका। अपना कनेक्शन और Norva सदस्यता जाँचकर फिर प्रयास करें।</string>
     <string name="ui_discovery_encryption" formatted="false">आपके प्रदाता की जानकारी एन्क्रिप्ट की जाती है।</string>
+    <string name="ui_catalog_section" formatted="false">कैटलॉग</string>
+    <string name="ui_languages_section" formatted="false">भाषाएँ</string>
+    <string name="ui_display_section" formatted="false">प्रदर्शन</string>
+    <string name="ui_season_count_one" formatted="false">{{count}} सीज़न</string>
+    <string name="ui_season_count_other" formatted="false">{{count}} सीज़न</string>
+    <string name="ui_season_count_zero" formatted="false">{{count}} सीज़न</string>
+    <string name="ui_season_count_two" formatted="false">{{count}} सीज़न</string>
+    <string name="ui_season_count_few" formatted="false">{{count}} सीज़न</string>
+    <string name="ui_season_count_many" formatted="false">{{count}} सीज़न</string>
 </resources>

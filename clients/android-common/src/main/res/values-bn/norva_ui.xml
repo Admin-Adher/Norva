@@ -74,4 +74,13 @@
     <string name="ui_discovery_loading" formatted="false">আপনার বাছাই প্রস্তুত হচ্ছে…</string>
     <string name="ui_discovery_error" formatted="false">বাছাই প্রস্তুত করা যায়নি। আপনার সংযোগ ও Norva সাবস্ক্রিপশন পরীক্ষা করে আবার চেষ্টা করুন।</string>
     <string name="ui_discovery_encryption" formatted="false">আপনার প্রদানকারীর তথ্য এনক্রিপ্ট করা হয়।</string>
+    <string name="ui_catalog_section" formatted="false">ক্যাটালগ</string>
+    <string name="ui_languages_section" formatted="false">ভাষা</string>
+    <string name="ui_display_section" formatted="false">প্রদর্শন</string>
+    <string name="ui_season_count_one" formatted="false">{{count}} সিজন</string>
+    <string name="ui_season_count_other" formatted="false">{{count}} সিজন</string>
+    <string name="ui_season_count_zero" formatted="false">{{count}} সিজন</string>
+    <string name="ui_season_count_two" formatted="false">{{count}} সিজন</string>
+    <string name="ui_season_count_few" formatted="false">{{count}} সিজন</string>
+    <string name="ui_season_count_many" formatted="false">{{count}} সিজন</string>
 </resources>

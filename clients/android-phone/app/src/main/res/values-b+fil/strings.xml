@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">Hindi ma-play ang pamagat na ito</string>
+    <string name="player_error_title">Hindi ma-play ang palabas na ito</string>
     <string name="player_error_pane_title">Problema sa pag-playback</string>
     <string name="player_retry">Subukan muli</string>
     <string name="player_back">Bumalik</string>
@@ -58,8 +58,8 @@
     <string name="player_unlock">I-unlock ang mga kontrol</string>
     <string name="player_controls_locked">Naka-lock ang mga kontrol sa pag-playback</string>
     <string name="player_controls_unlocked">Na-unlock ang mga kontrol sa pag-playback</string>
-    <string name="player_seek_forward">Pasulong ng 10 segundo</string>
-    <string name="player_seek_backward">Bumalik ng 10 segundo</string>
+    <string name="player_seek_forward">Isulong nang 10 segundo</string>
+    <string name="player_seek_backward">Ibalik nang 10 segundo</string>
     <string name="player_seek_forward_feedback">+10s</string>
     <string name="player_seek_backward_feedback">−10s</string>
     <string name="player_previous_episode">Nakaraang episode</string>
@@ -93,7 +93,7 @@
     <string name="player_cast_active_title">Kasalukuyang isinasagawa ang pag-cast</string>
     <string name="player_cast_stop_streaming">Itigil ang pag-cast</string>
     <string name="player_cast_pause_resume">I-pause o ipagpatuloy ang pag-cast</string>
-    <string name="player_cast_stop">Tumigil ka</string>
+    <string name="player_cast_stop">Ihinto</string>
     <string name="player_cast_connected_to">Nag-cast sa %1$s</string>
     <string name="player_cast_controls_description">Mga kontrol sa pag-cast para sa %1$s</string>
     <string name="player_pip_pause">I-pause</string>

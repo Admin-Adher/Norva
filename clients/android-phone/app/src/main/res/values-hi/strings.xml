@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">यह शीर्षक नहीं खेल सका</string>
+    <string name="player_error_title">यह वीडियो नहीं चल पाया</string>
     <string name="player_error_pane_title">प्लेबैक समस्या</string>
     <string name="player_retry">फिर से कोशिश करें</string>
     <string name="player_back">वापस</string>
@@ -58,8 +58,8 @@
     <string name="player_unlock">नियंत्रण अनलॉक करें</string>
     <string name="player_controls_locked">प्लेबैक नियंत्रण लॉक किया गया</string>
     <string name="player_controls_unlocked">प्लेबैक नियंत्रण अनलॉक किया गया</string>
-    <string name="player_seek_forward">10 सेकंड आगे बढ़ाएँ</string>
-    <string name="player_seek_backward">10 सेकंड पीछे</string>
+    <string name="player_seek_forward">10 सेकंड आगे जाएँ</string>
+    <string name="player_seek_backward">10 सेकंड पीछे जाएँ</string>
     <string name="player_seek_forward_feedback">+10s</string>
     <string name="player_seek_backward_feedback">−10s</string>
     <string name="player_previous_episode">पिछला एपिसोड</string>
@@ -93,12 +93,12 @@
     <string name="player_cast_active_title">कास्टिंग चल रही है</string>
     <string name="player_cast_stop_streaming">कास्ट करना बंद करो</string>
     <string name="player_cast_pause_resume">कास्टिंग रोकें या फिर से शुरू करें</string>
-    <string name="player_cast_stop">रुकें</string>
+    <string name="player_cast_stop">बंद करें</string>
     <string name="player_cast_connected_to">%1$s पर कास्टिंग</string>
     <string name="player_cast_controls_description">%1$s के लिए कास्टिंग नियंत्रण</string>
     <string name="player_pip_pause">रोकें</string>
     <string name="player_pip_play">चलाएँ</string>
-    <string name="player_pip_play_pause">चलायें या रोकें</string>
+    <string name="player_pip_play_pause">चलाएँ या रोकें</string>
     <string name="downloads_kicker">NORVA ऑफ़लाइन</string>
     <string name="downloads_title">डाउनलोड</string>
     <string name="downloads_close">बंद करें</string>

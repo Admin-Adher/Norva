@@ -8,7 +8,7 @@
     <string name="player_rewind_10">I-rewind nang 10 segundo</string>
     <string name="player_play">I-play</string>
     <string name="player_pause">I-pause</string>
-    <string name="player_forward_10">Pasulong ng 10 segundo</string>
+    <string name="player_forward_10">Isulong nang 10 segundo</string>
     <string name="player_quality">Kalidad</string>
     <string name="player_audio_button">Audio</string>
     <string name="player_audio_selected_description">Audio, %1$s ang napili</string>

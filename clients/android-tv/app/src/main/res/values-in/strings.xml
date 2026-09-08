@@ -37,7 +37,7 @@
     <string name="player_sleep_minutes">%1$d mnt</string>
     <string name="player_episodes">Episode</string>
     <string name="player_episode_list">Daftar episode</string>
-    <string name="player_next_episode">Episode selanjutnya</string>
+    <string name="player_next_episode">Episode berikutnya</string>
     <string name="player_up_next">Berikutnya</string>
     <string name="player_play_now">Mainkan sekarang</string>
     <string name="player_playing_in">Pemutaran video dimulai dalam %1$d detik</string>

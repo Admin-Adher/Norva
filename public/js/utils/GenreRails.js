@@ -104,10 +104,14 @@
 
     function railHtml(rail, railIndex) {
         const cards = (rail.items || []).map((item, i) => cardHtml(item, railIndex, i)).join('');
+        const bucket = rail.curation?.bucket;
+        const title = bucket && window.GenreTaxonomy
+            ? window.GenreTaxonomy.label(bucket, rail.title || rail.name)
+            : rail.title || rail.name || '';
         return `
             <section class="dashboard-section home-rail-section" data-rail-id="${esc(rail.id || railIndex)}">
                 <div class="section-header home-rail-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-                    <div><h2>${esc(rail.title || rail.name || '')}</h2></div>
+                    <div><h2>${esc(title)}</h2></div>
                     <button class="genre-see-all" type="button" data-rail-index="${railIndex}" style="background:none;border:none;color:#9db4ff;font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;padding:6px 8px" data-i18n="ui_web_95b1b5051ead">See all ›</button>
                 </div>
                 <div class="scroll-wrapper">

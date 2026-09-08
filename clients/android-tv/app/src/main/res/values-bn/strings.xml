@@ -8,7 +8,7 @@
     <string name="player_rewind_10">10 সেকেন্ড রিওয়াইন্ড করুন</string>
     <string name="player_play">চালান</string>
     <string name="player_pause">বিরতি দিন</string>
-    <string name="player_forward_10">10 সেকেন্ড ফরোয়ার্ড করুন</string>
+    <string name="player_forward_10">১০ সেকেন্ড এগিয়ে যান</string>
     <string name="player_quality">মান</string>
     <string name="player_audio_button">অডিও</string>
     <string name="player_audio_selected_description">অডিও, %1$s নির্বাচিত</string>
@@ -37,7 +37,7 @@
     <string name="player_sleep_minutes">%1$d মিনিট</string>
     <string name="player_episodes">পর্বসমূহ</string>
     <string name="player_episode_list">পর্বের তালিকা</string>
-    <string name="player_next_episode">পরের পর্ব</string>
+    <string name="player_next_episode">পরবর্তী পর্ব</string>
     <string name="player_up_next">এরপর</string>
     <string name="player_play_now">এখন খেলা</string>
     <string name="player_playing_in">ভিডিও প্লেব্যাক %1$d সেকেন্ডে শুরু হয়৷</string>

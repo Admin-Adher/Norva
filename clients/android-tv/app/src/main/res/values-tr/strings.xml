@@ -8,7 +8,7 @@
     <string name="player_rewind_10">10 saniye geri sar</string>
     <string name="player_play">Oynat</string>
     <string name="player_pause">Duraklat</string>
-    <string name="player_forward_10">10 saniye ileri sar</string>
+    <string name="player_forward_10">10 saniye ileri</string>
     <string name="player_quality">Kalite</string>
     <string name="player_audio_button">Ses</string>
     <string name="player_audio_selected_description">Ses, %1$s seçildi</string>

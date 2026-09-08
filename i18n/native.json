@@ -1,15 +1,15 @@
 {
   "Couldn't play this title": {
-    "en": "Couldn't play this title",
+    "en": "Couldn’t play this title",
     "fr": "Impossible de lire ce titre",
     "pt-BR": "Não foi possível reproduzir este título",
-    "es": "No se pudo reproducir este título.",
-    "hi": "यह शीर्षक नहीं खेल सका",
-    "tr": "Bu başlık oynatılamadı",
-    "bn": "এই শিরোনাম খেলতে পারেনি৷",
-    "ar": "تعذر تشغيل هذا العنوان",
-    "id": "Tidak dapat memutar judul ini",
-    "fil": "Hindi ma-play ang pamagat na ito"
+    "es": "No se pudo reproducir este título",
+    "hi": "यह वीडियो नहीं चल पाया",
+    "tr": "Bu yapım oynatılamadı",
+    "bn": "এই ভিডিওটি চালানো যায়নি",
+    "ar": "تعذر تشغيل هذا العمل",
+    "id": "Tidak dapat memutar tayangan ini",
+    "fil": "Hindi ma-play ang palabas na ito"
   },
   "Playback problem": {
     "en": "Playback problem",
@@ -651,25 +651,25 @@
     "en": "Forward 10 seconds",
     "fr": "Avancer de 10 secondes",
     "pt-BR": "Avançar 10 segundos",
-    "es": "Adelante 10 segundos",
-    "hi": "10 सेकंड आगे बढ़ाएँ",
-    "tr": "10 saniye ileri sar",
-    "bn": "10 সেকেন্ড ফরোয়ার্ড করুন",
-    "ar": "تقديم 10 ثانية",
+    "es": "Avanzar 10 segundos",
+    "hi": "10 सेकंड आगे जाएँ",
+    "tr": "10 saniye ileri",
+    "bn": "১০ সেকেন্ড এগিয়ে যান",
+    "ar": "التقديم 10 ثوانٍ",
     "id": "Maju 10 detik",
-    "fil": "Pasulong ng 10 segundo"
+    "fil": "Isulong nang 10 segundo"
   },
   "Back 10 seconds": {
     "en": "Back 10 seconds",
     "fr": "Reculer de 10 secondes",
     "pt-BR": "Voltar 10 segundos",
-    "es": "Atrás 10 segundos",
-    "hi": "10 सेकंड पीछे",
+    "es": "Retroceder 10 segundos",
+    "hi": "10 सेकंड पीछे जाएँ",
     "tr": "10 saniye geri",
-    "bn": "10 সেকেন্ড পিছনে",
-    "ar": "العودة 10 ثانية",
-    "id": "Kembali 10 detik",
-    "fil": "Bumalik ng 10 segundo"
+    "bn": "১০ সেকেন্ড পিছিয়ে যান",
+    "ar": "الرجوع 10 ثوانٍ",
+    "id": "Mundur 10 detik",
+    "fil": "Ibalik nang 10 segundo"
   },
   "+10s": {
     "en": "+10s",
@@ -711,12 +711,12 @@
     "en": "Next episode",
     "fr": "Épisode suivant",
     "pt-BR": "Próximo episódio",
-    "es": "Próximo episodio",
+    "es": "Siguiente episodio",
     "hi": "अगला एपिसोड",
     "tr": "Sonraki bölüm",
-    "bn": "পরের পর্ব",
-    "ar": "الحلقة القادمة",
-    "id": "Episode selanjutnya",
+    "bn": "পরবর্তী পর্ব",
+    "ar": "الحلقة التالية",
+    "id": "Episode berikutnya",
     "fil": "Susunod na episode"
   },
   "Previous episode: %1$s": {
@@ -1070,14 +1070,14 @@
   "Stop": {
     "en": "Stop",
     "fr": "Arrêter",
-    "pt-BR": "Pare",
+    "pt-BR": "Parar",
     "es": "Detener",
-    "hi": "रुकें",
+    "hi": "बंद करें",
     "tr": "Durdur",
-    "bn": "থামো",
-    "ar": "توقف",
-    "id": "Berhenti",
-    "fil": "Tumigil ka"
+    "bn": "বন্ধ করুন",
+    "ar": "إيقاف",
+    "id": "Hentikan",
+    "fil": "Ihinto"
   },
   "Casting to %1$s": {
     "en": "Casting to %1$s",
@@ -1132,9 +1132,9 @@
     "fr": "Lire ou mettre en pause",
     "pt-BR": "Reproduzir ou pausar",
     "es": "Reproducir o pausar",
-    "hi": "चलायें या रोकें",
+    "hi": "चलाएँ या रोकें",
     "tr": "Oynat veya duraklat",
-    "bn": "খেলা বা বিরতি",
+    "bn": "চালান বা বিরতি দিন",
     "ar": "تشغيل أو إيقاف مؤقت",
     "id": "Putar atau jeda",
     "fil": "I-play o i-pause"

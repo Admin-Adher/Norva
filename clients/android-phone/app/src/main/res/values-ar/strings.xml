@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">تعذر تشغيل هذا العنوان</string>
+    <string name="player_error_title">تعذر تشغيل هذا العمل</string>
     <string name="player_error_pane_title">مشكلة في التشغيل</string>
     <string name="player_retry">إعادة المحاولة</string>
     <string name="player_back">رجوع</string>
@@ -58,12 +58,12 @@
     <string name="player_unlock">فتح الضوابط</string>
     <string name="player_controls_locked">تم قفل عناصر التحكم في التشغيل</string>
     <string name="player_controls_unlocked">تم فتح عناصر التحكم في التشغيل</string>
-    <string name="player_seek_forward">تقديم 10 ثانية</string>
-    <string name="player_seek_backward">العودة 10 ثانية</string>
+    <string name="player_seek_forward">التقديم 10 ثوانٍ</string>
+    <string name="player_seek_backward">الرجوع 10 ثوانٍ</string>
     <string name="player_seek_forward_feedback">+10 ثواني</string>
     <string name="player_seek_backward_feedback">-10 ثانية</string>
     <string name="player_previous_episode">الحلقة السابقة</string>
-    <string name="player_next_episode">الحلقة القادمة</string>
+    <string name="player_next_episode">الحلقة التالية</string>
     <string name="player_previous_episode_description">الحلقة السابقة: %1$s</string>
     <string name="player_next_episode_description">الحلقة القادمة: %1$s</string>
     <string name="player_no_previous_episode">لا يوجد حلقة سابقة</string>
@@ -93,7 +93,7 @@
     <string name="player_cast_active_title">جارٍ الصب</string>
     <string name="player_cast_stop_streaming">توقف عن الصب</string>
     <string name="player_cast_pause_resume">إيقاف البث مؤقتًا أو استئنافه</string>
-    <string name="player_cast_stop">توقف</string>
+    <string name="player_cast_stop">إيقاف</string>
     <string name="player_cast_connected_to">الإرسال إلى %1$s</string>
     <string name="player_cast_controls_description">ضوابط الصب لـ %1$s</string>
     <string name="player_pip_pause">إيقاف مؤقت</string>

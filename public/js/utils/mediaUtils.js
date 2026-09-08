@@ -587,7 +587,7 @@ const MediaUtils = (() => {
         return { lang, hasSub, hasDub };
     }
 
-    const langFullName = (code) => LANGUAGE_NAMES[code] || languageDisplayFull(code);
+    const langFullName = (code) => languageDisplayFull(code);
 
     // Phase 1 "track intelligence" — the cheap, instant, zero-network layer. The
     // container is usually untagged (lang=und) and burned-in subtitles are not a
@@ -815,7 +815,34 @@ const MediaUtils = (() => {
 
     function languageDisplayFull(code) {
         const normalized = normalizeLanguagePreference(code);
+        const locale = globalThis.NorvaI18n?.language || 'en';
+        try {
+            if (normalized && normalized !== 'und') {
+                const label = new Intl.DisplayNames([locale], { type: 'language', fallback: 'none' }).of(normalized);
+                if (label) return label.charAt(0).toLocaleUpperCase(locale) + label.slice(1);
+            }
+        } catch (_) { /* Older WebViews can still show the established name/code. */ }
         return LANGUAGE_NAMES[normalized] || String(code || '').toUpperCase();
+    }
+
+    // Only language codes determine display names. Never display an English server
+    // sentence (e.g. "Spanish · 1 movies") or translate a facet's stable query value.
+    function languageFacetName(value, fallback = '') {
+        const code = String(value || '').replace(/^(?:provider|catalog)-/, '');
+        if (/^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/i.test(code)) return languageDisplayFull(code);
+        return String(fallback || value || '').replace(/\s+·\s+.*$/, '').trim();
+    }
+
+    function languageFacetLabel(facet) {
+        const name = languageFacetName(facet.value, facet.label);
+        // Cached options may only have a formatted label: retain their count.
+        const count = Number(facet.count);
+        if (facet.count != null && Number.isFinite(count)) {
+            const locale = globalThis.NorvaI18n?.language || 'en';
+            return `${name} · ${new Intl.NumberFormat(locale).format(count)}`;
+        }
+        const oldCount = String(facet.label || '').match(/\s+·\s+([\d,.\u0660-\u0669\u06f0-\u06f9\u066b\u066c\s]+)(?:\s+(?:movies|series))?$/i);
+        return oldCount ? `${name} · ${oldCount[1].trim()}` : name;
     }
 
     // Descriptive badge from the REAL detected languages (server audio_languages /
@@ -2027,7 +2054,7 @@ const MediaUtils = (() => {
         cleanEpisodeReleaseName, formatEpisodeDisplayLabel, selectionUnitLabel,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
-        resolveContentLanguage,
+        resolveContentLanguage, languageDisplayFull, languageFacetName, languageFacetLabel,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         audioLanguageValidationStatus,

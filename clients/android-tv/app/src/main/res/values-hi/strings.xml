@@ -8,7 +8,7 @@
     <string name="player_rewind_10">10 सेकंड रिवाइंड करें</string>
     <string name="player_play">चलाएँ</string>
     <string name="player_pause">रोकें</string>
-    <string name="player_forward_10">10 सेकंड आगे बढ़ाएँ</string>
+    <string name="player_forward_10">10 सेकंड आगे जाएँ</string>
     <string name="player_quality">गुणवत्ता</string>
     <string name="player_audio_button">ऑडियो</string>
     <string name="player_audio_selected_description">ऑडियो, %1$s चयनित</string>

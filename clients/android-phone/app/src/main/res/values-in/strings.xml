@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">Tidak dapat memutar judul ini</string>
+    <string name="player_error_title">Tidak dapat memutar tayangan ini</string>
     <string name="player_error_pane_title">Masalah pemutaran</string>
     <string name="player_retry">Coba lagi</string>
     <string name="player_back">Kembali</string>
@@ -59,11 +59,11 @@
     <string name="player_controls_locked">Kontrol pemutaran terkunci</string>
     <string name="player_controls_unlocked">Kontrol pemutaran tidak terkunci</string>
     <string name="player_seek_forward">Maju 10 detik</string>
-    <string name="player_seek_backward">Kembali 10 detik</string>
+    <string name="player_seek_backward">Mundur 10 detik</string>
     <string name="player_seek_forward_feedback">+10 detik</string>
     <string name="player_seek_backward_feedback">−10 detik</string>
     <string name="player_previous_episode">Episode sebelumnya</string>
-    <string name="player_next_episode">Episode selanjutnya</string>
+    <string name="player_next_episode">Episode berikutnya</string>
     <string name="player_previous_episode_description">Episode sebelumnya: %1$s</string>
     <string name="player_next_episode_description">Episode berikutnya: %1$s</string>
     <string name="player_no_previous_episode">Tidak ada episode sebelumnya</string>
@@ -93,7 +93,7 @@
     <string name="player_cast_active_title">Transmisi sedang berlangsung</string>
     <string name="player_cast_stop_streaming">Hentikan transmisi</string>
     <string name="player_cast_pause_resume">Jeda atau lanjutkan transmisi</string>
-    <string name="player_cast_stop">Berhenti</string>
+    <string name="player_cast_stop">Hentikan</string>
     <string name="player_cast_connected_to">Mentransmisi ke %1$s</string>
     <string name="player_cast_controls_description">Kontrol transmisi untuk %1$s</string>
     <string name="player_pip_pause">Jeda</string>

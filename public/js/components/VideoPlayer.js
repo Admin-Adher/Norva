@@ -790,10 +790,8 @@ class VideoPlayer {
         if (!normalized || normalized === 'und') return null;
 
         try {
-            // Norva's UI is English everywhere — render language names in English
-            // regardless of the browser locale (otherwise an "eng" track shows as
-            // "Anglais" on a French browser).
-            const displayNames = new Intl.DisplayNames(['en'], { type: 'language' });
+            const locale = globalThis.NorvaI18n?.language || 'en';
+            const displayNames = new Intl.DisplayNames([locale], { type: 'language' });
             const label = displayNames.of(normalized);
             if (label) return label.charAt(0).toUpperCase() + label.slice(1);
         } catch (_) {

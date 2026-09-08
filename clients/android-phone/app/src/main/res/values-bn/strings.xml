@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">এই শিরোনাম খেলতে পারেনি৷</string>
+    <string name="player_error_title">এই ভিডিওটি চালানো যায়নি</string>
     <string name="player_error_pane_title">প্লেব্যাক সমস্যা</string>
     <string name="player_retry">আবার চেষ্টা করুন</string>
     <string name="player_back">ফিরে যান</string>
@@ -58,12 +58,12 @@
     <string name="player_unlock">নিয়ন্ত্রণ আনলক করুন</string>
     <string name="player_controls_locked">প্লেব্যাক নিয়ন্ত্রণ লক করা হয়েছে</string>
     <string name="player_controls_unlocked">প্লেব্যাক নিয়ন্ত্রণ আনলক করা হয়েছে</string>
-    <string name="player_seek_forward">10 সেকেন্ড ফরোয়ার্ড করুন</string>
-    <string name="player_seek_backward">10 সেকেন্ড পিছনে</string>
+    <string name="player_seek_forward">১০ সেকেন্ড এগিয়ে যান</string>
+    <string name="player_seek_backward">১০ সেকেন্ড পিছিয়ে যান</string>
     <string name="player_seek_forward_feedback">+10</string>
     <string name="player_seek_backward_feedback">−10 সেকেন্ড</string>
     <string name="player_previous_episode">আগের পর্ব</string>
-    <string name="player_next_episode">পরের পর্ব</string>
+    <string name="player_next_episode">পরবর্তী পর্ব</string>
     <string name="player_previous_episode_description">আগের পর্ব: %1$s</string>
     <string name="player_next_episode_description">পরবর্তী পর্ব: %1$s</string>
     <string name="player_no_previous_episode">আগের পর্ব নেই</string>
@@ -93,12 +93,12 @@
     <string name="player_cast_active_title">কাস্টিং চলছে</string>
     <string name="player_cast_stop_streaming">কাস্ট করা বন্ধ করুন</string>
     <string name="player_cast_pause_resume">বিরাম দিন বা কাস্টিং পুনরায় শুরু করুন</string>
-    <string name="player_cast_stop">থামো</string>
+    <string name="player_cast_stop">বন্ধ করুন</string>
     <string name="player_cast_connected_to">%1$s এ কাস্ট করা হচ্ছে</string>
     <string name="player_cast_controls_description">%1$s এর জন্য কাস্টিং নিয়ন্ত্রণ</string>
     <string name="player_pip_pause">বিরতি দিন</string>
     <string name="player_pip_play">চালান</string>
-    <string name="player_pip_play_pause">খেলা বা বিরতি</string>
+    <string name="player_pip_play_pause">চালান বা বিরতি দিন</string>
     <string name="downloads_kicker">NORVA অফলাইন</string>
     <string name="downloads_title">ডাউনলোড</string>
     <string name="downloads_close">বন্ধ করুন</string>

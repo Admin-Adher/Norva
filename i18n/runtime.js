@@ -98,9 +98,9 @@ function translateRich(element, key) {
 function translateElement(element) {
     if (element.closest('[translate="no"], [data-i18n-ignore]')) return;
     const key = element.getAttribute('data-i18n');
-    if (key && i18next.exists(key) && element.hasAttribute('data-i18n-rich')) translateRich(element, key);
+    if (key && i18next.exists(key, elementArgs(element)) && element.hasAttribute('data-i18n-rich')) translateRich(element, key);
     // Labels with icons must mark a child span, never their interactive parent.
-    if (key && i18next.exists(key) && element.children.length === 0) {
+    if (key && i18next.exists(key, elementArgs(element)) && element.children.length === 0) {
         if (!labelWhitespace.has(element)) labelWhitespace.set(element, [element.textContent.match(/^\s*/)[0], element.textContent.match(/\s*$/)[0]]);
         const [before, after] = labelWhitespace.get(element);
         const next = before + t(key, elementArgs(element)) + after;
@@ -109,7 +109,7 @@ function translateElement(element) {
     }
     for (const attribute of attributes) {
         const attributeKey = element.getAttribute(`data-i18n-${attribute}`);
-        if (attributeKey && i18next.exists(attributeKey)) {
+        if (attributeKey && i18next.exists(attributeKey, elementArgs(element, attribute))) {
             const next = t(attributeKey, elementArgs(element, attribute));
             if (element.getAttribute(attribute) !== next) element.setAttribute(attribute, next);
         }

@@ -473,14 +473,7 @@ class MoviesPage {
     }
 
     facetLanguageName(value, label = '') {
-        const base = String(label || '').replace(/\s+·\s+[\d,.]+\s+(?:movies|series)$/i, '').trim();
-        if (base) return base;
-        try {
-            return new Intl.DisplayNames(['en'], { type: 'language' }).of(String(value).toLowerCase())
-                || String(value).toUpperCase();
-        } catch (_) {
-            return String(value).toUpperCase();
-        }
+        return MediaUtils.languageFacetName(value, label);
     }
 
     applyFacetOptions(select, anyLabel, facets, savedValue = '', mediaNoun = 'movies', resetForScope = false) {
@@ -512,16 +505,7 @@ class MoviesPage {
             const name = this.facetLanguageName(current, previous);
             options.push({ value: current, label: `${name} · 0 ${mediaNoun}`, count: 0 });
         }
-        const optionHtml = f => {
-            const declared = /^(?:provider|catalog)-(te|ta|ml|hi|kn|en)$/.exec(f.value);
-            let label = f.label;
-            if (declared) {
-                const locale = document.documentElement.lang || 'en';
-                const name = new Intl.DisplayNames([locale], { type: 'language' }).of(declared[1]);
-                label = `${name} · ${new Intl.NumberFormat(locale).format(f.count || 0)}`;
-            }
-            return `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(label)}</option>`;
-        };
+        const optionHtml = f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(MediaUtils.languageFacetLabel(f))}</option>`;
         const desired = [`<option value="">${anyLabel}</option>`]
             .concat(options.map(optionHtml))
             .join('');
@@ -1245,7 +1229,7 @@ class MoviesPage {
             this.categories = genres;
             const options = genres
                 .filter(g => Number(g.count) > 0 && !hiddenBuckets.has(String(g.bucket)))
-                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString((globalThis.NorvaI18n?.language || 'en-US'))}` }));
+                .map(g => ({ value: g.bucket, label: `${window.GenreTaxonomy?.label(g.bucket, g.label) || g.label} · ${Number(g.count).toLocaleString((globalThis.NorvaI18n?.language || 'en-US'))}` }));
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);
         } catch (err) {

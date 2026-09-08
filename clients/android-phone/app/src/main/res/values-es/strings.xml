@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from i18n/native.json. Do not edit. -->
 <resources>
-    <string name="player_error_title">No se pudo reproducir este título.</string>
+    <string name="player_error_title">No se pudo reproducir este título</string>
     <string name="player_error_pane_title">Problema de reproducción</string>
     <string name="player_retry">Reintentar</string>
     <string name="player_back">Volver</string>
@@ -58,12 +58,12 @@
     <string name="player_unlock">Desbloquear controles</string>
     <string name="player_controls_locked">Controles de reproducción bloqueados</string>
     <string name="player_controls_unlocked">Controles de reproducción desbloqueados</string>
-    <string name="player_seek_forward">Adelante 10 segundos</string>
-    <string name="player_seek_backward">Atrás 10 segundos</string>
+    <string name="player_seek_forward">Avanzar 10 segundos</string>
+    <string name="player_seek_backward">Retroceder 10 segundos</string>
     <string name="player_seek_forward_feedback">+10s</string>
     <string name="player_seek_backward_feedback">−10s</string>
     <string name="player_previous_episode">Episodio anterior</string>
-    <string name="player_next_episode">Próximo episodio</string>
+    <string name="player_next_episode">Siguiente episodio</string>
     <string name="player_previous_episode_description">Episodio anterior: %1$s</string>
     <string name="player_next_episode_description">Próximo episodio: %1$s</string>
     <string name="player_no_previous_episode">Sin episodio anterior</string>

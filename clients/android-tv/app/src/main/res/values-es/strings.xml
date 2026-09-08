@@ -8,7 +8,7 @@
     <string name="player_rewind_10">Rebobinar 10 segundos</string>
     <string name="player_play">Reproducir</string>
     <string name="player_pause">Pausar</string>
-    <string name="player_forward_10">Adelante 10 segundos</string>
+    <string name="player_forward_10">Avanzar 10 segundos</string>
     <string name="player_quality">Calidad</string>
     <string name="player_audio_button">Audio</string>
     <string name="player_audio_selected_description">Audio, %1$s seleccionado</string>
@@ -37,7 +37,7 @@
     <string name="player_sleep_minutes">%1$d min</string>
     <string name="player_episodes">Episodios</string>
     <string name="player_episode_list">Lista de episodios</string>
-    <string name="player_next_episode">Próximo episodio</string>
+    <string name="player_next_episode">Siguiente episodio</string>
     <string name="player_up_next">A continuación</string>
     <string name="player_play_now">Juega ahora</string>
     <string name="player_playing_in">La reproducción de vídeo comienza en %1$d s</string>

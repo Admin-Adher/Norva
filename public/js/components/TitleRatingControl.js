@@ -109,6 +109,8 @@
             this._onUp = () => this.choose(1);
             this._onDown = () => this.choose(-1);
             this._onRetry = () => this.retry();
+            this._onLanguageChange = () => this.render();
+            window.addEventListener?.('norva:languagechange', this._onLanguageChange);
             this.upButton?.addEventListener('click', this._onUp);
             this.downButton?.addEventListener('click', this._onDown);
             this.retryButton?.addEventListener('click', this._onRetry);
@@ -143,6 +145,7 @@
             this.upButton?.removeEventListener('click', this._onUp);
             this.downButton?.removeEventListener('click', this._onDown);
             this.retryButton?.removeEventListener('click', this._onRetry);
+            window.removeEventListener?.('norva:languagechange', this._onLanguageChange);
         }
 
         /**
@@ -635,6 +638,13 @@
                 button.classList.toggle('active', selected);
                 button.classList.toggle('is-selected', selected);
                 button.setAttribute('aria-pressed', String(selected));
+                const key = rating === 1
+                    ? (selected ? 'ui_web_daac3bde7c99' : 'ui_web_e96aa02e91fd')
+                    : (selected ? 'ui_web_c198943da380' : 'ui_web_d81123b5e9a4');
+                // Keep translation metadata aligned with the selected state so a
+                // DOM translation pass cannot replace "remove like" with "like".
+                button.setAttribute('data-i18n-aria-label', key);
+                button.setAttribute('data-i18n-title', key);
                 button.setAttribute('aria-label', label);
                 button.title = label;
             }

@@ -84,9 +84,12 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
     from("../../../public") {
         include "subscribe.html", "css/commerce.css", "css/i18n.css"
         include "css/main.css", "js/utils/mediaUtils.js", "js/pages/WatchPage.js"
+        include "app.html", "js/app.js", "js/utils/GenreTaxonomy.js", "js/components/TitleRatingControl.js"
+        include "js/components/MultiSelect.js", "js/pages/MoviesPage.js", "js/pages/SeriesPage.js"
         include "js/i18n.js", "js/consent-banner.js", "js/plan-selection-ui.js", "js/promo-ui.js", "js/navigation-safety.js"
         include "fonts/**", "assets/fonts/**", "img/**", "assets/landing/norva-every-screen-premium.webp"
     }
+    from("../../../tests/fixtures") { include "i18n-context.html", "i18n-context.js" }
     into("$buildDir/generated/i18nTestAssets")
 }
 tasks.configureEach { task ->
