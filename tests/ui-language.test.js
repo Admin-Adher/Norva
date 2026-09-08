@@ -103,9 +103,8 @@ test('external language preference changes are reflected without content-setting
 
 test('offline locale caching accepts only exact public asset hashes and no extra parameters', () => {
     const source = fs.readFileSync(require.resolve('../public/sw.js'), 'utf8');
-    const block = source.slice(source.indexOf('function canCacheRequest('), source.indexOf('// Anything that streams'));
-    const context = { URL, self: { location: { origin: 'https://norva.tv' } } };
-    vm.runInNewContext(block + '\nthis.check = canCacheRequest;', context);
+    const context = { URL, self: { location: { origin: 'https://norva.tv' }, addEventListener() {} } };
+    vm.runInNewContext(source + '\nthis.check = canCacheRequest;', context);
     assert.equal(context.check({ url: 'https://norva.tv/js/i18n.js?v=abcdef1234' }), true);
     assert.equal(context.check({ url: 'https://norva.tv/css/i18n.css?v=abcdef1234' }), true);
     for (const url of ['https://norva.tv/js/i18n.js?v=abcdef1234&token=secret',
