@@ -1522,5 +1522,89 @@
     "norva.tv/account",
     "norva.tv/account",
     "norva.tv/account"
+  ],
+  "Loading series categories...": [
+    "Loading series categories...",
+    "Chargement des catégories de séries...",
+    "Carregando categorias de séries...",
+    "Cargando categorías de series...",
+    "श्रृंखला श्रेणियां लोड हो रही हैं...",
+    "Dizi kategorileri yükleniyor...",
+    "সিরিজের বিভাগ লোড হচ্ছে...",
+    "جارٍ تحميل تصنيفات المسلسلات…",
+    "Memuat kategori seri...",
+    "Naglo-load ng mga kategorya ng serye..."
+  ],
+  "Error loading series categories": [
+    "Error loading series categories",
+    "Erreur lors du chargement des catégories de séries",
+    "Erro ao carregar categorias de séries",
+    "Error al cargar categorías de series",
+    "श्रृंखला श्रेणियां लोड करने में त्रुटि",
+    "Seri kategorileri yüklenirken hata oluştu",
+    "সিরিজের বিভাগগুলি লোড করার সময় ত্রুটি৷",
+    "تعذّر تحميل تصنيفات المسلسلات",
+    "Terjadi kesalahan saat memuat kategori rangkaian",
+    "Error sa paglo-load ng mga kategorya ng serye"
+  ],
+  "Best language match": [
+    "Best language match",
+    "Meilleure correspondance linguistique",
+    "Melhor correspondência de idioma",
+    "Mejor combinación de idiomas",
+    "सर्वोत्तम भाषा मेल",
+    "En iyi dil eşleşmesi",
+    "সেরা ভাষার মিল",
+    "أفضل تطابق لغوي",
+    "Pertandingan bahasa terbaik",
+    "Pinakamahusay na tugmang wika"
+  ],
+  "Open a random series": [
+    "Open a random series",
+    "Ouvrir une série aléatoire",
+    "Abra uma série aleatória",
+    "Abrir una serie aleatoria",
+    "एक यादृच्छिक श्रृंखला खोलें",
+    "Rastgele bir seri aç",
+    "একটি র্যান্ডম সিরিজ খুলুন",
+    "افتح مسلسلًا عشوائيًا",
+    "Buka seri acak",
+    "Magbukas ng random na serye"
+  ],
+  "Loading series...": [
+    "Loading series...",
+    "Chargement des séries…",
+    "Carregando série...",
+    "Cargando serie...",
+    "श्रृंखला लोड हो रही है...",
+    "Seri yükleniyor...",
+    "সিরিজ লোড হচ্ছে...",
+    "جارٍ تحميل المسلسلات…",
+    "Memuat seri...",
+    "Naglo-load ng serye..."
+  ],
+  "Your preference for this series": [
+    "Your preference for this series",
+    "Votre préférence pour cette série",
+    "Sua preferência por esta série",
+    "Tu preferencia por esta serie.",
+    "इस श्रृंखला के लिए आपकी प्राथमिकता",
+    "Bu seri için tercihiniz",
+    "এই সিরিজের জন্য আপনার পছন্দ",
+    "تفضيلك لهذا المسلسل",
+    "Preferensi Anda untuk seri ini",
+    "Ang iyong kagustuhan para sa seryeng ito"
+  ],
+  "Rate this series": [
+    "Rate this series",
+    "Notez cette série",
+    "Avalie esta série",
+    "Califica esta serie",
+    "इस श्रृंखला को रेट करें",
+    "Bu seriyi değerlendirin",
+    "এই সিরিজটিকে রেট করুন",
+    "قيّم هذا المسلسل",
+    "Nilai seri ini",
+    "I-rate ang seryeng ito"
   ]
 }
