@@ -94,6 +94,7 @@ create table public.cloud_sources (
   display_name text not null default 'Fixture source',
   sync_status text not null default 'idle',
   sync_error text,
+  config_hint jsonb not null default '{}'::jsonb,
   enabled boolean not null default true,
   deleted_at timestamptz,
   last_synced_at timestamptz,

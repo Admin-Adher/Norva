@@ -50,9 +50,21 @@ function emailData(overrides = {}) {
 }
 
 function actionUrl(message) {
-  const match = message.html.match(/<a href="([^"]+)"/);
-  assert.ok(match, 'email CTA URL was not rendered');
-  return new URL(match[1].replace(/&amp;/g, '&'));
+  const anchors = [...message.html.matchAll(/<a\b[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
+  const actionLinks = [];
+  for (const [, href, content] of anchors) {
+    const url = new URL(href.replace(/&amp;/g, '&'));
+    if (/<img\b/i.test(content)) {
+      assert.equal(url.href, 'https://norva.tv/', 'artwork must not invoke an authentication action');
+    }
+    if (url.pathname === '/account.html') {
+      assert.equal(url.origin, 'https://norva.tv');
+      actionLinks.push(url.href);
+    }
+  }
+  assert.ok(actionLinks.length > 0, 'email CTA URL was not rendered');
+  assert.equal(new Set(actionLinks).size, 1, 'CTA and fallback must use the same authentication URL');
+  return new URL(actionLinks[0]);
 }
 
 test('secure email change sends both confirmations with Supabase hash mapping', async () => {
