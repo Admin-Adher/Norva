@@ -30,7 +30,10 @@ export interface EmailFrame {
 
 export function renderEmailFrame(o: EmailFrame): string {
   const artwork = o.artwork ?? 'security';
-  const visual = artwork === false ? '' : `<tr><td class="nv-pad" style="padding:32px 40px 0"><img src="https://norva.tv/img/email/${artwork}-v1.jpg" width="518" height="${artwork === 'catalog' ? 174 : 173}" alt="" aria-hidden="true" style="display:block;width:100%;max-width:518px;height:auto;border:0;border-radius:10px;outline:none;text-decoration:none"></td></tr>`;
+  // A real site link avoids Gmail's download overlay on large unlinked images.
+  // It does not prevent saving the asset; never link artwork to an auth action.
+  const artworkLabel = o.lang === 'fr' ? 'Ouvrir Norva' : 'Open Norva';
+  const visual = artwork === false ? '' : `<tr><td class="nv-pad" style="padding:32px 40px 0"><a href="https://norva.tv/" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;border-radius:10px"><img src="https://norva.tv/img/email/${artwork}-v1.jpg" width="518" height="${artwork === 'catalog' ? 174 : 173}" alt="${artworkLabel}" style="display:block;width:100%;max-width:518px;height:auto;border:0;border-radius:10px;outline:none;text-decoration:none"></a></td></tr>`;
   const cta = o.cta ? `<tr><td class="nv-pad" style="padding:8px 40px 32px">
     <table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td bgcolor="${COLOR.action}" style="background-color:${COLOR.action};background-image:linear-gradient(135deg,${COLOR.action},${COLOR.actionHover});border:1px solid ${COLOR.highlight};border-radius:10px;box-shadow:0 8px 24px rgba(37,99,235,.24);mso-padding-alt:16px 24px">
     <a href="${escapeEmail(o.cta.url)}" style="display:inline-block;padding:16px 24px;color:#ffffff;font-family:${FONT};font-size:16px;font-weight:600;line-height:24px;text-decoration:none;text-align:center">${escapeEmail(o.cta.label)}</a>
