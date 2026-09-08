@@ -31,7 +31,7 @@ Artwork was published in commit `7bb0b363` through [Cloudflare run 34237110329](
 
 The shared frame and a forward database migration, `20260908144324_linked_email_artwork.sql`, now wrap each hero illustration in a normal `https://norva.tv/` link with a localized accessible image label. This addresses Gmail's download overlay on large unlinked images while retaining the same artwork and layout. The artwork never links to an authentication or confirmation action. This is a presentation change, not download prevention: the asset can still be saved or captured, and already-sent messages retain their original HTML.
 
-The focused follow-up passed 42 existing tests, the networkless PostgreSQL shell proof, and 21 rendered viewport checks with zero overflow or broken images. Both production Edge replicas passed health and hash checks with unchanged configuration; the database owner and ACL were preserved. A single new internal Gmail hover-check sample was queued under the immutable key `email-linked-artwork-20260908:verification`; real hover acceptance remains separate from the earlier successful image-display confirmation.
+The focused follow-up passed 42 existing tests, the networkless PostgreSQL shell proof, and 21 rendered viewport checks with zero overflow or broken images. Both production Edge replicas passed health and hash checks with unchanged configuration; the database owner and ACL were preserved. A single new internal Gmail hover-check sample under the immutable key `email-linked-artwork-20260908:verification` reached `sent` at `2026-09-08T14:50:00.455296Z`. The operator has not yet confirmed its hover controls; this acceptance remains separate from the earlier successful image-display confirmation.
 
 ## Activation still gated
 
