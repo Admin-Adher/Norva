@@ -2968,7 +2968,7 @@ class MoviesPage {
         if (backBtn) {
             const ctx = this.searchInput?.value?.trim()
                 ? (globalThis.NorvaI18n?.t("ui_web_e978b00de465", { defaultValue: "Search results" }) ?? 'Search results')
-                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Movies');
+                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : (globalThis.NorvaI18n?.t('ui_movies', { defaultValue: 'Movies' }) || 'Movies'));
             // Update only the label span — the button holds an SVG arrow icon that a
             // raw textContent write would destroy.
             const label = backBtn.querySelector('.back-label');

@@ -118,3 +118,26 @@ test('DOM plural counts survive argument filtering without accepting language ov
         assert.equal(element.textContent, expected);
     }
 });
+
+test('actual fiche back actions localize the default but retain search and provider context', () => {
+    const r = runtime();
+    for (const [page, key] of [['MoviesPage','ui_movies'], ['SeriesPage','ui_series']]) {
+        const source = read(`public/js/pages/${page}.js`);
+        const start = source.indexOf('        // Context-aware back label');
+        const body = source.slice(start, source.indexOf('\n\n        //', start + 30));
+        const label = { textContent:'' };
+        r.backPage = {detailsPanel:{querySelector:()=>({querySelector:()=>label})}, searchInput:{value:''}};
+        for (const {code} of locales) {
+            r.NorvaI18n.setPreference(code);
+            for (const [search, bucket, expected] of [
+                ['', '', r.NorvaI18n.t(key)],
+                ['query', '', r.NorvaI18n.t('ui_web_e978b00de465')],
+                ['', 'Provider category', 'Provider category'],
+            ]) {
+                r.backPage.searchInput.value=search; r.backPage.activeBucket=Boolean(bucket); r.backPage.bucketLabel=bucket;
+                vm.runInContext(`(function(){${body}}).call(backPage)`,r);
+                assert.equal(label.textContent,expected,`${page}/${code}`);
+            }
+        }
+    }
+});

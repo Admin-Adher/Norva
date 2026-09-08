@@ -3573,7 +3573,7 @@ class SeriesPage {
         if (backBtn) {
             const ctx = this.searchInput?.value?.trim()
                 ? (globalThis.NorvaI18n?.t("ui_web_e978b00de465", { defaultValue: "Search results" }) ?? 'Search results')
-                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Series');
+                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : (globalThis.NorvaI18n?.t('ui_series', { defaultValue: 'Series' }) || 'Series'));
             // Update only the label span — the button holds an SVG arrow icon that a
             // raw textContent write would destroy (the old circle-with-spilled-text bug).
             const label = backBtn.querySelector('.back-label');
