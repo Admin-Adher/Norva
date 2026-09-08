@@ -83,4 +83,23 @@
     <string name="ui_season_count_two" formatted="false">{{count}} موسمان</string>
     <string name="ui_season_count_few" formatted="false">{{count}} مواسم</string>
     <string name="ui_season_count_many" formatted="false">{{count}} موسمًا</string>
+    <string name="ui_trailer" formatted="false">الإعلان التشويقي</string>
+    <string name="ui_episode_count_one" formatted="false">{{count}} حلقة</string>
+    <string name="ui_episode_count_other" formatted="false">{{count}} حلقة</string>
+    <string name="ui_episode_count_zero" formatted="false">{{count}} حلقات</string>
+    <string name="ui_episode_count_two" formatted="false">{{count}} حلقتان</string>
+    <string name="ui_episode_count_few" formatted="false">{{count}} حلقات</string>
+    <string name="ui_episode_count_many" formatted="false">{{count}} حلقة</string>
+    <string name="ui_video_count_one" formatted="false">{{count}} فيديو</string>
+    <string name="ui_video_count_other" formatted="false">{{count}} فيديو</string>
+    <string name="ui_video_count_zero" formatted="false">{{count}} فيديو</string>
+    <string name="ui_video_count_two" formatted="false">{{count}} مقطعا فيديو</string>
+    <string name="ui_video_count_few" formatted="false">{{count}} فيديو</string>
+    <string name="ui_video_count_many" formatted="false">{{count}} فيديو</string>
+    <string name="ui_version_count_one" formatted="false">{{count}} نسخة</string>
+    <string name="ui_version_count_other" formatted="false">{{count}} نسخة</string>
+    <string name="ui_version_count_zero" formatted="false">{{count}} نسخ</string>
+    <string name="ui_version_count_two" formatted="false">{{count}} نسختان</string>
+    <string name="ui_version_count_few" formatted="false">{{count}} نسخ</string>
+    <string name="ui_version_count_many" formatted="false">{{count}} نسخة</string>
 </resources>

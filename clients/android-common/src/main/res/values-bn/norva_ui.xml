@@ -83,4 +83,23 @@
     <string name="ui_season_count_two" formatted="false">{{count}} সিজন</string>
     <string name="ui_season_count_few" formatted="false">{{count}} সিজন</string>
     <string name="ui_season_count_many" formatted="false">{{count}} সিজন</string>
+    <string name="ui_trailer" formatted="false">ট্রেলার</string>
+    <string name="ui_episode_count_one" formatted="false">{{count}} পর্ব</string>
+    <string name="ui_episode_count_other" formatted="false">{{count}} পর্ব</string>
+    <string name="ui_episode_count_zero" formatted="false">{{count}} পর্ব</string>
+    <string name="ui_episode_count_two" formatted="false">{{count}} পর্ব</string>
+    <string name="ui_episode_count_few" formatted="false">{{count}} পর্ব</string>
+    <string name="ui_episode_count_many" formatted="false">{{count}} পর্ব</string>
+    <string name="ui_video_count_one" formatted="false">{{count}} ভিডিও</string>
+    <string name="ui_video_count_other" formatted="false">{{count}} ভিডিও</string>
+    <string name="ui_video_count_zero" formatted="false">{{count}} ভিডিও</string>
+    <string name="ui_video_count_two" formatted="false">{{count}} ভিডিও</string>
+    <string name="ui_video_count_few" formatted="false">{{count}} ভিডিও</string>
+    <string name="ui_video_count_many" formatted="false">{{count}} ভিডিও</string>
+    <string name="ui_version_count_one" formatted="false">{{count}} সংস্করণ</string>
+    <string name="ui_version_count_other" formatted="false">{{count}} সংস্করণ</string>
+    <string name="ui_version_count_zero" formatted="false">{{count}} সংস্করণ</string>
+    <string name="ui_version_count_two" formatted="false">{{count}} সংস্করণ</string>
+    <string name="ui_version_count_few" formatted="false">{{count}} সংস্করণ</string>
+    <string name="ui_version_count_many" formatted="false">{{count}} সংস্করণ</string>
 </resources>

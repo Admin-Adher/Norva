@@ -83,4 +83,23 @@
     <string name="ui_season_count_two" formatted="false">{{count}} temporadas</string>
     <string name="ui_season_count_few" formatted="false">{{count}} temporadas</string>
     <string name="ui_season_count_many" formatted="false">{{count}} temporadas</string>
+    <string name="ui_trailer" formatted="false">Tráiler</string>
+    <string name="ui_episode_count_one" formatted="false">{{count}} episodio</string>
+    <string name="ui_episode_count_other" formatted="false">{{count}} episodios</string>
+    <string name="ui_episode_count_zero" formatted="false">{{count}} episodios</string>
+    <string name="ui_episode_count_two" formatted="false">{{count}} episodios</string>
+    <string name="ui_episode_count_few" formatted="false">{{count}} episodios</string>
+    <string name="ui_episode_count_many" formatted="false">{{count}} episodios</string>
+    <string name="ui_video_count_one" formatted="false">{{count}} vídeo</string>
+    <string name="ui_video_count_other" formatted="false">{{count}} vídeos</string>
+    <string name="ui_video_count_zero" formatted="false">{{count}} vídeos</string>
+    <string name="ui_video_count_two" formatted="false">{{count}} vídeos</string>
+    <string name="ui_video_count_few" formatted="false">{{count}} vídeos</string>
+    <string name="ui_video_count_many" formatted="false">{{count}} vídeos</string>
+    <string name="ui_version_count_one" formatted="false">{{count}} versión</string>
+    <string name="ui_version_count_other" formatted="false">{{count}} versiones</string>
+    <string name="ui_version_count_zero" formatted="false">{{count}} versiones</string>
+    <string name="ui_version_count_two" formatted="false">{{count}} versiones</string>
+    <string name="ui_version_count_few" formatted="false">{{count}} versiones</string>
+    <string name="ui_version_count_many" formatted="false">{{count}} versiones</string>
 </resources>

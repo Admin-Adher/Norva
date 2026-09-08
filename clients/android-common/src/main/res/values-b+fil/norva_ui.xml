@@ -83,4 +83,23 @@
     <string name="ui_season_count_two" formatted="false">{{count}} season</string>
     <string name="ui_season_count_few" formatted="false">{{count}} season</string>
     <string name="ui_season_count_many" formatted="false">{{count}} season</string>
+    <string name="ui_trailer" formatted="false">Trailer</string>
+    <string name="ui_episode_count_one" formatted="false">{{count}} episode</string>
+    <string name="ui_episode_count_other" formatted="false">{{count}} episode</string>
+    <string name="ui_episode_count_zero" formatted="false">{{count}} episode</string>
+    <string name="ui_episode_count_two" formatted="false">{{count}} episode</string>
+    <string name="ui_episode_count_few" formatted="false">{{count}} episode</string>
+    <string name="ui_episode_count_many" formatted="false">{{count}} episode</string>
+    <string name="ui_video_count_one" formatted="false">{{count}} video</string>
+    <string name="ui_video_count_other" formatted="false">{{count}} video</string>
+    <string name="ui_video_count_zero" formatted="false">{{count}} video</string>
+    <string name="ui_video_count_two" formatted="false">{{count}} video</string>
+    <string name="ui_video_count_few" formatted="false">{{count}} video</string>
+    <string name="ui_video_count_many" formatted="false">{{count}} video</string>
+    <string name="ui_version_count_one" formatted="false">{{count}} bersyon</string>
+    <string name="ui_version_count_other" formatted="false">{{count}} bersyon</string>
+    <string name="ui_version_count_zero" formatted="false">{{count}} bersyon</string>
+    <string name="ui_version_count_two" formatted="false">{{count}} bersyon</string>
+    <string name="ui_version_count_few" formatted="false">{{count}} bersyon</string>
+    <string name="ui_version_count_many" formatted="false">{{count}} bersyon</string>
 </resources>
