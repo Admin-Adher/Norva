@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { importTypescriptModule } = require('./helpers/import-typescript-module');
 
 const root = path.resolve(__dirname, '..');
 const migration = fs.readFileSync(
@@ -37,7 +38,7 @@ const envExample = fs.readFileSync(path.join(root, 'ops/hetzner/.env.hetzner.exa
 test('lifecycle transport is bounded, provider-acknowledged and idempotent for transactional flows', () => {
   assert.match(lifecycle, /norva_enqueue_lifecycle_email/);
   assert.match(lifecycle, /dedupeKey: `lifecycle:welcome:\$\{row\.user_id\}`/);
-  assert.match(lifecycle, /dedupeKey: `lifecycle:dunning:\$\{row\.user_id\}:\$\{stage\}`/);
+  assert.match(lifecycle, /dedupeKey: `lifecycle:dunning:\$\{row\.user_id\}:\$\{row\.cycle_key\}:\$\{stage\}`/);
   assert.doesNotMatch(lifecycle, /api\.resend\.com\/emails/);
   assert.match(emailWorker, /sendResendDelivery\(claim/);
   assert.match(resendTransport, /AbortSignal\.timeout\(timeout\)/);
@@ -232,13 +233,27 @@ test('winback and abandoned sends are gated before email and before push', () =>
   assert.match(abandoned, /unsubscribeUrl: context\.unsubscribeUrl/);
 });
 
-test('only marketing templates override the transactional unsubscribe fallback', () => {
+test('rendered marketing emails carry unsubscribe controls while transactional emails do not', async () => {
+  const rendered = await importTypescriptModule(path.join(root, 'supabase/functions/_shared/lifecycle-email.ts'));
+  const unsubscribeUrl = 'https://norva.tv/unsubscribe?token=consent-proof';
+  for (const message of [
+    rendered.renderWinback(null, { unsubscribeUrl }),
+    rendered.renderAbandonedCheckout(null, { unsubscribeUrl }),
+  ]) {
+    assert.ok(message.html.includes(`href="${unsubscribeUrl}"`));
+    assert.match(message.html, />Unsubscribe<\/a>/);
+    assert.ok(message.text.includes(`Unsubscribe: ${unsubscribeUrl}`));
+  }
+  for (const message of [
+    rendered.renderWelcome(null),
+    rendered.renderTrialEnding(null, { endsAt: '2026-09-20T00:00:00Z' }),
+    rendered.renderPaymentFailed(null, 1),
+    rendered.renderWinback(null),
+  ]) {
+    assert.doesNotMatch(message.html, />Unsubscribe<\/a>/);
+    assert.doesNotMatch(message.text, /Unsubscribe:/);
+  }
   assert.doesNotMatch(templates, /DEFAULT_UNSUBSCRIBE_URL/);
-  assert.match(templates, /Only marketing templates receive an unsubscribe control/);
-  assert.match(templates, /renderWinback\(firstName: string \| null, opts: \{ unsubscribeUrl\?: string \} = \{\}\)/);
-  assert.match(templates, /unsubscribeUrl: opts\.unsubscribeUrl/);
-  assert.match(templates, /renderTrialEnding/);
-  assert.match(templates, /renderPaymentFailed/);
   assert.match(lifecycle, /p_request_headers: unsubscribeHeaders/);
   assert.match(deliveryMigration, /List-Unsubscribe-Post/);
   assert.match(lifecycle, /BILLING_LIVE && LC_DUNNING && LC_EXPIRE/);

@@ -28,6 +28,17 @@ test('strict bounded payload and header policy',async t=>{
  const r=f.validateRequest({...f.input,messages:{...mail(),headers:{'List-Unsubscribe':'<https://norva.tv/unsubscribe?token=fixture>','List-Unsubscribe-Post':'List-Unsubscribe=One-Click'}}});
  assert.match(r.messages[0].headers['List-Unsubscribe'],/norva/);
 });
+
+test('import producer sender is accepted and normalized without allowing external brands',async t=>{
+ const f=await fixture(t);
+ const input={...f.input,key:'norva-import-70000000-0000-0000-0000-000000000001',messages:{...mail(),from:'Norva Updates <updates@norva.tv>',tags:[{name:'flow',value:'import_completed'}]}};
+ const r=f.validateRequest(input);
+ assert.equal(r.messages[0].from,'Norva <support@notify.norva.tv>');
+ assert.equal(r.messages[0].flow,'import_completed');
+ assert.equal(r.auth,false);
+ for(const from of ['Norva Updates <updates@outside.test>','Other Updates <updates@norva.tv>','Norva Updates <updates@norva.tv>\r\nBcc: x@outside.test'])
+  assert.throws(()=>f.validateRequest({...input,messages:{...input.messages,from}}),/invalid_sender/);
+});
 test('queue persists encrypted payload and permanent idempotency across reopen',async t=>{
  const f=await fixture(t),r=f.validateRequest(f.input);f.store.accept(r);
  assert.throws(()=>f.store.accept(f.validateRequest({...f.input,messages:{...mail(),subject:'changed'}})),/idempotency_conflict/);

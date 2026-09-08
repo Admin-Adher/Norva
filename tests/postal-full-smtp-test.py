@@ -46,6 +46,8 @@ class Tests(unittest.TestCase):
   r=self.go('temporary');self.assertEqual(r['state'],'retry');self.assertTrue(r['provedNoAcceptance'])
  def test_explicit_permanent_recipient_never_sends_data(self):
   r=self.go('recipient_bad');self.assertEqual(r['state'],'HardFail');self.assertTrue(r['recipientInvalid']);self.assertNotIn('data',Fake.calls)
+  self.assertEqual(r['smtpStage'],'RCPT');self.assertEqual(r['smtpCode'],550);self.assertEqual(r['enhancedStatus'],'5.1.1')
+  self.assertNotIn('invalid',str(r));self.assertNotIn('test@example.test',str(r))
  def test_private_address_never_connected(self):
   for ip in ['127.0.0.1','10.0.0.1','169.254.169.254','157.180.96.159','192.168.1.1']:
    self.go('sent',lambda *args:[(socket.AF_INET,socket.SOCK_STREAM,0,'',(ip,25))]);self.assertEqual(Fake.calls,[])

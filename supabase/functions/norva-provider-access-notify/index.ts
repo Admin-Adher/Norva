@@ -1,3 +1,4 @@
+import { renderEmailFrame } from "../_shared/email-frame.ts";
 // Durable Provider Access notification transport. PostgreSQL owns scheduling,
 // leases, eligibility and terminal state; this worker only resolves the current
 // recipient/token, performs the final authorization CAS and calls Resend/FCM.
@@ -108,7 +109,11 @@ function escapeHtml(value: string): string {
 }
 
 function emailHtml(copy: Copy): string {
-  return `<!doctype html><html><body style="margin:0;background:#090b12;color:#f5f7fb;font-family:Inter,Arial,sans-serif"><div style="max-width:560px;margin:0 auto;padding:32px 20px"><div style="font-size:24px;font-weight:700">Norva</div><h1 style="font-size:24px;line-height:1.25;margin:28px 0 12px">${escapeHtml(copy.title)}</h1><p style="font-size:16px;line-height:1.6;color:#d7dbea">${escapeHtml(copy.body)}</p><p style="font-size:16px;line-height:1.6;color:#d7dbea">${escapeHtml(copy.detail)}</p><a href="${DEEP_LINK}" style="display:inline-block;margin-top:12px;padding:12px 18px;border-radius:10px;background:#7c6df2;color:#fff;text-decoration:none;font-weight:650">Review provider access</a><p style="margin-top:30px;font-size:13px;line-height:1.5;color:#9299aa">This reminder concerns access supplied by an external provider. Norva does not provide, sell or extend external catalogs.</p></div></body></html>`;
+  return renderEmailFrame({ artwork: copy.title.toLowerCase().includes('restored') ? 'catalog' : 'action', title: copy.subject, heading: copy.title, preheader: copy.body,
+    bodyHtml: `<p style="margin:0 0 16px">${escapeHtml(copy.body)}</p><p style="margin:0">${escapeHtml(copy.detail)}</p>`,
+    cta: { label: "Review provider access", url: DEEP_LINK },
+    noteHtml: "This reminder concerns access supplied by an external provider. Norva does not provide, sell or extend external catalogs.",
+  });
 }
 
 function emailText(copy: Copy): string {

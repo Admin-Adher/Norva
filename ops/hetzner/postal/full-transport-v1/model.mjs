@@ -10,7 +10,7 @@ export function validateRequest(value){
   if(!m||Object.keys(m).some(k=>!['from','to','reply_to','subject','html','text','tags','headers'].includes(k)))throw Error('unsupported_mail_field');
   const to=Array.isArray(m.to)?m.to:[m.to];
   if(to.length!==1||typeof to[0]!=='string'||to[0].length>254||!address.test(to[0]))throw Error('invalid_recipient');
-  if(typeof m.from!=='string'||!/^Norva(?: Support)? <[^<>\r\n]+@(?:notify\.)?norva\.tv>$/i.test(m.from))throw Error('invalid_sender');
+  if(typeof m.from!=='string'||!/^Norva(?: Support| Updates)? <[^<>\r\n]+@(?:notify\.)?norva\.tv>$/i.test(m.from))throw Error('invalid_sender');
   if(m.reply_to!==undefined&&(typeof m.reply_to!=='string'||m.reply_to.length>254||!address.test(m.reply_to)))throw Error('invalid_reply_to');
   if(typeof m.subject!=='string'||m.subject.length<1||m.subject.length>300||/[\r\n]/.test(m.subject))throw Error('invalid_subject');
   if(!m.html&&!m.text)throw Error('empty_content');

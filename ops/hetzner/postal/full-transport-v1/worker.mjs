@@ -38,7 +38,9 @@ export async function workOne({store,runner,authorize,enabled}){
  if(result.state==='retry'&&result.provedNoAcceptance===true){
   store.mark(job.id,'held',{next_at:store.now()+Math.min(3600000,60000*2**Math.min(6,attempt-1)),error:'smtp_temporary'});return 'retry';}
  if(result.state==='HardFail'){
-  store.mark(job.id,'failed',{error:'smtp_permanent'});
+  const diagnostic=Number.isInteger(result.smtpCode)&&result.smtpCode>=500&&result.smtpCode<=599&&['MAIL','RCPT','DATA'].includes(result.smtpStage)
+   ?'smtp_permanent_'+result.smtpStage.toLowerCase()+'_'+result.smtpCode:'smtp_permanent';
+  store.mark(job.id,'failed',{error:diagnostic});
   if(result.recipientInvalid===true)store.suppress(job.recipient_hash,'permanent_recipient');return 'failed';}
  store.mark(job.id,'uncertain',{error:'smtp_unknown_no_replay'});return 'uncertain';
 }

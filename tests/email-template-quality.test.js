@@ -16,7 +16,7 @@ function assertPremiumEnvelope(rendered, expectedCategory, expectedFlow) {
   assert.match(rendered.html, /<h1\b/i);
   assert.match(rendered.html, /role="presentation"/i);
   assert.match(rendered.html, /x-apple-disable-message-reformatting/i);
-  assert.match(rendered.html, /color:#bcc5d6/i);
+  assert.match(rendered.html, /color:#cbd5e1/i);
   assert.doesNotMatch(rendered.html, /display\s*:\s*(?:flex|grid)/i);
   assert.equal(typeof rendered.text, 'string');
   assert.ok(rendered.text.length > 60);
