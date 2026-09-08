@@ -11,7 +11,7 @@ Spanish, Hindi, Turkish, Bengali, Arabic, Indonesian and Filipino.
 102 existing Web message keys received corrections (100 contextual entries plus two
 Filipino playback labels), with corresponding existing native messages updated where
 the source context matches. The generated catalogue completeness check covers all
-7,197 shared/Web entries and 3,240 native resource entries. **Completeness is a structural
+7,216 shared/Web entries and 3,240 native resource entries. **Completeness is a structural
 check, not a claim that every sentence has received a native-speaker linguistic review.**
 
 Examples of corrected meanings:

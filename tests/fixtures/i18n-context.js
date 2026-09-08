@@ -16,6 +16,7 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
     const assert = (condition, message) => { if (!condition) throw Error(message); };
     window.contextFixture = {
         async prepare(locale = 'fr', kind = 'movies') {
+            document.querySelectorAll('.filter-bar.mobile-open .mobile-filter-close').forEach(button => button.click());
             control?.destroy();
             document.body.classList.remove('catalog-filter-open');
             NorvaI18n.setPreference(locale);

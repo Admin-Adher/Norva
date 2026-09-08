@@ -52,6 +52,9 @@ public class ContextualLanguageInstrumentedTest {
             });
             activity.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             activity.setContentView(view);
+            // Acquire native focus before selecting the DOM input. Requesting
+            // WebView focus again afterward can move it to another DOM control.
+            view.requestFocus();
             view.loadUrl("https://norva-context.test/i18n-context.html");
         });
         try {
@@ -61,8 +64,9 @@ public class ContextualLanguageInstrumentedTest {
             for(String locale:new String[]{"fr","ar"}) for(String kind:new String[]{"movies","series"}) {
                 evaluate(instrumentation,holder.get(),"window.imeReady=false;contextFixture.prepare('"+locale+"','"+kind+"').then(async()=>{document.getElementById('"+kind+"-mobile-filters-btn').click();document.getElementById('"+kind+"-category-btn').click();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));document.getElementById('"+kind+"-category-search').focus();window.imeReady=true;});");
                 for(int i=0;i<100&&!"true".equals(evaluate(instrumentation,holder.get(),"window.imeReady"));i++)Thread.sleep(100);
+                assertEquals("Search focused before IME for "+locale+"/"+kind,
+                    "\""+kind+"-category-search\"",evaluate(instrumentation,holder.get(),"document.activeElement.id"));
                 instrumentation.runOnMainSync(() -> {
-                    holder.get().requestFocus();
                     ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE))
                         .showSoftInput(holder.get(), android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
                 });
@@ -72,7 +76,7 @@ public class ContextualLanguageInstrumentedTest {
                     instrumentation.runOnMainSync(()->{android.view.WindowInsets insets=holder.get().getRootWindowInsets();keyboard.set(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));});
                 }
                 assertTrue("Keyboard visible for "+locale+"/"+kind,keyboard.get());
-                assertEquals("Scope survives both reset orders with keyboard", "\"ok\"",evaluate(instrumentation,holder.get(),
+                assertEquals("Scope survives both reset orders with keyboard for "+locale+"/"+kind, "\"ok\"",evaluate(instrumentation,holder.get(),
                     "(()=>{const f=contextFixture;f.source.value='fixture-source';f.categories.setSelected(['comedie']);f.source.value='';f.categories.setSelected([]);if(f.source.value||f.categories.getSelected().size)return 'source/category';f.categories.setSelected(['comedie']);f.source.value='fixture-source';f.categories.setSelected([]);f.source.value='';if(f.source.value||f.categories.getSelected().size)return 'category/source';const sheet=document.getElementById('"+kind+"-filter-bar');if(sheet.inert||sheet.getAttribute('aria-hidden')!=='false')return 'inaccessible sheet';if(document.activeElement.id!=='"+kind+"-category-search')return 'focus lost';return 'ok';})()"));
                 instrumentation.runOnMainSync(()->((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(holder.get().getWindowToken(),0));
                 System.out.println("CONTEXT_KEYBOARD_OK locale="+locale+" media="+kind+" textZoom=130");
