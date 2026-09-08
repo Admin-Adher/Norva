@@ -1306,7 +1306,6 @@ class HomePage {
                         <p data-i18n="ui_discovery_description">Enjoy Norva with films and live TV from several sources, without adding a provider.</p>
                         <button type="button" class="btn btn-secondary" id="home-discovery-start" data-i18n="ui_discovery_continue">Continue with this selection</button>
                         <p class="setup-discovery-terms" data-i18n="ui_discovery_terms">Included in your 7-day trial, then in your Norva subscription.</p>
-                        <a href="/catalog/credits.html" target="_blank" rel="noopener" data-i18n="ui_discovery_credits">Films, sources and credits</a>
                         <p id="home-discovery-status" role="status" aria-live="polite" aria-atomic="true"></p>
                     </section>` : ''}
                 </div>

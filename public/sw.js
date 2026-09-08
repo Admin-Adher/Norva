@@ -35,12 +35,27 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
       keys.filter((k) => !k.startsWith(CACHE_VERSION)).map((k) => caches.delete(k))
-    )).then(() => self.clients.claim())
+    )).then(purgeWithdrawnCatalogDocuments).then(() => self.clients.claim())
   );
 });
 
 function isSameOrigin(url) {
   return url.origin === self.location.origin;
+}
+
+function isWithdrawnCatalogDocument(url) {
+  return isSameOrigin(url)
+    && /^\/catalog\/(?:credits(?:\.html)?|sources(?:\.json)?)\/?$/i.test(url.pathname);
+}
+
+async function purgeWithdrawnCatalogDocuments() {
+  const names = await caches.keys();
+  await Promise.all(names.filter(name => name.startsWith('norva-sw-')).map(async name => {
+    const cache = await caches.open(name);
+    const requests = await cache.keys();
+    await Promise.all(requests.filter(request => isWithdrawnCatalogDocument(new URL(request.url)))
+      .map(request => cache.delete(request)));
+  }));
 }
 
 function hasSensitiveDiditParams(url) {
@@ -54,6 +69,7 @@ function hasSensitiveDiditParams(url) {
 function canCacheRequest(request) {
   try {
     const url = new URL(request.url);
+    if (isWithdrawnCatalogDocument(url)) return false;
     if (url.search === '') return true;
     // Cache exact public locale assets without accepting other query parameters.
     return url.origin === self.location.origin
@@ -125,6 +141,18 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   let url;
   try { url = new URL(request.url); } catch (_) { return; }
+  if (isWithdrawnCatalogDocument(url)) {
+    event.respondWith(new Response('Page unavailable.', {
+      status: 410,
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'private, no-store, max-age=0',
+        'X-Robots-Tag': 'noindex, nofollow, noarchive',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    }));
+    return;
+  }
   if (isBypassed(url)) return;
 
   if (request.mode === 'navigate') {

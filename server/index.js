@@ -50,6 +50,7 @@ app.get('/login.html', (req, res, next) => {
     next();
 });
 
+app.use(require('./middleware/withdrawnCatalog'));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // FFMPEG Configuration (optional - for transcoding support)

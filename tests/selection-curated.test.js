@@ -29,7 +29,7 @@ test('live-only Home shortcut requires exactly the tenant-visible curated source
 test('current import is the reviewed allowlist only, regardless of requested aggregate feeds', async () => {
   const { DISCOVERY_PLAYLIST_URL, discoveryPlaylist, discoverySourceId, retiredDiscoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
   const { SELECTION_CURATED_CHANNELS } = await import('../supabase/functions/_shared/selection-curated-channels.mjs');
-  const { fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
+  const { DISCOVERY_SOURCES, fetchDiscoverySelection, discoveryCatalogFields } = await import('../supabase/functions/_shared/discovery-sources.mjs');
   let fetches = 0;
   const result = await fetchDiscoverySelection({ includeVod: false, feeds: [{ id:'unreviewed',kind:'movie',url:'https://example.test/all.m3u' }], fetchPlaylist: async () => { fetches++; } });
   const rows = result.items.map(item => discoveryCatalogFields(DISCOVERY_PLAYLIST_URL,item));
@@ -41,10 +41,8 @@ test('current import is the reviewed allowlist only, regardless of requested agg
   assert.equal(discoveryPlaylist().split('#EXTINF:').length-1,21);
   assert.notEqual(await discoverySourceId('owner'),await retiredDiscoverySourceId('owner'));
   assert.equal(fs.readFileSync('public/catalog/discovery.m3u','utf8').replace(/\r\n/g,'\n'),discoveryPlaylist());
-  const registry = JSON.parse(fs.readFileSync('public/catalog/sources.json','utf8'));
-  assert.equal(registry.sources.filter(s=>s.kind==='live').reduce((sum,s)=>sum+s.channels,0),21);
-  assert.equal(registry.sources.filter(s=>s.kind==='movie').length,5);
-  assert.ok(registry.sources.every(s => !s.url));
+  assert.equal(DISCOVERY_SOURCES.filter(s=>s.kind==='live').reduce((sum,s)=>sum+s.channels,0),21);
+  assert.equal(DISCOVERY_SOURCES.filter(s=>s.kind==='movie').length,5);
   assert.equal(fs.readFileSync('public/catalog/xumo-live.m3u','utf8').trim(),'#EXTM3U');
   for (const channel of SELECTION_CURATED_CHANNELS.filter(c=>c.feedId==='fls-reviewed')) {
     for (const [key,value] of new URL(channel.url).searchParams) if (/^(ads\.)?(did|device_id)$/.test(key)) assert.equal(value,'');

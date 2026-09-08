@@ -65,6 +65,12 @@ jobs:
           ) {
             throw new Error('Didit callback is missing from the Pages Functions bundle');
           }
+          if (
+            !routes.include.includes('/catalog/*')
+            || !bundle.includes('routePath: "/catalog/:path*"')
+          ) {
+            throw new Error('Retired catalogue documents are missing their access restriction');
+          }
           NODE
 
       - name: Minify landing CSS (strips comments and whitespace only)

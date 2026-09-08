@@ -2560,9 +2560,8 @@ test('Didit return identifiers are scrubbed before analytics, referrers or auth 
     serviceWorkerSource,
     /response\.ok && canCacheRequest\(request\)/,
   );
-  const cacheContext = { URL, self: { location: { origin: 'https://norva.tv' } } };
-  const cachePolicy = serviceWorkerSource.slice(serviceWorkerSource.indexOf('function canCacheRequest('), serviceWorkerSource.indexOf('// Anything that streams'));
-  vm.runInNewContext(cachePolicy + '\nthis.check = canCacheRequest;', cacheContext);
+  const cacheContext = { URL, self: { location: { origin: 'https://norva.tv' }, addEventListener() {} } };
+  vm.runInNewContext(serviceWorkerSource + '\nthis.check = canCacheRequest;', cacheContext);
   for (const query of ['verificationSessionId=private', 'status=approved', 'token=private']) {
     assert.equal(cacheContext.check({ url: 'https://norva.tv/partners-kyc-return?' + query }), false);
     assert.equal(cacheContext.check({ url: 'https://norva.tv/js/i18n.js?v=abcdef1234&' + query }), false);
