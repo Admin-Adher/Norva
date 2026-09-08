@@ -420,12 +420,12 @@ async function runDunning(db: SupabaseClient): Promise<number> {
 }
 
 async function runRenewalNotices(db: SupabaseClient): Promise<number> {
-  const { data, error } = await db.rpc("norva_pending_renewal_emails", { p_limit: BATCH });
+  const { data, error } = await db.rpc("norva_pending_renewal_email_quotes", { p_limit: BATCH });
   if (error) throw new Error("renewal_candidates_failed");
   let queuedCount = 0;
-  for (const row of (data ?? []) as { user_id: string; renews_at: string; cycle_key: string }[]) {
+  for (const row of (data ?? []) as { user_id: string; renews_at: string; cycle_key: string; amount_cents: number | null; currency: string }[]) {
     const queued = await queueUserEmail(db, row.user_id,
-      (fn) => renderRenewalUpcoming(fn, { renewsAt: row.renews_at }), {
+      (fn) => renderRenewalUpcoming(fn, { renewsAt: row.renews_at, amountCents: row.amount_cents, currency: row.currency }), {
         dedupeKey: `lifecycle:renewal:${row.user_id}:${row.cycle_key}`,
         markerKind: "billing_event", markerReference: row.cycle_key,
       });
@@ -765,12 +765,19 @@ async function runBehavioralEmails(
         failureFamily: authorization.failure_family,
         sourceType: authorization.source_type,
       });
+      if (claim.is_marketing && !await marketingEmailAllowed(db, claim.user_id)) {
+        throw new Error("behavioral_marketing_not_allowed");
+      }
+      const unsubscribeUrl = claim.is_marketing
+        ? `${UNSUBSCRIBE_URL}?token=${encodeURIComponent(await makeUnsubscribeToken(claim.user_id))}`
+        : undefined;
       const rendered = renderBehavioralLifecycle(firstNameOf(account.user ?? null), {
         subject: String(authorization.title ?? claim.title),
         body: String(authorization.body ?? claim.body),
         ctaLabel: String(authorization.cta_label ?? claim.cta_label),
         ctaUrl: deepLink,
         flow: `behavioral_${claim.journey_key}`.slice(0, 50),
+        unsubscribeUrl,
       });
       const { data: queued, error: queueError } = await db.rpc("norva_enqueue_behavioral_email", {
         p_delivery_id: claim.id,
@@ -782,7 +789,10 @@ async function runBehavioralEmails(
         p_request_html: rendered.html,
         p_request_text: rendered.text,
         p_request_tags: rendered.tags,
-        p_request_headers: {},
+        p_request_headers: unsubscribeUrl ? {
+          "List-Unsubscribe": `<${UNSUB_MAILTO}>, <${unsubscribeUrl}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        } : {},
       });
       if (!queueError && queued?.queued === false) {
         result.canceled_or_deferred++;

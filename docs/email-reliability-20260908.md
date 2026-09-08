@@ -1,5 +1,34 @@
 # Norva email reliability and presentation — 8 September 2026
 
+## Latest production state — 19:09 UTC / 21:09 Paris
+
+The operator subsequently requested all applicable email circuits active, and provided Gmail in the Codex browser for direct verification. This authorization supersedes the earlier scoped 10% email pilot described below.
+
+Migration `20260908183015_complete_email_coverage.sql` and the two Edge modules are deployed. Four behavioral journeys are active in the explicit `production` email audience, 100% rollout, all countries, zero experimental holdout, with five enabled email steps. Only new qualifying events after activation enter these cohorts. Internal accounts are excluded. Readiness must be fresh and passing to enter production; a later recorded failure suppresses delivery. Production email is a lasting product setting, separate from the expiring pilot and its experiment measurements; no uplift is claimed.
+
+| Circuit | Current behavior |
+| --- | --- |
+| No source | Email after the existing configured delay; adding a source attempt suppresses it. The private cadence guard still extends to 72 hours when a granted, recent push registration exists. |
+| Import unresolved | Email after 24 hours; a ready or progressively usable catalogue suppresses it. |
+| Catalogue ready, no first play | New email after 24 hours; a first play suppresses it. |
+| Continue watching | New consent-gated email after 72 hours, only while resumable progress remains relevant. |
+| Catalogue updates | New consent-gated email after seven days in the continuation journey, only when the server records newer catalogue content since the last watch. This is not a general newsletter to all accounts. |
+| Winback and abandoned checkout | Both Edge flags enabled. Existing current-event eligibility, consent, signed unsubscribe and final SMTP suppression preserved. Zero eligible historical candidates at activation. |
+| MFA added/removed, identity linked/unlinked, verified phone changed | Three new Auth database triggers enqueue five kinds of durable notices. Initial signup and cascading account deletion do not generate misleading notices. No real credential or MFA configuration was changed for QA. GoTrue's equivalent toggles remain off to avoid duplicate senders. |
+| Upcoming renewal | Existing monthly/annual reminder now includes the authoritative current USD amount with the same one-time discount calculation and 50-cent floor as billing. A pending plan transition with an unconfirmed final amount omits the quote. No payment behavior changed. |
+| Provider expiry J−7, J−1, day-of, hidden access and restored access | Email channel enabled through its audited revision-CAS control, revision 17. The underlying Provider Access product cohort remains at 20%; auto-detection, push and unrelated rollout settings are unchanged. These emails are not represented as available outside that cohort. |
+| Operations incidents and recovery | Both Edge replicas and private transport recipient policy explicitly target the operator's verified Gmail. Independent Telegram monitoring remains active. |
+
+Behavioral email retains a maximum two messages per week, journey cooldowns and quiet hours 21:00–09:00 in a verified user timezone. Marketing additionally shares a reservation guard across winback, checkout and behavioral marketing: no pending/processing commercial message, at least 24 hours since the previous accepted commercial message, and fewer than two accepted commercial messages in seven days. The enqueue lock serializes concurrent commercial reservations. Transactional security, receipts and service alerts retain their own delivery rules.
+
+The new migration compiled and passed security-event, deletion suppression, deduplication, renewal arithmetic, global audience, subsequent readiness failure and commercial-pressure checks in networkless disposable PostgreSQL. An exact-anchor preview against the live definitions was rolled back before the real application. Existing function owners, ACLs, security mode and search paths were preserved. 86 focused Node checks pass. Both Edge replicas passed health and deployed-file hash verification. The normal lifecycle cron subsequently returned `ok`, all intended email flags true, financial expiry false, zero newly queued customer messages and zero new dead letters. All eleven new test payloads have matching `sent` outbox and private SMTP receipts.
+
+Direct Gmail verification covered all eleven `[TEST Norva - complet]` variants: winback, checkout, renewal amount, first-watch help, continuation, catalogue updates and all five provider messages. All illustrations loaded, text was readable, and CTA destinations matched the intended Norva pages. Visible commercial unsubscribe links and the postal address were checked. The renewal test displayed `$7.99 USD`. These are synthetic transport previews, not real subscription/provider events or proof that a 24-hour/seven-day customer schedule has elapsed. Gmail grouped the renewal test into its earlier renewal conversation.
+
+The active release and rollback material live under `/home/adrien/.norva/email-coverage-20260908`. Migration SHA-256: `b20b3f91abcb7869dda6df1d2a4b19a573914c82e13a359e13ceaaee5b2a142d`; lifecycle worker SHA-256: `9a5abf766b6de452e9ab2c5640928bc0615ed3f575508da213bbd2ca08a3e92c`; lifecycle renderer SHA-256: `a2f1934bd33258be7e5226a063f72eea7139f394963525174179c60968f237f2`. The illustrated frame itself is unchanged.
+
+Potential future features are not mislabeled as activated switches: suspicious-login risk beyond the existing new-device alert needs an authoritative risk signal; targeted service-incident/recovery campaigns need an actual affected-user incident producer; a separate price-policy change notice needs a scheduled price-change event; export-ready email applies only if a deferred export feature exists. No such events were fabricated and no user was opted into marketing. The existing payment, Auth, support, import, trial, subtitle and Partners circuits remain active as previously documented.
+
 ## Production changes
 
 - The private Postal sender accepts the existing `Norva Updates` display name on approved Norva domains. The final normalized sender and recipient checks remain enforced.

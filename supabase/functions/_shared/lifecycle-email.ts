@@ -167,6 +167,7 @@ export function renderBehavioralLifecycle(
     ctaLabel: string;
     ctaUrl: string;
     flow: string;
+    unsubscribeUrl?: string;
   },
 ): Rendered {
   const subject = textValue(opts.subject, "Continue setting up Norva").slice(0, 120);
@@ -176,15 +177,18 @@ export function renderBehavioralLifecycle(
   const flow = /^[a-z0-9_]{1,50}$/.test(opts.flow) ? opts.flow : "behavioral_lifecycle";
   return {
     subject,
-    tags: tags("transactional", flow),
-    text: `${greetText(firstName)}\n\n${body}\n\n${ctaLabel}: ${ctaUrl}\n\n${transactionalFooter()}`,
+    tags: tags(opts.unsubscribeUrl ? "marketing" : "transactional", flow),
+    text: `${greetText(firstName)}\n\n${body}\n\n${ctaLabel}: ${ctaUrl}\n\n${opts.unsubscribeUrl ? marketingFooter(opts.unsubscribeUrl) : transactionalFooter()}`,
     html: shell({ artwork: flow === 'behavioral_import_unresolved' ? 'action' : flow === 'behavioral_no_source' ? 'welcome' : 'catalog',
       title: subject,
       preheader: body,
       heading: subject,
       bodyHtml: `<p style="margin:0 0 18px">${greetHtml(firstName)}</p><p style="margin:0">${esc(body)}</p>`,
       cta: { label: ctaLabel, url: ctaUrl },
-      note: `This service message relates only to using your Norva account. Questions? <a href="${SUPPORT_URL}" style="color:#b8c8f2;text-decoration:underline">${SUPPORT_EMAIL}</a>.`,
+      unsubscribeUrl: opts.unsubscribeUrl,
+      note: opts.unsubscribeUrl
+        ? `You receive this reminder because you enabled Norva marketing emails. Questions? <a href="${SUPPORT_URL}" style="color:#b8c8f2;text-decoration:underline">${SUPPORT_EMAIL}</a>.`
+        : `This service message relates only to using your Norva account. Questions? <a href="${SUPPORT_URL}" style="color:#b8c8f2;text-decoration:underline">${SUPPORT_EMAIL}</a>.`,
     }),
   };
 }
@@ -427,16 +431,20 @@ export function renderCancellationConfirmed(firstName: string | null, opts: { ef
   });
 }
 
-export function renderRenewalUpcoming(firstName: string | null, opts: { renewsAt: string }): Rendered {
+export function renderRenewalUpcoming(firstName: string | null, opts: { renewsAt: string; amountCents?: number | null; currency?: string }): Rendered {
   if (!Number.isFinite(Date.parse(opts.renewsAt))) throw new Error("valid renewal date required");
   const date = fmtDate(opts.renewsAt);
   if (!date) throw new Error("valid renewal date required");
+  const hasAmount = Number.isInteger(opts.amountCents) && Number(opts.amountCents) > 0 && Number(opts.amountCents) <= 9_999_999;
+  const amount = hasAmount && opts.currency === "USD"
+    ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(opts.amountCents) / 100)
+    : null;
   return renderBillingState({
     firstName,
     subject: "Your Norva subscription renews soon",
     heading: "Your next renewal",
     preheader: `Your subscription is scheduled to renew on ${date} (UTC).`,
-    body: `Your Norva subscription is scheduled to renew on ${date} (UTC). You can review your next payment and manage renewal in your subscription settings before that date.`,
+    body: `Your Norva subscription is scheduled to renew on ${date} (UTC). ${amount ? `The currently scheduled renewal amount is ${amount} USD. ` : ""}You can review your next payment and manage renewal in your subscription settings before that date.`,
     flow: "renewal_upcoming",
     ctaLabel: "Manage subscription",
     ctaUrl: MANAGE_URL,
