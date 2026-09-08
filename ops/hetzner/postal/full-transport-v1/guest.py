@@ -52,6 +52,11 @@ def resolve_mx(domain,query=None):
 def smtp_send(mime,recipient,return_path,mxes,deadline,connect=None,resolve=None,allow=None):
  connect=connect or smtplib.SMTP;resolve=resolve or socket.getaddrinfo;allow=allow or allowed
  result={'state':'retry','secure':False,'dataAttempted':False,'provedNoAcceptance':True}
+ def diagnostic(stage,code,detail):
+  # Keep protocol evidence, never recipient addresses, server prose or message content.
+  result.update(smtpStage=stage,smtpCode=int(code))
+  match=re.search(rb'\b([245]\.[0-9]{1,3}\.[0-9]{1,3})\b',detail or b'')
+  if match:result['enhancedStatus']=match.group(1).decode('ascii')
  context=ssl.create_default_context();context.minimum_version=ssl.TLSVersion.TLSv1_2
  for mx in mxes[:3]:
   if time.time()>=deadline:break
@@ -71,21 +76,23 @@ def smtp_send(mime,recipient,return_path,mxes,deadline,connect=None,resolve=None
     smtp.starttls(context=context);result['secure']=True
     assert smtp.ehlo('mx.postal.norva.tv')[0]==250
     allow(recipient);assert time.time()<deadline
-    code,_=smtp.mail(return_path)
+    code,detail=smtp.mail(return_path);diagnostic('MAIL',code,detail)
     if code!=250:
      result['state']='HardFail' if 500<=code<600 else 'retry';return result
     code,detail=smtp.rcpt(recipient)
+    diagnostic('RCPT',code,detail)
     if code not in [250,251]:
      result['state']='HardFail' if 500<=code<600 else 'retry'
      result['recipientInvalid']=500<=code<600 and bool(re.search(rb'5\.1\.[01]',detail));return result
     result['dataAttempted']=True;result['provedNoAcceptance']=False
-    code,_=smtp.data(mime)
+    code,detail=smtp.data(mime);diagnostic('DATA',code,detail)
     if code==250:result['state']='Sent'
     elif 400<=code<500:result.update(state='retry',provedNoAcceptance=True)
     elif 500<=code<600:result.update(state='HardFail',provedNoAcceptance=True)
     else:result['state']='unknown'
     return result
    except smtplib.SMTPDataError as error:
+    diagnostic('DATA',error.smtp_code,error.smtp_error)
     # An explicit final 4xx/5xx is known non-acceptance, unlike a lost DATA reply.
     result.update(state='retry' if 400<=error.smtp_code<500 else 'HardFail',provedNoAcceptance=True)
     return result

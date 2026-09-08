@@ -1,3 +1,4 @@
+import { renderEmailFrame } from "../_shared/email-frame.ts";
 /**
  * norva-auth-email — Supabase "Send Email Hook".
  *
@@ -263,53 +264,11 @@ export function verifyUrl(d: EmailData, tokenHash = d.token_hash): string {
 // truthful and deterministic until a complete translated message set exists;
 // never infer a language from the recipient address or request IP.
 function shell(opts: { heading: string; intro: string; cta?: { label: string; url: string }; note?: string; code?: string }): string {
-  const heading = esc(opts.heading);
-  const intro = esc(opts.intro);
-  const note = esc(opts.note ?? "If you didn't request this, you can safely ignore this email.");
-  const button = opts.cta
-    ? `<tr><td align="center" style="padding:8px 0 28px">
-         <table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr>
-           <td align="center" bgcolor="#5b7cfa" style="background:#5b7cfa;border-radius:10px;mso-padding-alt:14px 30px">
-             <a href="${esc(opts.cta.url)}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;line-height:1;text-decoration:none">${esc(opts.cta.label)}</a>
-           </td>
-         </tr></table>
-       </td></tr>`
-    : "";
-  const code = opts.code
-    ? `<tr><td align="center" style="padding:8px 0 28px">
-         <div style="display:inline-block;font-size:30px;letter-spacing:8px;font-weight:800;color:#ffffff;background:#161b24;border:1px solid #2a3344;border-radius:10px;padding:14px 24px">${esc(opts.code)}</div>
-       </td></tr>`
-    : "";
-  const fallback = opts.cta
-    ? `<tr><td style="padding:0 8px 8px;color:#5f6b85;font-size:12px;line-height:1.6;text-align:center">
-         If the button doesn't work, copy and paste this link:<br>
-         <a href="${esc(opts.cta.url)}" style="color:#7e9bff;word-break:break-all">${esc(opts.cta.url)}</a>
-       </td></tr>`
-    : "";
-  return `<!doctype html>
-<html lang="en" dir="ltr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${heading}</title></head>
-<body style="margin:0;padding:0;background:#0a0c11;color:#f8fafc;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
-  <div data-preheader="true" style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;max-height:0;max-width:0;overflow:hidden;mso-hide:all">${heading} &middot; Norva&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
-  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#0a0c11" style="width:100%;background:#0a0c11;border-collapse:collapse">
-    <tr><td align="center" style="padding:32px 16px">
-      <table role="presentation" width="480" border="0" cellpadding="0" cellspacing="0" bgcolor="#11151d" style="width:100%;max-width:480px;background:#11151d;border:1px solid #1f2733;border-radius:16px;border-collapse:separate">
-        <tr><td style="padding:32px 32px 8px;text-align:center">
-          <img src="https://norva.tv/img/norva-app-icon.png" width="48" height="48" alt="" aria-hidden="true" style="display:block;width:48px;height:48px;margin:0 auto;border:0;border-radius:12px;outline:none;text-decoration:none">
-          <div style="color:#ffffff;font-family:'Century Gothic',Arial,sans-serif;font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:10px">Norva</div>
-        </td></tr>
-        <tr><td style="padding:18px 32px 6px;text-align:center">
-          <h1 style="margin:0;color:#f8fafc;font-family:Arial,Helvetica,sans-serif;font-size:21px;font-weight:800;line-height:1.3">${heading}</h1>
-        </td></tr>
-        <tr><td style="padding:10px 32px 22px;text-align:center;color:#9aa6bd;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6">${intro}</td></tr>
-        ${button}${code}${fallback}
-        <tr><td style="padding:18px 32px 28px;border-top:1px solid #1f2733;color:#5f6b85;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;text-align:center">
-          ${note}
-        </td></tr>
-      </table>
-      <div style="color:#667085;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;margin-top:16px">&copy; Norva</div>
-    </td></tr>
-  </table>
-</body></html>`;
+  return renderEmailFrame({ title: opts.heading, heading: opts.heading,
+    preheader: `${opts.heading} · Norva`, bodyHtml: `<p style="margin:0">${esc(opts.intro)}</p>`,
+    cta: opts.cta, code: opts.code, fallbackUrl: opts.cta?.url,
+    noteHtml: esc(opts.note ?? "If you didn't request this, you can safely ignore this email."),
+  });
 }
 
 function renderHtml(

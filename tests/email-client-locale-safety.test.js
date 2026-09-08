@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { importTypescriptModule } = require('./helpers/import-typescript-module');
 
 const root = path.resolve(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
@@ -13,23 +14,31 @@ const edgeRenderers = [
   'supabase/functions/norva-auth-email/index.ts',
   'supabase/functions/norva-account-delete/index.ts',
   'supabase/functions/norva-support/index.ts',
+  'supabase/functions/norva-auth-challenge/index.ts',
+  'supabase/functions/norva-provider-access-notify/index.ts',
 ];
 
-test('every active Edge email renderer declares a truthful locale and conservative client envelope', () => {
+test('every active Edge email renderer uses the shared client-safe envelope with truthful locale', async () => {
   for (const file of edgeRenderers) {
     const source = read(file);
-    assert.match(source, /<html lang=(?:"en"|"\$\{lang\}") dir="ltr">/, `${file}: explicit LTR locale`);
-    assert.match(source, /x-apple-disable-message-reformatting/, `${file}: Apple reformat guard`);
-    assert.match(source, /format-detection[^>]*telephone=no,date=no,address=no,email=no,url=no/, `${file}: auto-link guard`);
-    assert.match(source, /name="color-scheme" content="dark"/, `${file}: dark-mode contract`);
-    assert.match(source, /name="supported-color-schemes" content="dark"/, `${file}: supported dark-mode contract`);
-    assert.match(source, /data-preheader="true"/, `${file}: bounded preheader`);
-    assert.match(source, /role="presentation"/, `${file}: presentation tables`);
-    assert.match(source, /bgcolor="#0a0c11"/, `${file}: legacy-client background fallback`);
+    assert.match(source, /import\s*\{[^}]*renderEmailFrame[^}]*\}\s*from\s*["'][^"']*email-frame\.ts["']/, `${file}: shared envelope imported`);
+    assert.match(source, /renderEmailFrame\(\{/, `${file}: shared envelope used`);
     assert.doesNotMatch(source, /display\s*:\s*(?:flex|grid)/i, `${file}: no layout CSS unsupported by email clients`);
   }
-  assert.match(read('supabase/functions/norva-auth-email/index.ts'), /mso-padding-alt:14px 30px/);
-  assert.match(read('supabase/functions/norva-support/index.ts'), /mso-padding-alt:14px 30px/);
+  const { renderEmailFrame } = await importTypescriptModule(path.join(root, 'supabase/functions/_shared/email-frame.ts'));
+  for (const lang of ['en', 'fr']) {
+    const html = renderEmailFrame({ title: 'Title', heading: 'Heading', preheader: 'Preview', bodyHtml: '<p>Message</p>', lang, cta: { label: 'Open', url: 'https://norva.tv' } });
+    assert.match(html, new RegExp(`<html lang="${lang}" dir="ltr">`));
+    assert.match(html, /x-apple-disable-message-reformatting/);
+    assert.match(html, /format-detection[^>]*telephone=no,date=no,address=no,email=no,url=no/);
+    assert.match(html, /name="color-scheme" content="dark"/);
+    assert.match(html, /name="supported-color-schemes" content="dark"/);
+    assert.match(html, /data-preheader="true"/);
+    assert.match(html, /role="presentation"/);
+    assert.match(html, /bgcolor="#080B12"/);
+    assert.match(html, /mso-padding-alt:16px 24px/);
+    assert.doesNotMatch(html, /display\s*:\s*(?:flex|grid)/i);
+  }
 });
 
 test('customer-facing support copy remains English while the internal support notification is explicitly French', () => {

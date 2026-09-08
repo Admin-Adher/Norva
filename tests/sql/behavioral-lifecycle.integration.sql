@@ -292,6 +292,13 @@ $configure$;
 -- The same evidence is rechecked on every pilot eligibility decision. Opening
 -- the runtime is not a permanent bypass: once the 14-day proof expires, real
 -- deliveries close automatically even if an operator forgot to stop runtime.
+select public.admin_update_behavioral_lifecycle_runtime(
+  false, 'pilot', 'START PILOT',
+  'Verify that pilot relevance closes when import evidence expires.'
+);
+
+-- Switching audience starts a fresh activation boundary. The pilot signup must
+-- happen after that boundary, as a real signup would.
 insert into auth.users (id, email, created_at)
 values (
   '00000000-0000-0000-0000-000000000020',
@@ -304,11 +311,6 @@ insert into public.cloud_signup_attribution (
 select id, created_at, 'mobile_android', 'IN'
 from auth.users
 where id = '00000000-0000-0000-0000-000000000020';
-
-select public.admin_update_behavioral_lifecycle_runtime(
-  false, 'pilot', 'START PILOT',
-  'Verify that pilot relevance closes when import evidence expires.'
-);
 
 do $assert$
 begin

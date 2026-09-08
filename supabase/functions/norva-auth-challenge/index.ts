@@ -1,3 +1,4 @@
+import { renderEmailFrame } from "../_shared/email-frame.ts";
 /**
  * norva-auth-challenge — prove mailbox ownership before GoTrue may create a
  * user. The browser reaches this service only through signed Cloudflare Pages
@@ -353,7 +354,12 @@ export async function sendChallenge(email: string, code: string, challengeId: st
       to: [email],
       reply_to: replyTo,
       subject: "Your verification code — Norva",
-      html: `<div style="background:#0a0d16;color:#eef1f8;font-family:Arial,sans-serif;padding:32px"><div style="max-width:520px;margin:auto;background:#111624;border:1px solid #252b3a;border-radius:16px;padding:28px"><h1 style="font-size:22px;margin:0 0 12px">Confirm this email address</h1><p style="color:#a2adc2;line-height:1.55">Enter this six-digit code on the Norva screen where you started. Your account is not created until this code is verified.</p><div style="font-size:30px;letter-spacing:8px;font-weight:800;text-align:center;background:#0a0d16;border:1px solid #2a3344;border-radius:10px;padding:14px 20px;margin:24px 0">${safeCode}</div><p style="color:#828da3;font-size:13px">The code expires in 15 minutes. If you did not request it, ignore this email.</p></div></div>`,
+      html: renderEmailFrame({ title: "Your verification code — Norva", heading: "Confirm this email address",
+        preheader: "Your Norva verification code. It expires in 15 minutes.",
+        bodyHtml: "Enter this six-digit code on the Norva screen where you started. Your account is not created until this code is verified.",
+        code: safeCode,
+        noteHtml: "The code expires in 15 minutes. If you did not request it, ignore this email.",
+      }),
       text: `Your Norva verification code is ${code}. It expires in 15 minutes. Your account is not created until this code is verified.`,
       tags: [
         { name: "app", value: "norva" },

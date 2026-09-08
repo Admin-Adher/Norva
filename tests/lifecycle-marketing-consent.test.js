@@ -37,7 +37,7 @@ const envExample = fs.readFileSync(path.join(root, 'ops/hetzner/.env.hetzner.exa
 test('lifecycle transport is bounded, provider-acknowledged and idempotent for transactional flows', () => {
   assert.match(lifecycle, /norva_enqueue_lifecycle_email/);
   assert.match(lifecycle, /dedupeKey: `lifecycle:welcome:\$\{row\.user_id\}`/);
-  assert.match(lifecycle, /dedupeKey: `lifecycle:dunning:\$\{row\.user_id\}:\$\{stage\}`/);
+  assert.match(lifecycle, /dedupeKey: `lifecycle:dunning:\$\{row\.user_id\}:\$\{row\.cycle_key\}:\$\{stage\}`/);
   assert.doesNotMatch(lifecycle, /api\.resend\.com\/emails/);
   assert.match(emailWorker, /sendResendDelivery\(claim/);
   assert.match(resendTransport, /AbortSignal\.timeout\(timeout\)/);

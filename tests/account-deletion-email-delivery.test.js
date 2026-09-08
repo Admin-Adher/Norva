@@ -376,8 +376,8 @@ test('confirmation email is accessible multipart content with stable non-PII tag
     source.indexOf('function renderAccountDeleted'),
     source.indexOf('interface DeletionDeliveryClaim'),
   );
-  assert.match(template, /<html lang="en" dir="ltr">/);
-  assert.match(template, /data-preheader="true"/);
+  assert.match(template, /renderEmailFrame\(\{/);
+  assert.match(template, /preheader:/);
   assert.match(template, /support@norva\.tv/);
   assert.match(template, /https:\/\/norva\.tv\/privacy\.html/);
   assert.match(template, /text:/);

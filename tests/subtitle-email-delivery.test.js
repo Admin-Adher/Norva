@@ -22,7 +22,7 @@ test('subtitle-ready template is premium, client-safe multipart and uses non-PII
   assert.match(rendered.html, /data-preheader="true"/i);
   assert.match(rendered.html, /role="presentation"/i);
   assert.match(rendered.html, /x-apple-disable-message-reformatting/i);
-  assert.match(rendered.html, /color:#bcc5d6/i);
+  assert.match(rendered.html, /color:#cbd5e1/i);
   assert.doesNotMatch(rendered.html, /display\s*:\s*(?:flex|grid)/i);
   assert.doesNotMatch(rendered.html, /<script>/i);
   assert.match(rendered.html, /A &lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; Story/);

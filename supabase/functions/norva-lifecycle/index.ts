@@ -26,7 +26,7 @@ import {
   renderWelcome, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
   renderCancellationConfirmed, renderSubscriptionResumed,
   renderPlanChangeScheduled, renderPlanChangeApplied, renderPaymentRecovered,
-  renderAccessExpired, renderRefundConfirmed, renderBehavioralLifecycle,
+  renderAccessExpired, renderRefundConfirmed, renderBehavioralLifecycle, renderRenewalUpcoming,
 } from "../_shared/lifecycle-email.ts";
 import { fcmConfigured, sendFcmPush } from "../_shared/fcm.ts";
 
@@ -48,6 +48,7 @@ const flag = (name: string) => (Deno.env.get(name) ?? "false").toLowerCase() ===
 // master now does NOTHING, which is the safe default.
 const BILLING_LIVE = flag("NORVA_LIFECYCLE_BILLING_LIVE");
 const LC_DUNNING = flag("NORVA_LC_DUNNING");     // failed-payment escalation (Revolut/web only)
+const LC_RENEWAL = flag("NORVA_LC_RENEWAL");     // upcoming renewal notice (Revolut/web only)
 const LC_EXPIRE = flag("NORVA_LC_EXPIRE");       // past_due → expired state transition
 const LC_WINBACK = flag("NORVA_LC_WINBACK");     // MARKETING; remains false unless explicitly enabled
 const LC_ABANDONED = flag("NORVA_LC_ABANDONED"); // MARKETING; remains false unless explicitly enabled
@@ -390,26 +391,21 @@ async function runDunning(db: SupabaseClient): Promise<number> {
   // past_due, at most one email per ~24h, up to 3 stages. PROVIDER-SCOPED to Revolut:
   // a Play/Apple past_due is the store's card to fix, so a Norva "update your card"
   // email with a norva.tv CTA would be a wrong-cohort mis-fire (the store already duns).
-  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
-  const { data } = await db.from("cloud_entitlement_projection")
-    .select("user_id,dunning_stage,dunning_last_at,status")
-    .eq("provider", "revolut")
-    .eq("status", "past_due")
-    .lt("dunning_stage", 3)
-    .or(`dunning_last_at.is.null,dunning_last_at.lt.${cutoff}`)
-    .limit(BATCH);
+  const { data, error } = await db.rpc("norva_pending_dunning_emails", { p_limit: BATCH });
+  if (error) throw new Error("dunning_candidates_failed");
   let sent = 0;
-  for (const row of (data ?? []) as (Proj & { dunning_last_at: string | null })[]) {
+  for (const row of (data ?? []) as { user_id: string; stage: number; cycle_key: string }[]) {
     if (await internalAccountOrUnknown(db, row.user_id)) continue;
-    const stage = (row.dunning_stage ?? 0) + 1;
+    const stage = row.stage;
     try {
       const queued = await queueUserEmail(
         db,
         row.user_id,
         (fn) => renderPaymentFailed(fn, stage),
         {
-          dedupeKey: `lifecycle:dunning:${row.user_id}:${stage}`,
+          dedupeKey: `lifecycle:dunning:${row.user_id}:${row.cycle_key}:${stage}`,
           markerKind: "dunning",
+          markerReference: row.cycle_key,
           markerStage: stage,
         },
       );
@@ -421,6 +417,22 @@ async function runDunning(db: SupabaseClient): Promise<number> {
     }
   }
   return sent;
+}
+
+async function runRenewalNotices(db: SupabaseClient): Promise<number> {
+  const { data, error } = await db.rpc("norva_pending_renewal_emails", { p_limit: BATCH });
+  if (error) throw new Error("renewal_candidates_failed");
+  let queuedCount = 0;
+  for (const row of (data ?? []) as { user_id: string; renews_at: string; cycle_key: string }[]) {
+    const queued = await queueUserEmail(db, row.user_id,
+      (fn) => renderRenewalUpcoming(fn, { renewsAt: row.renews_at }), {
+        dedupeKey: `lifecycle:renewal:${row.user_id}:${row.cycle_key}`,
+        markerKind: "billing_event", markerReference: row.cycle_key,
+      });
+    if (!queued.durable) throw new Error("renewal_enqueue_failed");
+    if (queued.created) queuedCount++;
+  }
+  return queuedCount;
 }
 
 // MARKETING email (not transactional). It is consent-gated twice (before claim and
@@ -971,7 +983,7 @@ Deno.serve(async (req) => {
     const out: Record<string, unknown> = {
       billing_live: BILLING_LIVE,
       marketing_ready: MARKETING_READY,
-      enabled: { trial: false, dunning: LC_DUNNING, expire: LC_EXPIRE && LC_DUNNING, winback: LC_WINBACK, abandoned: LC_ABANDONED },
+      enabled: { trial: false, dunning: LC_DUNNING, renewal: LC_RENEWAL, expire: LC_EXPIRE && LC_DUNNING, winback: LC_WINBACK, abandoned: LC_ABANDONED },
       trial_reminder: "db_cron_canonical",
     };
     // The database is the activation gate. All four behavioral journeys ship
@@ -980,6 +992,7 @@ Deno.serve(async (req) => {
     out.welcome = await runWelcome(db);              // always active (transactional)
     out.billing_events = await runBillingEventIntents(db); // always active (transactional)
     if (BILLING_LIVE && LC_DUNNING) out.dunning = await runDunning(db);
+    if (BILLING_LIVE && LC_RENEWAL) out.renewal = await runRenewalNotices(db);
     // Expiry is never allowed to run without the warning/dunning flow, even if
     // an environment variable is accidentally toggled in isolation.
     if (BILLING_LIVE && LC_DUNNING && LC_EXPIRE) out.expired_past_due = await runExpirePastDue(db);
