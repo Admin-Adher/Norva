@@ -24073,5 +24073,149 @@
     "ar": "{{p0}} فيديو",
     "id": "{{p0}} video",
     "fil": "{{p0}} video"
+  },
+  "notif_channels_heading": {
+    "source": "Active steps by channel",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Active steps by channel",
+    "fr": "Étapes actives par canal",
+    "pt-BR": "Etapas ativas por canal",
+    "es": "Pasos activos por canal",
+    "hi": "चैनल के अनुसार सक्रिय चरण",
+    "tr": "Kanala göre etkin adımlar",
+    "bn": "চ্যানেল অনুযায়ী সক্রিয় ধাপ",
+    "ar": "الخطوات النشطة حسب القناة",
+    "id": "Langkah aktif per kanal",
+    "fil": "Mga aktibong hakbang bawat channel"
+  },
+  "notif_channels_help": {
+    "source": "Automatic journeys: active / configured steps. Transactional messages are detailed under Automations.",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Automatic journeys: active / configured steps. Transactional messages are detailed under Automations.",
+    "fr": "Parcours automatiques : étapes actives / configurées. Les messages transactionnels sont détaillés dans Automatiques.",
+    "pt-BR": "Jornadas automáticas: etapas ativas / configuradas. Mensagens transacionais estão em Automações.",
+    "es": "Recorridos automáticos: pasos activos / configurados. Los mensajes transaccionales están en Automáticos.",
+    "hi": "स्वचालित यात्राएँ: सक्रिय / कॉन्फ़िगर किए गए चरण। लेनदेन संबंधी संदेश स्वचालन में हैं।",
+    "tr": "Otomatik akışlar: etkin / yapılandırılmış adımlar. İşlem mesajları Otomasyonlar bölümündedir.",
+    "bn": "স্বয়ংক্রিয় যাত্রা: সক্রিয় / কনফিগার করা ধাপ। লেনদেনের বার্তা অটোমেশনে রয়েছে।",
+    "ar": "المسارات التلقائية: الخطوات النشطة / المُعدّة. تفاصيل رسائل المعاملات في الأتمتة.",
+    "id": "Alur otomatis: langkah aktif / dikonfigurasi. Pesan transaksional ada di Otomatis.",
+    "fil": "Mga awtomatikong daloy: aktibo / nakaayos na hakbang. Ang mga mensahe sa transaksyon ay nasa Awtomatiko."
+  },
+  "notif_coverage": {
+    "source": "Coverage (%)",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Coverage (%)",
+    "fr": "Couverture (%)",
+    "pt-BR": "Cobertura (%)",
+    "es": "Cobertura (%)",
+    "hi": "कवरेज (%)",
+    "tr": "Kapsam (%)",
+    "bn": "কভারেজ (%)",
+    "ar": "التغطية (%)",
+    "id": "Cakupan (%)",
+    "fil": "Saklaw (%)"
+  },
+  "notif_holdout": {
+    "source": "Control group (%)",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Control group (%)",
+    "fr": "Groupe témoin (%)",
+    "pt-BR": "Grupo de controle (%)",
+    "es": "Grupo de control (%)",
+    "hi": "नियंत्रण समूह (%)",
+    "tr": "Kontrol grubu (%)",
+    "bn": "নিয়ন্ত্রণ গোষ্ঠী (%)",
+    "ar": "المجموعة الضابطة (%)",
+    "id": "Kelompok kontrol (%)",
+    "fil": "Control group (%)"
+  },
+  "notif_countries": {
+    "source": "Covered countries",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Covered countries",
+    "fr": "Pays couverts",
+    "pt-BR": "Países cobertos",
+    "es": "Países incluidos",
+    "hi": "शामिल देश",
+    "tr": "Kapsanan ülkeler",
+    "bn": "অন্তর্ভুক্ত দেশ",
+    "ar": "البلدان المشمولة",
+    "id": "Negara yang dicakup",
+    "fil": "Mga sakop na bansa"
+  },
+  "notif_countries_help": {
+    "source": "Two-letter ISO codes; * means all countries in production.",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Two-letter ISO codes; * means all countries in production.",
+    "fr": "Codes ISO à deux lettres ; * signifie tous les pays en production.",
+    "pt-BR": "Códigos ISO de duas letras; * significa todos os países em produção.",
+    "es": "Códigos ISO de dos letras; * significa todos los países en producción.",
+    "hi": "दो अक्षरों वाले ISO कोड; * का अर्थ प्रोडक्शन में सभी देश है।",
+    "tr": "İki harfli ISO kodları; * üretimde tüm ülkeler demektir.",
+    "bn": "দুই অক্ষরের ISO কোড; * মানে প্রোডাকশনে সব দেশ।",
+    "ar": "رموز ISO من حرفين؛ * تعني جميع البلدان في الإنتاج.",
+    "id": "Kode ISO dua huruf; * berarti semua negara dalam produksi.",
+    "fil": "Dalawang letrang ISO code; * ay lahat ng bansa sa production."
+  },
+  "notif_production": {
+    "source": "Production",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Production",
+    "fr": "Production",
+    "pt-BR": "Produção",
+    "es": "Producción",
+    "hi": "प्रोडक्शन",
+    "tr": "Üretim",
+    "bn": "প্রোডাকশন",
+    "ar": "الإنتاج",
+    "id": "Produksi",
+    "fil": "Production"
+  },
+  "notif_audience_unavailable": {
+    "source": "Audience unavailable. Refresh the page before sending.",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Audience unavailable. Refresh the page before sending.",
+    "fr": "Audience indisponible. Rafraîchissez la page avant un envoi.",
+    "pt-BR": "Público indisponível. Atualize a página antes de enviar.",
+    "es": "Audiencia no disponible. Actualiza la página antes de enviar.",
+    "hi": "ऑडियंस उपलब्ध नहीं है। भेजने से पहले पेज रीफ़्रेश करें।",
+    "tr": "Hedef kitle kullanılamıyor. Göndermeden önce sayfayı yenileyin.",
+    "bn": "লক্ষ্য ব্যবহারকারী পাওয়া যাচ্ছে না। পাঠানোর আগে পৃষ্ঠা রিফ্রেশ করুন।",
+    "ar": "الجمهور غير متاح. حدّث الصفحة قبل الإرسال.",
+    "id": "Audiens tidak tersedia. Muat ulang halaman sebelum mengirim.",
+    "fil": "Hindi available ang audience. I-refresh ang pahina bago magpadala."
+  },
+  "notif_transactional": {
+    "source": "Transactional system",
+    "refs": [
+      "public/js/pages/AdminPage.js"
+    ],
+    "en": "Transactional system",
+    "fr": "Système transactionnel",
+    "pt-BR": "Sistema transacional",
+    "es": "Sistema transaccional",
+    "hi": "लेनदेन प्रणाली",
+    "tr": "İşlem sistemi",
+    "bn": "লেনদেন ব্যবস্থা",
+    "ar": "نظام المعاملات",
+    "id": "Sistem transaksional",
+    "fil": "Sistema ng transaksyon"
   }
 }
