@@ -283,6 +283,58 @@ async function mountLifecycleCenter(page, fixture = lifecycleFixture) {
   }, fixture);
 }
 
+test('production channel summary follows enabled steps and the emergency stop', async ({ page }) => {
+  const fixture = JSON.parse(JSON.stringify(lifecycleFixture));
+  fixture.runtime = { emergency_stop: false, audience_mode: 'production' };
+  fixture.journeys.forEach(journey => {
+    journey.status = 'active'; journey.rollout_percent = 100; journey.holdout_percent = 0; journey.countries = ['*'];
+  });
+  await mountLifecycleCenter(page, fixture);
+  const configuredPush = fixture.journeys.flatMap(journey => journey.steps).filter(step => step.channel === 'push').length;
+  await expect(page.locator('[data-notification-channel="push"] strong')).toHaveText(`${configuredPush} / ${configuredPush}`);
+  await expect(page.locator('[data-lifecycle-runtime-root] h3')).toHaveText('Production');
+  await expect(page.getByText('Couverture (%)', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Pays couverts', { exact: true }).first()).toBeVisible();
+  await page.evaluate(() => {
+    window.__lifecycleAdmin._behavioralLifecycle.runtime.emergency_stop = true;
+    window.__lifecycleAdmin._renderNotificationCenter();
+  });
+  await expect(page.locator('[data-notification-channel="push"] strong')).toHaveText(`0 / ${configuredPush}`);
+});
+
+test('composer audience and entered copy survive real translation hydration', async ({ page }) => {
+  await mountLifecycleCenter(page);
+  await page.addScriptTag({ path: path.join(root, 'public/js/i18n.js') });
+  await page.evaluate(() => {
+    window.NorvaI18n.setPreference('fr');
+    const admin = window.__lifecycleAdmin;
+    admin._notificationAudienceCounts = { all: 249 };
+    window.AdminPage.prototype._wireNotificationComposer.call(admin);
+  });
+  await page.getByRole('tab', { name: 'Composer', exact: true }).click();
+  await page.locator('#notif-title').fill('Un message Norva précis');
+  await page.locator('#notif-body').fill('Votre programme reprend dans Norva.');
+  await page.evaluate(() => window.NorvaI18n.translate(document.body));
+  await expect(page.locator('#notif-audience-help')).toContainText('249');
+  await expect(page.locator('#notif-audience-help')).not.toContainText('Comptage');
+  await expect(page.locator('#notif-preview-title-text')).toHaveText('Un message Norva précis');
+  await expect(page.locator('#notif-preview-body-text')).toHaveText('Votre programme reprend dans Norva.');
+  await page.evaluate(() => {
+    window.__lifecycleAdmin._notificationAudienceCounts = null;
+    document.getElementById('notif-title').dispatchEvent(new Event('input'));
+  });
+  await page.locator('#notif-verify').click();
+  await expect(page.locator('#notif-send-review')).toBeHidden();
+  // setContent has an opaque origin: persisted locale preference is unavailable,
+  // so the real translator correctly falls back to this context's en-US locale.
+  await expect(page.locator('#notif-audience-help')).toContainText('Audience unavailable');
+  await page.locator('input[name="notif-delivery"][value="scheduled"]').check();
+  await page.locator('#notif-scheduled-for').fill('2099-09-08T19:00');
+  await page.locator('#notif-save-draft').click();
+  expect(await page.evaluate(() => window.__lifecycleAdminCalls.some(call =>
+    call.name === 'admin_save_marketing_notification_schedule' && call.args.p_publish === false))).toBe(true);
+});
+
 test('a real pilot stays closed until immutable import-readiness evidence is recorded', async ({ page }) => {
   const blockedFixture = JSON.parse(JSON.stringify(lifecycleFixture));
   blockedFixture.import_readiness = {

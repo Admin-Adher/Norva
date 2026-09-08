@@ -3493,7 +3493,7 @@ class AdminPage {
         const views = [
             ['composer', 'Composer', ''],
             ['scheduled', 'Programmées', scheduledCount ? String(scheduledCount) : ''],
-            ['automations', 'Automatiques', String(this._notificationSystemRules.length + this._notificationRules.length)],
+            ['automations', 'Automatiques', ''],
             ['journeys', 'Parcours', lifecycleJourneys.length ? String(lifecycleJourneys.length) : ''],
             ['history', 'Historique', '']
         ];
@@ -3508,6 +3508,7 @@ class AdminPage {
                 <div class="notif-kpi"><strong>${n(activeLifecycleCount)}</strong><span data-i18n="ui_web_eec1e11fb950" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p8":(n(lifecycleJourneys.length))}) || "{}")}">parcours comportementaux actifs · ${n(lifecycleJourneys.length)} configurés</span></div>
                 <div class="notif-kpi"><strong>${n(failureCount + lifecycleFailureCount)}</strong><span data-i18n="ui_web_dd4e28a3ce5d" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p10":(n(lifecycleFailureCount))}) || "{}")}">livraisons à vérifier · ${n(lifecycleFailureCount)} en lettre morte</span></div>
             </div>
+            ${this._notificationChannelSummaryMarkup()}
             <div class="notif-tabs" role="tablist" aria-label="Sections du centre de notifications" data-i18n-aria-label="ui_web_8b983650fd33">${tabs}</div>
             <section class="notif-panel" id="notif-panel-composer" role="tabpanel" aria-labelledby="notif-tab-composer"${this._notificationView === 'composer' ? '' : ' hidden'}>${this._notificationComposerMarkup()}</section>
             <section class="notif-panel" id="notif-panel-scheduled" role="tabpanel" aria-labelledby="notif-tab-scheduled"${this._notificationView === 'scheduled' ? '' : ' hidden'}><div id="notif-schedule-list"></div></section>
@@ -3553,6 +3554,24 @@ class AdminPage {
         this._wireBehavioralLifecycleControls();
         this._wirePushLogControls();
         this._loadPushLog();
+    }
+
+    _notificationChannelSummaryMarkup() {
+        const data = this._behavioralLifecycle;
+        if (!data || !Array.isArray(data.journeys)) return '';
+        const running = data.runtime?.emergency_stop === false;
+        const channels = [
+            ['email', 'ui_web_969ccbd3cf63', 'Email'],
+            ['push', 'ui_web_731ce7ed8089', 'Push'],
+            ['in_app', 'ui_web_5f597e4b3127', 'Dans l’app']
+        ].map(([channel, key, fallback]) => {
+            const configured = data.journeys.flatMap(journey => (journey.steps || [])
+                .filter(step => step.channel === channel).map(step => ({ step, journey })));
+            const active = configured.filter(({ step, journey }) => running && step.enabled && journey.status === 'active').length;
+            const label = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
+            return `<div class="notif-detail-fact" data-notification-channel="${channel}"><span>${AdminPage.esc(label)}</span><strong>${AdminPage.n(active)} / ${AdminPage.n(configured.length)}</strong></div>`;
+        }).join('');
+        return `<section class="notif-card" data-notification-channels><div class="notif-card-head"><div><h3 data-i18n="notif_channels_heading">Étapes actives par canal</h3><p data-i18n="notif_channels_help">Parcours automatiques : étapes actives / configurées. Les messages transactionnels sont détaillés dans Automatiques.</p></div></div><div class="notif-card-body"><div class="notif-detail-grid">${channels}</div></div></section>`;
     }
 
     _behavioralLifecycleMarkup() {
@@ -3745,9 +3764,9 @@ class AdminPage {
                     <label class="notif-field" for="lifecycle-window-${safeKey}"><norva-i18n data-i18n="ui_web_8a53a1ec88a9">Fenêtre principale</norva-i18n><select id="lifecycle-window-${safeKey}" data-lifecycle-field="experiment-window"${disabled}>${[24, 72, 168].map(value => `<option value="${value}"${Number(experimentPlan.window_hours || 72) === value ? ' selected' : ''}>${value === 168 ? '7 jours' : `${value} heures`}</option>`).join('')}</select></label>
                     <label class="notif-field span-2" for="lifecycle-hypothesis-${safeKey}"><norva-i18n data-i18n="ui_web_feb306398b92">Hypothèse</norva-i18n><textarea id="lifecycle-hypothesis-${safeKey}" data-lifecycle-field="experiment-hypothesis" minlength="20" maxlength="500" rows="2"${disabled}>${esc(experimentPlan.hypothesis || '')}</textarea><span class="notif-field-help" data-i18n="ui_web_30930b9e93da">Une phrase vérifiable, conservée dans le snapshot immuable de la version.</span></label>
                     <label class="notif-field" for="lifecycle-target-${safeKey}"><norva-i18n data-i18n="ui_web_fb3918461379">Cible d’uplift relatif (%)</norva-i18n><input id="lifecycle-target-${safeKey}" data-lifecycle-field="experiment-target" type="number" min="0.01" max="1000" step="0.01" value="${experimentPlan.target_relative_lift_pct == null ? '' : esc(experimentPlan.target_relative_lift_pct)}" placeholder="Après baseline"${disabled} data-i18n-placeholder="ui_web_7a99a34a04f0"><span class="notif-field-help" data-i18n="ui_web_35a7541f1c25">Facultative pour une baseline, obligatoire pour une variante.</span></label>
-                    <label class="notif-field" for="lifecycle-rollout-${safeKey}"><norva-i18n data-i18n="ui_web_a7d64c8d2d25">Pilote (%)</norva-i18n><input id="lifecycle-rollout-${safeKey}" data-lifecycle-field="rollout" type="number" min="0" max="100" step="1" value="${n(journey.rollout_percent || 0)}"${disabled}></label>
-                    <label class="notif-field" for="lifecycle-holdout-${safeKey}"><norva-i18n data-i18n="ui_web_1235c66c0482">Témoin permanent</norva-i18n><input id="lifecycle-holdout-${safeKey}" data-lifecycle-field="holdout" type="number" value="${n(journey.holdout_percent ?? 10)}" disabled><span class="notif-field-help" data-i18n="ui_web_b52f0b83c3d7">Affectation stable, indépendante des versions.</span></label>
-                    <label class="notif-field span-2" for="lifecycle-countries-${safeKey}"><norva-i18n data-i18n="ui_web_de37bd82e3de">Pays pilotes</norva-i18n><input id="lifecycle-countries-${safeKey}" data-lifecycle-field="countries" type="text" value="${esc(countries)}" placeholder="IN, BD" spellcheck="false"${disabled} data-i18n-placeholder="ui_web_661879a6b608"><span class="notif-field-help" data-i18n="ui_web_dc3a2d275be3">Codes ISO à deux lettres. Aucun parcours hors de cette liste.</span></label>
+                    <label class="notif-field" for="lifecycle-rollout-${safeKey}"><norva-i18n data-i18n="notif_coverage">Couverture (%)</norva-i18n><input id="lifecycle-rollout-${safeKey}" data-lifecycle-field="rollout" type="number" min="0" max="100" step="1" value="${n(journey.rollout_percent || 0)}"${disabled}></label>
+                    <label class="notif-field" for="lifecycle-holdout-${safeKey}"><norva-i18n data-i18n="notif_holdout">Groupe témoin (%)</norva-i18n><input id="lifecycle-holdout-${safeKey}" data-lifecycle-field="holdout" type="number" value="${n(journey.holdout_percent ?? 10)}" disabled><span class="notif-field-help" data-i18n="ui_web_b52f0b83c3d7">Affectation stable, indépendante des versions.</span></label>
+                    <label class="notif-field span-2" for="lifecycle-countries-${safeKey}"><norva-i18n data-i18n="notif_countries">Pays couverts</norva-i18n><input id="lifecycle-countries-${safeKey}" data-lifecycle-field="countries" type="text" value="${esc(countries)}" placeholder="IN, BD" spellcheck="false"${disabled} data-i18n-placeholder="ui_web_661879a6b608"><span class="notif-field-help" data-i18n="notif_countries_help">Codes ISO à deux lettres ; * signifie tous les pays en production.</span></label>
                     <label class="notif-field" for="lifecycle-cooldown-${safeKey}"><norva-i18n data-i18n="ui_web_261b279fa3ac">Pause après relance (jours)</norva-i18n><input id="lifecycle-cooldown-${safeKey}" data-lifecycle-field="cooldown" type="number" min="7" max="14" step="1" value="${n(journey?.limits?.cooldown_days ?? 7)}"${disabled}></label>
                     <label class="notif-field" for="lifecycle-push-day-${safeKey}"><norva-i18n data-i18n="ui_web_213483f962f2">Push / 24 h</norva-i18n><input id="lifecycle-push-day-${safeKey}" data-lifecycle-field="push-day" type="number" min="0" max="1" step="1" value="${n(journey?.limits?.push_day ?? 1)}"${disabled}></label>
                     <label class="notif-field" for="lifecycle-push-week-${safeKey}"><norva-i18n data-i18n="ui_web_9f26b7995153">Push / 7 jours</norva-i18n><input id="lifecycle-push-week-${safeKey}" data-lifecycle-field="push-week" type="number" min="0" max="3" step="1" value="${n(journey?.limits?.push_week ?? 3)}"${disabled}></label>
@@ -3773,7 +3792,7 @@ class AdminPage {
             return `<details class="notif-dlq-row" data-lifecycle-dlq="${esc(id)}"><summary><strong>${esc(row.journey_key || '')} · ${esc(row.step_key || '')}</strong><norva-i18n data-i18n="ui_web_9b80f43f9e37" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p3":(esc(row.last_error_family || 'unknown')),"p4":(n(row.attempt_count || 0))}) || "{}")}"> — ${esc(row.last_error_family || 'unknown')} · ${n(row.attempt_count || 0)} tentative(s)</norva-i18n></summary><p class="notif-status" data-i18n="ui_web_5baccbe7c96d" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p5":(esc(formatDate(row.expires_at)))}) || "{}")}">Expiration : ${esc(formatDate(row.expires_at))}</p><code>${esc(id)}</code><div class="notif-step-grid"><label class="notif-field"><norva-i18n data-i18n="ui_web_c89ac8f0d41a">Motif</norva-i18n><input data-lifecycle-retry-reason minlength="8" maxlength="500" placeholder="Pourquoi rejouer cette livraison" data-i18n-placeholder="ui_web_87a76d71f8e7"></label><label class="notif-field"><norva-i18n data-i18n="ui_web_d743070540a1">Confirmation</norva-i18n><input data-lifecycle-retry-confirm autocomplete="off" spellcheck="false" placeholder="${esc(expected)}"></label></div><div class="notif-actions"><button class="notif-button danger" type="button" data-lifecycle-retry disabled data-i18n="ui_web_ac0415a4dc52">Rejouer une fois</button><span class="notif-status" data-lifecycle-retry-status role="status"></span></div></details>`;
         }).join('');
         const runtimeRunning = runtime.emergency_stop === false;
-        const runtimeLabel = runtimeRunning ? (runtime.audience_mode === 'production' ? 'Production · email' : runtime.audience_mode === 'pilot' ? (globalThis.NorvaI18n?.t("ui_web_29df3d17af4f", { defaultValue: "Pilote réel autorisé" }) ?? 'Pilote réel autorisé') : (globalThis.NorvaI18n?.t("ui_web_fbc6644de81d", { defaultValue: "Test interne autorisé" }) ?? 'Test interne autorisé')) : (globalThis.NorvaI18n?.t("ui_web_3f5908384bee", { defaultValue: "Arrêt d’urgence actif" }) ?? 'Arrêt d’urgence actif');
+        const runtimeLabel = runtimeRunning ? (runtime.audience_mode === 'production' ? (globalThis.NorvaI18n?.t('notif_production', { defaultValue: 'Production' }) ?? 'Production') : runtime.audience_mode === 'pilot' ? (globalThis.NorvaI18n?.t("ui_web_29df3d17af4f", { defaultValue: "Pilote réel autorisé" }) ?? 'Pilote réel autorisé') : (globalThis.NorvaI18n?.t("ui_web_fbc6644de81d", { defaultValue: "Test interne autorisé" }) ?? 'Test interne autorisé')) : (globalThis.NorvaI18n?.t("ui_web_3f5908384bee", { defaultValue: "Arrêt d’urgence actif" }) ?? 'Arrêt d’urgence actif');
         const importReadinessLabel = importReady
             ? (globalThis.NorvaI18n?.t("ui_web_0b5a1a85bc4e", { defaultValue: "Preuve import valide" }) ?? 'Preuve import valide')
             : importReadiness.status === 'failed'
@@ -4343,6 +4362,12 @@ class AdminPage {
             const previewAudience = document.getElementById('notif-preview-audience');
             const previewDevices = document.getElementById('notif-preview-devices');
             const previewTime = document.getElementById('notif-preview-time');
+            // These nodes belong to the live composer. A later i18n pass must
+            // not restore their initial placeholders over audience/user data.
+            [previewTitle, previewBody, previewAudience, previewTime, document.getElementById('notif-audience-help')].filter(Boolean).forEach(node => {
+                node.removeAttribute('data-i18n');
+                node.removeAttribute('data-i18n-args');
+            });
             const scheduleFields = document.getElementById('notif-schedule-fields');
             const saveDraft = document.getElementById('notif-save-draft');
             const aud = AdminPage.AUDIENCES().find(([key]) => key === audience.value) || AdminPage.AUDIENCES()[0];
@@ -4360,7 +4385,9 @@ class AdminPage {
                     : (globalThis.NorvaI18n?.t("ui_web_5382d606a8f4", { defaultValue: "maintenant" }) ?? 'maintenant');
             }
             const audienceHelp = document.getElementById('notif-audience-help');
-            if (audienceHelp) audienceHelp.textContent = deviceCount === null ? aud[2] : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f9941c860497", {defaultValue: "{{p0}} appareil(s) actuellement ciblé(s)", p0:(AdminPage.n(deviceCount))}) : `${AdminPage.n(deviceCount)} appareil(s) actuellement ciblé(s)`);
+            if (audienceHelp) audienceHelp.textContent = deviceCount === null
+                ? (globalThis.NorvaI18n?.t('notif_audience_unavailable', { defaultValue: 'Audience indisponible. Rafraîchissez la page avant un envoi.' }) ?? 'Audience indisponible. Rafraîchissez la page avant un envoi.')
+                : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f9941c860497", {defaultValue: "{{p0}} appareil(s) actuellement ciblé(s)", p0:(AdminPage.n(deviceCount))}) : `${AdminPage.n(deviceCount)} appareil(s) actuellement ciblé(s)`);
             if (scheduleFields) scheduleFields.hidden = mode !== 'scheduled';
             if (saveDraft) saveDraft.hidden = mode !== 'scheduled';
             if (review) review.hidden = true;
@@ -4370,11 +4397,12 @@ class AdminPage {
         document.querySelectorAll('input[name="notif-delivery"]').forEach(input => input.addEventListener('change', sync));
         sync();
 
-        const validation = () => {
+        const validation = (requireAudience = true) => {
             const titleValue = title.value.trim();
             const bodyValue = body.value.trim();
             const mode = currentMode();
             if (titleValue.length < 2 || bodyValue.length < 2) return { error: (globalThis.NorvaI18n?.t("ui_web_b16d82c80264", { defaultValue: "Le titre et le message doivent contenir au moins 2 caractères." }) ?? 'Le titre et le message doivent contenir au moins 2 caractères.') };
+            if (requireAudience && !Number.isFinite(this._notificationAudienceCounts?.[audience.value])) return { error: (globalThis.NorvaI18n?.t('notif_audience_unavailable', { defaultValue: 'Audience indisponible. Rafraîchissez la page avant un envoi.' }) ?? 'Audience indisponible. Rafraîchissez la page avant un envoi.') };
             if (mode === 'scheduled') {
                 if (!this._notificationCenterAvailable) return { error: (globalThis.NorvaI18n?.t("ui_web_b03ac147b074", { defaultValue: "Le moteur de programmation est indisponible." }) ?? 'Le moteur de programmation est indisponible.') };
                 const date = new Date(scheduledFor?.value || '');
@@ -4406,7 +4434,7 @@ class AdminPage {
         });
 
         const saveSchedule = async publish => {
-            const result = validation();
+            const result = validation(publish);
             if (result.error || result.mode !== 'scheduled') { setStatus(result.error || (globalThis.NorvaI18n?.t("ui_web_0c410b4fe804", { defaultValue: "Choisissez la programmation." }) ?? 'Choisissez la programmation.'), 'error'); return; }
             const target = publish ? reviewConfirm : document.getElementById('notif-save-draft');
             if (target) target.disabled = true;
@@ -4568,12 +4596,17 @@ class AdminPage {
 
     _notificationSystemRuleDetail(rule) {
         const extendable = rule.control === 'extendable';
+        const channelText = Array.isArray(rule.channel_states)
+            ? rule.channel_states.map(item => `${item.channel} · ${item.enabled
+                ? (globalThis.NorvaI18n?.t('ui_web_df16db5ac698', { defaultValue: 'Activé' }) ?? 'Activé')
+                : (globalThis.NorvaI18n?.t('ui_web_da60ff35b212', { defaultValue: 'Désactivé' }) ?? 'Désactivé')}`).join(' / ')
+            : (rule.channels || []).join(' · ');
         return `<div class="notif-detail-head"><div><span class="notif-kicker" data-i18n="ui_web_e109367a9b01">Règle système</span><h3>${AdminPage.esc(rule.name)}</h3><p>${AdminPage.esc(rule.description || '')}</p></div><div class="notif-detail-actions">${extendable ? '<button class="notif-button primary" type="button" data-rule-extend data-i18n="ui_web_158daa00ce48">Créer un push complémentaire</button>' : ''}</div></div>
             <div class="notif-protected"><strong data-i18n="ui_web_0a090c1376af">Règle protégée.</strong><norva-i18n data-i18n="ui_web_10769c50b5a3" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p3":(extendable ? ' Vous pouvez ajouter une automation push séparée sans modifier ce tunnel.' : '')}) || "{}")}"> Son déclenchement dépend du moteur transactionnel indiqué et ne peut pas être désactivé depuis Marketing.${extendable ? (globalThis.NorvaI18n?.t("ui_web_7ec6c53032f6", { defaultValue: " Vous pouvez ajouter une automation push séparée sans modifier ce tunnel." }) ?? ' Vous pouvez ajouter une automation push séparée sans modifier ce tunnel.') : ''}</norva-i18n></div>
             <div class="notif-detail-grid">
                 <div class="notif-detail-fact"><span data-i18n="ui_web_0bc8485e76c3">Déclencheur</span><strong>${AdminPage.esc(rule.trigger || '—')}</strong></div>
-                <div class="notif-detail-fact"><span data-i18n="ui_web_fe6fc9aba0a8">Canaux</span><strong>${AdminPage.esc((rule.channels || []).join(' · ') || '—')}</strong></div>
-                <div class="notif-detail-fact"><span data-i18n="ui_web_32f651157552">État observé</span><strong>${rule.state === 'deployment_controlled' ? (globalThis.NorvaI18n?.t("ui_web_ae58d67ac856", { defaultValue: "Piloté par déploiement" }) ?? 'Piloté par déploiement') : (globalThis.NorvaI18n?.t("ui_web_ad26287ab66b", { defaultValue: "Actif" }) ?? 'Actif')}</strong></div>
+                <div class="notif-detail-fact"><span data-i18n="ui_web_fe6fc9aba0a8">Canaux</span><strong>${AdminPage.esc(channelText || '—')}</strong>${rule.scope ? `<span>${AdminPage.esc(rule.scope.replace('_percent', ' %'))}</span>` : ''}</div>
+                <div class="notif-detail-fact"><span data-i18n="ui_web_32f651157552">État observé</span><strong>${rule.state === 'deployment_controlled' ? (globalThis.NorvaI18n?.t("ui_web_ae58d67ac856", { defaultValue: "Piloté par déploiement" }) ?? 'Piloté par déploiement') : rule.state === 'transactional' ? (globalThis.NorvaI18n?.t('notif_transactional', { defaultValue: 'Système transactionnel' }) ?? 'Système transactionnel') : (globalThis.NorvaI18n?.t("ui_web_ad26287ab66b", { defaultValue: "Actif" }) ?? 'Actif')}</strong></div>
                 <div class="notif-detail-fact"><span data-i18n="ui_web_bb8fc3f9d460">Contrôle</span><strong>${extendable ? (globalThis.NorvaI18n?.t("ui_web_883320a97f2f", { defaultValue: "Système + extension push possible" }) ?? 'Système + extension push possible') : (globalThis.NorvaI18n?.t("ui_web_bb9d8f0b75d7", { defaultValue: "Système uniquement" }) ?? 'Système uniquement')}</strong></div>
             </div>`;
     }

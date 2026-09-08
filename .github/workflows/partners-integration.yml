@@ -335,6 +335,18 @@ jobs:
       - name: Run the Partners browser journey
         run: npx playwright test --config=tests/e2e/playwright.config.js
 
+  notification-channels-database:
+    name: Notification channel policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Pull the pinned PostgreSQL proof image
+        run: docker pull supabase/postgres:17.6.1.136
+      - name: Verify channels, consent and shared contact limits without network
+        run: python3 ops/hetzner/scripts/proof-notification-channels-20260908.py
+
   disposable-database:
     name: Disposable Supabase database
     runs-on: ubuntu-latest
