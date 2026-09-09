@@ -84,6 +84,20 @@ test('flapping source and overlapping LID incident do not generate false recover
   const run=opsRuntime();await run.api.dispatchOpsNotifications(db,[{key:'lid_cascade_expired',detail:'expired'}],'');
   assert.ok(run.calls.every(c=>!c.text.includes('résolu')));assert.equal(db.rows.length,3);
 });
+test('cleared incomplete-source alerts never resend and resolve once after the existing cooldown',async()=>{
+  const base={category:'catalogue',key:'sources_incomplete',details:'19 obsolete sources',last_alerted_at:new Date().toISOString()};
+  const db=fakeDb([{...base,channel:'telegram'},{...base,channel:'email'}]);
+  const run=opsRuntime();
+  const recent=await run.api.dispatchOpsNotifications(db,[],'ops@example.test');
+  assert.equal(recent.deliveries.length,0);assert.equal(run.calls.length,0);assert.equal(db.rows.length,2);
+  for(const row of db.rows)row.last_alerted_at=new Date(Date.now()-7*3600000).toISOString();
+  const recovered=await run.api.dispatchOpsNotifications(db,[],'ops@example.test');
+  assert.equal(recovered.deliveries.length,2);
+  assert.ok(recovered.deliveries.every(d=>d.recovery && d.accepted && d.keys.join(',')==='sources_incomplete'));
+  assert.equal(db.rows.length,0);
+  const next=await run.api.dispatchOpsNotifications(db,[],'ops@example.test');
+  assert.equal(next.deliveries.length,0);
+});
 test('trial outbox is authoritative, idempotent, leased, private and not backfilled',()=>{
   const sql=fs.readFileSync(path.join(root,'supabase/migrations/20260904194500_trial_telegram_outbox.sql'),'utf8');
   for(const expected of ['after insert or update on public.cloud_entitlement_projection',"new.status <> 'trialing'",'new.trial_consumed_at is null','new.trial_ends_at <= clock_timestamp()','old.trial_consumed_at is not null','admin_internal_accounts','on conflict(user_id) do nothing','for update skip locked','lease_token=p_lease','attempt_count >= 12','enable row level security'])assert.ok(sql.includes(expected),expected);
