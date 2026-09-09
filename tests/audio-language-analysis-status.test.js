@@ -115,3 +115,22 @@ test('a nested sibling job cannot make the current untagged version look schedul
     assert.equal(r.MediaUtils.versionLanguageBadge(currentFile), 'Language unidentified');
     assert.equal(r.MediaUtils.versionDescriptor(currentFile).headline, 'Language unidentified');
 });
+
+test('existing reviewed provider declarations precede every job state without becoming confirmed audio', () => {
+    const r = runtime();
+    for (const { code } of locales) {
+        r.NorvaI18n.setPreference(code);
+        for (const job of [undefined, 'queued', 'retry_wait', 'running', 'completed', 'failed']) {
+            const item = {
+                title: 'ES-SUB Netflix Example', original_language: 'es', subtitle_languages: ['es'],
+                provider_audio_languages: ['hi'], provider_audio_language_status: 'provider_declared',
+                audio_language_validation_status: 'not_analyzed', audio_language_validation_job_status: job,
+            };
+            const expected = new Intl.DisplayNames([code], { type: 'language' }).of('hi');
+            assert.equal(r.MediaUtils.versionLanguageBadge(item), expected, `${code}/${job}`);
+            assert.equal(r.MediaUtils.versionDescriptor(item).headline, expected, `${code}/${job}`);
+            assert.equal(r.MediaUtils.analyzeLanguageCompatibility(item, { preferredAudioLanguage: 'hi' }).audio.state, 'unknown');
+            assert.deepEqual(Array.from(r.MediaUtils.providerAudioLanguages({ ...item, provider_audio_language_status: '' })), []);
+        }
+    }
+});
