@@ -95,6 +95,38 @@ test('catalogue audio names and counts follow all ten UI languages, preserving f
     assert.equal(r.MediaUtils.audioLanguageBadge(['es'], []), 'Espagnol');
 });
 
+test('language facets rank all observed and declared counts together, preserving stable query values in every locale', () => {
+    const r = runtime();
+    const facets = [
+        { value: 'pt', label: 'Portuguese', count: 1201 },
+        { value: 'es', label: 'Spanish', count: 137 },
+        { value: 'catalog-te', label: 'Telugu', count: 2419 },
+        { value: 'fr', label: 'French', count: 9 },
+        { value: 'provider-hi', label: 'Hindi', count: '1800' },
+    ];
+    const original = JSON.stringify(facets);
+    for (const { code } of locales) {
+        r.NorvaI18n.setPreference(code);
+        assert.deepEqual(Array.from(r.MediaUtils.sortLanguageFacets(facets), f => f.value),
+            ['catalog-te', 'provider-hi', 'pt', 'es', 'fr'], code);
+    }
+    assert.equal(JSON.stringify(facets), original, 'sorting must not mutate a shared cached response');
+});
+
+test('equal language counts sort by their translated names rather than API labels or language codes', () => {
+    const r = runtime();
+    const facets = ['en', 'fr', 'de'].map(value => ({ value, label: 'Untrusted ordering label', count: 42 }));
+    r.NorvaI18n.setPreference('fr');
+    assert.deepEqual(Array.from(r.MediaUtils.sortLanguageFacets(facets), f => f.value), ['de', 'en', 'fr']);
+    r.NorvaI18n.setPreference('en');
+    assert.deepEqual(Array.from(r.MediaUtils.sortLanguageFacets(facets), f => f.value), ['en', 'fr', 'de']);
+    const nonCounts = [
+        { value: 'fr', count: NaN }, { value: 'es', count: 0 },
+        { value: 'de', count: -2 }, { value: 'en', count: Infinity },
+    ];
+    assert.deepEqual(Array.from(r.MediaUtils.sortLanguageFacets(nonCounts), f => f.value), ['en', 'fr', 'de', 'es']);
+});
+
 test('French contextual meanings stay distinct from comparison, shopping and clock vocabulary', () => {
     const r = runtime(); r.NorvaI18n.setPreference('fr');
     for (const [key, expected] of Object.entries({
