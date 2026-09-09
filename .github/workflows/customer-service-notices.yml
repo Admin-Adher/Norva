@@ -1,0 +1,48 @@
+name: Verify customer service notices
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/customer-service-notices.yml'
+      - 'supabase/migrations/**'
+      - 'supabase/functions/_shared/customer-service-health.ts'
+      - 'supabase/functions/norva-admin/**'
+      - 'ops/hetzner/scripts/proof-customer-notices-20260909.py'
+      - 'tests/sql/customer-notices.*.sql'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notices:
+    name: GoTrue and customer notice acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the pinned production-compatible images
+        run: |
+          docker pull supabase/postgres:17.6.1.136
+          docker pull supabase/gotrue:v2.189.0
+      - name: Check real Auth events and SQL isolation without customer delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          notice_dir="$RUNNER_TEMP/customer-notices"
+          mkdir -p "$notice_dir/notice-proof"
+          cp ops/hetzner/scripts/proof-customer-notices-20260909.py "$notice_dir/"
+          cp tests/sql/customer-notices.bootstrap.sql tests/sql/customer-notices.integration.sql "$notice_dir/notice-proof/"
+          cp supabase/migrations/20260626131645_norva_branded_email_helpers.sql \
+             supabase/migrations/20260721235400_branded_email_delivery_outbox.sql \
+             supabase/migrations/20260908144324_linked_email_artwork.sql \
+             supabase/migrations/20260909070224_complete_customer_service_notices.sql "$notice_dir/notice-proof/"
+          python3 "$notice_dir/proof-customer-notices-20260909.py" | tee "$notice_dir/acceptance.log"
+      - name: Keep the isolated acceptance result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: customer-service-notice-proof
+          path: |
+            ${{ runner.temp }}/customer-notices/acceptance.log
+            ${{ runner.temp }}/customer-notices/notice-proof/proof-summary.json

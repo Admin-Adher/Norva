@@ -176,6 +176,8 @@ services:
       # GoTrue 2.189 permits HTTP only for loopback hosts, so the hook must use
       # the public HTTPS function URL (not http://kong or http://functions).
       GOTRUE_HOOK_SEND_EMAIL_ENABLED: "true"
+      GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_ENABLED: "true"
+      GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_URI: "pg-functions://postgres/norva_notices/password_verification_attempt"
       GOTRUE_HOOK_SEND_EMAIL_URI: ${AUTH_SEND_EMAIL_HOOK_URI:?AUTH_SEND_EMAIL_HOOK_URI is required for Auth email}
       GOTRUE_HOOK_SEND_EMAIL_SECRETS: ${SEND_EMAIL_HOOK_SECRET:?SEND_EMAIL_HOOK_SECRET is required for Auth email}
       GOTRUE_MAILER_EXTERNAL_HOSTS: ${GOTRUE_MAILER_EXTERNAL_HOSTS:-api.norva.tv}
