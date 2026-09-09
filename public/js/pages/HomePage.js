@@ -1042,19 +1042,11 @@ class HomePage {
         `;
     }
 
-    renderImportRibbon(summary = {}) {
+    renderImportRibbon() {
         const host = document.getElementById('home-content');
         if (!host) return;
         host.querySelector('#home-import-ribbon')?.remove();
-        const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
-        // The compact health banner already carries this import status and its action.
-        if (!policy?.backgrounding || summary?.state === 'syncing') return;
-        const ribbon = document.createElement('div');
-        ribbon.id = 'home-import-ribbon';
-        ribbon.className = 'norva-setup-import-ribbon';
-        ribbon.setAttribute('role', 'status');
-        ribbon.textContent = (globalThis.NorvaI18n?.t("ui_web_9ac01274a97f", { defaultValue: "Still adding the rest of your library in the background." }) ?? 'Still adding the rest of your library in the background.');
-        host.prepend(ribbon);
+        // One compact banner also covers the usable-but-still-importing phase.
     }
 
     renderSetupSyncingGate(container, summary = {}) {
@@ -2097,7 +2089,8 @@ class HomePage {
             compact: true,
             prominent: !summary?.ready?.length
         });
-        container.classList.toggle('hidden', summary?.state === 'ready');
+        const backgrounding = window.NorvaSourceHealth.catalogAvailability?.(summary)?.backgrounding;
+        container.classList.toggle('hidden', summary?.state === 'ready' && !backgrounding);
         container.querySelectorAll('[data-source-health-action]').forEach(button => {
             button.addEventListener('click', () => {
                 const action = button.dataset.sourceHealthAction;

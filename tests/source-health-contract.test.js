@@ -414,6 +414,31 @@ test('Home removes the duplicate ribbon during an initial import and after compl
   assert.equal(appended, 0);
 });
 
+test('the compact banner survives the usable background phase and opens the source still importing', () => {
+  const health = sourceHealthHarness();
+  const ready = { id: 'ready', sync_status: 'ready', configHint: { lastSync: { total: 12 } } };
+  const importing = { id: 'importing', sync_status: 'syncing', configHint: { lastSync: { total: 12 } }, syncProgress: { usable: true, percent: 90 } };
+  const summary = health.summarize([ready, importing]);
+  assert.equal(summary.state, 'ready', 'available titles stay browsable');
+  assert.match(health.cardHtml(summary, { compact: true, hideWhenReady: true }), /service-health-compact/);
+  let opened;
+  health.openProgress(summary, { sourceManager: { showCatalogPreparation(source) { opened = source; } } });
+  assert.equal(opened.id, 'importing');
+  let hidden;
+  let appended = 0;
+  const container = { innerHTML: '', classList: { toggle(name, value) { if (name === 'hidden') hidden = value; } }, querySelectorAll: () => [], querySelector: () => ({ remove() {} }), prepend() { appended++; } };
+  const window = { NorvaSourceHealth: health };
+  vm.runInNewContext(HOME_SOURCE, { window, document: { getElementById: () => container }, console });
+  const page = Object.create(window.HomePage.prototype);
+  page.renderServiceHealth(summary);
+  page.renderImportRibbon(summary);
+  assert.equal(hidden, false);
+  assert.equal(appended, 0);
+  const completed = health.summarize([ready, { ...importing, sync_status: 'ready', syncProgress: { percent: 100 } }]);
+  page.renderServiceHealth(completed);
+  assert.equal(hidden, true);
+});
+
 test('Account health summary keeps the service price-neutral and secondary', () => {
   const health = sourceHealthHarness();
   const html = health.cardHtml({
