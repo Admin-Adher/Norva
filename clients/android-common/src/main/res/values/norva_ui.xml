@@ -66,9 +66,10 @@
     <string name="ui_prerequisite_changed" formatted="false">A prerequisite changed during validation. Close this window, check the configuration and try again.</string>
     <string name="ui_selection_kept" formatted="false">· current selection kept</string>
     <string name="ui_trial_days_left" formatted="false">{{days}} days left</string>
-    <string name="ui_discovery_title" formatted="false">No catalogue? Start with our selection.</string>
-    <string name="ui_discovery_description" formatted="false">Enjoy Norva with films and live TV from several sources, without adding a provider.</string>
-    <string name="ui_discovery_continue" formatted="false">Continue with this selection</string>
+    <string name="ui_discovery_title" formatted="false">No catalogue?</string>
+    <string name="ui_discovery_description" formatted="false">Discover films and live TV without entering a link or provider login.</string>
+    <string name="ui_discovery_continue" formatted="false">Start with Norva Selection</string>
+    <string name="ui_discovery_later" formatted="false">You can add your own provider later.</string>
     <string name="ui_discovery_terms" formatted="false">Included in your 7-day trial, then in your Norva subscription.</string>
     <string name="ui_discovery_credits" formatted="false">Films, sources and credits</string>
     <string name="ui_discovery_loading" formatted="false">Preparing your selection…</string>

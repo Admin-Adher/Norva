@@ -66,9 +66,10 @@
     <string name="ui_prerequisite_changed" formatted="false">सत्यापन के दौरान एक ज़रूरी शर्त बदल गई। इस विंडो को बंद करें, कॉन्फ़िगरेशन जाँचें और फिर कोशिश करें।</string>
     <string name="ui_selection_kept" formatted="false">· मौजूदा चयन रखा गया</string>
     <string name="ui_trial_days_left" formatted="false">{{days}} दिन बाकी</string>
-    <string name="ui_discovery_title" formatted="false">कैटलॉग नहीं है? हमारे चयन से शुरू करें।</string>
-    <string name="ui_discovery_description" formatted="false">प्रदाता जोड़े बिना, कई स्रोतों की फ़िल्मों और लाइव टीवी के साथ Norva का आनंद लें।</string>
-    <string name="ui_discovery_continue" formatted="false">इस चयन के साथ जारी रखें</string>
+    <string name="ui_discovery_title" formatted="false">कैटलॉग नहीं है?</string>
+    <string name="ui_discovery_description" formatted="false">बिना लिंक या प्रदाता के लॉगिन विवरण दर्ज किए फ़िल्में और लाइव टीवी खोजें।</string>
+    <string name="ui_discovery_continue" formatted="false">Norva Selection से शुरू करें</string>
+    <string name="ui_discovery_later" formatted="false">आप अपना प्रदाता बाद में जोड़ सकते हैं।</string>
     <string name="ui_discovery_terms" formatted="false">आपके 7-दिन के ट्रायल में, फिर आपकी Norva सदस्यता में शामिल।</string>
     <string name="ui_discovery_credits" formatted="false">फ़िल्में, स्रोत और श्रेय</string>
     <string name="ui_discovery_loading" formatted="false">आपका चयन तैयार हो रहा है…</string>

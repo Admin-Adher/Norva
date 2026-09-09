@@ -1302,10 +1302,19 @@ class HomePage {
                         <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit" data-i18n="ui_web_5d329e5a79c1">Check playlist</button>
                     </form>
                     ${this.app?.currentUser?.cloud ? `<section class="setup-discovery" aria-labelledby="home-discovery-title">
-                        <h2 id="home-discovery-title" data-i18n="ui_discovery_title">No catalogue? Start with our selection.</h2>
-                        <p data-i18n="ui_discovery_description">Enjoy Norva with films and live TV from several sources, without adding a provider.</p>
-                        <button type="button" class="btn btn-secondary" id="home-discovery-start" data-i18n="ui_discovery_continue">Continue with this selection</button>
-                        <p class="setup-discovery-terms" data-i18n="ui_discovery_terms">Included in your 7-day trial, then in your Norva subscription.</p>
+                        <div class="setup-discovery-heading">
+                            <img class="setup-discovery-mark" src="/img/norva-app-icon.png" width="48" height="48" alt="">
+                            <div>
+                                <p class="setup-discovery-kicker" data-i18n="ui_discovery_title">No catalogue?</p>
+                                <h2 id="home-discovery-title" translate="no">Norva Selection</h2>
+                            </div>
+                        </div>
+                        <p id="home-discovery-description" data-i18n="ui_discovery_description">Discover films and live TV without entering a link or provider login.</p>
+                        <button type="button" class="btn btn-primary" id="home-discovery-start" aria-describedby="home-discovery-description home-discovery-terms" data-i18n="ui_discovery_continue">Start with Norva Selection</button>
+                        <div class="setup-discovery-notes">
+                            <p class="setup-discovery-later" data-i18n="ui_discovery_later">You can add your own provider later.</p>
+                            <p class="setup-discovery-terms" id="home-discovery-terms" data-i18n="ui_discovery_terms">Included in your 7-day trial, then in your Norva subscription.</p>
+                        </div>
                         <p id="home-discovery-status" role="status" aria-live="polite" aria-atomic="true"></p>
                     </section>` : ''}
                 </div>
