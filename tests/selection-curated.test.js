@@ -5,10 +5,10 @@ const vm = require('node:vm');
 const { stripTypeScriptTypes } = require('node:module');
 
 test('live-only Home shortcut requires exactly the tenant-visible curated source and fails closed on database errors', async () => {
-  const { discoverySourceId, retiredDiscoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
+  const { discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
   const code=fs.readFileSync('supabase/functions/norva-catalog/index.ts','utf8');
   const start=code.indexOf('async function isCuratedLiveOnlyHome('),end=code.indexOf('async function listHomeRails(',start);
-  const context=vm.createContext({DISCOVERY_SELECTION_ENABLED:true,discoverySourceId,catalogTitleReadUnavailable:()=>Error('unavailable')});
+  const context=vm.createContext({DISCOVERY_SELECTION_ENABLED:true,isDiscoverySourceId,catalogTitleReadUnavailable:()=>Error('unavailable')});
   vm.runInContext(stripTypeScriptTypes(code.slice(start,end),{mode:'strip'}),context);
   let rows=[],error=null,titles=[],titlesError=null;
   const db={from(table){assert.ok(['cloud_catalog_visible_sources','cloud_catalog_visible_titles'].includes(table));return {
@@ -19,6 +19,7 @@ test('live-only Home shortcut requires exactly the tenant-visible curated source
     rows=ids.map(id=>({id}));assert.equal(await context.isCuratedLiveOnlyHome('owner',db),false);
   }
   rows=[{id:await discoverySourceId('owner')}];assert.equal(await context.isCuratedLiveOnlyHome('owner',db),true);
+  rows=[{id:await discoverySourceId('owner',1)}];assert.equal(await context.isCuratedLiveOnlyHome('owner',db),true);
   titles=[{id:'selection-film'}];assert.equal(await context.isCuratedLiveOnlyHome('owner',db),false);
   titles=[];titlesError={code:'unavailable'};await assert.rejects(context.isCuratedLiveOnlyHome('owner',db),/unavailable/);titlesError=null;
   error={code:'database-unavailable'};await assert.rejects(context.isCuratedLiveOnlyHome('owner',db),/unavailable/);

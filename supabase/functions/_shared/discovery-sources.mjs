@@ -1,5 +1,5 @@
 import { SELECTION_CURATED_CHANNELS, SELECTION_CURATED_PROVIDERS, SELECTION_CURATED_REVISION, curatedChannelForMetadata, curatedChannelExternalId } from './selection-curated-channels.mjs';
-import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, assertDiscoverySelectionAvailable, discoveryMovieFields, discoverySourceId, retiredDiscoverySourceId } from './discovery-catalog.mjs';
+import { DISCOVERY_FILMS, DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, assertDiscoverySelectionAvailable, discoveryMovieFields, isDiscoverySourceId, retiredDiscoverySourceId } from './discovery-catalog.mjs';
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
 import { matchesSelectionLiveQuarantine, SELECTION_LIVE_QUARANTINE } from './selection-live-quarantine.mjs';
 import { SELECTION_VOD_FEEDS, fetchSelectionVod, resolveSelectionVodTarget } from './selection-vod.mjs';
@@ -193,7 +193,7 @@ const playbackFeeds = new Map();
 // Never accept a feed URL or content identity from a client's playback hint.
 export async function resolveDiscoveryTarget(options) {
   if (options.sourceId === await retiredDiscoverySourceId(options.userId)) throw new Error('Selection programme is temporarily unavailable');
-  if (options.sourceId !== await discoverySourceId(options.userId)) return options.targetUrl;
+  if (!await isDiscoverySourceId(options.sourceId, options.userId)) return options.targetUrl;
   assertDiscoverySelectionAvailable();
   if (SELECTION_VOD_FEEDS.some(feed => feed.id === options.metadata?.discoveryFeed)) return resolveSelectionVodTarget(options);
   if (!curatedChannelForMetadata(options.metadata, options.targetUrl)) throw new Error('Selection programme is temporarily unavailable');
@@ -201,16 +201,17 @@ export async function resolveDiscoveryTarget(options) {
 }
 
 export async function resolveDiscoveryCandidateTarget({ sourceId, userId, metadata, targetUrl, fetchPlaylist = fetchM3uPlaylistStream, now = Date.now() }) {
-  if (sourceId === await discoverySourceId(userId) && isRetiredGeneralDiscoveryItem(metadata)) {
+  const isSelection = await isDiscoverySourceId(sourceId, userId);
+  if (isSelection && isRetiredGeneralDiscoveryItem(metadata)) {
     throw new Error('Selection programme is temporarily unavailable');
   }
-  if (sourceId === await discoverySourceId(userId)
+  if (isSelection
       && typeof metadata?.discoveryMediaKey === 'string'
       && await quarantinedLiveMedia(metadata.discoveryFeed, metadata.discoveryMediaKey, targetUrl)) {
     throw new Error('Selection programme is temporarily unavailable');
   }
   const feed = DISCOVERY_REVIEW_SOURCES.find(source => source.id === metadata?.discoveryFeed && source.refreshOnPlay);
-  if (!feed || sourceId !== await discoverySourceId(userId)) return targetUrl;
+  if (!feed || !isSelection) return targetUrl;
   const key = discoveryMediaKey(feed, targetUrl);
   if (!key || key !== metadata.discoveryMediaKey) throw new Error('Selection media identity mismatch');
   let cached = playbackFeeds.get(feed.id);

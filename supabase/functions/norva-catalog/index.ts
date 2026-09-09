@@ -4,7 +4,7 @@ import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 // to main validates this code but does not reload production: update the server
 // checkout and run ops/hetzner/scripts/04-deploy-edge-functions.sh.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DISCOVERY_SELECTION_ENABLED, discoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { DISCOVERY_SELECTION_ENABLED, discoverySourceIds, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { providerAudioFacet, selectionProviderAudioLanguages } from "../_shared/selection-provider-languages.mjs";
 import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
@@ -1417,7 +1417,7 @@ async function isCuratedLiveOnlyHome(userId: string, database: typeof db): Promi
   const { data, error } = await database.from("cloud_catalog_visible_sources")
     .select("id").eq("user_id", userId).limit(2);
   if (error) throw catalogTitleReadUnavailable();
-  if (data?.length !== 1 || data[0].id !== await discoverySourceId(userId)) return false;
+  if (data?.length !== 1 || !await isDiscoverySourceId(data[0].id, userId)) return false;
   const { data: titles, error: titlesError } = await database.from("cloud_catalog_visible_titles")
     .select("id").eq("user_id", userId).in("item_type", ["movie", "series"]).limit(1);
   if (titlesError) throw catalogTitleReadUnavailable();
@@ -2335,8 +2335,11 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     audio: exactLanguageFacetItems(d.audio, itemType),
     subtitles: exactLanguageFacetItems(d.subtitles, itemType),
   };
-  const selectionId = await discoverySourceId(userId);
-  if (selectionId && (!sourceId || sourceId === selectionId)) {
+  const { data: visibleSources, error: visibleSourcesError } = await db.from("cloud_catalog_visible_sources")
+    .select("id").eq("user_id", userId);
+  if (visibleSourcesError) throwDb(visibleSourcesError, "Unable to load Selection sources");
+  const selectionIds = await discoverySourceIds((visibleSources ?? []).map(source => source.id), userId);
+  for (const selectionId of selectionIds.filter(id => !sourceId || id === sourceId)) {
     const { data: declaredCounts, error: declaredError } = await db.rpc('cloud_selection_audio_catalog_counts', {
       p_user_id: userId, p_selection_source_id: selectionId, p_source_id: sourceId,
       p_item_type: itemType,
@@ -3477,22 +3480,24 @@ function flatMediaVariantKey(row: Record<string, any>): string | null {
 async function attachFlatSelectionSeriesLanguages(items: JsonRecord[], userId: string, itemType: string | null) {
   if (itemType !== "series" || !items.length) return;
   try {
-    const sourceId = await discoverySourceId(userId);
-    const selected = items.filter(item => item.source_id === sourceId &&
-      recordOrEmpty(item.metadata).seriesDelivery === "selection");
-    for (let start = 0; start < selected.length; start += 100) {
-      const batch = selected.slice(start, start + 100);
-      const { data, error } = await db.from("cloud_catalog_visible_title_variants")
-        .select("id,user_id,source_id,media_item_id,item_type,external_id,metadata")
-        .eq("user_id", userId).eq("source_id", sourceId).eq("item_type", "series")
-        .in("media_item_id", batch.map(item => item.id));
-      if (error) throw error;
-      const variants = (data ?? []) as JsonRecord[];
-      await attachSelectionSeriesLanguages(db, variants, userId);
-      const byFile = new Map(variants.map(variant => [flatMediaVariantKey(variant), variant]));
-      for (const item of batch) {
-        const variant = byFile.get(flatMediaVariantKey(item));
-        if (variant) Object.assign(item, selectionSeriesLanguageFields(variant.__series_languages));
+    const sourceIds = await discoverySourceIds(items.map(item => item.source_id), userId);
+    for (const sourceId of sourceIds) {
+      const selected = items.filter(item => item.source_id === sourceId &&
+        recordOrEmpty(item.metadata).seriesDelivery === "selection");
+      for (let start = 0; start < selected.length; start += 100) {
+        const batch = selected.slice(start, start + 100);
+        const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+          .select("id,user_id,source_id,media_item_id,item_type,external_id,metadata")
+          .eq("user_id", userId).eq("source_id", sourceId).eq("item_type", "series")
+          .in("media_item_id", batch.map(item => item.id));
+        if (error) throw error;
+        const variants = (data ?? []) as JsonRecord[];
+        await attachSelectionSeriesLanguages(db, variants, userId);
+        const byFile = new Map(variants.map(variant => [flatMediaVariantKey(variant), variant]));
+        for (const item of batch) {
+          const variant = byFile.get(flatMediaVariantKey(item));
+          if (variant) Object.assign(item, selectionSeriesLanguageFields(variant.__series_languages));
+        }
       }
     }
   } catch (_) { /* A failed language lookup must not hide the series catalogue. */ }

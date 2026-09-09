@@ -1,4 +1,4 @@
-import { discoverySourceId } from './discovery-catalog.mjs';
+import { isDiscoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_VOD_FEEDS, SELECTION_VOD_REVISION } from './selection-vod.mjs';
 import { isSelectionSeriesUnit, selectionSeriesIdentity, selectionSeriesExternalId } from './selection-series.mjs';
 import { selectionProviderAudioLanguages } from './selection-provider-languages.mjs';
@@ -16,7 +16,7 @@ export async function ownedSelectionSeries(row, seriesId) {
 // Called inside the same source/generation visibility fence as Xtream details.
 // Nothing here reads a provider account, emits media URLs or fabricates episodes.
 export async function loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, generationId }) {
-  if (sourceId !== await discoverySourceId(userId)) return null;
+  if (!await isDiscoverySourceId(sourceId, userId)) return null;
   const base = () => db.from('cloud_catalog_visible_media_items')
     .select('external_id,title,parent_external_id,poster_url,metadata')
     .eq('user_id', userId).eq('source_id', sourceId).eq('generation_id', generationId);
@@ -52,7 +52,7 @@ export async function loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, 
 }
 
 export async function resolveOwnedSelectionEpisode({ db, userId, sourceId, itemId, parentId = null }) {
-  if (sourceId !== await discoverySourceId(userId) || !/^norva-selection:movie:[a-f0-9]{64}$/.test(itemId)) return null;
+  if (!await isDiscoverySourceId(sourceId, userId) || !/^norva-selection:movie:[a-f0-9]{64}$/.test(itemId)) return null;
   const { data: row, error } = await db.from('cloud_catalog_visible_media_items')
     .select('id,updated_at,generation_id,parent_external_id,playback_hint,metadata')
     .eq('user_id', userId).eq('source_id', sourceId).eq('item_type', 'episode')
