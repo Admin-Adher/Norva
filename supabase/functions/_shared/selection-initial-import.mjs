@@ -2,17 +2,17 @@
 // A failed invocation can then be resumed by the existing watchdog without
 // downloading the Selection again or restarting an unbounded projection.
 export async function handoffSelectionFinalization({
-  db, sourceId, userId, generation, assertCurrent, releaseTransport, invokeFinalizer,
+  db, sourceId, userId, assertCurrent, releaseTransport, invokeFinalizer,
 }) {
   const stale = () => Object.assign(new Error('Catalog generation changed during Selection handoff'), {
     code: 'CATALOG_GENERATION_SUPERSEDED',
   });
   await assertCurrent();
   const { data: source, error: readError } = await db.from('cloud_sources')
-    .select('config_hint').eq('id', sourceId).eq('user_id', userId)
+    .select('config_hint,updated_at').eq('id', sourceId).eq('user_id', userId)
     .eq('enabled', true).is('deleted_at', null).maybeSingle();
   if (readError) throw readError;
-  if (!source) throw stale();
+  if (!source?.updated_at) throw stale();
   const hint = source.config_hint || {};
   const progress = hint.syncProgress || {};
   if (progress.steps?.import?.status !== 'done' || !(Number(progress.counts?.total) > 0)) {
@@ -31,8 +31,10 @@ export async function handoffSelectionFinalization({
         usable: false, liveReady: false },
     },
   }).eq('id', sourceId).eq('user_id', userId).eq('enabled', true).is('deleted_at', null)
-    .eq('config_revision', generation.configRevision)
-    .eq('visibility_epoch', generation.sourceVisibilityEpoch)
+    // Revisions live in the lifecycle table, not cloud_sources. The canonical
+    // generation assertion checks them before/after this write; updated_at
+    // prevents overwriting a concurrent source/config/progress change.
+    .eq('updated_at', source.updated_at)
     .select('id').maybeSingle();
   if (error) throw error;
   if (!saved) throw stale();

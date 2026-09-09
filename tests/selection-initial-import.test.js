@@ -15,14 +15,17 @@ function handoffHarness({ missing = false, writeFails = false, superseded = fals
             steps: { import: { status: imported ? 'done' : 'running' } } } };
     const db = { from(table) {
         assert.equal(table, 'cloud_sources');
+        // Physical source columns: lifecycle revisions belong to the separate
+        // cloud_source_lifecycle table and PostgREST rejects them here.
+        const columns = new Set(['id', 'user_id', 'enabled', 'deleted_at', 'config_hint', 'updated_at']);
         let update = false;
-        const query = { select() { return query; },
+        const query = { select(list) { list.split(',').forEach(column => assert.ok(columns.has(column), `unknown source column: ${column}`)); return query; },
             update(value) { update = true; written = value; return query; },
-            eq(...args) { filters.push(args); return query; }, is(...args) { filters.push(args); return query; },
+            eq(...args) { assert.ok(columns.has(args[0]), `unknown source column: ${args[0]}`); filters.push(args); return query; }, is(...args) { filters.push(args); return query; },
             async maybeSingle() {
                 events.push(update ? 'persist' : 'read');
                 return update ? { data: writeFails ? null : { id: 'source' } }
-                    : { data: missing ? null : { config_hint: hint } };
+                    : { data: missing ? null : { config_hint: hint, updated_at: '2026-09-09T15:00:00Z' } };
             } };
         return query;
     } };
@@ -42,7 +45,7 @@ test('Selection persists recovery before releasing transport and starting a fres
     assert.equal(h.written().config_hint.lastSync.total, 80, 'a prior ready catalogue remains available during refresh');
     assert.equal(h.written().sync_status, 'syncing');
     assert.equal(h.written().config_hint.syncProgress.browseReady, false);
-    for (const filter of [['user_id', 'owner'], ['enabled', true], ['deleted_at', null], ['config_revision', '3'], ['visibility_epoch', '5']]) {
+    for (const filter of [['user_id', 'owner'], ['enabled', true], ['deleted_at', null], ['updated_at', '2026-09-09T15:00:00Z']]) {
         assert.ok(h.filters.some(value => JSON.stringify(value) === JSON.stringify(filter)));
     }
 });

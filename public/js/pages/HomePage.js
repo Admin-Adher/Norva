@@ -657,6 +657,12 @@ class HomePage {
                     } catch (_) { /* best-effort */ }
                 } else if (railsResult.status === 'rejected') {
                     console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);
+                    // Projection can advance the visibility fence while Home is
+                    // being assembled. Keep the first cards and retry the full
+                    // catalogue while import continues, instead of leaving the
+                    // hero absent until the last item has finished importing.
+                    if (window.NorvaSourceHealth?.catalogAvailability?.(this.sourceSummary)?.backgrounding
+                        || this.isSelectionPreparing()) this.schedulePendingCatalogRefresh();
                     if (this._paintedFromCache || paintedEarlyRails) {
                         // The SWR paint already shows real (cached) rails — keep them instead
                         // of overwriting good content with a degraded fallback, and let the

@@ -192,6 +192,22 @@ test('an empty genre materialisation reads media directly without repeating pers
     assert.equal(h.heroes.length, 1);
 });
 
+test('an initial Selection retries full Home after a visibility race while preserving first cards', async () => {
+    const h = homeHarness(async (_, path) => {
+        if (path.startsWith('/home/rails')) throw Error('visibility changed');
+        return path.startsWith('/media/genre-rails') ? rail('first page') : [];
+    });
+    h.page.app.refreshSourceHealth = async () => ({ state: 'syncing', sources: [
+        { source: { enabled: true, source_type: 'm3u', config_hint: { playlistHost: 'norva.tv' } } }
+    ] });
+    let retries = 0;
+    h.page.schedulePendingCatalogRefresh = () => { retries++; };
+    await h.page.loadDashboardData();
+    assert.equal(retries, 1);
+    assert.equal(h.paints[0].rails[0].items[0].title, 'first page');
+    assert.equal(h.heroes.length, 1);
+});
+
 test('an empty live-only Home response waits for the first real fast rail and cannot erase it', async () => {
     const fast = deferred();
     const h = homeHarness(async (_, path) => {

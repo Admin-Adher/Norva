@@ -1436,6 +1436,8 @@ async function listHomeRails(req: Request, url: URL, userId: string) {
   const limit = boundedInt(url.searchParams.get("limit"), 24, 1, 50);
   const lang = railLang(url);
   const type = url.searchParams.get("type");
+  const preparing = await listPreparingSelectionHomeRails(userId, type, limit, lang);
+  if (preparing) return preparing;
   const includeSeries = !type || type === "series";
   const includeMovies = !type || type === "movie";
   const profilePromise = resolveCatalogProfileId(req, userId);
@@ -1531,6 +1533,37 @@ async function listHomeRails(req: Request, url: URL, userId: string) {
     contract: "norva.home.rails.v1",
     rails: rails.filter((rail): rail is JsonRecord => !!rail && Array.isArray(rail.items) && rail.items.length > 0),
   };
+}
+
+// An initial Selection has only a small set of projected titles. A returning
+// account can still have 100k historical title records from removed providers:
+// scanning those to rank a 96-title pool can hit the selector's resource bound
+// before finding the first page. Read the current source's visible variants
+// directly until import completes, retaining the same tenant/generation fence.
+async function listPreparingSelectionHomeRails(userId: string, type: string | null, limit: number, lang: string | null) {
+  if (!DISCOVERY_SELECTION_ENABLED) return null;
+  const { data: sources, error } = await db.from("cloud_catalog_visible_sources")
+    .select("id,sync_status,config_hint").eq("user_id", userId).limit(2);
+  if (error) throw catalogTitleReadUnavailable();
+  const source = sources?.length === 1 ? sources[0] : null;
+  if (!source || source.sync_status !== "syncing" || source.config_hint?.lastSync?.syncedAt
+      || !await isDiscoverySourceId(source.id, userId)) return null;
+  const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+  const types: Array<"movie" | "series"> = type === "movie" ? ["movie"] : type === "series" ? ["series"] : ["movie", "series"];
+  const rails = await Promise.all(types.map(async itemType => {
+    const { data: variants, error: readError } = await db.from("cloud_catalog_visible_title_variants")
+      .select("title_id").eq("user_id", userId).eq("source_id", source.id).eq("item_type", itemType)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).limit(limit * 2);
+    if (readError) throw catalogTitleReadUnavailable();
+    const ids = [...new Set((variants || []).map(row => catalogTitleUuid(row.title_id)))].slice(0, limit);
+    const titles = await hydrateVisibleCatalogTitlesByIds(userId, ids, visibilityEpoch);
+    const variantsByTitle = await listVariantsByTitleIds(ids, userId);
+    await applyCatalogOverlay(titles, itemType, lang);
+    return { id: `recently-added-${itemType === "movie" ? "movies" : "series"}`,
+      title: itemType === "movie" ? "Recently Added Movies" : "Recently Added Series", itemType, source: "titles",
+      items: titles.map(row => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)) };
+  }));
+  return { contract: "norva.home.rails.v1", preparing: true, rails: rails.filter(rail => rail.items.length > 0) };
 }
 
 // Netflix-style genre rails: one rail per curated genre bucket, built from the

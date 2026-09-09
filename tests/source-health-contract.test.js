@@ -407,7 +407,8 @@ test('Home import completion hides the compact status without hiding actionable 
   const failed = health.summarize([{ id: 'source-import', sync_status: 'failed', sync_error: '401 invalid username' }]);
   const failureHtml = health.cardHtml(failed, { compact: true });
   assert.match(failureHtml, /data-source-health-action="open-sources"/);
-  assert.doesNotMatch(failureHtml, /service-health-compact|Your catalogue is being prepared/);
+  assert.match(failureHtml, /service-health-compact/);
+  assert.doesNotMatch(failureHtml, /service-health-prominent|<h3>|Your catalogue is being prepared/);
 });
 
 test('Home removes the duplicate ribbon during an initial import and after completion', () => {
