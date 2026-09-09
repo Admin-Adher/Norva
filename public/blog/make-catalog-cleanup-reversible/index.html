@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="/js/i18n.js?v=d798020784"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Make Media Catalog Cleanup Reversible | Norva Blog</title>
+  <meta name="description" content="Make media catalog cleanup reversible with baselines, exports or snapshots, change sets, pilot batches, approvals, reconciliation, and tested rollback.">
+  <link rel="canonical" href="https://norva.tv/blog/make-catalog-cleanup-reversible/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Make Media Catalog Cleanup Reversible | Norva Blog">
+  <meta property="og:description" content="Make media catalog cleanup reversible with baselines, exports or snapshots, change sets, pilot batches, approvals, reconciliation, and tested rollback.">
+  <meta property="og:url" content="https://norva.tv/blog/make-catalog-cleanup-reversible/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Make Media Catalog Cleanup Reversible | Norva Blog">
+  <meta name="twitter:description" content="Make media catalog cleanup reversible with baselines, exports or snapshots, change sets, pilot batches, approvals, reconciliation, and tested rollback.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How to Make Catalog Cleanup Changes Reversible",
+  "description": "Make media catalog cleanup reversible with baselines, exports or snapshots, change sets, pilot batches, approvals, reconciliation, and tested rollback.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-09T20:00:00+02:00",
+  "dateModified": "2026-09-09T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/make-catalog-cleanup-reversible/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How to Make Catalog Cleanup Changes Reversible",
+      "item": "https://norva.tv/blog/make-catalog-cleanup-reversible/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content" data-i18n="ui_web_ac576a66d456">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home" data-i18n-aria-label="ui_web_1a123bf0fced">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary" data-i18n-aria-label="ui_web_efe10c80ec8a">
+      <a href="/blog/" data-i18n="ui_web_8c6bc099534a">Blog</a>
+      <a class="hide-sm" href="/#how-it-works" data-i18n="ui_web_9c870aa6e5e9">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action data-i18n="ui_web_b1effd1ffed3">Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Make Catalog Cleanup Changes Reversible</span></nav>
+    <article lang="en" dir="ltr">
+      <div class="article-meta">
+        <span class="tag">Catalog Cleanup</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-09T20:00:00+02:00">9 September 2026</time>
+        <span class="dot">·</span>
+        <span>6 min read</span>
+      </div>
+      <h1>How to Make Catalog Cleanup Changes Reversible</h1>
+      <p class="lede">Reversible cleanup requires a dated baseline, understood recovery method, small change sets, exception routing, reconciliation, and a tested rollback condition.</p>
+      <nav class="toc" aria-label="On this page" data-i18n-aria-label="ui_web_b5658fc8edda">
+      <strong data-i18n="ui_web_b5658fc8edda">On this page</strong>
+      <ul><li><a href="#classify-actions-by-reversibility">Classify actions by reversibility</a></li><li><a href="#capture-the-baseline">Capture the baseline</a></li><li><a href="#verify-recovery-methods">Verify recovery methods</a></li><li><a href="#create-named-change-sets">Create named change sets</a></li><li><a href="#test-rollback-on-a-harmless-sample">Test rollback on a harmless sample</a></li><li><a href="#reconcile-before-continuing">Reconcile before continuing</a></li><li><a href="#original-evidence-reversible-change-set-record">Original evidence: reversible change-set record</a></li><li><a href="#protect-source-and-personal-boundaries">Protect source and personal boundaries</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Capture a dated baseline, verify what an export, snapshot, or backup actually contains, and organise cleanup into small named change sets. Record every transformation, exception, approval, and validation result. Test rollback on a harmless sample before broad work, and stop any batch whose expected and observed states do not reconcile.</blockquote>
+<p>“Undo” is not a plan unless it has been tested. Some tools reverse a label edit but not a source removal, profile reset, or underlying file deletion. Reversibility must match the exact action.</p>
+<h2 id="classify-actions-by-reversibility">Classify actions by reversibility</h2>
+<p>Use three classes:</p>
+<ul><li><strong>Easily reversible:</strong> temporary filter, review label, or uncommitted proposal.</li><li><strong>Conditionally reversible:</strong> category rename, metadata mapping, or grouping change when a verified history or export exists.</li><li><strong>Potentially irreversible:</strong> source removal, app-data clearing, permanent deletion, unsupported file move, or overwrite.</li></ul>
+<p>Do not infer the class from the button label. Read current source and platform documentation and test the actual workflow.</p>
+<h2 id="capture-the-baseline">Capture the baseline</h2>
+<p>Before cleanup, record:</p>
+<ul><li>collection scope and source inventory;</li><li>category list and counts;</li><li>representative item states;</li><li>version and language relationships;</li><li>filters and profiles;</li><li>unresolved exceptions;</li><li>app, device, or system versions;</li><li>audit date.</li></ul>
+<p>Use <a href="/blog/audit-library-before-cleanup/">the pre-cleanup audit</a> so a later comparison uses the same context.</p>
+<h2 id="verify-recovery-methods">Verify recovery methods</h2>
+<p>A recovery method may preserve:</p>
+<ul><li>catalogue metadata;</li><li>categories;</li><li>source connection details;</li><li>profile state;</li><li>underlying media files;</li><li>only part of the above.</li></ul>
+<p>Write what is included and excluded. Do not call a metadata export a media backup. The Library of Congress recommends keeping copies of important digital material in different places, while NDSA guidance separates storage, integrity, metadata, security, and formats. Apply those principles only to material you own or are authorised to manage.</p>
+<h2 id="create-named-change-sets">Create named change sets</h2>
+<p>Each batch should have:</p>
+<ul><li>change-set ID and owner;</li><li>exact scope;</li><li>rule version;</li><li>baseline reference;</li><li>intended transformations;</li><li>excluded and uncertain items;</li><li>approval;</li><li>rollback method;</li><li>pass conditions;</li><li>completion and review date.</li></ul>
+<p>Do not mix category cleanup, duplicate merging, source migration, and profile reset into one batch.</p>
+<h2 id="test-rollback-on-a-harmless-sample">Test rollback on a harmless sample</h2>
+<p>Choose a representative item or temporary test category where rollback is supported and does not risk real media. Perform the proposed change, verify the new state, execute rollback, and compare with the baseline.</p>
+<p>Record whether labels, relationships, profile state, and source context returned. If not, reclassify the action and seek another protection method.</p>
+<h2 id="reconcile-before-continuing">Reconcile before continuing</h2>
+<p>After each change set, compare:</p>
+<ul><li>expected versus processed items;</li><li>categories before and after;</li><li>transformations completed;</li><li>exceptions produced;</li><li>retrieval tasks passed;</li><li>source and version context preserved;</li><li>rollback still available.</li></ul>
+<p>Stop if anything is unexplained. The <a href="/blog/catalog-cleanup-master-plan/">complete catalogue cleanup plan</a> uses reconciliation as a phase gate.</p>
+<h2 id="original-evidence-reversible-change-set-record">Original evidence: reversible change-set record</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Field</th><th>Record</th></tr></thead>
+<tbody><tr><td>Change-set ID / scope</td><td></td></tr><tr><td>Baseline and recovery method</td><td></td></tr><tr><td>Intended transformations</td><td></td></tr><tr><td>Exceptions excluded</td><td></td></tr><tr><td>Approver</td><td></td></tr><tr><td>Rollback test result</td><td>Pass / Recheck</td></tr><tr><td>Post-change retrieval result</td><td>Pass / Recheck</td></tr><tr><td>Reconciliation</td><td>Complete / Stop</td></tr></tbody>
+</table></div>
+<p>Link significant choices to the library decision log. Keep the record even after a successful rollback so the next maintainer knows the limitation.</p>
+<h2 id="protect-source-and-personal-boundaries">Protect source and personal boundaries</h2>
+<p>Norva can organise compatible authorised sources, but a catalogue cleanup should not change source rights or ownership. Never store credentials in the change set. Treat another person's profile history, favourites, and preferences as personal state requiring appropriate approval.</p>
+<p>For migrations, follow the library migration plan rather than disguising movement as cleanup.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Assuming every action has Undo.</li><li>Creating a backup without testing what it restores.</li><li>Calling a catalogue export a complete media backup.</li><li>Processing batches too large to inspect.</li><li>Mixing unrelated transformations.</li><li>Continuing after reconciliation fails.</li><li>Clearing app data to reverse a small label error.</li><li>Sharing credentials in recovery notes.</li></ul>
+<p>No method makes every change reversible. Potentially irreversible actions need stronger approval or should be avoided when the benefit is uncertain.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="is-a-screenshot-a-sufficient-baseline">Is a screenshot a sufficient baseline?</h3>
+<p>It helps with visible state but may omit identifiers, relationships, filters, and hidden items. Combine it with an inventory or supported export where appropriate.</p>
+<h3 id="how-often-should-rollback-be-tested">How often should rollback be tested?</h3>
+<p>Test when the recovery method, source, tool, or change type changes, and before a high-impact batch.</p>
+<h3 id="what-if-rollback-is-impossible">What if rollback is impossible?</h3>
+<p>Reduce scope, seek a supported export or backup, require explicit approval, and avoid the action when its value does not justify the risk.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Review Norva's catalog features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/" target="_blank" rel="noopener">Library of Congress: Personal digital archiving</a></li><li><a href="https://www.ndsa.org/publications/levels-of-digital-preservation/" target="_blank" rel="noopener">NDSA: Levels of Digital Preservation</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">National Archives: Knowing your records</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Review Norva's Catalog Features</a>
+    </section>
+      <section class="sources">
+      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
+      <ul><li><a href="https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/" target="_blank" rel="noopener">https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/</a></li><li><a href="https://www.ndsa.org/publications/levels-of-digital-preservation/" target="_blank" rel="noopener">https://www.ndsa.org/publications/levels-of-digital-preservation/</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/knowing</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
+    </section>
+      <section class="related">
+      <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/audit-library-before-cleanup/">
+          <span class="tag">Catalog Cleanup</span>
+          <div class="card-title">What to Audit Before Cleaning a Media Catalog</div>
+          <p>A pre-cleanup audit records the current catalogue state without editing it, creating the baseline needed to plan, reconcile, and reverse later changes.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer" data-i18n-aria-label="ui_web_26c87bb51e69">
+        <a href="/" data-i18n="ui_web_3a78695388b3">Home</a>
+        <a href="/blog/" data-i18n="ui_web_8c6bc099534a">Blog</a>
+        <a href="/#features" data-i18n="ui_web_d5b67bc930cd">Benefits</a>
+        <a href="/#pricing" data-i18n="ui_web_dfe95783edfe">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F" data-i18n="ui_web_be91940b79f4">Support</a>
+        <a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a>
+        <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a>
+        <a href="/mentions-legales.html" data-i18n="ui_web_1011b3a811f0">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
