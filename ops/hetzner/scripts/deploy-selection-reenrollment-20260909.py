@@ -40,7 +40,7 @@ def digest(path):
 
 
 def sql(query):
-    return run(['docker', 'exec', '-i', 'norva-db', 'psql', '-U', 'postgres', '-d', 'postgres',
+    return run(['docker', 'exec', '-i', 'norva-db', 'psql', '-U', 'supabase_admin', '-d', 'postgres',
                 '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], query.encode()).decode().strip()
 
 
@@ -146,10 +146,10 @@ elif phase == 'database':
     old = migration.split('v_old text := $old$', 1)[1].split('$old$;', 1)[0]
     assert previous.count(old) == 1, 'Hydration guard drift'
     expected = previous.replace(old, '  -- selection_reenrollment_identity_v1\n  if not public.norva_selection_source_identity_valid(p_source_id,p_user_id) then\n', 1)
-    # The migration and its ledger entry commit together. No other pending migration runs.
-    sql('begin;\n' + migration[len('begin;\n'):-len('commit;\n')]
-        + "\ninsert into supabase_migrations.schema_migrations(version,name,statements) values ('"
-        + VERSION + "','" + MIGRATION + "',ARRAY[$migration$" + migration + '$migration$]);\ncommit;')
+    # This self-hosted database has no CLI migration ledger. Apply only this
+    # atomic migration; the definition checks and signed-off artifact below
+    # record its effective state without inventing a second migration registry.
+    sql(migration)
     current = sql("select pg_get_functiondef('" + HYDRATION + "'::regprocedure);").replace('\r', '')
     assert current == expected, 'Unrelated hydration definition changed'
     checks = json.loads(sql("select json_build_object('security_invoker',not p.prosecdef,"
