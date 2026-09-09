@@ -2,7 +2,7 @@ import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/disc
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
-import { handoffSelectionFinalization, selectionStarterRows } from "../_shared/selection-initial-import.mjs";
+import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -2593,6 +2593,10 @@ async function syncCloudSource(
     if (!source) return;
     if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
     generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+    const selection = await isDiscoverySourceId(sourceId, userId);
+    const assertCurrent = () => selection
+      ? adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation!)
+      : assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
 
     const startedAt = new Date().toISOString();
     baseHint = recordOrEmpty(source.config_hint);
@@ -2631,7 +2635,7 @@ async function syncCloudSource(
       // the raw catalogue is imported; the existing finalize stepper (driven by
       // the client poll / cron) then materializes it to "ready".
       const cursor = freshSyncCursor(startedAt);
-      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+      await assertCurrent();
       await db
         .from("cloud_sources")
         .update({
@@ -2675,7 +2679,7 @@ async function syncCloudSource(
       };
     }
 
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    await assertCurrent();
     const { error: startError } = await db
       .from("cloud_sources")
       .update({
@@ -2699,11 +2703,11 @@ async function syncCloudSource(
       await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
     }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    await assertCurrent();
     const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
       await heartbeatM3uSyncLease();
       progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
-      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
+      await assertCurrent();
       await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
     };
 
@@ -2736,7 +2740,7 @@ async function syncCloudSource(
     if (recordOrEmpty(result).finalizePending === true) {
       await handoffSelectionFinalization({
         db, sourceId, userId,
-        assertCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!),
+        assertCurrent,
         releaseTransport: async () => {
           if (!m3uLeaseToken) return;
           await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
@@ -2764,7 +2768,7 @@ async function syncCloudSource(
       return;
     }
 
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    await assertCurrent();
     const syncedAt = new Date().toISOString();
     const { error: readyError } = await db
       .from("cloud_sources")
@@ -2794,6 +2798,7 @@ async function syncCloudSource(
       return;
     }
     if (isCatalogGenerationSuperseded(error)) {
+      console.info("[norva-cloud] source sync superseded", { sourceId, stage: progress.stage, code: recordOrEmpty(error).code });
       if (m3uLeaseToken) {
         await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
       }
@@ -3659,14 +3664,18 @@ async function replaceSourceItems(
   if (!preserveUntilSaved) await clearCatalogGenerationMediaItems(db, sourceId, userId, generation, heartbeat);
   for (let index = 0; index < rows.length; index += 500) {
     await heartbeat();
-    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
-      preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
-    ), generation);
-    if (!chunk.length) continue;
-    const { data, error } = await db
-      .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
-      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+    const write = async () => {
+      const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
+        preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
+      ), generation);
+      return await db.from("cloud_media_items")
+        .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
+        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+    };
+    const { data, error } = preserveUntilSaved
+      ? await writeSelectionBatch({ generation, write,
+        adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation) })
+      : await write();
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
   }

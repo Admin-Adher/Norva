@@ -86,6 +86,41 @@ test('only the first Selection title slice uses the small batch', async () => {
     assert.equal(initialTitleBatchLimit(false, false), 300);
 });
 
+test('a concurrent metadata epoch advance retries the raw batch once with a fresh fence', async () => {
+    const { writeSelectionBatch } = await shared;
+    const generation = { userVisibilityEpoch: '4' }, writes = [];
+    let reads = 0;
+    const result = await writeSelectionBatch({ generation,
+        adopt: async () => { generation.userVisibilityEpoch = ++reads === 1 ? '5' : '6'; },
+        write: async () => { writes.push(generation.userVisibilityEpoch); return writes.length === 1
+            ? { error: { code: '42501' } } : { data: ['saved'] }; } });
+    assert.deepEqual(writes, ['5', '6']);
+    assert.deepEqual(result.data, ['saved']);
+});
+
+test('unchanged authority errors are not retried and a changed source cannot be adopted', async () => {
+    const { writeSelectionBatch } = await shared;
+    const generation = { userVisibilityEpoch: '4' };
+    let writes = 0;
+    const write = async () => { writes++; return { error: { code: '42501' } }; };
+    await writeSelectionBatch({ generation, adopt: async () => {}, write });
+    assert.equal(writes, 1);
+    await assert.rejects(writeSelectionBatch({ generation,
+        adopt: async () => { throw Error('source generation changed'); }, write }), /source generation changed/);
+    assert.equal(writes, 1, 'stale source cannot write at all');
+});
+
+test('continued epoch contention remains bounded to two attempts', async () => {
+    const { writeSelectionBatch } = await shared;
+    const generation = { userVisibilityEpoch: '4' };
+    let writes = 0;
+    const result = await writeSelectionBatch({ generation,
+        adopt: async () => { generation.userVisibilityEpoch = String(Number(generation.userVisibilityEpoch) + 1); },
+        write: async () => { writes++; return { error: { code: 'PT409' } }; } });
+    assert.equal(writes, 2);
+    assert.equal(result.error.code, 'PT409');
+});
+
 test('starter titles are bounded, identifiable, illustrated and deduplicated by type', async () => {
     const { selectionStarterRows } = await shared;
     const row = (item_type, id, poster_url = 'poster') => ({ item_type, poster_url, metadata: { providerTmdbId: id } });

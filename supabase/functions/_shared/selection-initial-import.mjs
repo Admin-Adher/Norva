@@ -47,6 +47,21 @@ export function initialTitleBatchLimit(isSelection, firstSliceReady) {
   return isSelection && !firstSliceReady ? 60 : 300;
 }
 
+// A concurrent catalogue metadata writer can advance the account-wide cache
+// epoch without changing this source's authority. Revalidate the complete
+// snapshot and retry one idempotent raw batch only when that epoch advanced.
+// adopt() must reject any source/config/head/generation change.
+export async function writeSelectionBatch({ generation, adopt, write }) {
+  await adopt();
+  const epoch = generation.userVisibilityEpoch;
+  let result = await write();
+  if (!['42501', 'PT409', '40001'].includes(result.error?.code)) return result;
+  await adopt();
+  if (generation.userVisibilityEpoch === epoch) return result;
+  result = await write();
+  return result;
+}
+
 // Seed a small, identifiable first page before walking the UUID-ordered raw
 // catalogue. Otherwise thousands of un-enriched rows can precede the few titles
 // whose existing shared metadata already supplies a proper Home backdrop.
