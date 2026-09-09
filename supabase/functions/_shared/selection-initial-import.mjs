@@ -25,8 +25,10 @@ export async function handoffSelectionFinalization({
     config_hint: {
       ...hint,
       finalizeCursor: { phase: 'titles', offset: 0, afterId: '' },
-      syncProgress: { ...progress, moviesReady: false, seriesReady: false,
-        browseReady: false, usable: false, liveReady: false },
+      syncProgress: { ...progress, moviesReady: progress.moviesReady === true,
+        seriesReady: progress.seriesReady === true,
+        browseReady: progress.moviesReady === true || progress.seriesReady === true,
+        usable: false, liveReady: false },
     },
   }).eq('id', sourceId).eq('user_id', userId).eq('enabled', true).is('deleted_at', null)
     .eq('config_revision', generation.configRevision)
@@ -41,4 +43,23 @@ export async function handoffSelectionFinalization({
 
 export function initialTitleBatchLimit(isSelection, firstSliceReady) {
   return isSelection && !firstSliceReady ? 60 : 300;
+}
+
+// Seed a small, identifiable first page before walking the UUID-ordered raw
+// catalogue. Otherwise thousands of un-enriched rows can precede the few titles
+// whose existing shared metadata already supplies a proper Home backdrop.
+export function selectionStarterRows(rows) {
+  const seen = new Set();
+  const counts = { movie: 0, series: 0 };
+  const limits = { movie: 12, series: 4 };
+  return rows.filter(row => {
+    const type = row.item_type;
+    const tmdbId = String(row.metadata?.providerTmdbId || '');
+    if (!limits[type] || counts[type] >= limits[type] || !row.poster_url || !/^[1-9]\d*$/.test(tmdbId)) return false;
+    const key = `${type}:${tmdbId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    counts[type]++;
+    return true;
+  });
 }

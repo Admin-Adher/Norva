@@ -2,7 +2,7 @@ import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/disc
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
-import { handoffSelectionFinalization } from "../_shared/selection-initial-import.mjs";
+import { handoffSelectionFinalization, selectionStarterRows } from "../_shared/selection-initial-import.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -3604,6 +3604,19 @@ async function syncM3uSource(
   });
   if (playlistUrl === DISCOVERY_PLAYLIST_URL && (movieCount > 0 || seriesCount > 0)) {
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    const starterRows = selectionStarterRows(savedRows);
+    if (starterRows.length) {
+      await refreshVodTitleProjection({
+        sourceId, userId, db, generation, rows: starterRows,
+        xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
+        assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
+      });
+      await reportProgress({
+        moviesReady: starterRows.some(row => row.item_type === "movie"),
+        seriesReady: starterRows.some(row => row.item_type === "series"),
+        browseReady: true,
+      });
+    }
     return { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length,
       finalizePending: true, liveCatalog: { rawLive: liveCount, pending: true },
       discoverySources: "sources" in playlist ? playlist.sources : undefined };
