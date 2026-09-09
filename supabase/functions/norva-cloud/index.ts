@@ -1,6 +1,7 @@
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -747,18 +748,30 @@ async function route(
     if (req.method === "POST" && !id) {
       const input = await readJson(req.clone());
       const inputType = stringOr(input.sourceType ?? input.source_type ?? input.type, "");
+      let selectionId: string | null = null;
       if (inputType === "m3u" && buildSourceConfig(inputType, input).playlistUrl === DISCOVERY_PLAYLIST_URL) {
         if (!DISCOVERY_SELECTION_ENABLED) throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
         await requireCloudAccess(user.id, db, "source_sync");
-        const selectionId = await discoverySourceId(user.id);
-        const { data: existing, error } = await db.from("cloud_sources").select("id").eq("id", selectionId).eq("user_id", user.id).maybeSingle();
-        if (error) throwDb(error, "Unable to check selection");
-        if (existing) return { body: { source: await managedSourceSnapshot(selectionId, user.id, db), syncStarted: false } };
+        const enrollment = await selectionEnrollment(db, user.id);
+        const enrolledSourceId: string = enrollment.sourceId;
+        selectionId = enrolledSourceId;
+        if (enrollment.existing) {
+          if (enrollment.existing.enabled !== true) {
+            await requirePlanCapacity(user.id, db, "sources", "cloud_catalog_visible_sources");
+            const enableRequest = new Request(req.url, {
+              method: "POST", headers: req.headers, body: JSON.stringify({ enabled: true }),
+            });
+            const body = await setSourceEnabled(enableRequest, enrolledSourceId, user.id, db);
+            if (body.visibilityChanged) await acknowledgeCatalogVisibilityEpochMutation(req, db);
+            return { body };
+          }
+          return { body: { source: await managedSourceSnapshot(enrolledSourceId, user.id, db), syncStarted: false } };
+        }
       }
       // A hidden Phase-4 staging source is part of the same logical provider
       // replacement and must never consume a second commercial source slot.
       await requirePlanCapacity(user.id, db, "sources", "cloud_catalog_visible_sources");
-      const body = await createSource(req, user.id, db);
+      const body = await createSource(req, user.id, db, selectionId);
       await acknowledgeCatalogVisibilityEpochMutation(req, db);
       return { status: 201, body };
     }
@@ -1430,8 +1443,12 @@ async function listSources(userId: string, db: SupabaseClient) {
   // Withdrawn Selection stays archived server-side without an unusable Enable
   // action in the ordinary paused-provider onboarding or source manager.
   const retiredId = await retiredDiscoverySourceId(userId);
-  const withdrawnId = DISCOVERY_SELECTION_ENABLED ? null : await discoverySourceId(userId);
-  return { sources: (data ?? []).filter(source => source.id !== retiredId && source.id !== withdrawnId).map(sanitizeSource) };
+  const visible = [];
+  for (const source of data ?? []) {
+    if (source.id === retiredId || (!DISCOVERY_SELECTION_ENABLED && await isDiscoverySourceId(source.id, userId))) continue;
+    visible.push(source);
+  }
+  return { sources: visible.map(sanitizeSource) };
 }
 
 async function listVisibleSources(userId: string, db: SupabaseClient) {
@@ -1512,7 +1529,7 @@ async function managedSourceSnapshot(id: string, userId: string, db: SupabaseCli
   return sanitizeSource(data);
 }
 
-async function createSource(req: Request, userId: string, db: SupabaseClient) {
+async function createSource(req: Request, userId: string, db: SupabaseClient, enrollmentSourceId: string | null = null) {
   const body = await readJson(req);
   const sourceType = stringOr(body.sourceType ?? body.source_type ?? body.type, "");
   const displayName = stringOr(body.displayName ?? body.display_name ?? body.name, "");
@@ -1546,7 +1563,7 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
     const syncNow = hasManagedConfig && body.syncNow !== false && body.sync_now !== false;
 
     const selectionId = sourceType === "m3u" && rawConfig.playlistUrl === DISCOVERY_PLAYLIST_URL
-      ? await discoverySourceId(userId) : null;
+      ? enrollmentSourceId ?? await discoverySourceId(userId) : null;
     const row = {
       ...(selectionId ? { id: selectionId } : {}),
       user_id: userId,
@@ -1865,7 +1882,7 @@ async function setSourceEnabled(req: Request, id: string, userId: string, db: Su
   // explicit desired state and therefore retain retry idempotence.
   const desired = hasDesiredState ? body.enabled === true : !current;
   if (desired && (id === await retiredDiscoverySourceId(userId)
-    || (!DISCOVERY_SELECTION_ENABLED && id === await discoverySourceId(userId)))) {
+    || (!DISCOVERY_SELECTION_ENABLED && await isDiscoverySourceId(id, userId)))) {
     throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
   }
   const legacyToggle = !hasDesiredState;
@@ -3671,7 +3688,7 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
 
-  if (seriesId.startsWith("norva-selection:series:") && sourceId === await discoverySourceId(userId)) {
+  if (seriesId.startsWith("norva-selection:series:") && await isDiscoverySourceId(sourceId, userId)) {
     const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
     const selection = await loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, generationId: generation.generationId });
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);

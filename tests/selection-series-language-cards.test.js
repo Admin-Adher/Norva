@@ -83,3 +83,27 @@ test('missing series evidence stays pending and movie cards cannot inherit an ep
   const movie = { item_type: 'movie', ...selectionSeriesLanguageFields({ audio: ['es'], audioObserved: true }) };
   assert.equal(win.MediaUtils.versionDescriptor(movie).headline, 'Audio unknown');
 });
+
+test('re-enrolled series retain their own episode evidence across Selection generations', async () => {
+  const { discoverySourceId } = await mod('discovery-catalog.mjs');
+  const { attachSelectionSeriesLanguages } = await mod('selection-series-languages.mjs');
+  const userId = 'owner';
+  const parents = await Promise.all([0, 1, 2].map(async generation => ({
+    id: 'variant-' + generation, user_id: userId, source_id: await discoverySourceId(userId, generation),
+    item_type: 'series', external_id: 'shared-series', metadata: { seriesDelivery: 'selection' },
+  })));
+  const db = database({
+    cloud_catalog_visible_media_items: parents.map((parent, i) => ({
+      user_id: userId, source_id: parent.source_id, item_type: 'episode', available: true,
+      parent_external_id: 'shared-series', external_id: 'episode-' + i,
+    })),
+    cloud_title_file_language_observations: parents.flatMap((parent, i) => [
+      { user_id: userId, variant_id: parent.id, file_external_id: 'episode-' + i,
+        audio_observed: true, audio_languages: [['fr'], ['en'], ['es']][i] },
+      { user_id: userId, variant_id: parent.id, file_external_id: 'episode-' + ((i + 1) % 3),
+        audio_observed: true, audio_languages: ['de'] },
+    ]),
+  }, []);
+  await attachSelectionSeriesLanguages(db, parents, userId);
+  assert.deepEqual(parents.map(parent => parent.__series_languages.audio), [['fr'], ['en'], ['es']]);
+});

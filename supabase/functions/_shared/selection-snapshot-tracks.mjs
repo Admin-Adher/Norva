@@ -1,4 +1,4 @@
-import { discoverySourceId } from './discovery-catalog.mjs';
+import { isDiscoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_TESTED_VOD_FEEDS, testedSelectionVodEntries } from './selection-tested-vod.mjs';
 import { selectionVodIdentity, selectionVodExternalId } from './selection-vod.mjs';
 
@@ -43,7 +43,7 @@ export async function selectionSnapshotFileTags(externalId) {
 // The playback resolver already proved the current owned episode. Bind the
 // immutable audit to both that physical file id and its resolved URL.
 export async function selectionSnapshotPlaybackTags({userId,sourceId,itemId,targetUrl,itemType,db}) {
-  if(sourceId!==await discoverySourceId(userId))return {};
+  if(!await isDiscoverySourceId(sourceId,userId))return {};
   const file=(await snapshot()).get(itemId);
   if(!file||file.url!==targetUrl)return {};
   const tags=await selectionSnapshotFileTags(itemId);
@@ -77,7 +77,7 @@ export async function selectionSnapshotPlaybackTags({userId,sourceId,itemId,targ
 // public M3U source: each account retains its source-scoped key. Existing probes
 // and speech verification win over this preparation snapshot on later imports.
 export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
-  if (sourceId !== await discoverySourceId(userId)) return {seeded:0};
+  if (!await isDiscoverySourceId(sourceId, userId)) return {seeded:0};
   const files = await snapshot();
   const selected = rows.filter(r => r.item_type === 'movie' && files.get(r.external_id)?.url === r.playback_hint?.targetUrl);
   if (!selected.length) return {seeded:0};
@@ -136,7 +136,7 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
 // observations. The database validates the active parent/file binding and the
 // audited media URL hash; ordered track maps remain attached to each episode.
 export async function hydrateSelectionSnapshotSeriesTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
-  if (sourceId !== await discoverySourceId(userId)) return {seeded:0};
+  if (!await isDiscoverySourceId(sourceId, userId)) return {seeded:0};
   const parentIds = [...new Set(rows.filter(row => row.item_type === 'series'
     && row.metadata?.seriesDelivery === 'selection'
     && /^norva-selection:series:[a-f0-9]{64}$/.test(row.external_id)).map(row => row.external_id))];

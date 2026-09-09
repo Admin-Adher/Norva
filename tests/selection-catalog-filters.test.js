@@ -59,7 +59,8 @@ for (const name of ['MoviesPage', 'SeriesPage']) {
 test('series audio facets use the requested catalogue type and keep the SQL service boundary', () => {
   const edge = fs.readFileSync(path.join(root, 'supabase/functions/norva-catalog/index.ts'), 'utf8');
   const facets = edge.split('async function listLanguageFacets(')[1].split('function normalizeObservedSubtitleTracks')[0];
-  assert.match(facets, /const selectionId = await discoverySourceId\(userId\)/);
+  assert.match(facets, /from\("cloud_catalog_visible_sources"\)/);
+  assert.match(facets, /discoverySourceIds\(\(visibleSources \?\? \[\]\)\.map\(source => source\.id\), userId\)/);
   assert.match(facets, /p_item_type: itemType/);
   const sql = fs.readFileSync(path.join(root, 'supabase/migrations/20260906191036_selection_series_language_filters.sql'), 'utf8');
   assert.match(sql, /variant\.user_id = p_user_id/);

@@ -1,5 +1,5 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
-import { discoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
 import { selectionSnapshotPlaybackTags } from "../_shared/selection-snapshot-tracks.mjs";
 import { resolveOwnedSelectionEpisode } from "../_shared/selection-series-info.mjs";
@@ -6735,7 +6735,7 @@ async function resolvePlaybackTarget(
     }
   }
   if (!item) {
-    if (sourceId === await discoverySourceId(userId)) throw new HttpError(404, "Media item not found");
+    if (await isDiscoverySourceId(sourceId, userId)) throw new HttpError(404, "Media item not found");
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
       const requestContainer = containerObservation?.container ?? stringOr(requestHint.container, "mp4");
@@ -6865,7 +6865,7 @@ async function resolvePlaybackTarget(
       sourceId, userId, itemType, itemId, ownedItem, targetUrl,
     });
     const selectionVodDelivery = (itemType === "movie" || itemType === "series") && typeof ownedMetadata.selectionVodId === "string" ? await resolveSelectionVodDelivery({
-      sourceId, expectedSourceId: await discoverySourceId(userId), itemType, itemId, ownedItem, targetUrl,
+      sourceId, expectedSourceId: await isDiscoverySourceId(sourceId, userId) ? sourceId : null, itemType, itemId, ownedItem, targetUrl,
     }) : null;
     return {
       targetUrl,

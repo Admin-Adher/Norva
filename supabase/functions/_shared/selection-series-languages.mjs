@@ -1,4 +1,4 @@
-import { discoverySourceId } from './discovery-catalog.mjs';
+import { discoverySourceIds } from './discovery-catalog.mjs';
 
 // These are language sets for the available episodes of ONE owned series
 // version. They must never become a parent series' ordered stream map.
@@ -35,7 +35,13 @@ async function allRows(query) {
 }
 
 export async function attachSelectionSeriesLanguages(db, variants, userId) {
-  const sourceId = await discoverySourceId(userId);
+  const sourceIds = await discoverySourceIds(variants.filter(v => v.user_id === userId).map(v => v.source_id), userId);
+  for (const sourceId of sourceIds) {
+    await attachSelectionSourceSeriesLanguages(db, variants, userId, sourceId);
+  }
+}
+
+async function attachSelectionSourceSeriesLanguages(db, variants, userId, sourceId) {
   const parents = variants.filter(v => v.user_id === userId && v.source_id === sourceId &&
     v.item_type === 'series' && v.metadata?.seriesDelivery === 'selection');
   for (let start = 0; start < parents.length; start += 25) {

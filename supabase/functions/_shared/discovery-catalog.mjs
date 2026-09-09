@@ -7,7 +7,34 @@ export const DISCOVERY_SELECTION_ENABLED = true;
 export function assertDiscoverySelectionAvailable() {
   if (!DISCOVERY_SELECTION_ENABLED) throw new Error('Norva Selection is temporarily unavailable');
 }
-export function discoverySourceId(userId) { return selectionSourceIdentity('norva-selection-curated-v1:', userId); }
+// A deleted source has a terminal lifecycle and may still be purged by workers.
+// Re-enrolment gets a new physical identity; generation zero preserves existing
+// catalogues. The encoded generation lets readers verify owner-bound identities
+// without trusting a source name, client metadata or an extra database lookup.
+export async function discoverySourceId(userId, generation = 0) {
+  if (!Number.isSafeInteger(generation) || generation < 0 || generation > 0xffffffff) {
+    throw new Error('Invalid Selection generation');
+  }
+  if (!generation) return selectionSourceIdentity('norva-selection-curated-v1:', userId);
+  const identity = await selectionSourceIdentity(`norva-selection-enrolment-v1:${generation}:`, userId);
+  return identity.slice(0, -8) + generation.toString(16).padStart(8, '0');
+}
+export async function discoverySourceGeneration(sourceId, userId) {
+  if (typeof sourceId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-a[a-f0-9]{3}-[a-f0-9]{12}$/.test(sourceId)) return null;
+  if (sourceId === await discoverySourceId(userId)) return 0;
+  const generation = Number.parseInt(sourceId.slice(-8), 16);
+  return generation > 0 && sourceId === await discoverySourceId(userId, generation) ? generation : null;
+}
+export async function isDiscoverySourceId(sourceId, userId) {
+  return await discoverySourceGeneration(sourceId, userId) !== null;
+}
+export async function discoverySourceIds(sourceIds, userId) {
+  const matches = [];
+  for (const sourceId of new Set(sourceIds)) {
+    if (await isDiscoverySourceId(sourceId, userId)) matches.push(sourceId);
+  }
+  return matches;
+}
 export function retiredDiscoverySourceId(userId) { return selectionSourceIdentity('norva-selection-v1:', userId); }
 async function selectionSourceIdentity(prefix, userId) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(prefix + userId));

@@ -1,5 +1,5 @@
 import { curatedChannelForMetadata, curatedChannelExternalId } from './selection-curated-channels.mjs';
-import { discoverySourceId } from './discovery-catalog.mjs';
+import { isDiscoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_LIVE_DIRECT_CANARIES } from './selection-live-direct-canaries.mjs';
 
 // Reviewed public H.264/AAC HLS with browser CORS, 2026-09-05. The complete
@@ -96,7 +96,7 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
     const curated = curatedChannelForMetadata(metadata, targetUrl);
     if (curated) {
       if (hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hint.targetUrl !== targetUrl
-        || hasExplicitCanarySelection(hint) || sourceId !== await discoverySourceId(userId)
+        || hasExplicitCanarySelection(hint) || !await isDiscoverySourceId(sourceId, userId)
         || itemId !== await curatedChannelExternalId(curated)) return null;
       const delivery = Object.freeze({ transport: 'public-hls-direct', channelId: metadata.tvgId, targetUrl,
         providerAccountScopeSuffix: `public-media:${itemId.slice('norva-discovery:live:'.length)}` });
@@ -109,7 +109,7 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
       if (typeof part !== 'string' || !/^[a-f0-9]{24}-[a-f0-9]{24}$/.test(part)
         || metadata.discoverySource !== 'https://github.com/insa-ship-it/app-m3u-generator'
         || hint.sourceType !== 'm3u' || hint.container !== 'm3u8' || hasExplicitCanarySelection(hint)
-        || sourceId !== await discoverySourceId(userId)) return null;
+        || !await isDiscoverySourceId(sourceId, userId)) return null;
       const key = exactPlexPart(targetUrl, part);
       if (!key || exactPlexPart(hint.targetUrl, part) !== key || metadata.discoveryMediaKey !== key
         || itemId !== `norva-discovery:live:${await sha256(`live:${key}`)}`) return null;
@@ -124,7 +124,7 @@ export function createSelectionLiveDeliveryResolver({ canaryManifest = SELECTION
     if (!channel && !canaries.length) return null;
     if (hint.sourceType !== 'm3u' ||
         hint.container !== 'm3u8' || hint.targetUrl !== targetUrl ||
-        sourceId !== await discoverySourceId(userId)) return null;
+        !await isDiscoverySourceId(sourceId, userId)) return null;
 
     let url;
     try { url = new URL(targetUrl); } catch { return null; }

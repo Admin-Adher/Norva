@@ -421,8 +421,8 @@ test('all three catalog surfaces route their externally returned response throug
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   assert.equal(
     (cloud.match(/await acknowledgeCatalogVisibilityEpochMutation\(req, db\);/g) || []).length,
-    3,
-    'only source create, toggle, and delete may acknowledge their own epoch advance',
+    4,
+    'only source create, Selection reenable, toggle, and delete may acknowledge their own epoch advance',
   );
   assert.match(cloud, /if \(result\.visibilityChanged\) \{\s*await acknowledgeCatalogVisibilityEpochMutation/);
   assert.match(cloud, /\.is\("deleted_at", null\)\s*\.select\("id"\)\s*\.maybeSingle\(\)/);
