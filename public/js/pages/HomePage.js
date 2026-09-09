@@ -29,10 +29,11 @@ class HomePage {
         this.setupRefreshTimer = null;
         this.setupRecoverySession = null;
         this.setupRecoveryCooldowns = new Map();
-        document.addEventListener('norva:source-health-changed', () => {
+        document.addEventListener('norva:source-health-changed', (event) => {
             this.lastLoadedAt = 0;
+            if (event.detail?.remote) this.cancelPendingLoad();
             if (this.app?.currentPage === 'home') {
-                this.loadDashboardData();
+                this.loadDashboardData({ skipCache: event.detail?.remote === true });
             }
         });
         document.addEventListener('norva:title-rating-changed', () => {
@@ -570,9 +571,14 @@ class HomePage {
                             ? series.value.rails.slice(0, 1)
                             : [];
                         const rails = [...movieRails, ...seriesRails];
-                        return rails.length ? { contract: 'norva.home.fast-rails.v1', rails } : null;
+                        return rails.some(rail => rail.items?.length)
+                            ? { contract: 'norva.home.fast-rails.v1', rails }
+                            : this.loadFallbackRails(signal);
                     }, 'fast rails');
 
+                // Register rejection handlers before awaiting health; an aborted
+                // or fast-failing parallel request must never become unhandled.
+                void Promise.allSettled([historyP, railsP, fastRailsP]);
                 const [healthResult, settingsResult] = await Promise.allSettled([
                     this.boundedHomeTask(
                         this.app?.refreshSourceHealth?.() || window.NorvaSourceHealth?.loadSummary?.(),
@@ -608,16 +614,18 @@ class HomePage {
                 this.clearSetupGate();
                 this.renderImportRibbon(sourceSummary);
 
+                let paintedEarlyRails = false;
                 if (!this._paintedFromCache) {
                     const earlyRails = await Promise.race([
-                        railsP.then(() => null, () => null),
-                        fastRailsP.catch(() => null)
-                    ]);
+                        railsP.catch(() => fastRailsP),
+                        fastRailsP.then(value => value || railsP, () => railsP)
+                    ]).catch(() => null);
                     if (!this.isCurrentLoad(generation)) return;
                     if (earlyRails?.rails?.length) {
                         this.renderCloudRails(earlyRails);
                         this.renderHero([], this.railItems);
                         this.setHomeLoadingState(false);
+                        paintedEarlyRails = true;
                     }
                 }
 
@@ -648,14 +656,15 @@ class HomePage {
                     } catch (_) { /* best-effort */ }
                 } else {
                     console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);
-                    if (this._paintedFromCache) {
+                    if (this._paintedFromCache || paintedEarlyRails) {
                         // The SWR paint already shows real (cached) rails — keep them instead
                         // of overwriting good content with a degraded fallback, and let the
                         // service-health banner carry the "temporarily unavailable" message.
                         this._railsErrorNotice();
                     } else {
-                        await this.boundedHomeTask(this.renderFallbackRails(), 'fallback rails');
+                        const fallback = await fastRailsP;
                         if (!this.isCurrentLoad(generation)) return;
+                        this.renderCloudRails(fallback || { rails: [] });
                         this.renderHero(history, this.railItems);
                     }
                 }
@@ -795,7 +804,8 @@ class HomePage {
         this.setupRecoverySession = null;
         document.getElementById('page-home')?.classList.remove('home-setup-active', 'home-setup-connect-active', 'home-service-paused-active');
         document.getElementById('home-service-health')?.classList.remove('setup-suppressed');
-        document.getElementById('home-hero')?.classList.remove('hidden');
+        // renderHero owns visibility. Clearing a gate must not expose an empty
+        // billboard (and its large min-height) while catalogue reads are pending.
         document.getElementById('continue-watching-section')?.classList.remove('hidden');
         document.getElementById('favorite-channels-section')?.classList.remove('hidden');
     }
@@ -2100,15 +2110,15 @@ class HomePage {
         });
     }
 
-    async renderFallbackRails() {
-        const container = document.getElementById('home-rails');
-        if (!container) return;
-
+    async loadFallbackRails(signal) {
         const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
         const [moviesResult, seriesResult] = await Promise.allSettled([
-            window.API.request('GET', `/channels/recent?type=movie&limit=${railFetchLimit}`),
-            window.API.request('GET', `/channels/recent?type=series&limit=${railFetchLimit}`)
+            window.API.request('GET', `/channels/recent?type=movie&limit=${railFetchLimit}&direct=1`, null, { signal }),
+            window.API.request('GET', `/channels/recent?type=series&limit=${railFetchLimit}&direct=1`, null, { signal })
         ]);
+        if (moviesResult.status === 'rejected' && seriesResult.status === 'rejected') {
+            throw moviesResult.reason;
+        }
 
         // The raw fallback feed is one row PER PROVIDER VARIANT: two providers carrying the
         // same film used to render two adjacent identical cards. Collapse on identity
@@ -2131,7 +2141,9 @@ class HomePage {
             rails.push({ id: 'recently-added-series', title: (globalThis.NorvaI18n?.t("ui_web_7ce9c72b7952", { defaultValue: "Recently Added Series" }) ?? 'Recently Added Series'), items: dedupByIdentity(seriesResult.value) });
         }
 
-        this.renderCloudRails({ rails });
+        // Pure data: a late/aborted fallback can never repaint a newer profile or
+        // a catalogue removed on another device. The owning load paints it.
+        return { rails };
     }
 
     /**

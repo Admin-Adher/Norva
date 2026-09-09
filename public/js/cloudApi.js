@@ -818,7 +818,13 @@
     // adds a 6h isolate tier and a shared 14-day Postgres tier underneath this.
     const TMDB_EPISODES_TTL_MS = 6 * 60 * 60 * 1000;
     function invalidateSourcesCache() { invalidateCache('sources'); }
-    function listSourcesCached() { return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources')); }
+    function listSourcesCached(options = {}) {
+        if (options.fresh) invalidateSourcesCache();
+        return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources', null, {
+            signal: options.signal,
+            ...(options.fresh ? { _visibilityForceNoStore: true } : {})
+        }));
+    }
 
     // One-shot cold-start aggregation. A fresh load otherwise fans out into ~7
     // separate norva-cloud calls (profile, profiles, entitlements, sources,
@@ -4614,7 +4620,7 @@
         },
 
         sources: {
-            list: () => listSourcesCached(),
+            list: (options = {}) => listSourcesCached(options),
             recordAttempt: (attempt) => request('POST', '/sources/attempt', attempt),
             create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
@@ -4706,7 +4712,7 @@
         },
 
         mediaItems: {
-            list: (params = {}) => catalogRequest('/media-items', params),
+            list: (params = {}, options = {}) => catalogRequest('/media-items', params, options),
             categories: (params = {}) => catalogRequest('/media-categories', params),
             enrichmentProgress: () => catalogRequest('/enrichment-progress'),
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
@@ -4838,7 +4844,7 @@
             acknowledgeCommand: (id) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'acknowledged' }, { token: getDeviceToken() }),
             failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() }),
             sources: {
-                list: () => request('GET', '/device/sources', null, { token: getDeviceToken() }),
+                list: (options = {}) => request('GET', '/device/sources', null, { signal: options.signal, _visibilityForceNoStore: true, token: getDeviceToken() }),
                 test: (id) => request(
                     'POST',
                     `/device/sources/${encodeURIComponent(id)}/test`,
@@ -4865,7 +4871,7 @@
                 )
             },
             mediaItems: {
-                list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() }),
+                list: (params = {}, options = {}) => catalogRequest('/device/media-items', params, { ...options, token: getDeviceToken() }),
                 categories: (params = {}) => catalogRequest('/device/media-categories', params, { token: getDeviceToken() })
             },
             live: {

@@ -3164,8 +3164,8 @@ class SourceManager {
         // — a frozen bar reads as a crash. The slow endpoint is client-cached, so
         // long-lived polling is cheap, and the token guard stops it cleanly.
         while (this.catalogPreparationToken === token) {
-            const { phase } = this.sourceSyncState(current);
-            if (phase === 'ready' || phase === 'error') return;
+            const { phase, backgrounding } = this.sourceSyncState(current);
+            if ((phase === 'ready' && !backgrounding) || phase === 'error') return;
 
             // Only co-pilot finalize when the background driver looks genuinely stalled
             // (>60s without a progress write). Co-piloting eagerly makes the client and
