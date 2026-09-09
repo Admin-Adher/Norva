@@ -11,8 +11,8 @@ test('live-only Home shortcut requires exactly the tenant-visible curated source
   const context=vm.createContext({DISCOVERY_SELECTION_ENABLED:true,isDiscoverySourceId,catalogTitleReadUnavailable:()=>Error('unavailable')});
   vm.runInContext(stripTypeScriptTypes(code.slice(start,end),{mode:'strip'}),context);
   let rows=[],error=null,titles=[],titlesError=null;
-  const db={from(table){assert.ok(['cloud_catalog_visible_sources','cloud_catalog_visible_titles'].includes(table));return {
-    select(s){assert.equal(s,'id');return this;},eq(k,v){assert.equal(k,'user_id');assert.equal(v,'owner');return this;},
+  const db={from(table){assert.ok(['cloud_catalog_visible_sources','cloud_catalog_visible_title_variants'].includes(table));return {
+    select(s){assert.equal(s,table==='cloud_catalog_visible_sources'?'id':'title_id');return this;},eq(k,v){assert.equal(k,'user_id');assert.equal(v,'owner');return this;},
     in(k,v){assert.equal(k,'item_type');assert.deepEqual(Array.from(v),['movie','series']);return this;},
     limit:async n=>{assert.equal(n,table==='cloud_catalog_visible_sources'?2:1);return table==='cloud_catalog_visible_sources'?{data:rows,error}:{data:titles,error:titlesError};}}}};
   for (const ids of [[],['personal'],[await retiredDiscoverySourceId('owner')],[await discoverySourceId('other')],[await discoverySourceId('owner'),'personal']]) {

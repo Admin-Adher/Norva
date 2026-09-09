@@ -1418,8 +1418,11 @@ async function isCuratedLiveOnlyHome(userId: string, database: typeof db): Promi
     .select("id").eq("user_id", userId).limit(2);
   if (error) throw catalogTitleReadUnavailable();
   if (data?.length !== 1 || !await isDiscoverySourceId(data[0].id, userId)) return false;
-  const { data: titles, error: titlesError } = await database.from("cloud_catalog_visible_titles")
-    .select("id").eq("user_id", userId).in("item_type", ["movie", "series"]).limit(1);
+  // Existence only: hydrating the complete title runtime before LIMIT 1 can
+  // exhaust the DB timeout on Selection. This projection keeps the same tenant,
+  // source lifecycle and active-generation fences without title hydration.
+  const { data: titles, error: titlesError } = await database.from("cloud_catalog_visible_title_variants")
+    .select("title_id").eq("user_id", userId).in("item_type", ["movie", "series"]).limit(1);
   if (titlesError) throw catalogTitleReadUnavailable();
   return !titles?.length;
 }

@@ -493,8 +493,8 @@ const CloudAdapter = (() => {
         };
     }
 
-    async function listSources() {
-        const payload = await cloudSourcesApi().list();
+    async function listSources(options = {}) {
+        const payload = await cloudSourcesApi().list(options);
         // A transient 2xx with a MALFORMED body — e.g. a carrier/CDN proxy returning an HTML
         // interstitial with status 200 — arrives here as {} or {error:'…'} (cloudApi requestToBase
         // resolves, not rejects, a 2xx whose body isn't the expected JSON). Coercing that to [] used
@@ -913,7 +913,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}) {
+    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}, options = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -947,7 +947,7 @@ const CloudAdapter = (() => {
             addedDays,
             limit: normalizedLimit,
             offset: normalizedOffset
-        });
+        }, options);
         syncVisibilityEpoch(payload);
         const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
@@ -968,8 +968,8 @@ const CloudAdapter = (() => {
         return page;
     }
 
-    async function listMediaPage(options = {}) {
-        return (await getMediaPage(options)).items;
+    async function listMediaPage(params = {}, options = {}) {
+        return (await getMediaPage(params, options)).items;
     }
 
     async function listMediaCategories({ sourceId, type } = {}) {
@@ -1837,7 +1837,7 @@ const CloudAdapter = (() => {
             return NorvaCloud.push.register(data && data.token, data || {});
         }
 
-        if (method === 'GET' && path === '/sources') return listSources();
+        if (method === 'GET' && path === '/sources') return listSources(options);
         if (method === 'GET' && path.startsWith('/sources/type/')) {
             const type = decodeURIComponent(path.split('/').pop());
             return (await listSources()).filter(source => source.type === type);
@@ -1854,7 +1854,7 @@ const CloudAdapter = (() => {
         }
         if (method === 'GET' && /^\/sources\/[^/]+$/.test(path)) {
             const id = path.split('/').pop();
-            return (await listSources()).find(source => String(source.id) === String(id) || source.cloudId === id) || null;
+            return (await listSources(options)).find(source => String(source.id) === String(id) || source.cloudId === id) || null;
         }
         if (method === 'POST' && path === '/sources/attempt') {
             if (!hasUserSession()) return { accepted: false };
@@ -2463,7 +2463,11 @@ const CloudAdapter = (() => {
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
             const type = cloudTypeFromLocal(requestedType);
             try {
-                const payload = await getHomeRails({ type, limit });
+                // Home's cold-load fallback must not repeat a slow/failed
+                // personalized request before it can show available titles.
+                const payload = query.get('direct') === '1'
+                    ? { rails: [] }
+                    : await getHomeRails({ type, limit }, options);
                 const rail = (payload.rails || []).find(item => item.itemType === type || item.item_type === type || String(item.id || '').includes(type));
                 if (rail?.items?.length) {
                     return rail.items.slice(0, limit).map(normalizeHomeRailItem);
@@ -2471,7 +2475,7 @@ const CloudAdapter = (() => {
             } catch (err) {
                 console.warn('[Cloud] Home rail unavailable, falling back to media page:', err);
             }
-            const items = await listMediaPage({ type, limit });
+            const items = await listMediaPage({ type, limit }, options);
             return items.map(normalizeRecentItem);
         }
         if (path.startsWith('/channels/')) return { success: true };
@@ -2885,9 +2889,9 @@ const API = {
 
     // Sources
     sources: {
-        getAll: () => API.request('GET', '/sources'),
+        getAll: (options = {}) => API.request('GET', '/sources', null, options),
         getByType: (type) => API.request('GET', `/sources/type/${type}`),
-        getById: (id) => API.request('GET', `/sources/${id}`),
+        getById: (id, options = {}) => API.request('GET', `/sources/${id}`, null, options),
         recordAttempt: (data) => API.request('POST', '/sources/attempt', data),
         create: (data) => API.request('POST', '/sources', data),
         update: (id, data) => API.request('PUT', `/sources/${id}`, data),

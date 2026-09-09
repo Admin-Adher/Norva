@@ -816,6 +816,7 @@ class App {
         // page is touched, so this is a foreground-triggered SWR refresh, not a background poll.
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState !== 'visible') return;
+            this.pollCatalogChanges?.();
             try { this.pages?.[this.currentPage]?.maybeRevalidate?.('foreground'); } catch (_) { /* best-effort */ }
         });
 
@@ -1450,17 +1451,17 @@ class App {
         }, 0);
     }
 
-    async refreshSourceHealth({ redirectIfBlocked = false } = {}) {
+    async refreshSourceHealth({ redirectIfBlocked = false, summary: suppliedSummary = null } = {}) {
         if (!window.NorvaSourceHealth?.loadSummary) {
             this.applyCatalogAvailability(null);
             return null;
         }
 
         try {
-            const summary = await window.NorvaSourceHealth.loadSummary();
+            const summary = suppliedSummary || await window.NorvaSourceHealth.loadSummary();
             this.sourceHealthSummary = summary;
             this.applyCatalogAvailability(summary);
-            this.startImportWatcher(); // self-stops when nothing is importing
+            this.startImportWatcher();
 
             if (redirectIfBlocked && summary?.state !== 'unknown' && !summary?.error &&
                 this.isCatalogPage(this.currentPage) && !this.catalogCategoryAvailable(this.currentPage, summary)) {
@@ -1482,43 +1483,93 @@ class App {
         }
     }
 
-    // In-app completion banner: poll the sources list and toast when a catalog import finishes
-    // (syncing -> ready) while the app is open. Self-stopping — it only runs while something is
-    // importing, and the add-provider flow re-kicks it. Pairs with the email/push notifications for
-    // when the app is closed. The first tick records a baseline (no toast on initial load).
+    // Keep an open screen in sync with source changes made on another device.
+    // Only one lightweight sources GET runs at a time, only in the foreground.
+    // Progress percentages alone do not rebuild the catalogue or interrupt focus.
+    sourceWatchSignature(summary) {
+        if (!summary || summary.error || summary.state === 'unknown') return null;
+        return JSON.stringify((summary.sources || []).map(item => {
+            const source = item.source || item;
+            const policy = window.NorvaSourceHealth?.catalogSourcePolicy?.(source);
+            return [String(source.id || source.sourceId || ''), source.enabled !== false,
+                source.catalogVisible !== false, item.state || '',
+                source.sync_status || source.syncStatus || '', policy?.categories || {}];
+        }).sort((a, b) => a[0].localeCompare(b[0])));
+    }
+
     startImportWatcher() {
         if (this._importWatchTimer) return;
         if (!this._importStates) this._importStates = new Map();
-        const SYNCING = new Set(['syncing', 'checking', 'pending', 'connecting', 'discovering', 'discovered', 'importing', 'materializing', 'building_titles', 'building_live_channels', 'building_live_variants', 'finalizing']);
-        const tick = async () => {
-            let anySyncing = false;
-            try {
-                const sources = await (window.API?.sources?.getAll?.() ?? []);
-                for (const s of (Array.isArray(sources) ? sources : [])) {
-                    const id = String(s.id ?? s.sourceId ?? '');
-                    if (!id) continue;
-                    const status = String(s.sync_status || s.syncStatus || '').toLowerCase();
-                    const was = this._importStates.get(id);
-                    this._importStates.set(id, status);
-                    if (SYNCING.has(status)) anySyncing = true;
-                    // Toast only on a real syncing -> ready transition (skip the baseline pass).
-                    if (was && was !== status && status === 'ready' && SYNCING.has(was)) {
-                        try { this.sourceManager?.toast?.((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38b1431921a9", {defaultValue: "{{p0}} is ready to watch!", p0:(s.name || s.display_name || (globalThis.NorvaI18n?.t("ui_web_c8bf8d92554a", { defaultValue: "Your catalog" }) ?? 'Your catalog'))}) : `${s.name || s.display_name || 'Your catalog'} is ready to watch!`), 'success'); } catch (_) { /* noop */ }
-                        // The Home page listens to this to bust its cache — without it, a user
-                        // staring at "Preparing your Home" kept the placeholder (or day-old
-                        // rails) until a manual reload even after the import finished.
-                        try { document.dispatchEvent(new CustomEvent('norva:source-health-changed')); } catch (_) { /* noop */ }
-                    }
+        this._sourceWatchSignature = this.sourceWatchSignature(this.sourceHealthSummary);
+        for (const item of this.sourceHealthSummary?.sources || []) {
+            const source = item.source || item;
+            this._importStates.set(String(source.id || source.sourceId || ''), String(source.sync_status || source.syncStatus || '').toLowerCase());
+        }
+        this._importWatchTimer = setInterval(() => this.pollCatalogChanges(), 5000);
+    }
+
+    async pollCatalogChanges() {
+        if (this._catalogWatchRequest || this._signOutInFlight || document.visibilityState !== 'visible') return;
+        if (!this.hasCloudSession() || !window.API?.sources?.getAll) return;
+        if (Date.now() < (this._catalogWatchRetryAt || 0)) return;
+        const owner = this.currentUser;
+        const controller = new AbortController();
+        this._catalogWatchRequest = controller;
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+            const sources = await window.API.sources.getAll({ fresh: true, signal: controller.signal });
+            if (controller.signal.aborted || this.currentUser !== owner || this._signOutInFlight ||
+                document.visibilityState !== 'visible' || !Array.isArray(sources)) return;
+            const summary = window.NorvaSourceHealth.summarize(sources);
+            const signature = this.sourceWatchSignature(summary);
+            if (signature === null) return;
+            this._catalogWatchFailures = 0;
+            this._catalogWatchRetryAt = 0;
+            const changed = signature !== this._sourceWatchSignature;
+            this._sourceWatchSignature = signature;
+            const SYNCING = new Set(['syncing', 'checking', 'pending', 'connecting', 'discovering', 'discovered', 'importing', 'materializing', 'building_titles', 'building_live_channels', 'building_live_variants', 'finalizing']);
+            for (const source of sources) {
+                const id = String(source.id || source.sourceId || '');
+                const status = String(source.sync_status || source.syncStatus || '').toLowerCase();
+                if (status === 'ready' && SYNCING.has(this._importStates?.get(id))) {
+                    try { this.sourceManager?.toast?.((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38b1431921a9", {defaultValue: "{{p0}} is ready to watch!", p0:(source.name || source.display_name || (globalThis.NorvaI18n?.t("ui_web_c8bf8d92554a", { defaultValue: "Your catalog" }) ?? 'Your catalog'))}) : `${source.name || source.display_name || 'Your catalog'} is ready to watch!`), 'success'); } catch (_) { /* noop */ }
                 }
-            } catch (_) { /* best-effort */ }
-            if (!anySyncing) this.stopImportWatcher();
-        };
-        this._importWatchTimer = setInterval(tick, 30 * 1000);
-        tick(); // prime baseline immediately
+            }
+            this._importStates = new Map(sources.map(source => [String(source.id || source.sourceId || ''), String(source.sync_status || source.syncStatus || '').toLowerCase()]));
+            if (!changed) return;
+            window.API.media?.clearCatalogCaches?.();
+            window.NorvaCatalogCache?.clearAll?.();
+            for (const name of ['movies', 'series']) {
+                const page = this.pages?.[name];
+                if (!page) continue;
+                page._viewRenderedAt = 0;
+                page.cloudRequestId = (page.cloudRequestId || 0) + 1;
+                page.sources = [];
+            }
+            // Clear the live hydration generation synchronously; disk cleanup is
+            // best-effort and must not hold the visible deletion behind IndexedDB.
+            Promise.resolve(this.channelList?.clearLiveCatalogCache?.()).catch(() => {});
+            await this.refreshSourceHealth({ summary, redirectIfBlocked: true });
+            document.dispatchEvent(new CustomEvent('norva:source-health-changed', { detail: { remote: true } }));
+            if (['movies', 'series', 'live'].includes(this.currentPage)) {
+                await this.pages?.[this.currentPage]?.show?.();
+            }
+        } catch (_) {
+            // Outages keep the last known catalogue; they are never interpreted
+            // as an empty sources list. Back off without overlapping requests.
+            this._catalogWatchFailures = Math.min(4, (this._catalogWatchFailures || 0) + 1);
+            this._catalogWatchRetryAt = Date.now() + Math.min(60000, 5000 * 2 ** this._catalogWatchFailures);
+        } finally {
+            clearTimeout(timer);
+            if (this._catalogWatchRequest === controller) this._catalogWatchRequest = null;
+        }
     }
 
     stopImportWatcher() {
         if (this._importWatchTimer) { clearInterval(this._importWatchTimer); this._importWatchTimer = null; }
+        this._catalogWatchRequest?.abort();
+        this._sourceWatchSignature = null;
+        this._importStates = new Map();
     }
 
     // Phase 2 native push: read the FCM token the Android wrapper exposes via its JS bridge
@@ -3276,6 +3327,7 @@ class App {
         if (!confirmed) return false;
 
         this._signOutInFlight = true;
+        this.stopImportWatcher();
         if (tv) {
             try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort */ }
             try { window.NorvaCloud?.setDeviceToken?.(''); } catch (_) { /* noop */ }
