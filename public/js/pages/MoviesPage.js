@@ -857,16 +857,18 @@ class MoviesPage {
     // active page). Throttled by the same warm-view window show() uses, so a brief blur is a
     // no-op; only a real "was away past the warm window" return revalidates. When it does, it
     // invalidates the warm marker so the next entry rebuilds fresh, and — only when it won't
-    // disrupt the user (at the top of the default, unfiltered paged grid) — refreshes page 1
-    // in place via the SWR path. A scrolled, filtered or searched view is left untouched and
+    // disrupt the user (at the top of the default, unfiltered view) — refreshes the
+    // current layout. A scrolled, filtered or searched view is left untouched and
     // simply refreshes on its next entry.
     maybeRevalidate() {
         if (this.isLoading || this.cloudLoadingMore) return;
         if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return;
         this._viewRenderedAt = 0;
         const atTop = (this.container?.scrollTop || 0) < 40;
-        if (atTop && this.movies.length && this.catalogCacheKey()) {
-            this.loadCloudMovies({ reset: true });
+        if (!atTop || this.activeBucket || this.hasActiveFilters()) return;
+        if (this.shouldShowRails()) return this.renderGenreRails();
+        if (this.movies.length && this.catalogCacheKey()) {
+            return this.loadCloudMovies({ reset: true });
         }
     }
 

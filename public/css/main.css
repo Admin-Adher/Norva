@@ -14377,12 +14377,10 @@ html.tv-mode .multi-select-item:focus {
   bottom: 34px;
 }
 
-/* Mobile badge priority — a poster in a phone grid is small, so drop the two
-   lowest-priority badges (NEW, language) and keep what signals status:
-   playback issue, watched/progress, and the version count. */
+/* Keep the audio language visible on phone posters so viewers can choose a
+   version before opening its details. Only the decorative NEW badge is hidden. */
 @media (max-width: 640px) {
-  .movie-card .new-badge,
-  .movie-card .version-language-badge {
+  .movie-card .new-badge {
     display: none;
   }
 }
