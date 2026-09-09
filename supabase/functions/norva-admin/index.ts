@@ -14,6 +14,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 import { dispatchOpsNotifications } from '../_shared/ops-notifications.ts';
+import { readCustomerServiceHealth } from '../_shared/customer-service-health.ts';
 import { strictLidHealth } from '../_shared/strict-lid-health.mjs';
 import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 import { classifyOpsSourceError, SILENT_OPS_SOURCE_ERROR_KINDS } from "../_shared/source-sync-error.mjs";
@@ -427,13 +428,14 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 2) Live infra pings — including Revolut (the payment API: any HTTP response = reachable).
   const { gateway, relay } = await resolveInfraUrls();
   const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
-  const [gw, rl, st, lidCascade, partnersOps, lidRuntime] = await Promise.all([
+  const [gw, rl, st, lidCascade, partnersOps, lidRuntime, customerHealth] = await Promise.all([
     gateway ? ping(gateway) : Promise.resolve(null),
     relay ? ping(relay) : Promise.resolve(null),
     ping(revolutApiBase),
     readLidCascadeLeaseHealth(),
     readPartnersOpsSnapshot(),
     readStrictLidRuntimeHealth(gateway),
+    Promise.all([readCustomerServiceHealth(gateway, "gateway"), readCustomerServiceHealth(relay, "relay")]),
   ]);
 
   // 3) Conditions → stable keys. `detail` goes into the email body.
@@ -540,7 +542,22 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
 
   // Independent acknowledgements per category/channel, including recoveries.
   const delivery = await dispatchOpsNotifications(admin, problems, OPS_EMAIL);
-  return { problems, ...delivery, lid_runtime: lidRuntime, snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null };
+  // This RPC requires two separated observations and selects actual users of
+  // the affected playback path. Missing monitoring data never means recovery.
+  const customerNotices: Record<string, unknown> = {};
+  for (const [service, down] of [["gateway", customerHealth[0]], ["relay", customerHealth[1]]] as const) {
+    if (down === null) { customerNotices[service] = { unknown: true }; continue; }
+    try {
+      const { data, error } = await admin.rpc("norva_observe_customer_incident", {
+        p_service: service, p_down: down,
+      });
+      customerNotices[service] = error ? { error: "notice_observation_failed" } : data;
+      if (error) console.error("[norva-admin] customer incident observation failed", service, error.code);
+    } catch (_) {
+      customerNotices[service] = { error: "notice_observation_failed" };
+    }
+  }
+  return { problems, ...delivery, customer_notices: customerNotices, lid_runtime: lidRuntime, snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null };
 }
 
 // ── Weekly business digest (pg_cron → /weekly-digest, Monday 07:00) ────────────────────────────
