@@ -13924,7 +13924,12 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1.1;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: end;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
   backdrop-filter: blur(10px);
@@ -14357,7 +14362,12 @@ html.tv-mode .multi-select-item:focus {
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1.1;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: end;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
   backdrop-filter: blur(8px);

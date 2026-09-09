@@ -76,12 +76,12 @@ test('episode language reads paginate beyond the PostgREST row cap', async () =>
   assert.equal(calls.filter(call => call.start === 1000).length, 2);
 });
 
-test('missing series evidence stays pending and movie cards cannot inherit an episode union', async () => {
+test('missing series evidence stays unidentified and movie cards cannot inherit an episode union', async () => {
   const { selectionSeriesLanguageFields } = await mod('selection-series-languages.mjs');
   assert.deepEqual(selectionSeriesLanguageFields(undefined), {});
-  assert.equal(win.MediaUtils.versionLanguageBadge({ item_type: 'series' }), 'Audio pending');
+  assert.equal(win.MediaUtils.versionLanguageBadge({ item_type: 'series' }), 'Language unidentified');
   const movie = { item_type: 'movie', ...selectionSeriesLanguageFields({ audio: ['es'], audioObserved: true }) };
-  assert.equal(win.MediaUtils.versionDescriptor(movie).headline, 'Audio unknown');
+  assert.equal(win.MediaUtils.versionDescriptor(movie).headline, 'Language unidentified');
 });
 
 test('re-enrolled series retain their own episode evidence across Selection generations', async () => {

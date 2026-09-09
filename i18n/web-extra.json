@@ -1,4 +1,32 @@
 {
+  "ui_web_audio_language_unidentified": {
+    "source": "Language unidentified",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "Language unidentified",
+    "fr": "Langue non identifiée",
+    "pt-BR": "Idioma não identificado",
+    "es": "Idioma no identificado",
+    "hi": "भाषा की पहचान नहीं हुई",
+    "tr": "Dil belirlenemedi",
+    "bn": "ভাষা শনাক্ত হয়নি",
+    "ar": "اللغة غير محددة",
+    "id": "Bahasa belum teridentifikasi",
+    "fil": "Hindi natukoy ang wika"
+  },
+  "ui_web_audio_identifying": {
+    "source": "Identifying audio",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "Identifying audio",
+    "fr": "Analyse en cours",
+    "pt-BR": "Identificando o áudio",
+    "es": "Identificando el audio",
+    "hi": "ऑडियो की पहचान की जा रही है",
+    "tr": "Ses tanımlanıyor",
+    "bn": "অডিও শনাক্ত করা হচ্ছে",
+    "ar": "جارٍ تحديد لغة الصوت",
+    "id": "Mengidentifikasi audio",
+    "fil": "Tinutukoy ang audio"
+  },
   "ui_web_provider_audio_status": {
     "source": "Language announced by the provider",
     "refs": ["public/js/utils/mediaUtils.js"],

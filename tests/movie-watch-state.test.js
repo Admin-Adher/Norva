@@ -129,9 +129,9 @@ test('a newer watch-state read cannot be overwritten by an older in-flight respo
   assert.equal(racePage.historyItems.length, 1);
 });
 
-test('pending audio metadata stays out of the consumer catalogue', () => {
-  assert.equal(page.displayLanguageStatus('Audio pending'), '');
-  assert.equal(page.displayLanguageStatus('Identifying audio'), '');
+test('proven audio job status remains visible in the consumer catalogue', () => {
+  assert.equal(page.displayLanguageStatus('Audio pending'), 'Audio pending');
+  assert.equal(page.displayLanguageStatus('Identifying audio'), 'Identifying audio');
   assert.equal(page.displayLanguageStatus('French'), 'French');
 });
 

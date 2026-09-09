@@ -29,7 +29,7 @@ const desc = (item, siblings) => M.versionDescriptor(item, {
 
 test('AR-SUBS means Arabic subtitles, never Arabic audio without a file probe', () => {
     const d = desc(mk('AR-SUBS - Something'));
-    assert.strictEqual(d.headline, 'Audio pending');
+    assert.strictEqual(d.headline, 'Language unidentified');
     assert.match(d.meta, /ST AR · burned-in/);
     assert.doesNotMatch(d.headline, /Arabic/);
 });
@@ -81,7 +81,7 @@ test('an exact observed-but-untagged file suppresses a misleading prefix guess',
         audio_languages_observed: true,
         audio_languages: []
     }));
-    assert.strictEqual(d.headline, 'Audio pending');
+    assert.strictEqual(d.headline, 'Language unidentified');
     assert.doesNotMatch(d.headline, /French/);
 });
 
@@ -144,9 +144,9 @@ test('two or three exact soundtracks use compact language codes', () => {
     assert.strictEqual(d.headline, 'EN / FR / AR');
 });
 
-test('an unprobed language prefix remains pending instead of becoming a claim', () => {
-    assert.strictEqual(desc(mk('FR - X')).headline, 'Audio pending');
-    assert.strictEqual(desc(mk('EN - X')).headline, 'Audio pending');
+test('an unprobed language prefix stays unidentified instead of becoming a claim', () => {
+    assert.strictEqual(desc(mk('FR - X')).headline, 'Language unidentified');
+    assert.strictEqual(desc(mk('EN - X')).headline, 'Language unidentified');
 });
 
 test('missing, failed, and rejected validation states fail closed without prefix language guesses', () => {
@@ -156,15 +156,15 @@ test('missing, failed, and rejected validation states fail closed without prefix
         else item.audio_language_validation_status = status;
 
         const d = desc(item);
-        assert.strictEqual(d.headline, 'Audio pending', `descriptor status=${String(status)}`);
+        assert.strictEqual(d.headline, 'Language unidentified', `descriptor status=${String(status)}`);
         assert.doesNotMatch(`${d.headline} ${d.meta}`, /Likely|German/i);
         assert.strictEqual(
             M.versionLanguageBadge(item, {}),
-            'Audio pending',
+            'Language unidentified',
             `badge status=${String(status)}`
         );
         assert.doesNotMatch(M.versionLabel(item, 'Provider'), /Likely|German/i);
-        assert.match(M.versionLabel(item, 'Provider'), /Audio pending/);
+        assert.match(M.versionLabel(item, 'Provider'), /Language unidentified/);
         assert.strictEqual(M.audioLanguageValidationStatus(item), 'not_analyzed');
     }
 });
@@ -198,9 +198,9 @@ test('verified status without an exact language payload never falls back to a pr
     });
     const d = desc(item);
 
-    assert.strictEqual(d.headline, 'Audio unknown');
+    assert.strictEqual(d.headline, 'Language unidentified');
     assert.doesNotMatch(`${d.headline} ${d.meta}`, /Likely|German/i);
-    assert.strictEqual(M.versionLanguageBadge(item, {}), 'Audio unknown');
+    assert.strictEqual(M.versionLanguageBadge(item, {}), 'Language unidentified');
     assert.doesNotMatch(M.versionLabel(item, 'Provider'), /Likely|German/i);
 });
 
@@ -217,11 +217,11 @@ test('a verified title union remains displayable without consulting release-name
 
 test('Netflix and Nordic are never presented as observed audio', () => {
     const nf = desc(mk('NF - X'));
-    assert.strictEqual(nf.headline, 'Audio pending');
+    assert.strictEqual(nf.headline, 'Language unidentified');
     assert.match(nf.meta, /Netflix/);
 
     const nordic = desc(mk('X', { category_name: 'NORDIC FILM NEW RELEASE' }));
-    assert.strictEqual(nordic.headline, 'Audio pending');
+    assert.strictEqual(nordic.headline, 'Language unidentified');
     assert.match(nordic.meta, /Nordic/);
 });
 
@@ -233,7 +233,7 @@ test('a grouped title track map cannot contaminate a child variant', () => {
         audio_languages: ['en', 'fr']
     });
     const d = desc(item);
-    assert.strictEqual(d.headline, 'Audio pending');
+    assert.strictEqual(d.headline, 'Language unidentified');
     assert.doesNotMatch(d.headline, /French/);
     const compatibility = M.analyzeLanguageCompatibility(item, { preferredAudioLanguage: 'fr' });
     assert.strictEqual(compatibility.audio.state, 'unknown');
@@ -252,12 +252,12 @@ test('codec-profile tracks are safe because the profile belongs to the exact var
 
 test('quality is a badge and noise prefixes never leak into the headline', () => {
     const quality = desc(mk('EN - One Last Adventure 4K (2026)'));
-    assert.strictEqual(quality.headline, 'Audio pending');
+    assert.strictEqual(quality.headline, 'Language unidentified');
     assert.strictEqual(quality.badge, '4K');
 
     for (const raw of ['PREFIX - Oscar Shaw', 'TOP - Some Title']) {
         const d = desc(mk(raw));
-        assert.strictEqual(d.headline, 'Audio pending');
+        assert.strictEqual(d.headline, 'Language unidentified');
         assert.doesNotMatch(d.headline + d.meta, /PREFIX|TOP/);
     }
 });

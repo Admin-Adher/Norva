@@ -15,6 +15,7 @@ import {
 } from "./provider-direct-fallback-lease.mjs";
 import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
 import { hydrateSelectionSnapshotMovieTracks, hydrateSelectionSnapshotSeriesTracks } from "./selection-snapshot-tracks.mjs";
+import { hydrateSelectionAudioResults } from "./selection-audio-results.mjs";
 import {
   cleanTmdbSearchQuery,
   stripProviderSearchPrefix,
@@ -364,6 +365,11 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     assertSourceCurrent: options.assertSourceCurrent,
   });
   if (options.generation.kind === "active") {
+    await hydrateSelectionAudioResults({
+      db: options.db, userId: options.userId, sourceId: options.sourceId,
+      rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
+      assertSourceCurrent: options.assertSourceCurrent,
+    });
     await hydrateSelectionSnapshotSeriesTracks({
       db: options.db, userId: options.userId, sourceId: options.sourceId,
       rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),

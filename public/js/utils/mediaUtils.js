@@ -850,7 +850,7 @@ const MediaUtils = (() => {
     // 2-3 -> "Multi: DE/EN/FR"; >3 -> "Multi". Falls back to version tags, then null.
     function audioLanguageBadge(audioLanguages, versionLanguages) {
         const audio = Array.isArray(audioLanguages)
-            ? [...new Set(audioLanguages.map(c => String(c || '').toLowerCase().trim()).filter(Boolean))]
+            ? [...new Set(audioLanguages.map(code => normalizeLanguagePreference(code)).filter(code => code && code !== 'und' && code !== 'unknown'))]
             : [];
         if (audio.length === 1) return languageDisplayFull(audio[0]);
         if (audio.length >= 2 && audio.length <= 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_18bb799e2409", {defaultValue: "Multi: {{p0}}", p0:(audio.map(languageDisplay).join('/'))}) : `Multi: ${audio.map(languageDisplay).join('/')}`);
@@ -947,6 +947,23 @@ const MediaUtils = (() => {
     function hasVerifiedAudioLanguage(item = {}) {
         const status = typeof item === 'string' ? item : audioLanguageValidationStatus(item);
         return status === 'verified' || status === 'verified_union';
+    }
+
+    function audioLanguageAnalysisLabel(item = {}) {
+        // The validation result's legacy "pending" value also covers untagged
+        // files with no job. Only a projected durable job can promise progress.
+        const jobStatus = String(
+            item.audioLanguageValidationJobStatus ??
+            item.audio_language_validation_job_status ??
+            ''
+        ).toLowerCase().trim();
+        if (jobStatus === 'running') {
+            return globalThis.NorvaI18n?.t('ui_web_audio_identifying', { defaultValue: 'Identifying audio' }) ?? 'Identifying audio';
+        }
+        if (jobStatus === 'queued' || jobStatus === 'retry_wait') {
+            return globalThis.NorvaI18n?.t('ui_web_5a9e8e2f6e65', { defaultValue: 'Audio pending' }) ?? 'Audio pending';
+        }
+        return globalThis.NorvaI18n?.t('ui_web_audio_language_unidentified', { defaultValue: 'Language unidentified' }) ?? 'Language unidentified';
     }
 
     // Distinct ISO audio languages from the title's REAL ffprobe probe (audio_tracks[].lang) — the
@@ -1111,7 +1128,7 @@ const MediaUtils = (() => {
 
     function versionLanguageBadge(item, prefs = {}) {
         const validation = audioLanguageValidationStatus(item);
-        if (!hasDisplayableAudioLanguage(validation)) return providerAudioBadge(item) || (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending');
+        if (!hasDisplayableAudioLanguage(validation)) return providerAudioBadge(item) || audioLanguageAnalysisLabel(item);
         const analysis = analyzeLanguageCompatibility(item, prefs);
         const candidates = [];
         let audioCandidate = '';
@@ -1145,7 +1162,7 @@ const MediaUtils = (() => {
             []
         );
         if (detected) return detected;
-        return (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
+        return audioLanguageAnalysisLabel(item);
     }
 
     /**
@@ -1910,6 +1927,7 @@ const MediaUtils = (() => {
         const langs = versionTrackLanguages(tracks);
         const count = tracks.length;
         if (!count) return (globalThis.NorvaI18n?.t("ui_web_e39189e8bd71", { defaultValue: "Audio unavailable" }) ?? 'Audio unavailable');
+        if (!langs.length) return '';
         if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : (globalThis.NorvaI18n?.t("ui_web_bc1b88907d3b", { defaultValue: "Audio" }) ?? 'Audio');
         if (count <= 3 && langs.length === count) return langs.map(languageDisplay).join(' / ');
         // Large multi-audio files can expose dozens of tracks. Describe the
@@ -1928,7 +1946,7 @@ const MediaUtils = (() => {
     function versionAudioLanguageHeadline(state) {
         if (!state.known) return '';
         const langs = state.languages || [];
-        if (!langs.length) return (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
+        if (!langs.length) return '';
         if (langs.length === 1) return languageDisplayFull(langs[0]);
         if (langs.length <= 3) return langs.map(languageDisplay).join(' / ');
         return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
@@ -2000,8 +2018,8 @@ const MediaUtils = (() => {
         // exact observed soundtrack. Prefix/category/platform text is metadata,
         // never audio evidence; "Netflix" and "Arabic subtitles" are not audio.
         const headline = !hasDisplayableAudioLanguage(audioValidation)
-            ? providerAudioBadge(item) || (globalThis.NorvaI18n?.t("ui_web_5a9e8e2f6e65", { defaultValue: "Audio pending" }) ?? 'Audio pending')
-            : observedAudio || (globalThis.NorvaI18n?.t("ui_web_d9c2bd1dd377", { defaultValue: "Audio unknown" }) ?? 'Audio unknown');
+            ? providerAudioBadge(item) || audioLanguageAnalysisLabel(item)
+            : observedAudio || audioLanguageAnalysisLabel(item);
         const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== prefixAudioLabel
             ? marketLabel
             : '';

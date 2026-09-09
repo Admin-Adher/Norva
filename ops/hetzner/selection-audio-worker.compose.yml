@@ -1,0 +1,40 @@
+services:
+  selection-audio-worker:
+    image: ${NORVA_SELECTION_AUDIO_IMAGE:?Use the installed Gateway image digest}
+    container_name: norva-selection-audio-worker
+    user: '1000:1000'
+    entrypoint: ['node']
+    command: ['/worker/ops/hetzner/services/selection-audio-worker.mjs']
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?Internal API URL required}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Service credential required}
+      MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL:?Internal Gateway URL required}
+      MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:?Gateway credential required}
+      SELECTION_AUDIO_HEALTH_FILE: /tmp/selection-audio-health.json
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=16m']
+    volumes:
+      - ${NORVA_SELECTION_AUDIO_RELEASE_ROOT:?Release path required}/functions:/worker/supabase/functions:ro
+      - ${NORVA_SELECTION_AUDIO_RELEASE_ROOT}/runner:/worker/ops/hetzner/services:ro
+    networks: [norva]
+    healthcheck:
+      test: ['CMD', 'node', '-e', "const s=JSON.parse(require('fs').readFileSync('/tmp/selection-audio-health.json'));process.exit(Date.now()-s.at<180000?0:1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: '5m', max-file: '3'}
+networks:
+  norva:
+    external: true
+    name: norva_default
