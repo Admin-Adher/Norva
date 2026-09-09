@@ -66,9 +66,10 @@
     <string name="ui_prerequisite_changed" formatted="false">تغيّر أحد المتطلبات أثناء التحقق. أغلق هذه النافذة وتحقق من الإعدادات ثم حاول مجددًا.</string>
     <string name="ui_selection_kept" formatted="false">· تم الاحتفاظ بالتحديد الحالي</string>
     <string name="ui_trial_days_left" formatted="false">الأيام المتبقية: {{days}}</string>
-    <string name="ui_discovery_title" formatted="false">ليس لديك كتالوج؟ ابدأ بمختاراتنا.</string>
-    <string name="ui_discovery_description" formatted="false">استمتع بـ Norva مع أفلام وقنوات مباشرة من عدة مصادر، دون إضافة مزوّد.</string>
-    <string name="ui_discovery_continue" formatted="false">المتابعة مع هذه المختارات</string>
+    <string name="ui_discovery_title" formatted="false">ليس لديك كتالوج؟</string>
+    <string name="ui_discovery_description" formatted="false">اكتشف الأفلام والقنوات المباشرة دون إدخال رابط أو بيانات الدخول إلى مزوّد.</string>
+    <string name="ui_discovery_continue" formatted="false">ابدأ مع Norva Selection</string>
+    <string name="ui_discovery_later" formatted="false">يمكنك إضافة مزوّدك الخاص لاحقًا.</string>
     <string name="ui_discovery_terms" formatted="false">مشمولة في تجربتك لمدة 7 أيام، ثم في اشتراكك في Norva.</string>
     <string name="ui_discovery_credits" formatted="false">الأفلام والمصادر وأسماء المساهمين</string>
     <string name="ui_discovery_loading" formatted="false">جارٍ إعداد مختاراتك…</string>

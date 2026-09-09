@@ -66,9 +66,10 @@
     <string name="ui_prerequisite_changed" formatted="false">Um pré-requisito mudou durante a validação. Feche esta janela, verifique a configuração e tente novamente.</string>
     <string name="ui_selection_kept" formatted="false">· seleção atual mantida</string>
     <string name="ui_trial_days_left" formatted="false">{{days}} dias restantes</string>
-    <string name="ui_discovery_title" formatted="false">Sem catálogo? Comece com nossa seleção.</string>
-    <string name="ui_discovery_description" formatted="false">Aproveite o Norva com filmes e TV ao vivo de várias fontes, sem adicionar um provedor.</string>
-    <string name="ui_discovery_continue" formatted="false">Continuar com esta seleção</string>
+    <string name="ui_discovery_title" formatted="false">Sem catálogo?</string>
+    <string name="ui_discovery_description" formatted="false">Descubra filmes e TV ao vivo sem inserir um link ou dados de acesso de um provedor.</string>
+    <string name="ui_discovery_continue" formatted="false">Começar com Norva Selection</string>
+    <string name="ui_discovery_later" formatted="false">Você poderá adicionar seu próprio provedor depois.</string>
     <string name="ui_discovery_terms" formatted="false">Incluído nos seus 7 dias de teste e depois na sua assinatura Norva.</string>
     <string name="ui_discovery_credits" formatted="false">Filmes, fontes e créditos</string>
     <string name="ui_discovery_loading" formatted="false">Preparando sua seleção…</string>
