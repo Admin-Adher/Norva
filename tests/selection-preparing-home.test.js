@@ -34,7 +34,10 @@ function harness({ sourceCount = 1, status = 'syncing', previousSync = false, se
             assert.deepEqual(Array.from(ids), ['current', 'second']);
             return ids.map(id => ({ id, backdrop_url: 'existing-backdrop' }));
         },
-        listVariantsByTitleIds: async () => new Map(), applyCatalogOverlay: async () => {},
+        listVariantsByTitleIds: async () => new Map(),
+        applyCatalogOverlay: async (titles, itemType, lang) => {
+            assert.equal(lang, 'fr'); assert.ok(['movie', 'series'].includes(itemType));
+        },
         titleRailItem: row => row,
     });
     vm.runInContext(transformSync(code.slice(start, end) + '\nglobalThis.run = listPreparingSelectionHomeRails;', { loader: 'ts' }).code, context);
