@@ -1120,7 +1120,7 @@ const MediaUtils = (() => {
         if (hasDisplayableAudioLanguage(item)) return [];
         if ((item.providerAudioLanguageStatus || item.provider_audio_language_status) !== 'provider_declared') return [];
         const raw = item.providerAudioLanguages || item.provider_audio_languages;
-        return Array.isArray(raw) ? [...new Set(raw.filter(code => ['te', 'ta', 'ml', 'hi', 'kn', 'en'].includes(code)))] : [];
+        return Array.isArray(raw) ? [...new Set(raw.filter(code => ['te', 'ta', 'ml', 'hi', 'kn', 'en', 'es', 'pt', 'fr', 'de', 'it', 'nl', 'ja', 'ko', 'zh', 'ar', 'ru', 'tr', 'bn', 'fil', 'id'].includes(code)))] : [];
     }
 
     function providerAudioStatusLabel() {

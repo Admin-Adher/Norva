@@ -1950,7 +1950,8 @@ class MoviesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = this.displayLanguageStatus(
             MediaUtils.versionLanguageBadge(movie, this.getPreferences()));
-        const languageBadgeTitle = languageBadge;
+        const languageBadgeTitle = MediaUtils.providerAudioLanguages(movie).length
+            ? `${languageBadge} · ${MediaUtils.providerAudioStatusLabel()}` : languageBadge;
         // "New" corner badge for titles added in the last two weeks (unwatched).
         const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -3060,6 +3061,7 @@ class MoviesPage {
             ...this.getMovieGenres(displayMovie).slice(0, 3).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
             version.quality,
             this.displayLanguageStatus(MediaUtils.versionLanguageBadge(movie, this.getPreferences())),
+            MediaUtils.providerAudioLanguages(movie).length ? MediaUtils.providerAudioStatusLabel() : '',
             ordered.length > 1 ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(ordered.length), defaultValue: `${ordered.length} versions` }) ?? `${ordered.length} versions`) : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);

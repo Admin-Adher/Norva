@@ -23,7 +23,8 @@ test('only explicit curated supplier language categories produce declarations', 
   }
   assert.deepEqual(languages({ ...item('Movies / Hindi / 2026'), external_id: 'other-provider-file' }), []);
   assert.deepEqual(languages({ title: 'Hindi', metadata: { original_language: 'hi' } }), []);
-  assert.equal(providerAudioFacet('provider-fr'), null);
+  assert.equal(providerAudioFacet('provider-fr'), 'fr');
+  assert.equal(providerAudioFacet('provider-und'), null);
   assert.equal(providerAudioFacet('hi'), null);
   const series = { ...item('Movies / Telugu / 2026'), external_id: 'norva-selection:series:' + 'a'.repeat(64) };
   assert.deepEqual(languages(series), ['te']);
