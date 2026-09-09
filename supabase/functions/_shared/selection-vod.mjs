@@ -1,6 +1,7 @@
 import { fetchM3uPlaylistStream } from './m3u-playlist-stream.mjs';
 import { selectionSeriesUnit, selectionSeriesIdentity, selectionSeriesExternalId } from './selection-series.mjs';
 import { SELECTION_TESTED_VOD_FEEDS, testedSelectionVodEntries, testedSelectionVodUrlAllowed } from './selection-tested-vod.mjs';
+import { selectionFilenameAudioDeclaration } from './selection-filename-audio.mjs';
 
 export const SELECTION_VOD_REVISION = 'selection-vod-20260906-v1';
 export const SELECTION_VOD_FEEDS = Object.freeze([
@@ -96,6 +97,7 @@ export async function fetchSelectionVod({ fetchPlaylist = fetchM3uPlaylistStream
       const year = (item.group.match(/(?:^|\/\s*)(19\d{2}|20\d{2})$/) || item.title.match(/\((19\d{2}|20\d{2})\)/))?.[1];
       const poster = httpsUrl(item.logo)?.href || null;
       const container = item.containerExtension || 'm3u8';
+      const filenameAudio = await selectionFilenameAudioDeclaration(item);
       const fields = { item_type: 'movie', external_id: selectionVodExternalId(item.identity),
         title: item.title, parent_external_id: group, subtitle: group, poster_url: poster,
         metadata: { selectionRevision: SELECTION_VOD_REVISION, selectionVodId: item.identity,
@@ -109,6 +111,7 @@ export async function fetchSelectionVod({ fetchPlaylist = fetchM3uPlaylistStream
           ...(item.codecProfile ? { codecProfile: item.codecProfile } : {}),
           ...(item.duration ? { duration: item.duration } : {}),
           ...(item.validation ? { selectionPlaybackValidation: item.validation } : {}),
+          ...(filenameAudio ? { selectionFilenameAudio: filenameAudio } : {}),
           ...(year ? { year: Number(year) } : {}),
           plot: `${feed.name}\n${feed.website}\nhttps://norva.tv/catalog/credits.html` },
         playback_hint: { sourceType: 'm3u', targetUrl: item.url, container, containerExtension: container } };

@@ -116,12 +116,14 @@
         // Match the catalogue grid: observed audio takes precedence over the
         // provider declaration. TMDB's original language is never audio evidence.
         const languageBadge = window.MediaUtils?.versionLanguageBadge(item, {}) || '';
+        const languageTitle = window.MediaUtils?.providerAudioLanguages(item).length
+            ? `${languageBadge} · ${window.MediaUtils.providerAudioStatusLabel()}` : languageBadge;
         return `
             <div class="dashboard-card" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     <img src="${esc(posterOf(item))}" alt="${esc(t)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(variantCount)}) || "{}")}">${variantCount} versions</div>` : ''}
-                    ${languageBadge ? `<span class="home-card-language-badge" title="${esc(languageBadge)}" aria-label="${esc(languageBadge)}">${esc(languageBadge)}</span>` : ''}
+                    ${languageBadge ? `<span class="home-card-language-badge" title="${esc(languageTitle)}" aria-label="${esc(languageTitle)}">${esc(languageBadge)}</span>` : ''}
                     <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
                 </div>
                 <div class="card-info">

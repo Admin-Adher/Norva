@@ -1,15 +1,18 @@
+import { FILENAME_AUDIO_CODES, storedFilenameAudioLanguage } from './selection-filename-audio.mjs';
 // Supplier catalogue declarations are hints, never observed tracks or speech proof.
 const LANGUAGES = Object.freeze({ Telugu: 'te', Tamil: 'ta', Malayalam: 'ml', Hindi: 'hi', Kannada: 'kn', English: 'en' });
-const CODES = new Set(Object.values(LANGUAGES));
+const CODES = new Set([...Object.values(LANGUAGES), ...FILENAME_AUDIO_CODES]);
 
 export function providerAudioFacet(value) {
-  const match = /^(?:provider|catalog)-(te|ta|ml|hi|kn|en)$/.exec(String(value || '').trim().toLowerCase());
-  return match ? match[1] : null;
+  const match = /^(?:provider|catalog)-([a-z]{2,3})$/.exec(String(value || '').trim().toLowerCase());
+  return match && CODES.has(match[1]) ? match[1] : null;
 }
 
 export function selectionProviderAudioLanguages(item = {}) {
   const metadata = item.metadata || {};
   const id = item.external_id || item.externalId || item.item_id || item.itemId || '';
+  const filenameLanguage = storedFilenameAudioLanguage(metadata, id);
+  if (filenameLanguage) return [filenameLanguage];
   if (!/^norva-selection:(?:movie|series):[a-f0-9]{64}$/.test(id)
       || metadata.selectionRevision !== 'selection-vod-20260906-v1'
       || metadata.discoveryFeed !== 'babuperumana-vod') return [];
