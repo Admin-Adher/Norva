@@ -845,6 +845,20 @@ const MediaUtils = (() => {
         return oldCount ? `${name} · ${oldCount[1].trim()}` : name;
     }
 
+    function sortLanguageFacets(facets) {
+        const locale = globalThis.NorvaI18n?.language || documentLanguage();
+        const compareNames = new Intl.Collator(locale, { sensitivity: 'base' }).compare;
+        const countOf = facet => {
+            const count = Number(facet.count);
+            return Number.isFinite(count) && count > 0 ? count : 0;
+        };
+        return facets.slice().sort((left, right) =>
+            countOf(right) - countOf(left)
+            || compareNames(languageFacetName(left.value, left.label), languageFacetName(right.value, right.label))
+            || String(left.value).localeCompare(String(right.value))
+        );
+    }
+
     // Descriptive badge from the REAL detected languages (server audio_languages /
     // version_languages) — preferred over title-parsing. 1 lang -> full name ("French");
     // 2-3 -> "Multi: DE/EN/FR"; >3 -> "Multi". Falls back to version tags, then null.
@@ -2072,7 +2086,7 @@ const MediaUtils = (() => {
         cleanEpisodeReleaseName, formatEpisodeDisplayLabel, selectionUnitLabel,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
-        resolveContentLanguage, languageDisplayFull, languageFacetName, languageFacetLabel,
+        resolveContentLanguage, languageDisplayFull, languageFacetName, languageFacetLabel, sortLanguageFacets,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         audioLanguageValidationStatus,

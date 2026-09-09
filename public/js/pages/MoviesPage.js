@@ -510,7 +510,7 @@ class MoviesPage {
         }
         const optionHtml = f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(MediaUtils.languageFacetLabel(f))}</option>`;
         const desired = [`<option value="">${anyLabel}</option>`]
-            .concat(options.map(optionHtml))
+            .concat(MediaUtils.sortLanguageFacets(options).map(optionHtml))
             .join('');
         if (select.innerHTML === desired && savedValue && !select.value
             && options.some(f => f.value === savedValue)) {

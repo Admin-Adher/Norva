@@ -126,6 +126,37 @@ for (const spec of [
         className: 'SeriesPage'
     }
 ]) {
+    test(`${spec.className} sorts audio and subtitle counts together without resetting Any or the selected language`, () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        const facets = [
+            { value: 'pt', count: 1201 },
+            { value: 'es', count: 137 },
+            { value: 'catalog-te', count: 2419 },
+            { value: 'en', count: 137 },
+        ];
+        for (const any of ['Any Audio', 'Any Subtitles']) {
+            const select = new FakeSelect(`<option value="">${any}</option>`);
+            page.applyFacetOptions(select, any, facets, 'es');
+            assert.deepEqual(select.options.map(option => option.value), ['', 'catalog-te', 'pt', 'en', 'es']);
+            assert.equal(select.options[0].text, any);
+            assert.equal(select.value, 'es');
+            page.applyFacetOptions(select, any, facets.map(f => ({ ...f, count: f.value === 'es' ? 3000 : f.count })), 'pt');
+            assert.deepEqual(select.options.map(option => option.value), ['', 'es', 'catalog-te', 'pt', 'en']);
+            assert.equal(select.value, 'es', 'a count update keeps the current choice over older saved preferences');
+        }
+    });
+
+    test(`${spec.className} keeps a saved language absent from refreshed facets at zero after available languages`, () => {
+        const { Page } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        const select = new FakeSelect();
+        page.applyFacetOptions(select, 'Any Audio', [{ value: 'pt', count: 1201 }, { value: 'en', count: 3000 }], 'fr');
+        assert.deepEqual(select.options.map(option => option.value), ['', 'en', 'pt', 'fr']);
+        assert.equal(select.value, 'fr');
+        assert.match(select.options.at(-1).text, /0$/);
+    });
+
     test(`${spec.className} restores saved language after async facets arrive`, () => {
         const { Page } = loadPage(spec.file, spec.className);
         const page = Object.create(Page.prototype);
