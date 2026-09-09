@@ -328,7 +328,7 @@ export function publicSourceSyncError(value) {
   return PUBLIC_SYNC_ERRORS[kind] ?? PUBLIC_SYNC_ERRORS.unknown;
 }
 
-export function sanitizeSourceConfigHint(value) {
+export function sanitizeSourceConfigHint(value, syncStatus = null) {
   const source = record(value);
   const safe = compact({
     serverHost: publicHost(source.serverHost ?? source.server_host),
@@ -341,6 +341,21 @@ export function sanitizeSourceConfigHint(value) {
   });
   for (const key of ["lastSync", "syncProgress", "finalizeCursor"]) {
     if (safe[key] && Object.keys(safe[key]).length === 0) delete safe[key];
+  }
+  // A late progress heartbeat can outlive the finalizer's committed READY row.
+  // Only the authoritative source status may settle the public progress; an
+  // optimistic flag inside config_hint must never complete an ongoing import.
+  if (syncStatus === "ready") {
+    const progress = safe.syncProgress ?? {};
+    const steps = {};
+    for (const name of PUBLIC_PROGRESS_STEPS) {
+      steps[name] = { ...record(progress.steps?.[name]), status: "done" };
+    }
+    safe.syncProgress = {
+      ...progress, status: "ready", stage: "ready", percent: 100, steps,
+      moviesReady: true, seriesReady: true, liveReady: true, browseReady: true, usable: true,
+    };
+    delete safe.finalizeCursor;
   }
   return safe;
 }
@@ -428,7 +443,7 @@ export function sanitizeSource(sourceValue) {
   for (const field of SOURCE_MANAGEMENT_PUBLIC_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(source, field)) safe[field] = source[field];
   }
-  safe.config_hint = sanitizeSourceConfigHint(source.config_hint ?? source.configHint);
+  safe.config_hint = sanitizeSourceConfigHint(source.config_hint ?? source.configHint, source.sync_status);
   safe.auto_refresh_state = sanitizeSourceAutoRefreshState(
     source.auto_refresh_state ?? source.autoRefreshState,
   );
@@ -444,7 +459,7 @@ export function sanitizeCatalogSource(sourceValue) {
   for (const field of SOURCE_CATALOG_PUBLIC_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(source, field)) safe[field] = source[field];
   }
-  safe.config_hint = sanitizeSourceConfigHint(source.config_hint ?? source.configHint);
+  safe.config_hint = sanitizeSourceConfigHint(source.config_hint ?? source.configHint, source.sync_status);
   safe.auto_refresh_state = sanitizeSourceAutoRefreshState(
     source.auto_refresh_state ?? source.autoRefreshState,
   );
