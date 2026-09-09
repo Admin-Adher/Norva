@@ -94,7 +94,7 @@ test('rail cards use observed audio before provider tags and preserve accessible
     const base = { title: 'Example', providerAudioLanguages: ['te'], providerAudioLanguageStatus: 'provider_declared' };
     const cases = [
         { item: base, expected: 'télougou · Language announced by the provider' },
-        { item: { ...base, providerAudioLanguages: ['es'] }, expected: 'Espagnol · Language announced by the provider' },
+        { item: { ...base, providerAudioLanguages: ['es'] }, expected: 'espagnol · Language announced by the provider' },
         { item: { ...base, audioLanguages: ['es'], audioLanguageValidationStatus: 'probed' }, expected: 'Espagnol' },
         { item: { title: 'Unknown', original_language: 'fr' }, expected: 'Language unidentified' },
     ];
