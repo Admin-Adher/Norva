@@ -62,6 +62,20 @@ test('source ordering and progress-only changes do not repeatedly rebuild a usab
     assert.equal(h.events.length, 0);
 });
 
+test('the first movie page refreshes Home despite a normalized attempt timestamp', async () => {
+    const h = syncHarness();
+    const source = { id: 'selection', enabled: true, sync_status: 'syncing', last_sync: '2026-09-09T12:00:00Z',
+        configHint: { syncProgress: { status: 'syncing', percent: 86 } } };
+    h.app._sourceWatchSignature = h.app.sourceWatchSignature(h.window.NorvaSourceHealth.summarize([source]));
+    h.window.API.sources.getAll = async () => [{ ...source,
+        configHint: { syncProgress: { ...source.configHint.syncProgress, moviesReady: true } } }];
+    await h.app.pollCatalogChanges();
+    assert.equal(h.events.length, 1);
+    assert.equal(h.events[0].detail.remote, true);
+    await h.app.pollCatalogChanges();
+    assert.equal(h.events.length, 1, 'the same ready page does not repeatedly clear Home');
+});
+
 test('removing one source retains the other and invalidates warm browse pages', async () => {
     const h = syncHarness();
     const a = readySource('a'), b = readySource('b');
@@ -176,6 +190,22 @@ test('an empty genre materialisation reads media directly without repeating pers
     assert.equal(paths.filter(path => path.startsWith('/home/rails')).length, 1);
     assert.equal(paths.filter(path => path.includes('direct=1')).length, 2);
     assert.equal(h.heroes.length, 1);
+});
+
+test('an empty live-only Home response waits for the first real fast rail and cannot erase it', async () => {
+    const fast = deferred();
+    const h = homeHarness(async (_, path) => {
+        if (path.startsWith('/home/rails')) return { rails: [], liveOnly: true };
+        if (path.startsWith('/media/genre-rails')) return fast.promise;
+        return [];
+    });
+    const loading = h.page.loadDashboardData();
+    await turn();
+    assert.equal(h.heroes.length, 0);
+    fast.resolve(rail('first movie'));
+    await loading;
+    assert.equal(h.heroes.length, 1);
+    assert.equal(h.paints.at(-1).rails[0].items[0].title, 'first movie');
 });
 
 test('a late catalogue response cannot repaint after load cancellation', async () => {

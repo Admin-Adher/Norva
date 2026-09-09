@@ -2,7 +2,8 @@ import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/disc
 import { maintainCatalogBackgroundOwners } from "../_shared/catalog-background-owner-workflow.mjs";
 import { acceptAutomaticTmdbSearchMatch, isMissingTmdbTitle } from "../_shared/tmdb-enrichment-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DISCOVERY_PLAYLIST_URL } from "../_shared/discovery-catalog.mjs";
+import { DISCOVERY_PLAYLIST_URL, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { initialTitleBatchLimit } from "../_shared/selection-initial-import.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   buildLiveMaterializationPlan,
@@ -3242,6 +3243,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   const firstSliceThrottleMs = boundedInt(Deno.env.get("NORVA_FINALIZE_FIRST_SLICE_THROTTLE_MS"), 150, 0, 5000);
   let firstSliceReady = recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).browseReady === true
     || recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).usable === true;
+  const isSelection = await isDiscoverySourceId(sourceId, userId);
   while (Date.now() < deadline && guard++ < 400) {
     try {
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
@@ -3256,7 +3258,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // a re-walk that re-fires the keep-best / mirror triggers on already-built rows. The
       // upsert of 500 rows measured ~6.4s under load — too close to the ceiling — so 300
       // buys headroom; the cost is just more (cheap) self-invocations.
-      const batchLimit = phase === "titles" ? 300 : 1500;
+      const batchLimit = phase === "titles" ? initialTitleBatchLimit(isSelection, firstSliceReady) : 1500;
       result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, afterId, limit: batchLimit }) as unknown as JsonRecord;
     } catch (e) {
       if (isCatalogAccessGuardError(e)) return;

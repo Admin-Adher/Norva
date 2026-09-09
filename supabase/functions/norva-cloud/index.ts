@@ -2,6 +2,7 @@ import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/disc
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
+import { handoffSelectionFinalization, selectionStarterRows } from "../_shared/selection-initial-import.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -2732,6 +2733,37 @@ async function syncCloudSource(
       await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
     }
 
+    if (recordOrEmpty(result).finalizePending === true) {
+      await handoffSelectionFinalization({
+        db, sourceId, userId, generation,
+        assertCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!),
+        releaseTransport: async () => {
+          if (!m3uLeaseToken) return;
+          await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
+          await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+          m3uLeaseToken = null;
+        },
+        invokeFinalizer: async () => {
+          // A fresh isolate owns the bounded continuation. Do not project the
+          // entire Selection inside this activation isolate's wall-clock limit.
+          try {
+            const response = await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
+              signal: AbortSignal.timeout(5000),
+            });
+            const payload = await response.json();
+            if (!response.ok || payload?.ok !== true) throw new Error("Selection continuation was not acknowledged");
+          } catch (_) {
+            // The cursor is durable; an invocation failure must not turn a
+            // successfully imported source into an error or lose its recovery.
+            console.warn("[norva-cloud] Selection finalization queued for watchdog", sourceId);
+          }
+        },
+      });
+      return;
+    }
+
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const syncedAt = new Date().toISOString();
     const { error: readyError } = await db
@@ -3570,6 +3602,25 @@ async function syncM3uSource(
     percent: 86,
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
+  if (playlistUrl === DISCOVERY_PLAYLIST_URL && (movieCount > 0 || seriesCount > 0)) {
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    const starterRows = selectionStarterRows(savedRows);
+    if (starterRows.length) {
+      await refreshVodTitleProjection({
+        sourceId, userId, db, generation, rows: starterRows,
+        xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
+        assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
+      });
+      await reportProgress({
+        moviesReady: starterRows.some(row => row.item_type === "movie"),
+        seriesReady: starterRows.some(row => row.item_type === "series"),
+        browseReady: true,
+      });
+    }
+    return { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length,
+      finalizePending: true, liveCatalog: { rawLive: liveCount, pending: true },
+      discoverySources: "sources" in playlist ? playlist.sources : undefined };
+  }
   const liveCatalog = await refreshMaterializedLiveCatalog(db, {
     sourceId, userId, rows: savedRows.filter(row => row.item_type === "live"), generation, heartbeat,
   });
