@@ -667,7 +667,8 @@
 
     function cardHtml(summary = {}, options = {}) {
         const state = summary.state || 'degraded';
-        if (options.compact === true && state === 'syncing') {
+        if (options.compact === true && (state === 'syncing' ||
+            (state === 'ready' && catalogAvailability(summary).backgrounding))) {
             const message = globalThis.NorvaI18n?.t('ui_catalog_preparing_background', { defaultValue: 'Your catalogue is being prepared. You can already watch the available titles.' }) ?? 'Your catalogue is being prepared. You can already watch the available titles.';
             const action = globalThis.NorvaI18n?.t('ui_catalog_view_progress', { defaultValue: 'View progress' }) ?? 'View progress';
             return `
@@ -777,7 +778,7 @@
             ...(summary.issues || []),
             ...(summary.sources || [])
         ];
-        const match = candidates.find(item => item?.state === 'syncing') || candidates[0];
+        const match = candidates.find(item => item?.state === 'syncing' || item?.refreshing === true) || candidates[0];
         return match?.source || null;
     }
 
