@@ -2735,7 +2735,7 @@ async function syncCloudSource(
 
     if (recordOrEmpty(result).finalizePending === true) {
       await handoffSelectionFinalization({
-        db, sourceId, userId, generation,
+        db, sourceId, userId,
         assertCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!),
         releaseTransport: async () => {
           if (!m3uLeaseToken) return;

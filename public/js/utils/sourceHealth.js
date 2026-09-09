@@ -737,6 +737,19 @@
         const message = tvHandoff ? publicTvState.message : (accountState?.message || summary.message || STATE_META[state]?.message || '');
         const actionLabel = tvHandoff ? publicTvState.action : (accountState?.action || summary.action || (globalThis.NorvaI18n?.t("ui_web_a23b096cabd0", { defaultValue: "Manage service" }) ?? 'Manage service'));
         const actionName = tvHandoff && state !== 'ready' ? 'show-instructions' : 'open-sources';
+        if (options.compact === true && state !== 'ready' && !tvHandoff && !accountSummary) {
+            const manageLabel = globalThis.NorvaI18n?.t('ui_web_a23b096cabd0', { defaultValue: 'Manage service' }) ?? 'Manage service';
+            return `
+                <div class="service-health-card service-health-${escapeHtml(publicState)} service-health-compact" data-source-health-state="${escapeHtml(publicState)}">
+                    <div class="service-health-copy">
+                        <p role="status" aria-atomic="true">${escapeHtml(title)}</p>
+                    </div>
+                    <div class="service-health-actions">
+                        <button class="btn btn-secondary" data-source-health-action="open-sources" data-i18n="ui_web_a23b096cabd0">${escapeHtml(manageLabel)}</button>
+                    </div>
+                </div>
+            `;
+        }
         const progressAction = state === 'syncing' && !tvHandoff
             ? '<button class="btn btn-secondary" data-source-health-action="view-progress" data-i18n="ui_web_c2e39c2cee78">View progress</button>'
             : '';
