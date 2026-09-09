@@ -105,6 +105,43 @@ test('rail cards use observed audio before provider tags and preserve accessible
 });
 
 for (const pageName of ['MoviesPage', 'SeriesPage']) {
+    test(pageName + ' preserves genre rails when returning after a cached search', async () => {
+        const context = sandbox();
+        vm.runInContext(read('public/js/pages/' + pageName + '.js'), context);
+        const page = Object.create(context.window[pageName].prototype);
+        const calls = [];
+        Object.assign(page, {
+            container: { scrollTop: 0 }, movies: [{ title: 'Previous search' }],
+            seriesList: [{ title: 'Previous search' }], _viewRenderedAt: Date.now() - 300001,
+            shouldShowRails: () => true, hasActiveFilters: () => false,
+            catalogCacheKey: () => 'default',
+            renderGenreRails: async () => calls.push('rails'),
+            loadCloudMovies: async () => calls.push('grid'),
+            loadCloudSeries: async () => calls.push('grid')
+        });
+        await page.maybeRevalidate();
+        assert.deepEqual(calls, ['rails']);
+
+        for (const state of [
+            { container: { scrollTop: 200 } },
+            { activeBucket: 'action' },
+            { hasActiveFilters: () => true },
+            { _viewRenderedAt: Date.now() },
+            { isLoading: true }
+        ]) {
+            calls.length = 0;
+            const original = Object.fromEntries(Object.keys(state).map(key => [key, page[key]]));
+            Object.assign(page, state);
+            await page.maybeRevalidate();
+            assert.deepEqual(calls, [], 'Do not replace a scrolled, filtered, loading or warm view');
+            Object.assign(page, original);
+        }
+
+        page.shouldShowRails = () => false; // TV retains its paged grid.
+        await page.maybeRevalidate();
+        assert.deepEqual(calls, ['grid']);
+    });
+
     test(pageName + ' cannot paint an obsolete source response over a newer view', async () => {
         const context = sandbox();
         context.MediaUtils = context.window.MediaUtils;
