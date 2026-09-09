@@ -86,11 +86,11 @@ try:
     sql('create role supabase_auth_admin login; create role anon; create role authenticated; create role service_role; create schema auth authorization supabase_auth_admin; alter role supabase_auth_admin set search_path=auth; grant all on database postgres to supabase_auth_admin;')
     created.append(AUTH);address=start_auth()
     sql((ROOT/'customer-notices.bootstrap.sql').read_text())
-    for file in ['20260626131645_norva_branded_email_helpers.sql','20260721235400_branded_email_delivery_outbox.sql','20260908140448_branded_email_images.sql']:
+    for file in ['20260626131645_norva_branded_email_helpers.sql','20260721235400_branded_email_delivery_outbox.sql','20260908144324_linked_email_artwork.sql']:
         contents=(ROOT/file).read_text().replace('\r\n','\n')
         names={'20260626131645_norva_branded_email_helpers.sql':['norva_html_escape'],
                '20260721235400_branded_email_delivery_outbox.sql':['norva_html_fragment_to_text','norva_branded_email_text','norva_enqueue_branded_email'],
-               '20260908140448_branded_email_images.sql':['norva_branded_email_html']}[file]
+               '20260908144324_linked_email_artwork.sql':['norva_branded_email_html']}[file]
         for name in names:
             import re
             match=re.search(r'create (?:or replace )?function public\.'+name+r'\(',contents,re.I)
