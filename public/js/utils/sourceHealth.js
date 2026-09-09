@@ -667,6 +667,20 @@
 
     function cardHtml(summary = {}, options = {}) {
         const state = summary.state || 'degraded';
+        if (options.compact === true && state === 'syncing') {
+            const message = globalThis.NorvaI18n?.t('ui_catalog_preparing_background', { defaultValue: 'Your catalogue is being prepared. You can already watch the available titles.' }) ?? 'Your catalogue is being prepared. You can already watch the available titles.';
+            const action = globalThis.NorvaI18n?.t('ui_catalog_view_progress', { defaultValue: 'View progress' }) ?? 'View progress';
+            return `
+                <div class="service-health-card service-health-syncing service-health-compact" data-source-health-state="syncing">
+                    <div class="service-health-copy">
+                        <p role="status" aria-atomic="true" data-i18n="ui_catalog_preparing_background">${escapeHtml(message)}</p>
+                    </div>
+                    <div class="service-health-actions">
+                        <button class="btn btn-secondary" data-source-health-action="view-progress" data-i18n="ui_catalog_view_progress">${escapeHtml(action)}</button>
+                    </div>
+                </div>
+            `;
+        }
         const hidden = options.hideWhenReady !== false && state === 'ready';
         const prominent = options.prominent === true;
         const tvHandoff = options.tvHandoff === true;

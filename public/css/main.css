@@ -2414,6 +2414,42 @@ video::cue {
   flex: 0 0 auto;
 }
 
+#home-service-health .service-health-compact {
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  margin-bottom: 0;
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+}
+
+.service-health-compact .service-health-copy {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
+.service-health-compact .service-health-copy p {
+  font-size: max(14px, 1rem);
+  line-height: 1.5;
+  text-align: start;
+}
+
+.service-health-compact .service-health-actions {
+  max-width: 100%;
+}
+
+.service-health-compact .btn {
+  min-height: 48px;
+  max-width: 100%;
+  font-size: max(14px, 0.875rem);
+  white-space: normal;
+}
+
+.service-health-compact .btn:focus-visible {
+  outline: 2px solid var(--color-accent-hover);
+  outline-offset: 4px;
+}
+
 .norva-setup-gate {
   min-height: calc(100dvh - 180px);
   display: grid;
@@ -8274,6 +8310,10 @@ kbd {
 
   .service-health-actions .btn {
     width: 100%;
+  }
+
+  .service-health-compact .service-health-copy {
+    flex-basis: auto;
   }
 
   .norva-setup-gate {

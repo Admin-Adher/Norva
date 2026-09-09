@@ -1037,7 +1037,8 @@ class HomePage {
         if (!host) return;
         host.querySelector('#home-import-ribbon')?.remove();
         const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
-        if (!policy?.backgrounding) return;
+        // The compact health banner already carries this import status and its action.
+        if (!policy?.backgrounding || summary?.state === 'syncing') return;
         const ribbon = document.createElement('div');
         ribbon.id = 'home-import-ribbon';
         ribbon.className = 'norva-setup-import-ribbon';
@@ -2083,6 +2084,7 @@ class HomePage {
 
         container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, {
             hideWhenReady: true,
+            compact: true,
             prominent: !summary?.ready?.length
         });
         container.classList.toggle('hidden', summary?.state === 'ready');

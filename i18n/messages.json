@@ -1,4 +1,28 @@
 {
+  "ui_catalog_preparing_background": [
+    "Your catalogue is being prepared. You can already watch the available titles.",
+    "Votre catalogue se prépare. Vous pouvez déjà regarder les titres disponibles.",
+    "Seu catálogo está sendo preparado. Você já pode assistir aos títulos disponíveis.",
+    "Tu catálogo se está preparando. Ya puedes ver los títulos disponibles.",
+    "आपका कैटलॉग तैयार हो रहा है। आप उपलब्ध सामग्री अभी देख सकते हैं।",
+    "Kataloğunuz hazırlanıyor. Hazır olan içerikleri şimdiden izleyebilirsiniz.",
+    "আপনার ক্যাটালগ প্রস্তুত হচ্ছে। যে কনটেন্টগুলো পাওয়া যাচ্ছে, সেগুলো এখনই দেখতে পারেন।",
+    "جارٍ تجهيز كتالوجك. يمكنك الآن مشاهدة المحتوى المتاح.",
+    "Katalog Anda sedang disiapkan. Anda sudah bisa menonton konten yang tersedia.",
+    "Inihahanda ang iyong katalogo. Maaari mo nang panoorin ang mga available na palabas."
+  ],
+  "ui_catalog_view_progress": [
+    "View progress",
+    "Voir la progression",
+    "Ver progresso",
+    "Ver progreso",
+    "प्रगति देखें",
+    "İlerlemeyi görüntüle",
+    "অগ্রগতি দেখুন",
+    "عرض التقدم",
+    "Lihat progres",
+    "Tingnan ang progreso"
+  ],
   "ui_language": [
     "Interface language",
     "Langue de l’interface",

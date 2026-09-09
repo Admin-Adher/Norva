@@ -355,6 +355,65 @@ test('TV service handoff uses safe public copy and omits provider diagnostics', 
   assert.doesNotMatch(html, /data-source-health-source-(?:id|type)/);
 });
 
+test('Home import banner has one progress action and no oversized health summary', () => {
+  const health = sourceHealthHarness();
+  const summary = health.summarize([{
+    id: 'source-import',
+    sync_status: 'syncing',
+    syncProgress: { status: 'syncing', moviesReady: true },
+  }]);
+  const html = health.cardHtml(summary, { compact: true, prominent: true });
+
+  assert.match(html, /service-health-compact/);
+  assert.match(html, /Your catalogue is being prepared\. You can already watch the available titles\./);
+  assert.match(html, /role="status" aria-atomic="true"/);
+  assert.equal((html.match(/<button\b/g) || []).length, 1);
+  assert.match(html, /data-source-health-action="view-progress"/);
+  assert.doesNotMatch(html, /<h3|<small|service-health-prominent|data-source-health-action="open-sources"/);
+
+  let opened = null;
+  assert.equal(health.openProgress(summary, { sourceManager: {
+    showCatalogPreparation(source) { opened = source; },
+  } }), true);
+  assert.equal(opened.id, 'source-import');
+});
+
+test('Home import completion hides the compact status without hiding actionable failures', () => {
+  const health = sourceHealthHarness();
+  const completed = health.summarize([{ id: 'source-import', sync_status: 'ready' }]);
+  const readyHtml = health.cardHtml(completed, { compact: true, hideWhenReady: true });
+  assert.match(readyHtml, /service-health-ready[^\"]*hidden/);
+  assert.doesNotMatch(readyHtml, /service-health-compact|data-source-health-action="view-progress"/);
+
+  const failed = health.summarize([{ id: 'source-import', sync_status: 'failed', sync_error: '401 invalid username' }]);
+  const failureHtml = health.cardHtml(failed, { compact: true });
+  assert.match(failureHtml, /data-source-health-action="open-sources"/);
+  assert.doesNotMatch(failureHtml, /service-health-compact|Your catalogue is being prepared/);
+});
+
+test('Home removes the duplicate ribbon during an initial import and after completion', () => {
+  const health = sourceHealthHarness();
+  let removed = 0;
+  let appended = 0;
+  const window = { NorvaSourceHealth: health };
+  window.window = window;
+  const document = {
+    getElementById: () => ({
+      querySelector: () => ({ remove() { removed += 1; } }),
+      prepend() { appended += 1; },
+    }),
+  };
+  vm.runInNewContext(HOME_SOURCE, { window, document, console });
+  const page = Object.create(window.HomePage.prototype);
+  page.renderImportRibbon(health.summarize([{
+    id: 'source-import', sync_status: 'syncing',
+    syncProgress: { status: 'syncing', moviesReady: true },
+  }]));
+  page.renderImportRibbon(health.summarize([{ id: 'source-import', sync_status: 'ready' }]));
+  assert.equal(removed, 2);
+  assert.equal(appended, 0);
+});
+
 test('Account health summary keeps the service price-neutral and secondary', () => {
   const health = sourceHealthHarness();
   const html = health.cardHtml({
