@@ -193,7 +193,12 @@
         if (error || FAILURE_STATES.has(rawStatus)) return null;
 
         const direct = source.lastSync || source.last_sync || status.lastSync || status.last_sync;
-        if (direct && typeof direct !== 'object') return direct;
+        // API.normalizeSource also aliases last_synced_at (the attempt start)
+        // to last_sync. During an initial import this is not a completed sync:
+        // trusting it unlocks all categories before their first page exists and
+        // makes the source watcher miss the real readiness transition.
+        if (direct && typeof direct !== 'object' &&
+            (!SYNCING_STATES.has(rawStatus) || hasCompletedCatalog(source, status))) return direct;
         if (READY_STATES.has(rawStatus)) {
             return source.last_synced_at || source.lastSyncedAt || status.last_synced_at || status.lastSyncedAt || null;
         }

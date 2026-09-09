@@ -615,10 +615,11 @@ class HomePage {
                 this.renderImportRibbon(sourceSummary);
 
                 let paintedEarlyRails = false;
+                const hasRailItems = payload => payload?.rails?.some(rail => rail.items?.length);
                 if (!this._paintedFromCache) {
                     const earlyRails = await Promise.race([
-                        railsP.catch(() => fastRailsP),
-                        fastRailsP.then(value => value || railsP, () => railsP)
+                        railsP.then(value => hasRailItems(value) ? value : fastRailsP, () => fastRailsP),
+                        fastRailsP.then(value => hasRailItems(value) ? value : railsP, () => railsP)
                     ]).catch(() => null);
                     if (!this.isCurrentLoad(generation)) return;
                     if (earlyRails?.rails?.length) {
@@ -643,7 +644,7 @@ class HomePage {
 
                 this.renderHistory(history);
 
-                if (railsResult.status === 'fulfilled') {
+                if (railsResult.status === 'fulfilled' && (!paintedEarlyRails || hasRailItems(railsResult.value))) {
                     this.renderCloudRails(railsResult.value);
                     this.renderHero(history, this.railItems);
                     this._freshRailsPending = false;
@@ -654,7 +655,7 @@ class HomePage {
                             rails: railsResult.value
                         }, { version: window.API?.catalogSignature?.() });
                     } catch (_) { /* best-effort */ }
-                } else {
+                } else if (railsResult.status === 'rejected') {
                     console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);
                     if (this._paintedFromCache || paintedEarlyRails) {
                         // The SWR paint already shows real (cached) rails — keep them instead
@@ -688,6 +689,25 @@ class HomePage {
         })();
 
         return this.loadPromise;
+    }
+
+    schedulePendingCatalogRefresh() {
+        if (this.setupRefreshTimer) return;
+        this.setupRefreshTimer = setTimeout(() => {
+            this.setupRefreshTimer = null;
+            if (this.app?.currentPage !== 'home') return;
+            this.lastLoadedAt = 0;
+            this.loadDashboardData({ skipCache: true, freshRails: true });
+        }, 4000);
+    }
+
+    isSelectionPreparing(summary = this.sourceSummary) {
+        return summary?.state === 'syncing' && (summary.sources || []).some(item => {
+            const source = item.source || item;
+            const hint = source.configHint || source.config_hint || {};
+            return source.enabled !== false && (source.source_type || source.type) === 'm3u'
+                && hint.playlistHost === 'norva.tv';
+        });
     }
 
     // Home rails are empty. If a service is still syncing, say so and point at the
@@ -772,6 +792,9 @@ class HomePage {
 
     shouldShowSetupGate(summary = null) {
         if (!summary) return true;
+        // Selection needs no provider input. Show Home and its compact progress
+        // banner immediately; category access still follows the shared policy.
+        if (this.isSelectionPreparing(summary)) return false;
         const policy = window.NorvaSourceHealth?.catalogAvailability?.(summary);
         if (policy) return policy.gate === true;
         if (summary.state === 'ready') return false;
@@ -2353,7 +2376,12 @@ class HomePage {
         const layers = hero.querySelectorAll('.home-hero-bg');
         const front = [...layers].find(l => l.style.opacity !== '0') || layers[0];
         const back = [...layers].find(l => l !== front) || layers[0];
+        if (!front || !back) return;
         const paint = () => {
+            // An image can finish after source removal or a newer hero render.
+            if (this._heroSlides?.[index] !== slide || this._heroIndex !== index ||
+                document.getElementById('home-hero') !== hero ||
+                !hero.contains(front) || !hero.contains(back)) return;
             back.style.backgroundImage = `url('${String(backdrop).replace(/'/g, '%27')}')`;
             if (instant || front === back) {
                 back.style.opacity = '1';
@@ -2405,7 +2433,8 @@ class HomePage {
         if (tmdbId && !/^(tt)?0+$/i.test(String(tmdbId)) && window.NorvaCloud?.media?.tmdbMeta) {
             NorvaCloud.media.tmdbMeta({ type: type === 'series' ? 'series' : 'movie', tmdbId: String(tmdbId) })
                 .then((meta) => {
-                    if (this._heroIndex !== index || !meta?.trailerKey) return;
+                    if (this._heroIndex !== index || this._heroSlides?.[index] !== slide ||
+                        document.getElementById('home-hero') !== hero || !meta?.trailerKey) return;
                     this._heroTrailerKey = meta.trailerKey;
                     trailerBtn?.classList.remove('hidden');
                 })
@@ -2476,6 +2505,16 @@ class HomePage {
         this.railItems = rails;
 
         if (!rails.length) {
+            const preparing = this.isSelectionPreparing() ||
+                window.NorvaSourceHealth?.catalogAvailability?.(this.sourceSummary)?.backgrounding === true;
+            if (preparing) {
+                // Keep one compact status banner, with the existing card
+                // placeholders until the first real page arrives. Empty VOD
+                // during import must not announce a completed live-only Home.
+                this.schedulePendingCatalogRefresh();
+                container.innerHTML = `<section class="dashboard-section" aria-hidden="true"><div class="horizontal-scroll">${window.MediaUtils?.skeletonCards?.(6) || ''}</div></section>`;
+                return;
+            }
             container.innerHTML = payload.liveOnly === true ? `
                 <section class="dashboard-section home-state-panel" role="status">
                     <h2 data-i18n="ui_web_314c2bf74b46">Live TV is ready</h2>

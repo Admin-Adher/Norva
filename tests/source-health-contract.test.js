@@ -378,6 +378,25 @@ test('Home import banner has one progress action and no oversized health summary
   assert.equal(opened.id, 'source-import');
 });
 
+test('a normalized sync attempt timestamp cannot unlock an initial catalogue', () => {
+  const health = sourceHealthHarness();
+  const source = { id: 'selection', enabled: true, sync_status: 'syncing', catalog_version: 1,
+    last_synced_at: '2026-09-09T14:21:31Z', last_sync: '2026-09-09T14:21:31Z',
+    config_hint: { syncProgress: { status: 'syncing', stage: 'finalizing', percent: 86 } } };
+  const initial = health.catalogSourcePolicy(source);
+  assert.equal(initial.classification.lastSync, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(initial.categories)), { live: false, movies: false, series: false });
+  const firstPage = health.catalogSourcePolicy({ ...source,
+    config_hint: { syncProgress: { ...source.config_hint.syncProgress, moviesReady: true } } });
+  assert.deepEqual(JSON.parse(JSON.stringify(firstPage.categories)), { live: false, movies: true, series: false });
+  const completed = health.catalogSourcePolicy({ ...source, sync_status: 'ready' });
+  assert.equal(completed.classification.lastSync, source.last_sync);
+  const background = health.catalogSourcePolicy({ ...source,
+    config_hint: { ...source.config_hint, lastSync: { syncedAt: '2026-09-08T12:00:00Z', total: 50 } } });
+  assert.equal(background.classification.lastSync, '2026-09-08T12:00:00Z');
+  assert.equal(background.categories.movies, true);
+});
+
 test('Home import completion hides the compact status without hiding actionable failures', () => {
   const health = sourceHealthHarness();
   const completed = health.summarize([{ id: 'source-import', sync_status: 'ready' }]);
