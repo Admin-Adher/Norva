@@ -95,7 +95,7 @@ test('rail cards use observed audio before provider tags and preserve accessible
     const cases = [
         { item: base, expected: 'télougou' },
         { item: { ...base, audioLanguages: ['es'], audioLanguageValidationStatus: 'probed' }, expected: 'Espagnol' },
-        { item: { title: 'Unknown', original_language: 'fr' }, expected: 'Audio pending' },
+        { item: { title: 'Unknown', original_language: 'fr' }, expected: 'Language unidentified' },
     ];
     for (const { item, expected } of cases) {
         context.window.GenreRails.render(container, [{ items: [item] }]);

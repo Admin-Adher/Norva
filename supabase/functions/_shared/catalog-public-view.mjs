@@ -88,6 +88,8 @@ const MEDIA_SCALAR_FIELDS = Object.freeze([
   "audioLanguagesObserved",
   "audio_language_validation_status",
   "audioLanguageValidationStatus",
+  "audio_language_validation_job_status",
+  "audioLanguageValidationJobStatus",
   "audio_language_verified_at",
   "audioLanguageVerifiedAt",
   "subtitle_tracks_scope",

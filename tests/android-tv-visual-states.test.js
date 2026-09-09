@@ -110,10 +110,10 @@ test('Settings entry keeps header and tabs fixed while only the active panel scr
 test('Movie and series catalogue states stay intentional while metadata is pending', () => {
   assert.match(movies, /poster\.src\s*=\s*'\/img\/norva-media-placeholder\.png'/);
   assert.match(movies, /title\.textContent\s*=\s*[^;\r\n]*'Select a movie'/);
-  assert.match(movies, /Audio pending\|Identifying audio/);
-  assert.match(series, /Audio pending\|Identifying audio/);
-  assert.match(movies, /return \/\^\(\?:Audio pending\|Identifying audio\)\$\/i\.test\(text\) \? '' : text/);
-  assert.match(series, /return \/\^\(\?:Audio pending\|Identifying audio\)\$\/i\.test\(text\) \? '' : text/);
+  // Language status now comes from real analysis state and must not be hidden
+  // only in English while translations remain visible on phone and TV.
+  assert.doesNotMatch(movies, /Audio pending\|Identifying audio/);
+  assert.doesNotMatch(series, /Audio pending\|Identifying audio/);
   assert.match(movies, /data-movies-retry/);
   assert.match(series, /data-series-retry/);
   assert.doesNotMatch(movies, /empty-state rich-empty premium-state[^`]*[🎬📽️]/u);

@@ -1,4 +1,5 @@
 import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
+import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_shared/catalog-audio-job-status.mjs";
 // SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
 // supabase/functions tree, so sibling ../_shared imports stay available. A push
 // to main validates this code but does not reload production: update the server
@@ -3375,10 +3376,48 @@ async function fileLanguageObservationsByVariant(
   return byVariant;
 }
 
+async function attachSelectionAudioFileIdentity(variants: JsonRecord[], userId: string) {
+  for (const variant of variants) {
+    if (variant.user_id !== userId || variant.item_type !== "movie" ||
+      !await isDiscoverySourceId(String(variant.source_id ?? ""), userId)) continue;
+    const url = stringOrNull(recordOrEmpty(variant.playback_hint).targetUrl);
+    if (url) variant.__selection_audio_url_sha256 = await sha256Hex(url);
+  }
+}
+
+function selectionAudioEvidenceMismatch(variant: JsonRecord, verification: unknown) {
+  const expectedHash = stringOrNull(variant.__selection_audio_url_sha256);
+  const evidenceHash = stringOrNull(recordOrEmpty(verification).urlSha256);
+  // Historical probes without URL provenance retain their existing semantics.
+  // An explicit different URL is evidence about another file, even if its title
+  // and stable Selection external id did not change with the replacement.
+  if (!expectedHash || !evidenceHash || expectedHash === evidenceHash) return false;
+  variant.__selection_audio_evidence_rejected = true;
+  return true;
+}
+
+function titleAudioLanguagesWithFileIdentity(title: JsonRecord, variants: JsonRecord[]) {
+  if (!variants.some(variant => variant.__selection_audio_evidence_rejected === true)) {
+    return { observedAudioLanguages: titleAudioLanguages(title), verifiedAudioLanguages: titleVerifiedAudioLanguages(title) };
+  }
+  // The durable title union may still contain the rejected old URL. Rebuild
+  // from accepted file evidence rather than resurrecting it through the union.
+  const observed = variants.filter(variant => variant.__file_audio_observed === true);
+  return {
+    observedAudioLanguages: canonicalFileLanguages(observed.flatMap(variant =>
+      Array.isArray(variant.__file_audio_languages) ? variant.__file_audio_languages : [])),
+    verifiedAudioLanguages: canonicalFileLanguages(observed.filter(variant => Boolean(variant.__file_audio_verified_at))
+      .flatMap(variant => Array.isArray(variant.__file_audio_languages) ? variant.__file_audio_languages : [])),
+  };
+}
+
 function attachFileLanguageObservation(variant: JsonRecord, observation: JsonRecord | undefined) {
   if (!observation) return;
   const externalId = String(variant.external_id ?? "");
   if (!externalId || String(observation.file_external_id ?? "") !== externalId) return;
+  if (selectionAudioEvidenceMismatch(variant, observation.audio_verification)) return;
+  variant.__selection_audio_observation_matched = Boolean(variant.__selection_audio_url_sha256) &&
+    recordOrEmpty(observation.audio_verification).urlSha256 === variant.__selection_audio_url_sha256;
   if (observation.audio_observed === true) {
     const observedLanguages = canonicalFileLanguages(observation.audio_languages);
     variant.__file_audio_observed = true;
@@ -3413,6 +3452,11 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
   const variants = [...variantsByTitle.values()].flat()
     .filter((variant) => String(variant.item_type ?? "") === "movie");
   if (!variants.length) return;
+
+  await attachSelectionAudioFileIdentity(variants, userId);
+
+  try { await attachAudioJobStates(db, variants, userId); }
+  catch (_) { /* Unknown language remains unknown if job evidence is unavailable. */ }
 
   // Playback-time browser probes are deliberately tenant-local: they may label
   // this owned file but must never poison the cross-user ordered-track cache.
@@ -3462,6 +3506,16 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
         .map((key) => rowsByKey.get(`${key}:${itemType}:${externalId}`))
         .find(Boolean);
       if (!row) continue;
+      if (selectionAudioEvidenceMismatch(variant, row.audio_lang_verification ?? row.audio_whisper_verification)) {
+        if (variant.__selection_audio_observation_matched !== true) {
+          // A tenant observation without provenance may have been hydrated from
+          // this stale cache. Only an explicitly matching observation can survive.
+          for (const key of Object.keys(variant)) {
+            if (key.startsWith("__file_audio_") || key.startsWith("__file_subtitle_")) delete variant[key];
+          }
+        }
+        continue;
+      }
       if (row.audio_probed_at) {
         const cachedLanguages = canonicalFileLanguages(publicFileTrackLanguages(row.audio_tracks));
         const alreadyVerified = Boolean(variant.__file_audio_verified_at);
@@ -3565,10 +3619,15 @@ async function attachFlatMediaFileLanguages(
       [...variantByExactFile.values()].map((variant) => String(variant.id ?? "")),
       userId,
     );
+    await attachSelectionAudioFileIdentity([...variantByExactFile.values()], userId);
+    try { await attachAudioJobStates(db, [...variantByExactFile.values()], userId); }
+    catch (_) { /* Activity needs a live task, never a guessed pending status. */ }
     for (const item of items) {
       const exactFileKey = flatMediaVariantKey(item);
       const variant = exactFileKey ? variantByExactFile.get(exactFileKey) : null;
       if (!variant) continue;
+
+      Object.assign(item, audioJobFields(variant.__audio_job_status));
 
       // Gateway probes persist these facts on cloud_title_variants. Project them
       // back onto the exact cloud_media_items row so the next launch can route
@@ -3586,6 +3645,19 @@ async function attachFlatMediaFileLanguages(
       }
 
       attachFileLanguageObservation(variant, observations.get(String(variant.id ?? "")));
+      if (variant.__selection_audio_evidence_rejected === true) {
+        Object.assign(item, {
+          audio_languages: [], audioLanguages: [], audio_tracks: [], audioTracks: [],
+          audio_verified_languages: [], audioVerifiedLanguages: [], audio_probed_at: null, audioProbedAt: null,
+          audio_languages_observed: false, audioLanguagesObserved: false,
+          audio_language_validation_status: "not_analyzed", audioLanguageValidationStatus: "not_analyzed",
+          audio_language_verified_at: null, audioLanguageVerifiedAt: null,
+          audio_language_verification: {}, audioLanguageVerification: {},
+          subtitle_languages: [], subtitleLanguages: [], subtitle_tracks: [], subtitleTracks: [],
+          subtitle_probed_at: null, subtitleProbedAt: null,
+          subtitle_languages_observed: false, subtitleLanguagesObserved: false,
+        });
+      }
       if (variant.__file_audio_observed === true) {
         const verified = Boolean(variant.__file_audio_verified_at);
         const observedLanguages = canonicalFileLanguages(
@@ -3960,8 +4032,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
   const posterUrl = preferSecureImage(title.poster_url ?? defaultVariant.poster_url, tmdbImageUrl(tmdb.poster_path, "w500"));
   const backdropUrl = preferSecureImage(title.backdrop_url, tmdbImageUrl(tmdb.backdrop_path, "w780"));
   const serializedDefaultVariant = titleVariantItem(defaultVariant);
-  const observedAudioLanguages = titleAudioLanguages(title);
-  const verifiedAudioLanguages = titleVerifiedAudioLanguages(title);
+  const { observedAudioLanguages, verifiedAudioLanguages } = titleAudioLanguagesWithFileIdentity(title, variants);
   const anyAudioObserved = variants.some((variant) => variant.__file_audio_observed === true);
   const expectedVariantCount = Math.max(0, Number(title.variant_count) || 0);
   const strictlyVerifiedVariants = variants.filter((variant) =>
@@ -4042,6 +4113,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     audioVerifiedLanguages: verifiedAudioLanguages,
     audio_language_validation_status: titleAudioValidationStatus,
     audioLanguageValidationStatus: titleAudioValidationStatus,
+    ...audioJobFields(titleAudioJobState(variants)),
     // Ordered per-track map so the player labels each engine audio stream by absolute
     // index — real language names with NO playback-time probe.
     audio_tracks: numberOr(title.variant_count, variants.length) <= 1
@@ -4218,6 +4290,7 @@ function titleVariantItem(variant: JsonRecord) {
       variant.__file_audio_observed === true && (audioLanguages?.length ?? 0) > 0
         ? "probed"
         : variant.__file_audio_observed === true ? "pending" : "not_analyzed",
+    ...audioJobFields(variant.__audio_job_status),
     audio_language_verified_at: variant.__file_audio_verified_at,
     audioLanguageVerifiedAt: variant.__file_audio_verified_at,
     audio_language_verification: recordOrEmpty(variant.__file_audio_verification),

@@ -167,10 +167,10 @@ test('series ratings suppress zero and fall back to a verified TMDB score', () =
   assert.equal(page.getSeriesRatingText({ rating: '7.0' }), '7');
 });
 
-test('pending audio metadata stays out of the consumer catalogue', () => {
+test('proven audio job status remains visible in the consumer catalogue', () => {
   const page = makePage();
 
-  assert.equal(page.displayLanguageStatus('Audio pending'), '');
-  assert.equal(page.displayLanguageStatus('Identifying audio'), '');
+  assert.equal(page.displayLanguageStatus('Audio pending'), 'Audio pending');
+  assert.equal(page.displayLanguageStatus('Identifying audio'), 'Identifying audio');
   assert.equal(page.displayLanguageStatus('French'), 'French');
 });

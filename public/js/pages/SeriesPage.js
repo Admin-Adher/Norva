@@ -2825,8 +2825,9 @@ class SeriesPage {
     }
 
     displayLanguageStatus(value) {
-        const text = String(value || '').trim();
-        return /^(?:Audio pending|Identifying audio)$/i.test(text) ? '' : text;
+        // MediaUtils already distinguishes active analysis from unknown language.
+        // Keep that localized status consistent across cards and version details.
+        return String(value || '').trim();
     }
 
     getSeriesPoster(series = this.currentSeries) {
