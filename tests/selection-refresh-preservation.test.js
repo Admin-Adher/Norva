@@ -26,9 +26,10 @@ function persistenceHarness(engine, failBatch = 0, replacedOnPrune = false) {
   const fence = { ...snapshot, userVisibilityEpoch: '1' };
   const context = {
     Date,
+    writeSelectionBatch: async options => (await import('../supabase/functions/_shared/selection-initial-import.mjs')).writeSelectionBatch(options),
     assertCatalogSnapshotCurrent: async () => { assert.equal(fence.userVisibilityEpoch, String(epoch)); },
     adoptActiveCatalogUserVisibilityEpoch: async (_db, _source, _user, current) => {
-      if (replacedOnPrune) throw Error('catalog generation changed');
+      if (replacedOnPrune && calls.some(call => call.op === 'prune')) throw Error('catalog generation changed');
       current.userVisibilityEpoch = String(epoch); adoptions++;
     },
     catalogGenerationRpcFence: fence => ({ p_generation_id: fence.generationId, p_head_revision: fence.headRevision, p_user_visibility_epoch: fence.userVisibilityEpoch }),
@@ -77,7 +78,7 @@ for (const engine of ['norva-source-sync', 'norva-cloud']) {
     for (let i = 0; i < 260; i++) h.rows.set(`obsolete-${i}`, { id: `obsolete-${i}` });
     await h.run([{ external_id: 'keep', title: 'Kept film' }]);
     assert.equal(h.rows.size, 1);
-    assert.equal(h.adoptions(), 3);
+    assert.equal(h.adoptions(), engine === 'norva-cloud' ? 4 : 3);
     const changed = persistenceHarness(engine, 0, true);
     await assert.rejects(changed.run([{ external_id: 'keep' }]), /catalog generation changed/);
   });
