@@ -1,8 +1,8 @@
 ---
 content_id: "NVB-422"
 title: "Handoff, Mirroring, or Casting: Know Which Workflow You Need"
-seo_title: "Handoff vs Mirroring vs Casting for Viewing"
-meta_description: "Distinguish handoff, screen mirroring, and remote playback before choosing a viewing workflow, and verify which functions your product and devices actually support."
+seo_title: "Handoff vs Screen Mirroring vs Casting: Which to Use"
+meta_description: "Choose handoff for independent viewing, mirroring for a screen copy, or casting for receiver playback. Compare controls, privacy, access, and device checks."
 slug: "handoff-mirroring-or-casting-know-which-workflow-you-need"
 canonical_url: "https://norva.tv/blog/handoff-mirroring-or-casting-know-which-workflow-you-need/"
 language: "en"
@@ -34,12 +34,12 @@ product_claims:
   verified: false
   verified_by: ""
   verified_at: null
-  source_of_truth: "https://norva.tv/#features; https://norva.tv/#how-it-works; https://norva.tv/terms"
+  source_of_truth: "https://norva.tv/#features"
 published_at: null
-updated_at: null
-last_fact_check: null
-estimated_reading_minutes: 5
-excerpt: "Distinguish handoff, screen mirroring, and remote playback before choosing a viewing workflow, and verify which functions your product and devices actually support."
+updated_at: "2026-09-10T20:52:12Z"
+last_fact_check: "2026-09-10"
+estimated_reading_minutes: 7
+excerpt: "Decide whether you need an independent app, a copy of your screen, or receiver playback controlled from your phone, then check the requirements of that route."
 hero:
   src: ""
   alt: ""
@@ -53,13 +53,15 @@ is_pillar: false
 parent_pillar: "/blog/a-state-by-state-guide-to-cross-device-viewing-handoff/"
 related_articles:
   - "/blog/a-state-by-state-guide-to-cross-device-viewing-handoff/"
-  - "/blog/what-must-match-before-a-cross-device-handoff-can-work/"
-  - "/blog/how-to-verify-item-identity-before-moving-between-screens/"
+  - "/blog/separate-profiles-or-one-shared-profile-a-decision-framework/"
+  - "/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/"
 cta:
-  label: "Review Norva's Verified Cross-Device Features"
+  label: "Review Norva's Cross-Device Features"
   href: "https://norva.tv/#features"
   intent: "consideration"
 sources:
+  - "https://developers.google.com/cast/docs/overview"
+  - "https://support.google.com/chromecast/answer/3228332?hl=en"
   - "https://www.w3.org/TR/remote-playback/"
   - "https://www.w3.org/TR/presentation-api/"
   - "https://norva.tv/#features"
@@ -67,48 +69,52 @@ proof_assets: []
 original_evidence:
   required: true
   status: "present"
-  type: "workflow selection matrix"
-  summary: "A goal-first comparison separates where playback runs, what the target displays, source-device dependence, and the verification needed for three distinct second-screen concepts."
-  methodology: "Readers define the intended outcome, compare it to standards-based definitions, and choose only a workflow visibly supported by the current product and devices."
+  type: "illustrative workflow selection matrix"
+  summary: "Three completed fictional scenarios separate independent viewing, a shared screen, and receiver playback, with a choice and an unresolved device or source check for each."
+  methodology: "An authored comparison applies documented workflow definitions to stated viewing goals. It is a decision aid, not a device test or a claim that each route was exercised in Norva."
   asset_urls: []
 ---
 # Handoff, Mirroring, or Casting: Know Which Workflow You Need
 
-> **In short:** Use handoff when you want to stop on one supported device and continue independently on another. Use screen mirroring when you need the second display to reproduce the first screen. Use remote playback when the target receives and plays media while the source controls the session. These are distinct concepts, and Norva cross-device continuity does not by itself prove mirroring or casting support.
+> **In short:** Use handoff to continue independently in the target device's app. Use screen mirroring to reproduce your screen on another display. Use receiver-style casting to select media on one device and control playback on another. Choose by the behaviour you need, then check the app, receiver, network, and source requirements; the word “cast” alone does not identify the route.
 
-The word “cast” is often used for several different behaviours. That ambiguity causes setup failures: a user expects an independent target app, but the device is looking for a receiver; or they expect an exact screen copy, but only playback controls move.
+“Show this on the TV” can mean three different things: move your viewing progress, copy your current interface, or use your phone as a remote. A successful connection can still be the wrong workflow if it does not do the thing you expected.
+
+Here, **source device** means the phone or computer you start from; **media source** means the service or files supplying your authorised media. They are not interchangeable.
 
 ## Compare the three workflows
 
 | Workflow | Where the visible experience comes from | Source device after start | Main verification |
 | --- | --- | --- | --- |
-| Handoff | Norva experience opened independently on the target | Can usually stop participating after state is verified | Account, profile, source, item, version, progress |
-| Screen mirroring | A reproduction of the source screen | Remains central to the displayed session | Operating-system and display mirroring support |
-| Remote playback | Target playback selected or controlled from a source interface | Often remains a controller | Sender, receiver, media, network, and rights support |
+| Handoff | The target's independently opened app | Not needed to render the target's session | Account, profile, source, item, version, progress |
+| Screen mirroring | A reproduction of the shared source screen | Continues supplying the displayed screen | Operating-system and display support; what is shared |
+| Receiver-style casting | Media played by a receiver, selected from a sender | Provides session controls; continued dependence varies | Sender, receiver, media, network, and rights support |
 
-These are conceptual distinctions, not a Norva feature list. This article does not claim that Norva implements screen mirroring, casting, a receiver protocol, or the W3C APIs cited below.
+These are practical categories, not rigid protocol names. Google documents both [casting a Chrome tab or screen](https://support.google.com/chromecast/answer/3228332?hl=en) and [sender-controlled receiver playback](https://developers.google.com/cast/docs/overview). This guide uses “receiver-style casting” for the latter so you can distinguish the intended behaviour before following setup instructions.
 
 ## Choose handoff for continuity
 
-Handoff fits when the goal is “continue this item on the TV” or “move from tablet to web.” Norva states that the same account can preserve catalogue, progress, history, favourites, and preferences across supported devices.
+Handoff fits when the goal is “finish this item in the TV app” or “move from tablet to web.” Norva's [public feature page](https://norva.tv/#features) describes progress, favourites, history, and profile preferences following you across supported screens. That is continuity of viewing context, not a copy of the first screen.
 
-The target still needs its own supported Norva route and access to the compatible media source. Follow the [state-by-state handoff guide](/blog/a-state-by-state-guide-to-cross-device-viewing-handoff/) and verify the item independently.
+The target still needs its own supported Norva route and access to the compatible media source. Pause the first session, confirm the intended profile and item version on the target, then verify the resume position before playing. The [state-by-state handoff guide](/blog/a-state-by-state-guide-to-cross-device-viewing-handoff/) covers that sequence. A matching poster alone is not enough to identify the same episode or edition.
 
 **Choose this when:** you want the target to become the primary screen without reproducing the source display.
 
 ## Choose mirroring for an exact screen copy
 
-Screen mirroring generally reproduces the source display on another screen. The source remains important because navigation, notifications, orientation, and other on-screen activity may appear on the target.
+Screen mirroring reproduces a shared display rather than opening an independent copy of the target app. Full-screen sharing may reveal navigation, notifications, account details, or other on-screen activity. Sharing a tab or a single app is a narrower scope where the platform offers it; do not assume those modes expose the same things.
 
-Verify mirroring through current official documentation for the tablet, operating system, and display. Consider privacy before exposing notifications or account details.
+Check the sharing scope before starting and close private material that could appear within it. Verify both picture and sound: Google's Chrome instructions distinguish tab casting from full-screen casting and note that screen-cast audio may remain on the computer. A visible picture is not proof that sound has moved too.
 
 **Choose this when:** the real requirement is to show the same interface or non-media screen to other viewers, and verified mirroring support exists.
 
 ## Choose remote playback for a receiver workflow
 
-The W3C Remote Playback specification describes controlling playback on a remote device, while the Presentation API defines communication with a second presentation display. Implementations and device ecosystems vary.
+In Google's Cast model, a sender starts and controls the session while a receiver handles media playback. The receiver is not simply a second copy of everything on the phone screen. Whether the session survives closing the sender or losing its connection depends on the actual implementation; check rather than assuming phone independence.
 
-A receiver workflow needs compatible sender and receiver capabilities. A generic “available on TV” statement is not enough to establish them.
+A receiver workflow needs compatible sender and receiver capabilities. Norva's public home page lists **Google Cast**, separately from its Android TV app and cross-screen continuity. That published availability is not a test of your particular receiver, media format, subtitle track, or network. This article does not report a completed Norva casting test.
+
+The [W3C Remote Playback API draft](https://www.w3.org/TR/remote-playback/) describes a broader family of remote playback mechanisms, including cases where the source still renders or relays media. The [Presentation API draft](https://www.w3.org/TR/presentation-api/) concerns presenting web content on another display. Neither specification proves that an app implements a particular API or that every receiver is compatible.
 
 **Choose this when:** the target is designed to receive playback and the current sender, receiver, media, network, source rights, and product documentation all support the route.
 
@@ -116,45 +122,45 @@ A receiver workflow needs compatible sender and receiver capabilities. A generic
 
 Ask:
 
-1. Must the target run Norva independently?
-2. Must the target show the entire source screen?
-3. Should the source remain a controller?
-4. May private notifications appear on the target?
-5. Does the target have access to the same authorised source?
-6. Is the required function documented for both devices?
-7. Do current plan and source conditions allow the intended use?
+1. Do I want the target to run its own app after the transition?
+2. Do I need to share the entire screen, just one app, or only the media?
+3. Do I want to keep controlling playback from the source device?
+4. What private information is inside the chosen sharing scope?
+5. Can the selected route access the authorised media source?
+6. Is that function documented for these devices and app versions?
+7. Do current software-plan and media-source conditions permit the intended use?
 
 If the answers conflict, do not activate random connection icons. Clarify the goal first.
 
 ## Original evidence: selection card
 
-| Goal | Handoff | Mirroring | Remote playback |
-| --- | --- | --- | --- |
-| Continue independently on target | Strong conceptual fit | Poor fit | Possible but different |
-| Show exact source screen | Poor fit | Strong conceptual fit | Poor fit |
-| Keep source as controller | Not required after transition | Yes | Usually |
-| Target needs independent source access | Yes | Not necessarily | Depends on implementation |
-| Norva support verified here | Cross-device continuity only | Not claimed | Not claimed |
+The following completed card is an **authored illustration**, not a record of product tests. The people, title, and pause position are fictional. Each choice follows the stated goal; the last column is work still to do, not a successful check.
 
-The final row is critical: a conceptual match does not establish product availability.
+| Stated situation | Selected workflow | Why it fits | Check before using it |
+| --- | --- | --- | --- |
+| Maya paused the fictional film Harbour Walk at 18:40 on her phone and wants to finish in the TV app using the TV remote | Handoff | The TV should run an independent session with the right saved context | Same profile, authorised source, exact version, and resume position on the supported TV app |
+| Jules wants another person to see the filter panel currently open on a laptop | Mirroring or a supported app/window-sharing mode | The interface itself, not just a video, must appear on the display | Exact sharing scope, display support, and absence of private material |
+| Sam wants to choose a film on a phone and keep using that phone's playback controls for the living-room receiver | Receiver-style casting | The sender controls receiver playback without sharing the whole phone interface | Supported sender and receiver, reachable media, permitted use, and required audio/subtitle tracks |
+
+The decisions differ even though all three people say “put it on the big screen.” Reuse the four columns with your own situation. If the final check is unknown, the choice is provisional; an attractive feature label does not complete it.
 
 ## Verify before acting
 
-For handoff, check [the prerequisite list](/blog/what-must-match-before-a-cross-device-handoff-can-work/). For any other workflow, consult current official documentation from Norva and the relevant device makers. Do not rely on an icon shape, an old tutorial, or a function available in another app.
+For a shared TV, agree on whose progress and preferences should change. The [separate or shared profile decision guide](/blog/separate-profiles-or-one-shared-profile-a-decision-framework/) helps resolve that before playback starts. For a receiver workflow, consult current Norva and device-maker guidance; do not infer support from an icon shape, an old tutorial, or another app.
 
-Before moving any session, use [item identity verification](/blog/how-to-verify-item-identity-before-moving-between-screens/) so a successful connection does not open the wrong version.
+Check audio and subtitle availability on the destination as well. A successful picture does not prove that every [embedded or separate subtitle track](/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/) reached it. Record the app version, receiver model, chosen item version, and visible result if you need help; do not share source credentials.
 
 ## Limitations and common mistakes
 
 Terms vary across platforms. Some products combine discovery, control, and display under one label. This article provides a decision framework, not device-specific setup instructions.
 
-Common mistakes include treating handoff as mirroring, assuming every TV app is a receiver, exposing notifications during mirroring, confusing profile count with simultaneous-use permission, and expecting the same audio/subtitle tracks without source verification.
+Common mistakes include treating handoff as mirroring, assuming every TV app is a receiver, exposing notifications during mirroring, confusing profile count with simultaneous-use permission, and expecting identical tracks on every route. Norva is media-player software; no content or TV subscription is included. A connection method does not grant media rights or override a source's access conditions.
 
 ## Frequently asked questions
 
 ### Does Norva cross-device sync mean it supports casting?
 
-No. Sync and handoff describe continuity of account state. Casting or receiver support requires separate verified product and device documentation.
+Sync alone does not establish casting support. Norva separately lists Google Cast on its public home page. Check the supported sender, receiver, source, and media for the route you intend to use; this guide has not tested that device combination.
 
 ### Is mirroring best for video?
 
@@ -166,11 +172,12 @@ Avoid doing so. Name the expected source and target behaviour so support and hou
 
 ## Your next step
 
-[Review Norva's verified cross-device features](https://norva.tv/#features)
+Choose one row from the selection card, then [review Norva's cross-device features](https://norva.tv/#features) against that goal. Keep the remaining device and source checks explicit before moving a session.
 
 ## Sources
 
-- [W3C Remote Playback API](https://www.w3.org/TR/remote-playback/)
-- [W3C Presentation API](https://www.w3.org/TR/presentation-api/)
+- [Google Cast: sender and receiver overview](https://developers.google.com/cast/docs/overview)
+- [Google support: cast a Chrome tab or screen to a TV](https://support.google.com/chromecast/answer/3228332?hl=en)
+- [W3C Remote Playback API draft](https://www.w3.org/TR/remote-playback/)
+- [W3C Presentation API draft](https://www.w3.org/TR/presentation-api/)
 - [Norva Features](https://norva.tv/#features)
-

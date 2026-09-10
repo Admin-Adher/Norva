@@ -56,6 +56,21 @@ test('empty and small hubs expose all available cards without inventing categori
   assert.ok(!html.includes('data-topic-filter="privacy"'), 'do not offer categories with no translated articles');
 });
 
+test('the cumulative 17-guide selection keeps all cards and truthful counts in every language', () => {
+  const expanded = Array.from({ length: 17 }, (_, index) => ({
+    ...articles[index % articles.length], slug: `guide-${index}`, title: `Guide ${index}`, sequence: index,
+  }));
+  for (const locale of LOCALES) {
+    const ui = loadUi(content, locale.code);
+    const html = renderIndexPage(expanded, { locale, ui });
+    assert.match(html, /data-guide-count="17"/);
+    assert.equal((html.match(/data-library-item /g) || []).length, 17);
+    assert.equal((html.match(/data-topic-filter=/g) || []).length, 7, 'all plus six topics, not seventeen filters');
+    assert.equal((html.match(/<a href="[^"]*guide-\d+\/"/g) || []).length, 22, 'one featured, four recent and seventeen searchable cards');
+    if (locale.code !== 'en') assert.ok(html.includes(escapeHtml(ui.libraryNotice.replace('{count}', new Intl.NumberFormat(locale.code).format(17)))));
+  }
+});
+
 test('HTML interpolation escapes reviewed copy and featured titles', () => {
   const ui = { ...loadUi(content, 'en'), hubTitle: '<script>{accent}</script>', hubTitleAccent: '<img onerror=alert(1)>' };
   const html = renderIndexPage([{ ...articles[0], title: '\"><script>alert(1)</script>' }], { ui });
@@ -147,4 +162,20 @@ test('pagination is incremental, while a one-article hub never hides its only li
   assert.equal(h.visible().length, 25);
   assert.equal(h.control('library-more').hidden, true);
   assert.equal(harness('fr', 1).visible().length, 1);
+});
+
+test('a 17-guide hub exposes the first five highlights and correctly paginates a full search', () => {
+  for (const locale of LOCALES) {
+    const h = harness(locale.code, 17);
+    assert.equal(h.visible().length, 12, 'the remaining twelve accompany five visible highlights');
+    assert.equal(h.control('library-more').hidden, true);
+    h.items.forEach((item, index) => { item.textContent = `Guide ${index}`; });
+    h.input('guide');
+    assert.equal(h.visible().length, 12);
+    assert.equal(h.control('library-status').textContent, h.ui.hubResults.replace('{count}', new Intl.NumberFormat(locale.code).format(17)));
+    assert.equal(h.control('library-more').hidden, false);
+    h.control('library-more').handlers.click();
+    assert.equal(h.visible().length, 17);
+    assert.equal(h.control('library-more').hidden, true);
+  }
 });

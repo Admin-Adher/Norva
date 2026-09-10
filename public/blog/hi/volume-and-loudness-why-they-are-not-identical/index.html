@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="hi" dir="ltr" data-norva-document-language="hi">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>वॉल्यूम बनाम लाउडनेस: दोनों में अंतर क्यों है | Norva Blog</title>
+  <meta name="description" content="समझें कि वॉल्यूम स्लाइडर लाउडनेस मीटर क्यों नहीं है। केवल संख्या से अनुमान लगाए बिना गेन, कार्यक्रम की लाउडनेस, पीक, डायनैमिक रेंज और आउटपुट की तुलना करें।">
+  <link rel="canonical" href="https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="वॉल्यूम बनाम लाउडनेस: दोनों में अंतर क्यों है | Norva Blog">
+  <meta property="og:description" content="समझें कि वॉल्यूम स्लाइडर लाउडनेस मीटर क्यों नहीं है। केवल संख्या से अनुमान लगाए बिना गेन, कार्यक्रम की लाउडनेस, पीक, डायनैमिक रेंज और आउटपुट की तुलना करें।">
+  <meta property="og:url" content="https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="वॉल्यूम बनाम लाउडनेस: दोनों में अंतर क्यों है | Norva Blog">
+  <meta name="twitter:description" content="समझें कि वॉल्यूम स्लाइडर लाउडनेस मीटर क्यों नहीं है। केवल संख्या से अनुमान लगाए बिना गेन, कार्यक्रम की लाउडनेस, पीक, डायनैमिक रेंज और आउटपुट की तुलना करें।">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "वॉल्यूम और लाउडनेस: दोनों एक जैसे क्यों नहीं हैं",
+  "description": "समझें कि वॉल्यूम स्लाइडर लाउडनेस मीटर क्यों नहीं है। केवल संख्या से अनुमान लगाए बिना गेन, कार्यक्रम की लाउडनेस, पीक, डायनैमिक रेंज और आउटपुट की तुलना करें।",
+  "inLanguage": "hi",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "मुखपृष्ठ",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "ब्लॉग",
+      "item": "https://norva.tv/blog/hi/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "वॉल्यूम और लाउडनेस: दोनों एक जैसे क्यों नहीं हैं",
+      "item": "https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">मुख्य सामग्री पर जाएँ</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva का मुखपृष्ठ">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="मुख्य नेविगेशन">
+      <a href="/blog/hi/">ब्लॉग</a>
+      <a class="hide-sm" href="/#how-it-works">यह कैसे काम करता है</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>निःशुल्क परीक्षण शुरू करें</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="पृष्ठ का नेविगेशन पथ"><a href="/">मुखपृष्ठ</a><span class="sep" aria-hidden="true">›</span><a href="/blog/hi/">ब्लॉग</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">वॉल्यूम और लाउडनेस: दोनों एक जैसे क्यों नहीं हैं</span></nav>
+    <details class="blog-language-picker"><summary>भाषा: <bdi>हिन्दी</bdi></summary>
+    <nav aria-label="लेख की भाषा"><ul><li><a href="/blog/volume-and-loudness-why-they-are-not-identical/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/volume-and-loudness-why-they-are-not-identical/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/volume-and-loudness-why-they-are-not-identical/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/volume-and-loudness-why-they-are-not-identical/" lang="hi" dir="ltr" hreflang="hi" aria-current="page">हिन्दी</a></li><li><a href="/blog/tr/volume-and-loudness-why-they-are-not-identical/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/volume-and-loudness-why-they-are-not-identical/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/volume-and-loudness-why-they-are-not-identical/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/volume-and-loudness-why-they-are-not-identical/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/volume-and-loudness-why-they-are-not-identical/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="hi" dir="ltr" data-blog-article="volume-and-loudness-why-they-are-not-identical" data-blog-language="hi">
+      <div class="article-meta">
+        <span class="tag">ऑडियो की गुणवत्ता की समझ</span>
+        <span>लेखक Norva संपादकीय टीम</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 सितंबर 2026</time>
+        <span class="dot">·</span>
+        <span>पढ़ने में 9 मिनट</span>
+      </div>
+      <h1>वॉल्यूम और लाउडनेस: दोनों एक जैसे क्यों नहीं हैं</h1>
+      <p class="lede">एक ही वॉल्यूम सेटिंग अलग सुनने के स्तर दे सकती है। हल की हुई गणना और तुलना सूची से सिग्नल गेन, कार्यक्रम की लाउडनेस, पीक और आउटपुट रास्ता अलग समझें।</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/" hreflang="en">अंग्रेज़ी लेख से अनूदित</a><span>अंग्रेज़ी लेख 25 अगस्त 2026 को प्रकाशित हुआ</span><p>मूल स्क्रीनशॉट और उदाहरण चित्र अंग्रेज़ी में हैं। चित्र विवरण और व्याख्याओं का अनुवाद किया गया है; नए उत्पाद परीक्षण का आभास देने के लिए चित्रों में बदलाव नहीं किया गया है।</p></aside>
+      <nav class="toc" aria-label="इस पृष्ठ पर">
+      <strong>इस पृष्ठ पर</strong>
+      <ul><li><a href="#map-every-gain-stage">गेन के हर चरण का नक्शा बनाएँ</a></li><li><a href="#understand-programme-loudness">कार्यक्रम की लाउडनेस समझें</a></li><li><a href="#separate-peaks-and-dynamic-range">पीक और डायनैमिक रेंज अलग रखें</a></li><li><a href="#original-evidence-gain-loudness-card">मौलिक साक्ष्य: गेन और लाउडनेस कार्ड</a></li><li><a href="#compare-tracks-at-matched-level">समान सुनने के स्तर पर ट्रैक की तुलना करें</a></li><li><a href="#include-normalisation">सामान्यीकरण भी समझें</a></li><li><a href="#include-output-sensitivity-and-room">आउटपुट की संवेदनशीलता और कमरे को शामिल करें</a></li><li><a href="#report-a-level-difference">स्तर के अंतर की रिपोर्ट करें</a></li><li><a href="#common-mistakes-and-limitations">आम गलतियाँ और सीमाएँ</a></li><li><a href="#check-level-after-a-route-change">आउटपुट का रास्ता बदलने के बाद स्तर जाँचें</a></li><li><a href="#frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</a></li><li><a href="#your-next-step">आपका अगला कदम</a></li><li><a href="#sources">संदर्भ स्रोत</a></li></ul>
+    </nav>
+      <blockquote><strong>संक्षेप में:</strong> वॉल्यूम नियंत्रण प्लेबैक शृंखला के किसी बिंदु पर गेन बदलता है। लाउडनेस यानी ध्वनि कितनी तेज़ लगती है; कार्यक्रम की लाउडनेस का मापन एक निर्धारित विधि से ऑडियो सिग्नल के आधार पर उसका अनुमान लगाता है। रिकॉर्डिंग, मिक्स और प्रोसेसिंग उस सिग्नल को प्रभावित करते हैं, जबकि आउटपुट उपकरण और सुनने का वातावरण भी आपको सुनाई देने वाली ध्वनि को प्रभावित करते हैं। स्लाइडर की एक जैसी स्थिति, एक जैसे सुनने के स्तर की गारंटी नहीं है।</blockquote>
+<p>रिमोट छुए बिना एक फ़िल्म दूसरी से बहुत तेज़ सुनाई दे, तो ज़रूरी नहीं कि वॉल्यूम नियंत्रण बदला हो। संभव है कि आप अलग मिक्स, ट्रैक या प्रोसेसिंग मोड सुन रहे हों। दिखाई देने वाली संख्या को पूरे अनुभव का मापन मानने के बजाय नियंत्रण की सेटिंग और उस ऑडियो को अलग समझें जिस पर वह काम करती है।</p>
+<h2 id="map-every-gain-stage">गेन के हर चरण का नक्शा बनाएँ</h2>
+<p>गेन का अर्थ किसी खास चरण पर सिग्नल का स्तर बदलना है। साधारण डिजिटल गेन हर नमूने को एक मान से गुणा करता है; <a href="https://developer.mozilla.org/en-US/docs/Web/API/GainNode" target="_blank" rel="noopener">MDN का GainNode दस्तावेज़</a> यह सिद्धांत दिखाता है। उपभोक्ता का स्लाइडर वह गुणक सीधे दिखाए, यह ज़रूरी नहीं; “50” की सेटिंग न कोई सार्वभौमिक ध्वनिक स्तर है, न महसूस होने वाली लाउडनेस के आधा होने की गारंटी।</p>
+<p>वास्तव में लागू होने वाले नियंत्रण दर्ज करें: प्लेयर वॉल्यूम, ऑपरेटिंग सिस्टम का मीडिया स्तर, टीवी या रिसीवर का स्तर, हेडफ़ोन नियंत्रण और ट्रैक-विशिष्ट समायोजन। कुछ नियंत्रण जुड़े हो सकते हैं, जबकि चुने हुए रास्ते में अन्य चरण स्थिर या बाइपास हो सकते हैं। एक बार में एक नियंत्रण बदलने से पहले जाँचें कि ध्वनि किस उपकरण से निकल रही है।</p>
+<h2 id="understand-programme-loudness">कार्यक्रम की लाउडनेस समझें</h2>
+<p><a href="https://www.itu.int/rec/R-REC-BS.1770/en" target="_blank" rel="noopener">ITU-R BS.1770</a> कार्यक्रम की लाउडनेस और ट्रू-पीक मापने के एल्गोरिदम परिभाषित करता है। कार्यक्रम की लाउडनेस की रीडिंग उस विधि के अंतर्गत ऑडियो सिग्नल बताती है; वह सीधे आपके कानों पर ध्वनि-दाब नहीं मापती। अनुशंसा यह भी बताती है कि मापी गई लाउडनेस अलग श्रोताओं, सामग्री और सुनने की परिस्थितियों में कुछ अनिश्चितता के साथ अनुभूति का अनुमान लगाती है।</p>
+<p>आपको <strong>LUFS</strong> मिल सकता है: डिजिटल फ़ुल स्केल के सापेक्ष लाउडनेस इकाइयाँ। एकीकृत रीडिंग विश्लेषित पूरे कार्यक्रम या अंश को समेटती है, जबकि कम अवधि की रीडिंग छोटी समय-खिड़की बताती है। विधि, चैनल, विश्लेषित अवधि और मापन प्रोसेसिंग से पहले हुआ या बाद में, यह बताएँ। संवाद के छोटे नमूने को पूरी फ़िल्म का परिणाम न कहें।</p>
+<p><a href="https://tech.ebu.ch/publications/r128" target="_blank" rel="noopener">EBU R 128</a> प्रसारण के सामान्यीकरण ढाँचे में लाउडनेस मापन का उपयोग करता है और लाउडनेस को अधिकतम ट्रू-पीक स्तर से अलग रखता है। यह हर उपभोक्ता ऐप का सार्वभौमिक लक्ष्य नहीं है और वॉल्यूम स्लाइडर को मीटर नहीं बना देता।</p>
+<h2 id="separate-peaks-and-dynamic-range">पीक और डायनैमिक रेंज अलग रखें</h2>
+<p>सैंपल पीक रिकॉर्ड किए गए नमूनों के सबसे बड़े निरपेक्ष मान बताते हैं; ट्रू-पीक मापन नमूनों के बीच आने वाले वेवफ़ॉर्म पीक का अनुमान लगाता है। कोई भी संख्या यह नहीं बताती कि कार्यक्रम कितनी लगातार तेज़ रहता है। एक क्षणिक धमाका और लगातार संवाद एक ही पीक तक पहुँच सकते हैं, जबकि कुल सुनने का स्तर अलग हो सकता है।</p>
+<p>डायनैमिक रेंज अपेक्षाकृत शांत और तेज़ सामग्री के बीच अंतर से जुड़ी है। स्थिर वॉल्यूम सेटिंग बढ़ाने से दोनों बढ़ते हैं; इससे शांत संवाद चुनिंदा ढंग से तेज़ ध्वनि-प्रभावों के करीब नहीं आता। डायनैमिक रेंज प्रोसेसिंग एक अलग समस्या हल करती है। उदाहरण के लिए, <a href="https://www.sony.com/electronics/support/televisions-projectors/articles/00203665" target="_blank" rel="noopener">Sony का आधिकारिक मार्गदर्शन</a> निर्दिष्ट टीवी और ऑडियो प्रारूपों पर यह अंतर बदलने वाली सेटिंग बताता है। यह उपकरण-विशिष्ट उदाहरण है, Norva में वही सेटिंग उपलब्ध होने का दावा नहीं।</p>
+<h2 id="original-evidence-gain-loudness-card">मौलिक साक्ष्य: गेन और लाउडनेस कार्ड</h2>
+<p>यह <strong>बनाया गया अंकगणितीय उदाहरण</strong> है, मापा हुआ मीडिया, सुनने का परीक्षण या Norva की वॉल्यूम सेटिंग नहीं। नीचे दिए सैंपल पीक वाले दो डिजिटल सिग्नल और 0.5 का साधारण रैखिक गेन मानें। बिना इकाई वाले पीक मान डिजिटल फ़ुल स्केल के अंश हैं, डेसीबल या ध्वनि-दाब मापन नहीं। कोई अन्य प्रोसेसिंग शामिल नहीं है।</p>
+<div class="table-wrap" role="region" aria-label="स्क्रॉल की जा सकने वाली तालिका" tabindex="0"><table>
+<thead><tr><th scope="col">कल्पित सिग्नल</th><th scope="col">सबसे बड़ा निरपेक्ष इनपुट नमूना</th><th scope="col">गेन गुणक</th><th scope="col">गणना किया गया आउटपुट सैंपल पीक</th><th scope="col">कार्यक्रम की लाउडनेस या कानों पर स्तर</th></tr></thead>
+<tbody><tr><td>A</td><td>0.20</td><td>0.5</td><td>0.20 × 0.5 = 0.10</td><td>इन मानों से अज्ञात</td></tr><tr><td>B</td><td>0.60</td><td>0.5</td><td>0.60 × 0.5 = 0.30</td><td>इन मानों से अज्ञात</td></tr></tbody>
+</table></div>
+<p>समान गेन के बाद आउटपुट पीक अलग रहते हैं, क्योंकि इनपुट सिग्नल अलग हैं। B का गणना किया गया सैंपल पीक A से तीन गुना है, लेकिन इसका अर्थ यह <strong>नहीं</strong> कि B तीन गुना तेज़ सुनाई देता है। हमने दोनों में से किसी भी सिग्नल का बाकी हिस्सा, उसकी अवधि, आउटपुट उपकरण या सुनने की परिस्थितियाँ निर्दिष्ट नहीं की हैं।</p>
+<p>उन पीक को समान कर देने पर भी कार्यक्रम की समान लाउडनेस स्थापित नहीं होगी। यह कार्ड जानबूझकर केवल वहीं तक जाता है जो अंकगणित साबित करता है; वह LUFS रीडिंग, गुणवत्ता क्रम या सुरक्षित हेडफ़ोन स्तर नहीं दे सकता। 0.5 का गुणक यह भी नहीं बताता कि किसी खास उत्पाद का स्लाइडर 50% पर रखना चाहिए।</p>
+<h2 id="compare-tracks-at-matched-level">समान सुनने के स्तर पर ट्रैक की तुलना करें</h2>
+<p>अगर प्रश्न है कि कौन-सा ट्रैक अधिक स्पष्ट है, तो स्तर को अनियंत्रित अंतर न बनने दें। ऐसा मीडिया जिसे चलाने की आपको अनुमति है, उसके साथ यह छोटी तुलना प्रक्रिया अपनाएँ:</p>
+<ol><li>दोनों ट्रैक के लेबल और भूमिकाएँ पहचानें। कमेंट्री ट्रैक मुख्य साउंडट्रैक वाला मिक्स नहीं है; लेबल स्पष्ट न हों तो <a href="/blog/how-to-read-an-audio-track-list-before-playback/" hreflang="en">ऑडियो ट्रैक सूची का मार्गदर्शक <span class="link-language">(अंग्रेज़ी में)</span></a> देखें।</li><li>दोनों संस्करणों में वही अंश चुनें। शुरू और अंत के समय लिखें, और अगर आप इसी समस्या की जाँच कर रहे हैं, तो संवाद के साथ एक अधिक तेज़ क्षण शामिल करें।</li><li>उपकरण, आउटपुट का रास्ता, सुनने की जगह और प्रोसेसिंग की स्थिति समान रखें। अज्ञात सेटिंग को बंद मानने के बजाय अज्ञात लिखें।</li><li>कम और आरामदायक स्तर पर तुलना करें। अनुमानतः समान महसूस होने वाला स्तर बनाते समय जो ट्रैक अधिक तेज़ लगता है उसे कम करें; शांत वाले को इतना न बढ़ाएँ कि तेज़ ध्वनि-प्रभाव असुविधाजनक हो जाए। वैध लाउडनेस मीटर इस्तेमाल कर रहे हों, तो उसकी विधि और दायरा अलग दर्ज करें।</li><li>क्रम बदल-बदलकर सुनें और सीमित अवलोकन लिखें, जैसे “स्तर का अनुमानित मिलान करने के बाद भी संवाद समझना कठिन है।” अनौपचारिक पसंद को मापी गई श्रेष्ठता का दावा न बनाएँ।</li></ol>
+<p>कान से किया गया मिलान अनुमानित होता है, मानक अनुपालन का परिणाम नहीं। अगर अंश की तुलना आराम से नहीं की जा सकती, तो तुलना रोक दें।</p>
+<h2 id="include-normalisation">सामान्यीकरण भी समझें</h2>
+<p>लाउडनेस सामान्यीकरण कार्यक्रम या प्लेबैक का गेन एक निर्धारित लाउडनेस संबंध की ओर समायोजित करता है। इसके बजाय पीक सामान्यीकरण पीक का मानदंड इस्तेमाल करता है। इनमें से कोई शब्द अपने-आप यह नहीं बताता कि कार्यक्रम के भीतर शांत संवाद और तेज़ ध्वनि-प्रभाव करीब लाए गए हैं; उसके लिए उनके आपसी स्तर बदलने होंगे।</p>
+<p>लक्ष्य, मापन का दायरा, पीक का प्रबंधन और उपयोगकर्ता नियंत्रण कार्यान्वयन पर निर्भर करते हैं। किसी सक्रिय सामान्यीकरण या डायनैमिक प्रोसेसिंग के लिए ऐप, टीवी, रिसीवर या हेडफ़ोन के दस्तावेज़ देखें। यह लेख Norva का सामान्यीकरण लक्ष्य स्थापित नहीं करता और न Norva द्वारा EBU R 128 लागू करने का दावा करता है।</p>
+<h2 id="include-output-sensitivity-and-room">आउटपुट की संवेदनशीलता और कमरे को शामिल करें</h2>
+<p>हेडफ़ोन और स्पीकर एक ही डिजिटल सिग्नल या दिखाई देने वाली सेटिंग से अलग ध्वनिक स्तर पैदा कर सकते हैं। फ़िट, दूरी, कमरे के प्रतिबिंब, पृष्ठभूमि का शोर और उपकरण की प्रोसेसिंग भी सुनने को प्रभावित करते हैं। आउटपुट बदलने पर तुलना बदल गई है, भले स्क्रीन की संख्या वही रहे।</p>
+<p>अगर कमरे के शोर में शांत बारीकी दब जाती हो, तो लगातार वॉल्यूम बढ़ाने के बजाय वातावरण जाँचें या उपयुक्त <a href="/blog/hi/captions-and-subtitles-why-the-accessibility-goals-can-differ/">कैप्शन की जानकारी</a> इस्तेमाल करें। <a href="https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening" target="_blank" rel="noopener">WHO का सुरक्षित सुनने का मार्गदर्शन</a> ध्वनि के स्तर और उसके संपर्क की अवधि, दोनों पर ज़ोर देता है; वह विराम लेने और शोर वाली जगहों पर आवाज़ बढ़ाने की ज़रूरत कम करने की सलाह देता है। केवल आरामदायक महसूस होना संपर्क का मापन नहीं है।</p>
+<h2 id="report-a-level-difference">स्तर के अंतर की रिपोर्ट करें</h2>
+<p>आइटम/संस्करण, सटीक ट्रैक लेबल, अंश के समय, लागू वॉल्यूम नियंत्रण, प्रोसेसिंग की स्थिति, आउटपुट का रास्ता और उपकरण, कमरे की परिस्थितियाँ, तुलना विधि और परिणाम लिखें। वैध मापन केवल उपलब्ध होने पर, उनके दायरे के साथ शामिल करें। “लाउडनेस मापन नहीं हुआ; टीवी प्रोसेसिंग अज्ञात है” स्लाइडर से बनाया गया काल्पनिक डेसीबल अनुमान देने से अधिक उपयोगी है।</p>
+<p><a href="/blog/the-complete-guide-to-understanding-audio-quality/" hreflang="en">ऑडियो गुणवत्ता का पूरा मार्गदर्शक <span class="link-language">(अंग्रेज़ी में)</span></a> शृंखला के बाकी हिस्सों का नक्शा देता है।</p>
+<h2 id="common-mistakes-and-limitations">आम गलतियाँ और सीमाएँ</h2>
+<p>अलग उपकरणों के स्लाइडर की संख्याओं की तुलना करने, पीक मिलान को लाउडनेस मिलान समझने या बिना सत्यापन वाली फ़ोन की ध्वनि-स्तर रीडिंग को कैलिब्रेट किया हुआ प्रमाण मानने से बचें। स्पीकर के पास फ़ोन का माइक्रोफ़ोन भी हेडफ़ोन के अंदर की ध्वनि का सीधा मापन नहीं है। अनौपचारिक रूप से सुनना औपचारिक लाउडनेस अनुपालन परीक्षण, सुनने की क्षमता का आकलन या किसी कोडेक अथवा प्लेयर के बेहतर होने का प्रमाण नहीं है।</p>
+<h2 id="check-level-after-a-route-change">आउटपुट का रास्ता बदलने के बाद स्तर जाँचें</h2>
+<p>स्पीकर से हेडफ़ोन या रिसीवर पर जाते समय, प्लेबैक शुरू या फिर शुरू करने से पहले गंतव्य का स्तर जाँचें और कम से शुरू करें। पिछली संख्या कॉपी करने के बजाय सक्रिय गेन चरण लिखें। रास्ता और मीडिया एक साथ बदले हों, तो यह तय करने से पहले कि नए ट्रैक ने अंतर पैदा किया, कम स्तर पर किसी ज्ञात अंश पर लौटें।</p>
+<h2 id="frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</h2>
+<h3 id="is-volume-the-same-as-programme-loudness">क्या वॉल्यूम और कार्यक्रम की लाउडनेस एक ही हैं?</h3>
+<p>नहीं। वॉल्यूम नियंत्रण प्लेबैक के किसी चरण पर गेन तय करता है। कार्यक्रम की लाउडनेस रीडिंग एक निर्दिष्ट मापन विधि से सिग्नल का वर्णन करती है; इनमें से कोई भी अकेला आपके कानों पर ध्वनिक स्तर तय नहीं करता।</p>
+<h3 id="does-the-same-slider-value-produce-the-same-loudness-on-two-devices">क्या दो उपकरणों पर समान स्लाइडर मान समान लाउडनेस देता है?</h3>
+<p>नहीं। गेन संरचना, एम्प्लीफ़ायर, आउटपुट संवेदनशीलता, स्पीकर या हेडफ़ोन, कमरा और प्रोसेसिंग अलग होते हैं।</p>
+<h3 id="is-peak-normalisation-the-same-as-loudness-normalisation">क्या पीक सामान्यीकरण और लाउडनेस सामान्यीकरण एक ही हैं?</h3>
+<p>नहीं। पीक और लाउडनेस मापन अलग गुण बताते हैं और अलग प्रक्रियाओं का आधार बनते हैं।</p>
+<section class="article-cta"><h2 id="your-next-step">आपका अगला कदम</h2>
+<p>दूसरे संस्करण की तुलना से पहले वह ट्रैक और आउटपुट रास्ता दर्ज करें जो आपने वास्तव में इस्तेमाल किया। फिर किसी अदस्तावेज़ित सामान्यीकरण मोड को मान लिए बिना <a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="volume-and-loudness-why-they-are-not-identical">Norva की प्लेबैक सुविधाएँ देखें</a>। Norva मीडिया चलाने वाला सॉफ़्टवेयर है; इसमें सामग्री या टीवी सदस्यता शामिल नहीं है। आपका मीडिया ऐसे संगत स्रोत से आना चाहिए जिसके उपयोग की आपको अनुमति है।</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">संदर्भ स्रोत</h2>
+<ul><li><a href="https://developer.mozilla.org/en-US/docs/Web/API/GainNode" target="_blank" rel="noopener">MDN: डिजिटल गेन और GainNode</a></li><li><a href="https://www.itu.int/rec/R-REC-BS.1770/en" target="_blank" rel="noopener">ITU-R BS.1770: कार्यक्रम की लाउडनेस और ट्रू-पीक</a></li><li><a href="https://tech.ebu.ch/publications/r128" target="_blank" rel="noopener">EBU R 128: लाउडनेस सामान्यीकरण</a></li><li><a href="https://www.sony.com/electronics/support/televisions-projectors/articles/00203665" target="_blank" rel="noopener">Sony: डायनैमिक रेंज सेटिंग और लागू प्रारूप</a></li><li><a href="https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening" target="_blank" rel="noopener">WHO: सुरक्षित सुनना, स्तर और संपर्क की अवधि</a></li><li><a href="https://norva.tv/#features">Norva की सुविधाएँ</a></li></ul>
+</section>
+      <section class="related">
+      <h2>संबंधित लेख</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-understanding-audio-quality/" hreflang="en" lang="en">
+          <span class="tag">Audio Quality Literacy</span>
+          <div class="card-title">The Complete Guide to Understanding Audio Quality</div>
+          <span class="link-language" lang="hi">अंग्रेज़ी में</span>
+          <p>A source-to-listener model for audio quality across mix, encoding, loudness, channels, delivery, decoding, routing, output devices, room, and preferences.</p>
+        </a>
+        <a class="card" href="/blog/how-to-read-an-audio-track-list-before-playback/" hreflang="en" lang="en">
+          <span class="tag">Audio Track Management</span>
+          <div class="card-title">How to Read an Audio Track List Before Playback</div>
+          <span class="link-language" lang="hi">अंग्रेज़ी में</span>
+          <p>Learn what an audio list confirms, what remains ambiguous, and how to verify language and role before committing to a viewing session.</p>
+        </a>
+        <a class="card" href="/blog/hi/captions-and-subtitles-why-the-accessibility-goals-can-differ/">
+          <span class="tag">कैप्शन की सुलभता</span>
+          <div class="card-title">कैप्शन और उपशीर्षक: सुलभता के उद्देश्य अलग क्यों हो सकते हैं</div>
+
+          <p>बोली, वक्ता, ध्वनि, संगीत, अनुवाद, समय और वास्तविक संकेतों के आधार पर कैप्शन व उपशीर्षक की कार्यात्मक तुलना।</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="पादलेख नेविगेशन">
+        <a href="/">मुखपृष्ठ</a>
+        <a href="/blog/hi/">ब्लॉग</a>
+        <a href="/#features">लाभ</a>
+        <a href="/#pricing">मूल्य निर्धारण</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fhi%2F">सहायता</a>
+        <a href="/terms.html">शर्तें</a>
+        <a href="/privacy.html">गोपनीयता</a>
+        <a href="/mentions-legales.html">कानूनी सूचना</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva मीडिया चलाने और व्यवस्थित करने वाला सॉफ़्टवेयर है। यह मीडिया उपलब्ध नहीं कराता। उपयोग के लिए ऐसा संगत स्रोत चाहिए जिसके आप स्वामी हों या जिसे उपयोग करने की आपको अनुमति हो।</p>
+    </div>
+  </footer>
+</body>
+</html>

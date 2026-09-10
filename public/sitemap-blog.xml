@@ -176,7 +176,7 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
-    <lastmod>2026-08-27</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -194,13 +194,13 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/</loc>
-    <lastmod>2026-08-25</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -224,7 +224,7 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
-    <lastmod>2026-08-23</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -242,13 +242,13 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
-    <lastmod>2026-08-22</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://norva.tv/blog/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
-    <lastmod>2026-08-21</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -380,7 +380,7 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/organize-seasons-episodes/</loc>
-    <lastmod>2026-08-10</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -476,7 +476,7 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/offline-storage-management-handbook/</loc>
-    <lastmod>2026-08-02</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -524,7 +524,7 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/the-complete-guide-to-understanding-video-quality/</loc>
-    <lastmod>2026-07-29</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -644,7 +644,7 @@
   </url>
   <url>
     <loc>https://norva.tv/blog/personal-media-search-guide/</loc>
-    <lastmod>2026-07-19</lastmod>
+    <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -733,7 +733,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/fr/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/fr/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -751,7 +781,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/fr/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/fr/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fr/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -775,7 +835,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/pt-BR/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/pt-BR/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -793,7 +883,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/pt-BR/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/pt-BR/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/pt-BR/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -817,7 +937,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/es/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/es/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -835,7 +985,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/es/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/es/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/es/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -859,7 +1039,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/hi/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/hi/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -877,7 +1087,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/hi/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/hi/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/hi/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -901,7 +1141,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/tr/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/tr/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -919,7 +1189,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/tr/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/tr/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/tr/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -943,7 +1243,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/bn/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/bn/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -961,7 +1291,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/bn/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/bn/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/bn/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -985,7 +1345,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/ar/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/ar/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -1003,7 +1393,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/ar/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/ar/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/ar/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -1027,7 +1447,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/id/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/id/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -1045,7 +1495,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/id/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/id/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/id/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -1069,7 +1549,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/fil/organize-seasons-episodes/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/fil/what-is-norva-media-player/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/personal-media-search-guide/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/handoff-mirroring-or-casting-know-which-workflow-you-need/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/separate-profiles-or-one-shared-profile-a-decision-framework/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -1087,7 +1597,37 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://norva.tv/blog/fil/the-complete-guide-to-understanding-video-quality/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://norva.tv/blog/fil/resolution-and-bitrate-why-they-are-not-the-same/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/volume-and-loudness-why-they-are-not-identical/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/bandwidth-throughput-latency-and-jitter-explained/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/cold-start-or-warm-start-measure-the-right-tv-launch/</loc>
+    <lastmod>2026-09-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://norva.tv/blog/fil/offline-storage-management-handbook/</loc>
     <lastmod>2026-09-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>

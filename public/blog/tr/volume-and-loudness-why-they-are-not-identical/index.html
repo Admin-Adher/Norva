@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="tr" dir="ltr" data-norva-document-language="tr">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Ses düzeyi ve ses yüksekliği: Neden farklıdır? | Norva Blog</title>
+  <meta name="description" content="Ses kaydırıcısı neden ses yüksekliği ölçer değildir? Kazancı, program ses yüksekliğini, tepeleri, dinamik aralığı ve çıkışı tek sayıdan tahmin etmeden karşılaştırın.">
+  <link rel="canonical" href="https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Ses düzeyi ve ses yüksekliği: Neden farklıdır? | Norva Blog">
+  <meta property="og:description" content="Ses kaydırıcısı neden ses yüksekliği ölçer değildir? Kazancı, program ses yüksekliğini, tepeleri, dinamik aralığı ve çıkışı tek sayıdan tahmin etmeden karşılaştırın.">
+  <meta property="og:url" content="https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Ses düzeyi ve ses yüksekliği: Neden farklıdır? | Norva Blog">
+  <meta name="twitter:description" content="Ses kaydırıcısı neden ses yüksekliği ölçer değildir? Kazancı, program ses yüksekliğini, tepeleri, dinamik aralığı ve çıkışı tek sayıdan tahmin etmeden karşılaştırın.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Ses düzeyi ve algılanan ses yüksekliği: Neden aynı değiller?",
+  "description": "Ses kaydırıcısı neden ses yüksekliği ölçer değildir? Kazancı, program ses yüksekliğini, tepeleri, dinamik aralığı ve çıkışı tek sayıdan tahmin etmeden karşılaştırın.",
+  "inLanguage": "tr",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Ana sayfa",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/tr/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Ses düzeyi ve algılanan ses yüksekliği: Neden aynı değiller?",
+      "item": "https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">İçeriğe geç</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva ana sayfası">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Ana gezinme">
+      <a href="/blog/tr/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">Nasıl çalışır</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Ücretsiz denemeyi başlat</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Gezinme yolu"><a href="/">Ana sayfa</a><span class="sep" aria-hidden="true">›</span><a href="/blog/tr/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">Ses düzeyi ve algılanan ses yüksekliği: Neden aynı değiller?</span></nav>
+    <details class="blog-language-picker"><summary>Dil: <bdi>Türkçe</bdi></summary>
+    <nav aria-label="Makale dili"><ul><li><a href="/blog/volume-and-loudness-why-they-are-not-identical/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/volume-and-loudness-why-they-are-not-identical/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/volume-and-loudness-why-they-are-not-identical/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/volume-and-loudness-why-they-are-not-identical/" lang="hi" dir="ltr" hreflang="hi">हिन्दी</a></li><li><a href="/blog/tr/volume-and-loudness-why-they-are-not-identical/" lang="tr" dir="ltr" hreflang="tr" aria-current="page">Türkçe</a></li><li><a href="/blog/bn/volume-and-loudness-why-they-are-not-identical/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/volume-and-loudness-why-they-are-not-identical/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/volume-and-loudness-why-they-are-not-identical/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/volume-and-loudness-why-they-are-not-identical/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="tr" dir="ltr" data-blog-article="volume-and-loudness-why-they-are-not-identical" data-blog-language="tr">
+      <div class="article-meta">
+        <span class="tag">Ses kalitesi okuryazarlığı</span>
+        <span>Yazan Norva Editör Ekibi</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 Eylül 2026</time>
+        <span class="dot">·</span>
+        <span>6 dakikalık okuma</span>
+      </div>
+      <h1>Ses düzeyi ve algılanan ses yüksekliği: Neden aynı değiller?</h1>
+      <p class="lede">Aynı ses ayarı farklı dinleme düzeyleri oluşturabilir. Uygulamalı hesap ve karşılaştırma listesiyle sinyal kazancını, program ses yüksekliğini, tepeleri ve çıkış yolunu ayırın.</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/" hreflang="en">İngilizce makaleden çevrilmiştir</a><span>İngilizce makalenin yayımlanma tarihi: 25 Ağustos 2026</span><p>Özgün ekran görüntüleri ve açıklayıcı çizimler İngilizcedir. Görsel açıklamaları ve metinler çevrilmiştir; görseller, yeni bir ürün testi yapılmış izlenimi verecek şekilde değiştirilmemiştir.</p></aside>
+      <nav class="toc" aria-label="Bu sayfada">
+      <strong>Bu sayfada</strong>
+      <ul><li><a href="#map-every-gain-stage">Her kazanç aşamasını belirleyin</a></li><li><a href="#understand-programme-loudness">Program ses yüksekliğini anlayın</a></li><li><a href="#separate-peaks-and-dynamic-range">Tepeleri ve dinamik aralığı ayırın</a></li><li><a href="#original-evidence-gain-loudness-card">Özgün katkı: Kazanç-ses yüksekliği kartı</a></li><li><a href="#compare-tracks-at-matched-level">Ses parçalarını eşleştirilmiş düzeyde karşılaştırın</a></li><li><a href="#include-normalisation">Normalleştirmeyi dahil edin</a></li><li><a href="#include-output-sensitivity-and-room">Çıkış duyarlılığını ve odayı dahil edin</a></li><li><a href="#report-a-level-difference">Düzey farkını bildirin</a></li><li><a href="#common-mistakes-and-limitations">Yaygın hatalar ve sınırlamalar</a></li><li><a href="#check-level-after-a-route-change">Yol değişikliğinden sonra düzeyi kontrol edin</a></li><li><a href="#frequently-asked-questions">Sık sorulan sorular</a></li><li><a href="#your-next-step">Sonraki adımınız</a></li><li><a href="#sources">Kaynaklar</a></li></ul>
+    </nav>
+      <blockquote><strong>Kısaca:</strong> Ses düzeyi kontrolü, oynatma zincirinin bir noktasındaki kazancı değiştirir. Ses yüksekliği, sesin ne kadar güçlü algılandığıdır; program ses yüksekliği ölçümleri, tanımlanmış bir yöntemle ses sinyalinden bunu tahmin eder. Kayıt, miks ve işleme sinyali etkilerken çıkış cihazı ile dinleme ortamı da duyduklarınızı etkiler. Kaydırıcının aynı konumu, aynı dinleme düzeyini garanti etmez.</blockquote>
+<p>Kumandaya dokunmadan bir film diğerinden çok daha yüksek duyuluyorsa ses düzeyi kontrolü mutlaka değişmiş değildir. Farklı bir miks, ses parçası veya işleme modu duyuyor olabilirsiniz. Gösterilen sayıyı bütün deneyimin ölçümü saymak yerine kontrol ayarını, etkilediği sesten ayırarak başlayın.</p>
+<h2 id="map-every-gain-stage">Her kazanç aşamasını belirleyin</h2>
+<p>Kazanç, sinyali belirli bir aşamada ölçeklemek demektir. Basit dijital kazanç her örneği bir değerle çarpar; <a href="https://developer.mozilla.org/en-US/docs/Web/API/GainNode" target="_blank" rel="noopener">MDN'nin GainNode belgeleri</a> bu ilkeyi gösterir. Tüketiciye sunulan kaydırıcı bu çarpanı doğrudan göstermek zorunda değildir; “50” ayarı evrensel bir akustik düzey veya algılanan ses yüksekliğinin yarısı garantisi değildir.</p>
+<p>Gerçekten uygulanan kontrolleri kaydedin: Oynatıcı ses düzeyi, işletim sisteminin medya düzeyi, TV veya alıcı düzeyi, kulaklık kontrolleri ve parça başına ayarlar. Bazı kontroller bağlantılı olabilir; başka aşamalar ise seçilen yol için sabitlenmiş veya atlanmış olabilir. Kontrolleri tek tek değiştirmeden önce sesi hangi cihazın ürettiğini kontrol edin.</p>
+<h2 id="understand-programme-loudness">Program ses yüksekliğini anlayın</h2>
+<p><a href="https://www.itu.int/rec/R-REC-BS.1770/en" target="_blank" rel="noopener">ITU-R BS.1770</a>, program ses yüksekliği ve gerçek tepe ölçümü için algoritmalar tanımlar. Program ses yüksekliği değeri, bir ses sinyalini o yöntem altında tanımlar; kulaklarınızdaki ses basıncını doğrudan ölçmez. Tavsiye ayrıca ölçülen ses yüksekliğinin algıyı, dinleyicilere, malzemeye ve dinleme koşullarına göre değişen bir belirsizlikle tahmin ettiğini belirtir.</p>
+<p>Dijital tam ölçeğe referanslı ses yüksekliği birimleri olan <strong>LUFS</strong> ile karşılaşabilirsiniz. Bütünleşik ölçüm, analiz edilen programı veya kesiti kapsar; daha kısa süreli ölçümler ise daha küçük bir zaman aralığını tanımlar. Yöntemi, kanalları, analiz edilen aralığı ve ölçümün işlemeden önce mi sonra mı yapıldığını belirtin. Kısa bir diyalog örneğini tüm filmin sonucu olarak etiketlemeyin.</p>
+<p><a href="https://tech.ebu.ch/publications/r128" target="_blank" rel="noopener">EBU R 128</a>, yayın normalleştirme çerçevesinde ses yüksekliği ölçümlerini kullanır ve ses yüksekliğini en büyük gerçek tepe düzeyinden ayırır. Her tüketici uygulaması için evrensel hedef değildir ve ses kaydırıcısını ölçere dönüştürmez.</p>
+<h2 id="separate-peaks-and-dynamic-range">Tepeleri ve dinamik aralığı ayırın</h2>
+<p>Örnek tepeleri, kaydedilmiş en büyük mutlak örnek değerlerini tanımlar; gerçek tepe ölçümü ise örnekler arasında oluşabilecek dalga biçimi tepelerini tahmin eder. Bu sayılardan hiçbiri programın ne kadar sürekli yüksek kaldığını söylemez. Kısa bir darbe ile kesintisiz diyalog aynı tepeye ulaşabilirken genel dinleme düzeyleri farklı olabilir.</p>
+<p>Dinamik aralık, daha sessiz ve daha yüksek malzeme arasındaki karşıtlıkla ilgilidir. Sabit ses düzeyi ayarını artırmak ikisini de yükseltir; sessiz diyaloğu seçici biçimde yüksek efektlere yaklaştırmaz. Dinamik aralık işleme farklı bir sorunu ele alır. Örneğin <a href="https://www.sony.com/electronics/support/televisions-projectors/articles/00203665" target="_blank" rel="noopener">Sony'nin resmî rehberi</a>, belirli TV'ler ve ses biçimlerinde bu karşıtlığı değiştiren ayarları açıklar. Bu, cihaza özgü bir örnektir; Norva'nın aynı ayarı sunduğu iddiası değildir.</p>
+<h2 id="original-evidence-gain-loudness-card">Özgün katkı: Kazanç-ses yüksekliği kartı</h2>
+<p>Bu, <strong>oluşturulmuş bir aritmetik örneğidir</strong>; ölçülmüş medya, dinleme testi veya Norva ses ayarı değildir. Aşağıdaki örnek tepelere sahip iki dijital sinyal ve 0.5 değerinde basit doğrusal kazanç varsayalım. Birimsiz tepe değerleri dijital tam ölçeğin kesirleridir; desibel veya ses basıncı ölçümü değildir. Başka işleme dahil değildir.</p>
+<div class="table-wrap" role="region" aria-label="Kaydırılabilir tablo" tabindex="0"><table>
+<thead><tr><th scope="col">Oluşturulmuş sinyal</th><th scope="col">En büyük mutlak giriş örneği</th><th scope="col">Kazanç çarpanı</th><th scope="col">Hesaplanan çıkış örnek tepesi</th><th scope="col">Program ses yüksekliği veya kulaktaki düzey</th></tr></thead>
+<tbody><tr><td>A</td><td>0.20</td><td>0.5</td><td>0.20 × 0.5 = 0.10</td><td>Bu değerlerden bilinemez</td></tr><tr><td>B</td><td>0.60</td><td>0.5</td><td>0.60 × 0.5 = 0.30</td><td>Bu değerlerden bilinemez</td></tr></tbody>
+</table></div>
+<p>Giriş sinyalleri farklı olduğundan aynı kazanç, farklı çıkış tepeleri bırakır. B'nin hesaplanan örnek tepesi A'nın üç katıdır; ancak bu B'nin üç kat yüksek duyulduğu anlamına <strong>gelmez</strong>. İki sinyalin geri kalanını, süresini, çıkış ekipmanını veya dinleme koşullarını belirtmedik.</p>
+<p>Bu tepeleri eşleştirmek de eşit program ses yüksekliğini ortaya koymaz. Kart, bilinçli olarak aritmetiğin kanıtladığı yerde durur; LUFS değeri, kalite sıralaması veya güvenli kulaklık düzeyi sağlayamaz. 0.5 çarpanı, belirli bir ürünün kaydırıcısının %50'ye ayarlanması gerektiği anlamına da gelmez.</p>
+<h2 id="compare-tracks-at-matched-level">Ses parçalarını eşleştirilmiş düzeyde karşılaştırın</h2>
+<p>Sorunuz hangi ses parçasının daha anlaşılır olduğuysa düzeyin kontrol edilmemiş fark olmasına izin vermeyin. Oynatma yetkiniz olan medya ile şu küçük karşılaştırma sürecini kullanın:</p>
+<ol><li>İki parçanın etiketlerini ve rollerini belirleyin. Yorum parçası, ana ses kuşağıyla aynı miks değildir; etiketler belirsizse <a href="/blog/how-to-read-an-audio-track-list-before-playback/" hreflang="en">ses parçası listesi rehberini <span class="link-language">(İngilizce)</span></a> kullanın.</li><li>İki sürümde de aynı bölümü seçin. Başlangıç ve bitiş zamanlarını kaydedin; araştırdığınız sorun buysa diyalogla birlikte daha yüksek bir anı da dahil edin.</li><li>Cihazı, çıkış yolunu, dinleme konumunu ve işleme durumunu sabit tutun. Bilinmeyen ayarları kapalı varsaymak yerine kaydedin.</li><li>Düşük, rahat bir düzeyde karşılaştırın. Algılanan düzeyi kabaca eşleştirirken daha yüksek duyulan parçayı azaltın; sessiz parçayı, yüksek bir efekt rahatsız edici olana kadar artırmayın. Geçerli bir ses yüksekliği ölçer kullanıyorsanız yöntemini ve kapsamını ayrıca kaydedin.</li><li>Sırayı değiştirin ve “yaklaşık düzey eşleştirmesinden sonra diyalogu takip etmek hâlâ zor” gibi dar kapsamlı bir gözlem yazın. Gayriresmî tercihi ölçülmüş üstünlük iddiasına dönüştürmeyin.</li></ol>
+<p>Kulakla yapılan eşleştirme yaklaşık sonuçtur, standart uygunluğu sonucu değildir. Bölüm rahatça karşılaştırılamıyorsa karşılaştırmayı durdurun.</p>
+<h2 id="include-normalisation">Normalleştirmeyi dahil edin</h2>
+<p>Ses yüksekliği normalleştirmesi, program veya oynatma kazancını tanımlanmış bir ses yüksekliği ilişkisine doğru ayarlar. Tepe normalleştirmesi ise tepe ölçütü kullanır. Bu terimlerden hiçbiri tek başına bir programdaki sessiz diyalog ile yüksek efektlerin birbirine yaklaştırıldığı anlamına gelmez; bunun için göreli düzeylerinin değişmesi gerekir.</p>
+<p>Hedefler, ölçüm kapsamı, tepelerin ele alınışı ve kullanıcı kontrolleri uygulamaya bağlıdır. Etkin normalleştirme veya dinamik işleme olup olmadığını uygulama, TV, alıcı ya da kulaklık belgelerinden kontrol edin. Bu makale Norva için normalleştirme hedefi ortaya koymaz ve Norva'nın EBU R 128 uyguladığını iddia etmez.</p>
+<h2 id="include-output-sensitivity-and-room">Çıkış duyarlılığını ve odayı dahil edin</h2>
+<p>Kulaklıklar ve hoparlörler, aynı dijital sinyalden veya gösterilen ayardan farklı akustik düzeyler üretebilir. Oturuş, mesafe, oda yansımaları, arka plan gürültüsü ve cihaz işleme de dinlemeyi etkiler. Çıkışı değiştirirseniz ekrandaki sayı aynı kalsa bile karşılaştırmayı değiştirmiş olursunuz.</p>
+<p>Sessiz ayrıntı oda gürültüsünde kayboluyorsa sesi sürekli artırmak yerine ortamı araştırın veya uygun <a href="/blog/tr/captions-and-subtitles-why-the-accessibility-goals-can-differ/">erişilebilirlik altyazısı kapsamından</a> yararlanın. <a href="https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening" target="_blank" rel="noopener">Dünya Sağlık Örgütünün güvenli dinleme rehberi</a>, hem ses düzeyini hem maruz kalma süresini vurgular; ara vermeyi ve gürültülü ortamlarda sesi artırma ihtiyacını azaltmayı önerir. Rahatlık tek başına maruziyet ölçümü değildir.</p>
+<h2 id="report-a-level-difference">Düzey farkını bildirin</h2>
+<p>Öğe/sürümü, tam parça etiketlerini, kesit zamanlarını, geçerli ses kontrollerini, işleme durumunu, çıkış yolunu ve cihazını, oda koşullarını, karşılaştırma yöntemini ve sonucu kaydedin. Geçerli ölçümleri yalnızca mevcutsa kapsamlarıyla birlikte ekleyin. “Ses yüksekliği ölçümü yok; TV işleme durumu bilinmiyor” ifadesi, kaydırıcıdan uydurulmuş desibel tahmininden daha yararlıdır.</p>
+<p><a href="/blog/the-complete-guide-to-understanding-audio-quality/" hreflang="en">Eksiksiz ses kalitesi rehberi <span class="link-language">(İngilizce)</span></a>, zincirin geri kalanını gösterir.</p>
+<h2 id="common-mistakes-and-limitations">Yaygın hatalar ve sınırlamalar</h2>
+<p>Cihazlar arasında kaydırıcı sayıları karşılaştırmaktan, tepe eşleştirmesini ses yüksekliği eşleştirmesi saymaktan veya doğrulanmamış telefon ses düzeyi değerini kalibre edilmiş kanıt olarak kullanmaktan kaçının. Hoparlörün yanındaki telefon mikrofonu da kulaklık içindeki sesin doğrudan ölçümü değildir. Gayriresmî dinleme; resmî ses yüksekliği uygunluk testi, işitme değerlendirmesi veya bir kodeğin ya da oynatıcının daha iyi olduğunun kanıtı değildir.</p>
+<h2 id="check-level-after-a-route-change">Yol değişikliğinden sonra düzeyi kontrol edin</h2>
+<p>Hoparlörden kulaklığa veya alıcıya geçerken oynatmayı başlatmadan ya da sürdürmeden önce hedefin düzeyini kontrol edin ve düşük başlayın. Önceki sayıyı kopyalamak yerine etkin kazanç aşamalarını kaydedin. Yolu ve medyayı aynı anda değiştirdiyseniz farkı yeni ses parçasının yarattığına karar vermeden önce düşük düzeyde bildiğiniz bir bölüme dönün.</p>
+<h2 id="frequently-asked-questions">Sık sorulan sorular</h2>
+<h3 id="is-volume-the-same-as-programme-loudness">Ses düzeyi, program ses yüksekliğiyle aynı mıdır?</h3>
+<p>Hayır. Ses düzeyi kontrolü, oynatmanın bir aşamasında kazancı ayarlar. Program ses yüksekliği değeri, sinyali belirtilmiş bir ölçüm yöntemi altında niteler; ikisinden hiçbiri tek başına kulaklarınızdaki akustik düzeyi belirlemez.</p>
+<h3 id="does-the-same-slider-value-produce-the-same-loudness-on-two-devices">Aynı kaydırıcı değeri iki cihazda aynı ses yüksekliğini üretir mi?</h3>
+<p>Hayır. Kazanç yapısı, yükselteç, çıkış duyarlılığı, hoparlör veya kulaklık, oda ve işleme farklıdır.</p>
+<h3 id="is-peak-normalisation-the-same-as-loudness-normalisation">Tepe normalleştirmesi ile ses yüksekliği normalleştirmesi aynı mıdır?</h3>
+<p>Hayır. Tepe ve ses yüksekliği ölçümleri farklı özellikleri tanımlar ve farklı iş akışlarını destekler.</p>
+<section class="article-cta"><h2 id="your-next-step">Sonraki adımınız</h2>
+<p>Başka bir sürümü karşılaştırmadan önce gerçekten kullandığınız parçayı ve çıkış yolunu kaydedin. Ardından belgelenmemiş bir normalleştirme modu varsaymadan <a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="volume-and-loudness-why-they-are-not-identical">Norva'nın oynatma özelliklerini keşfedin</a>. Norva, içeriğin veya TV aboneliğinin dahil olmadığı medya oynatıcı yazılımıdır; medyanız kullanma yetkiniz olan uyumlu bir kaynaktan gelmelidir.</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Kaynaklar</h2>
+<ul><li><a href="https://developer.mozilla.org/en-US/docs/Web/API/GainNode" target="_blank" rel="noopener">MDN: Dijital kazanç ve GainNode</a></li><li><a href="https://www.itu.int/rec/R-REC-BS.1770/en" target="_blank" rel="noopener">ITU-R BS.1770: Program ses yüksekliği ve gerçek tepe</a></li><li><a href="https://tech.ebu.ch/publications/r128" target="_blank" rel="noopener">EBU R 128: Ses yüksekliği normalleştirmesi</a></li><li><a href="https://www.sony.com/electronics/support/televisions-projectors/articles/00203665" target="_blank" rel="noopener">Sony: Dinamik aralık ayarları ve geçerli biçimler</a></li><li><a href="https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening" target="_blank" rel="noopener">Dünya Sağlık Örgütü: Güvenli dinleme, düzey ve maruz kalma süresi</a></li><li><a href="https://norva.tv/#features">Norva özellikleri</a></li></ul>
+</section>
+      <section class="related">
+      <h2>İlgili yazılar</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-understanding-audio-quality/" hreflang="en" lang="en">
+          <span class="tag">Audio Quality Literacy</span>
+          <div class="card-title">The Complete Guide to Understanding Audio Quality</div>
+          <span class="link-language" lang="tr">İngilizce</span>
+          <p>A source-to-listener model for audio quality across mix, encoding, loudness, channels, delivery, decoding, routing, output devices, room, and preferences.</p>
+        </a>
+        <a class="card" href="/blog/how-to-read-an-audio-track-list-before-playback/" hreflang="en" lang="en">
+          <span class="tag">Audio Track Management</span>
+          <div class="card-title">How to Read an Audio Track List Before Playback</div>
+          <span class="link-language" lang="tr">İngilizce</span>
+          <p>Learn what an audio list confirms, what remains ambiguous, and how to verify language and role before committing to a viewing session.</p>
+        </a>
+        <a class="card" href="/blog/tr/captions-and-subtitles-why-the-accessibility-goals-can-differ/">
+          <span class="tag">Altyazı erişilebilirliği</span>
+          <div class="card-title">Erişilebilir altyazılar ve diyalog altyazıları: Amaçları neden farklı olabilir?</div>
+
+          <p>Konuşma, konuşmacı, ses, müzik, çeviri, zamanlama ve gerçek altyazı içeriği açısından erişilebilir altyazılar ile diyalog altyazılarının işlevsel karşılaştırması.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Alt bilgi gezinmesi">
+        <a href="/">Ana sayfa</a>
+        <a href="/blog/tr/">Blog</a>
+        <a href="/#features">Avantajlar</a>
+        <a href="/#pricing">Fiyatlandırma</a>
+        <a href="/support.html?returnTo=%2Fblog%2Ftr%2F">Destek</a>
+        <a href="/terms.html">Kullanım koşulları</a>
+        <a href="/privacy.html">Gizlilik</a>
+        <a href="/mentions-legales.html">Yasal bilgiler</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva bir medya oynatıcı ve düzenleyicidir. Medya sağlamaz. Kullanım için sahibi olduğunuz veya erişim yetkinizin bulunduğu uyumlu bir kaynak gerekir.</p>
+    </div>
+  </footer>
+</body>
+</html>

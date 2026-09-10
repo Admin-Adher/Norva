@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "batches": [
+    {
+      "id": "seven-reviewed-guides-ten-languages-20260910",
+      "sources": [
+        {
+          "content_id": 14,
+          "source_slug": "norva-getting-started",
+          "source_published_at": "2026-07-14T15:28:15.824Z"
+        },
+        {
+          "content_id": 15,
+          "source_slug": "connect-compatible-media-source-norva",
+          "source_published_at": "2026-08-10T06:00:00+02:00"
+        },
+        {
+          "content_id": 27,
+          "source_slug": "organize-large-movie-collection",
+          "source_published_at": "2026-07-14T15:28:15.824Z"
+        },
+        {
+          "content_id": 89,
+          "source_slug": "what-is-norva-media-player",
+          "source_published_at": "2026-07-17T20:00:00+02:00"
+        },
+        {
+          "content_id": 522,
+          "source_slug": "captions-and-subtitles-why-the-accessibility-goals-can-differ",
+          "source_published_at": "2026-08-24T06:00:00+02:00"
+        },
+        {
+          "content_id": 542,
+          "source_slug": "legibility-and-readability-two-different-viewing-problems",
+          "source_published_at": "2026-08-24T20:00:00+02:00"
+        },
+        {
+          "content_id": 562,
+          "source_slug": "resolution-and-bitrate-why-they-are-not-the-same",
+          "source_published_at": "2026-08-25T06:00:00+02:00"
+        }
+      ]
+    },
+    {
+      "id": "seo-batch2-20260910",
+      "sources": [
+        {
+          "content_id": 28,
+          "source_slug": "organize-seasons-episodes",
+          "source_published_at": "2026-08-10T20:00:00+02:00"
+        },
+        {
+          "content_id": 161,
+          "source_slug": "personal-media-search-guide",
+          "source_published_at": "2026-07-19T20:00:00+02:00"
+        },
+        {
+          "content_id": 422,
+          "source_slug": "handoff-mirroring-or-casting-know-which-workflow-you-need",
+          "source_published_at": "2026-08-21T20:00:00+02:00"
+        },
+        {
+          "content_id": 442,
+          "source_slug": "separate-profiles-or-one-shared-profile-a-decision-framework",
+          "source_published_at": "2026-08-22T06:00:00+02:00"
+        },
+        {
+          "content_id": 502,
+          "source_slug": "built-in-and-separate-subtitle-tracks-what-viewers-need-to-know",
+          "source_published_at": "2026-08-23T20:00:00+02:00"
+        },
+        {
+          "content_id": 561,
+          "source_slug": "the-complete-guide-to-understanding-video-quality",
+          "source_published_at": "2026-07-29T20:00:00+02:00"
+        },
+        {
+          "content_id": 582,
+          "source_slug": "volume-and-loudness-why-they-are-not-identical",
+          "source_published_at": "2026-08-25T20:00:00+02:00"
+        },
+        {
+          "content_id": 602,
+          "source_slug": "bandwidth-throughput-latency-and-jitter-explained",
+          "source_published_at": "2026-08-26T06:00:00+02:00"
+        },
+        {
+          "content_id": 662,
+          "source_slug": "cold-start-or-warm-start-measure-the-right-tv-launch",
+          "source_published_at": "2026-08-27T20:00:00+02:00"
+        },
+        {
+          "content_id": 721,
+          "source_slug": "offline-storage-management-handbook",
+          "source_published_at": "2026-08-02T20:00:00+02:00"
+        }
+      ]
+    }
+  ]
+}

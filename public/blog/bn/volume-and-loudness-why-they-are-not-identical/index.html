@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="bn" dir="ltr" data-norva-document-language="bn">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>ভলিউম বনাম লাউডনেস: কেন আলাদা | Norva Blog</title>
+  <meta name="description" content="ভলিউম স্লাইডার কেন লাউডনেস মিটার নয় বুঝুন। সংখ্যা দেখে অনুমান না করে গেইন, প্রোগ্রামের লাউডনেস, পিক, ডায়নামিক রেঞ্জ ও আউটপুটের বদল তুলনা করুন।">
+  <link rel="canonical" href="https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/volume-and-loudness-why-they-are-not-identical/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="ভলিউম বনাম লাউডনেস: কেন আলাদা | Norva Blog">
+  <meta property="og:description" content="ভলিউম স্লাইডার কেন লাউডনেস মিটার নয় বুঝুন। সংখ্যা দেখে অনুমান না করে গেইন, প্রোগ্রামের লাউডনেস, পিক, ডায়নামিক রেঞ্জ ও আউটপুটের বদল তুলনা করুন।">
+  <meta property="og:url" content="https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ভলিউম বনাম লাউডনেস: কেন আলাদা | Norva Blog">
+  <meta name="twitter:description" content="ভলিউম স্লাইডার কেন লাউডনেস মিটার নয় বুঝুন। সংখ্যা দেখে অনুমান না করে গেইন, প্রোগ্রামের লাউডনেস, পিক, ডায়নামিক রেঞ্জ ও আউটপুটের বদল তুলনা করুন।">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "ভলিউম ও লাউডনেস: কেন এক জিনিস নয়",
+  "description": "ভলিউম স্লাইডার কেন লাউডনেস মিটার নয় বুঝুন। সংখ্যা দেখে অনুমান না করে গেইন, প্রোগ্রামের লাউডনেস, পিক, ডায়নামিক রেঞ্জ ও আউটপুটের বদল তুলনা করুন।",
+  "inLanguage": "bn",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "প্রথম পাতা",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "ব্লগ",
+      "item": "https://norva.tv/blog/bn/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "ভলিউম ও লাউডনেস: কেন এক জিনিস নয়",
+      "item": "https://norva.tv/blog/bn/volume-and-loudness-why-they-are-not-identical/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">মূল বিষয়বস্তুতে যান</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva-এর প্রথম পাতা">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="প্রধান নেভিগেশন">
+      <a href="/blog/bn/">ব্লগ</a>
+      <a class="hide-sm" href="/#how-it-works">যেভাবে কাজ করে</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>বিনামূল্যের ট্রায়াল শুরু করুন</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="পাতার নেভিগেশন পথ"><a href="/">প্রথম পাতা</a><span class="sep" aria-hidden="true">›</span><a href="/blog/bn/">ব্লগ</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">ভলিউম ও লাউডনেস: কেন এক জিনিস নয়</span></nav>
+    <details class="blog-language-picker"><summary>ভাষা: <bdi>বাংলা</bdi></summary>
+    <nav aria-label="লেখার ভাষা"><ul><li><a href="/blog/volume-and-loudness-why-they-are-not-identical/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/volume-and-loudness-why-they-are-not-identical/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/volume-and-loudness-why-they-are-not-identical/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/volume-and-loudness-why-they-are-not-identical/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/volume-and-loudness-why-they-are-not-identical/" lang="hi" dir="ltr" hreflang="hi">हिन्दी</a></li><li><a href="/blog/tr/volume-and-loudness-why-they-are-not-identical/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/volume-and-loudness-why-they-are-not-identical/" lang="bn" dir="ltr" hreflang="bn" aria-current="page">বাংলা</a></li><li><a href="/blog/ar/volume-and-loudness-why-they-are-not-identical/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/volume-and-loudness-why-they-are-not-identical/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/volume-and-loudness-why-they-are-not-identical/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="bn" dir="ltr" data-blog-article="volume-and-loudness-why-they-are-not-identical" data-blog-language="bn">
+      <div class="article-meta">
+        <span class="tag">অডিওর মান সম্পর্কে ধারণা</span>
+        <span>লেখক Norva সম্পাদকীয় দল</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">১১ সেপ্টেম্বর, ২০২৬</time>
+        <span class="dot">·</span>
+        <span>পড়তে 7 মিনিট</span>
+      </div>
+      <h1>ভলিউম ও লাউডনেস: কেন এক জিনিস নয়</h1>
+      <p class="lede">একই ভলিউম সেটিংয়ে শোনার মাত্রা আলাদা হতে পারে। সমাধানসহ হিসাব ও তুলনার তালিকা দিয়ে সিগন্যাল গেইন, প্রোগ্রামের লাউডনেস, পিক ও আউটপুটের পথ আলাদা করুন।</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/volume-and-loudness-why-they-are-not-identical/" hreflang="en">ইংরেজি লেখা থেকে অনূদিত</a><span>ইংরেজি লেখাটি ২৫ আগস্ট, ২০২৬ তারিখে প্রকাশিত</span><p>মূল স্ক্রিনশট ও উদাহরণের ছবিগুলো ইংরেজিতে রয়েছে। ছবির বিবরণ ও ব্যাখ্যা অনুবাদ করা হয়েছে; নতুন পণ্য পরীক্ষা হয়েছে এমন ধারণা দিতে ছবিগুলো বদলানো হয়নি।</p></aside>
+      <nav class="toc" aria-label="এই পাতায়">
+      <strong>এই পাতায়</strong>
+      <ul><li><a href="#map-every-gain-stage">গেইনের প্রতিটি ধাপ চিহ্নিত করুন</a></li><li><a href="#understand-programme-loudness">প্রোগ্রামের লাউডনেস বুঝুন</a></li><li><a href="#separate-peaks-and-dynamic-range">পিক ও ডায়নামিক রেঞ্জ আলাদা করুন</a></li><li><a href="#original-evidence-gain-loudness-card">মৌলিক প্রমাণ: গেইন-লাউডনেস কার্ড</a></li><li><a href="#compare-tracks-at-matched-level">মাত্রা মিলিয়ে ট্র্যাক তুলনা করুন</a></li><li><a href="#include-normalisation">নর্মালাইজেশনও বিবেচনা করুন</a></li><li><a href="#include-output-sensitivity-and-room">আউটপুটের সংবেদনশীলতা ও ঘর বিবেচনা করুন</a></li><li><a href="#report-a-level-difference">মাত্রার পার্থক্য রিপোর্ট করুন</a></li><li><a href="#common-mistakes-and-limitations">সাধারণ ভুল ও সীমাবদ্ধতা</a></li><li><a href="#check-level-after-a-route-change">পথ বদলানোর পরে মাত্রা দেখুন</a></li><li><a href="#frequently-asked-questions">প্রায়শই জিজ্ঞাসিত প্রশ্ন</a></li><li><a href="#your-next-step">আপনার পরবর্তী পদক্ষেপ</a></li><li><a href="#sources">তথ্যসূত্র</a></li></ul>
+    </nav>
+      <blockquote><strong>সংক্ষেপে:</strong> ভলিউম নিয়ন্ত্রণ প্লেব্যাকের ধারার কোনো এক স্থানে গেইন বদলায়। লাউডনেস হলো শব্দ কতটা জোরে মনে হয়; প্রোগ্রামের লাউডনেস মাপা হয় নির্দিষ্ট পদ্ধতিতে অডিও সিগন্যাল থেকে তার অনুমান করে। রেকর্ডিং, মিক্স ও প্রসেসিং সেই সিগন্যালকে প্রভাবিত করে, আর আউটপুট ডিভাইস ও শোনার পরিবেশও আপনি কী শুনছেন তা প্রভাবিত করে। স্লাইডারের একই অবস্থান একই শ্রবণস্তর নিশ্চিত করে না।</blockquote>
+<p>রিমোট না ছুঁয়েও একটি চলচ্চিত্র অন্যটির চেয়ে অনেক জোরে শোনালে ভলিউম নিয়ন্ত্রণ বদলেছে—এমন নয়। আপনি হয়তো আলাদা মিক্স, ট্র্যাক বা প্রসেসিং মোড শুনছেন। প্রদর্শিত সংখ্যাকে পুরো অভিজ্ঞতার পরিমাপ না ধরে, নিয়ন্ত্রণের সেটিং ও যে অডিওতে সেটি কাজ করে তা আলাদা করা দিয়ে শুরু করুন।</p>
+<h2 id="map-every-gain-stage">গেইনের প্রতিটি ধাপ চিহ্নিত করুন</h2>
+<p>গেইন মানে নির্দিষ্ট ধাপে সিগন্যালের মাত্রা পরিবর্তন করা। সাধারণ ডিজিটাল গেইন প্রতিটি স্যাম্পলকে একটি মান দিয়ে গুণ করে; <a href="https://developer.mozilla.org/en-US/docs/Web/API/GainNode" target="_blank" rel="noopener">MDN-এর GainNode নথি</a> এই নীতি দেখায়। ভোক্তাদের স্লাইডারে সেই গুণক সরাসরি দেখানো বাধ্যতামূলক নয়, আর “50” সেটিং কোনো সর্বজনীন ধ্বনিক স্তর বা অনুভূত লাউডনেস অর্ধেক হওয়ার নিশ্চয়তা নয়।</p>
+<p>বাস্তবে প্রযোজ্য নিয়ন্ত্রণগুলো লিখুন: প্লেয়ারের ভলিউম, অপারেটিং সিস্টেমের মিডিয়া স্তর, টিভি বা রিসিভারের স্তর, হেডফোন নিয়ন্ত্রণ এবং ট্র্যাকভিত্তিক সমন্বয়। কিছু নিয়ন্ত্রণ যুক্ত থাকতে পারে, আবার নির্বাচিত পথে অন্য ধাপ স্থির বা বাইপাস হতে পারে। একবারে একটি নিয়ন্ত্রণ বদলানোর আগে কোন ডিভাইস থেকে শব্দ আসছে তা দেখুন।</p>
+<h2 id="understand-programme-loudness">প্রোগ্রামের লাউডনেস বুঝুন</h2>
+<p><a href="https://www.itu.int/rec/R-REC-BS.1770/en" target="_blank" rel="noopener">ITU-R BS.1770</a> প্রোগ্রামের লাউডনেস ও ট্রু-পিক মাপার অ্যালগরিদম সংজ্ঞায়িত করে। প্রোগ্রাম-লাউডনেস রিডিং সেই পদ্ধতিতে একটি অডিও সিগন্যালকে বর্ণনা করে; এটি সরাসরি আপনার কানে শব্দচাপ মাপে না। সুপারিশে আরও বলা আছে যে পরিমাপ করা লাউডনেস শ্রোতা, উপকরণ ও শোনার পরিস্থিতিভেদে কিছু অনিশ্চয়তাসহ অনুভূতির অনুমান দেয়।</p>
+<p>আপনি <strong>LUFS</strong> দেখতে পারেন, অর্থাৎ ডিজিটাল ফুল স্কেলের সাপেক্ষে লাউডনেসের একক। ইন্টিগ্রেটেড রিডিং বিশ্লেষিত প্রোগ্রাম বা অংশজুড়ে হিসাব করে, আর স্বল্পমেয়াদি রিডিং ছোট সময়সীমা বর্ণনা করে। পদ্ধতি, চ্যানেল, বিশ্লেষিত সময়সীমা এবং প্রসেসিংয়ের আগে না পরে মাপা হয়েছে তা বলুন। সংলাপের ছোট নমুনাকে পুরো চলচ্চিত্রের ফল বলবেন না।</p>
+<p><a href="https://tech.ebu.ch/publications/r128" target="_blank" rel="noopener">EBU R 128</a> সম্প্রচারের নর্মালাইজেশন কাঠামোতে লাউডনেস মাপ ব্যবহার করে এবং লাউডনেসকে সর্বোচ্চ ট্রু-পিক স্তর থেকে আলাদা করে। এটি প্রতিটি ভোক্তা অ্যাপের সর্বজনীন লক্ষ্য নয় এবং ভলিউম স্লাইডারকে মিটারে পরিণত করে না।</p>
+<h2 id="separate-peaks-and-dynamic-range">পিক ও ডায়নামিক রেঞ্জ আলাদা করুন</h2>
+<p>স্যাম্পল পিক রেকর্ড করা স্যাম্পলের সবচেয়ে বড় পরম মান বর্ণনা করে; ট্রু-পিক পরিমাপ স্যাম্পলের মাঝখানে ঘটতে পারে এমন তরঙ্গের চূড়া অনুমান করে। কোনো সংখ্যাই বলে না প্রোগ্রামটি কতটা একটানা জোরে থাকে। ক্ষণিকের আঘাতের শব্দ ও চলমান সংলাপ একই পিকে পৌঁছালেও সামগ্রিক শ্রবণস্তর আলাদা হতে পারে।</p>
+<p>ডায়নামিক রেঞ্জ তুলনামূলক শান্ত ও জোরে অংশের পার্থক্য নিয়ে। স্থির ভলিউম সেটিং বাড়ালে দুটিই বাড়ে; এতে বেছে বেছে শান্ত সংলাপকে জোরে সাউন্ড এফেক্টের কাছাকাছি আনা হয় না। ডায়নামিক রেঞ্জ প্রসেসিং ভিন্ন সমস্যার সমাধান করে। যেমন, <a href="https://www.sony.com/electronics/support/televisions-projectors/articles/00203665" target="_blank" rel="noopener">Sony-র আনুষ্ঠানিক নির্দেশনা</a> নির্দিষ্ট টিভি ও অডিও ফরম্যাটে এই পার্থক্য বদলানোর সেটিং বর্ণনা করে। এটি ডিভাইসভিত্তিক উদাহরণ, Norva একই সেটিং দেয়—এমন দাবি নয়।</p>
+<h2 id="original-evidence-gain-loudness-card">মৌলিক প্রমাণ: গেইন-লাউডনেস কার্ড</h2>
+<p>এটি <strong>বানানো গাণিতিক উদাহরণ</strong>, পরিমাপ করা মিডিয়া, শোনার পরীক্ষা বা Norva-র ভলিউম সেটিং নয়। নিচের স্যাম্পল পিকসহ দুটি ডিজিটাল সিগন্যাল এবং 0.5-এর সাধারণ লিনিয়ার গেইন ধরুন। এককবিহীন পিক মানগুলো ডিজিটাল ফুল স্কেলের ভগ্নাংশ, ডেসিবেল বা শব্দচাপের পরিমাপ নয়। অন্য কোনো প্রসেসিং অন্তর্ভুক্ত নেই।</p>
+<div class="table-wrap" role="region" aria-label="স্ক্রল করা যায় এমন সারণি" tabindex="0"><table>
+<thead><tr><th scope="col">কল্পিত সিগন্যাল</th><th scope="col">ইনপুট স্যাম্পলের সবচেয়ে বড় পরম মান</th><th scope="col">গেইন গুণক</th><th scope="col">হিসাব করা আউটপুট স্যাম্পল পিক</th><th scope="col">প্রোগ্রামের লাউডনেস বা কানে পৌঁছানো স্তর</th></tr></thead>
+<tbody><tr><td>A</td><td>0.20</td><td>0.5</td><td>0.20 × 0.5 = 0.10</td><td>এই মান থেকে অজানা</td></tr><tr><td>B</td><td>0.60</td><td>0.5</td><td>0.60 × 0.5 = 0.30</td><td>এই মান থেকে অজানা</td></tr></tbody>
+</table></div>
+<p>ইনপুট সিগন্যাল আলাদা বলে একই গেইনেও আউটপুট পিক আলাদা থাকে। B-এর হিসাব করা স্যাম্পল পিক A-এর তিন গুণ, কিন্তু তার মানে B তিন গুণ জোরে শোনায় <strong>না</strong>। কোনো সিগন্যালের বাকি অংশ, তার দৈর্ঘ্য, আউটপুট সরঞ্জাম বা শোনার পরিস্থিতি আমরা নির্দিষ্ট করিনি।</p>
+<p>পিকগুলো মেলালেও প্রোগ্রামের সমান লাউডনেস প্রমাণিত হবে না। কার্ডটি ইচ্ছাকৃতভাবে গণিতে যতটুকু প্রমাণ হয় সেখানেই থামে; এটি LUFS রিডিং, মানের ক্রম বা হেডফোনের নিরাপদ স্তর দিতে পারে না। 0.5 গুণক মানেও কোনো নির্দিষ্ট পণ্যের স্লাইডার 50%-এ রাখা উচিত—এমন নয়।</p>
+<h2 id="compare-tracks-at-matched-level">মাত্রা মিলিয়ে ট্র্যাক তুলনা করুন</h2>
+<p>কোন ট্র্যাক বেশি স্পষ্ট—এটাই প্রশ্ন হলে, মাত্রার পার্থক্যকে অনিয়ন্ত্রিত রাখবেন না। চালানোর অনুমতি আছে এমন মিডিয়ায় এই ছোট তুলনা পদ্ধতি ব্যবহার করুন:</p>
+<ol><li>দুই ট্র্যাকের লেবেল ও ভূমিকা শনাক্ত করুন। ধারাভাষ্যের ট্র্যাক মূল সাউন্ডট্র্যাকের একই মিক্স নয়; লেবেল অস্পষ্ট হলে <a href="/blog/how-to-read-an-audio-track-list-before-playback/" hreflang="en">অডিও ট্র্যাকের তালিকা নির্দেশিকা <span class="link-language">(ইংরেজিতে)</span></a> ব্যবহার করুন।</li><li>দুই সংস্করণে একই অংশ বেছে নিন। শুরু ও শেষের সময় লিখুন, আর যে সমস্যা দেখছেন তার জন্য প্রাসঙ্গিক হলে সংলাপের সঙ্গে একটি জোরে মুহূর্ত রাখুন।</li><li>ডিভাইস, আউটপুটের পথ, শোনার স্থান ও প্রসেসিংয়ের অবস্থা অপরিবর্তিত রাখুন। অজানা সেটিং বন্ধ আছে ধরে না নিয়ে অজানা লিখুন।</li><li>কম, স্বস্তিকর স্তরে তুলনা করুন। আনুমানিক অনুভূত মাত্রা মেলাতে যে ট্র্যাক বেশি জোরে মনে হয় সেটি কমান; শান্ত ট্র্যাকটি এত বাড়াবেন না যে জোরে সাউন্ড এফেক্ট অস্বস্তিকর হয়। বৈধ লাউডনেস মিটার ব্যবহার করলে তার পদ্ধতি ও পরিসর আলাদাভাবে লিখুন।</li><li>পালাক্রম বদলে শুনুন এবং সীমিত পর্যবেক্ষণ লিখুন, যেমন “মাত্রা আনুমানিক মেলানোর পরেও সংলাপ অনুসরণ করা কঠিন।” অনানুষ্ঠানিক পছন্দকে পরিমাপে প্রমাণিত শ্রেষ্ঠত্বের দাবি বানাবেন না।</li></ol>
+<p>কানে শুনে মেলানো আনুমানিক, মানদণ্ড মেনে চলার ফল নয়। অংশটি স্বস্তিতে তুলনা করা না গেলে তুলনা বন্ধ করুন।</p>
+<h2 id="include-normalisation">নর্মালাইজেশনও বিবেচনা করুন</h2>
+<p>লাউডনেস নর্মালাইজেশন প্রোগ্রাম বা প্লেব্যাকের গেইনকে একটি নির্দিষ্ট লাউডনেস সম্পর্কের দিকে সমন্বয় করে। অন্যদিকে পিক নর্মালাইজেশন পিকের মানদণ্ড ব্যবহার করে। কোনো শব্দই একা বোঝায় না যে প্রোগ্রামের শান্ত সংলাপ ও জোরে সাউন্ড এফেক্ট কাছাকাছি আনা হচ্ছে; তার জন্য তাদের আপেক্ষিক মাত্রা বদলাতে হবে।</p>
+<p>লক্ষ্য, মাপার পরিসর, পিক সামলানো এবং ব্যবহারকারীর নিয়ন্ত্রণ বাস্তবায়নের ওপর নির্ভর করে। কোনো সক্রিয় নর্মালাইজেশন বা ডায়নামিক প্রসেসিং আছে কি না অ্যাপ, টিভি, রিসিভার বা হেডফোনের নথিতে দেখুন। এই নিবন্ধ Norva-র নর্মালাইজেশনের লক্ষ্য স্থির করে না বা Norva EBU R 128 প্রয়োগ করে বলে দাবি করে না।</p>
+<h2 id="include-output-sensitivity-and-room">আউটপুটের সংবেদনশীলতা ও ঘর বিবেচনা করুন</h2>
+<p>একই ডিজিটাল সিগন্যাল বা প্রদর্শিত সেটিং থেকে হেডফোন ও স্পিকার ভিন্ন ধ্বনিক স্তর তৈরি করতে পারে। ফিট, দূরত্ব, ঘরের প্রতিফলন, পেছনের শব্দ ও ডিভাইস প্রসেসিংও শোনায় প্রভাব ফেলে। আউটপুট বদলালে তুলনাও বদলায়, স্ক্রিনের সংখ্যা একই থাকলেও।</p>
+<p>ঘরের শব্দে শান্ত খুঁটিনাটি ঢাকা পড়লে ক্রমাগত ভলিউম বাড়ানোর বদলে পরিবেশ দেখুন বা উপযুক্ত <a href="/blog/bn/captions-and-subtitles-why-the-accessibility-goals-can-differ/">ক্যাপশনের তথ্য</a> ব্যবহার করুন। <a href="https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening" target="_blank" rel="noopener">WHO-র নিরাপদে শোনার নির্দেশনা</a> শব্দের মাত্রা ও সেই শব্দে থাকার সময়—দুটির গুরুত্ব দেয় এবং বিরতি ও কোলাহলপূর্ণ জায়গায় শব্দ বাড়ানোর প্রয়োজন কমানোর পরামর্শ দেয়। স্বস্তি লাগলেই তা শব্দের সংস্পর্শের পরিমাপ নয়।</p>
+<h2 id="report-a-level-difference">মাত্রার পার্থক্য রিপোর্ট করুন</h2>
+<p>আইটেম/সংস্করণ, ট্র্যাকের সঠিক লেবেল, অংশের সময়, প্রযোজ্য ভলিউম নিয়ন্ত্রণ, প্রসেসিংয়ের অবস্থা, আউটপুটের পথ ও ডিভাইস, ঘরের পরিস্থিতি, তুলনা পদ্ধতি ও ফল লিখুন। বৈধ মাপ পাওয়া গেলেই কেবল তার পরিসরসহ দিন। স্লাইডার থেকে ডেসিবেলের মনগড়া অনুমানের চেয়ে “লাউডনেস মাপা হয়নি; টিভির প্রসেসিং অজানা” বেশি কাজে আসে।</p>
+<p><a href="/blog/the-complete-guide-to-understanding-audio-quality/" hreflang="en">অডিওর মান বোঝার সম্পূর্ণ নির্দেশিকা <span class="link-language">(ইংরেজিতে)</span></a> ধারার বাকি অংশগুলো দেখায়।</p>
+<h2 id="common-mistakes-and-limitations">সাধারণ ভুল ও সীমাবদ্ধতা</h2>
+<p>ভিন্ন ডিভাইসের স্লাইডারের সংখ্যা তুলনা করা, পিক মেলানোকে লাউডনেস মেলানো ধরা বা যাচাই না করা ফোনের শব্দমাত্রার রিডিংকে ক্যালিব্রেট করা প্রমাণ হিসেবে ব্যবহার করা এড়িয়ে চলুন। স্পিকারের পাশে ফোনের মাইক্রোফোনও হেডফোনের ভেতরের শব্দের সরাসরি পরিমাপ নয়। অনানুষ্ঠানিকভাবে শোনা লাউডনেসের মানদণ্ড মেনে চলার কোনো আনুষ্ঠানিক পরীক্ষা, শ্রবণশক্তি মূল্যায়ন বা কোডেক কিংবা প্লেয়ার ভালো হওয়ার প্রমাণ নয়।</p>
+<h2 id="check-level-after-a-route-change">পথ বদলানোর পরে মাত্রা দেখুন</h2>
+<p>স্পিকার থেকে হেডফোন বা রিসিভারে গেলে চালানো শুরু বা আবার শুরুর আগে গন্তব্যের মাত্রা যাচাই করুন এবং কম থেকে শুরু করুন। আগের সংখ্যা কপি না করে সক্রিয় গেইনের ধাপ লিখুন। পথ ও মিডিয়া একসঙ্গে বদলালে নতুন ট্র্যাক পার্থক্যের কারণ—এমন সিদ্ধান্তের আগে কম মাত্রায় পরিচিত অংশে ফিরে যান।</p>
+<h2 id="frequently-asked-questions">প্রায়শই জিজ্ঞাসিত প্রশ্ন</h2>
+<h3 id="is-volume-the-same-as-programme-loudness">ভলিউম কি প্রোগ্রামের লাউডনেসের সমান?</h3>
+<p>না। ভলিউম নিয়ন্ত্রণ প্লেব্যাকের কোনো ধাপে গেইন নির্ধারণ করে। প্রোগ্রামের লাউডনেস রিডিং নির্দিষ্ট মাপার পদ্ধতিতে সিগন্যালকে বর্ণনা করে; কোনোটিই একা আপনার কানে ধ্বনিক স্তর নির্ধারণ করে না।</p>
+<h3 id="does-the-same-slider-value-produce-the-same-loudness-on-two-devices">স্লাইডারের একই মান কি দুটি ডিভাইসে একই লাউডনেস দেয়?</h3>
+<p>না। গেইনের গঠন, অ্যামপ্লিফায়ার, আউটপুটের সংবেদনশীলতা, স্পিকার বা হেডফোন, ঘর ও প্রসেসিং আলাদা।</p>
+<h3 id="is-peak-normalisation-the-same-as-loudness-normalisation">পিক নর্মালাইজেশন কি লাউডনেস নর্মালাইজেশনের সমান?</h3>
+<p>না। পিক ও লাউডনেস মাপ আলাদা বৈশিষ্ট্য বর্ণনা করে এবং ভিন্ন পদ্ধতিতে কাজে লাগে।</p>
+<section class="article-cta"><h2 id="your-next-step">আপনার পরবর্তী পদক্ষেপ</h2>
+<p>আরেকটি সংস্করণ তুলনার আগে প্রকৃতপক্ষে ব্যবহৃত ট্র্যাক ও আউটপুটের পথ লিখুন। তারপর কোনো অনথিভুক্ত নর্মালাইজেশন মোড ধরে না নিয়ে <a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="volume-and-loudness-why-they-are-not-identical">Norva-র প্লেব্যাক ফিচার দেখুন</a>। Norva মিডিয়া-প্লেয়ার সফটওয়্যার; এর সঙ্গে কোনো কনটেন্ট বা টিভি সাবস্ক্রিপশন অন্তর্ভুক্ত নয়। আপনার মিডিয়া এমন সামঞ্জস্যপূর্ণ উৎস থেকে আসতে হবে যা ব্যবহারের অনুমতি আপনার আছে।</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">তথ্যসূত্র</h2>
+<ul><li><a href="https://developer.mozilla.org/en-US/docs/Web/API/GainNode" target="_blank" rel="noopener">MDN: ডিজিটাল গেইন ও GainNode</a></li><li><a href="https://www.itu.int/rec/R-REC-BS.1770/en" target="_blank" rel="noopener">ITU-R BS.1770: প্রোগ্রামের লাউডনেস ও ট্রু-পিক</a></li><li><a href="https://tech.ebu.ch/publications/r128" target="_blank" rel="noopener">EBU R 128: লাউডনেস নর্মালাইজেশন</a></li><li><a href="https://www.sony.com/electronics/support/televisions-projectors/articles/00203665" target="_blank" rel="noopener">Sony: ডায়নামিক রেঞ্জ সেটিং ও প্রযোজ্য ফরম্যাট</a></li><li><a href="https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening" target="_blank" rel="noopener">WHO: নিরাপদে শোনা, মাত্রা ও শব্দের সংস্পর্শে থাকার সময়</a></li><li><a href="https://norva.tv/#features">Norva-র ফিচার</a></li></ul>
+</section>
+      <section class="related">
+      <h2>সংশ্লিষ্ট লেখা</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-understanding-audio-quality/" hreflang="en" lang="en">
+          <span class="tag">Audio Quality Literacy</span>
+          <div class="card-title">The Complete Guide to Understanding Audio Quality</div>
+          <span class="link-language" lang="bn">ইংরেজিতে</span>
+          <p>A source-to-listener model for audio quality across mix, encoding, loudness, channels, delivery, decoding, routing, output devices, room, and preferences.</p>
+        </a>
+        <a class="card" href="/blog/how-to-read-an-audio-track-list-before-playback/" hreflang="en" lang="en">
+          <span class="tag">Audio Track Management</span>
+          <div class="card-title">How to Read an Audio Track List Before Playback</div>
+          <span class="link-language" lang="bn">ইংরেজিতে</span>
+          <p>Learn what an audio list confirms, what remains ambiguous, and how to verify language and role before committing to a viewing session.</p>
+        </a>
+        <a class="card" href="/blog/bn/captions-and-subtitles-why-the-accessibility-goals-can-differ/">
+          <span class="tag">ক্যাপশনের অভিগম্যতা</span>
+          <div class="card-title">ক্যাপশন ও সাবটাইটেল: অভিগম্যতার লক্ষ্য কেন আলাদা হতে পারে</div>
+
+          <p>বক্তব্য, বক্তা, শব্দ, সংগীত, অনুবাদ, সময় এবং বাস্তব সংকেতের পূর্ণতা দিয়ে ক্যাপশন ও সাবটাইটেলের কার্যকরী তুলনা।</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="ফুটার নেভিগেশন">
+        <a href="/">প্রথম পাতা</a>
+        <a href="/blog/bn/">ব্লগ</a>
+        <a href="/#features">সুবিধা</a>
+        <a href="/#pricing">মূল্যতালিকা</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fbn%2F">সহায়তা</a>
+        <a href="/terms.html">শর্তাবলি</a>
+        <a href="/privacy.html">গোপনীয়তা</a>
+        <a href="/mentions-legales.html">আইনি বিজ্ঞপ্তি</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva একটি মিডিয়া প্লেয়ার ও সংগঠক। এটি মিডিয়া সরবরাহ করে না। ব্যবহার করতে এমন সামঞ্জস্যপূর্ণ উৎস প্রয়োজন যার মালিক আপনি অথবা যেটি ব্যবহারের অনুমতি আপনার রয়েছে।</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -377,6 +377,546 @@
       "updated_at": "2026-09-10T19:21:54.340Z",
       "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
       "translation_sha256": "485f3d4df3ead86cc03bf01036d71180a0ba2744527e9abe1a75469981eb03da"
+    },
+    "fr/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "f4d35433bc4ff5529013e4c141312343024c6d0b1d3ede5ed2b5d0f7121fc60d"
+    },
+    "fr/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "da43cae90e56b2d9edad1390f7070bc9f5cb8f5dd9878baf85a299f301558629"
+    },
+    "fr/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "cd76ff152c5eee1c57bb567f1ff63257d4643e562125c3ea86495f400f8aeaa0"
+    },
+    "fr/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "196ee049e0887c54da8fffe9d7a5b4119be7b222cacee8c07957b1a44ea3e657"
+    },
+    "fr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "690584617d6b08eb8490a48290a5fc2734868af716a932e744dbb53ab282d731"
+    },
+    "fr/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "5fa41b2d4dfe233a187e5e311c3357fd71dcbf5d9bcc10fd784604fbcdb4487e"
+    },
+    "fr/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "8dffa07ac11441bd8ebc63eca0b6a406ddac73c2ca402dc813f46f776e4ef8f4"
+    },
+    "fr/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "1c6eecf46937e8000902d91bacd4975f71301f34544cfa41f31f78676adf5157"
+    },
+    "fr/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "b27f957cb3a1c3fdf3d202b9a8385f105c0bb3b94896b0d32daac938eae8d21b"
+    },
+    "fr/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "94631f3866994fa46ebae803d946f1ed62e33bc3c6744dfeb10f6e5bc5c00cef"
+    },
+    "pt-BR/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "62ba7783509336b519641771fe6468081da1f1f31c6df46ca46b5a7f0a58ce94"
+    },
+    "pt-BR/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "4baf10586596a1e837ce4a4e4aee2cc2555ede13b8ef351e66850be12d844875"
+    },
+    "pt-BR/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "f2f2695307e7c51252f17c35c2d3f02d739ef8e5f22e075b58e4593b9571effa"
+    },
+    "pt-BR/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "b1d683d9d896504d4e33f673dbff15606a58fc68a948500fb8aca6c53e4dd62d"
+    },
+    "pt-BR/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "50c4c3c5cbef36dbbcaf586d5f711fee7db2f68a90002c992ad9ed7a44bae782"
+    },
+    "pt-BR/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "d4bee7fa5f939ff90ff92ef11ffec79239d5c959ef20831985301e76b05262c4"
+    },
+    "pt-BR/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "c556b5a1ba355f1cca3d1345db4227f36019befd4314442d194d6a36ec0a1270"
+    },
+    "pt-BR/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "16f9e9e2fd3a5542ba0488eb2b923b6d00d5228a73138df4ce1a21e14a6dbc68"
+    },
+    "pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "706d770ea7fe7530c88aa200b0c2e6d33e13710d38def73267cb4dc31b775f23"
+    },
+    "pt-BR/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "dd738117348a065381bceaa5e1adf976607337f7edf893fabb91258978179bba"
+    },
+    "es/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "cac7d35f8eedf3c81721442c5bbedcbf20c43ce1dac336aa2b2947b8b0035521"
+    },
+    "es/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "8ca3813d519a1e8220267387f9d763373e79f2e3f362d4a845441c86e27f6b63"
+    },
+    "es/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "da673700efd4c993dfa22f47d406d5acc9e8142b070354de43ae30d0aebc592d"
+    },
+    "es/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "fcd691d1901460244315ee70065db05e6a5e6af934bf389f026d5c58edeea09b"
+    },
+    "es/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "467f896ff0e600c5214f6f2b0f2a889f5d765424e9018f7d4c5dd6e3fd96aa8d"
+    },
+    "es/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "0bff264bd5db0c0481dac7201cb5d6bb4b0f05458aa7b0fcc888e1ff818bd31a"
+    },
+    "es/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "6ae53bee450ec85519e3e00ea7a5ee3b8692508dfcfb62afd15b5129097ba89c"
+    },
+    "es/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "7c1c69936704738024be2c3da89db5c3535df87e83d98c1c8b87cc95c5b1e855"
+    },
+    "es/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "07e2edf8f2588cb75e40f35c028dc5cae782771e7e7acb34bcbad17c64baed98"
+    },
+    "es/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "bf5c2257e8eb0b1410276a59aed68403cfe005cff8d65cc3af4e676c659b11a5"
+    },
+    "hi/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "11078af596de6b7dc808a329b74cca63f753a6dd358bce03c50a35712f88c065"
+    },
+    "hi/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "6d8aa1b04f61789764d11989dca25b0fe8559e389381828608d1051649e472b9"
+    },
+    "hi/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "b5390d6a3fd3507404c19e134874a5b20aed1889cc5b2a57cef32b66f595c8ff"
+    },
+    "hi/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "e7957a1ba8d7c7be4822cf9409582af2c140b3995b42c5d6f04b819ca6240e98"
+    },
+    "hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "b529b2cf515cfc9780b17b66b28835de84074bdea8c8011f572749d5a7ac3c59"
+    },
+    "hi/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "7fa2d5260dd95d3bccddb25aad46339ab744134e669a57afc3df57e5cf4a2c0b"
+    },
+    "hi/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "eac898d5cfe1c2f3b3db7ac13dbddbb779a634f7e3e47e3bd217505d4d8124d3"
+    },
+    "hi/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "7b571a62608c8c9931cdb294ce463cf260bcea2c21bf2e996736ba8dbe49d8a0"
+    },
+    "hi/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "27807da876c4be95b2697b42499687b46ab51d04f0006d606d171e4191a870a7"
+    },
+    "hi/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "6399f46a5f3a8ba8bfc6d7ec13c1bf7ffb0e780e66269685b3daceca29005a6c"
+    },
+    "tr/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "3a86f13409b6a1103fac3673d2a94bd29157df64caceb6cf625ecb664dc24a99"
+    },
+    "tr/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "db526deb3ac6f45ffc92eb72fc9752840054f59ae026775f0389774877087991"
+    },
+    "tr/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "f664bc73a9db656b7684366bf11d81e73a3687ee047b99296a69061a4ee9aaec"
+    },
+    "tr/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "0cda16797e1f1f0092792134c7b3b9cb7490622ae6805e664414e7a5d7694ac1"
+    },
+    "tr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "87ed777e1262dd335e94f096d45e1520f399453470d021f2117ba22c8974718c"
+    },
+    "tr/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "31cc8ea10d9d3eead123fc524d977b258f56287fc8323864ba42665c12f3dbd3"
+    },
+    "tr/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "95e4de1b5439e15a9bbbc21eda020c079a348f3370735e6fe4c71e0bfabcc221"
+    },
+    "tr/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "7b48a15fc4d63d4ff89e2ce8e2ec4c300c168cd3032e348522954ac4f6457192"
+    },
+    "tr/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "ab3f2a7e1f6b79c2d2b344ce85da7d7fa7e1fc79284b2b85d980e8d353944e21"
+    },
+    "tr/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "3161089b76ed696a52f4d0485f7c41e57f9cdad4c3f9f87a91a735717140831f"
+    },
+    "bn/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "33f9c6fbdf043c897fe04f375b608db1f234d615d545ff8516db925b91664ab5"
+    },
+    "bn/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "3bfa653942fbce6d5bb3c26f478f25f8e4044e74baea4ff79428a6c0db7743da"
+    },
+    "bn/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "7e89e84fb15949a8a43115344731fd47bd841e754da725a0fe86879c6c7c37b1"
+    },
+    "bn/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "6bc6d8f90d29994a250e6a819233561b6a6359685a71ff113d8f88d423d90f69"
+    },
+    "bn/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "09b13b7c4fa7d602c0ed0ba57e46cff3e8df4edd83b8f491807f27c3145b3823"
+    },
+    "bn/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "11e9598e3786b7cdf1d612d5ebd3714abffdad1be313f456e8947071ab69a356"
+    },
+    "bn/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "56816fbb99742dabcf6cc58d6b51424861dae40e03f886ef5f31f16d56efd768"
+    },
+    "bn/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "e3971cb28472fb3665d4a895a318aee9190e860b23349cb952abe789a6d62fd1"
+    },
+    "bn/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "ad3e60fe79daa0b9093a7f1decc37bb17f85dde17af6d23d95ef7a8d99c8d1f1"
+    },
+    "bn/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "f8ee8d4476d9dd6ca91ea652d9fc0f097f0c53902dac5c34572ebf97b6a1ba28"
+    },
+    "ar/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "0a81ea384cd1b6ceff29ed6049156e51305fde72a49edcf766cca53edc36e81b"
+    },
+    "ar/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "6797c1e04ad0ec06938778c9a587928208cd477d5a947049789950e7db0706a4"
+    },
+    "ar/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "850efc0d7e7f57502977040cef2f3b5e63deac1b7a4a0bdc7cd0b81da3762066"
+    },
+    "ar/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "adc032b2d033e71b06480684c1b3e10195e0a9cd334cfe0e37b7a22b3bb9c5b1"
+    },
+    "ar/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "8c442707b11162efcc3035826aa24e10babf1449839fa24dc7f980f2ee26874b"
+    },
+    "ar/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "1a6882a5ab3034af2af99954ba58fd547e874f3dff4e4022703fd1907857d6f7"
+    },
+    "ar/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "8410965a815b4c2e410922ae9e1215c65525395f72b368f029abe2476aff6642"
+    },
+    "ar/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "25e149c49704b913448441cf511e7280d64586dcc3c99cde45ea6cb606ca7e05"
+    },
+    "ar/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "e0b913cccc30db85f759e046c78c7b550b5426675192356e6879ca561132fca3"
+    },
+    "ar/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "33b95825f64784b7656a36cc98628b08e470c29deef6d8ef71de551d334ddfb7"
+    },
+    "id/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "abb67684f41f4d8b17dbd0d5172ce932cd706cff73e149f37bdc94f81693f17f"
+    },
+    "id/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "8828d72efd5c2311a6ccbe1d2d23bba473c0d13626b11d3a6d76779645b509f7"
+    },
+    "id/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "ada2ca824bbc7dc629423d3b23f8ab019e8ecada1490e15d1c653c1f8513c18c"
+    },
+    "id/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "f85ad34c7c60e81d9e9b4ad3a553398cbd6639e187214538b9bd1f8cf5f00673"
+    },
+    "id/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "b15a4b47b36c10d6d05b47403d62774683bb8bb116ce2f21ab258a9046def8b7"
+    },
+    "id/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "699c56bb8cacb1779b7f9c0017ddbc53c1e4b955679dd7b5b5c116b1e5967fb2"
+    },
+    "id/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "8462ab36f992ed6de445d27b6b8bba6a5257f63e84ac54e306e6b442a3accaaf"
+    },
+    "id/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "9668330e5b7f640f75fdc32a914cf45328b18931c0de5fea4e850d26fd9963ef"
+    },
+    "id/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "b01d0c2a2e90debcb677bbe2abb390307ed7c398de6fd5ed11b719dbc1801b57"
+    },
+    "id/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "ff848caaf409dbf6f1867ac3bd6b5e1bb3c642a8ad5716aeec3b007cf92890af"
+    },
+    "fil/organize-seasons-episodes": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "5bf127fdded9a2e747c07533396e0e1087f951aaabf6110d741bc6f04cf1ba90",
+      "translation_sha256": "685a3645cabd48311e3a46926a2735749e10b485c546ed0c2138a86a80733d7d"
+    },
+    "fil/personal-media-search-guide": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "ceb386fa88d66020c14536e63e0925f2938d1bd815892c69dbf3f7a13bce9767",
+      "translation_sha256": "a2e9cf39c0af715aa241051d73da7204b73ca75233a2043e666c3fc867317b6c"
+    },
+    "fil/handoff-mirroring-or-casting-know-which-workflow-you-need": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "b46f9a584d473e98e7d7972e1d512ff3202c7d9490c7c540717f8958313a123e",
+      "translation_sha256": "cde7f9aecf2957dc4a912b536db30a81ea9074484406750825c494d16fe505b4"
+    },
+    "fil/separate-profiles-or-one-shared-profile-a-decision-framework": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99bfb58866328e9d2feb47aa9731a6392ed917bfb5d6f7de67602205c4efea0a",
+      "translation_sha256": "e49262c5405eabda72704fbc01d879c55a49cfd3d714d0c3c47c366718468e3e"
+    },
+    "fil/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "98b9d0bbd83440fb5f247e1595988ce7cc53b352a8396f7bd1e88988ce55ed90",
+      "translation_sha256": "aca4e73c98d55360a436e076817923890b1d4963ffbf8212f09e8b942ed7d2fa"
+    },
+    "fil/the-complete-guide-to-understanding-video-quality": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "99fccd54d5b6af5a6451f65c4e35b01af916d28dea353eeef1e7b80fc0beb5cc",
+      "translation_sha256": "c37e6de6ff59c11f87c07fa3c56f92d6cfa85c2a8ff9728555a0aba9b72fb784"
+    },
+    "fil/volume-and-loudness-why-they-are-not-identical": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "c5afea01c019d7d716ee9c9381688084918f14896336a67afc5e83d8a17ed1d1",
+      "translation_sha256": "5de034386abbe52899e100a268165239f2d8c81a0066427d274a84256d7e66c4"
+    },
+    "fil/bandwidth-throughput-latency-and-jitter-explained": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1187d6fb8fd3c55e3350243076646f12a474e161b0a321d197fcb55237b068da",
+      "translation_sha256": "ca2230668e9884fd748c7411fcdb1c73ed169961e10c237d324602b8b0cf0526"
+    },
+    "fil/cold-start-or-warm-start-measure-the-right-tv-launch": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "1d98978ab5f697cccbc66a8ab0cd8d60492abc5f7897a76ab52c9df291edcdcb",
+      "translation_sha256": "8e3efa666563dd624a7e15fd00e3f3843704f87f1b9ba1d5d9d226e673c8c390"
+    },
+    "fil/offline-storage-management-handbook": {
+      "published_at": "2026-09-10T22:33:41.694Z",
+      "updated_at": "2026-09-10T22:33:41.694Z",
+      "source_sha256": "4ad5c1694f9825a417d72d6c7ab37dd5066001c03760f05a46f96604b116836a",
+      "translation_sha256": "0199dc463c0595c845f2a5415ca3eb05cbc81d7a7cc236ef295da90466053fda"
     }
   }
 }

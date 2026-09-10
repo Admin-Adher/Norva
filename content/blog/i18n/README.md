@@ -1,8 +1,16 @@
-# Multilingual blog — first reviewed selection
+# Multilingual blog — reviewed selections
 
 The first selection contains seven reviewed English articles and nine complete
 translations of each article: 70 article versions, **not 70 different topics**.
 The remaining English library is not automatically translated or retired.
+
+The second authorized batch adds ten other individually revised English sources
+and ninety full translations: 100 additional versions, for a cumulative
+**seventeen topics and 170 selected versions**. The explicit cumulative inventory
+is `translations/selection.json`; it locks each source's original slug and
+first-publication instant. See `RELEASE-BATCH2-20260910.md` for selection evidence,
+scope and limitations. Counts here describe the selected families, not the entire
+English archive or a promise of indexed URLs.
 
 ## Locale and URL contract
 
@@ -43,6 +51,11 @@ by agents instead of an identified human review**, and production after validati
 a claim of human or native-speaker certification and not permission to release
 future automated drafts. Original English frontmatter review claims are not
 changed or fabricated.
+
+The same scoped exception was explicitly confirmed for the second 100-version
+batch on 10 September 2026: “Oui, même processus et mise en production”. This
+includes the ten revised English sources as well as ninety translations. It does
+not approve future batches or waive any technical/source verification gate.
 
 1. Translator reads the whole source, translates the whole body and metadata,
    and self-reviews. Files remain `translation_status: "in_review"`.
@@ -99,7 +112,7 @@ events only. No new key event, Ads conversion, spend, or Meta action is configur
 Register/report those GA4 event-scoped dimensions separately if needed; receiving
 a parameter does not automatically make it an available custom report dimension.
 
-Track this seven-topic selection separately from new English articles. Compare
+Track each explicit selection batch separately from new English articles. Compare
 queries, country, device and comparable time windows before expanding. Translate
 the next article only after its own editorial improvement and source review.
 

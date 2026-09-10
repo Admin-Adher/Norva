@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR" dir="ltr" data-norva-document-language="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Inicialização de apps de TV: compare o tempo de carregamento | Norva Blog</title>
+  <meta name="description" content="Por que um app de TV abre rápido uma vez e depois demora? Separe início a frio, reabertura, primeira imagem e navegação utilizável com um exemplo de tempos.">
+  <link rel="canonical" href="https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Inicialização de apps de TV: compare o tempo de carregamento | Norva Blog">
+  <meta property="og:description" content="Por que um app de TV abre rápido uma vez e depois demora? Separe início a frio, reabertura, primeira imagem e navegação utilizável com um exemplo de tempos.">
+  <meta property="og:url" content="https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Inicialização de apps de TV: compare o tempo de carregamento | Norva Blog">
+  <meta name="twitter:description" content="Por que um app de TV abre rápido uma vez e depois demora? Separe início a frio, reabertura, primeira imagem e navegação utilizável com um exemplo de tempos.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Inicialização a frio ou com estado salvo: por que um app de TV abre de formas diferentes",
+  "description": "Por que um app de TV abre rápido uma vez e depois demora? Separe início a frio, reabertura, primeira imagem e navegação utilizável com um exemplo de tempos.",
+  "inLanguage": "pt-BR",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Início",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/pt-BR/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Inicialização a frio ou com estado salvo: por que um app de TV abre de formas diferentes",
+      "item": "https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Ir para o conteúdo</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Página inicial da Norva">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Navegação principal">
+      <a href="/blog/pt-BR/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">Como funciona</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Iniciar teste gratuito</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Caminho de navegação"><a href="/">Início</a><span class="sep" aria-hidden="true">›</span><a href="/blog/pt-BR/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">Inicialização a frio ou com estado salvo: por que um app de TV abre de formas diferentes</span></nav>
+    <details class="blog-language-picker"><summary>Idioma: <bdi>Português (Brasil)</bdi></summary>
+    <nav aria-label="Idioma do artigo"><ul><li><a href="/blog/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="pt-BR" dir="ltr" hreflang="pt-BR" aria-current="page">Português (Brasil)</a></li><li><a href="/blog/es/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="hi" dir="ltr" hreflang="hi">हिन्दी</a></li><li><a href="/blog/tr/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="pt-BR" dir="ltr" data-blog-article="cold-start-or-warm-start-measure-the-right-tv-launch" data-blog-language="pt-BR">
+      <div class="article-meta">
+        <span class="tag">Desempenho de Smart TV</span>
+        <span>Por Equipe editorial da Norva</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 de setembro de 2026</time>
+        <span class="dot">·</span>
+        <span>7 minutos de leitura</span>
+      </div>
+      <h1>Inicialização a frio ou com estado salvo: por que um app de TV abre de formas diferentes</h1>
+      <p class="lede">Voltar da tela inicial não é necessariamente uma nova inicialização. Compare o mesmo estado de partida e diferencie uma imagem visível de uma navegação que realmente responde.</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/" hreflang="en">Traduzido do artigo em inglês</a><span>Artigo em inglês publicado em 27 de agosto de 2026</span><p>As capturas de tela e os exemplos ilustrados originais estão em inglês. As legendas das imagens e as explicações foram traduzidas; as imagens não foram alteradas para sugerir um novo teste do produto.</p></aside>
+      <nav class="toc" aria-label="Nesta página">
+      <strong>Nesta página</strong>
+      <ul><li><a href="#define-four-states">Defina quatro estados</a></li><li><a href="#define-two-finish-points">Defina dois pontos finais</a></li><li><a href="#fix-context">Fixe o contexto</a></li><li><a href="#original-evidence-launch-protocol">Contribuição original: protocolo de inicialização</a></li><li><a href="#establish-cold-state-safely">Estabeleça o estado a frio com segurança</a></li><li><a href="#establish-warm-state">Estabeleça um estado de inicialização com estado salvo</a></li><li><a href="#reverse-order-and-rest">Inverta a ordem e dê descanso</a></li><li><a href="#interpret-differences">Interprete as diferenças</a></li><li><a href="#compare-after-change">Compare depois de uma mudança</a></li><li><a href="#control-trial-order-and-readiness">Controle a ordem das tentativas e a prontidão</a></li><li><a href="#frequently-asked-questions">Perguntas frequentes</a></li><li><a href="#your-next-step">Seu próximo passo</a></li><li><a href="#sources">Fontes</a></li></ul>
+    </nav>
+      <blockquote><strong>Em resumo:</strong> Um app de TV pode começar do zero, reconstruir uma tela usando estado preservado ou voltar com grande parte da interface ainda na memória. São tarefas diferentes. Compare condições iniciais idênticas e cronometre tanto a primeira imagem do app quanto a navegação utilizável pelo controle remoto. Ver um logotipo não comprova que o catálogo esteja pronto.</blockquote>
+<p>Este guia é para quem tenta descrever tempos de abertura inconsistentes, não para pontuar uma TV com base em uma meta universal de velocidade. Os sistemas operacionais de TV podem gerenciar processos de forma invisível. Quando não conseguir verificar o estado interno, registre o que fez em vez de inventar um rótulo técnico.</p>
+<h2 id="define-four-states">Defina quatro estados</h2>
+<p>O Android documenta inicializações a frio (<strong>cold</strong>), com estado salvo (<strong>warm</strong>) e a quente (<strong>hot</strong>). Uma inicialização cold cria o app do zero; uma warm executa parte do trabalho de início usando estado preservado; uma hot traz uma atividade preservada para a frente. Voltar a uma tela dentro do app é uma observação de navegação separada, não uma quarta categoria de inicialização do Android.</p>
+<p>Para um registro prático de TV, diferencie estas quatro situações observáveis:</p>
+<div class="table-wrap" role="region" aria-label="Tabela com rolagem" tabindex="0"><table>
+<thead><tr><th scope="col">Situação que você pode registrar</th><th scope="col">O que ela informa</th><th scope="col">O que continua desconhecido</th></tr></thead>
+<tbody><tr><td>Abertura após uma reinicialização oficial da TV</td><td>O sistema reiniciou antes de o app abrir</td><td>Quanto do atraso pertence à prontidão do sistema ou da rede</td></tr><tr><td>Reabertura depois de sair com Voltar</td><td>A saída do app ocorreu pelo controle normal</td><td>Se o processo ou a tela foi preservado</td></tr><tr><td>Retorno depois de pressionar Início e esperar 30 segundos</td><td>Houve um intervalo curto em segundo plano</td><td>Se o sistema manteve o app ativo</td></tr><tr><td>Retorno a Filmes a partir de outra tela do app</td><td>A navegação permaneceu dentro do app</td><td>Quais recursos do catálogo ou imagens foram reutilizados</td></tr></tbody>
+</table></div>
+<p>O <a href="/blog/smart-tv-media-app-performance-a-layer-by-layer-guide/" hreflang="en">guia por camadas <span class="link-language">(em inglês)</span></a> separa o ciclo de vida da rede e da renderização.</p>
+<h2 id="define-two-finish-points">Defina dois pontos finais</h2>
+<p>O primeiro quadro visível pode aparecer antes de o foco funcionar, as imagens carregarem ou a navegação responder. Registre “primeiro quadro do app” e “tela utilizável” separadamente. Acrescente “imagens estáveis” somente quando essa for a questão. TTID e TTFD do Android distinguem a exibição inicial da prontidão completa, mas sua cronometragem manual do controle à tela não é automaticamente nenhuma dessas métricas instrumentadas.</p>
+<p>Não pare o relógio no marco mais favorável.</p>
+<h2 id="fix-context">Fixe o contexto</h2>
+<p>Registre modelo da TV, sistema operacional, versão do app, fonte de entrada, estado de energia, saída, caminho por cabo ou Wi-Fi, horário, descrição da sessão que preserve os dados da conta, disponibilidade da fonte e atividade em segundo plano. Mantenha comparáveis os estados da rede e da fonte.</p>
+<p>A cronometragem manual deve informar a incerteza do tempo de reação.</p>
+<h2 id="original-evidence-launch-protocol">Contribuição original: protocolo de inicialização</h2>
+<p>Os valores a seguir são <strong>exemplos didáticos fictícios, não medições do Norva</strong>. Uma pessoa usa uma TV, uma versão do app, uma conta e um catálogo. Cada tentativa começa no pressionamento do controle remoto que abre o app. “Utilizável” significa que a tela pretendida está visível, um movimento do direcional responde e nenhuma sobreposição bloqueante permanece. Os tempos são segundos a partir desse mesmo evento inicial.</p>
+<div class="table-wrap" role="region" aria-label="Tabela com rolagem" tabindex="0"><table>
+<thead><tr><th scope="col">Tentativa</th><th scope="col">Preparação observada</th><th scope="col">Primeiro quadro do app</th><th scope="col">Navegação utilizável</th><th scope="col">Imagens estáveis</th></tr></thead>
+<tbody><tr><td>A</td><td>Reinicialização oficial; tela inicial da TV e rede prontas</td><td>1.8 s</td><td>4.6 s</td><td>6.2 s</td></tr><tr><td>B</td><td>Início, esperar 30 segundos, voltar</td><td>0.7 s</td><td>1.2 s</td><td>1.9 s</td></tr><tr><td>C</td><td>Mesmo retorno após intervalo curto</td><td>0.8 s</td><td>1.4 s</td><td>2.0 s</td></tr><tr><td>D</td><td>Repetir a preparação usada em A</td><td>1.9 s</td><td>4.4 s</td><td>6.0 s</td></tr></tbody>
+</table></div>
+<p>As duas observações após reinicialização chegam à navegação utilizável em 4.4–4.6 segundos, enquanto os retornos curtos levam 1.2–1.4 segundos. Isso sugere uma diferença repetível entre essas preparações. <strong>Não</strong> estabelece quanto tempo um cache específico economizou, não comprova estado de processo warm ou hot nem prevê o resultado de outra TV.</p>
+<p>A observação útil para o suporte é a distância entre o primeiro quadro e a navegação que responde em A e D. Chamar o app de “pronto em 1.8 segundo” esconderia essa distância. A cronometragem manual também inclui o erro de reação do observador: não interprete uma diferença de um décimo de segundo como melhoria de desempenho sem medição mais precisa.</p>
+<h2 id="establish-cold-state-safely">Estabeleça o estado a frio com segurança</h2>
+<p>Use apenas orientações oficiais de parada do app, reinicialização da TV ou alimentação. Não retire a energia, use menus de serviço ou limpe dados apenas para criar um estado a frio. Se a plataforma não permitir verificar que o app não está em execução, chame de “abertura após reinicialização”.</p>
+<p>A segurança e a integridade do dispositivo têm prioridade sobre a pureza experimental.</p>
+<h2 id="establish-warm-state">Estabeleça um estado de inicialização com estado salvo</h2>
+<p>Nenhuma sequência genérica de Início ou Voltar garante um estado de processo warm. Se não conseguir verificá-lo pela instrumentação da plataforma, registre um <strong>retorno após intervalo curto</strong>: chegue à mesma tela, saia pelo controle documentado, espere um intervalo fixo e volte. Anote se a tela, o foco ou as imagens persistiram sem atribuir um rótulo de ciclo de vida não verificado.</p>
+<p>O estado preservado pode mudar entre tentativas, portanto mantenha recarregamentos inesperados no registro.</p>
+<h2 id="reverse-order-and-rest">Inverta a ordem e dê descanso</h2>
+<p>Use a sequência após reinicialização, retorno curto, retorno curto, após reinicialização quando for viável, com intervalos fixos de descanso. Inverter a ordem pode revelar um padrão compatível com mudanças de cache, temperatura, rede ou fonte; isso não identifica a causa. Não faça dezenas de aberturas: defina previamente uma quantidade pequena.</p>
+<p>A instrumentação pode estabelecer com mais precisão o estado do processo e os limites de tempo, mas quem assiste não precisa do modo de desenvolvedor nem de registros privados para relatar um atraso visível repetível.</p>
+<h2 id="interpret-differences">Interprete as diferenças</h2>
+<p>Uma inicialização warm mais rápida que uma cold pode refletir estado preservado ou recursos em cache, mas não quantifica qual cache. Uma warm que se comporta como cold pode refletir encerramento do app, atualização, pressão de memória ou escolha de implementação.</p>
+<p>Registre perdas repetidas de posição ou recarregamentos inesperados como observações, não como prova de que a TV precisa de mais memória. Se apenas a transferência da exibição entre telas parecer lenta, identifique primeiro o mecanismo no <a href="/blog/pt-BR/handoff-mirroring-or-casting-know-which-workflow-you-need/">guia de continuidade, espelhamento e transmissão</a>.</p>
+<h2 id="compare-after-change">Compare depois de uma mudança</h2>
+<p>Depois de atualizar o app, repita o mesmo protocolo e documente o contexto de versão. Preserve as anotações de antes e depois em vez de confiar na memória. Não compare uma abertura antiga após reinicialização com um retorno curto novo.</p>
+<p>O comportamento de abertura do Norva na TV depende do dispositivo, da versão e da fonte conectada. O Norva é um reprodutor para mídias compatíveis que você tem autorização para usar, não um catálogo incluído. Estes exemplos não certificam sua velocidade de inicialização ou seu desempenho de reprodução.</p>
+<h2 id="control-trial-order-and-readiness">Controle a ordem das tentativas e a prontidão</h2>
+<p>Tentativas a frio costumam acontecer primeiro, então manutenção na inicialização, reconexão de rede ou preparação do observador podem penalizá-las injustamente. Alterne a ordem entre sessões quando a plataforma permitir um estado documentado e espere o mesmo intervalo fixo antes de cada abertura. Registre se a tela inicial, o controle remoto, a rede e a saída já estavam prontos.</p>
+<p>Defina “utilizável” antes de cronometrar: por exemplo, a tela pretendida está visível, o foco responde uma vez e nenhuma sobreposição bloqueante permanece. Não encerre a medição apenas porque um logotipo apareceu. Informe a mediana somente junto com os valores individuais e o intervalo; um resumo único pode esconder uma abertura travada ou com falha que importa mais que uma pequena diferença média.</p>
+<h2 id="frequently-asked-questions">Perguntas frequentes</h2>
+<h3 id="is-tv-power-on-the-same-as-app-cold-start">Ligar a TV é o mesmo que iniciar o app a frio?</h3>
+<p>Não. Isso inclui a inicialização do sistema e pode restaurar o estado do app de forma diferente.</p>
+<h3 id="how-many-runs-are-needed">Quantas execuções são necessárias?</h3>
+<p>Use várias execuções predefinidas, suficientes para mostrar o intervalo sem sobrecarregar o dispositivo ou a fonte.</p>
+<h3 id="should-artwork-completion-define-launch">O carregamento completo das imagens deve definir a inicialização?</h3>
+<p>Somente se a prontidão das imagens for a tarefa; mantenha separados o primeiro quadro e o foco utilizável.</p>
+<section class="article-cta"><h2 id="your-next-step">Seu próximo passo</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="cold-start-or-warm-start-measure-the-right-tv-launch">Obtenha ajuda com um problema reproduzível de abertura na TV</a>. Inclua modelo da TV, versões do sistema operacional e do app, passos de preparação, tela esperada e os dois marcos de tempo. Deixe identificadores de conta, endereços de fonte e credenciais fora das capturas de tela.</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Fontes</h2>
+<ul><li><a href="https://developer.android.com/topic/performance/vitals/launch-time" target="_blank" rel="noopener">Android Developers: tempo de inicialização de apps</a></li><li><a href="https://support.google.com/googletv/answer/12364830?hl=en" target="_blank" rel="noopener">Ajuda do Google TV: corrigir lentidão em um dispositivo Google TV</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Leituras relacionadas</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/smart-tv-media-app-performance-a-layer-by-layer-guide/" hreflang="en" lang="en">
+          <span class="tag">Smart TV Performance</span>
+          <div class="card-title">Smart TV Media App Performance: A Layer-by-Layer Guide</div>
+          <span class="link-language" lang="pt-BR">em inglês</span>
+          <p>Separate remote input, focus movement, interface rendering, artwork delivery, search, app lifecycle, storage, memory clues, network response, media capability, playback controls, and output. Time one observable event at a time on the exact TV, app, and version. A slow interface is not automatically a slow network or decoder.</p>
+        </a>
+        <a class="card" href="/blog/pt-BR/handoff-mirroring-or-casting-know-which-workflow-you-need/">
+          <span class="tag">Continuidade entre dispositivos</span>
+          <div class="card-title">Continuidade, espelhamento ou transmissão: escolha o fluxo necessário</div>
+
+          <p>Decida se precisa de um app independente, uma cópia da tela ou reprodução em um receptor controlada pelo telefone e confira os requisitos desse caminho.</p>
+        </a>
+        <a class="card" href="/blog/pt-BR/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">Conceitos de qualidade de vídeo</span>
+          <div class="card-title">Entenda a qualidade de vídeo: como comparar o que você vê</div>
+
+          <p>Diferencie uma fonte borrada, a compressão, as interrupções de transmissão e o processamento da tela com uma cena, uma comparação preenchida e uma verificação repetível.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Navegação do rodapé">
+        <a href="/">Início</a>
+        <a href="/blog/pt-BR/">Blog</a>
+        <a href="/#features">Benefícios</a>
+        <a href="/#pricing">Preços</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fpt-BR%2F">Suporte</a>
+        <a href="/terms.html">Termos de uso</a>
+        <a href="/privacy.html">Privacidade</a>
+        <a href="/mentions-legales.html">Aviso legal</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. A Norva é um reprodutor e organizador de mídia. Ela não fornece mídia. O uso exige uma fonte compatível que pertença a você ou que você tenha autorização para acessar.</p>
+    </div>
+  </footer>
+</body>
+</html>

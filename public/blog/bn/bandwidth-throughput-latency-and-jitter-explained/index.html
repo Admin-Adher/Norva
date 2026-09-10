@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="bn" dir="ltr" data-norva-document-language="bn">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার: ভিডিও নির্দেশিকা | Norva Blog</title>
+  <meta name="description" content="ভিডিও নেটওয়ার্কের সমাধানসহ উদাহরণে ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার বুঝুন। স্পিড টেস্টের স্কোর বা সর্বজনীন জিটার সীমা কেন বিভ্রান্ত করে জানুন।">
+  <link rel="canonical" href="https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার: ভিডিও নির্দেশিকা | Norva Blog">
+  <meta property="og:description" content="ভিডিও নেটওয়ার্কের সমাধানসহ উদাহরণে ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার বুঝুন। স্পিড টেস্টের স্কোর বা সর্বজনীন জিটার সীমা কেন বিভ্রান্ত করে জানুন।">
+  <meta property="og:url" content="https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার: ভিডিও নির্দেশিকা | Norva Blog">
+  <meta name="twitter:description" content="ভিডিও নেটওয়ার্কের সমাধানসহ উদাহরণে ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার বুঝুন। স্পিড টেস্টের স্কোর বা সর্বজনীন জিটার সীমা কেন বিভ্রান্ত করে জানুন।">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার ব্যাখ্যা",
+  "description": "ভিডিও নেটওয়ার্কের সমাধানসহ উদাহরণে ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার বুঝুন। স্পিড টেস্টের স্কোর বা সর্বজনীন জিটার সীমা কেন বিভ্রান্ত করে জানুন।",
+  "inLanguage": "bn",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "প্রথম পাতা",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "ব্লগ",
+      "item": "https://norva.tv/blog/bn/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার ব্যাখ্যা",
+      "item": "https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">মূল বিষয়বস্তুতে যান</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva-এর প্রথম পাতা">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="প্রধান নেভিগেশন">
+      <a href="/blog/bn/">ব্লগ</a>
+      <a class="hide-sm" href="/#how-it-works">যেভাবে কাজ করে</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>বিনামূল্যের ট্রায়াল শুরু করুন</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="পাতার নেভিগেশন পথ"><a href="/">প্রথম পাতা</a><span class="sep" aria-hidden="true">›</span><a href="/blog/bn/">ব্লগ</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার ব্যাখ্যা</span></nav>
+    <details class="blog-language-picker"><summary>ভাষা: <bdi>বাংলা</bdi></summary>
+    <nav aria-label="লেখার ভাষা"><ul><li><a href="/blog/bandwidth-throughput-latency-and-jitter-explained/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/bandwidth-throughput-latency-and-jitter-explained/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/bandwidth-throughput-latency-and-jitter-explained/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/bandwidth-throughput-latency-and-jitter-explained/" lang="hi" dir="ltr" hreflang="hi">हिन्दी</a></li><li><a href="/blog/tr/bandwidth-throughput-latency-and-jitter-explained/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/bandwidth-throughput-latency-and-jitter-explained/" lang="bn" dir="ltr" hreflang="bn" aria-current="page">বাংলা</a></li><li><a href="/blog/ar/bandwidth-throughput-latency-and-jitter-explained/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/bandwidth-throughput-latency-and-jitter-explained/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/bandwidth-throughput-latency-and-jitter-explained/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="bn" dir="ltr" data-blog-article="bandwidth-throughput-latency-and-jitter-explained" data-blog-language="bn">
+      <div class="article-meta">
+        <span class="tag">ভিডিওর জন্য বাড়ির নেটওয়ার্কের বুনিয়াদ</span>
+        <span>লেখক Norva সম্পাদকীয় দল</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">১১ সেপ্টেম্বর, ২০২৬</time>
+        <span class="dot">·</span>
+        <span>পড়তে 6 মিনিট</span>
+      </div>
+      <h1>ব্যান্ডউইডথ, থ্রুপুট, ল্যাটেন্সি ও জিটার ব্যাখ্যা</h1>
+      <p class="lede">বহনক্ষমতা, মাপা স্থানান্তরের হার, বিলম্ব ও তার পরিবর্তন আলাদা প্রশ্নের উত্তর দেয়। বাফারিংয়ের জন্য একটি সংখ্যাকে দোষ দেওয়ার আগে পূর্ণ নেটওয়ার্ক তুলনা বুঝুন।</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en">ইংরেজি লেখা থেকে অনূদিত</a><span>ইংরেজি লেখাটি ২৬ আগস্ট, ২০২৬ তারিখে প্রকাশিত</span><p>মূল স্ক্রিনশট ও উদাহরণের ছবিগুলো ইংরেজিতে রয়েছে। ছবির বিবরণ ও ব্যাখ্যা অনুবাদ করা হয়েছে; নতুন পণ্য পরীক্ষা হয়েছে এমন ধারণা দিতে ছবিগুলো বদলানো হয়নি।</p></aside>
+      <nav class="toc" aria-label="এই পাতায়">
+      <strong>এই পাতায়</strong>
+      <ul><li><a href="#bandwidth-is-not-a-delivered-result">ব্যান্ডউইডথ বাস্তবে পৌঁছানো ডেটার ফল নয়</a></li><li><a href="#throughput-needs-a-test-context">থ্রুপুটের পরীক্ষার পরিসর দরকার</a></li><li><a href="#latency-is-elapsed-delay">ল্যাটেন্সি হলো অতিক্রান্ত বিলম্ব</a></li><li><a href="#jitter-is-variation-not-simply-slowness">জিটার হলো পরিবর্তন, শুধু ধীরতা নয়</a></li><li><a href="#packet-loss-is-another-dimension">প্যাকেট হারানো আরেকটি মাত্রা</a></li><li><a href="#original-evidence-metric-dictionary">মৌলিক প্রমাণ: মাপের অভিধান</a></li><li><a href="#build-a-small-measurement-set">ছোট একটি মাপের সেট তৈরি করুন</a></li><li><a href="#interpret-combinations">মিলিত ফল ব্যাখ্যা করুন</a></li><li><a href="#common-interpretation-errors">ব্যাখ্যার সাধারণ ভুল</a></li><li><a href="#frequently-asked-questions">প্রায়শই জিজ্ঞাসিত প্রশ্ন</a></li><li><a href="#your-next-step">আপনার পরবর্তী পদক্ষেপ</a></li><li><a href="#sources">তথ্যসূত্র</a></li></ul>
+    </nav>
+      <blockquote><strong>সংক্ষেপে:</strong> ব্যান্ডউইডথ উপলব্ধ বা নামমাত্র বহনক্ষমতার ধারণা; থ্রুপুট নির্দিষ্ট পরীক্ষায় মাপা উপযোগী ডেটার হার। ল্যাটেন্সি হলো বিলম্ব, আর জিটার নির্দিষ্ট পদ্ধতিতে বিলম্বের পরিবর্তন বোঝায়। প্যাকেট হারানো আবার আলাদা বিষয়। ভিডিও এক বা একাধিক বিষয়ে প্রভাবিত হতে পারে, তাই সংখ্যার অর্থ করার আগে পদ্ধতি ও পথ লিখে রাখুন।</blockquote>
+<p>প্রতিটি মাপ আংশিক চিত্র দেয়। একই একক হলেও দুটি পরীক্ষা ভিন্ন প্রান্তবিন্দু, প্রোটোকল, দিক, সময়কাল, পথ বা ট্র্যাফিক পরিস্থিতি মাপতে পারে।</p>
+<h2 id="bandwidth-is-not-a-delivered-result">ব্যান্ডউইডথ বাস্তবে পৌঁছানো ডেটার ফল নয়</h2>
+<p>ব্যান্ডউইডথকে অনেকে গতির সংক্ষিপ্ত নাম হিসেবে ব্যবহার করেন, কিন্তু বহনক্ষমতার লেবেল বলে না নির্দিষ্ট সময়ে অ্যাপের কত ডেটা পৌঁছেছে। ভাগ করা লিংক, প্রোটোকলের অতিরিক্ত ডেটা, ভিড়, রেডিওর অবস্থা, ডিভাইসের সীমা ও দূরের প্রান্তবিন্দু পর্যবেক্ষিত থ্রুপুট কমাতে পারে।</p>
+<p>তাই প্ল্যানের হার, Wi-Fi লিংকের হার, Ethernet লেবেল ও অ্যাপের থ্রুপুট আলাদা মান। অন্যটির সঙ্গে তুলনা করার আগে স্ক্রিনে কোনটি দেখাচ্ছে তা লিখুন।</p>
+<h2 id="throughput-needs-a-test-context">থ্রুপুটের পরীক্ষার পরিসর দরকার</h2>
+<p>থ্রুপুট হলো মাপা স্থানান্তরের হার। RFC 6349 TCP থ্রুপুট পরীক্ষার কাঠামো বর্ণনা করে এবং পরীক্ষার পদ্ধতির ওপর জোর দেয়। ফলের সঙ্গে প্রান্তবিন্দু, দিক, প্রোটোকল, সময়কাল, সংযোগের সংখ্যা, ডিভাইস, পথ ও সময় থাকা দরকার।</p>
+<p><a href="/blog/the-complete-guide-to-home-network-basics-for-video/" hreflang="en">বাড়ির নেটওয়ার্কের বুনিয়াদি নির্দেশিকা <span class="link-language">(ইংরেজিতে)</span></a> ডিভাইস ও উৎসের মধ্যকার পথ দেখায়। কাছের পরীক্ষার সার্ভার প্রতিটি অনুমোদিত উৎসের পথ পুনরায় তৈরি করে না, আর ক্ষণিকের সর্বোচ্চ হারকে অ্যাপের ধারাবাহিক কর্মক্ষমতা হিসেবে দেখানো উচিত নয়।</p>
+<h2 id="latency-is-elapsed-delay">ল্যাটেন্সি হলো অতিক্রান্ত বিলম্ব</h2>
+<p>মাপা পথে ডেটা বা সাড়া যেতে কত সময় লাগে তা ল্যাটেন্সি বর্ণনা করে। RFC 7679-এর পদ্ধতিতে একমুখী বিলম্বের জন্য ঘড়ির সমলয় এবং সময় মাপার অনিশ্চয়তার হিসাব দরকার; অনেক ভোক্তা টুল তার বদলে যাওয়া-আসার সময় দেখায়। এ ফলগুলো একটির জায়গায় অন্যটি ব্যবহার করা যায় না।</p>
+<p>ভিডিও শুরু, নিয়ন্ত্রণ, প্রমাণীকরণ ও সেগমেন্টের অনুরোধ ভিন্ন কারণে দ্রুত বা ধীর মনে হতে পারে। বেশি থ্রুপুটের ফল মানেই কম ল্যাটেন্সি নয়।</p>
+<h2 id="jitter-is-variation-not-simply-slowness">জিটার হলো পরিবর্তন, শুধু ধীরতা নয়</h2>
+<p>RFC 3393 প্যাকেটের বিলম্বের পরিবর্তনের মাপ সংজ্ঞায়িত করে। দৈনন্দিন টুলে “জিটার” ভিন্ন গণনা, দিক, সময়সীমা বা পরিসংখ্যান ব্যবহার করতে পারে। মান তুলনার আগে টুলের সংজ্ঞা পড়ুন।</p>
+<p>সংযোগে গড় থ্রুপুট যথেষ্ট হলেও প্যাকেট অনিয়মিতভাবে পৌঁছাতে পারে, অথবা বিলম্ব স্থির হলেও ধারাবাহিক থ্রুপুট অপর্যাপ্ত হতে পারে। স্থির 80 ms যাওয়া-আসার সময় এবং 20 ও 140 ms-এর মধ্যে পালাক্রমে বদলানো সময়ের গড় একই হলেও আচরণ আলাদা হতে পারে। উদাহরণটি পরিবর্তন বোঝায়, জিটারের সূত্র বা গ্রহণযোগ্য সীমা নয়।</p>
+<h2 id="packet-loss-is-another-dimension">প্যাকেট হারানো আরেকটি মাত্রা</h2>
+<p>RFC 7680 স্পষ্ট পদ্ধতিসহ একমুখী প্যাকেট হারানোর মাপ সংজ্ঞায়িত করে। ভোক্তা টুলের ফল তার বদলে অনুপস্থিত সাড়া থেকে প্যাকেট হারানো অনুমান করতে পারে, এবং কিছু ডিভাইস সমস্যা নির্ণয়ের ট্র্যাফিককে কম অগ্রাধিকার দিতে পারে। শূন্য ফল মানে অ্যাপের প্রতিটি প্যাকেট পৌঁছেছে—এমন প্রমাণ নয়; শূন্যের বেশি ফলের ক্ষেত্রে পুনরাবৃত্তি ও পরিসর দরকার।</p>
+<p>নোটে হারানো ও দেরিতে আসা প্যাকেট আলাদা রাখুন। প্লেব্যাকের বিরতি দৃশ্যমান লক্ষণ, প্যাকেট-স্তরের সমস্যা নির্ণয় নয়।</p>
+<h2 id="original-evidence-metric-dictionary">মৌলিক প্রমাণ: মাপের অভিধান</h2>
+<div class="table-wrap" role="region" aria-label="স্ক্রল করা যায় এমন সারণি" tabindex="0"><table>
+<thead><tr><th scope="col">মাপ</th><th scope="col">সহজ ভাষার প্রশ্ন</th><th scope="col">প্রয়োজনীয় পরিসর</th><th scope="col">একা কী প্রমাণ করতে পারে না</th></tr></thead>
+<tbody><tr><td>ব্যান্ডউইডথ/বহনক্ষমতা</td><td>সংজ্ঞা অনুযায়ী এই লিংক কত বহন করতে পারে?</td><td>লিংক, লেবেল, দিক</td><td>অ্যাপে ডেটা পৌঁছানো</td></tr><tr><td>থ্রুপুট</td><td>কী উপযোগী হার মাপা হয়েছে?</td><td>প্রান্তবিন্দু, প্রোটোকল, সময়কাল, পথ</td><td>প্রতিটি উৎসের পথ</td></tr><tr><td>ল্যাটেন্সি</td><td>পদ্ধতিতে কত বিলম্ব দেখা গেছে?</td><td>একমুখী/যাওয়া-আসা, ঘড়ি, পথ</td><td>ধারাবাহিক বহনক্ষমতা</td></tr><tr><td>জিটার</td><td>বিলম্ব কীভাবে বদলেছে?</td><td>সূত্র, নমুনা, পরিসংখ্যান</td><td>গড় থ্রুপুট</td></tr><tr><td>প্যাকেট হারানো</td><td>কোন প্রত্যাশিত প্যাকেট অনুপস্থিত ছিল?</td><td>পরীক্ষামূলক বার্তার ধরন, দিক, সময়সীমা</td><td>প্লেব্যাকের সঠিক কারণ</td></tr></tbody>
+</table></div>
+<p>প্রতিটি মানের একক দিন এবং গোপনীয়তা অনুমতি দিলে মূল ফল সংরক্ষণ করুন।</p>
+<h3 id="worked-example-a-fast-plan-and-an-inconsistent-evening">সমাধানসহ উদাহরণ: দ্রুত প্ল্যান, কিন্তু অনিয়মিত সন্ধ্যা</h3>
+<p>এগুলো <strong>শেখানোর জন্য কাল্পনিক ফল</strong>, Norva বা কোনো উৎসের পরীক্ষা নয়। একটি পরিবারের প্ল্যানের লেবেল 100 Mbps। তারা একই ল্যাপটপ একই Wi-Fi অবস্থানে রেখে একই কাছের প্রান্তবিন্দুতে পরীক্ষা করে; ডাউনলোডের সেটিং একই এবং প্রতিটি সময়পর্বে 30 সেকেন্ডের তিনটি পরীক্ষা চলে।</p>
+<div class="table-wrap" role="region" aria-label="স্ক্রল করা যায় এমন সারণি" tabindex="0"><table>
+<thead><tr><th scope="col">পর্যবেক্ষণ</th><th scope="col">কম ব্যস্ত সময়</th><th scope="col">ব্যস্ত সময়</th><th scope="col">ব্যাখ্যা</th></tr></thead>
+<tbody><tr><td>ডাউনলোড থ্রুপুট, তিনটি পরীক্ষা</td><td>82, 80, 84 Mbps</td><td>28, 14, 31 Mbps</td><td>মধ্যক 82 থেকে 28 Mbps-এ নামে; ব্যস্ত সময়ের পরিসর 14–31 Mbps</td></tr><tr><td>একই লোডের অবস্থায় টুলের রিপোর্ট করা যাওয়া-আসার বিলম্বের মধ্যক</td><td>18 ms</td><td>65 ms</td><td>পরীক্ষার এই পথ ব্যস্ত সময়ে বেশি ধীরে সাড়া দেয়</td></tr><tr><td>টুলের প্রদর্শিত জিটার, একই সূত্র ও নমুনা নেওয়ার সেটিং</td><td>3 ms</td><td>24 ms</td><td>এই টুলের সংজ্ঞায় বিলম্ব বেশি বদলায়; এটি পাশ/ফেলের নম্বর নয়</td></tr><tr><td>ব্যস্ত সময়ে অনুমোদিত ভিডিও</td><td>পরীক্ষা করা হয়নি</td><td>দুটি বিরতি নথিবদ্ধ</td><td>খারাপ ফলের সঙ্গে বিরতি ঘটেছে, কিন্তু ভিডিওর প্রান্তবিন্দু মাপা হয়নি</td></tr></tbody>
+</table></div>
+<p>যুক্তিযুক্ত পরবর্তী ধাপ হলো লক্ষণের সময় আবার পরীক্ষা করা; সমর্থিত হলে চাইলে শুধু স্থানীয় সংযোগ Ethernet-এ বদলানো যায়। সঙ্গে সঙ্গে দ্রুততর প্ল্যান কেনা <strong>নয়</strong>। এমনকি 14 Mbps নমুনা দিয়েও ভিডিও চলার কথা কি না প্রমাণ করা যায় না: সংস্করণের প্রকৃত চাহিদা, ছোট পতন, উৎসের পথ ও বাফারিংয়ের আচরণ অজানা।</p>
+<p>Mbps (মেগাবিট প্রতি সেকেন্ড) ও MB/s (মেগাবাইট প্রতি সেকেন্ড) আলাদা রাখুন: পরীক্ষায় অতিরিক্ত ডেটার সংজ্ঞার হিসাবের আগে 8 Mbps সমান 1 MB/s। মিলিসেকেন্ড সময় বোঝায়, ডেটার হার নয়। এই এককগুলো এমনভাবে তুলনা করা যায় না যেন বড় সংখ্যা মানেই ভালো সংযোগ।</p>
+<h2 id="build-a-small-measurement-set">ছোট একটি মাপের সেট তৈরি করুন</h2>
+<p>সমস্যা হওয়া ডিভাইসটি স্বাভাবিক স্থানে ব্যবহার করুন। কম ব্যস্ত সময়ে বিরতি দিয়ে তিনটি নমুনা এবং লক্ষণের সময় তিনটি নমুনা লিখুন। নিরাপদ ও সমর্থিত হলে প্রান্তবিন্দু বা পরীক্ষার সেটিং না বদলে একটি বিকল্প স্থানীয় লিংকে আবার পরীক্ষা করুন।</p>
+<p>তারপর সেরা সংখ্যা বেছে না নিয়ে মধ্যক, পরিসর ও পুনরাবৃত্তি তুলনা করুন। একই সময়ের আপলোড, মেশের পরিবর্তন, ডিভাইসের বিদ্যুৎ-সংক্রান্ত অবস্থা ও আবহাওয়া সরাসরি দেখা গেলেই শুধু লিখুন; কাকতালীয় ঘটনার চারপাশে কারণের গল্প বানাবেন না।</p>
+<h2 id="interpret-combinations">মিলিত ফল ব্যাখ্যা করুন</h2>
+<p>কম ধারাবাহিক থ্রুপুট প্লেব্যাকের বাফার খালি করতে পারে। স্বল্পমেয়াদি গড় হার যথেষ্ট দেখালেও বিলম্বের পরিবর্তন ও প্যাকেট হারানো ডেটা সরবরাহে ব্যাঘাত ঘটাতে পারে। বেশি ল্যাটেন্সি দীর্ঘ স্থানান্তরকে বাধ্যতামূলকভাবে সীমিত না করেও অনুরোধ-সাড়ার ধারা ধীর করতে পারে। অ্যাপ, পরিবহন প্রোটোকলের আচরণ, বাফারিংয়ের নকশা ও উৎস দৃশ্যমান প্রভাব নির্ধারণ করে।</p>
+<p>প্লেব্যাক চলতে থাকলেও ছবি খারাপ দেখালে ঝাপসাকে ধীর নেটওয়ার্কের প্রমাণ না ধরে <a href="/blog/bn/the-complete-guide-to-understanding-video-quality/">ছবির মানের তুলনা</a> ব্যবহার করুন। Norva সামঞ্জস্যপূর্ণ অনুমোদিত উৎস চালায়; এটি ক্যাটালগ দেয় না বা আপনার রাউটার, উৎসের পথ কিংবা তার এনকোডিং নিয়ন্ত্রণ করে না।</p>
+<h2 id="common-interpretation-errors">ব্যাখ্যার সাধারণ ভুল</h2>
+<p>বিটের সঙ্গে বাইট তুলনা করবেন না, লিংকের হারকে থ্রুপুট ভাববেন না, বিলম্বের সব পরিবর্তনকে “প্যাকেট হারানো” বলবেন না, বা একটি সার্ভারের ফলকে নিশ্চয়তা ধরবেন না। রাউটার, ডিভাইস ও উৎস একসঙ্গে বদলানোর পরেই কেবল মাপা এড়িয়ে চলুন।</p>
+<h2 id="frequently-asked-questions">প্রায়শই জিজ্ঞাসিত প্রশ্ন</h2>
+<h3 id="which-metric-matters-most-for-video">ভিডিওর জন্য কোন মাপ সবচেয়ে গুরুত্বপূর্ণ?</h3>
+<p>কোনো একক মাপ সবসময় প্রধান নয়। সংস্করণের সরবরাহের ধরন, পথ, ডিভাইস ও লক্ষণ ঠিক করে কোন মাপ প্রাসঙ্গিক।</p>
+<h3 id="can-throughput-exceed-a-plan-label">থ্রুপুট কি প্ল্যানের লেবেল ছাড়াতে পারে?</h3>
+<p>লেবেল, সরবরাহের ব্যবস্থা, পরীক্ষার পদ্ধতি, একক ও অতিরিক্ত ডেটার সংজ্ঞা ভিন্ন হয়। পার্থক্যকে ত্রুটি বলার আগে প্রতিটি সংখ্যা কী বোঝায় যাচাই করুন।</p>
+<h3 id="is-jitter-measured-the-same-way-by-every-tool">সব টুল কি একইভাবে জিটার মাপে?</h3>
+<p>না। টুলের সূত্র, দিক, পরীক্ষামূলক বার্তার ধরন, নমুনার সময়কাল ও রিপোর্ট করা পরিসংখ্যান দেখুন।</p>
+<h3 id="what-is-acceptable-jitter-for-video-streaming">ভিডিও স্ট্রিমিংয়ের জন্য কত জিটার গ্রহণযোগ্য?</h3>
+<p>ভিডিও প্লেব্যাক নিশ্চিত করে এমন সর্বজনীন মিলিসেকেন্ড সীমা নেই। বাফার করা অন-ডিমান্ড ভিডিও ও কথোপকথনের কল বিলম্ব ভিন্নভাবে সহ্য করে; টুলও জিটার ভিন্নভাবে হিসাব করে। একই পদ্ধতির পুনরাবৃত্ত ফল প্রকৃত লক্ষণের সঙ্গে তুলনা করুন। একটি অ্যাপ বা প্রোটোকলের জন্য প্রকাশিত সীমা Norva-র সর্বজনীন শর্ত হওয়া উচিত নয়।</p>
+<h3 id="why-does-video-buffer-after-a-good-speed-test">ভালো স্পিড টেস্টের পরেও ভিডিও বাফার করে কেন?</h3>
+<p>পরীক্ষা ভিন্ন সার্ভার, পথ, স্থানান্তরের ধরন বা সময়পর্ব ব্যবহার করতে পারে। ছোট ব্যাঘাত বাদ পড়তে পারে, আর প্লেব্যাক উৎস ও ডিভাইসের ওপরও নির্ভর করে। পরের পরীক্ষা বেছে নেওয়ার আগে লিখুন বিলম্ব প্রথম ফ্রেমের আগে নাকি প্লেব্যাকের মধ্যে হচ্ছে।</p>
+<section class="article-cta"><h2 id="your-next-step">আপনার পরবর্তী পদক্ষেপ</h2>
+<p><a  href="/blog/a-symptom-pattern-atlas-for-video-buffering/" hreflang="en" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="bandwidth-throughput-latency-and-jitter-explained">প্লেব্যাকের লক্ষণ মিলিয়ে পরের যাচাই বেছে নিন <span class="link-language">(ইংরেজিতে)</span></a>। সহায়তার অনুরোধে ডিভাইস, সময়পর্ব, পরীক্ষার পদ্ধতি ও একটি পুনরাবৃত্তিযোগ্য লক্ষণ দিন—উৎসের লগইনের গোপন তথ্য নয়।</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">তথ্যসূত্র</h2>
+<ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">RFC 6349: TCP থ্রুপুট পরীক্ষা</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc7679" target="_blank" rel="noopener">RFC 7679: একমুখী বিলম্বের মাপ</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">RFC 3393: বিলম্বের পরিবর্তনের মাপ</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc7680" target="_blank" rel="noopener">RFC 7680: একমুখী প্যাকেট হারানোর মাপ</a></li></ul>
+</section>
+      <section class="related">
+      <h2>সংশ্লিষ্ট লেখা</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-home-network-basics-for-video/" hreflang="en" lang="en">
+          <span class="tag">Home Network Video Basics</span>
+          <div class="card-title">The Complete Guide to Home Network Basics for Video</div>
+          <span class="link-language" lang="bn">ইংরেজিতে</span>
+          <p>Reliable video depends on the complete path, not one speed number. Identify the player, local link, access point or switch, router, internet path, and authorised source. Then observe throughput, delay, delay variation, packet loss, competing traffic, and recurrence while changing one layer at a time.</p>
+        </a>
+        <a class="card" href="/blog/a-symptom-pattern-atlas-for-video-buffering/" hreflang="en" lang="en">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">A Symptom-Pattern Atlas for Video Buffering</div>
+          <span class="link-language" lang="bn">ইংরেজিতে</span>
+          <p>Classify buffering by playback phase, title and version, device, network link, room, time window, simultaneous traffic, recurrence, and recovery. Each pattern narrows candidate layers but does not prove one cause. Capture the failing state, then change one axis and compare the same authorised content.</p>
+        </a>
+        <a class="card" href="/blog/bn/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">ভিডিওর মান সম্পর্কে ধারণা</span>
+          <div class="card-title">ভিডিওর মান বোঝা: যা দেখছেন তা যেভাবে তুলনা করবেন</div>
+
+          <p>একটি দৃশ্য, পূরণ করা তুলনা ও পুনরাবৃত্তিযোগ্য দেখার যাচাই দিয়ে ঝাপসা উৎস, কম্প্রেশন, সরবরাহের বিরতি এবং ডিসপ্লে প্রসেসিং আলাদা করুন।</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="ফুটার নেভিগেশন">
+        <a href="/">প্রথম পাতা</a>
+        <a href="/blog/bn/">ব্লগ</a>
+        <a href="/#features">সুবিধা</a>
+        <a href="/#pricing">মূল্যতালিকা</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fbn%2F">সহায়তা</a>
+        <a href="/terms.html">শর্তাবলি</a>
+        <a href="/privacy.html">গোপনীয়তা</a>
+        <a href="/mentions-legales.html">আইনি বিজ্ঞপ্তি</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva একটি মিডিয়া প্লেয়ার ও সংগঠক। এটি মিডিয়া সরবরাহ করে না। ব্যবহার করতে এমন সামঞ্জস্যপূর্ণ উৎস প্রয়োজন যার মালিক আপনি অথবা যেটি ব্যবহারের অনুমতি আপনার রয়েছে।</p>
+    </div>
+  </footer>
+</body>
+</html>

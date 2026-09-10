@@ -148,7 +148,7 @@
 <p>Ano ang mahihinuha? Doble ang data ng video na dala ng bersiyon B sa halimbawang ito. Hindi mo mahihinuha na doble ang detalye nito, doble ang ganda nito, o maayos itong magpe-play sa partikular na device. Kailangan ng paghahambing ng larawan at pag-play para sa mga tanong na iyon.</p>
 <h2 id="understand-what-resolution-can-tell-you">Unawain kung ano ang masasabi ng resolution</h2>
 <p>Itinatakda ng sukat ng frame ang pinakamalaking spatial grid para sa naka-encode na larawan. Hindi nito sinasabi kung may katumbas na detalye ang source, kung dati na itong na-compress, o kung pinalambot ito ng scaling at filtering.</p>
-<p>Dala pa rin ng mas malaking frame na ginawa mula sa mas maliit o nasirang source ang limitasyon ng source. Inilalarawan ng <a href="/blog/the-complete-guide-to-understanding-video-quality/" hreflang="en">kumpletong gabay sa kalidad <span class="link-language">(sa Ingles)</span></a> ang source, encode, paghahatid, decode, at display bilang magkakahiwalay na antas.</p>
+<p>Dala pa rin ng mas malaking frame na ginawa mula sa mas maliit o nasirang source ang limitasyon ng source. Inilalarawan ng <a href="/blog/fil/the-complete-guide-to-understanding-video-quality/">kumpletong gabay sa kalidad</a> ang source, encode, paghahatid, decode, at display bilang magkakahiwalay na antas.</p>
 <h2 id="understand-what-bitrate-can-tell-you">Unawain kung ano ang masasabi ng bitrate</h2>
 <p>Ipinapahiwatig ng bitrate ang data sa paglipas ng oras, ngunit maaaring target, average, peak, nasukat na rate ng segment, o impormasyon sa antas ng container ang iniulat na halaga. Maaaring maglaan ng magkaibang dami sa magkakaibang sandali ang variable-rate encoding. Palaging itala kung ano ang kinakatawan ng numero at paano ito nakuha.</p>
 <p>Maaaring magkaroon ng mas malaking puwang ang encoder kapag mas marami ang data, ngunit hindi kontroladong test ng kalidad ang paghahambing lamang ng bitrate sa magkakaibang codec, profile, source, resolution, frame rate, at implementasyon ng encoder.</p>
@@ -169,7 +169,7 @@
 <p>Gumamit ng higit sa isang eksena: nakahintong mukha, gumagalaw na pinong detalye, at madilim na gradient ay nagpapakita ng iba't ibang problema. Isulat ang eksaktong timecode para maulit ng iba ang obserbasyon. Kung humihinto ang larawan sa halip na medyo malambot lamang ang detalye, gamitin ang <a href="/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/" hreflang="en">gabay sa buffering sa simula at gitna ng pag-play <span class="link-language">(sa Ingles)</span></a> para ilarawan ang hiwalay na sintomas.</p>
 <h2 id="avoid-misleading-calculations">Iwasan ang mapanlinlang na kalkulasyon</h2>
 <p>Maaaring makatulong sa teknikal na pagsusuri ang mga ratio gaya ng “bits per pixel” kung kontrolado ang sukat, frame rate, kahulugan ng bitrate, codec, at nilalaman, ngunit hindi ito nagiging unibersal na marka ng kalidad na nakikita ng tao. Maaaring maitago ng average ang panandaliang bigat at pabago-bagong paglalaan.</p>
-<p>Huwag ipantay ang bitrate ng media sa magagamit na kapasidad ng koneksiyon. Inilalarawan ng <a href="/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en">bandwidth, throughput, latency, at jitter <span class="link-language">(sa Ingles)</span></a> ang magkakaibang aspeto ng paghahatid, kabilang ang pagkakaiba ng ipinahayag na kapasidad at aktuwal na nailipat na data.</p>
+<p>Huwag ipantay ang bitrate ng media sa magagamit na kapasidad ng koneksiyon. Inilalarawan ng <a href="/blog/fil/bandwidth-throughput-latency-and-jitter-explained/">bandwidth, throughput, latency, at jitter</a> ang magkakaibang aspeto ng paghahatid, kabilang ang pagkakaiba ng ipinahayag na kapasidad at aktuwal na nailipat na data.</p>
 <h2 id="read-interface-labels-cautiously">Basahin nang maingat ang mga label sa interface</h2>
 <p>Maaaring inilalarawan ng marka ng resolution ang available na representasyon o katangian ng media, hindi ang eksaktong pixel na kasalukuyang umaabot sa display. Maaaring hindi ipakita ang bitrate. Tiyakin ang kasalukuyang mga marka at paggana ng pag-play ng Norva mula sa opisyal na impormasyon ng produkto sa halip na mag-imbento ng halaga.</p>
 <p>Inaayos at pini-play ng Norva ang compatible na mga source na pag-aari o awtorisadong gamitin ng mga user; hindi ito dapat ilarawang nagbibigay ng katalogo.</p>
@@ -191,17 +191,17 @@
       <section class="related">
       <h2>Kaugnay na babasahin</h2>
       <div class="related-grid">
-        <a class="card" href="/blog/the-complete-guide-to-understanding-video-quality/" hreflang="en" lang="en">
-          <span class="tag">Video Quality Literacy</span>
-          <div class="card-title">The Complete Guide to Understanding Video Quality</div>
-          <span class="link-language" lang="fil">sa Ingles</span>
-          <p>A viewer-first model of the full picture-quality chain, from source and encoding through delivery, decoding, output, display, and viewing conditions.</p>
+        <a class="card" href="/blog/fil/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">Pag-unawa sa kalidad ng video</span>
+          <div class="card-title">Pag-unawa sa kalidad ng video: Paano ihambing ang nakikita mo</div>
+
+          <p>Ihiwalay ang malabong source, compression, putol-putol na paghahatid at pagproseso ng display gamit ang isang eksena, kumpletong halimbawa at nauulit na pagsusuri.</p>
         </a>
-        <a class="card" href="/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en" lang="en">
-          <span class="tag">Home Network Video Basics</span>
-          <div class="card-title">Bandwidth, Throughput, Latency, and Jitter Explained</div>
-          <span class="link-language" lang="fil">sa Ingles</span>
-          <p>Bandwidth is an available or nominal capacity concept; throughput is the useful rate measured in a specific test. Latency is delay, while jitter describes delay variation under a stated method. Packet loss is separate again. Video can be affected by one or several, so record the method and path before interpreting a number.</p>
+        <a class="card" href="/blog/fil/bandwidth-throughput-latency-and-jitter-explained/">
+          <span class="tag">Mga batayan ng home network para sa video</span>
+          <div class="card-title">Pag-unawa sa bandwidth, throughput, latency at jitter</div>
+
+          <p>Magkakaiba ang kapasidad, nasukat na transfer rate, delay at pagbabago ng delay. Suriin ang isang network comparison bago isisi ang buffering sa iisang numero.</p>
         </a>
         <a class="card" href="/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/" hreflang="en" lang="en">
           <span class="tag">Buffering Diagnostics</span>

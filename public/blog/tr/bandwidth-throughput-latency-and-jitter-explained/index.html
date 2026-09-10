@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="tr" dir="ltr" data-norva-document-language="tr">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Bant genişliği, aktarım hızı ve gecikme: Video rehberi | Norva Blog</title>
+  <meta name="description" content="Uygulamalı video ağı örneğiyle bant genişliği, aktarım hızı, gecikme ve değişkenliğini anlayın. Hız testi puanı veya evrensel jitter sınırı neden yanıltabilir?">
+  <link rel="canonical" href="https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Bant genişliği, aktarım hızı ve gecikme: Video rehberi | Norva Blog">
+  <meta property="og:description" content="Uygulamalı video ağı örneğiyle bant genişliği, aktarım hızı, gecikme ve değişkenliğini anlayın. Hız testi puanı veya evrensel jitter sınırı neden yanıltabilir?">
+  <meta property="og:url" content="https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Bant genişliği, aktarım hızı ve gecikme: Video rehberi | Norva Blog">
+  <meta name="twitter:description" content="Uygulamalı video ağı örneğiyle bant genişliği, aktarım hızı, gecikme ve değişkenliğini anlayın. Hız testi puanı veya evrensel jitter sınırı neden yanıltabilir?">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Bant genişliği, gerçek veri aktarım hızı, gecikme ve gecikme değişkenliği",
+  "description": "Uygulamalı video ağı örneğiyle bant genişliği, aktarım hızı, gecikme ve değişkenliğini anlayın. Hız testi puanı veya evrensel jitter sınırı neden yanıltabilir?",
+  "inLanguage": "tr",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Ana sayfa",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/tr/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Bant genişliği, gerçek veri aktarım hızı, gecikme ve gecikme değişkenliği",
+      "item": "https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">İçeriğe geç</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva ana sayfası">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Ana gezinme">
+      <a href="/blog/tr/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">Nasıl çalışır</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Ücretsiz denemeyi başlat</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Gezinme yolu"><a href="/">Ana sayfa</a><span class="sep" aria-hidden="true">›</span><a href="/blog/tr/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">Bant genişliği, gerçek veri aktarım hızı, gecikme ve gecikme değişkenliği</span></nav>
+    <details class="blog-language-picker"><summary>Dil: <bdi>Türkçe</bdi></summary>
+    <nav aria-label="Makale dili"><ul><li><a href="/blog/bandwidth-throughput-latency-and-jitter-explained/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/bandwidth-throughput-latency-and-jitter-explained/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/bandwidth-throughput-latency-and-jitter-explained/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/bandwidth-throughput-latency-and-jitter-explained/" lang="hi" dir="ltr" hreflang="hi">हिन्दी</a></li><li><a href="/blog/tr/bandwidth-throughput-latency-and-jitter-explained/" lang="tr" dir="ltr" hreflang="tr" aria-current="page">Türkçe</a></li><li><a href="/blog/bn/bandwidth-throughput-latency-and-jitter-explained/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/bandwidth-throughput-latency-and-jitter-explained/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/bandwidth-throughput-latency-and-jitter-explained/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/bandwidth-throughput-latency-and-jitter-explained/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="tr" dir="ltr" data-blog-article="bandwidth-throughput-latency-and-jitter-explained" data-blog-language="tr">
+      <div class="article-meta">
+        <span class="tag">Video için ev ağı temelleri</span>
+        <span>Yazan Norva Editör Ekibi</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 Eylül 2026</time>
+        <span class="dot">·</span>
+        <span>6 dakikalık okuma</span>
+      </div>
+      <h1>Bant genişliği, gerçek veri aktarım hızı, gecikme ve gecikme değişkenliği</h1>
+      <p class="lede">Kapasite, ölçülen aktarım hızı, gecikme ve gecikme değişkenliği farklı soruları yanıtlar. Arabelleğe almayı tek sayıya bağlamadan önce tamamlanmış ağ karşılaştırmasını yorumlayın.</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en">İngilizce makaleden çevrilmiştir</a><span>İngilizce makalenin yayımlanma tarihi: 26 Ağustos 2026</span><p>Özgün ekran görüntüleri ve açıklayıcı çizimler İngilizcedir. Görsel açıklamaları ve metinler çevrilmiştir; görseller, yeni bir ürün testi yapılmış izlenimi verecek şekilde değiştirilmemiştir.</p></aside>
+      <nav class="toc" aria-label="Bu sayfada">
+      <strong>Bu sayfada</strong>
+      <ul><li><a href="#bandwidth-is-not-a-delivered-result">Bant genişliği, teslim edilmiş sonuç değildir</a></li><li><a href="#throughput-needs-a-test-context">Gerçek veri aktarım hızı bir test bağlamı gerektirir</a></li><li><a href="#latency-is-elapsed-delay">Gecikme, geçen bekleme süresidir</a></li><li><a href="#jitter-is-variation-not-simply-slowness">Jitter, yalnızca yavaşlık değil değişkenliktir</a></li><li><a href="#packet-loss-is-another-dimension">Paket kaybı başka bir boyuttur</a></li><li><a href="#original-evidence-metric-dictionary">Özgün katkı: Ölçüt sözlüğü</a></li><li><a href="#build-a-small-measurement-set">Küçük bir ölçüm kümesi oluşturun</a></li><li><a href="#interpret-combinations">Birleşimleri yorumlayın</a></li><li><a href="#common-interpretation-errors">Yaygın yorumlama hataları</a></li><li><a href="#frequently-asked-questions">Sık sorulan sorular</a></li><li><a href="#your-next-step">Sonraki adımınız</a></li><li><a href="#sources">Kaynaklar</a></li></ul>
+    </nav>
+      <blockquote><strong>Kısaca:</strong> Bant genişliği, kullanılabilir veya nominal kapasite kavramıdır; gerçek veri aktarım hızı ise belirli bir testte ölçülen yararlı veri hızıdır. Gecikme, bekleme süresini; jitter ise belirtilmiş yöntem altında gecikme değişkenliğini tanımlar. Paket kaybı bunlardan yine ayrıdır. Video birinden veya birkaçından etkilenebilir; bu yüzden sayıyı yorumlamadan önce yöntemi ve yolu kaydedin.</blockquote>
+<p>Her ölçüt kısmi bir görünüm sunar. Birimleri aynı olan iki test bile farklı uç noktaları, protokolleri, yönleri, süreleri, rotaları veya trafik koşullarını ölçebilir.</p>
+<h2 id="bandwidth-is-not-a-delivered-result">Bant genişliği, teslim edilmiş sonuç değildir</h2>
+<p>İnsanlar bant genişliğini sık sık hızın kısaltması olarak kullanır; ancak kapasite etiketleri, belirli bir aralıkta ne kadar uygulama verisinin ulaştığını söylemez. Paylaşılan bağlantılar, protokol ek yükü, sıkışıklık, radyo koşulları, cihaz sınırları ve uzak uç nokta gözlenen aktarım hızını düşürebilir.</p>
+<p>Bu nedenle plan hızı, Wi-Fi bağlantı hızı, Ethernet etiketi ve uygulama aktarım hızı farklı değerlerdir. Başkasıyla karşılaştırmadan önce ekranın hangisini gösterdiğini kaydedin.</p>
+<h2 id="throughput-needs-a-test-context">Gerçek veri aktarım hızı bir test bağlamı gerektirir</h2>
+<p>Gerçek veri aktarım hızı, ölçülmüş aktarım oranıdır. RFC 6349, TCP aktarım hızı testi için bir çerçeve tanımlar ve test yöntemini vurgular. Sonuç; uç noktası, yönü, protokolü, süresi, bağlantı sayısı, cihazı, rotası ve zamanıyla birlikte anlam taşır.</p>
+<p><a href="/blog/the-complete-guide-to-home-network-basics-for-video/" hreflang="en">Ev ağı temelleri rehberi <span class="link-language">(İngilizce)</span></a>, cihazla kaynak arasındaki yolu gösterir. Yakındaki test sunucusu, kullanma yetkiniz olan her kaynak yolunu yeniden oluşturmaz; kısa bir tepe değeri de sürdürülen uygulama performansı olarak sunulmamalıdır.</p>
+<h2 id="latency-is-elapsed-delay">Gecikme, geçen bekleme süresidir</h2>
+<p>Gecikme, verinin veya yanıtın ölçülen bir yoldan geçmesinin ne kadar sürdüğünü tanımlar. RFC 7679'un yönteminde tek yönlü gecikme için saat eşzamanlaması ve zamanlama belirsizliğinin hesaba katılması gerekir; birçok tüketici aracı ise gidiş-dönüş süresini bildirir. Bu sonuçlar birbirinin yerine geçmez.</p>
+<p>Videonun başlaması, kontroller, kimlik doğrulama ve segment istekleri farklı nedenlerle hızlı veya gecikmeli hissedilebilir. Yüksek aktarım hızı sonucu, kendiliğinden düşük gecikme demek değildir.</p>
+<h2 id="jitter-is-variation-not-simply-slowness">Jitter, yalnızca yavaşlık değil değişkenliktir</h2>
+<p>RFC 3393, paket gecikmesi değişkenliği ölçütlerini tanımlar. Günlük araçlarda “jitter” farklı hesap, yön, aralık veya istatistik kullanabilir. Değerleri karşılaştırmadan önce aracın tanımını okuyun.</p>
+<p>Bir bağlantının ortalama aktarım hızı yeterli olduğu hâlde paket varışları düzensiz olabilir; ya da gecikme kararlı olsa bile sürekli aktarım hızı yetersiz kalabilir. Sabit 80 ms gidiş-dönüş süresi ile 20 ve 140 ms arasında gidip gelen bir süre aynı ortalamaya sahip olup farklı davranabilir. Bu örnek, değişkenliği anlatır; jitter formülü veya kabul edilebilir sınır değildir.</p>
+<h2 id="packet-loss-is-another-dimension">Paket kaybı başka bir boyuttur</h2>
+<p>RFC 7680, açık yöntemi olan tek yönlü paket kaybı ölçütünü tanımlar. Tüketici sonuçları ise kaybı gelmeyen yanıtlardan çıkarabilir; bazı cihazlar tanılama trafiğine daha düşük öncelik verebilir. Bildirilen sıfır, her uygulama paketinin ulaştığını kanıtlamaz; sıfırdan farklı sonucun tekrarı ve kapsamı gerekir.</p>
+<p>Notlarınızda gelmeyen paketleri geç gelenlerden ayrı tutun. Oynatma duraklaması görünür bir belirtidir, paket düzeyinde teşhis değildir.</p>
+<h2 id="original-evidence-metric-dictionary">Özgün katkı: Ölçüt sözlüğü</h2>
+<div class="table-wrap" role="region" aria-label="Kaydırılabilir tablo" tabindex="0"><table>
+<thead><tr><th scope="col">Ölçüt</th><th scope="col">Günlük dille soru</th><th scope="col">Gerekli bağlam</th><th scope="col">Tek başına neyi kanıtlayamaz?</th></tr></thead>
+<tbody><tr><td>Bant genişliği/kapasite</td><td>Bu bağlantı tanımı altında ne taşıyabilir?</td><td>Bağlantı, etiket, yön</td><td>Uygulama verisinin iletimini</td></tr><tr><td>Gerçek veri aktarım hızı</td><td>Hangi yararlı hız ölçüldü?</td><td>Uç nokta, protokol, süre, rota</td><td>Her kaynak yolunu</td></tr><tr><td>Gecikme</td><td>Yöntem ne kadar gecikme gözledi?</td><td>Tek yön/gidiş-dönüş, saatler, yol</td><td>Sürekli kapasiteyi</td></tr><tr><td>Jitter</td><td>Gecikme nasıl değişti?</td><td>Formül, örneklem, istatistik</td><td>Ortalama aktarım hızını</td></tr><tr><td>Kayıp</td><td>Beklenen hangi paketler yoktu?</td><td>Test paketi türü, yön, aralık</td><td>Oynatmanın kesin nedenini</td></tr></tbody>
+</table></div>
+<p>Her değere birim ekleyin ve gizliliğin izin verdiği ölçüde ham sonuçları saklayın.</p>
+<h3 id="worked-example-a-fast-plan-and-an-inconsistent-evening">Uygulamalı örnek: Hızlı bir plan ve tutarsız bir akşam</h3>
+<p>Bunlar <strong>kurmaca öğretici sonuçlardır</strong>; Norva'nın veya bir kaynağın testi değildir. Hanenin 100 Mbps etiketli bir planı vardır. Aynı dizüstü bilgisayarı aynı Wi-Fi konumunda, aynı yakındaki uç noktaya karşı, aynı indirme ayarlarıyla ve her zaman diliminde 30 saniyelik üç denemeyle test eder.</p>
+<div class="table-wrap" role="region" aria-label="Kaydırılabilir tablo" tabindex="0"><table>
+<thead><tr><th scope="col">Gözlem</th><th scope="col">Sakin zaman dilimi</th><th scope="col">Yoğun zaman dilimi</th><th scope="col">Yorum</th></tr></thead>
+<tbody><tr><td>İndirme aktarım hızı, üç deneme</td><td>82, 80, 84 Mbps</td><td>28, 14, 31 Mbps</td><td>Ortanca 82'den 28 Mbps'ye düşer; yoğun dönemde aralık 14–31 Mbps'dir</td></tr><tr><td>Aynı yük koşulunda alınan, aracın bildirdiği ortanca gidiş-dönüş gecikmesi</td><td>18 ms</td><td>65 ms</td><td>Bu test yolu yoğun dönemde daha yavaş yanıt verir</td></tr><tr><td>Aynı formül ve örnekleme ayarlarıyla aracın gösterdiği jitter</td><td>3 ms</td><td>24 ms</td><td>Aracın tanımına göre gecikme daha çok değişir; bu geçer/kalır notu değildir</td></tr><tr><td>Yoğun dönemde izleme yetkisi bulunan video</td><td>Kontrol edilmedi</td><td>İki duraklama kaydedildi</td><td>Duraklamalar daha kötü sonuçlarla aynı zamana denk gelir, ancak video uç noktası ölçülmemiştir</td></tr></tbody>
+</table></div>
+<p>Makul sonraki adım, belirtinin görüldüğü zamanda tekrarlamak ve destekleniyorsa isteğe bağlı olarak yalnızca yerel bağlantıyı Ethernet'e çevirmektir. Hemen daha hızlı plan satın almak <strong>değildir</strong>. 14 Mbps örneği bile videonun oynatılabilmesi gerekip gerekmediğini ortaya koyamaz: Sürümün gerçek gereksinimleri, kısa düşüşler, kaynak yolu ve arabelleğe alma davranışı bilinmemektedir.</p>
+<p>Mbps'yi (saniyede megabit), MB/s'den (saniyede megabayt) ayırın: Ölçümün ek yük tanımı hesaba katılmadan 8 Mbps, 1 MB/s'ye eşittir. Milisaniye veri hızını değil zamanı tanımlar. Bu birimler, büyük sayının her zaman daha iyi bağlantı anlamına geldiği varsayımıyla karşılaştırılamaz.</p>
+<h2 id="build-a-small-measurement-set">Küçük bir ölçüm kümesi oluşturun</h2>
+<p>Etkilenen cihazı olağan konumunda kullanın. Sakin zamanda aralıklı üç örnek, belirtinin yaşandığı dönemde de üç örnek kaydedin. Güvenli ve destekleniyorsa uç noktayı veya test ayarlarını değiştirmeden alternatif tek yerel bağlantı üzerinden tekrarlayın.</p>
+<p>Sonra en iyi sayıyı seçmek yerine ortancaları, aralıkları ve tekrarlanmayı karşılaştırın. Eşzamanlı yüklemeleri, mesh değişimlerini, cihazın güç durumunu ve hava koşullarını yalnızca doğrudan gözlendiğinde not edin; rastlantısal olayların çevresinde nedensellik hikâyeleri uydurmayın.</p>
+<h2 id="interpret-combinations">Birleşimleri yorumlayın</h2>
+<p>Düşük sürekli aktarım hızı oynatma arabelleğini boşaltabilir. Gecikme değişkenliği ve kayıp, kısa süreli ortalama hız yeterli görünse bile iletimi aksatabilir. Yüksek gecikme, uzun aktarımı mutlaka sınırlamadan istek-yanıt dizilerini yavaşlatabilir. Görünür etkiyi uygulama, taşıma davranışı, arabellek tasarımı ve kaynak belirler.</p>
+<p>Oynatma devam ediyor ama görüntü kötü görünüyorsa bulanıklığı yavaş ağın kanıtı saymak yerine <a href="/blog/tr/the-complete-guide-to-understanding-video-quality/">görüntü kalitesi karşılaştırmasını</a> kullanın. Norva, kullanma yetkiniz olan uyumlu kaynakları oynatır; katalog sağlamaz ve yönlendiricinizi, kaynak yolunu veya kodlamasını kontrol etmez.</p>
+<h2 id="common-interpretation-errors">Yaygın yorumlama hataları</h2>
+<p>Bit ile baytı karşılaştırmayın, bağlantı hızını gerçek aktarım hızıyla karıştırmayın, tüm gecikme değişkenliğini “paket kaybı” diye adlandırmayın veya tek sunucu sonucunu garanti saymayın. Yalnızca yönlendirici, cihaz ve kaynağı birlikte değiştirdikten sonra ölçmekten kaçının.</p>
+<h2 id="frequently-asked-questions">Sık sorulan sorular</h2>
+<h3 id="which-metric-matters-most-for-video">Video için en önemli ölçüt hangisi?</h3>
+<p>Hiçbir ölçüt her zaman baskın değildir. Hangi ölçümlerin ilgili olduğunu sürümün iletim biçimi, yol, cihaz ve belirti belirler.</p>
+<h3 id="can-throughput-exceed-a-plan-label">Gerçek aktarım hızı, plan etiketini aşabilir mi?</h3>
+<p>Etiketler, tahsis, test yöntemleri, birimler ve ek yük tanımları değişir. Bir farkı hata kabul etmeden önce her sayının neyi temsil ettiğini doğrulayın.</p>
+<h3 id="is-jitter-measured-the-same-way-by-every-tool">Her araç jitter'ı aynı biçimde mi ölçer?</h3>
+<p>Hayır. Aracın formülünü, yönünü, test paketi türünü, örnekleme süresini ve bildirilen istatistiği kontrol edin.</p>
+<h3 id="what-is-acceptable-jitter-for-video-streaming">Video akışı için kabul edilebilir jitter nedir?</h3>
+<p>Video oynatmayı onaylayan evrensel bir milisaniye eşiği yoktur. Arabelleğe alınan isteğe bağlı video ile etkileşimli görüşmeler gecikmeyi farklı tolere eder; araçlar da jitter'ı farklı hesaplar. Aynı yöntemle tekrarlanan sonuçları gerçek belirtiyle karşılaştırın. Tek uygulama veya protokol için yayımlanan sınır, Norva için genel gereksinime dönüşmemelidir.</p>
+<h3 id="why-does-video-buffer-after-a-good-speed-test">İyi bir hız testinden sonra video neden arabelleğe alır?</h3>
+<p>Test farklı sunucu, rota, aktarım biçimi veya zaman dilimi kullanabilir. Kısa kesintileri kaçırabilir; oynatma kaynağa ve cihaza da bağlıdır. Sonraki testi seçmeden önce gecikmenin ilk kareden önce mi yoksa oynatma sırasında mı olduğunu kaydedin.</p>
+<section class="article-cta"><h2 id="your-next-step">Sonraki adımınız</h2>
+<p><a  href="/blog/a-symptom-pattern-atlas-for-video-buffering/" hreflang="en" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="bandwidth-throughput-latency-and-jitter-explained">Oynatma belirtinizi sonraki kontrolle eşleştirin <span class="link-language">(İngilizce)</span></a>. Destek isteğinize kaynak giriş bilgilerini değil, cihazı, zaman dilimini, test yöntemini ve tekrarlanabilir tek belirtiyi ekleyin.</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Kaynaklar</h2>
+<ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">RFC 6349: TCP aktarım hızı testi</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc7679" target="_blank" rel="noopener">RFC 7679: Tek yönlü gecikme ölçütü</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">RFC 3393: Gecikme değişkenliği ölçütü</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc7680" target="_blank" rel="noopener">RFC 7680: Tek yönlü paket kaybı ölçütü</a></li></ul>
+</section>
+      <section class="related">
+      <h2>İlgili yazılar</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-home-network-basics-for-video/" hreflang="en" lang="en">
+          <span class="tag">Home Network Video Basics</span>
+          <div class="card-title">The Complete Guide to Home Network Basics for Video</div>
+          <span class="link-language" lang="tr">İngilizce</span>
+          <p>Reliable video depends on the complete path, not one speed number. Identify the player, local link, access point or switch, router, internet path, and authorised source. Then observe throughput, delay, delay variation, packet loss, competing traffic, and recurrence while changing one layer at a time.</p>
+        </a>
+        <a class="card" href="/blog/a-symptom-pattern-atlas-for-video-buffering/" hreflang="en" lang="en">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">A Symptom-Pattern Atlas for Video Buffering</div>
+          <span class="link-language" lang="tr">İngilizce</span>
+          <p>Classify buffering by playback phase, title and version, device, network link, room, time window, simultaneous traffic, recurrence, and recovery. Each pattern narrows candidate layers but does not prove one cause. Capture the failing state, then change one axis and compare the same authorised content.</p>
+        </a>
+        <a class="card" href="/blog/tr/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">Video kalitesi okuryazarlığı</span>
+          <div class="card-title">Video kalitesini anlamak: Gördüğünüz görüntüyü nasıl karşılaştırırsınız?</div>
+
+          <p>Tek sahne, tamamlanmış bir karşılaştırma ve tekrarlanabilir izleme kontrolüyle bulanık kaynağı, sıkıştırmayı, kesintili iletimi ve ekran işlemeyi ayırın.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Alt bilgi gezinmesi">
+        <a href="/">Ana sayfa</a>
+        <a href="/blog/tr/">Blog</a>
+        <a href="/#features">Avantajlar</a>
+        <a href="/#pricing">Fiyatlandırma</a>
+        <a href="/support.html?returnTo=%2Fblog%2Ftr%2F">Destek</a>
+        <a href="/terms.html">Kullanım koşulları</a>
+        <a href="/privacy.html">Gizlilik</a>
+        <a href="/mentions-legales.html">Yasal bilgiler</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva bir medya oynatıcı ve düzenleyicidir. Medya sağlamaz. Kullanım için sahibi olduğunuz veya erişim yetkinizin bulunduğu uyumlu bir kaynak gerekir.</p>
+    </div>
+  </footer>
+</body>
+</html>

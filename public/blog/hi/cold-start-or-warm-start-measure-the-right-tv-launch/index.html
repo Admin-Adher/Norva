@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="hi" dir="ltr" data-norva-document-language="hi">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>टीवी ऐप का कोल्ड और वॉर्म स्टार्ट: लोडिंग समय की सही तुलना | Norva Blog</title>
+  <meta name="description" content="टीवी ऐप कभी जल्दी और बाद में धीरे क्यों खुलता है? हल किए हुए समय उदाहरण से कोल्ड, वॉर्म और लौटने वाले लॉन्च, पहली तस्वीर और उपयोग योग्य नेविगेशन अलग करें।">
+  <link rel="canonical" href="https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="टीवी ऐप का कोल्ड और वॉर्म स्टार्ट: लोडिंग समय की सही तुलना | Norva Blog">
+  <meta property="og:description" content="टीवी ऐप कभी जल्दी और बाद में धीरे क्यों खुलता है? हल किए हुए समय उदाहरण से कोल्ड, वॉर्म और लौटने वाले लॉन्च, पहली तस्वीर और उपयोग योग्य नेविगेशन अलग करें।">
+  <meta property="og:url" content="https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="टीवी ऐप का कोल्ड और वॉर्म स्टार्ट: लोडिंग समय की सही तुलना | Norva Blog">
+  <meta name="twitter:description" content="टीवी ऐप कभी जल्दी और बाद में धीरे क्यों खुलता है? हल किए हुए समय उदाहरण से कोल्ड, वॉर्म और लौटने वाले लॉन्च, पहली तस्वीर और उपयोग योग्य नेविगेशन अलग करें।">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "कोल्ड स्टार्ट या वॉर्म स्टार्ट: टीवी ऐप अलग तरह से क्यों खुलता है",
+  "description": "टीवी ऐप कभी जल्दी और बाद में धीरे क्यों खुलता है? हल किए हुए समय उदाहरण से कोल्ड, वॉर्म और लौटने वाले लॉन्च, पहली तस्वीर और उपयोग योग्य नेविगेशन अलग करें।",
+  "inLanguage": "hi",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "मुखपृष्ठ",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "ब्लॉग",
+      "item": "https://norva.tv/blog/hi/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "कोल्ड स्टार्ट या वॉर्म स्टार्ट: टीवी ऐप अलग तरह से क्यों खुलता है",
+      "item": "https://norva.tv/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">मुख्य सामग्री पर जाएँ</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva का मुखपृष्ठ">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="मुख्य नेविगेशन">
+      <a href="/blog/hi/">ब्लॉग</a>
+      <a class="hide-sm" href="/#how-it-works">यह कैसे काम करता है</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>निःशुल्क परीक्षण शुरू करें</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="पृष्ठ का नेविगेशन पथ"><a href="/">मुखपृष्ठ</a><span class="sep" aria-hidden="true">›</span><a href="/blog/hi/">ब्लॉग</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">कोल्ड स्टार्ट या वॉर्म स्टार्ट: टीवी ऐप अलग तरह से क्यों खुलता है</span></nav>
+    <details class="blog-language-picker"><summary>भाषा: <bdi>हिन्दी</bdi></summary>
+    <nav aria-label="लेख की भाषा"><ul><li><a href="/blog/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="hi" dir="ltr" hreflang="hi" aria-current="page">हिन्दी</a></li><li><a href="/blog/tr/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/cold-start-or-warm-start-measure-the-right-tv-launch/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="hi" dir="ltr" data-blog-article="cold-start-or-warm-start-measure-the-right-tv-launch" data-blog-language="hi">
+      <div class="article-meta">
+        <span class="tag">स्मार्ट टीवी का प्रदर्शन</span>
+        <span>लेखक Norva संपादकीय टीम</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 सितंबर 2026</time>
+        <span class="dot">·</span>
+        <span>पढ़ने में 7 मिनट</span>
+      </div>
+      <h1>कोल्ड स्टार्ट या वॉर्म स्टार्ट: टीवी ऐप अलग तरह से क्यों खुलता है</h1>
+      <p class="lede">Home से लौटना ज़रूरी नहीं कि नया लॉन्च हो। समान शुरुआती स्थिति की तुलना करें और दिखाई देने वाली तस्वीर को वास्तव में प्रतिक्रिया देने वाले नेविगेशन से अलग रखें।</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/cold-start-or-warm-start-measure-the-right-tv-launch/" hreflang="en">अंग्रेज़ी लेख से अनूदित</a><span>अंग्रेज़ी लेख 27 अगस्त 2026 को प्रकाशित हुआ</span><p>मूल स्क्रीनशॉट और उदाहरण चित्र अंग्रेज़ी में हैं। चित्र विवरण और व्याख्याओं का अनुवाद किया गया है; नए उत्पाद परीक्षण का आभास देने के लिए चित्रों में बदलाव नहीं किया गया है।</p></aside>
+      <nav class="toc" aria-label="इस पृष्ठ पर">
+      <strong>इस पृष्ठ पर</strong>
+      <ul><li><a href="#define-four-states">चार स्थितियाँ परिभाषित करें</a></li><li><a href="#define-two-finish-points">समाप्ति के दो बिंदु तय करें</a></li><li><a href="#fix-context">संदर्भ समान रखें</a></li><li><a href="#original-evidence-launch-protocol">मौलिक साक्ष्य: ऐप खोलने की प्रक्रिया</a></li><li><a href="#establish-cold-state-safely">कोल्ड स्थिति सुरक्षित तरीके से बनाएँ</a></li><li><a href="#establish-warm-state">वॉर्म स्थिति बनाएँ</a></li><li><a href="#reverse-order-and-rest">क्रम उलटें और विराम दें</a></li><li><a href="#interpret-differences">अंतर का अर्थ समझें</a></li><li><a href="#compare-after-change">बदलाव के बाद तुलना करें</a></li><li><a href="#control-trial-order-and-readiness">परीक्षण का क्रम और तैयारी नियंत्रित करें</a></li><li><a href="#frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</a></li><li><a href="#your-next-step">आपका अगला कदम</a></li><li><a href="#sources">संदर्भ स्रोत</a></li></ul>
+    </nav>
+      <blockquote><strong>संक्षेप में:</strong> टीवी ऐप शुरुआत से खुल सकता है, बची हुई स्थिति से स्क्रीन दोबारा बना सकता है, या अपने इंटरफ़ेस का बहुत-सा हिस्सा मेमोरी में रहते हुए वापस आ सकता है। ये अलग काम हैं। समान शुरुआती परिस्थितियों की तुलना करें और ऐप की पहली तस्वीर तथा रिमोट से उपयोग योग्य नेविगेशन, दोनों का समय मापें। लोगो दिखना कैटलॉग तैयार होने का प्रमाण नहीं है।</blockquote>
+<p>यह मार्गदर्शक असंगत खुलने के समय का वर्णन करने वाले दर्शक के लिए है, टीवी को किसी सार्वभौमिक गति लक्ष्य पर अंक देने के लिए नहीं। टीवी ऑपरेटिंग सिस्टम पर्दे के पीछे प्रक्रियाएँ सँभाल सकते हैं। आंतरिक स्थिति सत्यापित न कर सकें, तो तकनीकी लेबल गढ़ने के बजाय आपने क्या किया, यह लिखें।</p>
+<h2 id="define-four-states">चार स्थितियाँ परिभाषित करें</h2>
+<p>Android <strong>कोल्ड</strong>, <strong>वॉर्म</strong> और <strong>हॉट</strong> स्टार्ट का दस्तावेज़ देता है। कोल्ड स्टार्ट ऐप को शुरू से बनाता है; वॉर्म स्टार्ट बची हुई स्थिति का उपयोग करके शुरू होने के कुछ काम करता है; हॉट स्टार्ट बची हुई गतिविधि को सामने लाता है। ऐप के अंदर किसी स्क्रीन पर दोबारा जाना अलग नेविगेशन अवलोकन है, Android की चौथी स्टार्ट श्रेणी नहीं।</p>
+<p>व्यावहारिक टीवी रिकॉर्ड के लिए ये चार दिखाई देने वाली परिस्थितियाँ अलग रखें:</p>
+<div class="table-wrap" role="region" aria-label="स्क्रॉल की जा सकने वाली तालिका" tabindex="0"><table>
+<thead><tr><th scope="col">दर्ज की जा सकने वाली परिस्थिति</th><th scope="col">इससे क्या पता चलता है</th><th scope="col">क्या अज्ञात रहता है</th></tr></thead>
+<tbody><tr><td>टीवी को आधिकारिक तरीके से रीस्टार्ट करने के बाद ऐप खोलना</td><td>ऐप खुलने से पहले सिस्टम रीस्टार्ट हुआ</td><td>कितनी देरी सिस्टम या नेटवर्क तैयार होने की है</td></tr><tr><td>Back से बाहर निकलने के बाद दोबारा खोलना</td><td>ऐप उसके सामान्य नियंत्रण से छोड़ा गया</td><td>उसकी प्रक्रिया या स्क्रीन बची रही या नहीं</td></tr><tr><td>Home दबाकर 30 सेकंड प्रतीक्षा करने के बाद लौटना</td><td>थोड़ी देर पृष्ठभूमि में रहने का अंतराल हुआ</td><td>सिस्टम ने ऐप को चालू रखा या नहीं</td></tr><tr><td>ऐप की दूसरी स्क्रीन से Movies पर लौटना</td><td>नेविगेशन ऐप के अंदर रहा</td><td>कैटलॉग या चित्र के कौन-से संसाधन दोबारा इस्तेमाल हुए</td></tr></tbody>
+</table></div>
+<p><a href="/blog/smart-tv-media-app-performance-a-layer-by-layer-guide/" hreflang="en">परत-दर-परत मार्गदर्शक <span class="link-language">(अंग्रेज़ी में)</span></a> जीवनचक्र को नेटवर्क और रेंडरिंग से अलग करता है।</p>
+<h2 id="define-two-finish-points">समाप्ति के दो बिंदु तय करें</h2>
+<p>पहला दिखाई देने वाला फ़्रेम फ़ोकस काम करने, चित्र लोड होने या नेविगेशन प्रतिक्रिया देने से पहले आ सकता है। “ऐप का पहला फ़्रेम” और “उपयोग योग्य स्क्रीन” अलग दर्ज करें। “चित्र स्थिर” केवल तब जोड़ें जब प्रश्न वही हो। Android के TTID और TTFD पहली प्रस्तुति और पूरी तैयारी में अंतर करते हैं, लेकिन रिमोट दबाने से स्क्रीन तक आपका मैन्युअल समय अपने-आप इन उपकरण-आधारित मापदंडों में से कोई नहीं बन जाता।</p>
+<p>सबसे अनुकूल पड़ाव पर घड़ी न रोकें।</p>
+<h2 id="fix-context">संदर्भ समान रखें</h2>
+<p>टीवी मॉडल, OS, ऐप संस्करण, इनपुट स्रोत, पावर स्थिति, आउटपुट, तार वाला या वाई-फ़ाई रास्ता, समय, खाते की जानकारी सुरक्षित रखने वाला सत्र विवरण, स्रोत की उपलब्धता और पृष्ठभूमि की गतिविधि लिखें। नेटवर्क और स्रोत की स्थिति तुलनीय रखें।</p>
+<p>मैन्युअल समय मापन में प्रतिक्रिया समय की अनिश्चितता बतानी चाहिए।</p>
+<h2 id="original-evidence-launch-protocol">मौलिक साक्ष्य: ऐप खोलने की प्रक्रिया</h2>
+<p>निम्न मान <strong>शिक्षण के लिए काल्पनिक उदाहरण हैं, Norva के मापन नहीं</strong>। दर्शक एक टीवी, ऐप संस्करण, खाते और कैटलॉग का उपयोग करता है। हर परीक्षण ऐप खोलने वाले रिमोट बटन को दबाने से शुरू होता है। “उपयोग योग्य” का अर्थ है इच्छित स्क्रीन दिखे, D-pad की एक गतिविधि पर प्रतिक्रिया मिले और कोई रोकने वाला ओवरले न बचा हो। सभी समय उसी शुरुआती घटना से सेकंड में हैं।</p>
+<div class="table-wrap" role="region" aria-label="स्क्रॉल की जा सकने वाली तालिका" tabindex="0"><table>
+<thead><tr><th scope="col">परीक्षण</th><th scope="col">देखी गई तैयारी</th><th scope="col">ऐप का पहला फ़्रेम</th><th scope="col">उपयोग योग्य नेविगेशन</th><th scope="col">चित्र स्थिर</th></tr></thead>
+<tbody><tr><td>A</td><td>आधिकारिक रीस्टार्ट; टीवी होम और नेटवर्क तैयार</td><td>1.8 s</td><td>4.6 s</td><td>6.2 s</td></tr><tr><td>B</td><td>Home, 30 सेकंड प्रतीक्षा, वापस लौटना</td><td>0.7 s</td><td>1.2 s</td><td>1.9 s</td></tr><tr><td>C</td><td>वही थोड़ी देर बाद लौटना</td><td>0.8 s</td><td>1.4 s</td><td>2.0 s</td></tr><tr><td>D</td><td>A में इस्तेमाल की गई तैयारी दोहराना</td><td>1.9 s</td><td>4.4 s</td><td>6.0 s</td></tr></tbody>
+</table></div>
+<p>रीस्टार्ट के बाद के दो अवलोकनों में उपयोग योग्य नेविगेशन 4.4–4.6 सेकंड में मिलता है, जबकि थोड़ी देर बाद लौटने में 1.2–1.4 सेकंड लगते हैं। इससे इन तैयारियों के बीच दोहराने योग्य अंतर का संकेत मिलता है। यह <strong>नहीं</strong> बताता कि किसी खास कैश से कितना समय बचा, वॉर्म या हॉट प्रक्रिया स्थिति साबित नहीं करता और दूसरे टीवी का परिणाम नहीं बताता।</p>
+<p>सहायता के लिए उपयोगी अवलोकन A और D में पहले फ़्रेम तथा प्रतिक्रिया देने वाले नेविगेशन का अंतर है। ऐप को “1.8 सेकंड में तैयार” कहना उस अंतर को छिपाएगा। मैन्युअल समय में निरीक्षक की प्रतिक्रिया की त्रुटि भी शामिल होती है: अधिक सटीक मापन के बिना सेकंड के दसवें हिस्से के अंतर को प्रदर्शन सुधार न मानें।</p>
+<h2 id="establish-cold-state-safely">कोल्ड स्थिति सुरक्षित तरीके से बनाएँ</h2>
+<p>केवल आधिकारिक ऐप रोकने, टीवी रीस्टार्ट करने या पावर संबंधी मार्गदर्शन का उपयोग करें। केवल कोल्ड स्थिति बनाने के लिए बिजली न काटें, सर्विस मेन्यू इस्तेमाल न करें और डेटा साफ़ न करें। प्लेटफ़ॉर्म ऐप के न चलने की स्थिति सत्यापित नहीं कर सकता, तो उसे “रीस्टार्ट के बाद खोलना” कहें।</p>
+<p>सुरक्षा और उपकरण को सही-सलामत रखना प्रयोग की शुद्धता से अधिक महत्त्वपूर्ण हैं।</p>
+<h2 id="establish-warm-state">वॉर्म स्थिति बनाएँ</h2>
+<p>Home या Back का कोई सामान्य क्रम वॉर्म प्रक्रिया स्थिति की गारंटी नहीं देता। प्लेटफ़ॉर्म के मापन उपकरणों से इसे सत्यापित नहीं कर सकते, तो <strong>थोड़ी देर बाद लौटना</strong> दर्ज करें: उसी स्क्रीन तक पहुँचें, दस्तावेज़ित नियंत्रण से बाहर जाएँ, निश्चित अंतराल रुकें और लौटें। असत्यापित जीवनचक्र लेबल दिए बिना लिखें कि स्क्रीन, फ़ोकस या चित्र बना रहा या नहीं।</p>
+<p>परीक्षणों के बीच बची हुई स्थिति बदल सकती है, इसलिए अनपेक्षित रूप से दोबारा लोड होना रिकॉर्ड में रखें।</p>
+<h2 id="reverse-order-and-rest">क्रम उलटें और विराम दें</h2>
+<p>जहाँ व्यावहारिक हो, निश्चित विश्राम अंतरालों के साथ रीस्टार्ट के बाद खोलना, थोड़ी देर बाद लौटना, थोड़ी देर बाद लौटना, रीस्टार्ट के बाद खोलना अपनाएँ। क्रम उलटने से कैशिंग, तापीय स्थिति, नेटवर्क या स्रोत के बदलाव से मेल खाता पैटर्न दिख सकता है; इससे कारण की पहचान नहीं होती। दर्जनों बार ऐप न खोलें; पहले से छोटी संख्या तय करें।</p>
+<p>मापन उपकरण प्रक्रिया की स्थिति और समय की सीमाएँ अधिक सटीक स्थापित कर सकते हैं, लेकिन दोहराने योग्य दिखाई देने वाली देरी बताने के लिए दर्शक को डेवलपर मोड या निजी लॉग नहीं चाहिए।</p>
+<h2 id="interpret-differences">अंतर का अर्थ समझें</h2>
+<p>वॉर्म का कोल्ड से तेज़ होना बची हुई स्थिति या कैश किए संसाधनों को दिखा सकता है, लेकिन कौन-सा कैश कितना ज़िम्मेदार है यह नहीं मापता। वॉर्म का कोल्ड जैसा व्यवहार ऐप समाप्त होने, अपडेट, मेमोरी पर दबाव या कार्यान्वयन के निर्णय को दर्शा सकता है।</p>
+<p>बार-बार जगह खोना या अनपेक्षित रीलोड अवलोकन की तरह लिखें, टीवी को अधिक मेमोरी चाहिए इसका प्रमाण नहीं। अगर केवल स्क्रीन के बीच देखना स्थानांतरित करना धीमा लगता है, तो पहले <a href="/blog/hi/handoff-mirroring-or-casting-know-which-workflow-you-need/">हैंडऑफ़, मिररिंग और कास्टिंग मार्गदर्शक</a> से तरीका पहचानें।</p>
+<h2 id="compare-after-change">बदलाव के बाद तुलना करें</h2>
+<p>ऐप अपडेट के बाद वही प्रक्रिया और संस्करण संदर्भ दोहराएँ। याद पर निर्भर रहने के बजाय पहले/बाद के नोट सुरक्षित रखें। पुराने रीस्टार्ट के बाद खुलने की तुलना नए थोड़ी देर बाद लौटने से न करें।</p>
+<p>Norva का टीवी पर खुलने का व्यवहार उपकरण, संस्करण और जुड़े हुए स्रोत पर निर्भर करता है। Norva ऐसा संगत मीडिया चलाने वाला प्लेयर है जिसका उपयोग करने की आपको अनुमति है, साथ मिलने वाला कैटलॉग नहीं। ये उदाहरण उसके खुलने की गति या प्लेबैक प्रदर्शन को प्रमाणित नहीं करते।</p>
+<h2 id="control-trial-order-and-readiness">परीक्षण का क्रम और तैयारी नियंत्रित करें</h2>
+<p>कोल्ड परीक्षण अक्सर पहले होते हैं, इसलिए शुरुआत का रखरखाव, नेटवर्क से दोबारा जुड़ना या निरीक्षक की तैयारी उन्हें अनुचित रूप से धीमा दिखा सकती है। जहाँ प्लेटफ़ॉर्म दस्तावेज़ित स्थिति की अनुमति दे, सत्रों में क्रम बदलें और हर शुरुआत से पहले समान निश्चित अंतराल प्रतीक्षा करें। लिखें कि होम स्क्रीन, रिमोट, नेटवर्क और आउटपुट पहले से तैयार थे या नहीं।</p>
+<p>समय मापने से पहले “उपयोग योग्य” परिभाषित करें: उदाहरण के लिए, इच्छित स्क्रीन दिखती है, फ़ोकस एक बार प्रतिक्रिया देता है और कोई रोकने वाला ओवरले नहीं बचा है। केवल लोगो आने पर समय मापन समाप्त न करें। मध्यिका केवल अलग-अलग मानों और सीमा के साथ दें; एक सारांश किसी अटके या असफल लॉन्च को छिपा सकता है, जो छोटे औसत अंतर से अधिक महत्त्वपूर्ण हो।</p>
+<h2 id="frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</h2>
+<h3 id="is-tv-power-on-the-same-as-app-cold-start">क्या टीवी चालू करना और ऐप का कोल्ड स्टार्ट एक ही है?</h3>
+<p>नहीं। टीवी चालू करने में सिस्टम की शुरुआत शामिल होती है और वह ऐप की स्थिति अलग ढंग से बहाल कर सकता है।</p>
+<h3 id="how-many-runs-are-needed">कितने परीक्षण चाहिए?</h3>
+<p>पहले से तय कई परीक्षण करें, जो उपकरण या स्रोत पर दबाव डाले बिना सीमा दिखाने के लिए पर्याप्त हों।</p>
+<h3 id="should-artwork-completion-define-launch">क्या चित्र पूरा लोड होना लॉन्च की समाप्ति तय करे?</h3>
+<p>केवल तब जब काम चित्रों की तैयारी जाँचना हो; पहला फ़्रेम और उपयोग योग्य फ़ोकस अलग रखें।</p>
+<section class="article-cta"><h2 id="your-next-step">आपका अगला कदम</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="cold-start-or-warm-start-measure-the-right-tv-launch">दोहराई जा सकने वाली टीवी ऐप खोलने की समस्या में सहायता लें</a>। टीवी मॉडल, OS और ऐप संस्करण, तैयारी के चरण, अपेक्षित स्क्रीन और समय के दोनों पड़ाव शामिल करें। स्क्रीनशॉट में खाते के पहचानकर्ता, स्रोत के पते और लॉगिन विवरण न रखें।</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">संदर्भ स्रोत</h2>
+<ul><li><a href="https://developer.android.com/topic/performance/vitals/launch-time" target="_blank" rel="noopener">Android Developers: ऐप शुरू होने का समय</a></li><li><a href="https://support.google.com/googletv/answer/12364830?hl=en" target="_blank" rel="noopener">Google TV सहायता: धीमे या रुक-रुककर चलने वाले Google TV उपकरण को ठीक करें</a></li></ul>
+</section>
+      <section class="related">
+      <h2>संबंधित लेख</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/smart-tv-media-app-performance-a-layer-by-layer-guide/" hreflang="en" lang="en">
+          <span class="tag">Smart TV Performance</span>
+          <div class="card-title">Smart TV Media App Performance: A Layer-by-Layer Guide</div>
+          <span class="link-language" lang="hi">अंग्रेज़ी में</span>
+          <p>Separate remote input, focus movement, interface rendering, artwork delivery, search, app lifecycle, storage, memory clues, network response, media capability, playback controls, and output. Time one observable event at a time on the exact TV, app, and version. A slow interface is not automatically a slow network or decoder.</p>
+        </a>
+        <a class="card" href="/blog/hi/handoff-mirroring-or-casting-know-which-workflow-you-need/">
+          <span class="tag">डिवाइसों के बीच हैंडऑफ़</span>
+          <div class="card-title">हैंडऑफ़, मिररिंग या कास्टिंग: समझें कि आपको कौन-सा तरीका चाहिए</div>
+
+          <p>तय करें कि आपको स्वतंत्र ऐप चाहिए, अपनी स्क्रीन की प्रतिलिपि या फ़ोन से नियंत्रित रिसीवर प्लेबैक, फिर उस पथ की आवश्यकताएँ जाँचें।</p>
+        </a>
+        <a class="card" href="/blog/hi/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">वीडियो की गुणवत्ता की समझ</span>
+          <div class="card-title">वीडियो की गुणवत्ता समझें: जो दिखता है उसकी तुलना कैसे करें</div>
+
+          <p>एक दृश्य, भरी हुई तुलना और दोहराने योग्य देखने की जाँच से धुँधले स्रोत, संपीड़न, डेटा की रुकावट और डिस्प्ले प्रोसेसिंग को अलग समझें।</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="पादलेख नेविगेशन">
+        <a href="/">मुखपृष्ठ</a>
+        <a href="/blog/hi/">ब्लॉग</a>
+        <a href="/#features">लाभ</a>
+        <a href="/#pricing">मूल्य निर्धारण</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fhi%2F">सहायता</a>
+        <a href="/terms.html">शर्तें</a>
+        <a href="/privacy.html">गोपनीयता</a>
+        <a href="/mentions-legales.html">कानूनी सूचना</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva मीडिया चलाने और व्यवस्थित करने वाला सॉफ़्टवेयर है। यह मीडिया उपलब्ध नहीं कराता। उपयोग के लिए ऐसा संगत स्रोत चाहिए जिसके आप स्वामी हों या जिसे उपयोग करने की आपको अनुमति हो।</p>
+    </div>
+  </footer>
+</body>
+</html>

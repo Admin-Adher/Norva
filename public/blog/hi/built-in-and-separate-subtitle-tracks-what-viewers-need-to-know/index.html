@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="hi" dir="ltr" data-norva-document-language="hi">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>अंतर्निहित, बाहरी और चित्र में अंकित उपशीर्षक समझें | Norva Blog</title>
+  <meta name="description" content="अंतर्निहित ट्रैक, बाहरी उपशीर्षक फ़ाइल और चित्र में स्थायी पाठ की तुलना करें। समझें कि कंटेनर, ट्रैक चयनकर्ता और बंद करने का नियंत्रण क्या बताते हैं।">
+  <link rel="canonical" href="https://norva.tv/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="अंतर्निहित, बाहरी और चित्र में अंकित उपशीर्षक समझें | Norva Blog">
+  <meta property="og:description" content="अंतर्निहित ट्रैक, बाहरी उपशीर्षक फ़ाइल और चित्र में स्थायी पाठ की तुलना करें। समझें कि कंटेनर, ट्रैक चयनकर्ता और बंद करने का नियंत्रण क्या बताते हैं।">
+  <meta property="og:url" content="https://norva.tv/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="अंतर्निहित, बाहरी और चित्र में अंकित उपशीर्षक समझें | Norva Blog">
+  <meta name="twitter:description" content="अंतर्निहित ट्रैक, बाहरी उपशीर्षक फ़ाइल और चित्र में स्थायी पाठ की तुलना करें। समझें कि कंटेनर, ट्रैक चयनकर्ता और बंद करने का नियंत्रण क्या बताते हैं।">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "अंतर्निहित और अलग उपशीर्षक ट्रैक: दर्शकों को क्या जानना चाहिए",
+  "description": "अंतर्निहित ट्रैक, बाहरी उपशीर्षक फ़ाइल और चित्र में स्थायी पाठ की तुलना करें। समझें कि कंटेनर, ट्रैक चयनकर्ता और बंद करने का नियंत्रण क्या बताते हैं।",
+  "inLanguage": "hi",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "मुखपृष्ठ",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "ब्लॉग",
+      "item": "https://norva.tv/blog/hi/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "अंतर्निहित और अलग उपशीर्षक ट्रैक: दर्शकों को क्या जानना चाहिए",
+      "item": "https://norva.tv/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">मुख्य सामग्री पर जाएँ</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva का मुखपृष्ठ">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="मुख्य नेविगेशन">
+      <a href="/blog/hi/">ब्लॉग</a>
+      <a class="hide-sm" href="/#how-it-works">यह कैसे काम करता है</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>निःशुल्क परीक्षण शुरू करें</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="पृष्ठ का नेविगेशन पथ"><a href="/">मुखपृष्ठ</a><span class="sep" aria-hidden="true">›</span><a href="/blog/hi/">ब्लॉग</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">अंतर्निहित और अलग उपशीर्षक ट्रैक: दर्शकों को क्या जानना चाहिए</span></nav>
+    <details class="blog-language-picker"><summary>भाषा: <bdi>हिन्दी</bdi></summary>
+    <nav aria-label="लेख की भाषा"><ul><li><a href="/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="hi" dir="ltr" hreflang="hi" aria-current="page">हिन्दी</a></li><li><a href="/blog/tr/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="hi" dir="ltr" data-blog-article="built-in-and-separate-subtitle-tracks-what-viewers-need-to-know" data-blog-language="hi">
+      <div class="article-meta">
+        <span class="tag">उपशीर्षक प्रबंधन</span>
+        <span>लेखक Norva संपादकीय टीम</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 सितंबर 2026</time>
+        <span class="dot">·</span>
+        <span>पढ़ने में 9 मिनट</span>
+      </div>
+      <h1>अंतर्निहित और अलग उपशीर्षक ट्रैक: दर्शकों को क्या जानना चाहिए</h1>
+      <p class="lede">अंतर्निहित ट्रैक चित्र में स्थायी पाठ नहीं है। पूरे उदाहरण से उपशीर्षक की पैकेजिंग समझें, फिर चयनकर्ता जो साबित करता है और जो अज्ञात है उन्हें अलग रखें।</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/built-in-and-separate-subtitle-tracks-what-viewers-need-to-know/" hreflang="en">अंग्रेज़ी लेख से अनूदित</a><span>अंग्रेज़ी लेख 23 अगस्त 2026 को प्रकाशित हुआ</span><p>मूल स्क्रीनशॉट और उदाहरण चित्र अंग्रेज़ी में हैं। चित्र विवरण और व्याख्याओं का अनुवाद किया गया है; नए उत्पाद परीक्षण का आभास देने के लिए चित्रों में बदलाव नहीं किया गया है।</p></aside>
+      <nav class="toc" aria-label="इस पृष्ठ पर">
+      <strong>इस पृष्ठ पर</strong>
+      <ul><li><a href="#define-the-three-practical-categories">तीन व्यावहारिक श्रेणियाँ समझें</a></li><li><a href="#identify-the-category-through-behavior">व्यवहार से श्रेणी पहचानें</a></li><li><a href="#treat-separate-track-support-as-conditional">अलग ट्रैक के समर्थन को सशर्त मानें</a></li><li><a href="#original-evidence-packaging-card">मौलिक साक्ष्य: पैकेजिंग कार्ड</a></li><li><a href="#compare-versions-carefully">संस्करणों की सावधानी से तुलना करें</a></li><li><a href="#diagnose-a-missing-separate-track">गायब अलग ट्रैक का कारण जाँचें</a></li><li><a href="#understand-feature-differences">सुविधाओं के अंतर समझें</a></li><li><a href="#protect-source-rights-and-privacy">स्रोत के अधिकार और निजता सुरक्षित रखें</a></li><li><a href="#common-mistakes-and-limitations">आम गलतियाँ और सीमाएँ</a></li><li><a href="#frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</a></li><li><a href="#your-next-step">आपका अगला कदम</a></li><li><a href="#sources">संदर्भ स्रोत</a></li></ul>
+    </nav>
+      <blockquote><strong>संक्षेप में:</strong> अंतर्निहित उपशीर्षक डेटा मीडिया कंटेनर के अंदर रखा जाता है; बाहरी उपशीर्षक अलग रखे जाते हैं और मीडिया से जोड़े जाते हैं। समर्थन मिलने पर दोनों चयन योग्य ट्रैक बन सकते हैं। चित्र में स्थायी रूप से अंकित उपशीर्षक पहले से वीडियो की तस्वीर का हिस्सा होते हैं और उन्हें ट्रैक की तरह बंद नहीं किया जा सकता। काम करने वाला उपशीर्षक चयनकर्ता यह साबित करता है कि नियंत्रण काम करता है, यह नहीं कि उपशीर्षक डेटा कहाँ रखा गया है।</blockquote>
+<p>“अंतर्निहित” शब्द अक्सर कंटेनर के भीतर मौजूद ट्रैक और तस्वीर में स्थायी रूप से अंकित पाठ, दोनों के लिए इस्तेमाल होता है। यह अस्पष्टता महत्त्वपूर्ण है: एक को चुना जा सकता है, जबकि दूसरा तस्वीर का ही हिस्सा है। पहले समझें कि मीडिया कैसे पैक किया गया है, फिर जाँचें कि चुने हुए संस्करण के लिए यह प्लेयर क्या उपलब्ध कराता है।</p>
+<h2 id="define-the-three-practical-categories">तीन व्यावहारिक श्रेणियाँ समझें</h2>
+<ul><li><strong>अंतर्निहित चयन योग्य ट्रैक:</strong> मीडिया कंटेनर के अंदर रखा उपशीर्षक डेटा, जो वीडियो की तस्वीरों से अलग होता है और समर्थन मिलने पर विकल्प के रूप में दिखाई देता है।</li><li><strong>अलग संबद्ध ट्रैक:</strong> मीडिया से अलग रखा उपशीर्षक डेटा, जो स्रोत या प्लेबैक संदर्भ के माध्यम से जुड़ा होता है। ऐसी अलग फ़ाइल को कभी-कभी साइडकार फ़ाइल कहते हैं।</li><li><strong>चित्र में स्थायी रूप से अंकित पाठ:</strong> वीडियो की तस्वीर में पहले से मौजूद पिक्सेल; कोई चयनकर्ता उन्हें स्वतंत्र रूप से बंद नहीं कर सकता।</li></ul>
+<p>MKV या MP4 जैसा <strong>कंटेनर</strong> मीडिया स्ट्रीम और मेटाडेटा को एक साथ रखता है। वह स्वयं उपशीर्षक ट्रैक नहीं है और न ही डिकोडर समर्थन की गारंटी है। <a href="https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Formats/Containers" target="_blank" rel="noopener">MDN का कंटेनर मार्गदर्शक</a> कंटेनर और उसके अंदर के कोडेक अलग करता है। इसलिए केवल MKV एक्सटेंशन से न यह पता चलता है कि कौन-से उपशीर्षक मौजूद हैं, न यह कि कोई खास प्लेयर उन्हें उपलब्ध कराएगा या नहीं।</p>
+<p>उपशीर्षक डेटा हमेशा साधारण पाठ नहीं होता। <a href="https://www.matroska.org/technical/subtitles.html" target="_blank" rel="noopener">Matroska उपशीर्षक विनिर्देश</a> पाठ-आधारित उपशीर्षक और VobSub जैसे चित्र-आधारित प्रारूप बताता है। चित्र-आधारित उपशीर्षक ट्रैक फिर भी वीडियो की तस्वीर से अलग रहता है; “चित्र-आधारित” का अर्थ “चित्र में स्थायी रूप से अंकित” नहीं है। ये श्रेणियाँ पैकेजिंग बताती हैं, अनुवाद की गुणवत्ता या सुलभता की पूर्णता नहीं।</p>
+<h2 id="identify-the-category-through-behavior">व्यवहार से श्रेणी पहचानें</h2>
+<p>ठीक उसी आइटम और संस्करण का उपशीर्षक चयनकर्ता खोलें और कुछ बदलने से पहले सभी प्रविष्टियाँ लिख लें। एक ट्रैक चुनें, उसका लेबल नोट करें और ऐसा दृश्य देखें जिसमें उपशीर्षक का कोई अंश आता हो। बंद करने का नियंत्रण उपलब्ध हो तो उसका उपयोग करें और उसी क्षण को फिर देखें; दो अलग क्षणों की तुलना करने से केवल पाठ वाले अंश और बिना उपशीर्षक वाले विराम की तुलना हो सकती है।</p>
+<p>चुना हुआ पाठ गायब होने से यह स्थापित होता है कि इस संदर्भ में उसे नियंत्रित किया जा सकता था। इससे अंतर्निहित और बाहरी ट्रैक में अंतर <strong>नहीं</strong> पता चलता। पाठ बने रहने पर चित्र में स्थायी अंकन एक संभावना है, लेकिन उसे वीडियो का हिस्सा मानने से पहले किसी अन्य सक्रिय कैप्शन परत या उपकरण-स्तरीय कैप्शन सुविधा की जाँच करें। भंडारण की पुष्टि उपलब्ध कराए गए मीडिया की जानकारी से करें, केवल दृश्य शैली से नहीं।</p>
+<h2 id="treat-separate-track-support-as-conditional">अलग ट्रैक के समर्थन को सशर्त मानें</h2>
+<p>अलग संसाधन को सही आइटम से जुड़ा होना चाहिए और उसका प्रारूप प्लेबैक संदर्भ में समर्थित होना चाहिए। उदाहरण के लिए, <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/track" target="_blank" rel="noopener">HTML track एलिमेंट</a> स्पष्ट रूप से किसी बाहरी संसाधन की ओर इशारा करता है और भाषा व लेबल दे सकता है। <a href="https://www.w3.org/TR/webvtt1/" target="_blank" rel="noopener">WebVTT का मसौदा विनिर्देश</a> इस उद्देश्य के लिए इस्तेमाल होने वाला समयबद्ध पाठ प्रारूप परिभाषित करता है। यह वेब प्लेटफ़ॉर्म का उदाहरण है, Norva के आयात नियंत्रणों का विवरण नहीं।</p>
+<p>वीडियो के पास रखी फ़ाइल हर प्लेयर में अपने-आप उससे नहीं जुड़ जाती। जिस उपकरण और स्रोत का आप उपयोग कर रहे हैं, उसकी दस्तावेज़ित प्रक्रिया देखें। बाहरी उपशीर्षक ट्रैक का अस्तित्व अपने-आप यह स्थापित नहीं करता कि Norva में किसी भी स्थानीय फ़ाइल का आयात, फ़ाइल नामों का स्वतः मिलान या हर प्रारूप का समर्थन उपलब्ध है।</p>
+<h2 id="original-evidence-packaging-card">मौलिक साक्ष्य: पैकेजिंग कार्ड</h2>
+<p>यह <strong>लेखक का बनाया हुआ उदाहरण</strong> काल्पनिक क्लिप Harbour Gate का उपयोग करता है, जिसमें 00:18 पर “The gate is open” (“फाटक खुला है”) पंक्ति आती है। डाउनलोड करने योग्य नमूना फ़ाइलें नहीं हैं और Norva में चलाकर कोई अवलोकन नहीं किया गया है। पंक्तियाँ A–C वे अलग तरीके तय करती हैं जिनसे कोई मालिक उस क्लिप को तैयार कर सकता है; नियंत्रण का व्यवहार यह मानता है कि प्लेयर निर्दिष्ट संसाधन का समर्थन करता है।</p>
+<div class="table-wrap" role="region" aria-label="स्क्रॉल की जा सकने वाली तालिका" tabindex="0"><table>
+<thead><tr><th scope="col">संस्करण</th><th scope="col">उदाहरण में दी गई पैकेजिंग जानकारी</th><th scope="col">नियंत्रण का अपेक्षित व्यवहार</th><th scope="col">उचित निष्कर्ष</th></tr></thead>
+<tbody><tr><td>A</td><td>एक MKV कंटेनर में वीडियो, ऑडियो और उसके अंदर अलग अंग्रेज़ी उपशीर्षक ट्रैक है</td><td>English चुनने पर पाठ दिखता है; वह ट्रैक बंद करने पर छिप जाता है</td><td>अंतर्निहित उपशीर्षक ट्रैक, क्योंकि उसका भंडारण स्पष्ट रूप से ज्ञात है</td></tr><tr><td>B</td><td>एक MP4 वीडियो स्पष्ट रूप से अलग अंग्रेज़ी WebVTT फ़ाइल से जुड़ा है जिसमें वह पाठ है</td><td>English चुनने पर पाठ दिखता है; बंद करने पर छिप जाता है</td><td>बाहरी उपशीर्षक संसाधन, क्योंकि जुड़ाव और अलग भंडारण ज्ञात हैं</td></tr><tr><td>C</td><td>मालिक ने अंग्रेज़ी पंक्ति वीडियो की तस्वीरों में अंकित की है; कोई उपशीर्षक ट्रैक नहीं दिया गया</td><td>उपशीर्षक बंद करने वाला नियंत्रण उन पिक्सेल को नहीं हटा सकता</td><td>चित्र में स्थायी रूप से अंकित पाठ, क्योंकि दिए गए वीडियो की यही परिभाषा है</td></tr><tr><td>D</td><td>केवल English लेबल वाली प्लेयर प्रविष्टि ज्ञात है; वह पाठ दिखा और छिपा सकती है</td><td>चालू-बंद नियंत्रण A और B की तरह काम करता है</td><td>चयन योग्य उपशीर्षक ट्रैक; भंडारण अंतर्निहित है या बाहरी, इसकी पुष्टि नहीं हुई</td></tr></tbody>
+</table></div>
+<p>पंक्तियाँ A और B प्लेयर में बिल्कुल एक जैसी दिख सकती हैं। पंक्ति D महत्त्वपूर्ण सीमा दिखाती है: बंद करने के नियंत्रण का परीक्षण उनमें अंतर नहीं बता सकता। किसी वास्तविक आइटम में चित्र में स्थायी पाठ और चयन योग्य अनुवाद, दोनों भी हो सकते हैं; इसलिए अलग दिखाई देने वाली पंक्तियों पर एक से अधिक श्रेणियाँ लागू हो सकती हैं।</p>
+<p>कार्ड दोबारा इस्तेमाल करने के लिए आइटम/संस्करण, चयनकर्ता की पूरी सूची, चुना हुआ लेबल, पाठ आने का समय, बंद अवस्था का परिणाम और पैकेजिंग जानकारी का स्रोत लिखें। जहाँ मीडिया स्रोत पर्याप्त विवरण नहीं देता, वहाँ “अपुष्ट” लिखें।</p>
+<h2 id="compare-versions-carefully">संस्करणों की सावधानी से तुलना करें</h2>
+<p>किसी संस्करण में उपशीर्षक अलग तरह से पैक हो सकते हैं या उनका दूसरा समूह उपलब्ध हो सकता है। संस्करणों की तुलना करते समय उपकरण, प्रोफ़ाइल और मीडिया स्रोत समान रखें, और हर संस्करण की पूरी ट्रैक सूची दर्ज करें। शीर्षक के साथ संस्करण की कटिंग और अवधि भी जाँचें: किसी दूसरी कटिंग के लिए समयबद्ध उपशीर्षक उसी नाम की फ़िल्म से मेल न खाएँ, यह संभव है।</p>
+<p>संस्करण बदलने के बाद ट्रैक गायब होना यह साबित नहीं करता कि कोई अलग संसाधन लोड नहीं हो पाया।</p>
+<h2 id="diagnose-a-missing-separate-track">गायब अलग ट्रैक का कारण जाँचें</h2>
+<p>पहले स्पष्ट करें कि आपको उस ट्रैक की अपेक्षा क्यों है। कैटलॉग का लेबल, मालिक की दी हुई फ़ाइल और इस संस्करण के लिए वास्तव में सूचीबद्ध ट्रैक, अलग-अलग तरह के साक्ष्य हैं। पूछें कि क्या स्रोत का मालिक संसाधन और चुने हुए संस्करण से उसके जुड़ाव की पुष्टि करता है।</p>
+<p>अपेक्षित भाषा और भूमिका, उपकरण, ऐप या ब्राउज़र संस्करण, कनेक्टिविटी और पूरा चयनकर्ता दर्ज करें। “सूचीबद्ध नहीं”, “सूचीबद्ध है लेकिन चुना नहीं जा सकता” और “चुना है लेकिन जाँचे गए क्षण पर कोई पाठ नहीं दिखा” अलग रखें। ये अवलोकन अलग प्रश्न उठाते हैं; कोई भी अकेला प्लेयर की खराबी सिद्ध नहीं करता। फ़ाइलों का नाम बदलने, संसाधन स्थानांतरित करने, स्रोत हटाने, डेटा साफ़ करने या दोबारा स्थापित करने से पहले यह साक्ष्य सुरक्षित रखें।</p>
+<h2 id="understand-feature-differences">सुविधाओं के अंतर समझें</h2>
+<p>अंतर्निहित और बाहरी, दोनों ट्रैक उपयोगी उपशीर्षक दे सकते हैं। शैली के विकल्प प्रारूप और रेंडरर पर निर्भर करते हैं; पाठ-आधारित और चित्र-आधारित संसाधनों में समान नियंत्रण होना ज़रूरी नहीं। चित्र में स्थायी रूप से अंकित पाठ की शैली उपशीर्षक चयनकर्ता से अलग से नहीं बदली जा सकती और न उसे बंद किया जा सकता है। W3C का <a href="https://www.w3.org/WAI/media/av/captions/" target="_blank" rel="noopener">कैप्शन संबंधी मार्गदर्शन</a> भी जिन कैप्शन को दर्शक छिपा सकते हैं, उन्हें हमेशा दिखाई देने वाले ओपन कैप्शन से अलग करता है।</p>
+<p><a href="/blog/the-complete-guide-to-managing-subtitle-tracks/" hreflang="en">उपशीर्षक प्रबंधन का पूरा मार्गदर्शक <span class="link-language">(अंग्रेज़ी में)</span></a> ट्रैक मिलने के बाद लागू भाषा, भूमिका, समय, स्थिति और उपकरण की जाँच समझाता है।</p>
+<p>फिर देखें कि ट्रैक में क्या शामिल है: <a href="/blog/hi/captions-and-subtitles-why-the-accessibility-goals-can-differ/">कैप्शन और संवाद के उपशीर्षक जानकारी की अलग ज़रूरतें पूरी कर सकते हैं</a>। पाठ मौजूद हो लेकिन पढ़ना कठिन हो, तो भंडारण के तरीके को दोष देने के बजाय <a href="/blog/hi/legibility-and-readability-two-different-viewing-problems/">अक्षर पहचानने की स्पष्टता और सहज पढ़ पाने का अंतर</a> समझें।</p>
+<h2 id="protect-source-rights-and-privacy">स्रोत के अधिकार और निजता सुरक्षित रखें</h2>
+<p>वही मीडिया और उपशीर्षक संसाधन उपयोग करें जो आपके हैं या जिन तक पहुँचने की आपको अनुमति है। Norva मीडिया चलाने वाला सॉफ़्टवेयर है; इसमें कोई सामग्री या टीवी सदस्यता शामिल नहीं है। किसी संसाधन को जोड़ने से उसके अधिकार नहीं मिल जाते। ज़रूरी अनुमति के बिना मीडिया या उपशीर्षक फ़ाइलें सहायता टीम को अपलोड न करें। रिपोर्ट की शुरुआत गैर-संवेदनशील लेबल, चरणों और टाइमस्टैम्प से करें; स्क्रीनशॉट साझा करने से पहले निजी स्रोत पते या खाते का विवरण जाँच लें।</p>
+<h2 id="common-mistakes-and-limitations">आम गलतियाँ और सीमाएँ</h2>
+<p>चित्र में स्थायी रूप से अंकित पाठ को अंतर्निहित चयन योग्य ट्रैक कहने, स्वतः मिलान का वादा करने, हर प्रारूप समर्थित मानने और साक्ष्य बचाने से पहले स्रोत फ़ाइलें संपादित करने से बचें।</p>
+<p>अगर स्रोत केवल चलाने का विकल्प दिखाता है, तो पैकेजिंग अस्पष्ट रह सकती है। भंडारण का तरीका अनुमान लगाने के बजाय चयनकर्ता का देखा गया व्यवहार बताएँ।</p>
+<h2 id="frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</h2>
+<h3 id="can-burned-in-subtitles-be-turned-off">क्या चित्र में स्थायी रूप से अंकित उपशीर्षक बंद किए जा सकते हैं?</h3>
+<p>अलग ट्रैक की तरह नहीं, क्योंकि पाठ तस्वीर का हिस्सा है। मीडिया का कोई दूसरा संस्करण अलग हो सकता है, लेकिन उसकी उपलब्धता जाँचें।</p>
+<h3 id="are-separate-subtitle-tracks-always-text-files">क्या अलग उपशीर्षक ट्रैक हमेशा पाठ फ़ाइलें होते हैं?</h3>
+<p>नहीं। WebVTT और SubRip पाठ-आधारित उदाहरण हैं, लेकिन VobSub की तरह उपशीर्षक संसाधन चित्र-आधारित भी हो सकते हैं। “अलग” बताता है कि संसाधन मीडिया के सापेक्ष कहाँ रखा गया है, न कि उसके पाठ या चित्र के अंश कैसे एन्कोड किए गए हैं। वास्तविक प्रारूप और दस्तावेज़ित समर्थन जाँचें।</p>
+<h3 id="does-a-missing-separate-track-mean-the-player-is-broken">क्या अलग ट्रैक गायब होने का मतलब प्लेयर खराब है?</h3>
+<p>नहीं। कारण तय करने से पहले जुड़ाव, आइटम/संस्करण, स्रोत मेटाडेटा, प्रारूप समर्थन और चयनकर्ता सत्यापित करें।</p>
+<section class="article-cta"><h2 id="your-next-step">आपका अगला कदम</h2>
+<p>अगर स्रोत उपशीर्षक संसाधन की पुष्टि करता है, लेकिन परिणाम स्पष्ट नहीं है, तो अपना भरा हुआ पैकेजिंग कार्ड <a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="built-in-and-separate-subtitle-tracks-what-viewers-need-to-know">Norva सहायता</a> को दें। बताएँ कि आपने क्या देखा और क्या अब भी अपुष्ट है; शुरुआती रिपोर्ट में मीडिया फ़ाइलें और निजी कनेक्शन विवरण न भेजें।</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">संदर्भ स्रोत</h2>
+<ul><li><a href="https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Formats/Containers" target="_blank" rel="noopener">MDN: मीडिया कंटेनर और उनके अंदर के कोडेक</a></li><li><a href="https://www.matroska.org/technical/subtitles.html" target="_blank" rel="noopener">Matroska: पाठ और चित्र-आधारित ट्रैक सहित उपशीर्षक कोडेक</a></li><li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/track" target="_blank" rel="noopener">MDN: HTML track एलिमेंट और बाहरी संसाधन</a></li><li><a href="https://www.w3.org/TR/webvtt1/" target="_blank" rel="noopener">W3C: WebVTT का मसौदा विनिर्देश</a></li><li><a href="https://www.w3.org/WAI/media/av/captions/" target="_blank" rel="noopener">W3C: कैप्शन, उपशीर्षक और खुली या बंद की जा सकने वाली प्रस्तुति</a></li><li><a href="https://norva.tv/#features">Norva: सुविधाएँ और संगत स्रोत की आवश्यकताएँ</a></li></ul>
+</section>
+      <section class="related">
+      <h2>संबंधित लेख</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-managing-subtitle-tracks/" hreflang="en" lang="en">
+          <span class="tag">Subtitle Management</span>
+          <div class="card-title">The Complete Guide to Managing Subtitle Tracks</div>
+          <span class="link-language" lang="hi">अंग्रेज़ी में</span>
+          <p>A complete framework for reading, choosing, verifying, and troubleshooting subtitle tracks without guessing from incomplete labels.</p>
+        </a>
+        <a class="card" href="/blog/hi/captions-and-subtitles-why-the-accessibility-goals-can-differ/">
+          <span class="tag">कैप्शन की सुलभता</span>
+          <div class="card-title">कैप्शन और उपशीर्षक: सुलभता के उद्देश्य अलग क्यों हो सकते हैं</div>
+
+          <p>बोली, वक्ता, ध्वनि, संगीत, अनुवाद, समय और वास्तविक संकेतों के आधार पर कैप्शन व उपशीर्षक की कार्यात्मक तुलना।</p>
+        </a>
+        <a class="card" href="/blog/hi/legibility-and-readability-two-different-viewing-problems/">
+          <span class="tag">दृश्य आराम और सुलभता</span>
+          <div class="card-title">अक्षर पहचानना और पाठ समझना: देखने की दो अलग समस्याएँ</div>
+
+          <p>अक्षर और नियंत्रण पहचानने तथा शब्द, क्रम, लेबल और लेआउट को आसानी से समझने के बीच काम आधारित अंतर।</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="पादलेख नेविगेशन">
+        <a href="/">मुखपृष्ठ</a>
+        <a href="/blog/hi/">ब्लॉग</a>
+        <a href="/#features">लाभ</a>
+        <a href="/#pricing">मूल्य निर्धारण</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fhi%2F">सहायता</a>
+        <a href="/terms.html">शर्तें</a>
+        <a href="/privacy.html">गोपनीयता</a>
+        <a href="/mentions-legales.html">कानूनी सूचना</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva मीडिया चलाने और व्यवस्थित करने वाला सॉफ़्टवेयर है। यह मीडिया उपलब्ध नहीं कराता। उपयोग के लिए ऐसा संगत स्रोत चाहिए जिसके आप स्वामी हों या जिसे उपयोग करने की आपको अनुमति हो।</p>
+    </div>
+  </footer>
+</body>
+</html>

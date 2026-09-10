@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="hi" dir="ltr" data-norva-document-language="hi">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>बैंडविड्थ, थ्रूपुट, विलंबता और जिटर: वीडियो मार्गदर्शक | Norva Blog</title>
+  <meta name="description" content="वीडियो नेटवर्क के हल किए हुए उदाहरण से बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें। जानें कि स्पीड टेस्ट अंक या सार्वभौमिक जिटर सीमा भ्रमित क्यों कर सकती है।">
+  <link rel="canonical" href="https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="en" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="fr" href="https://norva.tv/blog/fr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="pt-BR" href="https://norva.tv/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="es" href="https://norva.tv/blog/es/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="hi" href="https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="tr" href="https://norva.tv/blog/tr/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="bn" href="https://norva.tv/blog/bn/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="ar" href="https://norva.tv/blog/ar/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="id" href="https://norva.tv/blog/id/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="tl" href="https://norva.tv/blog/fil/bandwidth-throughput-latency-and-jitter-explained/">
+  <link rel="alternate" hreflang="x-default" href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="बैंडविड्थ, थ्रूपुट, विलंबता और जिटर: वीडियो मार्गदर्शक | Norva Blog">
+  <meta property="og:description" content="वीडियो नेटवर्क के हल किए हुए उदाहरण से बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें। जानें कि स्पीड टेस्ट अंक या सार्वभौमिक जिटर सीमा भ्रमित क्यों कर सकती है।">
+  <meta property="og:url" content="https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="बैंडविड्थ, थ्रूपुट, विलंबता और जिटर: वीडियो मार्गदर्शक | Norva Blog">
+  <meta name="twitter:description" content="वीडियो नेटवर्क के हल किए हुए उदाहरण से बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें। जानें कि स्पीड टेस्ट अंक या सार्वभौमिक जिटर सीमा भ्रमित क्यों कर सकती है।">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें",
+  "description": "वीडियो नेटवर्क के हल किए हुए उदाहरण से बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें। जानें कि स्पीड टेस्ट अंक या सार्वभौमिक जिटर सीमा भ्रमित क्यों कर सकती है।",
+  "inLanguage": "hi",
+  "translationOfWork": {
+    "@type": "BlogPosting",
+    "@id": "https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/",
+    "inLanguage": "en"
+  },
+  "datePublished": "2026-09-10T22:33:41.694Z",
+  "dateModified": "2026-09-10T22:33:41.694Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "मुखपृष्ठ",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "ब्लॉग",
+      "item": "https://norva.tv/blog/hi/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें",
+      "item": "https://norva.tv/blog/hi/bandwidth-throughput-latency-and-jitter-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">मुख्य सामग्री पर जाएँ</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva का मुखपृष्ठ">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="मुख्य नेविगेशन">
+      <a href="/blog/hi/">ब्लॉग</a>
+      <a class="hide-sm" href="/#how-it-works">यह कैसे काम करता है</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>निःशुल्क परीक्षण शुरू करें</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="पृष्ठ का नेविगेशन पथ"><a href="/">मुखपृष्ठ</a><span class="sep" aria-hidden="true">›</span><a href="/blog/hi/">ब्लॉग</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें</span></nav>
+    <details class="blog-language-picker"><summary>भाषा: <bdi>हिन्दी</bdi></summary>
+    <nav aria-label="लेख की भाषा"><ul><li><a href="/blog/bandwidth-throughput-latency-and-jitter-explained/" lang="en" dir="ltr" hreflang="en">English</a></li><li><a href="/blog/fr/bandwidth-throughput-latency-and-jitter-explained/" lang="fr" dir="ltr" hreflang="fr">Français</a></li><li><a href="/blog/pt-BR/bandwidth-throughput-latency-and-jitter-explained/" lang="pt-BR" dir="ltr" hreflang="pt-BR">Português (Brasil)</a></li><li><a href="/blog/es/bandwidth-throughput-latency-and-jitter-explained/" lang="es" dir="ltr" hreflang="es">Español</a></li><li><a href="/blog/hi/bandwidth-throughput-latency-and-jitter-explained/" lang="hi" dir="ltr" hreflang="hi" aria-current="page">हिन्दी</a></li><li><a href="/blog/tr/bandwidth-throughput-latency-and-jitter-explained/" lang="tr" dir="ltr" hreflang="tr">Türkçe</a></li><li><a href="/blog/bn/bandwidth-throughput-latency-and-jitter-explained/" lang="bn" dir="ltr" hreflang="bn">বাংলা</a></li><li><a href="/blog/ar/bandwidth-throughput-latency-and-jitter-explained/" lang="ar" dir="rtl" hreflang="ar">العربية</a></li><li><a href="/blog/id/bandwidth-throughput-latency-and-jitter-explained/" lang="id" dir="ltr" hreflang="id">Bahasa Indonesia</a></li><li><a href="/blog/fil/bandwidth-throughput-latency-and-jitter-explained/" lang="fil" dir="ltr" hreflang="tl">Filipino</a></li></ul></nav></details>
+    <article lang="hi" dir="ltr" data-blog-article="bandwidth-throughput-latency-and-jitter-explained" data-blog-language="hi">
+      <div class="article-meta">
+        <span class="tag">वीडियो के लिए घरेलू नेटवर्क की बुनियाद</span>
+        <span>लेखक Norva संपादकीय टीम</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-10T22:33:41.694Z">11 सितंबर 2026</time>
+        <span class="dot">·</span>
+        <span>पढ़ने में 8 मिनट</span>
+      </div>
+      <h1>बैंडविड्थ, थ्रूपुट, विलंबता और जिटर समझें</h1>
+      <p class="lede">क्षमता, मापी गई स्थानांतरण दर, देरी और देरी का बदलाव अलग प्रश्नों के उत्तर हैं। बफ़रिंग के लिए एक संख्या को दोष देने से पहले पूरी नेटवर्क तुलना समझें।</p>
+      <aside class="translation-note"><a href="https://norva.tv/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en">अंग्रेज़ी लेख से अनूदित</a><span>अंग्रेज़ी लेख 26 अगस्त 2026 को प्रकाशित हुआ</span><p>मूल स्क्रीनशॉट और उदाहरण चित्र अंग्रेज़ी में हैं। चित्र विवरण और व्याख्याओं का अनुवाद किया गया है; नए उत्पाद परीक्षण का आभास देने के लिए चित्रों में बदलाव नहीं किया गया है।</p></aside>
+      <nav class="toc" aria-label="इस पृष्ठ पर">
+      <strong>इस पृष्ठ पर</strong>
+      <ul><li><a href="#bandwidth-is-not-a-delivered-result">बैंडविड्थ वास्तव में पहुँचे डेटा का परिणाम नहीं है</a></li><li><a href="#throughput-needs-a-test-context">थ्रूपुट के लिए परीक्षण का संदर्भ चाहिए</a></li><li><a href="#latency-is-elapsed-delay">विलंबता लगने वाली देरी है</a></li><li><a href="#jitter-is-variation-not-simply-slowness">जिटर बदलाव है, केवल धीमापन नहीं</a></li><li><a href="#packet-loss-is-another-dimension">पैकेट लॉस एक और पहलू है</a></li><li><a href="#original-evidence-metric-dictionary">मौलिक साक्ष्य: मापदंडों का शब्दकोश</a></li><li><a href="#build-a-small-measurement-set">मापन का छोटा समूह बनाएँ</a></li><li><a href="#interpret-combinations">मापदंडों के मेल का अर्थ समझें</a></li><li><a href="#common-interpretation-errors">अर्थ निकालने की आम गलतियाँ</a></li><li><a href="#frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</a></li><li><a href="#your-next-step">आपका अगला कदम</a></li><li><a href="#sources">संदर्भ स्रोत</a></li></ul>
+    </nav>
+      <blockquote><strong>संक्षेप में:</strong> बैंडविड्थ उपलब्ध या नाममात्र क्षमता की अवधारणा है; थ्रूपुट किसी खास परीक्षण में मापी गई उपयोगी दर है। विलंबता देरी है, जबकि जिटर बताई गई विधि के अंतर्गत देरी में बदलाव बताता है। पैकेट लॉस फिर अलग बात है। वीडियो इनमें से एक या कई से प्रभावित हो सकता है, इसलिए किसी संख्या का अर्थ निकालने से पहले विधि और रास्ता दर्ज करें।</blockquote>
+<p>हर मापदंड केवल आंशिक तस्वीर देता है। समान इकाई वाले दो परीक्षण भी अलग एंडपॉइंट, प्रोटोकॉल, दिशाएँ, अवधियाँ, रास्ते या ट्रैफ़िक परिस्थितियाँ माप सकते हैं।</p>
+<h2 id="bandwidth-is-not-a-delivered-result">बैंडविड्थ वास्तव में पहुँचे डेटा का परिणाम नहीं है</h2>
+<p>लोग अक्सर बैंडविड्थ को गति का संक्षिप्त नाम मानते हैं, लेकिन क्षमता का लेबल यह नहीं बताता कि किसी अवधि में ऐप का कितना डेटा पहुँचा। साझा लिंक, प्रोटोकॉल का अतिरिक्त डेटा, भीड़, रेडियो की परिस्थितियाँ, उपकरण की सीमाएँ और दूरस्थ एंडपॉइंट देखे गए थ्रूपुट को घटा सकते हैं।</p>
+<p>इसलिए प्लान की दर, वाई-फ़ाई लिंक दर, ईथरनेट लेबल और ऐप का थ्रूपुट अलग मान हैं। किसी दूसरे से तुलना करने से पहले लिखें कि स्क्रीन कौन-सा मान दिखा रही है।</p>
+<h2 id="throughput-needs-a-test-context">थ्रूपुट के लिए परीक्षण का संदर्भ चाहिए</h2>
+<p>थ्रूपुट मापी गई डेटा स्थानांतरण दर है। RFC 6349 TCP थ्रूपुट परीक्षण का ढाँचा बताता है और परीक्षण विधि पर ज़ोर देता है। परिणाम के साथ उसका एंडपॉइंट, दिशा, प्रोटोकॉल, अवधि, कनेक्शनों की संख्या, उपकरण, रास्ता और समय होना चाहिए।</p>
+<p><a href="/blog/the-complete-guide-to-home-network-basics-for-video/" hreflang="en">घरेलू नेटवर्क की बुनियादी बातों का मार्गदर्शक <span class="link-language">(अंग्रेज़ी में)</span></a> उपकरण से स्रोत तक का रास्ता दिखाता है। पास का परीक्षण सर्वर हर अधिकृत स्रोत के रास्ते को दोहराता नहीं है, और क्षणिक शिखर को ऐप के लगातार प्रदर्शन की तरह नहीं दिखाना चाहिए।</p>
+<h2 id="latency-is-elapsed-delay">विलंबता लगने वाली देरी है</h2>
+<p>विलंबता बताती है कि डेटा या उत्तर को मापे गए रास्ते से जाने में कितना समय लगता है। RFC 7679 की विधि में एकतरफ़ा देरी के लिए घड़ियों का समकालिक होना और समय मापन की अनिश्चितता का हिसाब ज़रूरी है; कई उपभोक्ता उपकरण इसके बजाय आने-जाने की कुल देरी बताते हैं। ये परिणाम एक-दूसरे के स्थान पर इस्तेमाल नहीं किए जा सकते।</p>
+<p>वीडियो शुरू होना, नियंत्रण, प्रमाणीकरण और सेगमेंट अनुरोध अलग कारणों से तुरंत प्रतिक्रिया वाले या धीमे लग सकते हैं। अधिक थ्रूपुट का परिणाम अपने-आप कम विलंबता नहीं बताता।</p>
+<h2 id="jitter-is-variation-not-simply-slowness">जिटर बदलाव है, केवल धीमापन नहीं</h2>
+<p>RFC 3393 पैकेट की देरी में बदलाव के मापदंड परिभाषित करता है। रोज़मर्रा के उपकरणों में “जिटर” अलग गणना, दिशा, अवधि या सांख्यिकीय मान इस्तेमाल कर सकता है। मानों की तुलना से पहले उपकरण की परिभाषा पढ़ें।</p>
+<p>कनेक्शन का औसत थ्रूपुट पर्याप्त होकर भी पैकेट अनियमित रूप से आ सकते हैं, या देरी स्थिर होकर भी लगातार थ्रूपुट अपर्याप्त हो सकता है। लगातार 80 ms की आने-जाने की देरी और 20 तथा 140 ms के बीच बारी-बारी बदलती देरी का औसत समान हो सकता है, जबकि व्यवहार अलग होता है। यह उदाहरण बदलाव बताता है, जिटर का सूत्र या स्वीकार्य सीमा नहीं।</p>
+<h2 id="packet-loss-is-another-dimension">पैकेट लॉस एक और पहलू है</h2>
+<p>RFC 7680 स्पष्ट विधि के साथ एकतरफ़ा पैकेट लॉस मापदंड परिभाषित करता है। उपभोक्ता परिणाम इसके बजाय गायब उत्तरों से लॉस का अनुमान लगा सकते हैं, और कुछ उपकरण निदान वाले ट्रैफ़िक को कम प्राथमिकता दे सकते हैं। शून्य का परिणाम यह साबित नहीं करता कि ऐप का हर पैकेट पहुँचा; शून्य से अलग परिणाम में दोहराव और दायरा जाँचना ज़रूरी है।</p>
+<p>अपने नोट में गायब पैकेट और देर से आए पैकेट अलग रखें। प्लेबैक रुकना दिखाई देने वाला लक्षण है, पैकेट स्तर का निदान नहीं।</p>
+<h2 id="original-evidence-metric-dictionary">मौलिक साक्ष्य: मापदंडों का शब्दकोश</h2>
+<div class="table-wrap" role="region" aria-label="स्क्रॉल की जा सकने वाली तालिका" tabindex="0"><table>
+<thead><tr><th scope="col">मापदंड</th><th scope="col">सरल भाषा में प्रश्न</th><th scope="col">ज़रूरी संदर्भ</th><th scope="col">अकेले क्या साबित नहीं कर सकता</th></tr></thead>
+<tbody><tr><td>बैंडविड्थ/क्षमता</td><td>अपनी परिभाषा के अनुसार यह लिंक कितना डेटा ले जा सकता है?</td><td>लिंक, लेबल, दिशा</td><td>ऐप तक डेटा पहुँचना</td></tr><tr><td>थ्रूपुट</td><td>कौन-सी उपयोगी दर मापी गई?</td><td>एंडपॉइंट, प्रोटोकॉल, अवधि, रास्ता</td><td>हर स्रोत का रास्ता</td></tr><tr><td>विलंबता</td><td>विधि ने कितनी देरी देखी?</td><td>एकतरफ़ा/आना-जाना, घड़ियाँ, रास्ता</td><td>लगातार क्षमता</td></tr><tr><td>जिटर</td><td>देरी कैसे बदली?</td><td>सूत्र, नमूना, सांख्यिकीय मान</td><td>औसत थ्रूपुट</td></tr><tr><td>लॉस</td><td>कौन-से अपेक्षित पैकेट नहीं आए?</td><td>जाँच संदेश का प्रकार, दिशा, अवधि</td><td>प्लेबैक का सटीक कारण</td></tr></tbody>
+</table></div>
+<p>हर मान के साथ इकाई लिखें और जहाँ निजता अनुमति दे वहाँ मूल परिणाम बचाएँ।</p>
+<h3 id="worked-example-a-fast-plan-and-an-inconsistent-evening">हल किया हुआ उदाहरण: तेज़ प्लान और अस्थिर शाम</h3>
+<p>ये <strong>शिक्षण के लिए काल्पनिक परिणाम</strong> हैं, Norva या किसी स्रोत का परीक्षण नहीं। किसी घर का प्लान 100 Mbps लेबल वाला है। उसी लैपटॉप को वाई-फ़ाई की उसी जगह पर, पास के उसी एंडपॉइंट के साथ, समान डाउनलोड सेटिंग से जाँचा जाता है; हर समय-खिड़की में 30 सेकंड के तीन परीक्षण होते हैं।</p>
+<div class="table-wrap" role="region" aria-label="स्क्रॉल की जा सकने वाली तालिका" tabindex="0"><table>
+<thead><tr><th scope="col">अवलोकन</th><th scope="col">कम व्यस्त समय</th><th scope="col">अधिक व्यस्त समय</th><th scope="col">अर्थ</th></tr></thead>
+<tbody><tr><td>डाउनलोड थ्रूपुट, तीन परीक्षण</td><td>82, 80, 84 Mbps</td><td>28, 14, 31 Mbps</td><td>मध्यिका 82 से 28 Mbps होती है; व्यस्त समय की सीमा 14–31 Mbps है</td></tr><tr><td>समान लोड स्थिति में उपकरण की बताई आने-जाने की मध्यिका देरी</td><td>18 ms</td><td>65 ms</td><td>यह परीक्षण रास्ता व्यस्त समय में अधिक धीमा उत्तर देता है</td></tr><tr><td>समान सूत्र और सैंपलिंग सेटिंग पर उपकरण का दिखाया जिटर</td><td>3 ms</td><td>24 ms</td><td>इस उपकरण की परिभाषा में देरी अधिक बदलती है; यह पास/फ़ेल अंक नहीं है</td></tr><tr><td>व्यस्त समय में अधिकृत वीडियो</td><td>नहीं जाँचा</td><td>दो रुकावटें दर्ज</td><td>रुकावटें खराब परिणामों के साथ हुईं, लेकिन वीडियो एंडपॉइंट नहीं मापा गया</td></tr></tbody>
+</table></div>
+<p>उचित अगला कदम लक्षण आने के समय दोहराना है; समर्थन मिलने पर वैकल्पिक रूप से केवल स्थानीय कनेक्शन को ईथरनेट में बदल सकते हैं। इसका अर्थ तुरंत तेज़ प्लान खरीदना <strong>नहीं</strong> है। 14 Mbps वाला नमूना भी यह स्थापित नहीं करता कि वीडियो चलना चाहिए या नहीं: संस्करण की वास्तविक ज़रूरतें, छोटी गिरावटें, स्रोत का रास्ता और बफ़रिंग व्यवहार अज्ञात हैं।</p>
+<p>Mbps (मेगाबिट प्रति सेकंड) और MB/s (मेगाबाइट प्रति सेकंड) अलग रखें: मापन में अतिरिक्त डेटा की परिभाषा का हिसाब लगाने से पहले 8 Mbps बराबर 1 MB/s होता है। मिलीसेकंड समय बताते हैं, डेटा दर नहीं। इन इकाइयों की तुलना ऐसे नहीं की जा सकती जैसे बड़ा अंक हमेशा बेहतर कनेक्शन हो।</p>
+<h2 id="build-a-small-measurement-set">मापन का छोटा समूह बनाएँ</h2>
+<p>प्रभावित उपकरण को उसकी सामान्य जगह पर इस्तेमाल करें। कम व्यस्त समय में अंतराल देकर तीन नमूने और लक्षण वाले समय में तीन नमूने दर्ज करें। सुरक्षित और समर्थित होने पर एंडपॉइंट या परीक्षण सेटिंग बदले बिना एक वैकल्पिक स्थानीय लिंक पर दोहराएँ।</p>
+<p>फिर सबसे अच्छा अंक चुनने के बजाय मध्यिका, सीमा और दोहराव की तुलना करें। एक साथ हो रहे अपलोड, मेश बदलाव, उपकरण की पावर स्थिति और मौसम केवल सीधे देखे जाने पर नोट करें; संयोग से हुई घटनाओं के आसपास कारण की कहानी न बनाएँ।</p>
+<h2 id="interpret-combinations">मापदंडों के मेल का अर्थ समझें</h2>
+<p>कम लगातार थ्रूपुट प्लेबैक बफ़र खाली कर सकता है। छोटी अवधि की औसत दर पर्याप्त दिखने पर भी देरी का बदलाव और लॉस डेटा वितरण बाधित कर सकते हैं। अधिक विलंबता लंबे स्थानांतरण को ज़रूरी नहीं सीमित करे, लेकिन अनुरोध-उत्तर क्रम धीमे कर सकती है। ऐप, परिवहन का व्यवहार, बफ़रिंग का डिज़ाइन और स्रोत दिखाई देने वाला प्रभाव तय करते हैं।</p>
+<p>प्लेबैक चलता रहे लेकिन तस्वीर खराब दिखे, तो धुँधलेपन को धीमे नेटवर्क का प्रमाण मानने के बजाय <a href="/blog/hi/the-complete-guide-to-understanding-video-quality/">तस्वीर की गुणवत्ता की तुलना</a> देखें। Norva संगत अधिकृत स्रोत चलाता है; वह कैटलॉग नहीं देता और आपके राउटर, स्रोत के रास्ते या उसकी एन्कोडिंग को नियंत्रित नहीं करता।</p>
+<h2 id="common-interpretation-errors">अर्थ निकालने की आम गलतियाँ</h2>
+<p>बिट और बाइट की तुलना न करें, लिंक दर को थ्रूपुट न समझें, देरी के हर बदलाव को “पैकेट लॉस” न कहें और एक सर्वर के परिणाम को गारंटी न मानें। राउटर, उपकरण और स्रोत एक साथ बदलने के बाद ही मापने से बचें।</p>
+<h2 id="frequently-asked-questions">अक्सर पूछे जाने वाले प्रश्न</h2>
+<h3 id="which-metric-matters-most-for-video">वीडियो के लिए कौन-सा मापदंड सबसे महत्त्वपूर्ण है?</h3>
+<p>कोई एक मापदंड हमेशा प्रमुख नहीं होता। संस्करण के डेटा पहुँचने का ढंग, रास्ता, उपकरण और लक्षण तय करते हैं कि कौन-से मापन प्रासंगिक हैं।</p>
+<h3 id="can-throughput-exceed-a-plan-label">क्या थ्रूपुट प्लान के लेबल से अधिक हो सकता है?</h3>
+<p>लेबल, सेवा का प्रावधान, परीक्षण विधियाँ, इकाइयाँ और अतिरिक्त डेटा की परिभाषाएँ अलग होती हैं। अंतर को गलती मानने से पहले सत्यापित करें कि हर संख्या क्या बताती है।</p>
+<h3 id="is-jitter-measured-the-same-way-by-every-tool">क्या हर उपकरण जिटर एक ही तरह से मापता है?</h3>
+<p>नहीं। उपकरण का सूत्र, दिशा, जाँच संदेश का प्रकार, नमूना लेने की अवधि और बताया गया सांख्यिकीय मान जाँचें।</p>
+<h3 id="what-is-acceptable-jitter-for-video-streaming">वीडियो स्ट्रीमिंग के लिए कितना जिटर स्वीकार्य है?</h3>
+<p>ऐसी कोई सार्वभौमिक मिलीसेकंड सीमा नहीं है जो वीडियो प्लेबैक को प्रमाणित करे। बफ़र किया हुआ ऑन-डिमांड वीडियो और परस्पर संवाद वाली कॉल देरी को अलग तरह से सहते हैं; उपकरण भी जिटर की गणना अलग करते हैं। उसी विधि से दोहराए गए परिणामों की तुलना वास्तविक लक्षण से करें। किसी एक ऐप या प्रोटोकॉल के लिए प्रकाशित सीमा Norva की सर्वव्यापी आवश्यकता नहीं बननी चाहिए।</p>
+<h3 id="why-does-video-buffer-after-a-good-speed-test">अच्छा स्पीड टेस्ट आने के बाद भी वीडियो बफ़र क्यों होता है?</h3>
+<p>परीक्षण अलग सर्वर, रास्ता, स्थानांतरण ढंग या समय-खिड़की इस्तेमाल कर सकता है। वह छोटी बाधाएँ चूक सकता है और प्लेबैक स्रोत व उपकरण पर भी निर्भर है। अगला परीक्षण चुनने से पहले दर्ज करें कि देरी पहले फ़्रेम से पहले होती है या प्लेबैक के दौरान।</p>
+<section class="article-cta"><h2 id="your-next-step">आपका अगला कदम</h2>
+<p><a  href="/blog/a-symptom-pattern-atlas-for-video-buffering/" hreflang="en" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="bandwidth-throughput-latency-and-jitter-explained">प्लेबैक के लक्षण से अगली जाँच चुनें <span class="link-language">(अंग्रेज़ी में)</span></a>। किसी भी सहायता अनुरोध में उपकरण, समय-खिड़की, परीक्षण विधि और एक दोहराने योग्य लक्षण दें—स्रोत के लॉगिन विवरण नहीं।</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">संदर्भ स्रोत</h2>
+<ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">RFC 6349: TCP थ्रूपुट परीक्षण</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc7679" target="_blank" rel="noopener">RFC 7679: एकतरफ़ा देरी का मापदंड</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">RFC 3393: देरी में बदलाव का मापदंड</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc7680" target="_blank" rel="noopener">RFC 7680: एकतरफ़ा पैकेट लॉस का मापदंड</a></li></ul>
+</section>
+      <section class="related">
+      <h2>संबंधित लेख</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-home-network-basics-for-video/" hreflang="en" lang="en">
+          <span class="tag">Home Network Video Basics</span>
+          <div class="card-title">The Complete Guide to Home Network Basics for Video</div>
+          <span class="link-language" lang="hi">अंग्रेज़ी में</span>
+          <p>Reliable video depends on the complete path, not one speed number. Identify the player, local link, access point or switch, router, internet path, and authorised source. Then observe throughput, delay, delay variation, packet loss, competing traffic, and recurrence while changing one layer at a time.</p>
+        </a>
+        <a class="card" href="/blog/a-symptom-pattern-atlas-for-video-buffering/" hreflang="en" lang="en">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">A Symptom-Pattern Atlas for Video Buffering</div>
+          <span class="link-language" lang="hi">अंग्रेज़ी में</span>
+          <p>Classify buffering by playback phase, title and version, device, network link, room, time window, simultaneous traffic, recurrence, and recovery. Each pattern narrows candidate layers but does not prove one cause. Capture the failing state, then change one axis and compare the same authorised content.</p>
+        </a>
+        <a class="card" href="/blog/hi/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">वीडियो की गुणवत्ता की समझ</span>
+          <div class="card-title">वीडियो की गुणवत्ता समझें: जो दिखता है उसकी तुलना कैसे करें</div>
+
+          <p>एक दृश्य, भरी हुई तुलना और दोहराने योग्य देखने की जाँच से धुँधले स्रोत, संपीड़न, डेटा की रुकावट और डिस्प्ले प्रोसेसिंग को अलग समझें।</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="पादलेख नेविगेशन">
+        <a href="/">मुखपृष्ठ</a>
+        <a href="/blog/hi/">ब्लॉग</a>
+        <a href="/#features">लाभ</a>
+        <a href="/#pricing">मूल्य निर्धारण</a>
+        <a href="/support.html?returnTo=%2Fblog%2Fhi%2F">सहायता</a>
+        <a href="/terms.html">शर्तें</a>
+        <a href="/privacy.html">गोपनीयता</a>
+        <a href="/mentions-legales.html">कानूनी सूचना</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva मीडिया चलाने और व्यवस्थित करने वाला सॉफ़्टवेयर है। यह मीडिया उपलब्ध नहीं कराता। उपयोग के लिए ऐसा संगत स्रोत चाहिए जिसके आप स्वामी हों या जिसे उपयोग करने की आपको अनुमति हो।</p>
+    </div>
+  </footer>
+</body>
+</html>

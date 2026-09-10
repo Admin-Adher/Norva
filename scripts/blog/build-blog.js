@@ -342,7 +342,12 @@ function writeIfChanged(file, content) {
 
 function writeSitemap(ordered, file = SITEMAP_OUT, hubs = []) {
   const lastmod = (iso) => new Date(iso).toISOString().slice(0, 10);
-  const newest = ordered.length ? ordered[0].updatedAtISO : new Date().toISOString();
+  // Publication order is not modification order: an older guide can be revised.
+  // Each hub follows its own articles; a translation release cannot redate EN.
+  const english = ordered.filter(article => !article.locale || article.locale.code === 'en');
+  const newest = english.length
+    ? english.reduce((latest, article) => Date.parse(article.updatedAtISO) > Date.parse(latest) ? article.updatedAtISO : latest, english[0].updatedAtISO)
+    : new Date().toISOString();
   const urls = [];
   urls.push(`  <url>
     <loc>${SITE}/blog/</loc>

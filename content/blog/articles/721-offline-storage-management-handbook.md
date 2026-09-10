@@ -1,8 +1,8 @@
 ---
 content_id: "NVB-721"
-title: "The Complete Handbook for Offline Storage Management"
-seo_title: "Complete Offline Storage Management Handbook"
-meta_description: "Manage offline media storage with measured item sizes, a protected free-space reserve, safe in-app removal, review dates, and device-specific checks."
+title: "Offline Video Storage: Free Space Without Resetting the App"
+seo_title: "Manage Offline Video Storage and Remove Downloads Safely"
+meta_description: "Downloads taking too much space? Reconcile app and device totals, remove finished offline videos safely and protect free space with a worked storage example."
 slug: "offline-storage-management-handbook"
 canonical_url: "https://norva.tv/blog/offline-storage-management-handbook/"
 language: "en"
@@ -36,10 +36,10 @@ product_claims:
   verified_at: null
   source_of_truth: "https://norva.tv/privacy"
 published_at: null
-updated_at: null
-last_fact_check: null
-estimated_reading_minutes: 7
-excerpt: "Responsible offline storage management measures real device use, protects working space, removes item-level copies safely, and audits unexplained changes."
+updated_at: "2026-09-10T20:52:12Z"
+last_fact_check: "2026-09-10"
+estimated_reading_minutes: 6
+excerpt: "A completed before-and-after example explains why download totals differ from app storage and how to recover space without resetting the app or removing local settings."
 hero:
   src: ""
   alt: ""
@@ -53,12 +53,11 @@ is_pillar: true
 parent_pillar: null
 related_articles:
   - "/blog/set-free-space-reserve-offline-media/"
-  - "/blog/find-unexpected-offline-storage-use/"
-  - "/blog/app-data-vs-offline-media-storage/"
-  - "/blog/divide-offline-storage-across-devices/"
+  - "/blog/storage-for-offline-video/"
+  - "/blog/offline-playback-explained/"
 cta:
-  label: "Explore Norva's Offline Storage Approach"
-  href: "https://norva.tv/#features"
+  label: "Check How Offline Playback Works"
+  href: "https://norva.tv/blog/offline-playback-explained/"
   intent: "awareness"
 sources:
   - "https://norva.tv/privacy"
@@ -69,17 +68,17 @@ proof_assets: []
 original_evidence:
   required: true
   status: "included"
-  type: "offline storage control ledger"
-  summary: "A ledger reconciles app-level offline items with device-level storage, a protected reserve, ownership, verification, and cleanup decisions."
-  methodology: "Readers capture before-and-after observations, change one category at a time, and use supported in-app removal before considering broader platform actions."
+  type: "worked illustrative storage reconciliation"
+  summary: "A fictional 8.0 GB download list is reconciled with a 10.2 GB app footprint before and after removing one 3.0 GB item, without labelling the unexplained balance as cache."
+  methodology: "The completed example uses consistent decimal GB, explicitly invented figures and one item-level change. It is not a Norva download or deletion test."
   asset_urls: []
 ---
 
-# The Complete Handbook for Offline Storage Management
+# Offline Video Storage: Free Space Without Resetting the App
 
 > **In short:** Manage offline storage from two views: the app’s list of local items and the operating system’s storage report. Measure representative items, protect a device-specific free-space reserve, assign every batch an owner and review date, and remove finished items through the app first. Investigate unexplained growth one change at a time; never assume cache, app data, and offline media are interchangeable.
 
-Offline storage is useful precisely because the media is available locally. That benefit also creates a maintenance responsibility: device capacity is shared with the operating system, other apps, photos, messages, updates, and temporary files.
+If your phone says an app uses 10 GB but its download list adds up to 8 GB, the remaining space is not automatically wasted. App code, settings, artwork and temporary data may also count. The task is to recover unnecessary local copies while keeping the account, preferences and media you still need.
 
 ## Understand the storage layers
 
@@ -91,13 +90,13 @@ Norva states that eligible offline media is encrypted and stored on the device, 
 - application settings and credentials;
 - unrelated files owned by other apps.
 
-The guide to [app data versus offline media](/blog/app-data-vs-offline-media-storage/) explains why a broad “clear data” action can have much wider consequences than removing one completed item.
+Local availability is also different from eligibility. A visible download entry does not prove that the intended version and all required tracks play without a connection. Use the [offline playback guide](/blog/offline-playback-explained/) for that separate check. Availability depends on the source, authorisation, supported device and current product conditions; this is not a promise that every Norva platform downloads every item.
 
 ## Build a reliable baseline
 
 Open both the app's offline area and the device storage settings. Record current free space, the app's reported footprint, and the local items you can identify. Apple and Android both expose storage information, but their category names and accounting methods differ.
 
-Measure a representative eligible item by noting storage before and after preparation. Treat the result as an observation for that device, item, and version—not a universal size-per-hour rule.
+Measure a representative eligible item by noting storage before and after preparation, avoiding other transfers during the comparison. Treat the result as an observation for that device, item and version—not a universal size-per-hour rule. The [offline video storage estimate](/blog/storage-for-offline-video/) helps plan a batch; actual sizes remain the basis for maintenance.
 
 ## Protect working free space
 
@@ -119,22 +118,30 @@ Next review other app downloads and clearly unused local files through their own
 
 ## Diagnose unexplained growth
 
-If storage use changes unexpectedly, capture a new baseline and compare one category at a time. The [unexpected offline storage diagnostic](/blog/find-unexpected-offline-storage-use/) separates completed local media, partial transfers, cache, app data, system accounting, and unrelated device changes.
+If storage use changes unexpectedly, capture a new baseline and compare one category at a time. Check whether a transfer is still active, whether another app added files, and whether both storage reports have refreshed. A growing difference is worth investigating, but the difference alone does not identify a leak, cache or duplicate download.
 
 Do not reinstall the app as an early diagnostic step. Norva's privacy policy says downloaded media is removed when the app is uninstalled.
 
 ## Coordinate more than one device
 
-Each device has its own storage, battery, and planned viewer. Do not duplicate the entire batch automatically. The guide to [dividing offline storage across devices](/blog/divide-offline-storage-across-devices/) assigns roles and verifies each copy independently.
+Each device has its own storage, battery, and planned viewer. Do not duplicate the entire batch automatically. A phone for the train and a tablet for the evening may need different items. Syncing progress or preferences does not mean the media bytes have been copied to the other device; verify its local availability separately.
 
 ## Original evidence: storage control ledger
 
-| Item or category | Device | Owner | Observed size | Purpose | Review date | Action |
-| --- | --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  | Retain / Recheck / Remove |
-|  |  |  |  |  |  | Retain / Recheck / Remove |
+This completed example uses **fictional figures, not a Norva device test**. A phone reports 12.0 GB free and a 10.2 GB app footprint. Its app lists three completed local items totalling 8.0 GB. All numbers use decimal GB and the same reporting time.
 
-Add baseline free space, protected reserve, and projected space after changes. Record only observations; mark unexplained differences for investigation.
+| Item or category | Size | Purpose | Decision |
+| --- | --- | --- | --- |
+| Finished travel video A | 3.0 GB | Previous journey completed | Remove only this local copy through the app |
+| Planned video B | 4.0 GB | Upcoming evening viewing | Retain and test offline before departure |
+| Short fallback C | 1.0 GB | Backup session | Retain until the return journey |
+| App footprint minus listed downloads | 2.2 GB | Not itemised by these two reports | Leave alone; do not call the whole balance cache |
+
+After removing A and letting the reports refresh, this illustrative phone shows **5.0 GB** of listed downloads, a **7.2 GB** app footprint and **15.0 GB** free. The 3.0 GB reduction is consistent with the chosen removal. The remaining 2.2 GB difference is unchanged and still not classified.
+
+The household chooses a **6.0 GB reserve** for its own expected updates and activity. That leaves 9.0 GB above the reserve after cleanup, not 15.0 GB to fill. The reserve is an example, not an Android or Norva minimum; temporary preparation space and future device activity also matter.
+
+If your actual free-space increase differs from the removed item's displayed size, do not repeat deletion blindly. Refresh both views, note other changes, and compare consistent units. Ask for help if a reproducible unexplained difference remains. Record safe item nicknames and rounded sizes, never source URLs or credentials.
 
 ## Common mistakes and limitations
 
@@ -157,13 +164,17 @@ The device may include app code, settings, cache, temporary data, and local medi
 
 Do not assume so. Cache normally refers to temporary data, while offline media is a deliberate local item. Use the app's item-level removal first.
 
+### Will clearing storage remove my settings or downloads?
+
+Android describes Clear storage as removing all app data. It is not a download-only cleanup control. Do not use it to remove one video. Read the app's removal prompt and retain account recovery information before considering any broader reset through official support guidance.
+
 ### Should every device keep the same batch?
 
 No. Allocate by planned viewer, journey, battery, storage, and reliability. Verify every device independently.
 
 ## Your next step
 
-[Explore Norva's offline storage approach](https://norva.tv/#features)
+[Check how offline playback works](https://norva.tv/blog/offline-playback-explained/) before your next journey. Start with one compatible item you are authorised to use, verify its required tracks on the intended device, and keep a review date for its local copy. Norva is a media player, not a supplied content library.
 
 ## Sources
 

@@ -148,7 +148,7 @@
 <p>Que peut-on conclure ? La version B transporte deux fois plus de données vidéo dans cet exemple. On ne peut pas en conclure qu’elle contient deux fois plus de détails, paraît deux fois meilleure ou sera lue sans saccades sur un appareil donné. Ces questions exigent de comparer l’image et la lecture.</p>
 <h2 id="understand-what-resolution-can-tell-you">Comprendre ce qu’indique la résolution</h2>
 <p>Les dimensions fixent une grille spatiale maximale pour l’image encodée. Elles ne révèlent pas si la source contenait le niveau de détail correspondant, si elle avait déjà été compressée ou si la mise à l’échelle et le filtrage l’ont adoucie.</p>
-<p>Une image plus grande issue d’une source plus petite ou dégradée garde les limites de cette source. <a href="/blog/the-complete-guide-to-understanding-video-quality/" hreflang="en">Le guide complet de la qualité <span class="link-language">(en anglais)</span></a> distingue les niveaux source, encodage, acheminement, décodage et affichage.</p>
+<p>Une image plus grande issue d’une source plus petite ou dégradée garde les limites de cette source. <a href="/blog/fr/the-complete-guide-to-understanding-video-quality/">Le guide complet de la qualité</a> distingue les niveaux source, encodage, acheminement, décodage et affichage.</p>
 <h2 id="understand-what-bitrate-can-tell-you">Comprendre ce qu’indique le débit</h2>
 <p>Le débit indique les données au fil du temps, mais la valeur affichée peut être une cible, une moyenne, une pointe, un débit de segment mesuré ou une information au niveau du conteneur. Un encodage variable peut allouer des quantités différentes selon les moments. Notez toujours ce que représente le nombre et comment il a été obtenu.</p>
 <p>Davantage de données peut laisser plus de marge à l’encodeur, mais comparer le débit seul entre différents codecs, profils, sources, résolutions, fréquences d’images et implémentations d’encodeur ne constitue pas un test de qualité contrôlé.</p>
@@ -169,7 +169,7 @@
 <p>Utilisez plusieurs scènes : un visage immobile, des détails fins en mouvement et un dégradé sombre révèlent des problèmes différents. Notez les repères exacts pour qu’une autre personne puisse reproduire l’observation. Si l’image s’arrête au lieu d’être simplement peu nette, utilisez <a href="/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/" hreflang="en">le guide de la mise en mémoire tampon au démarrage ou en cours de lecture <span class="link-language">(en anglais)</span></a> pour décrire ce symptôme distinct.</p>
 <h2 id="avoid-misleading-calculations">Éviter les calculs trompeurs</h2>
 <p>Les ratios de type « bits par pixel » peuvent soutenir une analyse technique lorsque dimensions, fréquence d’images, définition du débit, codec et contenu sont contrôlés, mais ils ne deviennent pas un score perceptif universel. Les moyennes peuvent masquer les moments difficiles et l’allocation variable.</p>
-<p>N’assimilez pas le débit du média à la capacité utile de votre connexion. <a href="/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en">Bande passante, débit effectif, latence et gigue <span class="link-language">(en anglais)</span></a> décrivent différents aspects de l’acheminement, notamment la différence entre capacité annoncée et données réellement transférées.</p>
+<p>N’assimilez pas le débit du média à la capacité utile de votre connexion. <a href="/blog/fr/bandwidth-throughput-latency-and-jitter-explained/">Bande passante, débit effectif, latence et gigue</a> décrivent différents aspects de l’acheminement, notamment la différence entre capacité annoncée et données réellement transférées.</p>
 <h2 id="read-interface-labels-cautiously">Lire les libellés de l’interface avec prudence</h2>
 <p>Un badge de résolution peut décrire une représentation disponible ou une propriété du média plutôt que les pixels exacts arrivant actuellement à l’écran. Le débit peut ne pas être affiché du tout. Confirmez les badges et le comportement de lecture actuels de Norva à partir des informations officielles du produit au lieu d’inventer une valeur.</p>
 <p>Norva organise et lit des sources compatibles que les utilisateurs possèdent ou sont autorisés à utiliser ; il ne doit pas être présenté comme un fournisseur de catalogue.</p>
@@ -191,17 +191,17 @@
       <section class="related">
       <h2>À lire aussi</h2>
       <div class="related-grid">
-        <a class="card" href="/blog/the-complete-guide-to-understanding-video-quality/" hreflang="en" lang="en">
-          <span class="tag">Video Quality Literacy</span>
-          <div class="card-title">The Complete Guide to Understanding Video Quality</div>
-          <span class="link-language" lang="fr">en anglais</span>
-          <p>A viewer-first model of the full picture-quality chain, from source and encoding through delivery, decoding, output, display, and viewing conditions.</p>
+        <a class="card" href="/blog/fr/the-complete-guide-to-understanding-video-quality/">
+          <span class="tag">Comprendre la qualité vidéo</span>
+          <div class="card-title">Comprendre la qualité vidéo : comment comparer ce que vous voyez</div>
+
+          <p>Distinguez une source floue, la compression, les interruptions de transmission et le traitement de l’écran à l’aide d’une scène, d’une comparaison complétée et d’une vérification reproductible.</p>
         </a>
-        <a class="card" href="/blog/bandwidth-throughput-latency-and-jitter-explained/" hreflang="en" lang="en">
-          <span class="tag">Home Network Video Basics</span>
-          <div class="card-title">Bandwidth, Throughput, Latency, and Jitter Explained</div>
-          <span class="link-language" lang="fr">en anglais</span>
-          <p>Bandwidth is an available or nominal capacity concept; throughput is the useful rate measured in a specific test. Latency is delay, while jitter describes delay variation under a stated method. Packet loss is separate again. Video can be affected by one or several, so record the method and path before interpreting a number.</p>
+        <a class="card" href="/blog/fr/bandwidth-throughput-latency-and-jitter-explained/">
+          <span class="tag">Bases du réseau domestique pour la vidéo</span>
+          <div class="card-title">Bande passante, débit utile, latence et gigue : les différences</div>
+
+          <p>Capacité, débit de transfert mesuré, délai et variation du délai répondent à des questions différentes. Interprétez une comparaison réseau complète avant d’attribuer les pauses à un seul chiffre.</p>
         </a>
         <a class="card" href="/blog/startup-buffering-or-mid-playback-buffering-separate-the-cases/" hreflang="en" lang="en">
           <span class="tag">Buffering Diagnostics</span>
