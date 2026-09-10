@@ -2651,7 +2651,7 @@ class HomePage {
         const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
         const meta = this.cardMeta(item);
         const variantCount = Number(item.variantCount || item.variant_count || data.variantCount || 0);
-        const languageBadge = this.cardLanguageBadge(item);
+        const languageBadge = MediaUtils.languageBadgeHtml(this.cardLanguageInfo(item), 'home-card-language-badge');
         // "New" corner badge, except on the ranked Top-10 rails (the numeral owns that corner).
         const isNew = !ranked && MediaUtils.isRecentlyAdded?.(item);
 
@@ -2664,7 +2664,7 @@ class HomePage {
                          ${MediaUtils.tmdbSrcset?.(posterUrl) ? `srcset="${this.escapeAttr(MediaUtils.tmdbSrcset(posterUrl))}" sizes="(max-width: 640px) 40vw, 220px"` : ''}
                          onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(variantCount)}) || "{}")}">${variantCount} versions</div>` : ''}
-                    ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
+                    ${languageBadge}
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </div>
@@ -2678,8 +2678,13 @@ class HomePage {
     }
 
     cardLanguageBadge(item) {
+        return this.cardLanguageInfo(item).text;
+    }
+
+    cardLanguageInfo(item) {
         const prefs = this.contentPreferences || {};
-        if (!prefs.preferredAudioLanguage && !prefs.preferredSubtitleLanguage) return '';
+        const type = item.item_type || item.itemType || item.type || 'movie';
+        if (type !== 'movie' && type !== 'series') return { headline: '', text: '' };
         const variants = Array.isArray(item.variants) && item.variants.length
             ? item.variants
             : [item.defaultVariant || item.default_variant || item];
@@ -2687,8 +2692,8 @@ class HomePage {
             MediaUtils.scoreVersionLanguage({ ...item, ...b }, prefs) -
             MediaUtils.scoreVersionLanguage({ ...item, ...a }, prefs)
         )[0] || item;
-        const label = MediaUtils.versionLanguageBadge({ ...item, ...best }, prefs);
-        return label;
+        // A selected exact variant must not inherit another variant's union tracks.
+        return MediaUtils.catalogLanguageInfo(best === item ? item : { ...best, item_type: type }, prefs);
     }
 
     cardMeta(item = {}) {

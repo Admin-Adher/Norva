@@ -14390,6 +14390,29 @@ html.tv-mode .multi-select-item:focus {
   bottom: 34px;
 }
 
+/* A supplier hint is always qualified in visible text, not just a hover title. */
+.catalog-language-badge {
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+.catalog-language-badge.provider-language-badge {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+  border-radius: var(--radius-md);
+}
+.language-badge-label,
+.language-badge-status {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.language-badge-status {
+  font-weight: 500;
+}
+@media (max-width: 640px) {
+  .catalog-language-badge { font-size: 0.875rem; }
+}
+
 /* Keep the audio language visible on phone posters so viewers can choose a
    version before opening its details. Only the decorative NEW badge is hidden. */
 @media (max-width: 640px) {

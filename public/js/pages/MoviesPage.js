@@ -1950,10 +1950,9 @@ class MoviesPage {
             card.setAttribute('aria-label', displayName || (globalThis.NorvaI18n?.t("ui_web_941de4447b2e", { defaultValue: "Movie" }) ?? 'Movie'));
         }
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
-        const languageBadge = this.displayLanguageStatus(
-            MediaUtils.versionLanguageBadge(movie, this.getPreferences()));
-        const languageBadgeTitle = MediaUtils.providerAudioLanguages(movie).length
-            ? `${languageBadge} · ${MediaUtils.providerAudioStatusLabel()}` : languageBadge;
+        const languageBadge = MediaUtils.languageBadgeHtml(
+            MediaUtils.catalogLanguageInfo(movie, this.getPreferences()),
+            `version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}`);
         // "New" corner badge for titles added in the last two weeks (unwatched).
         const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -1969,7 +1968,7 @@ class MoviesPage {
                 </div>
                 ${groupBroken ? '<span class="playback-badge" title="Playback failed" data-i18n-title="ui_web_0535388758c1">⚠</span>' : ''}
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version" data-i18n-title="ui_web_70428a34013f" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(versionCount)}) || "{}")}">${versionCount} versions</button>` : ''}
-                ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}" title="${MediaUtils.escapeHtml(languageBadgeTitle)}" aria-label="${MediaUtils.escapeHtml(languageBadgeTitle)}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
+                ${languageBadge}
                 ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched" data-i18n-title="ui_web_1ca8c1c0de6f">✓</span>' : ''}
                 ${watch.status === 'inprogress' ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.round(watch.ratio * 100)}%"></div></div>` : ''}
                 <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}" title="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
@@ -3065,8 +3064,7 @@ class MoviesPage {
             ratingLabel,
             ...this.getMovieGenres(displayMovie).slice(0, 3).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
             version.quality,
-            this.displayLanguageStatus(MediaUtils.versionLanguageBadge(movie, this.getPreferences())),
-            MediaUtils.providerAudioLanguages(movie).length ? MediaUtils.providerAudioStatusLabel() : '',
+            MediaUtils.catalogLanguageInfo(movie, this.getPreferences()).text,
             ordered.length > 1 ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(ordered.length), defaultValue: `${ordered.length} versions` }) ?? `${ordered.length} versions`) : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);

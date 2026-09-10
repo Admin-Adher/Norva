@@ -19,7 +19,8 @@ public class ProviderVersionCardsInstrumentedTest {
         + "<style>body{overflow:auto}main{padding:var(--space-md)}</style><body><main id='qa-host'></main>"
         + "<script src='/js/i18n.js'></script><script src='/js/utils/mediaUtils.js'></script>"
         + "<script src='/js/pages/MoviesPage.js'></script><script src='/js/pages/SeriesPage.js'></script>"
-        + "<script src='/provider-version-cards.js'></script></body></html>";
+        + "<script src='/js/icons.js'></script><script src='/js/pages/HomePage.js'></script><script src='/js/utils/GenreRails.js'></script>"
+        + "<script src='/provider-version-cards.js'></script><script src='/catalog-language-surfaces.js'></script></body></html>";
 
     private static String evaluate(android.app.Instrumentation instrumentation, WebView view, String js) throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
@@ -31,8 +32,12 @@ public class ProviderVersionCardsInstrumentedTest {
 
     @Test public void portraitVersionCardsAtBothTextZooms() throws Exception { verify(360, 800); }
     @Test public void landscapeVersionCardsAtBothTextZooms() throws Exception { verify(844, 390); }
+    @Test public void portraitCatalogueSurfacesAtBothTextZooms() throws Exception { verify(360, 800, true); }
+    @Test public void landscapeCatalogueSurfacesAtBothTextZooms() throws Exception { verify(844, 390, true); }
 
-    private void verify(int width, int height) throws Exception {
+    private void verify(int width, int height) throws Exception { verify(width, height, false); }
+
+    private void verify(int width, int height, boolean catalogue) throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         android.content.Context context = instrumentation.getTargetContext();
         AtomicReference<WebView> holder = new AtomicReference<>();
@@ -65,10 +70,11 @@ public class ProviderVersionCardsInstrumentedTest {
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
                 for (String locale : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
-                    for (String kind : new String[] {"movie", "series"}) {
+                    for (String kind : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
+                        String fixture = catalogue ? "CatalogLanguageQA" : "ProviderVersionCardsQA";
                         evaluate(instrumentation, holder.get(), "window.versionResult='pending';(async()=>{try{"
-                            + "await NorvaI18n.setPreference('"+locale+"');ProviderVersionCardsQA.mount('"+kind+"');"
-                            + "await new Promise(r=>setTimeout(r,150));ProviderVersionCardsQA.verify();"
+                            + "await NorvaI18n.setPreference('"+locale+"');await "+fixture+".mount('"+kind+"');"
+                            + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();"
                             + "if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);"
                             + "window.versionResult='ok';}catch(e){window.versionResult=String(e);}})();");
                         String result = "\"pending\"";
@@ -79,7 +85,7 @@ public class ProviderVersionCardsInstrumentedTest {
                     }
                 }
             }
-            System.out.println("PROVIDER_VERSION_CARDS_WEBVIEW_OK width="+width+" textZooms=100,130 locales=6 kinds=movie,series");
+            System.out.println("LANGUAGE_PRESENTATION_WEBVIEW_OK width="+width+" textZooms=100,130 locales=6 catalogue="+catalogue);
         } finally { instrumentation.runOnMainSync(() -> holder.get().destroy()); }
     }
 }

@@ -1894,40 +1894,93 @@ const MediaUtils = (() => {
         }) ?? `${hint} · Provider label`;
     }
 
-    // Display-only interpretations approved for provider version labels. Never feed
-    // these into track maps, language facets, matching scores or playback preferences.
-    // In particular IN is a country, Nordic a group, and MP4 only a container.
+    // Display-only supplier declarations, shared by every VOD surface. This table
+    // must never feed track maps, facets, scoring or playback preferences. Ambiguous
+    // country/bundle codes (IN, AF, HU, CA, UK, MULTI) are deliberately not languages.
     const VERSION_PROVIDER_LANGUAGE_TAGS = {
-        al: 'sq', alb: 'sq', albanian: 'sq',
-        ar: 'ar', arabic: 'ar',
-        fr: 'fr', french: 'fr',
-        gr: 'el', greece: 'el', greek: 'el',
-        hi: 'hi', hindi: 'hi',
-        nl: 'nl', dutch: 'nl',
+        al: 'sq', alb: 'sq', sq: 'sq', sqi: 'sq', albanian: 'sq', shqip: 'sq',
+        ar: 'ar', ara: 'ar', arabic: 'ar', arabe: 'ar', العربية: 'ar',
+        fr: 'fr', fra: 'fr', fre: 'fr', vf: 'fr', vff: 'fr', vfq: 'fr', french: 'fr', francais: 'fr', truefrench: 'fr',
+        en: 'en', eng: 'en', english: 'en', anglais: 'en',
+        de: 'de', deu: 'de', ger: 'de', german: 'de', deutsch: 'de', allemand: 'de',
+        es: 'es', spa: 'es', spanish: 'es', espanol: 'es', espagnol: 'es', castellano: 'es', latino: 'es',
+        pt: 'pt', por: 'pt', portuguese: 'pt', portugues: 'pt', portugais: 'pt',
+        it: 'it', ita: 'it', italian: 'it', italiano: 'it', italien: 'it',
+        nl: 'nl', nld: 'nl', dut: 'nl', dutch: 'nl', nederlands: 'nl', neerlandais: 'nl',
+        gr: 'el', el: 'el', ell: 'el', gre: 'el', greece: 'el', greek: 'el', grec: 'el',
+        ru: 'ru', rus: 'ru', russian: 'ru', russe: 'ru', русский: 'ru',
+        pl: 'pl', pol: 'pl', polish: 'pl', polski: 'pl', polonais: 'pl',
+        tr: 'tr', tur: 'tr', turkish: 'tr', turkce: 'tr', turc: 'tr',
+        hi: 'hi', hin: 'hi', hindi: 'hi', हिन्दी: 'hi', हिंदी: 'hi',
+        te: 'te', tel: 'te', telugu: 'te', తెలుగు: 'te',
+        ta: 'ta', tam: 'ta', tamil: 'ta', தமிழ்: 'ta',
+        ml: 'ml', mal: 'ml', malayalam: 'ml', മലയാളം: 'ml',
+        kn: 'kn', kan: 'kn', kannada: 'kn', ಕನ್ನಡ: 'kn',
+        bn: 'bn', ben: 'bn', bengali: 'bn', bangla: 'bn', বাংলা: 'bn',
+        mr: 'mr', mar: 'mr', marathi: 'mr', pa: 'pa', pan: 'pa', punjabi: 'pa', ਪੰਜਾਬੀ: 'pa',
+        gu: 'gu', guj: 'gu', gujarati: 'gu', ur: 'ur', urd: 'ur', urdu: 'ur',
+        si: 'si', sin: 'si', sinhala: 'si', ne: 'ne', nep: 'ne', nepali: 'ne', odia: 'or', oriya: 'or',
+        ja: 'ja', jpn: 'ja', jp: 'ja', japanese: 'ja', japonais: 'ja', 日本語: 'ja',
+        ko: 'ko', kor: 'ko', korean: 'ko', coreen: 'ko', 한국어: 'ko',
+        zh: 'zh', zho: 'zh', chi: 'zh', chinese: 'zh', mandarin: 'zh', 中文: 'zh',
+        yue: 'yue', cantonese: 'yue', th: 'th', tha: 'th', thai: 'th',
+        vi: 'vi', vie: 'vi', vietnamese: 'vi', id: 'id', indonesian: 'id', indonesia: 'id',
+        ms: 'ms', msa: 'ms', malay: 'ms', melayu: 'ms', fil: 'fil', filipino: 'fil', tagalog: 'fil',
+        fa: 'fa', fas: 'fa', per: 'fa', persian: 'fa', farsi: 'fa', فارسی: 'fa',
+        he: 'he', heb: 'he', hebrew: 'he', עברית: 'he', kurdish: 'ku',
+        sv: 'sv', swe: 'sv', swedish: 'sv', svenska: 'sv', se: 'sv',
+        da: 'da', dan: 'da', danish: 'da', dansk: 'da', dk: 'da',
+        no: 'no', nor: 'no', norwegian: 'no', norsk: 'no',
+        fi: 'fi', fin: 'fi', finnish: 'fi', suomi: 'fi', icelandic: 'is',
+        cs: 'cs', ces: 'cs', cze: 'cs', czech: 'cs', cz: 'cs',
+        sk: 'sk', slk: 'sk', slo: 'sk', slovak: 'sk', slovene: 'sl', slovenian: 'sl',
+        ro: 'ro', ron: 'ro', rum: 'ro', romanian: 'ro', romana: 'ro',
+        hu: null, hun: 'hu', hungarian: 'hu', magyar: 'hu', hongrois: 'hu',
+        bg: 'bg', bul: 'bg', bulgarian: 'bg', hr: 'hr', hrv: 'hr', croatian: 'hr',
+        sr: 'sr', srp: 'sr', serbian: 'sr', bs: 'bs', bos: 'bs', bosnian: 'bs',
+        ukrainian: 'uk', ukr: 'uk', ua: 'uk', lithuanian: 'lt', latvian: 'lv', estonian: 'et',
+        catalan: 'ca', basque: 'eu', galician: 'gl', armenian: 'hy', georgian: 'ka',
+        afrikaans: 'af', swahili: 'sw', zulu: 'zu', yoruba: 'yo', amharic: 'am',
         so: 'so', som: 'so', somali: 'so', somalia: 'so',
         nordic: 'nordic', scandinavian: 'nordic', scandinavia: 'nordic'
     };
 
     function versionProviderLanguageHint(item = {}) {
-        const raw = String(item.raw_title || item.rawTitle || '').replace(BAR_SEPARATORS, ' | ');
-        // Only the delimited prefix of a raw provider title is eligible. Never scan
-        // the film/episode title body ("So - ...", "Hindi Medium", etc.).
-        const prefix = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})\s*[-–—|:]\s*/)?.[1] || '';
-        const category = String(item.category_name || item.metadata?.categoryName || '').replace(BAR_SEPARATORS, ' | ');
-        const inspect = (value) => {
-            const tokens = stripDiacritics(value).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-            const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || t === 'subtitled')
+        const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000);
+        // Local M3U/Xtream inventories may retain the raw label only as `name`.
+        // A source/category context is required before treating it as a supplier label.
+        const providerContext = category || item.sourceId || item.source_id;
+        const raw = String(item.raw_title || item.rawTitle || (providerContext ? item.name || item.title : '') || '')
+            .replace(BAR_SEPARATORS, ' | ').slice(0, 2000);
+        const prefix = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})\s*[-–—|:]\s*/)?.[1]
+            || raw.match(/^\s*[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*/u)?.[1] || '';
+        // Explicit release suffixes / "Malayalam Dubbed" are annotations. Plain
+        // title words ("Hindi Medium", "Johnny English", "It") are never scanned.
+        const withoutYear = raw.replace(/\s*[[(]?(?:19|20)\d{2}[\])]?\s*$/, '').trim();
+        const suffix = withoutYear.match(/[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*$/u)?.[1]
+            || withoutYear.match(/\s[-–—|]\s*([A-Z]{2,3}|[\p{L}\p{M}]{4,30})\s*$/u)?.[1]
+            || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
+            || withoutYear.match(/\b(?:dubbed|audio)\s+(?:in\s+)?([\p{L}\p{M}]{4,30})\s*$/iu)?.[1] || '';
+        const inspect = (value, annotated = false) => {
+            const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
+            const tokens = originalTokens.map(t => t.toLowerCase());
+            const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
                 || /sous[\s-]+titres/i.test(value) || RTL_SUB_RE.test(value))
                 && !tokens.some(t => DUB_MARKERS.has(t));
-            const tags = [...new Set(tokens.map(t => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
+            const codeIsBounded = token => new RegExp(`(?:^|[|:/\\[(])\\s*${token}(?:\\s*[-–—|:/\\])]|\\s*$)`, 'i').test(value);
+            const tags = [...new Set(tokens.map((t, i) => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
+                && (t.length > 3 || tokens.length === 1 || (originalTokens[i] === originalTokens[i].toUpperCase() && (annotated || codeIsBounded(t))))
                 ? VERSION_PROVIDER_LANGUAGE_TAGS[t] : null).filter(Boolean))];
-            return { subOnly, tags };
+            return { subOnly, tags, multi: tokens.some(t => /^(?:multi|dual|bilingual|multiaudio)$/.test(t)) };
         };
-        const leading = inspect(prefix);
+        const leading = inspect(prefix, true);
         const categorized = inspect(category);
+        const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.
-        if (leading.subOnly || categorized.subOnly) return null;
-        const tags = [...new Set([...leading.tags, ...categorized.tags])];
+        if (leading.subOnly || categorized.subOnly || trailing.subOnly
+            || leading.multi || categorized.multi || trailing.multi
+            || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw)) return null;
+        const tags = [...new Set([...leading.tags, ...categorized.tags, ...trailing.tags])];
         // Conflicting or multi-language provider labels do not prove a track list.
         if (tags.length !== 1) return null;
         const tag = tags[0];
@@ -1951,6 +2004,58 @@ const MediaUtils = (() => {
         const job = item.audioLanguageValidationJobStatus || item.audio_language_validation_job_status;
         return ['running', 'queued', 'retry_wait'].includes(job)
             ? `${status} · ${audioLanguageAnalysisLabel(item)}` : status;
+    }
+
+    // The one presentation decision used by grids, rails, simple fiches and version
+    // cards. It does not upgrade evidence, mutate records, or influence selection.
+    function languagePresentation(item, prefs = {}, providerHints = true) {
+        const state = versionTrackState(item, 'audio');
+        const languages = versionFileLanguageState(item, 'audio');
+        const validation = audioLanguageValidationStatus(item);
+        const observed = state.known && state.tracks.length ? versionAudioHeadline(state)
+            : languages.known && languages.languages.length ? versionAudioLanguageHeadline(languages)
+                : state.known ? versionAudioHeadline(state) : versionAudioLanguageHeadline(languages);
+        const source = state.known && state.tracks.length ? state.source
+            : languages.known && languages.languages.length ? languages.source
+                : state.known ? state.source : languages.source;
+        const displayable = hasDisplayableAudioLanguage(validation);
+        // Title-level observed unions have no exact ordered tracks. They remain
+        // legitimate aggregate card evidence, never an individual sibling's tracks.
+        const scope = item.audioLanguagesScope || item.audio_languages_scope;
+        const type = item.item_type || item.itemType || item.type;
+        const aggregate = providerHints && displayable && !(scope === 'series' && type !== 'series')
+            ? versionLanguageBadge(item, prefs) : '';
+        const aggregateKnown = aggregate && aggregate !== audioLanguageAnalysisLabel(item);
+        const declared = !displayable ? providerAudioBadge(item) : '';
+        const interpreted = providerHints && !observed && !aggregateKnown && !declared
+            ? versionProviderLanguageHint(item) : null;
+        const headline = !displayable
+            ? declared || interpreted?.label || audioLanguageAnalysisLabel(item)
+            : observed || (aggregateKnown ? aggregate : '') || interpreted?.label || audioLanguageAnalysisLabel(item);
+        const languageStatus = providerHints && (interpreted || declared) ? versionProviderLanguageStatus(item) : '';
+        return { headline, languageStatus,
+            audioSource: interpreted ? 'provider-label' : declared && providerHints ? 'provider-declared' : source };
+    }
+
+    function catalogLanguageInfo(item = {}, prefs = {}) {
+        const data = item.data && typeof item.data === 'object' ? item.data : {};
+        let record = { ...data, ...item, metadata: { ...data.metadata, ...item.metadata } };
+        const variant = item.defaultVariant || item.default_variant;
+        if (variant && typeof variant === 'object' && variant !== item && !hasDisplayableAudioLanguage(record)) {
+            // Do not spread the parent's union/codec evidence into an unobserved
+            // exact variant. Only the default variant's supplier category is shared.
+            record = { ...variant, item_type: variant.item_type || variant.itemType || record.item_type || record.itemType,
+                category_name: variant.category_name || variant.categoryName || variant.metadata?.categoryName || record.category_name || record.categoryName };
+        }
+        const result = languagePresentation(record, prefs, true);
+        return { ...result, text: [result.headline, result.languageStatus].filter(Boolean).join(' · ') };
+    }
+
+    function languageBadgeHtml(info, className) {
+        if (!info?.headline) return '';
+        const qualified = Boolean(info.languageStatus);
+        const text = info.text || [info.headline, info.languageStatus].filter(Boolean).join(' · ');
+        return `<span class="${escapeHtml(className || '')} catalog-language-badge${qualified ? ' provider-language-badge' : ''}" title="${escapeHtml(text)}" aria-label="${escapeHtml(text)}"><span class="language-badge-label">${escapeHtml(info.headline)}</span>${qualified ? `<span class="language-badge-status">${escapeHtml(info.languageStatus)}</span>` : ''}</span>`;
     }
 
     function versionTrackState(item = {}, kind = 'audio') {
@@ -2081,41 +2186,10 @@ const MediaUtils = (() => {
         const provider = resolveVersionProvider(item, resolve);
         const container = String(item.container_extension || item.containerExtension || '').toUpperCase();
         const quality = versionQuality(item);
-        const audioState = versionTrackState(item, 'audio');
-        const audioValidation = audioLanguageValidationStatus(item);
         const subtitleState = versionTrackState(item, 'subtitle');
-        const audioLanguageState = versionFileLanguageState(item, 'audio');
         const subtitleLanguageState = versionFileLanguageState(item, 'subtitle');
-        // During cache convergence, a global ordered-track row can be known-empty
-        // while this tenant already owns a non-empty exact language observation.
-        // The empty row must not hide that stronger file-scoped evidence.
-        const observedAudio = audioState.known && audioState.tracks.length
-            ? versionAudioHeadline(audioState)
-            : audioLanguageState.known && audioLanguageState.languages.length
-                ? versionAudioLanguageHeadline(audioLanguageState)
-                : audioState.known
-                    ? versionAudioHeadline(audioState)
-                    : versionAudioLanguageHeadline(audioLanguageState);
-        const observedAudioSource = audioState.known && audioState.tracks.length
-            ? audioState.source
-            : audioLanguageState.known && audioLanguageState.languages.length
-                ? audioLanguageState.source
-                : audioState.known
-                    ? audioState.source
-                    : audioLanguageState.source;
         const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
-
-        // Exact observations (including a known-empty map) always outrank supplier
-        // interpretations. The opt-in display fallback stays visibly unverified;
-        // default descriptors and all playback/filter evidence keep their contract.
-        const declaredAudio = !hasDisplayableAudioLanguage(audioValidation) ? providerAudioBadge(item) : '';
-        const interpreted = opts.providerLanguageHints === true && !observedAudio && !declaredAudio
-            ? versionProviderLanguageHint(item) : null;
-        const headline = !hasDisplayableAudioLanguage(audioValidation)
-            ? declaredAudio || interpreted?.label || audioLanguageAnalysisLabel(item)
-            : observedAudio || interpreted?.label || audioLanguageAnalysisLabel(item);
-        const languageStatus = opts.providerLanguageHints === true && (interpreted || declaredAudio)
-            ? versionProviderLanguageStatus(item) : '';
+        const { headline, languageStatus, audioSource } = languagePresentation(item, {}, opts.providerLanguageHints === true);
         const metaParts = [subtitleLabel, languageStatus ? providerHint : providerHintLabel(providerHint), provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Keep provider labels secondary, without repeating the audio headline.
@@ -2157,8 +2231,7 @@ const MediaUtils = (() => {
             meta,
             badge,
             tier,
-            audioSource: interpreted ? 'provider-label' : declaredAudio && opts.providerLanguageHints === true
-                ? 'provider-declared' : observedAudioSource
+            audioSource
         };
     }
 
@@ -2173,6 +2246,7 @@ const MediaUtils = (() => {
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         audioLanguageValidationStatus,
         providerAudioLanguages, providerAudioStatusLabel, providerAudioBadge,
+        catalogLanguageInfo, languageBadgeHtml,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         versionDescriptor,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,

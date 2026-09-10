@@ -1924,8 +1924,9 @@ class SeriesPage {
         const versionCount = group.items.length;
         const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : MediaUtils.cleanReleaseName(series.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
-        const languageBadge = this.displayLanguageStatus(
-            MediaUtils.versionLanguageBadge(series, this.getPreferences()));
+        const languageBadge = MediaUtils.languageBadgeHtml(
+            MediaUtils.catalogLanguageInfo(series, this.getPreferences()),
+            `version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}`);
         // "New" corner badge for series added in the last two weeks (not started).
         const isNew = !started && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
@@ -1941,7 +1942,7 @@ class SeriesPage {
                 </div>
                 ${groupBroken ? '<span class="playback-badge" title="Unavailable — failed the health scan" data-i18n-title="ui_web_6168604ed2ae">⚠</span>' : ''}
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version" data-i18n-title="ui_web_70428a34013f" data-i18n="ui_web_3b776504afaf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(versionCount)}) || "{}")}">${versionCount} versions</button>` : ''}
-                ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
+                ${languageBadge}
                 ${started ? '<span class="watched-badge inprogress-badge" title="Watching" data-i18n-title="ui_web_fbc594054d51">▶</span>' : ''}
                 <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}" title="${isFav ? (globalThis.NorvaI18n?.t("ui_web_33fb0dd35e91", { defaultValue: "Remove from Favorites" }) ?? 'Remove from Favorites') : (globalThis.NorvaI18n?.t("ui_web_2461cfb0ed43", { defaultValue: "Add to Favorites" }) ?? 'Add to Favorites')}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
@@ -2524,7 +2525,7 @@ class SeriesPage {
             ...this.getSeriesGenres(display).slice(0, 2).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
             rating ? `★ ${rating}` : '',
             version.quality,
-            this.displayLanguageStatus(MediaUtils.versionLanguageBadge(selected, this.getPreferences()))
+            MediaUtils.catalogLanguageInfo(selected, this.getPreferences()).text
         ].filter(Boolean);
         const history = this._tvPreviewProgress(group);
         const ratio = history?.duration > 0
@@ -3678,6 +3679,7 @@ class SeriesPage {
                 this.getSeriesYear(series),
                 (this.currentSeriesGroup?.items?.length > 1) ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(this.currentSeriesGroup.items.length), defaultValue: `${this.currentSeriesGroup.items.length} versions` }) ?? `${this.currentSeriesGroup.items.length} versions`) : '',
                 ...this.getSeriesGenres(series).slice(0, 3).map(genre => window.GenreTaxonomy?.displayGenre?.(genre) || genre),
+                MediaUtils.catalogLanguageInfo(series, this.getPreferences()).text,
             ].filter(Boolean);
             seriesMetaEarly.innerHTML = earlyMeta.map(p => `<span>${MediaUtils.escapeHtml(p)}</span>`).join('');
         }
@@ -3745,7 +3747,7 @@ class SeriesPage {
                 (this.currentSeriesGroup?.items?.length > 1) ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(this.currentSeriesGroup.items.length), defaultValue: `${this.currentSeriesGroup.items.length} versions` }) ?? `${this.currentSeriesGroup.items.length} versions`) : '',
                 ...genres,
                 version.quality,
-                this.displayLanguageStatus(MediaUtils.versionLanguageBadge(series, this.getPreferences()))
+                MediaUtils.catalogLanguageInfo(series, this.getPreferences()).text
             ].filter(Boolean);
 
             const metaEl = document.getElementById('series-meta');
