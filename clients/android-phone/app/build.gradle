@@ -84,6 +84,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
     from("../../../public") {
         include "subscribe.html", "css/commerce.css", "css/i18n.css"
         include "css/main.css", "js/utils/mediaUtils.js", "js/pages/WatchPage.js"
+        include "js/pages/Settings.js"
         include "app.html", "js/app.js", "js/utils/GenreTaxonomy.js", "js/components/TitleRatingControl.js"
         include "js/components/MultiSelect.js", "js/pages/MoviesPage.js", "js/pages/SeriesPage.js"
         include "js/utils/GenreRails.js", "js/utils/CatalogQueryParams.js"

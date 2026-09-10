@@ -1741,9 +1741,15 @@ class SettingsPage {
      */
     renderGenreChips(selectEl, host) {
         if (!selectEl || !host) return;
-        host.innerHTML = [...selectEl.options].map(o =>
-            `<button type="button" class="genre-chip ${o.selected ? 'is-active' : ''}" data-value="${this.escapeAttr(o.value)}" aria-pressed="${o.selected ? 'true' : 'false'}">${this.escapeHtml(o.textContent)}</button>`
-        ).join('');
+        host.replaceChildren(...[...selectEl.options].map(o => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = `genre-chip ${o.selected ? 'is-active' : ''}`;
+            chip.dataset.value = o.value;
+            chip.setAttribute('aria-pressed', o.selected ? 'true' : 'false');
+            chip.textContent = o.textContent;
+            return chip;
+        }));
         selectEl.classList.add('is-chip-backed');
         if (host.dataset.wired) return;
         host.dataset.wired = '1';

@@ -4246,6 +4246,7 @@ video::cue {
 }
 
 .genre-chip {
+  min-height: 44px;
   padding: 7px 14px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
