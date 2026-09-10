@@ -420,20 +420,25 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       .filter(Boolean),
   )];
   if (projectionServerHost && movieExternalIds.length) {
-    for (let index = 0; index < movieExternalIds.length; index += 500) {
+    // Hydration writes observations, variant certificates and title facets.
+    // Keep those transactions small and never acknowledge a failed RPC: a
+    // resolved Supabase promise can still contain an error. The outer sync
+    // cursor must retry that projection instead of permanently skipping tags.
+    const fileLanguageBatchSize = 50;
+    for (let index = 0; index < movieExternalIds.length; index += fileLanguageBatchSize) {
+      await adoptActiveCatalogUserVisibilityEpoch(
+        options.db, options.sourceId, options.userId, options.generation,
+      );
       await options.assertSourceCurrent?.();
-      try {
-        await options.db.rpc("hydrate_cloud_title_file_languages", {
-          p_user_id: options.userId,
-          p_source_id: options.sourceId,
-          ...catalogGenerationRpcFence(options.generation),
-          p_server_key: projectionServerHost,
-          p_item_type: "movie",
-          p_external_ids: movieExternalIds.slice(index, index + 500),
-        });
-      } catch (error) {
-        console.warn("[vod-title-projection] exact file-language hydration skipped:", error instanceof Error ? error.message : error);
-      }
+      const { error } = await options.db.rpc("hydrate_cloud_title_file_languages", {
+        p_user_id: options.userId,
+        p_source_id: options.sourceId,
+        ...catalogGenerationRpcFence(options.generation),
+        p_server_key: projectionServerHost,
+        p_item_type: "movie",
+        p_external_ids: movieExternalIds.slice(index, index + fileLanguageBatchSize),
+      });
+      if (error) throw error;
       await adoptActiveCatalogUserVisibilityEpoch(
         options.db,
         options.sourceId,

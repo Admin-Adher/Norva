@@ -37,6 +37,11 @@ file evidence, public title metadata and business/account state are distinct.
   a retryable error. Retain the existing provider lease unless the remote
   request has returned or the lane was local; a shorter schedule delay never
   proves that provider work was drained.
+- Transfer exact movie audio/subtitle observations during projection in bounded
+  50-file transactions. Re-prove the source generation and adopt only a monotone
+  user visibility epoch before each batch. A resolved RPC with an error must
+  fail the projection so the finalization cursor does not acknowledge missing
+  language facets. Never fall back to a provider probe on a hydration error.
 
 ## Deployment order
 
@@ -90,3 +95,16 @@ fresh fenced read; they do not justify larger production timeouts. An interrupte
 batch may already contain successful writes, so its invocation ledger is a
 confirmed minimum, not an exact total of every database mutation. Report a final
 current-state count separately and do not add both measures together.
+
+The completed 22-source sweep checked 240,892 candidates (including deferred
+rechecks), confirmed at least 94,186 applied title repairs, and left no deferred
+candidate pending. It made no provider or TMDB requests. The source records
+remain intact. WAL advanced by about 29 GiB during the window including other
+background work; do not repeat this one-time repair as a periodic full sweep.
+
+A separate exact-file audit confirmed that the two active owners sharing one
+provider identity read the same approximately 40,200 audio maps and 42,900
+subtitle maps. These are stream enumerations, not speech-language certificates.
+An existing fenced hydration RPC repaired 68 missing owner observations; no
+audio was re-probed or guessed. A missing observation on a media row that has
+not yet become a current title variant is not a cache-key mismatch.

@@ -217,6 +217,56 @@ test('partial and negative cache entries do not trigger provider fetches or fill
   assert.equal(db.writes.length, 0);
 });
 
+test('file-language hydration is bounded to fifty exact files per fenced transaction', async () => {
+  const harness = projectionHarness();
+  const db = database();
+  await harness.api.refreshVodTitleProjection({
+    sourceId: 'source-a', userId: 'owner-a', generation: { generationId: 'generation-a', kind: 'active' },
+    rows: Array.from({ length: 121 }, (_, i) => row(String(i), `Example ${i}`)), db,
+    xtreamConfig: { serverUrl: 'https://provider.example', username: 'fixture', password: 'fixture' },
+    vodInfoLimit: 0, tmdbValidateLimit: 0, assertSourceCurrent: async () => {},
+  });
+  const calls = db.calls.filter(call => call.rpc === 'hydrate_cloud_title_file_languages');
+  assert.deepEqual(calls.map(call => call.args.p_external_ids.length), [50, 50, 21]);
+  assert.equal(new Set(calls.flatMap(call => call.args.p_external_ids)).size, 121);
+  assert.ok(calls.every(call => call.args.p_server_key === 'verified-provider' && call.args.p_generation_id === 'generation-a'));
+  assert.equal(harness.externalRequests(), 0);
+});
+
+test('a resolved hydration RPC error fails the projection so its sync cursor can retry', async () => {
+  const harness = projectionHarness();
+  const db = database();
+  const rpc = db.rpc.bind(db);
+  const failure = { code: 'PT409', message: 'Catalogue changed' };
+  db.rpc = async (name, args) => name === 'hydrate_cloud_title_file_languages'
+    ? { data: null, error: failure } : rpc(name, args);
+  await assert.rejects(harness.api.refreshVodTitleProjection({
+    sourceId: 'source-a', userId: 'owner-a', generation: { generationId: 'generation-a', kind: 'active' },
+    rows: [row('1')], db, vodInfoLimit: 0, tmdbValidateLimit: 0,
+    xtreamConfig: { serverUrl: 'https://provider.example', username: 'fixture', password: 'fixture' },
+    assertSourceCurrent: async () => {},
+  }), error => error === failure);
+  assert.equal(harness.externalRequests(), 0);
+  assert.equal(db.writes.some(write => write.table === 'catalog_titles'), false,
+    'failed hydration cannot silently continue and acknowledge the projection');
+});
+
+test('a generation change before hydration prevents the cache write', async () => {
+  let adopts = 0;
+  const failure = new Error('Generation superseded');
+  const harness = projectionHarness({ adoptActiveCatalogUserVisibilityEpoch: async () => {
+    if (++adopts === 3) throw failure;
+  }});
+  const db = database();
+  await assert.rejects(harness.api.refreshVodTitleProjection({
+    sourceId: 'source-a', userId: 'owner-a', generation: { generationId: 'generation-a', kind: 'active' },
+    rows: [row('1')], db, vodInfoLimit: 0, tmdbValidateLimit: 0,
+    xtreamConfig: { serverUrl: 'https://provider.example', username: 'fixture', password: 'fixture' },
+    assertSourceCurrent: async () => {},
+  }), error => error === failure);
+  assert.equal(db.calls.some(call => call.rpc === 'hydrate_cloud_title_file_languages'), false);
+});
+
 test('cached metadata still requires validation and compatible title/year', async () => {
   const harness = projectionHarness();
   for (const bad of [cachedTitle('101', { year: 1990 }), cachedTitle('101', { valid: false }), cachedTitle('101', { title: 'Completely Different Work' })]) {
