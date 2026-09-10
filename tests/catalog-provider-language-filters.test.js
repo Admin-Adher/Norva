@@ -65,4 +65,12 @@ test('SQL counters and bounded page filtering share the exact visible per-varian
   assert.doesNotMatch(sql,/update public\.(cloud_title_variants|cloud_media_items|cloud_title_file_language_observations)/);
   const guard=read('supabase/migrations/20260910160152_catalog_language_counts_title_type_guard.sql');
   assert.match(guard,/title\.id=effective\.title_id and title\.user_id=p_user_id and title\.item_type=p_item_type/);
+  const fast=read('supabase/migrations/20260910161252_catalog_language_query_pushdown.sql');
+  assert.match(fast,/with codes as materialized/);
+  assert.match(fast,/select distinct unnest\(audio_languages\)/);
+  assert.match(fast,/p_language is null or hint\.language=p_language/);
+  assert.match(fast,/p_language is null or codes\.code=p_language/);
+  assert.match(fast,/p_user_id,p_item_type,p_source_id,regexp_replace\(p\.audio/);
+  assert.match(fast,/title\.id=effective\.title_id and title\.user_id=p_user_id and title\.item_type=p_item_type/);
+  assert.doesNotMatch(fast,/security definer/i);
 });
