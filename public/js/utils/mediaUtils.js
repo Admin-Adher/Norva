@@ -63,6 +63,10 @@ const MediaUtils = (() => {
     };
 
     const LANGUAGE_ALIASES = {
+        // Exact ISO container tags, not provider-title audio assumptions.
+        afr: 'af', aze: 'az', glg: 'gl', guj: 'gu', kan: 'kn', kaz: 'kk',
+        khm: 'km', kir: 'ky', lat: 'la', mal: 'ml', mar: 'mr', nep: 'ne',
+        oci: 'oc', ori: 'or', pan: 'pa', scr: 'hr', tgl: 'tl', yor: 'yo', zul: 'zu',
         french: 'fr',
         francais: 'fr',
         francaise: 'fr',

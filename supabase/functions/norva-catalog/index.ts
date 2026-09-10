@@ -1893,6 +1893,10 @@ function paramNumber(value: string | null): number | null {
 // requests use ISO-639-1 (`fr`) while ffprobe/container tags often use
 // ISO-639-2 (`fra`/`fre`). Comparing the raw strings can select the wrong sibling.
 const FILE_LANGUAGE_ALIASES: Record<string, string> = {
+  // Exact container tags found by the all-provider audio/subtitle audit.
+  afr: "af", aze: "az", glg: "gl", guj: "gu", kan: "kn", kaz: "kk",
+  khm: "km", kir: "ky", lat: "la", mal: "ml", mar: "mr", nep: "ne",
+  oci: "oc", ori: "or", pan: "pa", scr: "hr", tgl: "tl", yor: "yo", zul: "zu",
   alb: "sq", sqi: "sq", ara: "ar", arm: "hy", hye: "hy", baq: "eu", eus: "eu",
   ben: "bn", bos: "bs", bul: "bg", bur: "my", mya: "my", cat: "ca",
   chi: "zh", zho: "zh", cze: "cs", ces: "cs", dan: "da", dut: "nl", nld: "nl",

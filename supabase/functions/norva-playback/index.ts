@@ -2941,7 +2941,7 @@ async function createPlaybackSessionCore(
   // the authoritative write for this lifecycle; an intermediate public profile
   // write would advance updated_at and make the later exact CAS always miss.
   if (sourceId && gateway.codecProfile && !deferGatewayProfilePersistenceForMkvFastStart) {
-    await persistObservedCodecProfile(db, {
+    const profilePersisted = await persistObservedCodecProfile(db, {
       userId,
       sourceId,
       itemType,
@@ -2950,6 +2950,16 @@ async function createPlaybackSessionCore(
       startupMs: gateway.startupMs,
       audioMode: gateway.audioMode,
     });
+    if (profilePersisted && itemType === "movie") {
+      // Reuse the already completed Gateway probe without delaying first frame
+      // or opening another provider connection. A request-echoed codec hint is
+      // not Gateway evidence and cannot enter the shared file cache.
+      runBackground(shareObservedGatewayProfileTracks(db, {
+        userId, sourceId, itemId,
+        codecProfile: gateway.codecProfile,
+        codecProfileSource: gateway.codecProfileSource,
+      }));
+    }
   }
   const responseCodecProfile = stripMkvH264FastStartProof(mergeCodecProfileAnnotations(
     firstUsefulCodecProfile(requestedPlaybackHint.codecProfile, requestedPlaybackHint.codec_profile),
@@ -7822,6 +7832,7 @@ async function createGatewaySession(
       exactSubtitleHls,
       startupPolicy,
       codecProfile,
+      codecProfileSource: stringOrNull(gatewayBody.codecProfileSource),
       cleanupCreatedSession,
     };
   } catch (databaseError) {
@@ -8138,6 +8149,57 @@ async function persistObservedCodecProfile(
     throw new HttpError(404, "Exact variant codec profile was not persisted");
   }
   return !variantError;
+}
+
+async function shareObservedGatewayProfileTracks(
+  db: SupabaseClient,
+  options: { userId: string; sourceId: string; itemId: string; codecProfile: unknown; codecProfileSource: unknown },
+) {
+  const origin = stringOr(options.codecProfileSource, "").split("+");
+  if (!origin.some((part) => part === "gateway_probe" || part === "gateway_inband")) return false;
+  const raw = recordOrEmpty(options.codecProfile);
+  const probeSource = normalizeCodecToken(raw.probeSource ?? raw.probe_source);
+  if (probeSource !== "gatewayprobe" && !(probeSource === "gatewayinband" && raw.metadataComplete === true)) return false;
+  const audio = raw.audioTracks ?? raw.audio_tracks;
+  const subtitles = raw.subtitles ?? raw.subtitleTracks ?? raw.subtitle_tracks;
+  const validMap = (value: unknown): value is JsonRecord[] => {
+    if (!Array.isArray(value) || value.length > 32) return false;
+    const indices = value.map((track) => recordOrEmpty(track).index);
+    return indices.every((index) => typeof index === "number" && Number.isInteger(index) && index >= 0 && index <= 128) &&
+      new Set(indices).size === indices.length;
+  };
+  if (!validMap(audio) || !audio.length || !validMap(subtitles)) return false;
+  if (!Number.isFinite(Date.parse(stringOr(raw.probedAt, "")))) return false;
+  try {
+    const generation = await readActiveCatalogGenerationSnapshot(db, options.sourceId, options.userId);
+    const { data: variants, error } = await db.from("cloud_catalog_visible_title_variants")
+      .select("id,codec_profile")
+      .eq("user_id", options.userId).eq("source_id", options.sourceId)
+      .eq("generation_id", generation.generationId).eq("item_type", "movie")
+      .eq("external_id", options.itemId).limit(2);
+    if (error || !Array.isArray(variants) || variants.length !== 1 ||
+      recordOrEmpty(variants[0].codec_profile).probedAt !== raw.probedAt) return false;
+    const { key } = await resolveSourceIdentity(options.sourceId, options.userId, db);
+    // Selection/M3U URL replacement has a separate provenance-aware pipeline.
+    // Never infer a shared provider identity from an owner-editable URL or hint.
+    if (!key || key.startsWith("source:")) return false;
+    const audioTracks = audio.map((track) => compactRecord({
+      index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
+      codec: stringOrNull(track.codec), channels: boundedNullableInt(track.channels, 0, 16),
+      default: booleanOrNull(track.default),
+    }));
+    const subtitleTracks = subtitles.map((track) => compactRecord({
+      index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
+      codec: stringOrNull(track.codec), subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
+      extractable: booleanOrNull(track.extractable), forced: booleanOrNull(track.forced),
+      default: booleanOrNull(track.default),
+    }));
+    return await shareFileTracks(db, key, "movie", options.itemId, audioTracks, subtitleTracks, true, true);
+  } catch (_) {
+    // A failed enrichment must never interrupt playback. The regular fenced
+    // file crawler remains the retry path; no client or title-language fallback.
+    return false;
+  }
 }
 
 function mergePlaybackHints(base: JsonRecord, override: JsonRecord) {
@@ -9479,6 +9541,10 @@ function normalizeIsoLang(value: string | null): string | null {
   const v = String(value || "").toLowerCase().trim().split(/[-_]/)[0];
   if (!v || ["un", "und", "mis", "mul", "zxx", "nar"].includes(v)) return null;
   const map: Record<string, string> = {
+    // Keep exact stream tags aligned with catalogue SQL and WebView facets.
+    afr: "af", aze: "az", glg: "gl", guj: "gu", kan: "kn", kaz: "kk",
+    khm: "km", kir: "ky", lat: "la", mal: "ml", mar: "mr", nep: "ne",
+    oci: "oc", ori: "or", pan: "pa", scr: "hr", tgl: "tl", yor: "yo", zul: "zu",
     alb: "sq", sqi: "sq", ara: "ar", arm: "hy", hye: "hy", baq: "eu", eus: "eu",
     ben: "bn", bos: "bs", bul: "bg", bur: "my", mya: "my", cat: "ca",
     chi: "zh", zho: "zh", cze: "cs", ces: "cs", dan: "da", dut: "nl", nld: "nl",
