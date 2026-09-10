@@ -29,6 +29,26 @@ const unidentifiedByLocale = [
     'ভাষা শনাক্ত হয়নি', 'اللغة غير محددة', 'Bahasa belum teridentifikasi', 'Hindi natukoy ang wika',
 ];
 
+test('regional provider codes remain qualified secondary labels in all app locales', () => {
+    const r = runtime();
+    const labels = [
+        'Provider label', 'Étiquette du fournisseur', 'Etiqueta do fornecedor',
+        'Etiqueta del proveedor', 'प्रदाता लेबल', 'Sağlayıcı etiketi',
+        'প্রদানকারী লেবেল', 'تسمية الموفر', 'Label penyedia', 'Label ng tagapagbigay',
+    ];
+    for (const [index, { code }] of locales.entries()) {
+        r.NorvaI18n.setPreference(code);
+        const siblings = ['AR', 'DE', 'GR', 'HU', 'NL', 'PL', 'RU', 'SO'].map(prefix => ({
+            raw_title: `${prefix} - Example Film`, audio_language_validation_status: 'not_analyzed',
+        }));
+        for (const item of siblings) {
+            const d = r.MediaUtils.versionDescriptor(item, { siblings });
+            assert.equal(d.headline, unidentifiedByLocale[index], `${code}: audio stays unidentified`);
+            assert.equal(d.meta, `${item.raw_title.slice(0, 2)} · ${labels[index]}`, `${code}: qualified supplier code`);
+        }
+    }
+});
+
 test('missing, terminal, and synthetic pending states never promise an audio analysis in any locale', () => {
     const r = runtime();
     for (const [index, { code }] of locales.entries()) {

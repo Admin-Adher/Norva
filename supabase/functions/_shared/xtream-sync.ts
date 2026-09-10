@@ -973,7 +973,12 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
         rows: savedRows,
         db,
         generation: accessSnapshot,
-        xtreamConfig: null,
+        // Keep the early shelf cache-aware without opening a second provider
+        // connection. Projection resolves exact-file caches only through the
+        // server-written source identity (or its source-local fallback); the
+        // zero budgets below forbid provider/TMDB requests for cache misses.
+        // A provisional source must still wait for normal identity resolution.
+        xtreamConfig: { serverUrl, username, password },
         mediaGatewayUrl: null,
         mediaGatewayToken: null,
         vodInfoLimit: 0,

@@ -13,7 +13,7 @@ import {
   upsertLiveChannelRows,
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
-import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
+import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch, reuseBackgroundTitleMatch } from "../_shared/vod-title-projection.ts";
 import { TMDB_SEARCH_POLICY_VERSION } from "../_shared/tmdb-search-policy.mjs";
 import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
 import { classifyOpsSourceError, formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -1802,7 +1802,8 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
         const title = stringOr(row.originalTitle ?? row.title, "");
         if (!title) continue;
         try {
-          const match = await searchTmdbMatch(
+          const cachedMatch = await reuseBackgroundTitleMatch(db, row);
+          const match = cachedMatch && acceptAutomaticTmdbSearchMatch(row, cachedMatch) ? cachedMatch : await searchTmdbMatch(
             apiKey,
             row.itemType,
             title,
@@ -3614,7 +3615,13 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     ...existingProgress,
     status: "syncing",
     stage: finalizePhaseStage(phase),
-    percent: Math.max(74, Number(existingProgress.percent ?? 0) || 0),
+    // Rebase a resumed cinema-first cursor as well: the old unlock-threshold
+    // calculation may already have persisted 90%. Otherwise the monotone
+    // merge below would preserve that misleading value until completion.
+    // Legacy Live-first cursors keep their original phase/percentage ordering.
+    percent: phase === "titles" && !legacyLiveFirst
+      ? titleFinalizePercent(batchOffset, counts.movies + counts.series)
+      : Math.max(74, Number(existingProgress.percent ?? 0) || 0),
     startedAt,
     updatedAt: new Date().toISOString(),
   });
@@ -3812,7 +3819,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const usable = moviesReady && seriesReady && nextOffset >= thresholds.usable;
       await reportProgress({
         stage: done ? "building_live_channels" : "building_titles",
-        percent: done ? 90 : titleFinalizePercent(nextOffset, thresholds.usable),
+        percent: done ? 90 : titleFinalizePercent(nextOffset, totalVod),
         ...(moviesReady ? { moviesReady: true } : {}),
         ...(seriesReady ? { seriesReady: true } : {}),
         ...(browseReady ? { browseReady: true } : {}),
@@ -5032,7 +5039,7 @@ function json(req: Request, data: unknown, status = 200) {
   });
 }
 
-function catalogVisibilityEpochHeaders(req: Request) {
+function catalogVisibilityEpochHeaders(req: Request): Record<string, string> {
   const epoch = catalogVisibilityEpochs.get(req);
   return epoch ? { "X-Norva-Visibility-Epoch": epoch } : {};
 }

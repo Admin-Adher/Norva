@@ -4,6 +4,9 @@ import {
   type BuildingCatalogGeneration,
   adoptActiveCatalogUserVisibilityEpoch,
   catalogGenerationRpcFence,
+  isRollingRpcUnavailable,
+  readActiveCatalogGenerationSnapshot,
+  assertActiveCatalogGenerationCurrent,
   withCatalogGenerationRows,
 } from "./catalog-generation.ts";
 import {
@@ -175,6 +178,9 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     : new Map<string, ProviderIds>();
   await options.assertSourceCurrent?.();
   const providerIdsByExternalId = collectProviderIds(rows, vodInfoByExternalId);
+  const exactFileMatches = projectionServerHost && !projectionServerHost.startsWith("source:")
+    ? await reuseExactFileTitleMatches(options, providerIdsByExternalId)
+    : new Map<string, { ids: ProviderIds; validation: TmdbValidation }>();
   const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit, options.db);
   await options.assertSourceCurrent?.();
 
@@ -201,8 +207,18 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       metadata.description,
       metadata.plot,
     );
-    const providerIds = providerIdsByExternalId.get(externalId) ?? { tmdbId: null, imdbId: null };
-    const tmdbValidation = providerIds.tmdbId ? tmdbValidationById.get(tmdbValidationKey(itemType, providerIds.tmdbId)) : null;
+    const fileKey = tmdbValidationKey(itemType, externalId);
+    const recovered = exactFileMatches.get(fileKey);
+    const providerIds = recovered?.ids ?? providerIdsByExternalId.get(fileKey) ?? { tmdbId: null, imdbId: null };
+    let tmdbValidation = recovered?.validation ?? (providerIds.tmdbId
+      ? tmdbValidationById.get(tmdbValidationKey(itemType, providerIds.tmdbId)) : null);
+    // Validation is file-specific, even when several rows share a TMDB ID.
+    // A matching first variant must not validate a different title/remake later.
+    if (tmdbValidation?.valid && !matchCatalogValidationCandidate(
+      { itemType, tmdbId: providerIds.tmdbId!, title, year: releaseYear }, {},
+      { tmdb: tmdbValidation.details, i18n: tmdbValidation.i18n },
+      { title: tmdbValidation.title, year: tmdbValidation.year },
+    )) tmdbValidation = null;
     const trustedTmdbId = tmdbValidation?.valid ? providerIds.tmdbId : null;
     const trustedIds = { tmdbId: trustedTmdbId, imdbId: providerIds.imdbId };
     // Dedup identity binds to the PROVIDER's id whenever it's real, so a film's
@@ -212,10 +228,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     // whether we trust TMDB *metadata*; it must never split identity. cleanId()
     // maps the "0" no-match sentinel to null, so those fall through to norm:.
     const identity = identityForTitle(itemType, title, releaseYear, providerIds);
+    const typedIdentityKey = tmdbValidationKey(itemType, identity.key);
     if (providerIds.tmdbId) providerTmdbIds += 1;
 
-    if (!titleRowsByKey.has(identity.key)) {
-      titleRowsByKey.set(identity.key, {
+    if (!titleRowsByKey.has(typedIdentityKey)
+      || (tmdbValidation?.valid && recordOrEmpty(recordOrEmpty(titleRowsByKey.get(typedIdentityKey)?.metadata).tmdbValidation).valid !== true)) {
+      titleRowsByKey.set(typedIdentityKey, {
         user_id: options.userId,
         item_type: itemType,
         identity_key: identity.key,
@@ -256,9 +274,9 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     const version = parseVersionInfo(title, metadata);
     const versionLangTag = stringOrNull(version.language);
     if (versionLangTag) {
-      const set = languagesByKey.get(identity.key) ?? new Set<string>();
+      const set = languagesByKey.get(typedIdentityKey) ?? new Set<string>();
       set.add(versionLangTag.toLowerCase());
-      languagesByKey.set(identity.key, set);
+      languagesByKey.set(typedIdentityKey, set);
     }
     variantRows.push({
       user_id: options.userId,
@@ -315,7 +333,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     const { data, error } = await options.db
       .from("cloud_titles")
       .upsert(chunk, { onConflict: "user_id,item_type,identity_key" })
-      .select("id,identity_key");
+      .select("id,item_type,identity_key");
     if (error) throw error;
     await adoptActiveCatalogUserVisibilityEpoch(
       options.db,
@@ -325,14 +343,14 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     );
     for (const title of data ?? []) {
       if (typeof title.identity_key === "string" && typeof title.id === "string") {
-        titleIdByKey.set(title.identity_key, title.id);
+        titleIdByKey.set(tmdbValidationKey(title.item_type, title.identity_key), title.id);
       }
     }
   }
 
   for (const variant of variantRows) {
     const key = stringOr(recordOrEmpty(variant.metadata).identityKey, "");
-    const titleId = titleIdByKey.get(key);
+    const titleId = titleIdByKey.get(tmdbValidationKey(stringOr(variant.item_type, ""), key));
     if (titleId) variant.title_id = titleId;
   }
 
@@ -516,6 +534,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     variants: savedVariants.length,
     providerTmdbIds,
     vodInfoFetched: vodInfoByExternalId.size,
+    exactFileTitlesReused: exactFileMatches.size,
   };
 }
 
@@ -697,10 +716,127 @@ function collectProviderIds(rows: ProjectionRow[], vodInfoByExternalId: Map<stri
   for (const row of rows) {
     const externalId = stringOr(row.external_id, "");
     if (!externalId) continue;
-    const ids = mergeProviderIds(extractProviderIds(row.metadata), extractProviderIds(row.playback_hint), vodInfoByExternalId.get(externalId));
-    idsByExternalId.set(externalId, ids);
+    const itemType = row.item_type === "series" ? "series" : "movie";
+    const ids = mergeProviderIds(extractProviderIds(row.metadata), extractProviderIds(row.playback_hint),
+      itemType === "movie" ? vodInfoByExternalId.get(externalId) : undefined);
+    idsByExternalId.set(tmdbValidationKey(itemType, externalId), ids);
   }
   return idsByExternalId;
+}
+
+// Recover missing file -> title links without get_vod_info, probing or TMDB
+// requests. The SQL endpoint proves identity/ownership/visibility in one
+// snapshot. The current raw file must ALSO match the public title/year here.
+// Keep results per typed file; never promote one sibling's candidate by TMDB ID.
+async function reuseExactFileTitleMatches(options: ProjectionOptions, existingIds: Map<string, ProviderIds>) {
+  const matches = new Map<string, { ids: ProviderIds; validation: TmdbValidation }>();
+  for (const itemType of ["movie", "series"] as const) {
+    const candidates = options.rows.filter((row) => row.item_type === itemType
+      && stringOr(row.external_id, "") && !existingIds.get(tmdbValidationKey(itemType, row.external_id!))?.tmdbId)
+      .slice(0, REUSE_SCAN_CAP);
+    for (let offset = 0; offset < candidates.length; offset += 200) {
+      await options.assertSourceCurrent?.();
+      const chunk = candidates.slice(offset, offset + 200);
+      const byId = new Map(chunk.map((row) => [row.external_id!, row]));
+      const { data, error } = await options.db.rpc("norva_exact_file_title_candidates", {
+        p_user_id: options.userId, p_source_id: options.sourceId,
+        ...catalogGenerationRpcFence(options.generation),
+        p_item_type: itemType, p_external_ids: [...byId.keys()],
+      });
+      // During a DB/Edge rolling release only a missing RPC may degrade to the
+      // old cache path. Permission, timeout and stale-generation errors remain
+      // retryable failures, not silently accepted empty cache hits.
+      if (error) {
+        if (isRollingRpcUnavailable(error)) return matches;
+        throw error;
+      }
+      const result = Array.isArray(data) ? data as JsonRecord[] : [];
+      const seen = new Set<string>();
+      const duplicates = new Set<string>();
+      for (const entry of result) {
+        const id = stringOr(entry.external_id, "");
+        if (seen.has(id)) duplicates.add(id);
+        seen.add(id);
+      }
+      for (const entry of result) {
+        const externalId = stringOr(entry.external_id, "");
+        const row = byId.get(externalId);
+        const tmdbId = cleanId(entry.provider_tmdb_id);
+        const metadata = recordOrEmpty(entry.metadata);
+        const validation = recordOrEmpty(metadata.tmdbValidation);
+        const details = recordOrEmpty(metadata.tmdb);
+        if (!row || duplicates.has(externalId) || !tmdbId || !/^[1-9]\d*$/.test(tmdbId)
+          || validation.valid !== true || String(details.id ?? "") !== tmdbId) continue;
+        const rawMetadata = recordOrEmpty(row.metadata);
+        const title = stringOr(row.title, "");
+        const matched = matchCatalogValidationCandidate({ itemType, tmdbId, title,
+          year: extractYear(title, rawMetadata.year ?? rawMetadata.releaseYear ?? rawMetadata.release_date),
+        }, {}, metadata, validation);
+        // More conservative than provider-declared IDs: these are recovered
+        // links, so a merely plausible fuzzy match is insufficient.
+        if (!matched || matched.confidence < 0.9) continue;
+        const fileKey = tmdbValidationKey(itemType, externalId);
+        matches.set(fileKey, {
+          ids: { tmdbId, imdbId: existingIds.get(fileKey)?.imdbId ?? null },
+          validation: { valid: true, ...matched, posterUrl: null, backdropUrl: null,
+            details, i18n: recordOrEmpty(metadata.i18n) as TmdbValidation["i18n"], reason: "reused_from_verified_exact_file" },
+        });
+      }
+    }
+  }
+  return matches;
+}
+
+// Existing imports must benefit too: the durable search worker consults this
+// cache path before any external TMDB search. It still commits through its
+// normal payload/visibility CAS; this helper is strictly read-only.
+export async function reuseBackgroundTitleMatch(db: SupabaseClient, candidate: {
+  id: string; userId: string; itemType: "movie" | "series"; title: string;
+  originalTitle: string | null; releaseYear: number | null;
+  visibilityEpoch: string; displayGenerationId: string | null;
+}) {
+  if (!candidate.displayGenerationId) return null;
+  const { data: head, error: headError } = await db.from("cloud_source_catalog_heads")
+    .select("source_id").eq("user_id", candidate.userId)
+    .eq("active_generation_id", candidate.displayGenerationId).maybeSingle();
+  if (headError) throw headError;
+  const sourceId = stringOr(head?.source_id, "");
+  if (!sourceId) return null;
+  const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, candidate.userId);
+  if (generation.generationId !== candidate.displayGenerationId
+    || generation.userVisibilityEpoch !== candidate.visibilityEpoch) {
+    throw new Error("Background title cache snapshot changed");
+  }
+  const { data: variants, error: variantError } = await db.from("cloud_title_variants")
+    .select("external_id").eq("user_id", candidate.userId).eq("source_id", sourceId)
+    .eq("generation_id", generation.generationId).eq("title_id", candidate.id)
+    .eq("item_type", candidate.itemType).order("external_id").limit(33);
+  if (variantError) throw variantError;
+  // Do not conclude agreement from an arbitrarily truncated set of versions.
+  // Exceptionally large groups retain the normal durable search path.
+  if (!variants?.length || variants.length > 32) return null;
+  const { data: media, error: mediaError } = await db.from("cloud_media_items")
+    .select("id,user_id,source_id,generation_id,item_type,external_id,title,metadata,playback_hint")
+    .eq("user_id", candidate.userId).eq("source_id", sourceId)
+    .eq("generation_id", generation.generationId).eq("item_type", candidate.itemType)
+    .eq("available", true).in("external_id", variants.map((variant) => variant.external_id));
+  if (mediaError) throw mediaError;
+  if (!media?.length) return null;
+  const rows = media as ProjectionRow[];
+  const matches = await reuseExactFileTitleMatches({ sourceId, userId: candidate.userId, db, generation, rows,
+    assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, candidate.userId, generation),
+  }, collectProviderIds(rows, new Map()));
+  await assertActiveCatalogGenerationCurrent(db, sourceId, candidate.userId, generation);
+  const ids = new Set([...matches.values()].map((match) => match.ids.tmdbId));
+  if (ids.size !== 1) return null;
+  const match = [...matches.values()][0];
+  const validation = match.validation;
+  const sanity = matchCatalogValidationCandidate({ itemType: candidate.itemType,
+    tmdbId: match.ids.tmdbId!, title: candidate.originalTitle || candidate.title,
+    year: extractYear(candidate.originalTitle || candidate.title, candidate.releaseYear),
+  }, {}, { tmdb: validation.details, i18n: validation.i18n }, { title: validation.title, year: validation.year });
+  if (!sanity || sanity.confidence < 0.9) return null;
+  return { ...validation, ...sanity, tmdbId: match.ids.tmdbId! };
 }
 
 function matchStatusFor(providerIds: ProviderIds, trustedIds: ProviderIds, validation: TmdbValidation | null | undefined) {
@@ -912,24 +1048,29 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
   // populate validations from another user's already-validated titles (zero TMDB calls).
 
   const candidates: Array<{ key: string; itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null }> = [];
+  const alternativesByKey = new Map<string, typeof candidates>();
   const seen = new Set<string>();
-  for (const row of rows) {
+  for (const row of rows.slice(0, REUSE_SCAN_CAP)) {
     const externalId = stringOr(row.external_id, "");
     const itemType = row.item_type === "series" ? "series" : row.item_type === "movie" ? "movie" : "";
-    const ids = externalId ? idsByExternalId.get(externalId) : null;
+    const ids = externalId && itemType ? idsByExternalId.get(tmdbValidationKey(itemType, externalId)) : null;
     if (!itemType || !ids?.tmdbId) continue;
     const key = tmdbValidationKey(itemType, ids.tmdbId);
-    if (seen.has(key)) continue;
-    seen.add(key);
     const metadata = recordOrEmpty(row.metadata);
     const title = stringOr(row.title, "");
-    candidates.push({
+    const candidate: (typeof candidates)[number] = {
       key,
       itemType,
       tmdbId: ids.tmdbId,
       title,
       year: extractYear(title, metadata.year ?? metadata.releaseYear ?? metadata.release_date),
-    });
+    };
+    const alternatives = alternativesByKey.get(key) ?? [];
+    alternatives.push(candidate);
+    alternativesByKey.set(key, alternatives);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(candidate);
     // NOT capped at `limit` — `limit` rate-caps the TMDB *fetches* further down;
     // the free catalog reuse should see the whole batch so all already-known
     // titles fill this pass instead of trickling 120 at a time.
@@ -944,7 +1085,6 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
   let toFetch = candidates;
   if (db && candidates.length) {
     const remaining = new Set(candidates.map((c) => c.key));
-    const candidateByKey = new Map(candidates.map((candidate) => [candidate.key, candidate]));
     const idsByType = { movie: [] as string[], series: [] as string[] };
     for (const c of candidates) idsByType[c.itemType].push(c.tmdbId);
     for (const itemType of ["movie", "series"] as const) {
@@ -962,10 +1102,9 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
             const tv = recordOrEmpty(md.tmdbValidation);
             if (tv.valid !== true) continue; // only reuse a trusted match
             const key = tmdbValidationKey(itemType, tmdbId);
-            const candidate = candidateByKey.get(key);
-            const reuseMatch = candidate
-              ? matchCatalogValidationCandidate(candidate, r as JsonRecord, md, tv)
-              : null;
+            const reuseMatch = (alternativesByKey.get(key) ?? [])
+              .map((candidate) => matchCatalogValidationCandidate(candidate, r as JsonRecord, md, tv))
+              .find(Boolean);
             // A provider-supplied TMDB id is not proof of identity. Re-run the
             // title/year sanity gate against the current account before promoting
             // a shared validation, otherwise a bad id can leak another film's text.

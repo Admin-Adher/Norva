@@ -1,6 +1,6 @@
 {
   "public/css/i18n.css": "9d49bdc112",
-  "public/css/main.css": "3c427ddff4",
+  "public/css/main.css": "c033457474",
   "public/js/api.js": "1884e2695b",
   "public/js/app.js": "0d9ba4c2db",
   "public/js/authApi.js": "be61dee633",
@@ -38,7 +38,7 @@
   "public/js/utils/GenreRails.js": "bded96b39c",
   "public/js/utils/GenreTaxonomy.js": "ad8c124ca0",
   "public/js/utils/hoverPreview.js": "89a1abb538",
-  "public/js/utils/mediaUtils.js": "933af8d4c1",
+  "public/js/utils/mediaUtils.js": "015e187bfd",
   "public/js/utils/regions.js": "68b00bc227",
   "public/js/utils/sourceHealth.js": "c9d3adcf56",
   "public/js/utils/standalone.js": "bedbd1e12f",

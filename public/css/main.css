@@ -9809,7 +9809,8 @@ kbd {
   font-size: 0.98rem;
   letter-spacing: -0.01em;
   color: var(--color-text-primary);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -9835,9 +9836,14 @@ kbd {
   font-size: 0.8rem;
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  /* Keep the qualified provider hint readable at Android font scale 1.3.
+     Two lines stay compact; a long source name can truncate after the hint. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .version-tier-dot {
   width: 8px;

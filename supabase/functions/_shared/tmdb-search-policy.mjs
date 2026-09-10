@@ -79,6 +79,7 @@ export function cleanTmdbSearchQuery(value) {
 
 // Prefer an explicit release date, then the last suffix year. A numeric movie
 // title ("2012") is never itself treated as a release year.
+/** @param {unknown} value @param {string | number | null} [fallback] */
 export function tmdbSearchYear(value, fallback = null) {
   const raw = stripProviderSearchPrefix(value);
   const bracket = /\((19\d{2}|20\d{2})\)/.exec(raw);

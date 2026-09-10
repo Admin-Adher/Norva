@@ -1874,6 +1874,22 @@ const MediaUtils = (() => {
         return s.length > 24 ? `${s.slice(0, 23).trim()}…` : s;
     }
 
+    function versionProviderHint(item = {}) {
+        const market = versionMarket(item);
+        if (!market) return '';
+        const token = leadingMarketToken(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
+        // Keep the supplier's code, not an inferred soundtrack. Regional codes
+        // must be equally visible whether or not our language parser knows them.
+        return token && !MARKET_REJECT.has(token) ? token : market.label;
+    }
+
+    function providerHintLabel(hint) {
+        if (!hint) return '';
+        return globalThis.NorvaI18n?.t('ui_web_38fc9a457587', {
+            defaultValue: '{{p0}} · Provider label', p0: hint
+        }) ?? `${hint} · Provider label`;
+    }
+
     function versionTrackState(item = {}, kind = 'audio') {
         const isAudio = kind === 'audio';
         const direct = isAudio
@@ -1997,8 +2013,7 @@ const MediaUtils = (() => {
         const siblings = rawSiblings.filter(s => s && typeof s === 'object');
         const tier = versionTierInfo(item);
 
-        const market = versionMarket(item);
-        const marketLabel = market ? market.label : '';
+        const providerHint = versionProviderHint(item);
         const provider = resolveVersionProvider(item, resolve);
         const container = String(item.container_extension || item.containerExtension || '').toUpperCase();
         const quality = versionQuality(item);
@@ -2025,8 +2040,6 @@ const MediaUtils = (() => {
                     ? audioState.source
                     : audioLanguageState.source;
         const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
-        const prefix = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
-        const prefixAudioLabel = prefix && prefix.audioLang ? languageDisplayFull(prefix.audioLang) : '';
 
         // A version card represents one provider FILE. Lead with that file's
         // exact observed soundtrack. Prefix/category/platform text is metadata,
@@ -2034,19 +2047,14 @@ const MediaUtils = (() => {
         const headline = !hasDisplayableAudioLanguage(audioValidation)
             ? providerAudioBadge(item) || audioLanguageAnalysisLabel(item)
             : observedAudio || audioLanguageAnalysisLabel(item);
-        const inferredMarket = market && market.kind !== 'subtitle' && marketLabel !== prefixAudioLabel
-            ? marketLabel
-            : '';
-        const metaParts = [subtitleLabel, inferredMarket, provider, container];
+        const metaParts = [subtitleLabel, providerHintLabel(providerHint), provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
-        // Demote constants, but never repeat the headline in the meta line (e.g. an "NF"
-        // market whose provider is also literally named "Netflix").
+        // Keep provider labels secondary, without repeating the audio headline.
         let meta = metaParts.filter(p => p && p !== headline).join(' · ');
 
-        // Never two identical buttons: if market+provider+container+quality all match a
-        // sibling, disambiguate with the raw provider category.
+        // If provider hint+provider+container+quality match a sibling, use an
+        // available category to distinguish copies without exposing internal IDs.
         const sigOf = (it) => {
-            const m = versionMarket(it);
             const trackState = versionTrackState(it, 'audio');
             const languageState = versionFileLanguageState(it, 'audio');
             const a = trackState.known && trackState.tracks.length
@@ -2058,7 +2066,7 @@ const MediaUtils = (() => {
                         : versionAudioLanguageHeadline(languageState);
             return [
                 a,
-                m ? m.label : '',
+                versionProviderHint(it),
                 resolveVersionProvider(it, resolve),
                 String(it.container_extension || it.containerExtension || '').toUpperCase(),
                 versionQuality(it) || ''
@@ -2068,7 +2076,10 @@ const MediaUtils = (() => {
         const collides = siblings.length > 1 && siblings.filter(s => sigOf(s) === mySig).length > 1;
         if (collides) {
             const cat = versionCategoryLabel(item);
-            if (cat && cat !== headline) meta = meta ? `${meta} · ${cat}` : cat;
+            if (cat && cat !== headline && cat !== providerHint) {
+                const qualifiedCategory = providerHintLabel(cat);
+                meta = meta ? `${meta} · ${qualifiedCategory}` : qualifiedCategory;
+            }
         }
 
         return {
