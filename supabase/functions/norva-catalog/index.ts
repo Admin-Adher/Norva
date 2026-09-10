@@ -6,7 +6,7 @@ import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_sh
 // checkout and run ops/hetzner/scripts/04-deploy-edge-functions.sh.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceIds, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
-import { providerAudioFacet, selectionProviderAudioLanguages } from "../_shared/selection-provider-languages.mjs";
+import { providerAudioFacet, selectionProviderAudioLanguages, catalogVariantMatchesAudio } from "../_shared/selection-provider-languages.mjs";
 import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
@@ -2383,21 +2383,18 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     audio: exactLanguageFacetItems(d.audio, itemType),
     subtitles: exactLanguageFacetItems(d.subtitles, itemType),
   };
-  const { data: visibleSources, error: visibleSourcesError } = await db.from("cloud_catalog_visible_sources")
-    .select("id").eq("user_id", userId);
-  if (visibleSourcesError) throwDb(visibleSourcesError, "Unable to load Selection sources");
-  const selectionIds = await discoverySourceIds((visibleSources ?? []).map(source => source.id), userId);
-  for (const selectionId of selectionIds.filter(id => !sourceId || id === sourceId)) {
-    const { data: declaredCounts, error: declaredError } = await db.rpc('cloud_selection_audio_catalog_counts', {
-      p_user_id: userId, p_selection_source_id: selectionId, p_source_id: sourceId,
-      p_item_type: itemType,
-    });
-    if (declaredError) throwDb(declaredError, 'Unable to load provider language declarations');
-    for (const facet of exactLanguageFacetItems(declaredCounts, itemType)) {
-      value.audio = value.audio.filter((entry: any) => entry.value !== facet.value);
-      value.audio.push({ ...facet, value: `catalog-${facet.value}`, language: facet.value });
-    }
-  }
+  // One indexed, title-deduplicated union for ALL providers. The same relation
+  // drives paged filtering; never add separate counts for overlapping variants.
+  const { data: catalogCounts, error: catalogError } = await db.rpc('cloud_catalog_audio_language_counts', {
+    p_user_id: userId, p_item_type: itemType, p_source_id: sourceId,
+  });
+  if (catalogError) throwDb(catalogError, 'Unable to load catalogue language facets');
+  value.audio = Object.entries(recordOrEmpty(catalogCounts)).flatMap(([language, rawCount]) => {
+    const count = Number(rawCount) || 0;
+    const code = providerAudioFacet(`catalog-${language}`);
+    return code && count > 0 ? [{ value: `catalog-${code}`, language: code, count,
+      label: code === 'nordic' ? 'Nordic languages' : languageFacetLabel(code, count, itemType) }] : [];
+  });
 
   if (cacheKey) {
     FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
@@ -3752,8 +3749,7 @@ async function listVariantsByTitleIds(
       variants.sort((left, right) => {
         const matches = (variant: JsonRecord) => {
           const declaredIso = providerAudioFacet(requiredAudioIso);
-          if (declaredIso && selectionProviderAudioLanguages(variant).includes(declaredIso) &&
-            !(variant.__file_audio_observed === true && canonicalFileLanguages(variant.__file_audio_languages).length)) return true;
+          if (declaredIso) return catalogVariantMatchesAudio(variant, requiredAudioIso, canonicalFileLanguage);
           if (!requiredCanonicalIso) return false;
           const orderedTrackMatch = Array.isArray(variant.__file_audio_tracks) &&
             (variant.__file_audio_tracks as JsonRecord[]).some((track) =>

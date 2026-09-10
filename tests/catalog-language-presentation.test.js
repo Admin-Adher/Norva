@@ -124,7 +124,7 @@ test('ordinary title words, subtitle-only tags, conflicts and ambiguous territor
     }
 });
 
-test('qualifiers remain visible, localized and escaped without touching track or preference evidence', () => {
+test('provenance stays internal and localized without touching public labels, tracks or preferences', () => {
     for (const { code } of locales) {
         const utility = load(code).window.MediaUtils;
         const item = make('Example Malayalam Dubbed 2023');
@@ -133,23 +133,27 @@ test('qualifiers remain visible, localized and escaped without touching track or
         const presentation = utility.catalogLanguageInfo(item);
         assert.equal(presentation.headline, utility.languageDisplayFull('ml'));
         assert.equal(presentation.languageStatus, translations.ui_web_provider_language_unverified[code]);
-        assert.match(utility.languageBadgeHtml(presentation, 'version-language-badge'), /class="language-badge-status"/);
+        assert.equal(presentation.text, presentation.headline);
+        const markup = utility.languageBadgeHtml(presentation, 'version-language-badge');
+        assert.doesNotMatch(markup, /language-badge-status|provider-language-badge/);
+        assert.ok(!markup.includes(presentation.languageStatus), 'no visible, tooltip or accessible provenance');
         assert.equal(JSON.stringify(item), before);
         assert.equal(JSON.stringify(utility.analyzeLanguageCompatibility(item, {preferredAudioLanguage:'fr'})), scores);
         assert.equal(utility.providerAudioLanguages(item).length, 0);
     }
-    const html = M.languageBadgeHtml({headline:'<script>',languageStatus:'" onmouseover="bad'}, 'x" onclick="bad');
+    const html = M.languageBadgeHtml({headline:'<script>',text:'PRIVATE_STATUS',languageStatus:'" onmouseover="bad'}, 'x" onclick="bad');
     assert.doesNotMatch(html, /<script>| onmouseover="| onclick="/);
+    assert.doesNotMatch(html, /PRIVATE_STATUS|onmouseover/);
 });
 
 test('home renders VOD hints without requiring preferences or contaminating a selected variant', () => {
     const home = Object.create(ctx.window.HomePage.prototype);
     home.contentPreferences = {};
-    assert.equal(home.cardLanguageBadge(make('NL | Example')), 'Dutch · Provider · Unverified');
+    assert.equal(home.cardLanguageBadge(make('NL | Example')), 'Dutch');
     assert.equal(home.cardLanguageBadge({item_type:'channel',name:'FR | Example'}), '');
     const group = { item_type:'movie', audioTracks:[{lang:'fr'}], audioTracksScope:'file',
         audioLanguageValidationStatus:'probed_union', defaultVariant:make('EN | Example') };
-    assert.equal(home.cardLanguageBadge(group), 'English · Provider · Unverified');
+    assert.equal(home.cardLanguageBadge(group), 'English');
 });
 
 test('every requested surface uses the common display helper, including early series error states', () => {
@@ -160,5 +164,5 @@ test('every requested surface uses the common display helper, including early se
     }
     const series = read('public/js/pages/SeriesPage.js');
     assert.match(series, /const earlyMeta = \[[\s\S]*?MediaUtils\.catalogLanguageInfo\(series/);
-    assert.match(read('public/css/main.css'), /\.catalog-language-badge\.provider-language-badge\s*\{[^}]*-webkit-line-clamp:\s*unset;[^}]*overflow:\s*visible;/);
+    assert.doesNotMatch(read('public/css/main.css'), /\.provider-language-badge|\.version-language-status/);
 });

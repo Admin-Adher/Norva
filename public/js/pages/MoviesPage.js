@@ -446,9 +446,13 @@ class MoviesPage {
                 ...(source ? { source } : {})
             });
             if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
+            const previousAudio = this.audioSelect?.value;
             this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), facets && facets.audio, this.savedFilters?.audio, 'movies');
             this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), facets && facets.subtitles, this.savedFilters?.subtitle, 'movies');
             this.renderActiveFilterChips();
+            // A saved strict ISO option can become a unified catalogue option.
+            // Refresh membership as well as the label/count when that happens.
+            if (previousAudio && previousAudio !== this.audioSelect?.value && this.app?.currentPage === 'movies') this.onFiltersChanged();
         } catch (_) {
             if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
         }
@@ -2648,12 +2652,10 @@ class MoviesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
-            const languageStatus = desc.languageStatus ? `<span class="version-meta version-language-status">${MediaUtils.escapeHtml(desc.languageStatus)}</span>` : '';
             const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
-                    ${languageStatus}
                     ${meta}
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress" data-i18n="ui_web_c1f88e9d6c41">In progress</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress" data-i18n="ui_web_1ca8c1c0de6f">Watched</span>' : ''}

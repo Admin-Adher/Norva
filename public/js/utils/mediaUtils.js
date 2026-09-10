@@ -833,6 +833,7 @@ const MediaUtils = (() => {
     // sentence (e.g. "Spanish · 1 movies") or translate a facet's stable query value.
     function languageFacetName(value, fallback = '') {
         const code = String(value || '').replace(/^(?:provider|catalog)-/, '');
+        if (code === 'nordic') return globalThis.NorvaI18n?.t('ui_web_provider_nordic_languages', { defaultValue: 'Nordic languages' }) ?? 'Nordic languages';
         if (/^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/i.test(code)) return languageDisplayFull(code);
         return String(fallback || value || '').replace(/\s+·\s+.*$/, '').trim();
     }
@@ -1894,8 +1895,8 @@ const MediaUtils = (() => {
         }) ?? `${hint} · Provider label`;
     }
 
-    // Display-only supplier declarations, shared by every VOD surface. This table
-    // must never feed track maps, facets, scoring or playback preferences. Ambiguous
+    // Supplier declarations shared by VOD presentation and catalogue facets. They
+    // must never feed track maps, scoring or playback preferences. Ambiguous
     // country/bundle codes (IN, AF, HU, CA, UK, MULTI) are deliberately not languages.
     const VERSION_PROVIDER_LANGUAGE_TAGS = {
         al: 'sq', alb: 'sq', sq: 'sq', sqi: 'sq', albanian: 'sq', shqip: 'sq',
@@ -1985,12 +1986,12 @@ const MediaUtils = (() => {
         if (tags.length !== 1) return null;
         const tag = tags[0];
         if (tag === 'nordic') {
-            return { label: globalThis.NorvaI18n?.t('ui_web_provider_nordic_languages', {
+            return { tag, label: globalThis.NorvaI18n?.t('ui_web_provider_nordic_languages', {
                 defaultValue: 'Nordic languages'
             }) ?? 'Nordic languages' };
         }
         const label = languageDisplayFull(tag);
-        return { label: tag === 'so'
+        return { tag, label: tag === 'so'
             ? (globalThis.NorvaI18n?.t('ui_web_provider_language_to_confirm', {
                 defaultValue: '{{language}} · to confirm', language: label
             }) ?? `${label} · to confirm`)
@@ -2048,14 +2049,14 @@ const MediaUtils = (() => {
                 category_name: variant.category_name || variant.categoryName || variant.metadata?.categoryName || record.category_name || record.categoryName };
         }
         const result = languagePresentation(record, prefs, true);
-        return { ...result, text: [result.headline, result.languageStatus].filter(Boolean).join(' · ') };
+        // Provenance stays available to internal logic, never in the public label.
+        return { ...result, text: result.headline };
     }
 
     function languageBadgeHtml(info, className) {
         if (!info?.headline) return '';
-        const qualified = Boolean(info.languageStatus);
-        const text = info.text || [info.headline, info.languageStatus].filter(Boolean).join(' · ');
-        return `<span class="${escapeHtml(className || '')} catalog-language-badge${qualified ? ' provider-language-badge' : ''}" title="${escapeHtml(text)}" aria-label="${escapeHtml(text)}"><span class="language-badge-label">${escapeHtml(info.headline)}</span>${qualified ? `<span class="language-badge-status">${escapeHtml(info.languageStatus)}</span>` : ''}</span>`;
+        const text = info.headline;
+        return `<span class="${escapeHtml(className || '')} catalog-language-badge" title="${escapeHtml(text)}" aria-label="${escapeHtml(text)}"><span class="language-badge-label">${escapeHtml(text)}</span></span>`;
     }
 
     function versionTrackState(item = {}, kind = 'audio') {

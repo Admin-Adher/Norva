@@ -93,16 +93,15 @@ test('rail cards use observed audio before provider tags and preserve accessible
         set innerHTML(value) { markup = value; } };
     const base = { title: 'Example', providerAudioLanguages: ['te'], providerAudioLanguageStatus: 'provider_declared' };
     const cases = [
-        { item: base, expected: 'télougou · Provider · Unverified' },
-        { item: { ...base, providerAudioLanguages: ['es'] }, expected: 'espagnol · Provider · Unverified' },
+        { item: base, expected: 'télougou' },
+        { item: { ...base, providerAudioLanguages: ['es'] }, expected: 'espagnol' },
         { item: { ...base, audioLanguages: ['es'], audioLanguageValidationStatus: 'probed' }, expected: 'Espagnol' },
         { item: { title: 'Unknown', original_language: 'fr' }, expected: 'Language unidentified' },
     ];
     for (const { item, expected } of cases) {
         context.window.GenreRails.render(container, [{ items: [item] }]);
         assert.match(markup, new RegExp('class="home-card-language-badge catalog-language-badge[^\"]*" title="' + expected + '" aria-label="' + expected + '"'));
-        if (expected.includes('Provider')) assert.match(markup, /class="language-badge-status">Provider · Unverified<\/span>/);
-        else assert.doesNotMatch(markup, /class="language-badge-status"/);
+        assert.doesNotMatch(markup, /language-badge-status|Provider · Unverified/);
     }
 });
 

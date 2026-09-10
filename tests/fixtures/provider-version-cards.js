@@ -55,7 +55,9 @@ window.ProviderVersionCardsQA = (() => {
     function verify() {
         const buttons = [...document.querySelectorAll('#qa-versions button')];
         if (buttons.length !== 12) throw Error('version count');
-        if (document.querySelectorAll('.version-language-status').length !== 7) throw Error('seven qualified hints');
+        if (document.querySelector('.version-language-status')) throw Error('internal provenance exposed');
+        const versions = currentKind === 'movie' ? controller.currentMovieVersions : controller._orderedVersions;
+        if (versions.filter(item => MediaUtils.versionDescriptor(item,{providerLanguageHints:true}).languageStatus).length !== 7) throw Error('internal provenance lost');
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('horizontal overflow');
         for (const button of buttons) {
             const rect = button.getBoundingClientRect();
@@ -72,7 +74,7 @@ window.ProviderVersionCardsQA = (() => {
         });
         if (arabicFile.querySelector('.version-headline').textContent !== MediaUtils.languageDisplayFull('fr')) throw Error('AR file must stay French');
         if (arabicFile.querySelector('.version-language-status')) throw Error('observed audio has supplier qualifier');
-        const hintButton = buttons.find(button => button.querySelector('.version-language-status'));
+        const hintButton = buttons.find(button => MediaUtils.versionDescriptor(versions[Number(button.dataset.index)],{providerLanguageHints:true}).languageStatus);
         const list = currentKind === 'movie' ? controller.currentMovieVersions : controller._orderedVersions;
         const expected = list[Number(hintButton.dataset.index)];
         hintButton.focus();
@@ -80,8 +82,8 @@ window.ProviderVersionCardsQA = (() => {
         hintButton.click();
         if (lastChoice !== expected) throw Error('wrong version selected');
         const active = document.querySelector('#qa-versions button.active');
-        if (!active || !active.querySelector('.version-language-status')) throw Error('selection not reflected');
-        return { kind:currentKind, buttons:12, qualified:7, selected:lastChoice.stream_id,
+        if (!active || Number(active.dataset.index) !== versions.indexOf(expected)) throw Error('selection not reflected');
+        return { kind:currentKind, buttons:12, internalHints:7, selected:lastChoice.stream_id,
             locale:NorvaI18n.language, width:innerWidth };
     }
     return { mount, verify, get lastChoice() { return lastChoice?.stream_id ?? null; } };

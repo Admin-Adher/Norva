@@ -83,7 +83,7 @@ window.CatalogLanguageQA = (() => {
         if (surface.endsWith('-detail')) {
             const meta = host.querySelector(surface === 'movie-detail' ? '#movie-detail-meta' : '#series-meta');
             const expected = MediaUtils.catalogLanguageInfo(items[1]).text;
-            if (!meta.textContent.includes(expected)) throw Error('single detail lacks qualified language');
+            if (!meta.textContent.includes(expected)) throw Error('single detail lacks language');
             if (host.querySelector('.version-language-status')) throw Error('single detail needs no version switcher');
             for (const pill of meta.children) {
                 if (pill.scrollWidth > pill.clientWidth + 1 || pill.scrollHeight > pill.clientHeight + 1) throw Error('clipped detail language');
@@ -91,10 +91,12 @@ window.CatalogLanguageQA = (() => {
         } else {
             const badges = [...host.querySelectorAll('.catalog-language-badge')];
             if (badges.length !== 5) throw Error('five catalogue badges');
-            if (host.querySelectorAll('.language-badge-status').length !== 3) throw Error('three qualified supplier hints');
+            if (host.querySelector('.language-badge-status')) throw Error('internal provenance leaked');
+            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 3) throw Error('internal provenance lost');
             badges.forEach((badge,index) => {
                 const expected = MediaUtils.catalogLanguageInfo(items[index]);
-                if (badge.getAttribute('aria-label') !== expected.text) throw Error('accessible provenance missing');
+                if (badge.getAttribute('aria-label') !== expected.headline) throw Error('accessible language wrong');
+                if (expected.languageStatus && badge.outerHTML.includes(expected.languageStatus)) throw Error('internal provenance exposed');
                 if (index === 2 && (badge.querySelector('.language-badge-status') || !badge.textContent.includes(MediaUtils.languageDisplayFull('fr')))) throw Error('AR file must stay observed French');
                 const box = badge.closest('.movie-poster,.series-poster,.card-image').getBoundingClientRect();
                 for (const text of badge.querySelectorAll('.language-badge-label,.language-badge-status')) {

@@ -9846,12 +9846,6 @@ kbd {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
-/* The evidence qualifier must never disappear behind the metadata line clamp. */
-.version-language-status {
-  display: block;
-  -webkit-line-clamp: unset;
-  overflow: visible;
-}
 .version-tier-dot {
   width: 8px;
   height: 8px;
@@ -14390,24 +14384,14 @@ html.tv-mode .multi-select-item:focus {
   bottom: 34px;
 }
 
-/* A supplier hint is always qualified in visible text, not just a hover title. */
+/* The language is public; evidence provenance remains internal. */
 .catalog-language-badge {
   font-size: 0.75rem;
   line-height: 1.25;
 }
-.catalog-language-badge.provider-language-badge {
-  display: block;
-  -webkit-line-clamp: unset;
-  overflow: visible;
-  border-radius: var(--radius-md);
-}
-.language-badge-label,
-.language-badge-status {
+.language-badge-label {
   display: block;
   overflow-wrap: anywhere;
-}
-.language-badge-status {
-  font-weight: 500;
 }
 @media (max-width: 640px) {
   .catalog-language-badge { font-size: 0.875rem; }

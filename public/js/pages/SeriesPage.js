@@ -449,9 +449,11 @@ class SeriesPage {
                 ...(source ? { source } : {})
             });
             if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
+            const previousAudio = this.audioSelect?.value;
             this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), facets && facets.audio, this.savedFilters?.audio, 'series');
             this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), facets && facets.subtitles, this.savedFilters?.subtitle, 'series');
             this.renderActiveFilterChips();
+            if (previousAudio && previousAudio !== this.audioSelect?.value && this.app?.currentPage === 'series') this.onFiltersChanged();
         } catch (_) {
             if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
         }
@@ -2730,12 +2732,10 @@ class SeriesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
-            const languageStatus = desc.languageStatus ? `<span class="version-meta version-language-status">${MediaUtils.escapeHtml(desc.languageStatus)}</span>` : '';
             const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
-                    ${languageStatus}
                     ${meta}
                     ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan" data-i18n-title="ui_web_6168604ed2ae" data-i18n="ui_web_ca1844969742">Unavailable</span>' : ''}
                 </button>`;

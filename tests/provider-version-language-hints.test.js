@@ -164,12 +164,12 @@ test('qualifier, regional group and Somali uncertainty are localized for all ten
     }
 });
 
-test('only Movie and Series version renderers opt in and keep the qualifier outside clamped metadata', () => {
+test('Movie and Series version renderers show interpreted languages but never render internal provenance', () => {
     for (const file of ['MoviesPage.js', 'SeriesPage.js']) {
         const page = fs.readFileSync(path.join(root, 'public/js/pages', file), 'utf8');
         assert.equal((page.match(/providerLanguageHints: true/g) || []).length, 1);
-        assert.match(page, /class="version-meta version-language-status">\$\{MediaUtils\.escapeHtml\(desc\.languageStatus\)\}/);
+        assert.doesNotMatch(page, /version-language-status|desc\.languageStatus/);
     }
     const css = fs.readFileSync(path.join(root, 'public/css/main.css'), 'utf8');
-    assert.match(css, /\.version-language-status\s*\{[^}]*display:\s*block;[^}]*-webkit-line-clamp:\s*unset;/);
+    assert.doesNotMatch(css, /\.version-language-status/);
 });

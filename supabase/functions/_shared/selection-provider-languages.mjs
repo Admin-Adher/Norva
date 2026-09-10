@@ -1,11 +1,33 @@
 import { FILENAME_AUDIO_CODES, storedFilenameAudioLanguage } from './selection-filename-audio.mjs';
+import { providerCatalogLanguage, PROVIDER_CATALOG_LANGUAGES } from './provider-catalog-language.mjs';
 // Supplier catalogue declarations are hints, never observed tracks or speech proof.
 const LANGUAGES = Object.freeze({ Telugu: 'te', Tamil: 'ta', Malayalam: 'ml', Hindi: 'hi', Kannada: 'kn', English: 'en' });
-const CODES = new Set([...Object.values(LANGUAGES), ...FILENAME_AUDIO_CODES]);
+const CODES = new Set([...Object.values(LANGUAGES), ...FILENAME_AUDIO_CODES, ...PROVIDER_CATALOG_LANGUAGES]);
 
 export function providerAudioFacet(value) {
-  const match = /^(?:provider|catalog)-([a-z]{2,3})$/.exec(String(value || '').trim().toLowerCase());
-  return match && CODES.has(match[1]) ? match[1] : null;
+  const match = /^(?:provider|catalog)-([a-z]{2,3}|nordic)$/.exec(String(value || '').trim().toLowerCase());
+  return match && (CODES.has(match[1]) || (/^[a-z]{2}$/.test(match[1]) && match[1] !== 'un')) ? (match[1] === 'fil' ? 'tl' : match[1]) : null;
+}
+
+// Query/display declarations only. Exact observed tracks remain independent.
+export function catalogProviderAudioLanguages(item = {}) {
+  const selection = selectionProviderAudioLanguages(item);
+  if (selection.length) return selection;
+  const hint = providerCatalogLanguage(item);
+  return hint ? [hint] : [];
+}
+
+export function catalogVariantMatchesAudio(variant, facet, canonicalize = value => value) {
+  const language = providerAudioFacet(facet);
+  if (!language) return false;
+  const tracks = Array.isArray(variant.__file_audio_tracks) ? variant.__file_audio_tracks : [];
+  const observed = Array.isArray(variant.__file_audio_languages) ? variant.__file_audio_languages : [];
+  const actual = [...observed, ...tracks.map(track => track?.lang ?? track?.language)]
+    .map(value => value === 'yue' ? value : canonicalize(value)).filter(value => value && !['und','un','unknown'].includes(value));
+  if (actual.length) return actual.includes(language);
+  // Empty language observations are inconclusive, not evidence of silence.
+  if (variant.__file_audio_probed_at && Array.isArray(variant.__file_audio_tracks) && !tracks.length) return false;
+  return catalogProviderAudioLanguages(variant).some(value => (value === 'fil' ? 'tl' : value) === language);
 }
 
 export function selectionProviderAudioLanguages(item = {}) {
