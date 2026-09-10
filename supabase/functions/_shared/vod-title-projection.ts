@@ -17,6 +17,7 @@ import {
   withSourceDirectFallbackLease,
 } from "./provider-direct-fallback-lease.mjs";
 import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
+import { acceptAutomaticTmdbSearchMatch, isMissingTmdbTitle } from "./tmdb-enrichment-policy.mjs";
 import { hydrateSelectionSnapshotMovieTracks, hydrateSelectionSnapshotSeriesTracks } from "./selection-snapshot-tracks.mjs";
 import { hydrateSelectionAudioResults } from "./selection-audio-results.mjs";
 import {
@@ -181,6 +182,17 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const exactFileMatches = projectionServerHost && !projectionServerHost.startsWith("source:")
     ? await reuseExactFileTitleMatches(options, providerIdsByExternalId)
     : new Map<string, { ids: ProviderIds; validation: TmdbValidation }>();
+  const publicCandidates = rows.map((row) => {
+    const metadata = recordOrEmpty(row.metadata);
+    return { itemType: row.item_type === "series" ? "series" as const : "movie" as const,
+      title: stringOr(row.title, ""), originalTitle: null,
+      releaseYear: extractYear(stringOr(row.title, ""), metadata.year ?? metadata.releaseYear ?? metadata.release_date),
+      posterUrl: stringOrNull(row.poster_url), metadata };
+  });
+  const publicMatches = await reusePublicCatalogTitleMatches(options.db, publicCandidates,
+    (index) => !providerIdsByExternalId.get(tmdbValidationKey(publicCandidates[index].itemType, stringOr(rows[index].external_id, "")))?.tmdbId
+      && !providerIdsByExternalId.get(tmdbValidationKey(publicCandidates[index].itemType, stringOr(rows[index].external_id, "")))?.imdbId
+      && !exactFileMatches.has(tmdbValidationKey(publicCandidates[index].itemType, stringOr(rows[index].external_id, ""))));
   const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit, options.db);
   await options.assertSourceCurrent?.();
 
@@ -194,7 +206,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const syncedAt = new Date().toISOString();
   let providerTmdbIds = 0;
 
-  for (const row of rows) {
+  for (const [rowIndex, row] of rows.entries()) {
     const metadata = recordOrEmpty(row.metadata);
     const playbackHint = recordOrEmpty(row.playback_hint);
     const externalId = stringOr(row.external_id, "");
@@ -208,7 +220,9 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       metadata.plot,
     );
     const fileKey = tmdbValidationKey(itemType, externalId);
-    const recovered = exactFileMatches.get(fileKey);
+    const publicMatch = publicMatches.get(rowIndex);
+    const recovered = exactFileMatches.get(fileKey) ?? (publicMatch
+      ? { ids: { tmdbId: publicMatch.tmdbId, imdbId: null }, validation: publicMatch } : null);
     const providerIds = recovered?.ids ?? providerIdsByExternalId.get(fileKey) ?? { tmdbId: null, imdbId: null };
     let tmdbValidation = recovered?.validation ?? (providerIds.tmdbId
       ? tmdbValidationById.get(tmdbValidationKey(itemType, providerIds.tmdbId)) : null);
@@ -535,6 +549,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     providerTmdbIds,
     vodInfoFetched: vodInfoByExternalId.size,
     exactFileTitlesReused: exactFileMatches.size,
+    publicTitlesReused: publicMatches.size,
   };
 }
 
@@ -790,6 +805,69 @@ async function reuseExactFileTitleMatches(options: ProjectionOptions, existingId
 // Existing imports must benefit too: the durable search worker consults this
 // cache path before any external TMDB search. It still commits through its
 // normal payload/visibility CAS; this helper is strictly read-only.
+type PublicCatalogLookup = {
+  itemType: "movie" | "series"; title: string; originalTitle: string | null;
+  releaseYear: string | number | null; posterUrl: string | null; metadata?: JsonRecord;
+};
+
+// Public title-level reuse works across providers, countries and M3U accounts.
+// It never copies a playable URL, file ID, track or language observation.
+export async function reusePublicCatalogTitleMatches(db: SupabaseClient,
+  candidates: PublicCatalogLookup[], include: (index: number) => boolean = () => true,
+) {
+  const matches = new Map<number, TmdbValidation & { tmdbId: string }>();
+  const pending = candidates.map((row, index) => {
+    const title = cleanTmdbSearchQuery(row.originalTitle || row.title);
+    const year = tmdbSearchYear(row.originalTitle || row.title, row.releaseYear);
+    const posterPath = tmdbPosterPath(row.posterUrl);
+    return { index, query: { itemType: row.itemType, title,
+      year: year && /^(19|20|21)\d{2}$/.test(String(year)) ? Number(year) : null, posterPath } };
+  }).filter((entry) => include(entry.index) && entry.query.title.length >= 2 && entry.query.title.length <= 512
+    && (entry.query.year !== null || entry.query.posterPath !== null));
+  for (let offset = 0; offset < pending.length; offset += 50) {
+    const batch = pending.slice(offset, offset + 50);
+    const { data, error } = await db.rpc("norva_public_catalog_title_candidates", { p_queries: batch.map((entry) => entry.query) });
+    if (error) {
+      if (isRollingRpcUnavailable(error)) return matches;
+      throw error;
+    }
+    if (!Array.isArray(data) || data.length > batch.length) throw new Error("Invalid public title cache response");
+    const duplicates = new Set<number>();
+    const seen = new Set<number>();
+    for (const cached of data) {
+      const index = cached.query_index;
+      if (!Number.isInteger(index) || index < 0 || index >= batch.length) throw new Error("Invalid public title cache index");
+      if (seen.has(index)) duplicates.add(index);
+      seen.add(index);
+    }
+    for (const cached of data) {
+      if (duplicates.has(cached.query_index)) continue;
+      const entry = batch[cached.query_index];
+      const row = candidates[entry.index];
+      const metadata = recordOrEmpty(cached.metadata);
+      const details = recordOrEmpty(metadata.tmdb);
+      const tmdbId = stringOr(cached.provider_tmdb_id, "");
+      if (!/^[1-9]\d*$/.test(tmdbId) || String(details.id) !== tmdbId
+        || recordOrEmpty(metadata.tmdbValidation).valid !== true) continue;
+      const sanity = matchCatalogValidationCandidate({ itemType: row.itemType, tmdbId,
+        title: row.originalTitle || row.title, year: entry.query.year ? String(entry.query.year) : null,
+      }, {}, metadata, recordOrEmpty(metadata.tmdbValidation));
+      if (!sanity || sanity.confidence < 0.9) continue;
+      const i18n: Record<string, { title?: string; overview?: string }> = {};
+      for (const [locale, value] of Object.entries(recordOrEmpty(metadata.i18n))) {
+        if (!/^[a-z]{2}(-[A-Za-z]{2})?$/.test(locale)) continue;
+        const localized = recordOrEmpty(value);
+        i18n[locale] = { title: stringOrNull(localized.title) ?? undefined, overview: stringOrNull(localized.overview) ?? undefined };
+      }
+      const match = { ...sanity, valid: true, tmdbId, details, i18n,
+        posterUrl: tmdbImageUrl(details.poster_path), backdropUrl: tmdbImageUrl(details.backdrop_path, "w780"),
+        reason: "public_catalog_title_year_validated" };
+      if (acceptAutomaticTmdbSearchMatch(row, match)) matches.set(entry.index, match);
+    }
+  }
+  return matches;
+}
+
 export async function reuseBackgroundTitleMatch(db: SupabaseClient, candidate: {
   id: string; userId: string; itemType: "movie" | "series"; title: string;
   originalTitle: string | null; releaseYear: number | null;
@@ -1421,9 +1499,13 @@ async function tmdbSearchResults(
 function tmdbPosterPath(value: unknown): string | null {
   const s = stringOr(value, "");
   if (!s) return null;
-  const fromUrl = s.match(/\/t\/p\/[^/]+(\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp))/i);
-  if (fromUrl) return fromUrl[1].toLowerCase();
-  return /^\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp)$/i.test(s) ? s.toLowerCase() : null;
+  if (/^\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp)$/i.test(s)) return s;
+  try {
+    const url = new URL(s);
+    if (url.hostname !== "image.tmdb.org" || !["https:","http:"].includes(url.protocol)) return null;
+    const fromUrl = url.pathname.match(/^\/t\/p\/[^/]+(\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp))$/i);
+    return fromUrl?.[1] ?? null; // TMDB paths are case-sensitive.
+  } catch (_) { return null; }
 }
 
 export async function searchTmdbMatch(
@@ -1435,7 +1517,22 @@ export async function searchTmdbMatch(
   // candidate's is near-proof of identity: it outranks the fuzzy title score and bypasses the
   // gate, rescuing renamed/prefixed titles ("4K-AR - La Bête") the text search would miss.
   posterHint: string | null = null,
+  deadlineAt = Date.now() + 40_000,
 ): Promise<(TmdbValidation & { tmdbId: string }) | null> {
+  const assertBudget = () => {
+    if (Date.now() >= deadlineAt) throw new TmdbRequestError("TMDB search budget exhausted", null, true);
+  };
+  const validateSearchCandidate = async (id: string, confirmed = false) => {
+    assertBudget();
+    try {
+      return await validateTmdbCandidate(apiKey, { itemType, tmdbId: id, title: rawTitle, year: effYear }, confirmed);
+    } catch (error) {
+      // Search can still index a deleted entity. Skip THAT candidate and keep
+      // examining the bounded alternatives; 401/429/5xx/timeouts are not misses.
+      if (isMissingTmdbTitle(error)) return null;
+      throw error;
+    }
+  };
   const query = cleanTmdbSearchQuery(rawTitle);
   if (query.length < 2) return null;
   const endpoint = itemType === "series" ? "tv" : "movie";
@@ -1488,6 +1585,7 @@ export async function searchTmdbMatch(
   const searchAcrossLocales = async (candidateYear: string | null): Promise<Pick | null> => {
     let bestAcrossLocales: Pick | null = null;
     for (const language of languages) {
+      assertBudget();
       const candidate = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, candidateYear));
       bestAcrossLocales = betterPick(bestAcrossLocales, candidate);
       if (candidate?.posterConfirmed || (candidate?.score ?? 0) >= 0.9) return candidate;
@@ -1510,12 +1608,8 @@ export async function searchTmdbMatch(
   const inspected = new Set<string>();
   if (best && (best.posterConfirmed || best.score >= 0.72)) {
     inspected.add(best.id);
-    const validation = await validateTmdbCandidate(
-      apiKey,
-      { itemType, tmdbId: best.id, title: rawTitle, year: effYear },
-      best.posterConfirmed,
-    );
-    if (validation.valid) primary = { ...validation, tmdbId: best.id };
+    const validation = await validateSearchCandidate(best.id, best.posterConfirmed);
+    if (validation?.valid) primary = { ...validation, tmdbId: best.id };
     if (primary && (best.posterConfirmed || primary.confidence >= 0.9)) return primary;
   }
 
@@ -1527,10 +1621,8 @@ export async function searchTmdbMatch(
   const aliasMatches: Array<TmdbValidation & { tmdbId: string }> = [];
   for (const candidate of [...searchCandidates.values()].sort((a, b) => b.score - a.score).slice(0, 3)) {
       if (inspected.has(candidate.id)) continue;
-      const validation = await validateTmdbCandidate(apiKey, {
-        itemType, tmdbId: candidate.id, title: rawTitle, year: effYear,
-      });
-      if (validation.valid && validation.confidence >= 0.9) {
+      const validation = await validateSearchCandidate(candidate.id);
+      if (validation?.valid && validation.confidence >= 0.9) {
         const match = { ...validation, tmdbId: candidate.id };
         if (itemType === "series") return match;
         aliasMatches.push(match);

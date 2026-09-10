@@ -13,7 +13,7 @@ import {
   upsertLiveChannelRows,
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
-import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch, reuseBackgroundTitleMatch } from "../_shared/vod-title-projection.ts";
+import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch, reuseBackgroundTitleMatch, reusePublicCatalogTitleMatches } from "../_shared/vod-title-projection.ts";
 import { TMDB_SEARCH_POLICY_VERSION } from "../_shared/tmdb-search-policy.mjs";
 import { backfillProviderOverviews } from "../_shared/provider-overview-backfill.ts";
 import { classifyOpsSourceError, formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -1778,6 +1778,10 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   let retryPending = 0;
   let emptyTransitions = 0;
   let done = false;
+  let searchFailureHalted = false;
+  let failureCode: string | null = null;
+  let publicCacheReused = 0;
+  let exactFileCacheReused = 0;
 
   while (remaining > 0 && Date.now() - startedAt < CATALOG_BACKGROUND_DRAIN_DEADLINE_MS) {
     claim.checkpointRevision = checkpointRevision;
@@ -1794,22 +1798,32 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
     scanned += rows.length;
     remaining -= rows.length;
     const outcomes: Array<JsonRecord | null> = Array.from({ length: rows.length }, () => null);
+    const publicMatches = await reusePublicCatalogTitleMatches(db, rows);
     let next = 0;
     const worker = async () => {
-      while (next < rows.length) {
+      while (!searchFailureHalted && next < rows.length
+        && Date.now() - startedAt < CATALOG_BACKGROUND_DRAIN_DEADLINE_MS) {
         const index = next++;
         const row = rows[index];
-        const title = stringOr(row.originalTitle ?? row.title, "");
+        const title = stringOr(row.originalTitle || row.title, "").trim();
         if (!title) continue;
         try {
-          const cachedMatch = await reuseBackgroundTitleMatch(db, row);
-          const match = cachedMatch && acceptAutomaticTmdbSearchMatch(row, cachedMatch) ? cachedMatch : await searchTmdbMatch(
+          const publicMatch = publicMatches.get(index);
+          const exactMatch = await reuseBackgroundTitleMatch(db, row);
+          const cachedMatch = exactMatch ?? publicMatch;
+          const reused = cachedMatch && acceptAutomaticTmdbSearchMatch(row, cachedMatch);
+          const match = reused ? cachedMatch : await searchTmdbMatch(
             apiKey,
             row.itemType,
             title,
             row.releaseYear != null ? String(row.releaseYear) : null,
             row.posterUrl,
+            startedAt + CATALOG_BACKGROUND_DRAIN_DEADLINE_MS,
           );
+          if (reused) {
+            if (exactMatch) exactFileCacheReused += 1;
+            else publicCacheReused += 1;
+          }
           outcomes[index] = acceptAutomaticTmdbSearchMatch(row, match) && match ? {
             matched: true,
             providerTmdbId: match.tmdbId,
@@ -1832,7 +1846,16 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
               searchMatchedAt: new Date().toISOString(),
             },
           } : { matched: false };
-        } catch (_) { /* transient TMDB failure remains durably inflight */ }
+        } catch (error) {
+          // Stop allocating calls on an outage; already-running workers finish.
+          // No false 90-day miss and no whole-page retry storm. Report only a
+          // bounded classification, never a URL, token or account identifier.
+          searchFailureHalted = true;
+          const failure = error as { name?: string; status?: number };
+          failureCode = failure?.name === "TmdbRequestError"
+            ? ([401,403,404,429,500,502,503,504].includes(Number(failure.status)) ? `tmdb_${failure.status}` : "tmdb_unavailable")
+            : "catalog_enrichment_dependency";
+        }
       }
     };
     await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows.length) }, worker));
@@ -1878,6 +1901,10 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
     busy: false,
     done,
     focused: false,
+    publicCacheReused,
+    exactFileCacheReused,
+    searchFailureHalted,
+    failureCode,
     resetDeferred: reset,
     checkpointRevision,
     cooperativeYielded,

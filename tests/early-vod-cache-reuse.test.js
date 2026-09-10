@@ -18,6 +18,7 @@ function projectionHarness(overrides = {}) {
   let externalRequests = 0;
   const dependencies = {
     ...require('../supabase/functions/_shared/tmdb-search-policy.mjs'),
+    ...require('../supabase/functions/_shared/tmdb-enrichment-policy.mjs'),
     adoptActiveCatalogUserVisibilityEpoch: async () => {},
     isRollingRpcUnavailable: (error) => ['42883', 'PGRST202'].includes(error?.code),
     readActiveCatalogGenerationSnapshot: async () => ({ kind: 'active', generationId: 'generation-a', userVisibilityEpoch: '4' }),
@@ -90,6 +91,7 @@ function database({ identity = 'verified-provider', identityError = null, visibl
     },
     async rpc(name, args) {
       calls.push({ rpc: name, args });
+      if (name === 'norva_public_catalog_title_candidates') return { data: [], error: null };
       if (name === 'norva_exact_file_title_candidates') return { data: peers.filter((peer) =>
         (!peer.item_type || peer.item_type === args.p_item_type) && args.p_external_ids.includes(peer.external_id)), error: peerError };
       return { data: name === 'norva_source_catalog_visible' ? visible : 0, error: null };
@@ -433,8 +435,10 @@ test('background recovery excludes conflicting versions and never consumes a net
   assert.equal(await harness.api.reuseBackgroundTitleMatch(db, backgroundCandidate), null);
   assert.equal(harness.externalRequests(), 0);
   const source = read('supabase/functions/norva-source-sync/index.ts');
-  assert.match(source, /const cachedMatch = await reuseBackgroundTitleMatch\(db, row\);/);
-  assert.match(source, /cachedMatch && acceptAutomaticTmdbSearchMatch\(row, cachedMatch\) \? cachedMatch : await searchTmdbMatch/);
+  assert.match(source, /const exactMatch = await reuseBackgroundTitleMatch\(db, row\);/);
+  assert.match(source, /const cachedMatch = exactMatch \?\? publicMatch/);
+  assert.match(source, /const reused = cachedMatch && acceptAutomaticTmdbSearchMatch\(row, cachedMatch\)/);
+  assert.match(source, /const match = reused \? cachedMatch : await searchTmdbMatch/);
   assert.match(source, /applyCatalogBackgroundOutcomes\(\s*db, "search_pending", rows, outcomes, concurrency/);
 });
 
