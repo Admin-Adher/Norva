@@ -54,6 +54,10 @@ test('all supported separators and camel/snake category fields work without sour
     assert.equal(hinted({ rawTitle: 'FR|Example', category_name: 'FR | DISNEY+' }).headline, 'French');
     assert.equal(hinted(make('', 'GREECE')).headline, 'Greek');
     assert.equal(hinted(make('AR ▎ Example', 'AR | FOREIGN')).headline, 'Arabic');
+    // Actual source categories, including older localized media responses that
+    // did not yet preserve the raw-title prefix.
+    assert.equal(hinted(make('Example Film', 'SCANDINAVIA')).headline, 'Nordic languages');
+    assert.equal(hinted(make('Example Film', 'SOMALIA')).headline, 'Somali · to confirm');
 });
 
 test('the AR-labelled file stays French once its actual French track is available', () => {

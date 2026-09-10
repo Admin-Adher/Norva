@@ -1904,8 +1904,8 @@ const MediaUtils = (() => {
         gr: 'el', greece: 'el', greek: 'el',
         hi: 'hi', hindi: 'hi',
         nl: 'nl', dutch: 'nl',
-        so: 'so', som: 'so', somali: 'so',
-        nordic: 'nordic', scandinavian: 'nordic'
+        so: 'so', som: 'so', somali: 'so', somalia: 'so',
+        nordic: 'nordic', scandinavian: 'nordic', scandinavia: 'nordic'
     };
 
     function versionProviderLanguageHint(item = {}) {

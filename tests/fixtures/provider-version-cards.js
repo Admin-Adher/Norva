@@ -4,9 +4,9 @@ window.ProviderVersionCardsQA = (() => {
         ['ALB', 'AL | PRIME VIDEO', ['fr']], ['ALB', 'AL | DISNEY+', null],
         ['AR', 'AR | FOREIGN', ['fr']], ['DE', 'GERMANY', ['de']],
         ['FR', 'FR | DISNEY+', null], ['GR', 'GREECE', null],
-        ['HU', 'NORDIC FILM NEW RELEASE', null], ['IN', 'ASIA| HINDI', null],
+        ['HU', 'SCANDINAVIA', null], ['IN', 'ASIA| HINDI', null],
         ['NL', 'NL | DISNEY+', null], ['PL', 'POLAND', ['fr']],
-        ['RU', 'RUSSIA', ['fr', 'ru']], ['SO', '', null]
+        ['RU', 'RUSSIA', ['fr', 'ru']], ['SO', 'SOMALIA', null]
     ];
     let controller, selected, lastChoice, currentKind;
     const entries = kind => definitions.map(([prefix, category, audio], index) => ({

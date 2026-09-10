@@ -715,6 +715,19 @@ async function applyMediaCatalogOverlay(items: Array<Record<string, any>>, sourc
   }
 }
 
+function prepareProviderMediaRow(row: Record<string, any>) {
+  // Save this owner's inventory label before catalogue/localization overlays
+  // replace title/name. It is a display-only supplier hint, never audio proof.
+  const rawTitle = [row.raw_title, row.rawTitle, row.title, row.name]
+    .find(value => typeof value === "string" && value.trim());
+  if (rawTitle) {
+    row.raw_title = rawTitle;
+    row.rawTitle = rawTitle;
+  }
+  row.year = row.release_year ?? null;
+  return row;
+}
+
 async function listMediaItems(url: URL, userId: string) {
   const sourceId = url.searchParams.get("sourceId");
   const itemType = url.searchParams.get("type");
@@ -750,10 +763,7 @@ async function listMediaItems(url: URL, userId: string) {
         p_dedup: dedupSearch,
       });
       if (!rpcErr && Array.isArray(hits)) {
-        const items = (hits as Array<Record<string, any>>).map((row) => {
-          row.year = row.release_year ?? null;
-          return row;
-        });
+        const items = (hits as Array<Record<string, any>>).map(prepareProviderMediaRow);
         await attachMediaLanguages(items, userId, itemType, lang);
         await localizeMediaTitles(items, userId, lang, itemType);
         return {
@@ -791,10 +801,7 @@ async function listMediaItems(url: URL, userId: string) {
 
   const payload = (rpcData ?? {}) as { items?: Array<Record<string, any>>; films?: number; total?: number };
   // release_year is a first-class column now — expose it as item.year for the card.
-  const items = (payload.items ?? []).map((row) => {
-    row.year = row.release_year ?? null;
-    return row;
-  });
+  const items = (payload.items ?? []).map(prepareProviderMediaRow);
   const count = typeof payload.total === "number" ? payload.total : null;
   // `items` are version rows; the page is paginated by FILM, so the client advances
   // its cursor by `films`, not by row count (a film can contribute several rows).
