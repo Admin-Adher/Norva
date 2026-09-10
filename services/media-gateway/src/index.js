@@ -15,6 +15,9 @@ const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
 const strictLidInference = createStrictLidInference();
+const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
+const { prepareStrictLidSpeechSample } = require('./strict-lid-speech-sampler');
+const { createStrictLidAudioDiagnostic } = require('./strict-lid-audio-evidence');
 const {
     buildStrictLidExtractionObservability,
     buildStrictLidUnverifiedObservability,
@@ -1105,6 +1108,10 @@ const WHISPER_BIN_BUILD_SHA256 = readBuildDigest('/opt/whisper/bin.sha256');
 const WHISPER_MODEL_BUILD_SHA256 = readBuildDigest('/opt/whisper/model.sha256');
 const WHISPER_VAD_MODEL = process.env.WHISPER_VAD_MODEL || '';
 const WHISPER_VAD_MODEL_BUILD_SHA256 = readBuildDigest('/opt/whisper/vad-model.sha256');
+const WHISPER_VAD_BIN = process.env.WHISPER_VAD_BIN || '/usr/local/bin/whisper-vad-speech-segments';
+const WHISPER_VAD_BIN_BUILD_SHA256 = readBuildDigest('/opt/whisper/vad-bin.sha256');
+let WHISPER_VAD_BIN_SHA256 = null;
+let WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED = false;
 const WHISPER_ACCELERATOR = process.env.WHISPER_ACCELERATOR || 'cpu';
 let WHISPER_BIN_SHA256 = null;
 let WHISPER_MODEL_SHA256 = null;
@@ -1472,6 +1479,15 @@ function strictLidWindowRuntimeBinding() {
         sampleDurationSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         transcriptDiversityProtocol: 1,
         cjkEvidenceProtocol: 1,
+        qualityFallbackProtocol: 1,
+        speechSelectionProtocol: 1,
+        speechSearchDurationSeconds: 60,
+        speechSelector: 'silero-vad-max-speech-v1',
+        speechSelectorThreads: 2,
+        speechSelectorTimeoutMs: 8000,
+        speechSelectorBinaryDigest: WHISPER_VAD_BIN_SHA256,
+        speechSelectorModelDigest: WHISPER_VAD_MODEL_SHA256,
+        speechSelectorRuntimeVerified: WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED,
     })).digest('hex');
     return Object.freeze({ modelDigest, configDigest });
 }
@@ -1536,6 +1552,7 @@ function strictLidWindowReceiptBinding(context, windowOrdinal) {
         method: STRICT_LID_WINDOW_METHOD,
         configDigest: context.configDigest,
         modelDigest: context.modelDigest,
+        selectionProtocol: 1,
     };
 }
 
@@ -2293,7 +2310,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 166;
+const GATEWAY_VERSION = 167;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -2964,6 +2981,9 @@ app.get('/health', (req, res) => {
             vadEnabled: WHISPER_VAD_RUNTIME_VERIFIED,
             vadModelSha256: WHISPER_VAD_MODEL_SHA256,
             vadRuntimeVerified: WHISPER_VAD_RUNTIME_VERIFIED,
+            speechSamplerBinarySha256: WHISPER_VAD_BIN_SHA256,
+            speechSamplerRuntimeVerified: WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED,
+            strictLidSpeechSelectionProtocol: 1,
             detectOnlyBenchmark: true,
             detectOnlyProductionAvailable: WHISPER_DETECT_ONLY_PRODUCTION_AVAILABLE,
             detectOnlyMinProbability: WHISPER_DETECT_ONLY_MIN_PROBABILITY,
@@ -6650,6 +6670,10 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         };
         for (const [offsetIndex, off] of offsets.entries()) {
             const observedWindowOrdinal = strictWindowContext?.windowOrdinal || offsetIndex + 1;
+            const speechPlan = strictWindowContext
+                ? planStrictSpeechWindow(strictWindowContext.durationSeconds, observedWindowOrdinal)
+                : null;
+            if (strictWindowContext && !speechPlan) throw new Error('invalid strict speech window plan');
             let wavPath = null;
             try {
                 const extractionBudget = strict
@@ -6683,8 +6707,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         extractionUrl,
                         ua,
                         trackIndex,
-                        off > 0 ? off : 0,
-                        dur,
+                        speechPlan ? speechPlan.searchStartSeconds : (off > 0 ? off : 0),
+                        speechPlan ? speechPlan.searchDurationSeconds : dur,
                         strict ? extractionBudget.timeoutMs : 30_000,
                         claims.uid,
                         true,
@@ -6733,7 +6757,28 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     // Provider access stays sequential through the mono-socket broker. Keep all
                     // completed WAVs locally, then load Whisper once for the complete ordered
                     // batch after provider extraction has finished.
-                    strictWavSamples.push({ offset: off, path: wavPath });
+                    if (speechPlan) {
+                        const prepared = await runStrictSpeechSampler(wavPath, speechPlan, {
+                            ...lidBackgroundOptions,
+                            timeoutMs: Math.min(8000, Math.max(0, strictWorkDeadlineAt - Date.now())),
+                            abortSignal: requestController.signal,
+                        });
+                        console.info(JSON.stringify({
+                            ...prepared.diagnostic,
+                            windowOrdinal: observedWindowOrdinal,
+                        }));
+                        if (!prepared.ok) {
+                            lastExtractErr = 'Strict audio evidence preparation failed';
+                            if (prepared.preempted) inferencePreempted = true;
+                            if (prepared.preempted || prepared.aborted) break;
+                            continue;
+                        }
+                        strictWavSamples.push({
+                            offset: prepared.offset, path: wavPath, selection: prepared.selection,
+                        });
+                    } else {
+                        strictWavSamples.push({ offset: off, path: wavPath });
+                    }
                     wavPath = null;
                     continue;
                 }
@@ -7018,6 +7063,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         ...lidBackgroundOptions,
                         timeoutMs: batchTimeoutMs,
                         abortSignal: requestController.signal,
+                        evaluateSample: (sample, index) => strictLanguageBatchSampleResult(
+                            sample, strictWavSamples[index].offset,
+                        ),
                     },
                 );
                 strictBatchOutcome = strictLidBatchOutcome(batch);
@@ -7028,7 +7076,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                 } else if (batch.ok !== true) {
                     strictBatchFailure = strictLidBatchFailureResponse(batch);
                 } else if (!batch.aborted) {
-                    const evaluated = strictWavSamples.map((sample, index) => (
+                    const evaluated = batch.evaluatedSamples || strictWavSamples.map((sample, index) => (
                         strictLanguageBatchSampleResult(batch.samples[index], sample.offset)
                     ));
                     if (strictWindowContext) {
@@ -7041,8 +7089,17 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                                 strictWindowContext,
                                 strictWindowContext.windowOrdinal,
                             ),
-                            evidence: evaluated[0],
+                            evidence: { ...evaluated[0], selection: strictWavSamples[0].selection },
                         });
+                        // Closed diagnostics only: no transcript, URL, account, file key or receipt.
+                        console.info(JSON.stringify({
+                            event: 'strict_lid_window_evidence', protocol: 1,
+                            windowOrdinal: strictWindowContext.windowOrdinal,
+                            disposition: evaluated[0].disposition,
+                            wordCount: evaluated[0].result.wordCount,
+                            uniqueWordCount: evaluated[0].result.uniqueWordCount,
+                            qualityFallback: batch.qualityFallback || null,
+                        }));
                         res.setHeader('Cache-Control', 'no-store');
                         return sendDetectionJson(200, {
                             windowCheckpointProtocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
@@ -8649,6 +8706,39 @@ async function runProductionWhisperDetectOnly(wavPath, mode, options = {}) {
 // Strict LID consumes every successfully extracted window in one whisper-cli process. The
 // pinned whisper.cpp build accepts ordered repeated -f/-of arguments, so model initialization
 // happens once while each transcript and LID line remains mapped to its own offset.
+async function runStrictSpeechSampler(wavPath, plan, options = {}) {
+    const backgroundKey = String(options.backgroundKey || '');
+    const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
+    if (options.abortSignal?.aborted || (preemptibleBackground && viewerPlaybackActiveLocally())) {
+        const preempted = preemptibleBackground && viewerPlaybackActiveLocally();
+        return { ok: false, preempted, aborted: options.abortSignal?.aborted === true,
+            diagnostic: createStrictLidAudioDiagnostic({ outcome: preempted ? 'preempted' : 'aborted' }) };
+    }
+    // The CPU-only speech selector participates in exactly the same viewer-priority ledger
+    // as transcription. It never holds a second provider connection or restarts extraction.
+    whisperInferenceActive += 1;
+    let registration = null;
+    try {
+        const value = await prepareStrictLidSpeechSample({
+            wavPath, plan,
+            bin: WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED ? WHISPER_VAD_BIN : null,
+            model: WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED ? WHISPER_VAD_MODEL : null,
+            timeoutMs: options.timeoutMs,
+            abortSignal: options.abortSignal || null,
+            onSpawn: (child) => {
+                if (preemptibleBackground) registration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
+            },
+            isPreempted: () => registration?.preempted === true
+                || (preemptibleBackground && viewerPlaybackActiveLocally()),
+        });
+        if (registration?.preempted === true) return { ...value, ok: false, preempted: true };
+        return value;
+    } finally {
+        registration?.release?.();
+        whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
+    }
+}
+
 async function runStrictWhisperBatch(wavPaths, options = {}) {
     const backgroundKey = String(options.backgroundKey || '');
     const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
@@ -8673,6 +8763,7 @@ async function runStrictWhisperBatch(wavPaths, options = {}) {
             vadModel: WHISPER_VAD_RUNTIME_VERIFIED ? WHISPER_VAD_MODEL : null,
             timeoutMs: Math.max(1, Number(options.timeoutMs) || 1),
             abortSignal: options.abortSignal || null,
+            evaluateSample: options.evaluateSample,
             onSpawn: (child) => {
                 if (!preemptibleBackground) return;
                 backgroundRegistration = registerPreemptibleBackgroundWhisper(backgroundKey, child);
@@ -11254,10 +11345,11 @@ app.use((err, req, res, next) => {
 async function bootstrap() {
     await fsp.mkdir(OUTPUT_DIR, { recursive: true });
     if (WHISPER_BIN && WHISPER_MODEL) {
-        [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256, WHISPER_VAD_MODEL_SHA256] = await Promise.all([
+        [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256, WHISPER_VAD_MODEL_SHA256, WHISPER_VAD_BIN_SHA256] = await Promise.all([
             hashFileSha256(WHISPER_BIN),
             hashFileSha256(WHISPER_MODEL),
             WHISPER_VAD_MODEL ? hashFileSha256(WHISPER_VAD_MODEL) : Promise.resolve(null),
+            WHISPER_VAD_BIN ? hashFileSha256(WHISPER_VAD_BIN) : Promise.resolve(null),
         ]);
         WHISPER_RUNTIME_VERIFIED = Boolean(
             WHISPER_BIN_BUILD_SHA256 &&
@@ -11277,6 +11369,10 @@ async function bootstrap() {
         if (WHISPER_VAD_MODEL && !WHISPER_VAD_RUNTIME_VERIFIED) {
             console.warn('[media-gateway] Whisper VAD runtime hash does not match the pinned build; VAD disabled');
         }
+        WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED = Boolean(
+            WHISPER_VAD_RUNTIME_VERIFIED && WHISPER_VAD_BIN_BUILD_SHA256
+            && WHISPER_VAD_BIN_SHA256 === WHISPER_VAD_BIN_BUILD_SHA256
+        );
     }
     app.listen(PORT, () => {
         console.log(`Norva Media Gateway listening on ${PORT}`);

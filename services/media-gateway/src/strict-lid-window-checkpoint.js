@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
 
 const STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL = 1;
 const STRICT_LID_WINDOW_ENVELOPE_PROTOCOL = 1;
@@ -71,6 +72,17 @@ function normalizeStrictLidWindowBinding(input = {}) {
     const windowCount = safeInteger(input.windowCount, 'window count', 4, 6);
     if (![4, 6].includes(windowCount)) fail('STRICT_LID_WINDOW_BINDING_INVALID', 'invalid window count');
     const windowOrdinal = safeInteger(input.windowOrdinal, 'window ordinal', 1, windowCount);
+    const hasSelectionProtocol = Object.prototype.hasOwnProperty.call(input, 'selectionProtocol');
+    if (hasSelectionProtocol && input.selectionProtocol !== 1) {
+        fail('STRICT_LID_WINDOW_BINDING_INVALID', 'invalid speech selection protocol');
+    }
+    if (hasSelectionProtocol) {
+        const plan = planStrictSpeechWindow(input.durationSeconds, windowOrdinal);
+        if (!plan || plan.windowCount !== windowCount
+            || plan.anchorOffsetMilliseconds !== input.offsetMilliseconds) {
+            fail('STRICT_LID_WINDOW_BINDING_INVALID', 'invalid speech selection anchor');
+        }
+    }
     return Object.freeze({
         protocol: STRICT_LID_WINDOW_CHECKPOINT_PROTOCOL,
         envelopeProtocol: STRICT_LID_WINDOW_ENVELOPE_PROTOCOL,
@@ -86,6 +98,7 @@ function normalizeStrictLidWindowBinding(input = {}) {
         method,
         configDigest,
         modelDigest,
+        ...(hasSelectionProtocol ? { selectionProtocol: 1 } : {}),
     });
 }
 
@@ -108,6 +121,47 @@ function boundedEvidenceInteger(value, name) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', `invalid ${name}`);
     }
     return value;
+}
+
+function normalizeStrictLidSpeechSelection(input, binding) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || input.protocol !== 1) {
+        fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'speech selection evidence is required');
+    }
+    const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal);
+    if (!plan || plan.windowCount !== binding.windowCount
+        || plan.anchorOffsetMilliseconds !== binding.offsetMilliseconds) {
+        fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'invalid speech selection plan');
+    }
+    const selectedOffsetMilliseconds = input.selectedOffsetMilliseconds;
+    const selectedDurationMilliseconds = input.selectedDurationMilliseconds;
+    const speechMilliseconds = input.speechMilliseconds;
+    const selector = input.selector;
+    const speechMeasurementUnavailable = speechMilliseconds === null && selector === 'anchor-fallback';
+    if (input.searchStartMilliseconds !== plan.searchStartMilliseconds
+        || input.searchDurationMilliseconds !== plan.searchDurationMilliseconds
+        || !Number.isSafeInteger(selectedOffsetMilliseconds)
+        || selectedDurationMilliseconds !== plan.sampleDurationMilliseconds
+        || selectedOffsetMilliseconds < plan.searchStartMilliseconds
+        || selectedOffsetMilliseconds + selectedDurationMilliseconds
+            > plan.searchStartMilliseconds + plan.searchDurationMilliseconds
+        || (!speechMeasurementUnavailable && (
+            !Number.isSafeInteger(speechMilliseconds)
+            || speechMilliseconds < 0 || speechMilliseconds > selectedDurationMilliseconds
+        ))
+        || !['silero-vad-max-speech-v1', 'anchor-fallback'].includes(selector)
+        || (selector === 'anchor-fallback'
+            && selectedOffsetMilliseconds !== plan.anchorOffsetMilliseconds)) {
+        fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'invalid speech selection coordinates');
+    }
+    return Object.freeze({
+        protocol: 1,
+        searchStartMilliseconds: plan.searchStartMilliseconds,
+        searchDurationMilliseconds: plan.searchDurationMilliseconds,
+        selectedOffsetMilliseconds,
+        selectedDurationMilliseconds,
+        speechMilliseconds,
+        selector,
+    });
 }
 
 function normalizeStrictLidWindowEvidence(input, binding) {
@@ -154,7 +208,23 @@ function normalizeStrictLidWindowEvidence(input, binding) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'invalid transcript agreement');
     }
     const offset = finiteNumber(result.offset, 'result offset', 0, 86_400);
-    if (Math.round(offset * 1000) !== binding.offsetMilliseconds) {
+    const selection = binding.selectionProtocol === 1
+        ? normalizeStrictLidSpeechSelection(input.selection, binding)
+        : null;
+    if (!selection && Object.prototype.hasOwnProperty.call(input, 'selection')) {
+        fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'speech selection requires a matching binding');
+    }
+    const hasQualityFallbackConflict = Object.prototype.hasOwnProperty.call(result, 'qualityFallbackConflict');
+    const qualityFallbackConflict = result.qualityFallbackConflict === true;
+    if (hasQualityFallbackConflict && (
+        typeof result.qualityFallbackConflict !== 'boolean'
+        || (qualityFallbackConflict && (binding.selectionProtocol !== 1 || disposition !== 'conflict'))
+    )) {
+        fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'invalid quality fallback conflict');
+    }
+    if (selection
+        ? offset !== selection.selectedOffsetMilliseconds / 1000
+        : Math.round(offset * 1000) !== binding.offsetMilliseconds) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'result offset does not match binding');
     }
     const normalizedResult = Object.freeze({
@@ -184,6 +254,7 @@ function normalizeStrictLidWindowEvidence(input, binding) {
         ),
         scriptDensity: finiteNumber(result.scriptDensity, 'script density', 0, 1),
         offset,
+        ...(qualityFallbackConflict ? { qualityFallbackConflict: true } : {}),
     });
     if (disposition === 'accepted' && (
         normalizedResult.language === null
@@ -200,13 +271,14 @@ function normalizeStrictLidWindowEvidence(input, binding) {
     )) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'non-accepted evidence cannot carry a language');
     }
-    if (disposition === 'conflict' && normalizedResult.transcriptAgrees !== false) {
+    if (disposition === 'conflict' && normalizedResult.transcriptAgrees !== false && !qualityFallbackConflict) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'conflicting evidence requires disagreement');
     }
     return Object.freeze({
         disposition,
         diversity: Object.freeze({ fingerprint, shingles: Object.freeze(shingles) }),
         result: normalizedResult,
+        ...(selection ? { selection } : {}),
     });
 }
 

@@ -11,7 +11,7 @@ const gateway = fs.readFileSync(path.join(
 ), 'utf8');
 
 test('Gateway v166 keeps adaptive routing behind dedicated route and benchmark gates', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 166;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 167;/);
   assert.match(gateway, /process\.env\.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY/);

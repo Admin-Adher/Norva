@@ -40,7 +40,7 @@ RUN git init Vulkan-Headers \
     && case "${WHISPER_BUILD_JOBS}" in ''|*[!0-9]*) exit 1 ;; esac \
     && test "${WHISPER_BUILD_JOBS}" -ge 1 \
     && test "${WHISPER_BUILD_JOBS}" -le 8 \
-    && cmake --build build --parallel "${WHISPER_BUILD_JOBS}" --config Release --target whisper-cli \
+    && cmake --build build --parallel "${WHISPER_BUILD_JOBS}" --config Release --target whisper-cli whisper-vad-speech-segments \
     && sh ./models/download-ggml-model.sh "${WHISPER_MODEL}" \
     && sh ./models/download-vad-model.sh "${WHISPER_VAD_MODEL}" /opt \
     && printf '%s  %s\n' "${WHISPER_VAD_MODEL_SHA256}" "/opt/ggml-${WHISPER_VAD_MODEL}.bin" | sha256sum -c - \
@@ -48,6 +48,7 @@ RUN git init Vulkan-Headers \
     && cp "/opt/ggml-${WHISPER_VAD_MODEL}.bin" /opt/whisper-vad-model.bin \
     && printf '%s\n' "${WHISPER_MODEL}" > /opt/whisper-model-name \
     && sha256sum build/bin/whisper-cli | cut -d' ' -f1 > /opt/whisper-bin.sha256 \
+    && sha256sum build/bin/whisper-vad-speech-segments | cut -d' ' -f1 > /opt/whisper-vad-bin.sha256 \
     && sha256sum /opt/whisper-model.bin | cut -d' ' -f1 > /opt/whisper-model.sha256 \
     && sha256sum /opt/whisper-vad-model.bin | cut -d' ' -f1 > /opt/whisper-vad-model.sha256
 
@@ -85,12 +86,14 @@ WORKDIR /app
 
 # whisper.cpp CLI (static) + model for audio-track language detection.
 COPY --from=whisper /opt/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper /opt/whisper.cpp/build/bin/whisper-vad-speech-segments /usr/local/bin/whisper-vad-speech-segments
 COPY --from=whisper /opt/whisper-model.bin /opt/whisper/ggml-model.bin
 COPY --from=whisper /opt/whisper-vad-model.bin /opt/whisper/ggml-vad-model.bin
 COPY --from=whisper /opt/whisper-model-name /opt/whisper/model-name
 COPY --from=whisper /opt/whisper-bin.sha256 /opt/whisper/bin.sha256
 COPY --from=whisper /opt/whisper-model.sha256 /opt/whisper/model.sha256
 COPY --from=whisper /opt/whisper-vad-model.sha256 /opt/whisper/vad-model.sha256
+COPY --from=whisper /opt/whisper-vad-bin.sha256 /opt/whisper/vad-bin.sha256
 
 COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts \
@@ -105,6 +108,7 @@ ENV OUTPUT_DIR=/tmp/norva-media-gateway
 ENV WHISPER_BIN=/usr/local/bin/whisper-cli
 ENV WHISPER_MODEL=/opt/whisper/ggml-model.bin
 ENV WHISPER_VAD_MODEL=/opt/whisper/ggml-vad-model.bin
+ENV WHISPER_VAD_BIN=/usr/local/bin/whisper-vad-speech-segments
 ENV WHISPER_ACCELERATOR=vulkan-radeon
 ENV WHISPER_CPP_COMMIT=${WHISPER_CPP_COMMIT}
 # Translation (Phase 3b). Empty/missing ARGOS_MODELS_DIR disables the /translate* endpoints.
