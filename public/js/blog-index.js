@@ -19,11 +19,16 @@
   if (!form || !input || !status || !emptyState || !moreButton || !items.length) return;
 
   const pageSize = 12;
+  // The URL's reviewed language is authoritative, regardless of app preferences.
+  const locale = root.dataset.blogLanguage || 'en';
+  const number = new Intl.NumberFormat(locale);
+  const resultMessage = root.dataset.statusResults || 'Guides found: {count}';
+  const remainingMessage = root.dataset.statusRemaining || 'More guides: {count} · newest first';
   let activeTopic = 'all';
   let visibleLimit = pageSize;
 
   const normalise = (value) => String(value || '')
-    .toLocaleLowerCase()
+    .toLocaleLowerCase(locale)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .trim();
@@ -43,7 +48,7 @@
       const topicMatches = activeTopic === 'all' || item.dataset.topic === activeTopic;
       return topicMatches && matchesQuery(item, query);
     });
-    const candidates = filtering
+    const candidates = filtering || items.length <= 5
       ? matches
       : matches.filter((item) => item.dataset.highlighted !== 'true');
 
@@ -57,9 +62,9 @@
     moreButton.hidden = candidates.length <= visibleLimit;
 
     if (filtering) {
-      status.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_e7a1132e823a", {defaultValue: "{{p0}} guide{{p1}} found", p0:(matches.length),p1:(matches.length === 1 ? '' : 's')}) : `${matches.length} guide${matches.length === 1 ? '' : 's'} found`);
+      status.textContent = resultMessage.replace('{count}', number.format(matches.length));
     } else {
-      status.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_62122262e673", {defaultValue: "{{p0}} more guide{{p1}} · newest first", p0:(candidates.length),p1:(candidates.length === 1 ? '' : 's')}) : `${candidates.length} more guide${candidates.length === 1 ? '' : 's'} · newest first`);
+      status.textContent = remainingMessage.replace('{count}', number.format(candidates.length));
     }
   }
 

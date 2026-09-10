@@ -162,7 +162,8 @@ function localizeArticles({ english, translations, publicDir }) {
     const original = bySlug.get(source.slug);
     const article = {
       ...original, locale, ui, title: data.title, seoTitle: data.seo_title, metaDescription: data.meta_description,
-      excerpt: data.excerpt, cluster: data.topic_cluster, canonicalUrl: `${SITE}${blogPath(locale.code, source.slug)}`,
+      excerpt: data.excerpt, cluster: data.topic_cluster, topicCluster: original.cluster,
+      canonicalUrl: `${SITE}${blogPath(locale.code, source.slug)}`,
       publishedAtISO: entry.publishedAtISO, updatedAtISO: entry.updatedAtISO,
       displayDate: formatDisplayDate(entry.publishedAtISO, 'Europe/Paris', locale.code),
       originalPublishedDate: formatDisplayDate(original.publishedAtISO, 'Europe/Paris', locale.code),

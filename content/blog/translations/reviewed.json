@@ -9,13 +9,22 @@
     "human_or_native_speaker_certification": false
   },
   "recorded_at": "2026-09-10T19:21:53.012Z",
-  "source_ui_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+  "source_ui_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
   "source_ui_review": {
     "author_task": "/root",
     "reviewer_task": "/root/blog_latin_translations",
-    "reviewed_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+    "reviewed_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
     "method": "ai_assisted_cross_review",
-    "decision": "approved"
+    "decision": "approved",
+    "previous_review": {
+      "author_task": "/root",
+      "reviewer_task": "/root/blog_latin_translations",
+      "reviewed_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+      "method": "ai_assisted_cross_review",
+      "decision": "approved"
+    },
+    "review_report": "content/blog/i18n/reviews/review-hub-tr-id-fil-en.md",
+    "review_report_sha256": "0dc1cc493e56505eb05b5dfea8baf1c3091ebc78645c6cbd25937d3eaa0e2109"
   },
   "review_method": "Author self-review followed by a different agent reading the entire source and translation; parent technical and rendered acceptance.",
   "mechanical_transition": "Only translation_status changes from in_review to approved. Reviewed hashes remain recorded separately from the final publication hashes.",
@@ -844,101 +853,208 @@
     "fr": {
       "author_task": "/root/blog_latin_translations",
       "reviewer_task": "/root/blog_indic_arabic_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-fr-es-pt-BR.md",
-      "review_report_sha256": "173665fcc366d82fd84c79955b25b0c3729de02f50c3940fdaf1ca41e9b71bcf",
+      "review_report": "content/blog/i18n/reviews/review-hub-fr-es-pt-BR.md",
+      "review_report_sha256": "67bd58570f00169b3b7e1cd1fa43fb635d6d2771c94d31d84c5235275975542f",
       "file": "content/blog/i18n/ui/fr.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "bb85d9981a9aa44baa570ae0abdf72a29da4c40599d39650613d250390216a63",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "ed1c5332f3bc6441c287064006c9338e4b8435141666fd8e5f14ab064230da5c",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_latin_translations",
+        "reviewer_task": "/root/blog_indic_arabic_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-fr-es-pt-BR.md",
+        "review_report_sha256": "173665fcc366d82fd84c79955b25b0c3729de02f50c3940fdaf1ca41e9b71bcf",
+        "file": "content/blog/i18n/ui/fr.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "bb85d9981a9aa44baa570ae0abdf72a29da4c40599d39650613d250390216a63",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "es": {
       "author_task": "/root/blog_latin_translations",
       "reviewer_task": "/root/blog_indic_arabic_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-fr-es-pt-BR.md",
-      "review_report_sha256": "173665fcc366d82fd84c79955b25b0c3729de02f50c3940fdaf1ca41e9b71bcf",
+      "review_report": "content/blog/i18n/reviews/review-hub-fr-es-pt-BR.md",
+      "review_report_sha256": "67bd58570f00169b3b7e1cd1fa43fb635d6d2771c94d31d84c5235275975542f",
       "file": "content/blog/i18n/ui/es.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "6b40d2e6094207ac58178182494ca8820309e03c145c2dadbf18f8f74811df3a",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "501f0428e33fe9735def0f04b4833eee6e0d1ddd8643d20fadb77763d984bd17",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_latin_translations",
+        "reviewer_task": "/root/blog_indic_arabic_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-fr-es-pt-BR.md",
+        "review_report_sha256": "173665fcc366d82fd84c79955b25b0c3729de02f50c3940fdaf1ca41e9b71bcf",
+        "file": "content/blog/i18n/ui/es.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "6b40d2e6094207ac58178182494ca8820309e03c145c2dadbf18f8f74811df3a",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "pt-BR": {
       "author_task": "/root/blog_latin_translations",
       "reviewer_task": "/root/blog_indic_arabic_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-fr-es-pt-BR.md",
-      "review_report_sha256": "173665fcc366d82fd84c79955b25b0c3729de02f50c3940fdaf1ca41e9b71bcf",
+      "review_report": "content/blog/i18n/reviews/review-hub-fr-es-pt-BR.md",
+      "review_report_sha256": "67bd58570f00169b3b7e1cd1fa43fb635d6d2771c94d31d84c5235275975542f",
       "file": "content/blog/i18n/ui/pt-BR.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "45601256d3750fb05fd5ba56f668393b1c27bd0d6d7924f04f341b7137abd4b9",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "19b3452d9681ec0cba964a82d005aba2267619922a2bf7424c4e8101d5df03e5",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_latin_translations",
+        "reviewer_task": "/root/blog_indic_arabic_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-fr-es-pt-BR.md",
+        "review_report_sha256": "173665fcc366d82fd84c79955b25b0c3729de02f50c3940fdaf1ca41e9b71bcf",
+        "file": "content/blog/i18n/ui/pt-BR.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "45601256d3750fb05fd5ba56f668393b1c27bd0d6d7924f04f341b7137abd4b9",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "tr": {
       "author_task": "/root/blog_asian_translations",
       "reviewer_task": "/root/blog_latin_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-tr-id-fil.md",
-      "review_report_sha256": "6198c76e1c619c7df4d078f03f51d5fd9c74be99b43b1c47172c3fbdb49dcdf7",
+      "review_report": "content/blog/i18n/reviews/review-hub-tr-id-fil-en.md",
+      "review_report_sha256": "0dc1cc493e56505eb05b5dfea8baf1c3091ebc78645c6cbd25937d3eaa0e2109",
       "file": "content/blog/i18n/ui/tr.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "0d68794166a60bf3f1662cb014c07fdcb5395ed555fb92ce469deef55ecf17ca",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "1fc89f41296d3fa545e9dd79d8c4bb6de4665de193d03de8918371866a1138b2",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_asian_translations",
+        "reviewer_task": "/root/blog_latin_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-tr-id-fil.md",
+        "review_report_sha256": "6198c76e1c619c7df4d078f03f51d5fd9c74be99b43b1c47172c3fbdb49dcdf7",
+        "file": "content/blog/i18n/ui/tr.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "0d68794166a60bf3f1662cb014c07fdcb5395ed555fb92ce469deef55ecf17ca",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "id": {
       "author_task": "/root/blog_asian_translations",
       "reviewer_task": "/root/blog_latin_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-tr-id-fil.md",
-      "review_report_sha256": "6198c76e1c619c7df4d078f03f51d5fd9c74be99b43b1c47172c3fbdb49dcdf7",
+      "review_report": "content/blog/i18n/reviews/review-hub-tr-id-fil-en.md",
+      "review_report_sha256": "0dc1cc493e56505eb05b5dfea8baf1c3091ebc78645c6cbd25937d3eaa0e2109",
       "file": "content/blog/i18n/ui/id.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "19943bb3e6d4a793b4205cbf4bbd8771f534b0aa77e120a33bda5e8b9335996f",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "25fe9d245bf6588c8083bab9b223ea9a6e75382265db0df93dae98dbbcb8dac3",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_asian_translations",
+        "reviewer_task": "/root/blog_latin_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-tr-id-fil.md",
+        "review_report_sha256": "6198c76e1c619c7df4d078f03f51d5fd9c74be99b43b1c47172c3fbdb49dcdf7",
+        "file": "content/blog/i18n/ui/id.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "19943bb3e6d4a793b4205cbf4bbd8771f534b0aa77e120a33bda5e8b9335996f",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "fil": {
       "author_task": "/root/blog_asian_translations",
       "reviewer_task": "/root/blog_latin_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-tr-id-fil.md",
-      "review_report_sha256": "6198c76e1c619c7df4d078f03f51d5fd9c74be99b43b1c47172c3fbdb49dcdf7",
+      "review_report": "content/blog/i18n/reviews/review-hub-tr-id-fil-en.md",
+      "review_report_sha256": "0dc1cc493e56505eb05b5dfea8baf1c3091ebc78645c6cbd25937d3eaa0e2109",
       "file": "content/blog/i18n/ui/fil.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "62e1930eb9bcf7519b4fab9cbaf170dd5a7818bcb1d1636ed582a7c50738c43d",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "7c90ce129754adb037eb21dec4f5a6bc4d0b9bad547c166ff83f1f79f03179f0",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_asian_translations",
+        "reviewer_task": "/root/blog_latin_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-tr-id-fil.md",
+        "review_report_sha256": "6198c76e1c619c7df4d078f03f51d5fd9c74be99b43b1c47172c3fbdb49dcdf7",
+        "file": "content/blog/i18n/ui/fil.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "62e1930eb9bcf7519b4fab9cbaf170dd5a7818bcb1d1636ed582a7c50738c43d",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "hi": {
       "author_task": "/root/blog_indic_arabic_translations",
       "reviewer_task": "/root/blog_asian_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-hi-bn-ar.md",
-      "review_report_sha256": "161a8e55b7dd853078a40342be82e5c98e0d3daaa4140030df02f0ae019486cf",
+      "review_report": "content/blog/i18n/reviews/review-hub-hi-bn-ar.md",
+      "review_report_sha256": "743b75aac8f53617f3165273eda7c3fa26e2262693b4da17636cfbc6d2620451",
       "file": "content/blog/i18n/ui/hi.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "303cef53a23ce862540941761dd7f3cf99f1b5050004fe50fbca823b189d66cc",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "5e0de4dd0714fe527ee3a2943b151f142ebec8a3d8523d2492d0cde0f5dccbbe",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_indic_arabic_translations",
+        "reviewer_task": "/root/blog_asian_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-hi-bn-ar.md",
+        "review_report_sha256": "161a8e55b7dd853078a40342be82e5c98e0d3daaa4140030df02f0ae019486cf",
+        "file": "content/blog/i18n/ui/hi.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "303cef53a23ce862540941761dd7f3cf99f1b5050004fe50fbca823b189d66cc",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "bn": {
       "author_task": "/root/blog_indic_arabic_translations",
       "reviewer_task": "/root/blog_asian_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-hi-bn-ar.md",
-      "review_report_sha256": "161a8e55b7dd853078a40342be82e5c98e0d3daaa4140030df02f0ae019486cf",
+      "review_report": "content/blog/i18n/reviews/review-hub-hi-bn-ar.md",
+      "review_report_sha256": "743b75aac8f53617f3165273eda7c3fa26e2262693b4da17636cfbc6d2620451",
       "file": "content/blog/i18n/ui/bn.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "d11ae243095396cb9c8056fd48904a8bf3a6746d7b4ed31f1dc3fe40411a7cb2",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "87daece9ed5ed6a161061b750df9a7ff99a2a775aaf18de1e7871d6dfc2b8f59",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_indic_arabic_translations",
+        "reviewer_task": "/root/blog_asian_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-hi-bn-ar.md",
+        "review_report_sha256": "161a8e55b7dd853078a40342be82e5c98e0d3daaa4140030df02f0ae019486cf",
+        "file": "content/blog/i18n/ui/bn.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "d11ae243095396cb9c8056fd48904a8bf3a6746d7b4ed31f1dc3fe40411a7cb2",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     },
     "ar": {
       "author_task": "/root/blog_indic_arabic_translations",
       "reviewer_task": "/root/blog_asian_translations",
-      "review_report": "content/blog/i18n/reviews/cross-review-hi-bn-ar.md",
-      "review_report_sha256": "161a8e55b7dd853078a40342be82e5c98e0d3daaa4140030df02f0ae019486cf",
+      "review_report": "content/blog/i18n/reviews/review-hub-hi-bn-ar.md",
+      "review_report_sha256": "743b75aac8f53617f3165273eda7c3fa26e2262693b4da17636cfbc6d2620451",
       "file": "content/blog/i18n/ui/ar.json",
-      "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
-      "sha256": "912420e9250bf7618d9d01a7e635319a260f5e4d9cea9fdfe5b7948dcc1b0d4c",
+      "source_sha256": "f76bd921b22a194c15fd5e43f102bd20a854495e45318073917de80b11bc2ad5",
+      "sha256": "f26f92b2193a737bf1707a012392c63d4d2bf39937893f9e0e55e33aa153f86e",
       "decision": "approved",
-      "method": "ai_assisted_cross_review"
+      "method": "ai_assisted_cross_review",
+      "previous_review": {
+        "author_task": "/root/blog_indic_arabic_translations",
+        "reviewer_task": "/root/blog_asian_translations",
+        "review_report": "content/blog/i18n/reviews/cross-review-hi-bn-ar.md",
+        "review_report_sha256": "161a8e55b7dd853078a40342be82e5c98e0d3daaa4140030df02f0ae019486cf",
+        "file": "content/blog/i18n/ui/ar.json",
+        "source_sha256": "ab14080d6ffb7ba84820d4e72682737d44987fdbabcec358935d97494515870d",
+        "sha256": "912420e9250bf7618d9d01a7e635319a260f5e4d9cea9fdfe5b7948dcc1b0d4c",
+        "decision": "approved",
+        "method": "ai_assisted_cross_review"
+      }
     }
+  },
+  "hub_ui_release": {
+    "date": "2026-09-10",
+    "scope": "One shared premium hub in ten languages; 35 new UI labels per locale, no article body or publication date changes.",
+    "owner_release_authorized": true,
+    "user_confirmation": "fait les corrections et met en prod ensuite",
+    "review_method": "Author self-review and independent agent cross-review; legacy strings compared with the previously approved release.",
+    "human_or_native_speaker_certification": false
   }
 }

@@ -325,41 +325,50 @@ function topicForCluster(cluster) {
 
 const arrowIcon = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>`;
 
-function renderLibraryCard(article, index) {
-  const topic = topicForCluster(article.cluster);
+const topicUiKeys = { start: 'hubStart', organise: 'hubOrganise', anywhere: 'hubAnywhere', playback: 'hubPlayback', accessibility: 'hubAccessibility', privacy: 'hubPrivacy' };
+
+function renderLibraryCard(article, index, ui, code) {
+  // Classification is inherited from the English source, never guessed from a translation.
+  const topic = topicForCluster(article.topicCluster || article.cluster);
   const summary = article.excerpt || article.metaDescription;
   return `<article class="library-card" data-library-item data-topic="${escapeAttr(topic.id)}" data-highlighted="${index < 5 ? 'true' : 'false'}">
-          <a href="/blog/${escapeAttr(article.slug)}/">
+          <a href="${blogPath(code, article.slug)}">
             <div class="library-card-topline">
-              <span class="topic-label">${escapeHtml(topic.label)}</span>
-              <span class="cluster-label">${escapeHtml(article.cluster || 'Norva guide')}</span>
+              <span class="topic-label">${escapeHtml(ui[topicUiKeys[topic.id]])}</span>
+              <span class="cluster-label">${escapeHtml(article.cluster || ui.hubFallbackTopic)}</span>
             </div>
             <h3>${escapeHtml(article.title)}</h3>
             <p>${escapeHtml(summary)}</p>
             <div class="library-card-meta">
-              <span><time datetime="${escapeAttr(article.publishedAtISO)}">${escapeHtml(article.displayDate)}</time> · ${article.readingMinutes} min</span>
+              <span><time datetime="${escapeAttr(article.publishedAtISO)}">${escapeHtml(article.displayDate)}</time> · ${escapeHtml(ui.readingTime.replace('{minutes}', String(article.readingMinutes)))}</span>
               ${arrowIcon}
             </div>
           </a>
         </article>`;
 }
 
-/** Render the blog index page listing published articles (newest first). */
+/** One editorial layout for every language; only copy, routes and available articles vary. */
 function renderIndexPage(articles, options = {}) {
-  const canonical = `${SITE}/blog/`;
-  const description = 'Practical guides on organising a personal media library, playback, cross-device setup, and getting the most out of Norva.';
+  const locale = options.locale || localeFor('en');
+  const ui = options.ui || EN_UI;
+  const code = locale.code;
+  const canonical = `${SITE}${blogPath(code)}`;
+  const description = ui.hubDescription;
+  articles = articles.slice().sort((a, b) => (new Date(b.publishedAtISO) - new Date(a.publishedAtISO)) || (a.sequence || 0) - (b.sequence || 0));
+  const number = value => new Intl.NumberFormat(code).format(value);
+  const heading = escapeHtml(ui.hubTitle).replace('{accent}', `<span>${escapeHtml(ui.hubTitleAccent)}</span>`);
 
   const crumbs = [
-    { name: 'Home', url: '/', absolute: `${SITE}/` },
-    { name: 'Blog', url: '/blog/', absolute: `${SITE}/blog/` },
+    { name: ui.home, url: '/', absolute: `${SITE}/` },
+    { name: ui.blog, url: blogPath(code), absolute: canonical },
   ];
 
   const blogJsonLd = jsonLd({
     '@context': 'https://schema.org',
     '@type': 'Blog',
-    name: 'Norva Blog',
+    name: `Norva ${ui.blog}`,
     url: canonical,
-    inLanguage: 'en',
+    inLanguage: code,
     description,
     publisher: {
       '@type': 'Organization',
@@ -377,37 +386,36 @@ function renderIndexPage(articles, options = {}) {
 
   const featured = articles[0] || null;
   const recent = articles.slice(1, 5);
-  const archiveCount = Math.max(articles.length - 5, 0);
 
   const featuredStory = featured
     ? `<article class="hero-feature">
-        <a href="/blog/${escapeAttr(featured.slug)}/" aria-label="Read the latest guide: ${escapeAttr(featured.title)}">
-          <img src="/img/devices/norva-device-tv.webp" width="1280" height="720" alt="Norva media library interface displayed on a television" decoding="async" fetchpriority="high">
+          <a href="${blogPath(code, featured.slug)}" aria-label="${escapeAttr(ui.hubReadLatest.replace('{title}', featured.title))}">
+          <img src="/img/devices/norva-device-tv.webp" width="1280" height="720" alt="${escapeAttr(ui.hubImageAlt)}" decoding="async" fetchpriority="high">
           <span class="hero-feature-scrim" aria-hidden="true"></span>
           <div class="hero-feature-copy">
             <div class="hero-feature-labels">
-              <span class="latest-label" data-i18n="ui_web_1f0a3e872f8c">Latest guide</span>
+              <span class="latest-label">${escapeHtml(ui.hubLatest)}</span>
               ${featured.cluster ? `<span>${escapeHtml(featured.cluster)}</span>` : ''}
             </div>
             <h2>${escapeHtml(featured.title)}</h2>
-            <div class="hero-feature-meta"><time datetime="${escapeAttr(featured.publishedAtISO)}">${escapeHtml(featured.displayDate)}</time><span>·</span><span>${featured.readingMinutes} min read</span></div>
+            <div class="hero-feature-meta"><time datetime="${escapeAttr(featured.publishedAtISO)}">${escapeHtml(featured.displayDate)}</time><span>·</span><span>${escapeHtml(ui.readingTime.replace('{minutes}', String(featured.readingMinutes)))}</span></div>
           </div>
         </a>
       </article>`
-    : '<div class="hero-feature hero-feature-empty"><p data-i18n="ui_web_553a5c8b790b">New guides are on the way.</p></div>';
+    : `<div class="hero-feature hero-feature-empty"><p>${escapeHtml(ui.hubEmpty)}</p></div>`;
 
   const recentStories = recent.length
     ? `<section class="recent-section" aria-labelledby="recent-heading">
         <div class="section-heading compact-heading">
-          <div><span class="section-number" aria-hidden="true">01</span><h2 id="recent-heading" data-i18n="ui_web_5eda7c0bf89e">Recently published</h2></div>
-          <p data-i18n="ui_web_12e172074c67">Fresh field notes from the Norva editorial desk.</p>
+          <div><span class="section-number" aria-hidden="true">01</span><h2 id="recent-heading">${escapeHtml(ui.hubRecent)}</h2></div>
+          <p>${escapeHtml(ui.hubRecentDescription)}</p>
         </div>
         <ol class="recent-list">
           ${recent.map((article, index) => `<li>
-            <a href="/blog/${escapeAttr(article.slug)}/">
+            <a href="${blogPath(code, article.slug)}">
               <span class="recent-index" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>
               <span class="recent-copy">
-                <span>${escapeHtml(article.cluster || 'Norva guide')}</span>
+                <span>${escapeHtml(article.cluster || ui.hubFallbackTopic)}</span>
                 <strong>${escapeHtml(article.title)}</strong>
               </span>
               ${arrowIcon}
@@ -417,75 +425,79 @@ function renderIndexPage(articles, options = {}) {
       </section>`
     : '';
 
-  const topicButtons = BLOG_TOPICS.map((topic) => `<button type="button" class="topic-chip" data-topic-filter="${escapeAttr(topic.id)}" aria-pressed="false">${escapeHtml(topic.label)}</button>`).join('\n              ');
+  const availableTopics = new Set(articles.map(article => topicForCluster(article.topicCluster || article.cluster).id));
+  const topicButtons = BLOG_TOPICS.filter(topic => availableTopics.has(topic.id))
+    .map(topic => `<button type="button" class="topic-chip" data-topic-filter="${escapeAttr(topic.id)}" aria-pressed="false">${escapeHtml(ui[topicUiKeys[topic.id]])}</button>`).join('\n              ');
+  const translationNotice = code === 'en' ? '' : `<p class="translation-note">${escapeHtml(ui.libraryNotice.replace('{count}', number(articles.length)))} <a href="/blog/" hreflang="en">${escapeHtml(ui.browseEnglish)}</a></p>`;
 
   const library = articles.length
     ? `<section class="library-section" id="library" aria-labelledby="library-heading">
         <div class="section-heading library-heading">
-          <div><span class="section-number" aria-hidden="true">02</span><h2 id="library-heading" data-i18n="ui_web_9fe4b2432b52">Explore the full library</h2></div>
-          <p data-i18n="ui_web_069c7140d8d4">Search by problem, workflow, device or topic.</p>
+          <div><span class="section-number" aria-hidden="true">02</span><h2 id="library-heading">${escapeHtml(ui.hubLibrary)}</h2></div>
+          <p>${escapeHtml(ui.hubLibraryDescription)}</p>
         </div>
+        ${translationNotice}
         <form class="library-search" role="search" data-library-search>
-          <label for="blog-search" data-i18n="ui_web_5d0331fea78f">What do you want to solve?</label>
+          <label for="blog-search">${escapeHtml(ui.hubSearchLabel)}</label>
           <div class="search-field">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"/></svg>
-            <input id="blog-search" type="search" inputmode="search" autocomplete="off" placeholder="Try “subtitles”, “TV”, or “privacy”" aria-describedby="blog-search-hint" data-library-query>
-            <button type="button" class="search-clear" aria-label="Clear search" data-i18n-aria-label="ui_web_3b7ea51793e9" data-library-clear hidden data-i18n="ui_web_83b12c2216ef">Clear</button>
+            <input id="blog-search" type="search" inputmode="search" autocomplete="off" placeholder="${escapeAttr(ui.hubSearchPlaceholder)}" aria-describedby="blog-search-hint" data-library-query>
+            <button type="button" class="search-clear" aria-label="${escapeAttr(ui.hubClearLabel)}" data-library-clear hidden>${escapeHtml(ui.hubClear)}</button>
           </div>
-          <span id="blog-search-hint" data-i18n="ui_web_b3d0f7dc57f0">Results update as you type. Choose a focus to narrow the library.</span>
+          <span id="blog-search-hint">${escapeHtml(ui.hubSearchHint)}</span>
         </form>
-        <div class="topic-filters" aria-label="Filter guides by focus" data-i18n-aria-label="ui_web_88ee817a6507">
-          <button type="button" class="topic-chip is-active" data-topic-filter="all" aria-pressed="true" data-i18n="ui_web_0b5543efa44a">All guides</button>
+        <div class="topic-filters" role="group" aria-label="${escapeAttr(ui.hubFilterLabel)}">
+          <button type="button" class="topic-chip is-active" data-topic-filter="all" aria-pressed="true">${escapeHtml(ui.hubAll)}</button>
           ${topicButtons}
         </div>
         <div class="library-status-row">
-          <p class="library-status" role="status" aria-live="polite" data-library-status>${archiveCount} more guide${archiveCount === 1 ? '' : 's'} · newest first</p>
-          <button type="button" class="reset-filters" data-library-reset hidden data-i18n="ui_web_10afa98480f2">Reset filters</button>
+          <p class="library-status" role="status" aria-live="polite" data-library-status>${escapeHtml(ui.hubCount.replace('{count}', number(articles.length)))}</p>
+          <button type="button" class="reset-filters" data-library-reset hidden>${escapeHtml(ui.hubReset)}</button>
         </div>
         <div class="library-grid" data-library-grid>
-          ${articles.map(renderLibraryCard).join('\n          ')}
+          ${articles.map((article, index) => renderLibraryCard(article, index, ui, code)).join('\n          ')}
         </div>
         <div class="no-results" data-library-empty hidden>
-          <h3 data-i18n="ui_web_57fd1aa63698">No guide matches that search yet.</h3>
-          <p data-i18n="ui_web_0b7414a175e5">Try a device name, a shorter phrase, or browse all guides.</p>
-          <button type="button" data-library-empty-reset data-i18n="ui_web_86322e54d967">Browse all guides</button>
+          <h3>${escapeHtml(ui.hubNoResults)}</h3>
+          <p>${escapeHtml(ui.hubNoResultsHint)}</p>
+          <button type="button" data-library-empty-reset>${escapeHtml(ui.hubBrowseAll)}</button>
         </div>
-        <button type="button" class="load-more" data-library-more hidden data-i18n="ui_web_593fc2c41e47">Show more guides</button>
+        <button type="button" class="load-more" data-library-more hidden>${escapeHtml(ui.hubMore)}</button>
       </section>`
-    : '<p class="empty" data-i18n="ui_web_3133da40e003">Articles are on the way. Check back soon.</p>';
+    : `<p class="empty">${escapeHtml(ui.hubEmpty)}</p>`;
 
   return `<!DOCTYPE html>
-<html lang="en" dir="ltr" data-norva-document-language="en">
+<html lang="${code}" dir="${locale.dir}" data-norva-document-language="${code}">
 <head>
 ${commonHead({
-    title: 'Norva Blog — Media library guides & how-tos',
+    title: code === 'en' ? 'Norva Blog — Media library guides & how-tos' : `${ui.libraryTitle} | Norva Blog`,
     description,
     canonical,
-    robots: 'index,follow',
+    robots: options.preview ? 'noindex,nofollow' : 'index,follow',
     ogType: 'website',
     ogImage: null,
     jsonLdBlocks: [blogJsonLd, breadcrumbJsonLd(crumbs)],
     alternates: options.alternates,
   })}
-  <script defer src="/js/blog-index.js?v=1"></script>
+  <script defer src="${i18nAsset('js/blog-index.js')}"></script>
   <script defer src="${i18nAsset('js/blog-language.js')}"></script>
 </head>
 <body>
-${header()}
-  <main id="main-content" class="wide blog-index" data-blog-index data-guide-count="${articles.length}">
-    ${breadcrumb(crumbs)}
-    ${languagePicker(options.languageLinks)}
+${localizedChrome(header(), ui, code)}
+  <main id="main-content" class="wide blog-index" data-blog-index data-blog-language="${code}" data-guide-count="${articles.length}" data-status-results="${escapeAttr(ui.hubResults)}" data-status-remaining="${escapeAttr(ui.hubRemaining)}">
+    ${breadcrumb(crumbs, ui)}
+    ${languagePicker(options.languageLinks, ui, code)}
     <div data-index-highlights>
       <section class="blog-hero" aria-labelledby="blog-title">
         <div class="blog-hero-copy">
-          <span class="eyebrow" data-i18n="ui_web_3b892c601a47">Norva knowledge library</span>
-          <h1 class="page-title" id="blog-title">A practical operating manual for your <span data-i18n="ui_web_9023afe1d1b1">media library</span></h1>
+          <span class="eyebrow">${escapeHtml(ui.libraryEyebrow)}</span>
+          <h1 class="page-title" id="blog-title">${heading}</h1>
           <p>${escapeHtml(description)}</p>
-          <div class="hero-facts" aria-label="Blog publishing details" data-i18n-aria-label="ui_web_f3d010cd6d17">
-            <span><strong>${articles.length}</strong> published guide${articles.length === 1 ? '' : 's'}</span>
-            <span data-i18n="ui_web_73dc02d4c5be">New every morning and evening</span>
+          <div class="hero-facts">
+            <span>${escapeHtml(ui.hubCount).replace('{count}', `<strong>${number(articles.length)}</strong>`)}</span>
+            <span>${escapeHtml(ui.hubCadence)}</span>
           </div>
-          <a class="hero-jump" href="#library">Explore the library ${arrowIcon}</a>
+          <a class="hero-jump" href="#library">${escapeHtml(ui.hubExplore)} ${arrowIcon}</a>
         </div>
         ${featuredStory}
       </section>
@@ -493,47 +505,14 @@ ${header()}
     </div>
     ${library}
   </main>
-${footer()}
+${localizedChrome(footer(), ui, code)}
 </body>
 </html>
 `;
 }
 
-function renderLocalizedIndexPage(articles, { locale, ui, languageLinks, alternates, preview }) {
-  const canonical = `${SITE}${blogPath(locale.code)}`;
-  const crumbs = [{ name: ui.home, url: '/', absolute: `${SITE}/` }, { name: ui.blog, url: canonical, absolute: canonical }];
-  const schema = jsonLd({ '@context': 'https://schema.org', '@type': 'Blog', name: `Norva ${ui.blog}`,
-    inLanguage: locale.code, url: canonical, description: ui.libraryDescription,
-    blogPost: articles.map(article => ({ '@type': 'BlogPosting', headline: article.title, url: article.canonicalUrl, inLanguage: locale.code })),
-  });
-  return `<!DOCTYPE html>
-<html lang="${locale.code}" dir="${locale.dir}" data-norva-document-language="${locale.code}">
-<head>
-${commonHead({ title: `${ui.libraryTitle} | Norva Blog`, description: ui.libraryDescription, canonical,
-    robots: preview ? 'noindex,nofollow' : 'index,follow', ogType: 'website', jsonLdBlocks: [schema, breadcrumbJsonLd(crumbs)], alternates })}
-  <script defer src="${i18nAsset('js/blog-language.js')}"></script>
-</head>
-<body>
-${localizedChrome(header(), ui, locale.code)}
-  <main id="main-content" class="wide blog-index localized-library" data-blog-language="${locale.code}">
-    ${breadcrumb(crumbs, ui)}
-    ${languagePicker(languageLinks, ui, locale.code)}
-    <section class="localized-library-intro">
-      <span class="eyebrow">${escapeHtml(ui.libraryEyebrow)}</span>
-      <h1>${escapeHtml(ui.libraryTitle)}</h1>
-      <p class="lede">${escapeHtml(ui.libraryDescription)}</p>
-      <p>${escapeHtml(ui.libraryCount.replace('{count}', String(articles.length)))}</p>
-      <p class="translation-note">${escapeHtml(ui.libraryNotice.replace('{count}', String(articles.length)))} <a href="/blog/" hreflang="en">${escapeHtml(ui.browseEnglish)}</a></p>
-    </section>
-    <div class="library-grid">${articles.map(article => `<article class="library-card"><a href="${blogPath(locale.code, article.slug)}">
-      <span class="tag">${escapeHtml(article.cluster)}</span><h2>${escapeHtml(article.title)}</h2><p>${escapeHtml(article.excerpt)}</p>
-      <div class="library-card-meta"><span>${escapeHtml(ui.readingTime.replace('{minutes}', String(article.readingMinutes)))}</span><span>${escapeHtml(ui.readGuide)}</span></div>
-    </a></article>`).join('\n')}</div>
-  </main>
-${localizedChrome(footer(), ui, locale.code)}
-</body>
-</html>
-`;
+function renderLocalizedIndexPage(articles, options) {
+  return renderIndexPage(articles, options);
 }
 
 module.exports = { renderArticlePage, renderIndexPage, renderLocalizedIndexPage, SITE };

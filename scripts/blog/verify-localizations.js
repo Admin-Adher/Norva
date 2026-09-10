@@ -22,6 +22,14 @@ const sources = fs.readdirSync(path.join(content, 'articles')).filter(file => fi
 const decode = value => value.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 const expectedLanguageCodes = LOCALES.map(locale => locale.code);
 
+function verifyHubLayout(html, count) {
+  const markers = ['data-blog-index', 'class="blog-hero"', 'class="page-title"'];
+  if (count > 0) markers.push('class="hero-feature"', 'role="search"', 'class="topic-filters"', 'data-library-empty-reset');
+  else markers.push('class="hero-feature hero-feature-empty"');
+  if (count > 1) markers.push('class="recent-list"');
+  for (const marker of markers) assert.ok(html.includes(marker), `Missing premium hub module: ${marker}`);
+}
+
 if (!preview) {
   try {
     const englishState = JSON.parse(read(path.join(content, 'published-state.json'))).published;
@@ -115,6 +123,30 @@ for (const code of expectedLanguageCodes) {
   const html = read(hub);
   hubsChecked++;
   if (!html.includes(`data-norva-document-language="${code}"`)) findings.push({ key: `${code}/index`, error: 'Wrong hub language' });
+  try {
+    const ui = loadUi(content, code);
+    const expectedCount = code === 'en'
+      ? Object.keys(JSON.parse(read(path.join(content, 'published-state.json'))).published).length
+      : Object.keys(state).filter(key => key.startsWith(code + '/')).length;
+    if (!preview) assert.ok(html.includes(`data-guide-count="${expectedCount}"`), 'truthful locale count');
+    const renderedCount = Number(html.match(/data-guide-count="(\d+)"/)?.[1]);
+    assert.ok(Number.isInteger(renderedCount), 'valid rendered guide count');
+    verifyHubLayout(html, renderedCount);
+    if (renderedCount > 0) {
+      assert.ok(html.includes(escapeHtml(ui.hubSearchLabel)), 'localized search label');
+      assert.ok(html.includes(escapeHtml(ui.hubNoResults)), 'localized empty state');
+    }
+    assert.ok(html.includes(`data-status-results="${escapeAttr(ui.hubResults)}"`), 'localized runtime results');
+    const cards = [...html.matchAll(/<article class="library-card"[^>]*data-topic="([^"]+)"[^>]*>\s*<a href="([^"]+)"/g)];
+    if (!preview) assert.equal(cards.length, expectedCount, 'all localized cards available without JavaScript');
+    const english = read(path.join(publicDir, 'blog/index.html'));
+    const englishTopics = new Map([...english.matchAll(/<article class="library-card"[^>]*data-topic="([^"]+)"[^>]*>\s*<a href="([^"]+)"/g)].map(match => [parseBlogUrl(match[2]).slug, match[1]]));
+    for (const card of cards) {
+      const target = parseBlogUrl(card[2]);
+      assert.equal(target?.code, code, 'hub card must stay in its language');
+      assert.equal(card[1], englishTopics.get(target.slug), 'topic classification must match source');
+    }
+  } catch (error) { findings.push({ key: `${code}/index`, error: error.message }); }
 }
 console.log(JSON.stringify({ preview, complete, versionsChecked: checked.length, languageHubs: hubsChecked,
   existingEnglishArticles: Object.keys(JSON.parse(read(path.join(content, 'published-state.json'))).published).length,
