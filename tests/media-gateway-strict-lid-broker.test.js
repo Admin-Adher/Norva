@@ -12,7 +12,7 @@ const root = path.join(__dirname, '..');
 const gatewayPath = path.join(root, 'services/media-gateway/src/index.js');
 const gatewaySource = fs.readFileSync(gatewayPath, 'utf8');
 
-function brokerHarness() {
+function brokerHarness(diagnosticLogs = null) {
   const startMarker = '// ── Strict LID loopback broker (mono-account provider barrier)';
   const endMarker = '// ── End strict LID loopback broker';
   const start = gatewaySource.indexOf(startMarker);
@@ -20,7 +20,7 @@ function brokerHarness() {
   assert.ok(start >= 0 && end > start, 'strict LID broker source block must remain extractable');
   const source = gatewaySource.slice(start, end);
   return vm.runInNewContext(
-    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256, strictLidBrokers }; })()`,
+    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256, strictLidBrokers, strictLidProviderFailureObservation }; })()`,
     {
       AbortController,
       Buffer,
@@ -42,7 +42,7 @@ function brokerHarness() {
       String,
       URL,
       clearTimeout,
-      console,
+      console: { ...console, warn: (...args) => diagnosticLogs?.push(args.join(' ')) },
       crypto: require('node:crypto'),
       fetch,
       http,
@@ -175,6 +175,234 @@ function sendExactRange(req, res, data, options = {}) {
   if (options.etag !== false) res.setHeader('ETag', options.etag || '"fixture-v1"');
   res.end(options.body || body);
 }
+
+test('strict provider diagnostics retain only safe cause codes and bounded stage counters', () => {
+  const { strictLidProviderFailureObservation: observe } = brokerHarness();
+  const cause = Object.assign(new Error('https://provider.invalid/account/password'), { code: 'ECONNRESET' });
+  const outer = new TypeError('Bearer secret-token', { cause });
+  const result = observe(outer, {
+    stage: 'request', elapsedMs: 12, progressBytes: 0, upstreamStatus: null,
+    url: 'https://secret.invalid', jobId: 'private-job', transcript: 'private-speech',
+  });
+  assert.deepEqual({ ...result }, {
+    event: 'strict_lid_provider_failure', protocol: 1, mode: 'strict-language',
+    stage: 'request', errorType: 'Error', errorCode: 'ECONNRESET', reason: null,
+    upstreamStatus: null, timeout: null, elapsedMs: 12, progressBytes: 0,
+    validatorKind: null, targetIdentityMatch: null,
+  });
+  assert.equal(Object.isFrozen(result), true);
+  assert.doesNotMatch(JSON.stringify(result), /password|secret|private|Bearer|https?:/);
+  const malformed = observe({ code: 'secret', name: 'secret', cause: null }, {
+    finiteSeek: true, stage: 'secret', elapsedMs: NaN, progressBytes: -1,
+    upstreamStatus: 999, timeoutKind: 'secret',
+  });
+  assert.equal(malformed.stage, 'unknown');
+  assert.equal(malformed.errorCode, null);
+  assert.equal(malformed.errorType, 'Error');
+  assert.equal(malformed.elapsedMs, null);
+  assert.equal(malformed.progressBytes, null);
+  assert.equal(malformed.upstreamStatus, null);
+  assert.equal(malformed.timeout, null);
+});
+
+test('strict provider diagnostics tolerate cyclic, throwing and changing error getters', () => {
+  const { strictLidProviderFailureObservation: observe } = brokerHarness();
+  const cyclic = { code: 'UND_ERR_SOCKET' }; cyclic.cause = cyclic;
+  assert.equal(observe(cyclic).errorCode, 'UND_ERR_SOCKET');
+  const throwing = { get code() { throw new Error('private'); }, cause: cyclic };
+  assert.equal(observe(throwing).errorCode, 'UND_ERR_SOCKET');
+  let reads = 0;
+  const changing = { get code() { return reads++ === 0 ? 'EPIPE' : 'private'; } };
+  assert.equal(observe(changing).errorCode, 'EPIPE');
+  assert.equal(reads, 1);
+  assert.doesNotThrow(() => observe({ get cause() { throw new Error('private'); } }));
+  assert.equal(observe(new Error('The media provider target changed during the byte-range session.')).reason, 'effective-target-changed');
+  assert.equal(observe(new Error('The media file changed during language validation.')).reason, 'validator-changed');
+  assert.equal(observe(new Error('The media file changed during language validation. secret')).reason, null);
+});
+
+test('strict transport failure logs the request stage without changing public error or retry policy', async (t) => {
+  const logs = [];
+  const { createStrictLidBroker } = brokerHarness(logs);
+  let fetches = 0;
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/private/password/file.mkv',
+    fileSizeBytes: 100, dispatcher: null, releaseDelayMs: 0,
+    fetchImpl: async () => {
+      fetches++;
+      throw Object.assign(new TypeError('private provider password'), { code: 'UND_ERR_INVALID_ARG' });
+    },
+  });
+  t.after(() => broker.close());
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).code, 'PROVIDER_FETCH_FAILED');
+  assert.equal(fetches, 1);
+  assert.equal(logs.length, 1);
+  const event = JSON.parse(logs[0]);
+  assert.equal(event.stage, 'request');
+  assert.equal(event.errorCode, 'UND_ERR_INVALID_ARG');
+  assert.equal(event.upstreamStatus, null);
+  assert.equal(event.progressBytes, 0);
+  assert.doesNotMatch(logs.join(''), /private|password|provider\.invalid/);
+});
+
+test('strict upstream rejection records the actual HTTP status separately from loopback 502', async (t) => {
+  const logs = [];
+  const { createStrictLidBroker } = brokerHarness(logs);
+  const broker = await createStrictLidBroker({
+    sourceUrl: 'https://provider.invalid/movie/account/secret/file.mkv',
+    fileSizeBytes: 100, dispatcher: null, releaseDelayMs: 0,
+    fetchImpl: async () => new Response('secret upstream body', { status: 403 }),
+  });
+  t.after(() => broker.close());
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+  assert.equal(response.status, 502);
+  await response.json();
+  assert.equal(logs.length, 1);
+  const event = JSON.parse(logs[0]);
+  assert.equal(event.stage, 'headers');
+  assert.equal(event.upstreamStatus, 403);
+  assert.equal(event.errorCode, 'PROVIDER_REQUEST_FAILED');
+  assert.doesNotMatch(logs.join(''), /secret|upstream body|provider\.invalid/);
+});
+
+test('strict LID accepts rotating query credentials only behind an unchanged strong file validator and target identity', async (t) => {
+  const cases = [
+    { name: 'same path and query shape, unchanged strong ETag', allowed: true },
+    { name: 'missing validator', etag: null, allowed: false },
+    { name: 'last-modified alone is not a strong validator', etag: null, modified: 'Wed, 09 Sep 2026 12:00:00 GMT', allowed: false },
+    { name: 'changed ETag', changedEtag: true, allowed: false },
+    { name: 'changed target path', changedPath: true, allowed: false },
+    { name: 'changed target host', changedHost: true, allowed: false },
+    { name: 'changed query shape', changedQueryShape: true, allowed: false },
+  ];
+  for (const fixture of cases) await t.test(fixture.name, async () => {
+    const { createStrictLidBroker } = brokerHarness();
+    let calls = 0;
+    const broker = await createStrictLidBroker({
+      sourceUrl: 'https://provider.invalid/movie/account/password/file.mkv',
+      fileSizeBytes: 20, dispatcher: null, releaseDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        calls++;
+        const [, startText, endText] = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+        const start = Number(startText), end = Number(endText);
+        const etag = fixture.etag === null ? null : fixture.changedEtag && calls > 1 ? '"other-file"' : '"same-file"';
+        const response = new Response(Buffer.alloc(end - start + 1, 7), { status: 206, headers: {
+          'Content-Range': `bytes ${start}-${end}/20`, 'Content-Length': String(end - start + 1),
+          ...(etag ? { ETag: etag } : {}), ...(fixture.modified ? { 'Last-Modified': fixture.modified } : {}),
+        } });
+        const host = fixture.changedHost && calls > 1 ? 'other.invalid' : 'cdn.invalid';
+        const pathname = fixture.changedPath && calls > 1 ? '/other.mkv' : '/file.mkv';
+        const query = fixture.changedQueryShape && calls > 1 ? `newToken=${calls}` : `token=${calls}`;
+        return { status: response.status, headers: response.headers, body: response.body, url: `https://${host}${pathname}?${query}` };
+      },
+    });
+    try {
+      const first = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-9' } });
+      assert.equal(first.status, 206);
+      assert.equal((await first.arrayBuffer()).byteLength, 10);
+      const second = await fetch(broker.inputUrl, { headers: { Range: 'bytes=10-19' } });
+      assert.equal(second.status, fixture.allowed ? 206 : 502);
+      if (fixture.allowed) {
+        assert.equal((await second.arrayBuffer()).byteLength, 10);
+        assert.equal(broker.terminalError, null);
+      } else {
+        assert.equal((await second.json()).code, 'VOD_CHANGED');
+      }
+      assert.equal(calls, 2, 'No retry or additional provider request is introduced');
+    } finally { await broker.close(); }
+  });
+});
+
+test('strict LID resolves a rotating signed CDN path once and reuses that exact target without needing an ETag', async (t) => {
+  let originRequests = 0;
+  let rangeRequests = 0;
+  const data = Buffer.alloc(64, 7);
+  const provider = http.createServer((req, res) => {
+    if (!req.url.startsWith('/signed/')) {
+      originRequests++;
+      res.writeHead(302, { Location: `/signed/ephemeral-${originRequests}/file.mkv` });
+      res.end();
+      return;
+    }
+    rangeRequests++;
+    sendExactRange(req, res, data, { etag: false });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const { createStrictLidBroker } = brokerHarness();
+  const broker = await createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length, dispatcher: null, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const [start, end] of [[0, 15], [48, 63], [16, 31]]) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start, end + 1));
+  }
+  assert.equal(originRequests, 1, 'Do not mint a different temporary URL at every FFmpeg seek');
+  assert.equal(rangeRequests, 3, 'No extra probe or retry is needed');
+  assert.equal(broker.terminalError, null);
+});
+
+test('strict LID never re-resolves the provider entry when the pinned signed target expires', async (t) => {
+  let originRequests = 0;
+  let rangeRequests = 0;
+  const data = Buffer.alloc(64, 7);
+  const provider = http.createServer((req, res) => {
+    if (!req.url.startsWith('/signed/')) {
+      originRequests++;
+      res.writeHead(302, { Location: `/signed/ephemeral-${originRequests}/file.mkv` });
+      return res.end();
+    }
+    rangeRequests++;
+    if (rangeRequests > 1) {
+      res.writeHead(403);
+      return res.end();
+    }
+    sendExactRange(req, res, data);
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const { createStrictLidBroker } = brokerHarness();
+  const broker = await createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length, dispatcher: null, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  const first = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-15' } });
+  assert.equal(first.status, 206);
+  await first.arrayBuffer();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=48-63' } });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, 'PROVIDER_REQUEST_FAILED');
+  }
+  assert.equal(originRequests, 1);
+  assert.equal(rangeRequests, 2, 'Expired signed targets stay terminal with no hidden reconnect');
+});
+
+test('strict signed-target pinning leaves finite playback entry resolution unchanged', async (t) => {
+  let originRequests = 0;
+  const data = Buffer.alloc(64, 7);
+  const provider = http.createServer((req, res) => {
+    if (!req.url.startsWith('/signed/')) {
+      originRequests++;
+      res.writeHead(302, { Location: `/signed/ephemeral-${originRequests}/file.mkv` });
+      return res.end();
+    }
+    sendExactRange(req, res, data);
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const { createStrictLidBroker } = brokerHarness();
+  const broker = await createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    dispatcher: null, releaseDelayMs: 0, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 16 });
+  t.after(() => broker.close());
+  for (const [start, end] of [[0, 15], [48, 63]]) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start, end + 1));
+  }
+  assert.equal(originRequests, 2);
+  assert.equal(broker.terminalError, null);
+});
 
 test('strict LID range parser converts only one bounded range into exact safe offsets', () => {
   const { parseStrictLidRange } = brokerHarness();

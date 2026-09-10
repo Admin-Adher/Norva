@@ -4554,6 +4554,65 @@ function strictLidBrokerError(code, message, options = {}) {
     return error;
 }
 
+// Internal structured diagnostics only. Never serialize an Error, message, stack,
+// cause, provider URL, credentials or catalogue/account identifiers. Allowlisted
+// low-cardinality values keep hostile upstream errors out of logs and metrics.
+function strictLidProviderFailureObservation(error, details = {}) {
+    const safeCodes = new Set([
+        'UND_ERR_INVALID_ARG', 'UND_ERR_INVALID_URL', 'UND_ERR_SOCKET',
+        'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+        'UND_ERR_ABORTED', 'UND_ERR_TOO_MANY_REDIRECTS', 'UND_ERR_DESTROYED', 'UND_ERR_CLOSED',
+        'UND_ERR_SOCKS5_AUTH_FAILED', 'UND_ERR_SOCKS5_AUTH_REJECTED',
+        'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+        'ENETUNREACH', 'EHOSTUNREACH', 'EPROTO', 'CERT_HAS_EXPIRED',
+        'ERR_TLS_CERT_ALTNAME_INVALID', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+        'PROXY_AUTH_FAILED', 'PROVIDER_BUSY', 'PROVIDER_REQUEST_FAILED',
+        'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_EMPTY_RESPONSE',
+        'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'VOD_CHANGED',
+    ]);
+    const safeNames = new Set(['Error', 'TypeError', 'ReferenceError', 'RangeError', 'AbortError']);
+    const safeReasons = new Map([
+        ['The media file changed during language validation.', 'validator-changed'],
+        ['The media provider target changed during the byte-range session.', 'effective-target-changed'],
+        ['Provider ignored the exact language-validation byte range.', 'range-ignored'],
+        ['Provider encoded the language-validation byte range.', 'range-encoded'],
+        ['Provider returned an invalid language-validation byte range.', 'range-invalid'],
+        ['Provider truncated the exact language-validation byte range.', 'range-truncated'],
+    ]);
+    let errorCode = null;
+    let errorType = 'Error';
+    let reason = null;
+    let current = error;
+    const visited = new Set();
+    for (let depth = 0; current && depth < 5 && !visited.has(current); depth++) {
+        visited.add(current);
+        // Read each property independently: an exotic getter must neither abort
+        // error handling nor hide a safe transport code in the nested cause.
+        try { const code = current.code; if (safeCodes.has(code)) errorCode = code; } catch (_) {}
+        try { const name = current.name; if (safeNames.has(name)) errorType = name; } catch (_) {}
+        try { const message = current.message; if (safeReasons.has(message)) reason = safeReasons.get(message); } catch (_) {}
+        try { current = current.cause; } catch (_) { break; }
+    }
+    const finiteInteger = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+    return Object.freeze({
+        event: 'strict_lid_provider_failure',
+        protocol: 1,
+        mode: details.finiteSeek === true ? 'finite-playback' : 'strict-language',
+        stage: ['request', 'headers', 'busy-prefix', 'range-validation', 'body', 'close'].includes(details.stage)
+            ? details.stage : 'unknown',
+        errorType,
+        errorCode,
+        reason,
+        upstreamStatus: Number.isInteger(details.upstreamStatus)
+            && details.upstreamStatus >= 100 && details.upstreamStatus <= 599 ? details.upstreamStatus : null,
+        timeout: ['first-byte', 'idle'].includes(details.timeoutKind) ? details.timeoutKind : null,
+        elapsedMs: finiteInteger(details.elapsedMs),
+        progressBytes: finiteInteger(details.progressBytes),
+        validatorKind: ['etag', 'last-modified'].includes(details.validatorKind) ? details.validatorKind : null,
+        targetIdentityMatch: typeof details.targetIdentityMatch === 'boolean' ? details.targetIdentityMatch : null,
+    });
+}
+
 // WHATWG fetch intentionally rejects a 407 before exposing its status. The lower-level
 // undici request API preserves that status, which is required to distinguish residential
 // proxy authentication failure from a provider's mono-account 458 response.
@@ -5457,6 +5516,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 ? beginFiniteMkvSeekWindowTrace(context, requestId, range, remainingRange)
                 : null;
             let upstreamStatus = null;
+            let diagnosticStage = 'request';
+            let diagnosticTargetIdentityMatch = null;
+            const diagnosticStartedAt = Date.now();
             try {
                 if (finiteSeek) {
                     // The provider mutex is held and the previous exact window
@@ -5477,7 +5539,15 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (context.validator) headers[context.validator.header] = context.validator.value;
                 attempt.fetchStarted = true;
                 context.providerFetches++;
-                attempt.response = await context.fetchImpl(context.sourceUrl, {
+                // Resolve the provider entry URL only once per strict window.
+                // Some providers mint a different signed CDN *path* each time
+                // the entry URL is opened, even for the same exact file. Reuse
+                // the validated target for FFmpeg seeks without changing the
+                // original account's pinned dispatcher. An expired target is
+                // terminal: never silently re-resolve or relax identity checks.
+                const requestSourceUrl = !finiteSeek && context.strictResolvedSourceUrl
+                    ? context.strictResolvedSourceUrl : context.sourceUrl;
+                attempt.response = await context.fetchImpl(requestSourceUrl, {
                     method: 'GET',
                     headers,
                     redirect: 'follow',
@@ -5486,6 +5556,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 });
                 markFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'headers');
                 upstreamStatus = Number(attempt.response.status);
+                diagnosticStage = 'headers';
                 if (upstreamStatus === 458) {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
                         'PROVIDER_BUSY',
@@ -5500,10 +5571,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         { status: 502, upstreamStatus },
                     ));
                 }
-                const observedEffectiveUrlSha256 = strictLidEffectiveUrlSha256(
-                    attempt.response?.url || context.sourceUrl,
-                );
+                const observedEffectiveUrl = attempt.response?.url || requestSourceUrl;
+                const observedEffectiveUrlSha256 = strictLidEffectiveUrlSha256(observedEffectiveUrl);
                 if (upstreamStatus === 200) {
+                    diagnosticStage = 'busy-prefix';
                     const busy = await strictLidResponseHasBusyPrefix(
                         attempt.response,
                         upstreamController.signal,
@@ -5545,6 +5616,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                     throw markStrictLidTerminal(context, providerRequestError);
                 }
+                diagnosticStage = 'range-validation';
                 const contentEncoding = String(attempt.response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
                 if (contentEncoding && contentEncoding !== 'identity') {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
@@ -5578,17 +5650,28 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
                 if (!context.validator && observedValidator) context.validator = observedValidator;
                 const observedEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
-                    attempt.response?.url || context.sourceUrl,
+                    observedEffectiveUrl,
                 );
-                // Finite playback always refetches the same authenticated logical
-                // source. Signed CDN host/path rotation is acceptable only while
-                // the exact byte coordinates, total and strong validator remain
-                // pinned. Strict language validation keeps the original target
-                // fence and never enables the playback reconnect path.
+                diagnosticTargetIdentityMatch = context.effectiveUrlIdentitySha256
+                    ? observedEffectiveUrlIdentitySha256 === context.effectiveUrlIdentitySha256 : null;
+                // A redirect may renew only the query credential while FFmpeg
+                // seeks within one exact file. For strict validation this is
+                // acceptable only with the SAME strong ETag AND unchanged
+                // protocol/host/path/query-key identity. Exact range/total and
+                // validator checks above still reject a different representation.
+                // Last-Modified alone, a missing ETag, or a different CDN path/
+                // host never relaxes the strict target fence. No retry is added.
+                const strictQueryRenewal = !finiteSeek
+                    && context.validator?.kind === 'etag'
+                    && observedValidator?.kind === 'etag'
+                    && observedValidator.value === context.validator.value
+                    && Boolean(context.effectiveUrlIdentitySha256)
+                    && observedEffectiveUrlIdentitySha256 === context.effectiveUrlIdentitySha256;
                 if (
                     context.effectiveUrlSha256
                     && observedEffectiveUrlSha256 !== context.effectiveUrlSha256
                     && !finiteSeek
+                    && !strictQueryRenewal
                 ) {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
                         'VOD_CHANGED',
@@ -5599,6 +5682,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (!context.effectiveUrlSha256) context.effectiveUrlSha256 = observedEffectiveUrlSha256;
                 if (!context.effectiveUrlIdentitySha256) {
                     context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
+                }
+                if (!finiteSeek && !context.strictResolvedSourceUrl) {
+                    context.strictResolvedSourceUrl = observedEffectiveUrl;
                 }
                 if (!context.providerIdentityReported && context.onProviderIdentity) {
                     context.providerIdentityReported = true;
@@ -5615,6 +5701,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         { status: 502, upstreamStatus },
                     ));
                 }
+                diagnosticStage = 'body';
                 attempt.reader = attempt.response.body.getReader();
                 if (!responseStarted && !finiteSeek) {
                     res.statusCode = 206;
@@ -5697,6 +5784,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                 }
                 finishFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'completed');
+                diagnosticStage = 'close';
                 await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
                 if (finiteSeek && range.start + forwarded === finiteWindowRange.end + 1) {
                     const windowLength = finiteWindowRange.end - finiteWindowRange.start + 1;
@@ -5772,6 +5860,16 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     await closeStrictLidBrokerProviderFetch(context, attempt, attempt.stopReason || 'stopped');
                     throw error;
                 }
+                console.warn(JSON.stringify(strictLidProviderFailureObservation(error, {
+                    finiteSeek,
+                    stage: diagnosticStage,
+                    upstreamStatus,
+                    timeoutKind,
+                    elapsedMs: Math.max(0, Date.now() - diagnosticStartedAt),
+                    progressBytes,
+                    validatorKind: context.validator?.kind,
+                    targetIdentityMatch: diagnosticTargetIdentityMatch,
+                })));
                 if (context.terminalError) {
                     await closeStrictLidBrokerProviderFetch(context, attempt, 'failed');
                     throw error;
@@ -6022,6 +6120,7 @@ async function createStrictLidBroker(options = {}) {
     const controller = new AbortController();
     const context = {
         sourceUrl,
+        strictResolvedSourceUrl: null,
         fileSizeBytes,
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
         dispatcher: initialDispatcher,
