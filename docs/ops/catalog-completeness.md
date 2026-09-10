@@ -31,6 +31,12 @@ file evidence, public title metadata and business/account state are distinct.
   existing translations when another validated write lacks those languages.
 - Restrict artwork proof to image.tmdb.org or exact bare TMDB paths; paths are
   case-sensitive.
+- Re-read source visibility after an enrichment access guard rejects an old
+  snapshot. A still-visible source retries after one minute, not the daily
+  delay reserved for removed/hidden sources. A visibility lookup outage stays
+  a retryable error. Retain the existing provider lease unless the remote
+  request has returned or the lane was local; a shorter schedule delay never
+  proves that provider work was drained.
 
 ## Deployment order
 
@@ -65,3 +71,22 @@ deleted results, transient errors, bounded batches and rejected metadata.
 `early-vod-cache-reuse.test.js` preserves early import and exact-file fences.
 The optional PGlite tests must be explicitly enabled for the release check;
 their skip in ordinary CI is not SQL execution evidence.
+
+`catalog-enrichment-visibility-retry.test.js` executes the actual dispatcher
+helper for visible, hidden and unavailable states with both release-lease
+outcomes. Completion errors must propagate. The live audit found two enabled,
+currently visible sources delayed a day by the old generic guard outcome.
+
+## Audit boundaries
+
+For Selection/M3U exact-file audio evidence, the source-local cache key is
+`source:<source_id>`, not the bare source UUID. Count actual episode evidence
+separately from legacy parent-series entries. Container-declared languages and
+speech-verified languages are different levels of evidence.
+
+The all-catalogue cache-only sweep uses resumable per-source cursors and the
+production CAS writer. Statement/lock timeouts defer the affected title to a
+fresh fenced read; they do not justify larger production timeouts. An interrupted
+batch may already contain successful writes, so its invocation ledger is a
+confirmed minimum, not an exact total of every database mutation. Report a final
+current-state count separately and do not add both measures together.

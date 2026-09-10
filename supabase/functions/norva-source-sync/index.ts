@@ -2576,6 +2576,27 @@ async function runSeriesInventoryFleetLane(
   };
 }
 
+async function deferEnrichmentFleetAccessGuard(
+  db: SupabaseClient,
+  claim: EnrichmentFleetClaim,
+  releaseLeases: boolean,
+) {
+  // Metadata enrichment itself advances visibility epochs. A stale snapshot
+  // does not prove that a source was hidden or removed. Re-read visibility
+  // before choosing the long retired-source delay, while retaining the old
+  // request's lease until its provider work is known to have stopped.
+  let visible: boolean;
+  try {
+    visible = await sourceCatalogVisible(claim.source_id, claim.user_id, db);
+  } catch (_) {
+    await finishEnrichmentFleetClaim(db, claim, false, 5 * 60,
+      { errorCode: "CATALOG_VISIBILITY_UNAVAILABLE" }, releaseLeases);
+    return;
+  }
+  await finishEnrichmentFleetClaim(db, claim, true, visible ? 60 : 24 * 60 * 60,
+    { skipped: visible ? "source_catalog_changed" : "source_not_catalog_visible" }, releaseLeases);
+}
+
 async function runEnrichmentFleetClaim(
   db: SupabaseClient,
   claim: EnrichmentFleetClaim,
@@ -2738,28 +2759,14 @@ async function runEnrichmentFleetClaim(
         await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
       } catch (guardError) {
         if (isCatalogAccessGuardError(guardError)) {
-          await finishEnrichmentFleetClaim(
-            db,
-            claim,
-            true,
-            24 * 60 * 60,
-            { skipped: "source_not_catalog_visible" },
-            localLane || responseReceived,
-          );
+          await deferEnrichmentFleetAccessGuard(db, claim, localLane || responseReceived);
           return;
         }
         throw guardError;
       }
     }
     if (isCatalogAccessGuardError(error)) {
-      await finishEnrichmentFleetClaim(
-        db,
-        claim,
-        true,
-        24 * 60 * 60,
-        { skipped: "source_not_catalog_visible" },
-        localLane || responseReceived,
-      );
+      await deferEnrichmentFleetAccessGuard(db, claim, localLane || responseReceived);
       return;
     }
     const failures = Math.max(0, Number(claim.failure_count) || 0) + 1;
