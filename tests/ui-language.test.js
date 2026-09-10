@@ -20,18 +20,18 @@ test('device matching uses supported language priority, variants and legacy alia
     assert.equal(normalize('en;fr'), '');
 });
 
-function runtime({ stored = null, native, denied = false, languages = ['fr-FR'] } = {}) {
+function runtime({ stored = null, native, denied = false, languages = ['fr-FR'], pathname = '/app', documentLanguage = null } = {}) {
     const entries = new Map(stored ? [['norva-ui-language-v1', stored]] : []);
     const handlers = new Map();
     const document = {
-        documentElement: {}, querySelectorAll: () => [],
+        documentElement: { getAttribute: name => name === 'data-norva-document-language' ? documentLanguage : null }, querySelectorAll: () => [],
         addEventListener() {},
     };
     const localStorage = {
         getItem(key) { if (denied) throw Error('denied'); return entries.get(key) ?? null; },
         setItem(key, value) { if (denied) throw Error('denied'); entries.set(key, value); },
     };
-    const context = { document, localStorage, navigator: { languages }, console,
+    const context = { document, localStorage, location: { pathname }, navigator: { languages }, console,
         setTimeout, clearTimeout, CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
         addEventListener(type, fn) { handlers.set(type, fn); }, dispatchEvent() {}, NorvaTVCloud: native };
     context.window = context;
@@ -51,6 +51,22 @@ test('web switch persists only the UI preference and updates direction immediate
     assert.equal(api.language, 'fr');
     assert.equal(api.setPreference('de'), false);
     assert.equal(api.language, 'fr');
+});
+
+test('static blog locale is URL-owned without persisting or changing app/native defaults', () => {
+    const blog = runtime({ stored: 'fr', pathname: '/blog/ar/test/', documentLanguage: 'ar' });
+    assert.equal(blog.api.language, 'ar');
+    assert.equal(blog.document.documentElement.dir, 'rtl');
+    assert.equal(blog.entries.get('norva-ui-language-v1'), 'fr');
+    blog.entries.set('norva-ui-language-v1', 'hi');
+    blog.handlers.get('storage')({ key: 'norva-ui-language-v1' });
+    assert.equal(blog.api.language, 'ar', 'another tab cannot change the article language');
+    assert.equal(blog.api.setPreference('ar'), true, 'explicit onward click can use the existing preference API');
+    assert.equal(blog.entries.get('norva-ui-language-v1'), 'ar');
+    const app = runtime({ stored: 'fr', pathname: '/app', documentLanguage: 'ar' });
+    assert.equal(app.api.language, 'fr', 'the document marker has no authority on app routes');
+    const invalid = runtime({ stored: 'fr', pathname: '/blog/test/', documentLanguage: 'private' });
+    assert.equal(invalid.api.language, 'fr');
 });
 
 test('Android is authoritative over browser languages and an old browser preference', () => {

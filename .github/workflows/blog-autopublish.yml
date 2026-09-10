@@ -107,6 +107,12 @@ jobs:
       - name: Run regression suite on the exact deployment commit
         run: npm test
 
+      - name: Verify released multilingual blog selection
+        run: |
+          node scripts/blog/build-blog.js --existing-only
+          git diff --exit-code -- public/blog public/sitemap-blog.xml content/blog/translations/published-state.json
+          node scripts/blog/verify-localizations.js --expect-complete
+
       - name: Verify region model
         run: npm run verify:region
 

@@ -8,6 +8,8 @@
 
 const { escapeHtml, escapeAttr, jsonLd } = require('./format');
 const { isSafeLink } = require('./markdown');
+const { blogPath, localeFor } = require('./localization');
+const EN_UI = require('../../../content/blog/i18n/ui/en.json');
 
 const fs = require('fs');
 const path = require('path');
@@ -20,14 +22,15 @@ const LOGO = `${SITE}/img/norva-app-icon-96.png`;
 const TRIAL_HREF = '/account.html?returnTo=%2Fapp%23home';
 const BYLINE = 'Norva Editorial Team';
 
-const commonHead = ({ title, description, canonical, robots, ogType, ogImage, jsonLdBlocks }) => `  <meta charset="UTF-8">
-  <script src="${i18nAsset('js/i18n.js')}"></script>
+const commonHead = ({ title, description, canonical, robots, ogType, ogImage, jsonLdBlocks, alternates = [] }) => `  <meta charset="UTF-8">
+  <script defer src="${i18nAsset('js/i18n.js')}"></script>
   <link rel="stylesheet" href="${i18nAsset('css/i18n.css')}">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#05080f">
   <title>${escapeHtml(title)}</title>
   <meta name="description" content="${escapeAttr(description)}">
   <link rel="canonical" href="${escapeAttr(canonical)}">
+${alternates.map(item => `  <link rel="alternate" hreflang="${escapeAttr(item.hreflang)}" href="${escapeAttr(item.href)}">`).join('\n')}
   <meta name="robots" content="${escapeAttr(robots)}">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -47,6 +50,29 @@ ${jsonLdBlocks.map((b) => `  <script type="application/ld+json">\n${b}\n  </scri
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="${i18nAsset('js/marketing.js')}"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>`;
+
+function languagePicker(items = [], ui = EN_UI, language = 'en', isArticle = false) {
+  const links = items.filter(item => item.code !== 'x-default');
+  if (links.length < 2) return '';
+  return `<details class="blog-language-picker"><summary>${escapeHtml(ui.language)}: <bdi>${escapeHtml(localeFor(language).name)}</bdi></summary>
+    <nav aria-label="${escapeAttr(isArticle ? ui.articleLanguage : ui.blogLanguage)}"><ul>${links.map(item => `<li><a href="${escapeAttr(new URL(item.href).pathname)}" lang="${escapeAttr(item.code)}" dir="${item.dir}" hreflang="${escapeAttr(item.hreflang)}"${item.code === language ? ' aria-current="page"' : ''}>${escapeHtml(item.name)}</a></li>`).join('')}</ul></nav></details>`;
+}
+
+// Static copy is authoritative for an article URL, including without JavaScript.
+function localizedChrome(html, ui = EN_UI, language = 'en') {
+  const labels = {
+    'Skip to content': ui.skip, 'Norva home': ui.norvaHome, Primary: ui.primaryNav,
+    'How it works': ui.howItWorks, 'Start free trial': ui.startTrial, Footer: ui.footerNav,
+    Home: ui.home, Blog: ui.blog, Benefits: ui.benefits, Pricing: ui.pricing, Support: ui.support,
+    Terms: ui.terms, Privacy: ui.privacy, 'Legal notice': ui.legal,
+  };
+  return html.replace(/ data-i18n(?:-[a-z-]+)?="[^"]*"/g, '')
+    .replace(/>([^<>]+)</g, (match, label) => labels[label] ? `>${escapeHtml(labels[label])}<` : match)
+    .replace(/aria-label="([^"]+)"/g, (match, label) => labels[label] ? `aria-label="${escapeAttr(labels[label])}"` : match)
+    .replace(/href="\/blog\/"/g, `href="${blogPath(language)}"`)
+    .replace('href="/support.html?returnTo=%2Fblog%2F"', `href="/support.html?returnTo=${encodeURIComponent(blogPath(language))}"`)
+    .replace(/Norva is a media player and organiser\. It does not provide media\. Use requires a compatible source you own or are authorised to access\./g, escapeHtml(ui.disclaimer));
+}
 
 const header = () => `  <a class="skip-link" href="#main-content" data-i18n="ui_web_ac576a66d456">Skip to content</a>
   <header class="blog-nav">
@@ -77,13 +103,13 @@ const footer = () => `  <footer class="blog-footer">
     </div>
   </footer>`;
 
-function breadcrumb(items) {
+function breadcrumb(items, ui = EN_UI) {
   const parts = items.map((it, idx) => {
     const last = idx === items.length - 1;
     if (last) return `<span aria-current="page">${escapeHtml(it.name)}</span>`;
     return `<a href="${escapeAttr(it.url)}">${escapeHtml(it.name)}</a>`;
   });
-  return `<nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734">${parts.join('<span class="sep">›</span>')}</nav>`;
+  return `<nav class="breadcrumb" aria-label="${escapeAttr(ui.breadcrumb)}">${parts.join('<span class="sep" aria-hidden="true">›</span>')}</nav>`;
 }
 
 function breadcrumbJsonLd(items) {
@@ -101,9 +127,12 @@ function breadcrumbJsonLd(items) {
 
 /** Merge the body's curated references with metadata without two Sources blocks. */
 function articleEditorialSections(a) {
+  const ui = a.ui || EN_UI;
+  const regexLiteral = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let body = a.bodyHtml || '';
   const sourceBodies = [];
-  body = body.replace(/<h2\b[^>]*>Sources<\/h2>\s*([\s\S]*?)(?=<h[12]\b|$)/gi, (_, content) => {
+  const sourcePattern = new RegExp(`<h2\\b[^>]*>${regexLiteral(escapeHtml(a.sourcesHeading || 'Sources'))}<\\/h2>\\s*([\\s\\S]*?)(?=<h[12]\\b|$)`, 'gi');
+  body = body.replace(sourcePattern, (_, content) => {
     sourceBodies.push(content.trim());
     return '';
   });
@@ -119,13 +148,14 @@ function articleEditorialSections(a) {
     ? `<ul>${missing.map((url) => `<li><a href="${escapeAttr(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></li>`).join('')}</ul>`
     : '';
   const sources = curated || extra
-    ? `<section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>\n${curated}\n${extra}</section>`
+    ? `<section class="sources" aria-labelledby="sources"><h2 id="sources">${escapeHtml(ui.sources)}</h2>\n${curated}\n${extra}</section>`
     : '';
 
   // The authored next-step block is authoritative; never append its CTA twice.
   let primaryFound = false;
   const primaryAttrs = `data-cta="blog-article" data-blog-cta="primary" data-blog-slug="${escapeAttr(a.slug)}"`;
-  body = body.replace(/(<h2\b[^>]*>(?:Your )?Next steps?<\/h2>)([\s\S]*?)(?=<h[12]\b|$)/gi, (section, heading, content) => {
+  const nextStepPattern = new RegExp(`(<h2\\b[^>]*>${a.nextStepHeading ? regexLiteral(escapeHtml(a.nextStepHeading)) : '(?:Your )?Next steps?'}<\\/h2>)([\\s\\S]*?)(?=<h[12]\\b|$)`, 'gi');
+  body = body.replace(nextStepPattern, (section, heading, content) => {
     if (primaryFound) return section;
     const instrumented = content.replace(/<a\b([^>]*href="[^"]+"[^>]*)>/, (_, attrs) => {
       primaryFound = true;
@@ -141,12 +171,15 @@ function articleEditorialSections(a) {
 
 /** Render a single article page. */
 function renderArticlePage(a) {
+  const ui = a.ui || EN_UI;
+  const locale = a.locale || localeFor('en');
+  const hubPath = blogPath(locale.code);
   const pageTitle = a.seoTitle || a.title;
   const documentTitle = `${pageTitle} | Norva Blog`;
 
   const crumbs = [
-    { name: 'Home', url: '/', absolute: `${SITE}/` },
-    { name: 'Blog', url: '/blog/', absolute: `${SITE}/blog/` },
+    { name: ui.home, url: '/', absolute: `${SITE}/` },
+    { name: ui.blog, url: hubPath, absolute: `${SITE}${hubPath}` },
     { name: a.title, url: a.canonicalUrl, absolute: a.canonicalUrl },
   ];
 
@@ -159,7 +192,8 @@ function renderArticlePage(a) {
     '@type': a.schemaType || 'BlogPosting',
     headline: a.title,
     description: a.metaDescription,
-    inLanguage: 'en',
+    inLanguage: locale.code,
+    ...(a.translated ? { translationOfWork: { '@type': 'BlogPosting', '@id': a.originalUrl, inLanguage: 'en' } } : {}),
     datePublished: a.publishedAtISO,
     dateModified: a.updatedAtISO || a.publishedAtISO,
     author: authorNode,
@@ -175,8 +209,8 @@ function renderArticlePage(a) {
   // Table of contents from H2 headings (only when the article is long enough).
   const h2s = (a.headings || []).filter((h) => h.level === 2);
   const toc = h2s.length >= 3
-    ? `<nav class="toc" aria-label="On this page" data-i18n-aria-label="ui_web_b5658fc8edda">
-      <strong data-i18n="ui_web_b5658fc8edda">On this page</strong>
+    ? `<nav class="toc" aria-label="${escapeAttr(ui.onThisPage)}">
+      <strong>${escapeHtml(ui.onThisPage)}</strong>
       <ul>${h2s.map((h) => `<li><a href="#${escapeAttr(h.id)}">${escapeHtml(h.text)}</a></li>`).join('')}</ul>
     </nav>`
     : '';
@@ -185,11 +219,12 @@ function renderArticlePage(a) {
 
   const related = (a.related && a.related.length)
     ? `<section class="related">
-      <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
+      <h2>${escapeHtml(ui.related)}</h2>
       <div class="related-grid">
-        ${a.related.map((r) => `<a class="card" href="/blog/${escapeAttr(r.slug)}/">
+        ${a.related.map((r) => `<a class="card" href="${escapeAttr(r.href || blogPath('en', r.slug))}"${r.language ? ` hreflang="${escapeAttr(r.language)}" lang="${escapeAttr(r.language)}"` : ''}>
           ${r.cluster ? `<span class="tag">${escapeHtml(r.cluster)}</span>` : ''}
           <div class="card-title">${escapeHtml(r.title)}</div>
+          ${r.note ? `<span class="link-language" lang="${locale.code}">${escapeHtml(r.note)}</span>` : ''}
           ${r.excerpt ? `<p>${escapeHtml(r.excerpt)}</p>` : ''}
         </a>`).join('\n        ')}
       </div>
@@ -199,7 +234,7 @@ function renderArticlePage(a) {
   const { body, sources, cta } = articleEditorialSections(a);
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${locale.code}" dir="${locale.dir}" data-norva-document-language="${locale.code}">
 <head>
 ${commonHead({
     title: documentTitle,
@@ -209,30 +244,34 @@ ${commonHead({
     ogType: 'article',
     ogImage: a.ogImage,
     jsonLdBlocks: [blogPosting, breadcrumbJsonLd(crumbs)],
+    alternates: a.alternates,
   })}
+  <script defer src="${i18nAsset('js/blog-language.js')}"></script>
 </head>
 <body>
-${header()}
+${localizedChrome(header(), ui, locale.code)}
   <main id="main-content">
-    ${breadcrumb(crumbs)}
-    <article lang="en" dir="ltr" data-blog-article="${escapeAttr(a.slug)}">
+    ${breadcrumb(crumbs, ui)}
+    ${languagePicker(a.languageLinks, ui, locale.code, true)}
+    <article lang="${locale.code}" dir="${locale.dir}" data-blog-article="${escapeAttr(a.slug)}" data-blog-language="${locale.code}">
       <div class="article-meta">
         ${a.cluster ? `<span class="tag">${escapeHtml(a.cluster)}</span>` : ''}
-        <span>By ${escapeHtml(a.author && a.author.name ? a.author.name : BYLINE)}</span>
+        <span>${escapeHtml(ui.by)} ${escapeHtml(a.author && a.author.name ? a.author.name : ui.byline)}</span>
         <span class="dot">·</span>
         <time datetime="${escapeAttr(a.publishedAtISO)}">${escapeHtml(a.displayDate)}</time>
         <span class="dot">·</span>
-        <span>${a.readingMinutes} min read</span>
+        <span>${escapeHtml(ui.readingTime.replace('{minutes}', String(a.readingMinutes)))}</span>
       </div>
       <h1>${escapeHtml(a.title)}</h1>
       ${lede}
+      ${a.translated ? `<aside class="translation-note"><a href="${escapeAttr(a.originalUrl)}" hreflang="en">${escapeHtml(ui.translatedFrom)}</a><span>${escapeHtml(ui.sourcePublished.replace('{date}', a.originalPublishedDate))}</span><p>${escapeHtml(ui.originalImages)}</p></aside>` : ''}
       ${toc}
       ${body}${cta ? '\n      ' + cta : ''}
       ${sources}
       ${related}
     </article>
   </main>
-${footer()}
+${localizedChrome(footer(), ui, locale.code)}
 </body>
 </html>
 `;
@@ -306,7 +345,7 @@ function renderLibraryCard(article, index) {
 }
 
 /** Render the blog index page listing published articles (newest first). */
-function renderIndexPage(articles) {
+function renderIndexPage(articles, options = {}) {
   const canonical = `${SITE}/blog/`;
   const description = 'Practical guides on organising a personal media library, playback, cross-device setup, and getting the most out of Norva.';
 
@@ -416,7 +455,7 @@ function renderIndexPage(articles) {
     : '<p class="empty" data-i18n="ui_web_3133da40e003">Articles are on the way. Check back soon.</p>';
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr" data-norva-document-language="en">
 <head>
 ${commonHead({
     title: 'Norva Blog — Media library guides & how-tos',
@@ -426,13 +465,16 @@ ${commonHead({
     ogType: 'website',
     ogImage: null,
     jsonLdBlocks: [blogJsonLd, breadcrumbJsonLd(crumbs)],
+    alternates: options.alternates,
   })}
   <script defer src="/js/blog-index.js?v=1"></script>
+  <script defer src="${i18nAsset('js/blog-language.js')}"></script>
 </head>
 <body>
 ${header()}
   <main id="main-content" class="wide blog-index" data-blog-index data-guide-count="${articles.length}">
     ${breadcrumb(crumbs)}
+    ${languagePicker(options.languageLinks)}
     <div data-index-highlights>
       <section class="blog-hero" aria-labelledby="blog-title">
         <div class="blog-hero-copy">
@@ -457,4 +499,41 @@ ${footer()}
 `;
 }
 
-module.exports = { renderArticlePage, renderIndexPage, SITE };
+function renderLocalizedIndexPage(articles, { locale, ui, languageLinks, alternates, preview }) {
+  const canonical = `${SITE}${blogPath(locale.code)}`;
+  const crumbs = [{ name: ui.home, url: '/', absolute: `${SITE}/` }, { name: ui.blog, url: canonical, absolute: canonical }];
+  const schema = jsonLd({ '@context': 'https://schema.org', '@type': 'Blog', name: `Norva ${ui.blog}`,
+    inLanguage: locale.code, url: canonical, description: ui.libraryDescription,
+    blogPost: articles.map(article => ({ '@type': 'BlogPosting', headline: article.title, url: article.canonicalUrl, inLanguage: locale.code })),
+  });
+  return `<!DOCTYPE html>
+<html lang="${locale.code}" dir="${locale.dir}" data-norva-document-language="${locale.code}">
+<head>
+${commonHead({ title: `${ui.libraryTitle} | Norva Blog`, description: ui.libraryDescription, canonical,
+    robots: preview ? 'noindex,nofollow' : 'index,follow', ogType: 'website', jsonLdBlocks: [schema, breadcrumbJsonLd(crumbs)], alternates })}
+  <script defer src="${i18nAsset('js/blog-language.js')}"></script>
+</head>
+<body>
+${localizedChrome(header(), ui, locale.code)}
+  <main id="main-content" class="wide blog-index localized-library" data-blog-language="${locale.code}">
+    ${breadcrumb(crumbs, ui)}
+    ${languagePicker(languageLinks, ui, locale.code)}
+    <section class="localized-library-intro">
+      <span class="eyebrow">${escapeHtml(ui.libraryEyebrow)}</span>
+      <h1>${escapeHtml(ui.libraryTitle)}</h1>
+      <p class="lede">${escapeHtml(ui.libraryDescription)}</p>
+      <p>${escapeHtml(ui.libraryCount.replace('{count}', String(articles.length)))}</p>
+      <p class="translation-note">${escapeHtml(ui.libraryNotice.replace('{count}', String(articles.length)))} <a href="/blog/" hreflang="en">${escapeHtml(ui.browseEnglish)}</a></p>
+    </section>
+    <div class="library-grid">${articles.map(article => `<article class="library-card"><a href="${blogPath(locale.code, article.slug)}">
+      <span class="tag">${escapeHtml(article.cluster)}</span><h2>${escapeHtml(article.title)}</h2><p>${escapeHtml(article.excerpt)}</p>
+      <div class="library-card-meta"><span>${escapeHtml(ui.readingTime.replace('{minutes}', String(article.readingMinutes)))}</span><span>${escapeHtml(ui.readGuide)}</span></div>
+    </a></article>`).join('\n')}</div>
+  </main>
+${localizedChrome(footer(), ui, locale.code)}
+</body>
+</html>
+`;
+}
+
+module.exports = { renderArticlePage, renderIndexPage, renderLocalizedIndexPage, SITE };

@@ -30,8 +30,9 @@ const path = require('path');
 
 const { splitDocument } = require('./lib/frontmatter');
 const { renderMarkdown } = require('./lib/markdown');
-const { renderArticlePage, renderIndexPage, SITE } = require('./lib/templates');
+const { renderArticlePage, renderIndexPage, renderLocalizedIndexPage, SITE } = require('./lib/templates');
 const { formatDisplayDate, estimateReadingMinutes } = require('./lib/format');
+const { loadTranslations, localizeArticles, loadUi, blogPath, parseBlogUrl, hashText, localeFor, alternates, assertNoUnreleasedTranslationPages } = require('./lib/localization');
 
 const ROOT = path.join(__dirname, '..', '..');
 const CONTENT_DIR = path.join(ROOT, 'content', 'blog');
@@ -121,13 +122,7 @@ function loadArticle(file) {
 /* ------------------------------- helpers --------------------------------- */
 
 function slugFromBlogUrl(url) {
-  let p = url;
-  const m = url.match(/^https?:\/\/[^/]*norva\.tv(\/.*)$/i);
-  if (m) p = m[1];
-  if (!p.startsWith('/blog/')) return null;
-  const rest = p.slice('/blog/'.length).split(/[?#]/)[0];
-  const seg = rest.split('/').filter(Boolean);
-  return seg.length ? seg[0] : ''; // '' means the index
+  return parseBlogUrl(url)?.slug ?? null;
 }
 
 function bodyPlainText(body) {
@@ -141,8 +136,11 @@ function main(options = {}) {
   const args = options.args || process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const existingOnly = args.includes('--existing-only') || args.includes('--render-published-only');
+  const previewTranslations = args.includes('--preview-translations');
+  const publishTranslations = args.includes('--publish-translations');
+  if (previewTranslations && publishTranslations) throw new Error('Choose preview or publication, not both');
   for (const arg of args) {
-    if (!['--dry-run', '--existing-only', '--render-published-only'].includes(arg)) throw new Error(`Unknown blog build option: ${arg}`);
+    if (!['--dry-run', '--existing-only', '--render-published-only', '--preview-translations', '--publish-translations'].includes(arg)) throw new Error(`Unknown blog build option: ${arg}`);
   }
   const contentDir = path.join(root, 'content/blog');
   const stateFile = path.join(contentDir, 'published-state.json');
@@ -196,7 +194,7 @@ function main(options = {}) {
     const { data, body } = loadArticle(filesById.get(entry.contentId));
     const slug = (data.slug && String(data.slug).trim()) || entry.slug;
     liveSlugs.add(slug);
-    return { entry, data, body, slug };
+    return { entry, data, body, slug, sourceHash: hashText(fs.readFileSync(filesById.get(entry.contentId), 'utf8')) };
   });
 
   // Metadata lookup for related-article cards (title/excerpt/cluster by slug).
@@ -211,6 +209,8 @@ function main(options = {}) {
   }
 
   const rendered = [];
+  // Legacy test fixtures need not carry the new optional translation package.
+  const englishUi = fs.existsSync(path.join(contentDir, 'i18n/ui/en.json')) ? loadUi(contentDir, 'en') : undefined;
   for (const { entry, data, body, slug } of loaded) {
     const cid = String(entry.contentId);
 
@@ -248,6 +248,8 @@ function main(options = {}) {
 
     const article = {
       slug,
+      locale: localeFor('en'),
+      ui: englishUi,
       canonicalUrl: (data.canonical_url && String(data.canonical_url)) || `${SITE}/blog/${slug}/`,
       title: data.title || entry.title,
       seoTitle: data.seo_title || data.title || entry.title,
@@ -273,6 +275,13 @@ function main(options = {}) {
     rendered.push(article);
   }
 
+  const translationResult = loadTranslations({ contentDir, loaded, preview: previewTranslations, publish: publishTranslations, nowISO });
+  if (!previewTranslations) assertNoUnreleasedTranslationPages(publicDir, translationResult.state);
+  const localized = localizeArticles({ english: rendered, translations: translationResult.translations, publicDir });
+  const localeCodes = [...new Set(localized.map(article => article.locale.code))];
+  const hubs = localeCodes.map(code => ({ code, path: blogPath(code), articles: localized.filter(article => article.locale.code === code) }));
+  const hubLanguages = alternates('', ['en', ...localeCodes]);
+
   // Newest first for the index and sitemap.
   const ordered = rendered.slice().sort((a, b) => {
     const d = new Date(b.publishedAtISO) - new Date(a.publishedAtISO);
@@ -284,15 +293,16 @@ function main(options = {}) {
       ? `[blog] DRY RUN — ${liveCount} existing article(s); schedule ignored; publication state read-only`
       : `[blog] DRY RUN — ${liveCount} live (floor ${MIN_PUBLISHED}, due-by-time ${dueByTime}) of ${usable.length} scheduled`);
     ordered.forEach((a) => console.log(`  · ${a.slug}  (${a.displayDate}, ${a.readingMinutes}m)`));
+    console.log(`[blog] ${localized.length} localized article(s), ${hubs.length} localized hub(s); ${previewTranslations ? 'preview (noindex)' : 'reviewed releases only'}`);
     return;
   }
 
   // Write article pages.
   let written = 0;
-  for (const article of rendered) {
-    const dir = path.join(blogOut, article.slug);
+  for (const article of [...rendered, ...localized]) {
+    const dir = path.join(publicDir, blogPath(article.locale.code, article.slug));
     fs.mkdirSync(dir, { recursive: true });
-    const html = renderArticlePage(article);
+    const html = renderArticlePage(article).replace(/[ \t]+$/gm, '');
     const out = path.join(dir, 'index.html');
     const prev = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : null;
     if (prev !== html) { fs.writeFileSync(out, html); written++; }
@@ -300,10 +310,19 @@ function main(options = {}) {
 
   // Write index page.
   fs.mkdirSync(blogOut, { recursive: true });
-  writeIfChanged(path.join(blogOut, 'index.html'), renderIndexPage(ordered));
+  writeIfChanged(path.join(blogOut, 'index.html'), renderIndexPage(ordered, { languageLinks: hubLanguages, alternates: previewTranslations ? [] : hubLanguages }));
+  for (const hub of hubs) {
+    const directory = path.join(publicDir, hub.path);
+    fs.mkdirSync(directory, { recursive: true });
+    writeIfChanged(path.join(directory, 'index.html'), renderLocalizedIndexPage(hub.articles, {
+      locale: localeFor(hub.code), ui: loadUi(contentDir, hub.code), languageLinks: hubLanguages,
+      alternates: previewTranslations ? [] : hubLanguages, preview: previewTranslations,
+    }));
+  }
 
   // Write blog sitemap.
-  writeSitemap(ordered, sitemapOut);
+  writeSitemap([...ordered, ...localized.filter(article => !article.preview)], sitemapOut, hubs.filter(hub => hub.articles.some(article => !article.preview)));
+  if (translationResult.stateChanged) writeIfChanged(translationResult.stateFile, `${JSON.stringify(translationResult.state, null, 2)}\n`);
 
   // Persist state.
   if (!existingOnly && stateChanged) {
@@ -313,13 +332,15 @@ function main(options = {}) {
   console.log(existingOnly
     ? `[blog] rebuilt ${liveCount} existing article(s); ${written} page(s) written/updated; schedule ignored; publication state unchanged`
     : `[blog] published ${liveCount} article(s) (floor ${MIN_PUBLISHED}, due-by-time ${dueByTime}); ${written} page(s) written/updated; state ${stateChanged ? 'updated' : 'unchanged'}`);
+  console.log(`[blog] ${localized.length} localized article(s), ${hubs.length} localized hub(s)`);
 }
 
 function writeIfChanged(file, content) {
+  if (file.endsWith('.html')) content = content.replace(/[ \t]+$/gm, '');
   if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) fs.writeFileSync(file, content);
 }
 
-function writeSitemap(ordered, file = SITEMAP_OUT) {
+function writeSitemap(ordered, file = SITEMAP_OUT, hubs = []) {
   const lastmod = (iso) => new Date(iso).toISOString().slice(0, 10);
   const newest = ordered.length ? ordered[0].updatedAtISO : new Date().toISOString();
   const urls = [];
@@ -336,6 +357,10 @@ function writeSitemap(ordered, file = SITEMAP_OUT) {
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>`);
+  }
+  for (const hub of hubs) {
+    const newestTranslation = hub.articles.map(article => article.updatedAtISO).sort().at(-1);
+    urls.push(`  <url><loc>${SITE}${hub.path}</loc><lastmod>${lastmod(newestTranslation)}</lastmod></url>`);
   }
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

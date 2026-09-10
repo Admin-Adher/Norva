@@ -35,7 +35,8 @@ function slugifyHeading(text) {
     .toLowerCase()
     .replace(/<[^>]+>/g, '')       // strip any inline HTML tags
     .replace(/&[a-z]+;/g, '')      // strip entities
-    .replace(/[^a-z0-9\s-]/g, '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}\p{M}\s-]/gu, '')
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
@@ -51,12 +52,14 @@ const MONTHS = [
  * Human-readable date ("14 July 2026") for the given instant, rendered in the
  * editorial time zone (Europe/Paris) so the visible date matches the calendar.
  */
-function formatDisplayDate(instant, timeZone = 'Europe/Paris') {
+function formatDisplayDate(instant, timeZone = 'Europe/Paris', language = 'en') {
   const date = instant instanceof Date ? instant : new Date(instant);
   try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
+    const formatter = new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : language, {
       day: 'numeric', month: 'long', year: 'numeric', timeZone,
-    }).formatToParts(date);
+    });
+    if (language !== 'en') return formatter.format(date);
+    const parts = formatter.formatToParts(date);
     const get = (t) => parts.find((p) => p.type === t)?.value || '';
     return `${get('day')} ${get('month')} ${get('year')}`.trim();
   } catch (_) {

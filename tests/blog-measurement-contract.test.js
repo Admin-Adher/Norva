@@ -33,7 +33,7 @@ function runtime(options = {}) {
     createElement: () => ({ setAttribute() {} }),
     head: { appendChild: script => scripts.push(script) },
     addEventListener: (name, listener) => { listeners[name] = listener; },
-    querySelector: () => options.marker === false ? null : ({ getAttribute: () => options.marker || slug }),
+    querySelector: () => options.marker === false ? null : ({ getAttribute: name => name === 'data-blog-language' ? (options.language || 'en') : (options.marker || slug) }),
   };
   const sessionStorage = {
     getItem: key => { storageCalls.push(['get', key]); if (options.storageBlocked) throw Error('blocked'); return storage.get(key) || null; },
@@ -76,7 +76,7 @@ test('blog events contain only bounded editorial context, not raw link text or q
   assert.deepEqual(app.events().map(e => e.name), ['blog_view', 'blog_cta_click']);
   assert.deepEqual(app.events()[1].params, {
     send_to: 'G-TEST', event_source: 'blog', content_group: 'blog', measurement_environment: 'production',
-    article_slug: slug, cta_placement: 'primary', cta_target: 'signup',
+    article_slug: slug, article_language: 'en', cta_placement: 'primary', cta_target: 'signup',
   });
   const serialized = JSON.stringify([app.events(), [...app.storage]]);
   for (const secret of ['private@example.test', 'super-secret', 'utm_source', 'returnTo']) assert.equal(serialized.includes(secret), false);
@@ -138,6 +138,7 @@ test('invalid, future and tampered context is removed without transmitting its c
     'bad json', { ...base, slug: 'person@example.test' }, { ...base, placement: 'private' },
     { ...base, target: 'https://provider.test/password' }, { ...base, at: 2_000_000 },
     { ...base, at: '999999' }, { ...base, v: 2 }, { ...base, at: null },
+    { ...base, language: 'private@example.test' },
   ]) {
     const storage = new Map([[KEY, typeof record === 'string' ? record : JSON.stringify(record)]]);
     const app = runtime({ consent: 'granted', storage, location: { pathname: '/account.html' } });
@@ -145,6 +146,23 @@ test('invalid, future and tampered context is removed without transmitting its c
     assert.equal(app.events().find(e => e.name === 'sign_up').params.blog_article_slug, undefined);
     assert.equal(storage.has(KEY), false);
   }
+});
+
+test('localized articles retain canonical slug and bounded language through the real GA4 funnel only', () => {
+  for (const language of ['fr', 'pt-BR', 'es', 'hi', 'tr', 'bn', 'ar', 'id', 'fil']) {
+    const app = runtime({ consent: 'granted', language, location: { pathname: `/blog/${language}/${slug}/` } });
+    app.click();
+    assert.equal(app.events()[0].params.article_language, language);
+    assert.equal(app.events()[1].params.article_slug, slug);
+    const next = runtime({ consent: 'granted', storage: app.storage, location: { pathname: '/account.html' } });
+    next.window.NorvaMarketing.track('signup_completed', { method: 'email' });
+    assert.equal(next.events().find(e => e.name === 'sign_up').params.blog_article_language, language);
+    assert.equal(next.events().find(e => e.name === 'conversion').params.blog_article_language, undefined);
+  }
+  const mismatch = runtime({ consent: 'granted', language: 'ar', location: { pathname: `/blog/fr/${slug}/` } });
+  assert.deepEqual(mismatch.events(), []);
+  const query = runtime({ consent: 'granted', location: { search: '?article_language=ar&email=private' } });
+  assert.equal(query.events()[0].params.article_language, 'en');
 });
 
 test('blocked storage falls back to event-only collection without breaking a CTA', () => {

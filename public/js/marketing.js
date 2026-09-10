@@ -9,6 +9,7 @@
   var blogViewSent = false;
   var BLOG_CONTEXT_KEY = 'norva_blog_context_v1';
   var BLOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
+  var BLOG_LANGUAGES = ['en', 'fr', 'pt-BR', 'es', 'hi', 'tr', 'bn', 'ar', 'id', 'fil'];
   var EVENT_SOURCES = ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'final_cta',
     'footer', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'consent', 'blog', 'unknown'];
   var BLOG_PLACEMENTS = ['nav', 'primary', 'inline', 'footer'];
@@ -57,12 +58,20 @@
   function blogArticle() {
     var path = String(location.pathname || '');
     if (path === '/blog/' || path === '/blog') return 'blog_index';
-    var match = /^\/blog\/([a-z0-9-]+)\/?$/.exec(path);
+    var localized = /^\/blog\/(fr|pt-BR|es|hi|tr|bn|ar|id|fil)(?:\/([a-z0-9-]+))?\/?$/.exec(path);
+    if (localized && !localized[2]) return 'blog_index';
+    var match = localized ? [localized[0], localized[2]] : /^\/blog\/([a-z0-9-]+)\/?$/.exec(path);
     if (!match || !validBlogSlug(match[1]) || typeof document.querySelector !== 'function') return '';
     var article = document.querySelector('[data-blog-article]');
+    if (localized && (!article || article.getAttribute('data-blog-language') !== localized[1])) return '';
     // A template-owned marker must agree with the canonical path. Do not read
     // slugs, account identifiers, or arbitrary labels from query strings.
     return article && article.getAttribute('data-blog-article') === match[1] ? match[1] : '';
+  }
+
+  function blogLanguage() {
+    var localized = /^\/blog\/(fr|pt-BR|es|hi|tr|bn|ar|id|fil)(?:\/|$)/.exec(String(location.pathname || ''));
+    return localized ? localized[1] : 'en';
   }
 
   function measurementEnvironment() {
@@ -98,7 +107,7 @@
     try {
       sessionStorage.setItem(BLOG_CONTEXT_KEY, JSON.stringify({
         v: 1, slug: params.article_slug, placement: params.cta_placement,
-        target: params.cta_target, at: Date.now()
+        target: params.cta_target, language: params.article_language, at: Date.now()
       }));
     } catch (_) { /* Storage unavailable: retain event-only measurement. */ }
   }
@@ -112,6 +121,7 @@
       if (record.v !== 1 || !validBlogSlug(record.slug)
           || BLOG_PLACEMENTS.indexOf(record.placement) === -1
           || BLOG_TARGETS.indexOf(record.target) === -1 || record.target === 'other'
+          || (record.language !== undefined && BLOG_LANGUAGES.indexOf(record.language) === -1)
           || typeof record.at !== 'number' || !Number.isFinite(age)
           || age < 0 || age >= BLOG_CONTEXT_TTL_MS) {
         clearBlogContext();
@@ -119,6 +129,7 @@
       }
       return {
         blog_article_slug: record.slug,
+        blog_article_language: record.language || 'en',
         blog_cta_placement: record.placement,
         blog_cta_target: record.target,
         blog_context_model: 'last_cta_30m',
@@ -142,7 +153,7 @@
   function publishBlogView() {
     if (blogViewSent || !enabled()) return;
     var slug = blogArticle();
-    if (slug) blogViewSent = blogEvent('blog_view', { article_slug: slug });
+    if (slug) blogViewSent = blogEvent('blog_view', { article_slug: slug, article_language: blogLanguage() });
   }
 
   function log() {
@@ -287,7 +298,7 @@
       var placement = cta.getAttribute('data-blog-cta')
         || ({ 'blog-nav': 'nav', 'blog-article': 'primary' })[cta.getAttribute('data-cta')];
       if (BLOG_PLACEMENTS.indexOf(placement) !== -1) {
-        var blogParams = { article_slug: slug, cta_placement: placement, cta_target: blogTarget(cta) };
+        var blogParams = { article_slug: slug, article_language: blogLanguage(), cta_placement: placement, cta_target: blogTarget(cta) };
         if (blogEvent('blog_cta_click', blogParams)) rememberBlogClick(blogParams);
       }
       // Do not duplicate the blog click as an indistinguishable select_content

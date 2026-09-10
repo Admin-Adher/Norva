@@ -1,19 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr" data-norva-document-language="en">
 <head>
   <meta charset="UTF-8">
-  <script src="/js/i18n.js?v=2b9bdc01ca"></script>
+  <script defer src="/js/i18n.js?v=08a85874e5"></script>
   <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#05080f">
   <title>Normalize Media Title Capitalization Safely | Norva Blog</title>
   <meta name="description" content="Normalize media title capitalization with protected tokens, language-aware rules, official styling evidence, exception handling, reversible batches, and search tests.">
   <link rel="canonical" href="https://norva.tv/blog/normalize-media-title-capitalization/">
+
   <meta name="robots" content="index,follow">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
+  <link rel="stylesheet" href="/css/blog.css?v=ddf3dd9383">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Normalize Media Title Capitalization Safely | Norva Blog">
@@ -81,25 +82,27 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main-content" data-i18n="ui_web_ac576a66d456">Skip to content</a>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="blog-nav">
-    <a class="brand" href="/" aria-label="Norva home" data-i18n-aria-label="ui_web_1a123bf0fced">
+    <a class="brand" href="/" aria-label="Norva home">
       <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
       <span>Norva</span>
     </a>
-    <nav class="nav-right" aria-label="Primary" data-i18n-aria-label="ui_web_efe10c80ec8a">
-      <a href="/blog/" data-i18n="ui_web_8c6bc099534a">Blog</a>
-      <a class="hide-sm" href="/#how-it-works" data-i18n="ui_web_9c870aa6e5e9">How it works</a>
-      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action data-i18n="ui_web_b1effd1ffed3">Start free trial</a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
     </nav>
   </header>
   <main id="main-content">
-    <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Normalize Title Capitalization Without Losing Meaning</span></nav>
-    <article lang="en" dir="ltr" data-blog-article="normalize-media-title-capitalization">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">How to Normalize Title Capitalization Without Losing Meaning</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="normalize-media-title-capitalization" data-blog-language="en">
       <div class="article-meta">
         <span class="tag">Metadata Quality</span>
         <span>By Norva Editorial Team</span>
@@ -110,8 +113,9 @@
       </div>
       <h1>How to Normalize Title Capitalization Without Losing Meaning</h1>
       <p class="lede">Safe capitalisation cleanup protects official styling, names, acronyms, scripts, numerals, and edition markers before applying any general casing rule.</p>
-      <nav class="toc" aria-label="On this page" data-i18n-aria-label="ui_web_b5658fc8edda">
-      <strong data-i18n="ui_web_b5658fc8edda">On this page</strong>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
       <ul><li><a href="#decide-the-purpose-of-normalisation">Decide the purpose of normalisation</a></li><li><a href="#build-the-protected-token-sheet">Build the protected-token sheet</a></li><li><a href="#write-language-aware-casing-rules">Write language-aware casing rules</a></li><li><a href="#generate-a-preview-not-an-immediate-overwrite">Generate a preview, not an immediate overwrite</a></li><li><a href="#pilot-a-varied-batch">Pilot a varied batch</a></li><li><a href="#handle-source-conflicts">Handle source conflicts</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
     </nav>
       <blockquote><strong>In short:</strong> Do not apply a universal title-case function to the whole catalogue. First identify each title’s language and protected tokens—official styling, proper names, acronyms, numerals, scripts, punctuation, and edition markers. Apply a documented rule only to ordinary words, preview every change, manually review exceptions, and test search and identity before approving a reversible batch.</blockquote>
@@ -156,20 +160,22 @@
 <section class="article-cta"><h2 id="your-next-step">Your next step</h2>
 <p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="normalize-media-title-capitalization">Explore Norva's features</a></p>
 </section>
-      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
 <ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">Dublin Core: DCMI Metadata Terms</a></li><li><a href="https://www.archives.gov/files/preservation/formats/pdf/naming-and-organizing-files.pdf" target="_blank" rel="noopener">National Archives: Naming and organizing files</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
 </section>
       <section class="related">
-      <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
+      <h2>Related reading</h2>
       <div class="related-grid">
         <a class="card" href="/blog/media-metadata-quality-audit/">
           <span class="tag">Metadata Quality</span>
           <div class="card-title">How to Run a Media Metadata Quality Audit</div>
+
           <p>A useful metadata audit tests whether catalogue information supports identity, retrieval, choice, relationships, and accessibility—not whether every field is filled.</p>
         </a>
         <a class="card" href="/blog/resolve-conflicting-release-years/">
           <span class="tag">Metadata Quality</span>
           <div class="card-title">How to Investigate Conflicting Release Years</div>
+
           <p>Conflicting years often describe different events, territories, editions, or records, so the first task is to define what each date actually claims.</p>
         </a>
       </div>
@@ -178,15 +184,15 @@
   </main>
   <footer class="blog-footer">
     <div class="foot-inner">
-      <nav class="foot-links" aria-label="Footer" data-i18n-aria-label="ui_web_26c87bb51e69">
-        <a href="/" data-i18n="ui_web_3a78695388b3">Home</a>
-        <a href="/blog/" data-i18n="ui_web_8c6bc099534a">Blog</a>
-        <a href="/#features" data-i18n="ui_web_d5b67bc930cd">Benefits</a>
-        <a href="/#pricing" data-i18n="ui_web_dfe95783edfe">Pricing</a>
-        <a href="/support.html?returnTo=%2Fblog%2F" data-i18n="ui_web_be91940b79f4">Support</a>
-        <a href="/terms.html" data-i18n="ui_web_ede548996483">Terms</a>
-        <a href="/privacy.html" data-i18n="ui_web_54a57c3147c4">Privacy</a>
-        <a href="/mentions-legales.html" data-i18n="ui_web_1011b3a811f0">Legal notice</a>
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
       </nav>
       <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
     </div>

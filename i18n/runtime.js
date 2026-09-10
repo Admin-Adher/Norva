@@ -9,6 +9,10 @@ import languagePolicy from './language.cjs';
 
 const { normalize, resolve, locales } = languagePolicy;
 const storageKey = 'norva-ui-language-v1';
+// A localized static blog document is one crawlable language per URL. Reading
+// it must not mutate the visitor's app preference or retranslate its chrome.
+const fixedBlogLanguage = /^\/blog(?:\/|$)/.test(window.location?.pathname || '')
+    && locales.find(locale => locale.code === document.documentElement.getAttribute?.('data-norva-document-language'))?.code;
 const attributes = ['title', 'placeholder', 'aria-label', 'alt'];
 const selector = '[data-i18n], ' + attributes.map(a => `[data-i18n-${a}]`).join(', ');
 let preference = 'auto';
@@ -42,7 +46,7 @@ const resources = Object.fromEntries(locales.map((locale, index) => [locale.code
         ...Object.fromEntries(Object.entries(webMessages).map(([key, values]) => [key, values[locale.code]])) },
 }]));
 readState();
-current = resolve(preference, deviceLanguages());
+current = fixedBlogLanguage || resolve(preference, deviceLanguages());
 i18next.init({ resources, lng: current, supportedLngs: locales.map(l => l.code),
     fallbackLng: 'en', load: 'currentOnly', initImmediate: false,
     // DOM writes use textContent/setAttribute. Never interpolate a translation into HTML.
@@ -141,7 +145,7 @@ function refreshControls() {
     });
 }
 function apply() {
-    current = resolve(preference, deviceLanguages());
+    current = fixedBlogLanguage || resolve(preference, deviceLanguages());
     i18next.changeLanguage(current);
     document.documentElement.lang = current;
     document.documentElement.dir = current === 'ar' ? 'rtl' : 'ltr';

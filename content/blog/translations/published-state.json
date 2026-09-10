@@ -1,0 +1,382 @@
+{
+  "published": {
+    "fr/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "5d1d1d3f7ffab72ab875caa4909cc67212b75a48cb9f90b07f339a7b87d55581"
+    },
+    "fr/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "29f18e8b03061951b8230a39f6990eeb79deaf9670b8630413bdd5e9215414d6"
+    },
+    "fr/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "baf44cce42078cea1475bcfdf3d7965ab5e148487402d6d50ae4c426ceb6602e"
+    },
+    "fr/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "07b9750071ab08319bcfbc6dce076880f3e1c33d81ab0f4597b61b977a2a85e8"
+    },
+    "fr/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "60d95fb1201d7b17607748cc08f7ba95fa3234ae7d1479471759c86ab7fb1174"
+    },
+    "fr/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "750881e3ff60ce9547e907e6f428492fea2fadc3753324c67ff03f628827a442"
+    },
+    "fr/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "d415821cdb250f8e10b4a4f230485addb45ed4510744aba130da8416a380ebf8"
+    },
+    "pt-BR/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "f0e8e9cd4ed44ad6e7babda6af3a8a042bc262349a0f661b568c271affe20e58"
+    },
+    "pt-BR/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "45f23d2351877c0b0ca127e7c0062b5773c07a704d1f8b1d96a516dd9403b9ea"
+    },
+    "pt-BR/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "8d1e6d27cb0c8832f1d31dd6213945f775631518d39d77a5b44eed7b7696ab92"
+    },
+    "pt-BR/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "3277cd9bf5014bdc2432900ccb337b5c51a3c52389c6b13057f3235d9a26e0bf"
+    },
+    "pt-BR/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "b1546fd0ef1068c81a86f540e9d1cb8c58907a31d95173e8eb88719ca4da0339"
+    },
+    "pt-BR/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "d2d59b40923dd14809a9754ed140adad8681ee8d41c7259aa6688d3ad82fa000"
+    },
+    "pt-BR/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "dfe7d1ba9f8fdb351f165ab94a1f445a8a7312db5f80cd6b9890c8776b70acab"
+    },
+    "es/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "e92a2fbb0b475dac482503835163973fb05a36371c9402cbe1287d7a3e24a759"
+    },
+    "es/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "aea22cabb5b2516bd5d12f6f0cd457f6e3e463a73c03f1b6ba8d56297b81e950"
+    },
+    "es/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "2c6bf8fac7d1a5c84e9f5c4b09bc93681c6f3c4a769b3788a3dc433ad10558ac"
+    },
+    "es/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "b3da32c19b897879b7cf0658f7972a8e2126f0d68d760418c65efafc36bfe1d3"
+    },
+    "es/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "f79801bb8ae828552097a5a6a29e650349c6764e5a16d504598c77ed349476be"
+    },
+    "es/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "9e7810b0250a37461481745270d4687776b413063c2c911380b5d8e45729b323"
+    },
+    "es/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "383706d1288dbb90d2ed7d171f99d7634a426d74cd3179f6f31bbcc434b431dc"
+    },
+    "hi/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "457eca200a98f532be9c00ff0365b083d9d698c9ec8626f3f7480e85b282fd68"
+    },
+    "hi/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "c23b0d6ef7f3fc3008dd671cc2f23bffde0f92f6a6456f3e0020cb3e30bfb40a"
+    },
+    "hi/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "7affbf449558cdf730ed5e51c332a8b5b2e3bd4a94fcccb66413df1c15a0d6d6"
+    },
+    "hi/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "5b07c59c140aa65333e93d8ced7a81fd7b527ebca81497cd3a6f3b3de9c9f44a"
+    },
+    "hi/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "928bcbc95bd2b3dbd174e5da38d1a76d7937d7af2389be4b4b8dc9400882fb43"
+    },
+    "hi/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "86851ed2525b8856b013e25e0245dc8c016d8e5773e54596f77a9f2a9fdc7c57"
+    },
+    "hi/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "2b3ecefa2a4e00db0d27bab3fe8b2ee46e4972ee0a4f289583676655e05bcf79"
+    },
+    "tr/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "39168c7667193302110b34a38fb85e0582698d07080639feefc98744dccf37f5"
+    },
+    "tr/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "31a218e05786f397a43def030ffd1469a9a7333affef94328178a254831a9d66"
+    },
+    "tr/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "90ea09badf0a84d8d7b524ce94c1c1969052fa0061b37496021c97ac56676942"
+    },
+    "tr/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "ecbd3e774214e497e3a2fe6ec831b1b0091d9332e56f5caa7f43378bc4569b16"
+    },
+    "tr/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "cc30a89a5e6d623e568c4997418a438d4c9c857d5b392b2d424584b8f7167000"
+    },
+    "tr/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "0620f3385cb10a86563049ed4329386a3a45bf51335aa3cd34279f0246ba2433"
+    },
+    "tr/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "636cdfc1caaae0914d5cfa7217eaf67be314532bd1a0ec6dd040f42e839915b6"
+    },
+    "bn/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "54e15f36fd09f7e803226bdb5cd6ee89fcbf1a151ae364736032eeb0ba094d4f"
+    },
+    "bn/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "79dc07d5c0af203fbda6c3e95e9b54349bea977acbaee04ba274ef344474b5a6"
+    },
+    "bn/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "6878e5050e4953c602cb652645c41e4b4578fb7e553f75c443606dcbe9a92519"
+    },
+    "bn/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "ba701c764e54140058cfc2125e39fe2c8a7479af8cba6a5185dd2c46f805df50"
+    },
+    "bn/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "41ea54144f638bc59c2142bd6548ddc3d3f07ffb292fbd246f931916f59cc1d4"
+    },
+    "bn/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "fc749dc4f80f51dd0c64bfe95fce023503292cba4767a4059eed1b72c2b10a60"
+    },
+    "bn/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "945ab7db027c855ed2cae1f7212ee0d09213896d31781b9f3aed2ab4e6c5c03c"
+    },
+    "ar/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "13eca322e0b57bf2bd73655c10ea63775387da3783ee012c775c0d2bf4f1be99"
+    },
+    "ar/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "34d90442390512bb1b052e64d56e0f3b8aac10a6309edaea5e5e4c652ae5d09b"
+    },
+    "ar/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "6dd7378da24e1b871695b5488948cac3e4b8383c7ae0315ff423080471d5c600"
+    },
+    "ar/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "2d68c61b18d7e4d6c8699251c9ca3c17a67e3156e4edce795751af981e269a0c"
+    },
+    "ar/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "2396ffc43279ff68aa225384b5f6b5d81daa1ad6ddb6f97a42b8b6e3e30a002d"
+    },
+    "ar/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "f1d697128eeeb9486ff42a44c8f5b1a0c20779869557fb1eef403137b82608c7"
+    },
+    "ar/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "409e7d68bfe458909116a1aa47a37feb5c68ee46363a85df16ca075ca8024e5d"
+    },
+    "id/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "ec95a0d1457067205845e49b614c39c799c2a1e9c522089513ffef9daec76498"
+    },
+    "id/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "ee98125f88c104c17cdb94c19e2eefa70eaf77a17ab8c1061173b5c4ef86039f"
+    },
+    "id/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "eacd9250cbcf868f98bef85157ece48570e7f2cbcf725ca229b72f9178f767f5"
+    },
+    "id/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "f7b9c16b30468642dbd6c74355eda8d9545882f98d98549b9fd5146e27bdc43a"
+    },
+    "id/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "27c630e7a885dec488c74b630a36cabbf8bdfdad9634316ad9f39a2f748ec8a3"
+    },
+    "id/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "33c7b630b0cc73dd3a7ed3f02097dec691e77ed48ccbce840d120892e65b25c8"
+    },
+    "id/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "90e0a243124f539eff50f355789bd71625991f3bc9d0fe02f0afda7f9911f666"
+    },
+    "fil/norva-getting-started": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f49a10b2880f3cc4a8fa82c203ac9042a99bd85bab4ec846d308e37889f63b69",
+      "translation_sha256": "2a13865b087b65a25d1617b72314228b285fb1f9e44ceca2d645a28ca94097b0"
+    },
+    "fil/connect-compatible-media-source-norva": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8efa2f6c3971568d3ed277e8cdd99305ea755c0d2b3628b40aefe9cc0d3bf659",
+      "translation_sha256": "bb23c86a6a3d871aae754f1509a27dcbeee55d173402c3df181fe20ee5b97f3e"
+    },
+    "fil/organize-large-movie-collection": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "70d3f683f1bcc47dc17c14e181cb0a1b72a5e687ae129f5eb370c0fd9c3dc8ce",
+      "translation_sha256": "57349baa5ad9530353f67d2ec9b2c7e1937c518c2d3af763b01f7b4b24c1d7de"
+    },
+    "fil/what-is-norva-media-player": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "82eee2f74722ec16664a26e811d7ea18a4fc9b2dc90733bb8fe49d56af804297",
+      "translation_sha256": "2e4d14c1ddb43560c0cde1f1c79c50e1a222f6752c2c6318b413388e2206d98e"
+    },
+    "fil/captions-and-subtitles-why-the-accessibility-goals-can-differ": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "8609ed90fdc87c761863c6237160c53b74df1b4dca9ccad442b2fcba69fdde81",
+      "translation_sha256": "c7c528860bac8b87e4a7c1d09781b14d44e107b6d12e605df0dfddb2c8ec19c3"
+    },
+    "fil/legibility-and-readability-two-different-viewing-problems": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "1b55217a33e5761ed80d94c9865abae96810f3ab7ef102102082a65f06d9dd9b",
+      "translation_sha256": "4e89c6e2dcd41b2d34582e8c1a308d82d31f70ee505afd78460465f7b913334a"
+    },
+    "fil/resolution-and-bitrate-why-they-are-not-the-same": {
+      "published_at": "2026-09-10T19:21:54.340Z",
+      "updated_at": "2026-09-10T19:21:54.340Z",
+      "source_sha256": "f01136e764e04cac55c20c14d3c6d393d827a51ecc5bf37cce8da07de71596be",
+      "translation_sha256": "485f3d4df3ead86cc03bf01036d71180a0ba2744527e9abe1a75469981eb03da"
+    }
+  }
+}

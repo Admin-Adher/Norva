@@ -159,11 +159,14 @@ function renderInline(text, ctx) {
     if (!isSafeLink(url) || (ctx && typeof ctx.isLinkSuppressed === 'function' && ctx.isLinkSuppressed(url))) {
       return label; // Keep the words, drop unsafe or unpublished links.
     }
-    const href = escapeAttr(url);
-    const external = /^https?:\/\//i.test(url) && !/^https?:\/\/(?:www\.)?norva\.tv(?:[/:?#]|$)/i.test(url);
+    const resolved = ctx?.resolveLink ? ctx.resolveLink(url) : { href: url };
+    if (!resolved || !isSafeLink(resolved.href)) return label;
+    const href = escapeAttr(resolved.href);
+    const external = /^https?:\/\//i.test(resolved.href) && !/^https?:\/\/(?:www\.)?norva\.tv(?:[/:?#]|$)/i.test(resolved.href);
     const rel = external ? ' rel="noopener"' : '';
     const target = external ? ' target="_blank"' : '';
-    links.push(`<a href="${href}"${target}${rel}>${escapeHtml(label)}</a>`);
+    const language = resolved.language ? ` hreflang="${escapeAttr(resolved.language)}"` : '';
+    links.push(`<a href="${href}"${target}${rel}${language}>${escapeHtml(label)}${resolved.note ? ` <span class="link-language">(${escapeHtml(resolved.note)})</span>` : ''}</a>`);
     return `\u0000LINK${links.length - 1}\u0000`;
   });
   s = escapeHtml(s);
@@ -202,6 +205,7 @@ function renderMarkdown(body, ctx = {}) {
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
   const out = [];
   const headings = ctx.headings || [];
+  const usedHeadingIds = new Set();
   let firstH1Dropped = false;
   let i = 0;
 
@@ -250,7 +254,7 @@ function renderMarkdown(body, ctx = {}) {
       if (!match || !match[1].trim()) throw new Error('Invalid blog image syntax or missing alt text');
       const [, alt, src, caption] = match;
       const { width, height } = resolveBlogImage(src, ctx.publicDir);
-      out.push(`<figure class="article-figure"><img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" width="${width}" height="${height}" loading="lazy" decoding="async"><figcaption>${caption ? escapeHtml(caption) : ''}<a class="article-figure-link" href="${escapeAttr(src)}" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>`);
+      out.push(`<figure class="article-figure"><img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" width="${width}" height="${height}" loading="lazy" decoding="async"><figcaption>${caption ? escapeHtml(caption) : ''}<a class="article-figure-link" href="${escapeAttr(src)}" target="_blank" rel="noopener">${escapeHtml(ctx.ui?.fullSizeImage || 'Open full-size image (new tab)')}</a></figcaption></figure>`);
       i++;
       continue;
     }
@@ -268,7 +272,13 @@ function renderMarkdown(body, ctx = {}) {
         continue;
       }
       const renderLevel = Math.min(level === 1 ? 2 : level, 6);
-      const id = slugifyHeading(rawText);
+      // Stable English anchors make existing deep links work in every locale.
+      // Translated documents must preserve the source's heading structure.
+      const base = ctx.headingAliases?.[headings.length] || slugifyHeading(rawText) || 'section';
+      let id = base;
+      let suffix = 2;
+      while (usedHeadingIds.has(id)) id = `${base}-${suffix++}`;
+      usedHeadingIds.add(id);
       headings.push({ level: renderLevel, text: rawText, id });
       out.push(`<h${renderLevel} id="${escapeAttr(id)}">${renderInline(rawText, ctx)}</h${renderLevel}>`);
       i++;
@@ -302,7 +312,7 @@ function renderMarkdown(body, ctx = {}) {
         i++;
       }
       const alignAttr = (n) => (aligns[n] ? ` style="text-align:${aligns[n]}"` : '');
-      let html = '<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>\n<thead><tr>';
+      let html = `<div class="table-wrap" role="region" aria-label="${escapeAttr(ctx.ui?.scrollableTable || 'Scrollable table')}" tabindex="0"><table>\n<thead><tr>`;
       header.forEach((c, n) => { html += `<th scope="col"${alignAttr(n)}>${renderInline(c, ctx)}</th>`; });
       html += '</tr></thead>\n<tbody>';
       for (const row of rows) {

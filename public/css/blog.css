@@ -63,6 +63,33 @@
 
 * { box-sizing: border-box; }
 
+/* Localized guides share the original visual system and remain usable without JS. */
+.blog-language-picker { margin-block: 16px 32px; max-inline-size: 100%; }
+.blog-language-picker summary { width: fit-content; cursor: pointer; min-block-size: 44px; padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--glass); color: var(--text); }
+.blog-language-picker summary:focus-visible, .blog-language-picker a:focus-visible { outline: 2px solid var(--blue-bright); outline-offset: 4px; }
+.blog-language-picker ul { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 16px 0 0; margin: 0; }
+.blog-language-picker a { display: flex; align-items: center; min-block-size: 44px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; }
+.blog-language-picker a[aria-current="page"] { border-color: var(--blue-bright); color: var(--text); background: var(--glass-strong); }
+.translation-note { padding-block: 16px; padding-inline: 20px; margin-block: 24px; border-inline-start: 2px solid var(--border-strong); color: var(--muted); font-size: .88rem; }
+.translation-note > span { display: block; margin-block-start: 4px; }
+.translation-note p { margin-block: 8px 0; }
+.link-language { font-size: .85em; color: var(--muted); }
+.localized-library-intro { max-inline-size: 850px; margin-block-end: 40px; }
+.localized-library .library-card h2 { font-size: 1.3rem; margin-block: 16px 8px; }
+.localized-library .library-card-meta { flex-wrap: wrap; gap: 8px 24px; }
+html[dir="rtl"] .breadcrumb .sep { display: inline-block; transform: scaleX(-1); }
+html[dir="rtl"] article ul, html[dir="rtl"] article ol { padding-left: 0; padding-inline-start: 24px; }
+html[dir="rtl"] article blockquote { border-left: 0; border-inline-start: 3px solid var(--border-strong); padding-inline: 20px 0; }
+html[dir="rtl"] article th, html[dir="rtl"] article td { text-align: start; }
+html[dir="rtl"] article code, html[dir="rtl"] article pre { direction: ltr; unicode-bidi: isolate; }
+html[lang="ar"] h1, html[lang="ar"] h2, html[lang="hi"] h1, html[lang="hi"] h2, html[lang="bn"] h1, html[lang="bn"] h2 { letter-spacing: normal; line-height: 1.5; }
+html[lang="ar"] article, html[lang="hi"] article, html[lang="bn"] article { line-height: 1.9; }
+@media (max-width: 480px) {
+  .blog-nav { flex-wrap: wrap; }
+  .blog-nav .nav-right { flex-wrap: wrap; gap: 8px; }
+  .blog-language-picker summary { width: auto; }
+}
+
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 92px;
@@ -72,7 +99,7 @@ html {
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
   overflow-x: hidden;
   isolation: isolate;
   color: var(--text);
@@ -120,10 +147,11 @@ a { color: var(--blue-bright); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .skip-link {
-  position: absolute; left: -9999px; top: 0;
-  background: var(--blue); color: #fff; padding: 10px 16px; border-radius: 0 0 8px 0; z-index: 100;
+  position: absolute; inset-inline-start: 0; top: 0; z-index: 100;
+  width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  background: var(--blue); color: #fff; border-radius: 0 0 8px 8px;
 }
-.skip-link:focus { left: 0; }
+.skip-link:focus { width: auto; height: auto; min-height: 44px; padding: 10px 16px; overflow: visible; clip-path: none; }
 
 /* ---- Header ---- */
 .blog-nav {
@@ -139,6 +167,7 @@ a:hover { text-decoration: underline; }
 .blog-nav .brand:hover { text-decoration: none; }
 .blog-nav .nav-right { display: flex; align-items: center; gap: clamp(12px, 3vw, 26px); }
 .blog-nav .nav-right a { color: var(--muted); font-weight: 600; font-size: 15px; }
+.blog-nav .nav-right a, .blog-nav .brand { min-height: 44px; min-inline-size: 44px; display: inline-flex; align-items: center; justify-content: center; }
 .blog-nav .nav-right a:hover { color: var(--text); text-decoration: none; }
 .blog-nav .cta {
   background: var(--grad-accent); color: #fff !important; padding: 9px 16px; border-radius: 999px;
@@ -634,4 +663,10 @@ main.blog-index {
 @media (max-width: 560px) {
   body { font-size: 16px; }
   .blog-nav .nav-right a.hide-sm { display: none; }
+}
+
+@media (max-width: 480px) {
+  .blog-nav .nav-right { gap: 8px; }
+  .blog-nav .brand span { display: none; }
+  html { scroll-padding-top: 140px; }
 }
