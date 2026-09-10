@@ -63,4 +63,6 @@ test('SQL counters and bounded page filtering share the exact visible per-varian
   assert.match(sql,/on delete cascade/);
   assert.match(sql,/after update of metadata,raw_title,external_id,user_id,title_id,source_id,item_type/);
   assert.doesNotMatch(sql,/update public\.(cloud_title_variants|cloud_media_items|cloud_title_file_language_observations)/);
+  const guard=read('supabase/migrations/20260910160152_catalog_language_counts_title_type_guard.sql');
+  assert.match(guard,/title\.id=effective\.title_id and title\.user_id=p_user_id and title\.item_type=p_item_type/);
 });
