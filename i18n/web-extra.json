@@ -55,6 +55,48 @@
     "id": "{{language}} · penyedia",
     "fil": "{{language}} · provider"
   },
+  "ui_web_provider_language_unverified": {
+    "source": "Provider · Unverified",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "Provider · Unverified",
+    "fr": "Fournisseur · Non vérifié",
+    "pt-BR": "Provedor · Não verificado",
+    "es": "Proveedor · Sin verificar",
+    "hi": "प्रदाता · अपुष्ट",
+    "tr": "Sağlayıcı · Doğrulanmadı",
+    "bn": "প্রদানকারী · যাচাই করা হয়নি",
+    "ar": "المزود · غير متحقق منه",
+    "id": "Penyedia · Belum diverifikasi",
+    "fil": "Provider · Hindi pa beripikado"
+  },
+  "ui_web_provider_nordic_languages": {
+    "source": "Nordic languages",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "Nordic languages",
+    "fr": "Langues nordiques",
+    "pt-BR": "Idiomas nórdicos",
+    "es": "Lenguas nórdicas",
+    "hi": "नॉर्डिक भाषाएँ",
+    "tr": "Nordik diller",
+    "bn": "নর্ডিক ভাষাসমূহ",
+    "ar": "لغات بلدان الشمال الأوروبي",
+    "id": "Bahasa Nordik",
+    "fil": "Mga wikang Nordiko"
+  },
+  "ui_web_provider_language_to_confirm": {
+    "source": "{{language}} · to confirm",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "{{language}} · to confirm",
+    "fr": "{{language}} · à confirmer",
+    "pt-BR": "{{language}} · a confirmar",
+    "es": "{{language}} · por confirmar",
+    "hi": "{{language}} · पुष्टि बाकी है",
+    "tr": "{{language}} · teyit edilmeli",
+    "bn": "{{language}} · নিশ্চিত করা বাকি",
+    "ar": "{{language}} · يحتاج إلى تأكيد",
+    "id": "{{language}} · perlu konfirmasi",
+    "fil": "{{language}} · kailangan pang kumpirmahin"
+  },
   "ui_web_e508df1e1204": {
     "source": "Nothing new right now",
     "refs": [

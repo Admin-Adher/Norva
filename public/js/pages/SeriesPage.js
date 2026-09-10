@@ -2719,6 +2719,7 @@ class SeriesPage {
             const desc = MediaUtils.versionDescriptor(item, {
                 siblings: versions,
                 index,
+                providerLanguageHints: true,
                 resolveSourceName: (id) => this.getSourceName(id)
             });
             const dot = desc.tier
@@ -2728,10 +2729,12 @@ class SeriesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
+            const languageStatus = desc.languageStatus ? `<span class="version-meta version-language-status">${MediaUtils.escapeHtml(desc.languageStatus)}</span>` : '';
             const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
+                    ${languageStatus}
                     ${meta}
                     ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan" data-i18n-title="ui_web_6168604ed2ae" data-i18n="ui_web_ca1844969742">Unavailable</span>' : ''}
                 </button>`;

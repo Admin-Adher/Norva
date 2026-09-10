@@ -9846,6 +9846,12 @@ kbd {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+/* The evidence qualifier must never disappear behind the metadata line clamp. */
+.version-language-status {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
 .version-tier-dot {
   width: 8px;
   height: 8px;

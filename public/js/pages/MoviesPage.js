@@ -2636,6 +2636,7 @@ class MoviesPage {
             const desc = MediaUtils.versionDescriptor(item, {
                 siblings: versions,
                 index,
+                providerLanguageHints: true,
                 resolveSourceName: (id) => this.getSourceName(id)
             });
             const state = this.getMovieWatchState(item);
@@ -2648,10 +2649,12 @@ class MoviesPage {
                 ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
                 : '';
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
+            const languageStatus = desc.languageStatus ? `<span class="version-meta version-language-status">${MediaUtils.escapeHtml(desc.languageStatus)}</span>` : '';
             const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
+                    ${languageStatus}
                     ${meta}
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress" data-i18n="ui_web_c1f88e9d6c41">In progress</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress" data-i18n="ui_web_1ca8c1c0de6f">Watched</span>' : ''}

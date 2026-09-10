@@ -1894,6 +1894,65 @@ const MediaUtils = (() => {
         }) ?? `${hint} · Provider label`;
     }
 
+    // Display-only interpretations approved for provider version labels. Never feed
+    // these into track maps, language facets, matching scores or playback preferences.
+    // In particular IN is a country, Nordic a group, and MP4 only a container.
+    const VERSION_PROVIDER_LANGUAGE_TAGS = {
+        al: 'sq', alb: 'sq', albanian: 'sq',
+        ar: 'ar', arabic: 'ar',
+        fr: 'fr', french: 'fr',
+        gr: 'el', greece: 'el', greek: 'el',
+        hi: 'hi', hindi: 'hi',
+        nl: 'nl', dutch: 'nl',
+        so: 'so', som: 'so', somali: 'so',
+        nordic: 'nordic', scandinavian: 'nordic'
+    };
+
+    function versionProviderLanguageHint(item = {}) {
+        const raw = String(item.raw_title || item.rawTitle || '').replace(BAR_SEPARATORS, ' | ');
+        // Only the delimited prefix of a raw provider title is eligible. Never scan
+        // the film/episode title body ("So - ...", "Hindi Medium", etc.).
+        const prefix = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})\s*[-–—|:]\s*/)?.[1] || '';
+        const category = String(item.category_name || item.metadata?.categoryName || '').replace(BAR_SEPARATORS, ' | ');
+        const inspect = (value) => {
+            const tokens = stripDiacritics(value).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+            const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || t === 'subtitled')
+                || /sous[\s-]+titres/i.test(value) || RTL_SUB_RE.test(value))
+                && !tokens.some(t => DUB_MARKERS.has(t));
+            const tags = [...new Set(tokens.map(t => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
+                ? VERSION_PROVIDER_LANGUAGE_TAGS[t] : null).filter(Boolean))];
+            return { subOnly, tags };
+        };
+        const leading = inspect(prefix);
+        const categorized = inspect(category);
+        // An explicit subtitle marker must not be bypassed by the other field.
+        if (leading.subOnly || categorized.subOnly) return null;
+        const tags = [...new Set([...leading.tags, ...categorized.tags])];
+        // Conflicting or multi-language provider labels do not prove a track list.
+        if (tags.length !== 1) return null;
+        const tag = tags[0];
+        if (tag === 'nordic') {
+            return { label: globalThis.NorvaI18n?.t('ui_web_provider_nordic_languages', {
+                defaultValue: 'Nordic languages'
+            }) ?? 'Nordic languages' };
+        }
+        const label = languageDisplayFull(tag);
+        return { label: tag === 'so'
+            ? (globalThis.NorvaI18n?.t('ui_web_provider_language_to_confirm', {
+                defaultValue: '{{language}} · to confirm', language: label
+            }) ?? `${label} · to confirm`)
+            : label };
+    }
+
+    function versionProviderLanguageStatus(item) {
+        const status = globalThis.NorvaI18n?.t('ui_web_provider_language_unverified', {
+            defaultValue: 'Provider · Unverified'
+        }) ?? 'Provider · Unverified';
+        const job = item.audioLanguageValidationJobStatus || item.audio_language_validation_job_status;
+        return ['running', 'queued', 'retry_wait'].includes(job)
+            ? `${status} · ${audioLanguageAnalysisLabel(item)}` : status;
+    }
+
     function versionTrackState(item = {}, kind = 'audio') {
         const isAudio = kind === 'audio';
         const direct = isAudio
@@ -2007,8 +2066,9 @@ const MediaUtils = (() => {
         return '';
     }
 
-    // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string }
-    // Returns { headline, meta, badge, tier }.
+    // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string,
+    //         providerLanguageHints?: boolean } (version cards only, never filters).
+    // Returns { headline, languageStatus, meta, badge, tier, audioSource }.
     function versionDescriptor(item = {}, opts = {}) {
         item = item || {};
         const index = opts.index || 0;
@@ -2045,13 +2105,18 @@ const MediaUtils = (() => {
                     : audioLanguageState.source;
         const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
 
-        // A version card represents one provider FILE. Lead with that file's
-        // exact observed soundtrack. Prefix/category/platform text is metadata,
-        // never audio evidence; "Netflix" and "Arabic subtitles" are not audio.
+        // Exact observations (including a known-empty map) always outrank supplier
+        // interpretations. The opt-in display fallback stays visibly unverified;
+        // default descriptors and all playback/filter evidence keep their contract.
+        const declaredAudio = !hasDisplayableAudioLanguage(audioValidation) ? providerAudioBadge(item) : '';
+        const interpreted = opts.providerLanguageHints === true && !observedAudio && !declaredAudio
+            ? versionProviderLanguageHint(item) : null;
         const headline = !hasDisplayableAudioLanguage(audioValidation)
-            ? providerAudioBadge(item) || audioLanguageAnalysisLabel(item)
-            : observedAudio || audioLanguageAnalysisLabel(item);
-        const metaParts = [subtitleLabel, providerHintLabel(providerHint), provider, container];
+            ? declaredAudio || interpreted?.label || audioLanguageAnalysisLabel(item)
+            : observedAudio || interpreted?.label || audioLanguageAnalysisLabel(item);
+        const languageStatus = opts.providerLanguageHints === true && (interpreted || declaredAudio)
+            ? versionProviderLanguageStatus(item) : '';
+        const metaParts = [subtitleLabel, languageStatus ? providerHint : providerHintLabel(providerHint), provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Keep provider labels secondary, without repeating the audio headline.
         let meta = metaParts.filter(p => p && p !== headline).join(' · ');
@@ -2088,10 +2153,12 @@ const MediaUtils = (() => {
 
         return {
             headline,
+            languageStatus,
             meta,
             badge,
             tier,
-            audioSource: observedAudioSource
+            audioSource: interpreted ? 'provider-label' : declaredAudio && opts.providerLanguageHints === true
+                ? 'provider-declared' : observedAudioSource
         };
     }
 
