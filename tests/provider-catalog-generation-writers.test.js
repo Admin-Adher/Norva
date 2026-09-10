@@ -774,9 +774,13 @@ test('active projection adopts only a monotone user visibility epoch after its o
   assert.ok(variantWrite >= 0 && adopt > variantWrite, 'visible variant upsert must adopt its post-write user epoch');
   assert.equal(
     projection.match(/await adoptActiveCatalogUserVisibilityEpoch\(/g)?.length,
-    6,
+    7,
     'every projection write boundary must re-prove authority while adopting only the monotone user epoch',
   );
+  const hydration = projection.indexOf('options.db.rpc("hydrate_cloud_title_file_languages"');
+  const languageLoop = projection.lastIndexOf('for (let index = 0;', hydration);
+  assert.ok(projection.indexOf('await adoptActiveCatalogUserVisibilityEpoch(', languageLoop) < hydration,
+    'exact-language hydration also re-proves the current source before its write');
 });
 
 test('isolated projection cannot reach active/shared metadata mutations', () => {
