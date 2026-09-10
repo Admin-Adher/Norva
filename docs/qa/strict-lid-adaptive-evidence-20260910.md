@@ -43,8 +43,56 @@ process ledger. Its budget comes from the existing request ceiling, not an added
 
 ## Production and real-provider pilot
 
-At this pre-publication checkpoint, the candidate is validated but **not deployed**.
-The authorized release must still pass Git publication/CI, idle deployment checks and a small
-new internal-account multi-provider pilot through the existing worker. No old quarantines or
-pending jobs are manually revived. Pilot outcomes must separate extraction, usable evidence,
-window acceptance and final exact-file certification; this small sample cannot prove 99% accuracy.
+- Published gateway change on `main`: `4b410072465819070c9e3b5f1ed680bca9c217b2`.
+- CI `Verify cloud contracts` succeeded, run `34522088450`, job `103021828284`:
+  **4,157 tests, 4,147 passed, 10 skipped, zero failures**. Region/locales/syntax passed too.
+  Web and Relay deployments succeeded. Android/Windows packaging is separate from gateway proof.
+- Candidate v167 deployed after every idle gate passed. All six module hashes, helper hash,
+  sampler runtime, original Whisper runtime, environment, Docker configuration and mounts verified.
+  Original v166 container retained for rollback; no schema, flag or queue configuration changed.
+- Production normalized `index.js` SHA-256:
+  `fa92a6c95557ac753131396d98af79396f03c9dcbeac9a1b9a76c76bb461c812`.
+- Eligibility audit: 86 new exact files across four providers and three active internal accounts,
+  each with one unknown audio track and a gateway profile less than 48 hours old.
+- Pilot enqueued **three new files on three providers** using the normal tenant-fenced RPC.
+  No previous jobs/quarantines were reset or retimed. All three completed six windows before
+  20:00 UTC, with six provider attempts each and no quarantine. All 18 retained receipts were
+  authenticated using the deployed binding and real current time; expiry was never bypassed.
+
+| Internal sample / distinct provider | Accepted windows | Weak | Insufficient | Speech selection / anchor fallback | Final decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 1 | 3 EN | 1 | 2 | 3 / 3 | Pending: three qualifying windows, below four |
+| 2 | 4 FR + 1 EN | 0 | 1 | 6 / 0 | Pending: conflicting accepted languages |
+| 3 | 2 EN | 0 | 4 | 4 / 2 | Pending: two qualifying windows, below four |
+
+These are model/evidence classifications, not independently human-verified ground truth.
+No repeated-evidence or missing-diversity rejection was found in these receipts. **Zero of
+three files was newly certified in the shared cache**; the existing next-day retry policy remains.
+The pilot validates the collection/selection/checkpoint mechanics, not a certification-rate gain.
+Thirteen windows used speech selection; five retained their anchor after zero detected speech.
+
+Since gateway restart, two quality fallbacks ran, with zero recovered qualifying samples,
+zero fallback conflicts/failures and zero fallback budget exhaustion. These counters are global
+and must not be individually attributed to the pilot. The bounded global diagnostic read found
+18 selected audio preparations and no invalid-audio/preparation timeout/failure events.
+
+Final gateway check: v167 healthy, runtime and speech sampler verified, zero active brokers,
+WAV extractions, inference processes, viewers, pumps or queue work. All CI packaging jobs for
+the gateway-code commit also completed successfully; this is not an Android device proof.
+
+Early waiting was not an extraction failure: one provider's normal five-minute catalogue-refresh
+protection expired, then the bounded scheduler resumed it naturally. No stale blocking lease or
+active viewer was found by the targeted audit. The other provider's historical activity type
+was already replaced in the ledger and cannot be reconstructed with certainty.
+
+Final operator verification: 220/221 focused Node tests passed (one opt-in binary smoke skipped
+locally, already passed in the exact Linux candidate), 12 deployment tests and seven read-only
+proof tests passed. The packaging test now normalizes Windows CRLF without changing runtime code.
+
+Reproduction: use the adjacent `check-strict-lid-adaptive-evidence-batch-20260910.py` and
+`read-strict-lid-adaptive-evidence-proof-20260910.py` operators. Never replay a start intention,
+reset an old job or backdate receipt opening. The final sanitized local snapshot is
+`norva-adaptive-evidence-live-proof-20260910.json`; it contains metrics, not tokens/transcripts.
+
+Pilot outcomes must separate extraction, usable evidence, window acceptance and final exact-file
+certification. This small sample cannot prove 99% accuracy or generalized throughput improvement.

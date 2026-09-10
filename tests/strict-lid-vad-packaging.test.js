@@ -2,8 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const source = fs.readFileSync('ops/hetzner/media/Dockerfile.strict-lid-vad', 'utf8');
-const gateway = fs.readFileSync('services/media-gateway/Dockerfile', 'utf8');
+const source = fs.readFileSync('ops/hetzner/media/Dockerfile.strict-lid-vad', 'utf8').replace(/\r\n/g, '\n');
+const gateway = fs.readFileSync('services/media-gateway/Dockerfile', 'utf8').replace(/\r\n/g, '\n');
 
 test('standalone VAD uses the gateway pinned source and a bounded static CPU build', () => {
     const commit = /^ARG WHISPER_CPP_COMMIT=([a-f0-9]{40})$/m.exec(gateway)?.[1];
