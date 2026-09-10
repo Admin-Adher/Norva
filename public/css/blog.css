@@ -231,16 +231,37 @@ article tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
 .toc a:hover { color: var(--blue-bright); text-decoration: none; }
 
 /* ---- CTA + related + sources ---- */
+.article-figure { margin: 32px 0; min-width: 0; }
+.article-figure img {
+  display: block; max-width: 100%; width: 100%; height: auto; margin-inline: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
+}
+.article-figure figcaption {
+  margin-top: 12px; max-width: 68ch; color: var(--muted);
+  font-size: 14px; line-height: 1.6;
+}
+.article-figure-link {
+  display: flex; align-items: center; width: fit-content; min-height: 44px;
+  margin-top: 4px; text-decoration: underline; text-underline-offset: 3px;
+}
+.table-wrap:focus-visible,
+article a:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }
+
 .article-cta {
   margin: 40px 0 0; padding: 26px; text-align: center;
   background: linear-gradient(135deg, rgba(59, 130, 255, 0.12), rgba(124, 107, 255, 0.10));
   border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--card-shadow);
 }
-.article-cta a.btn {
+.article-cta h2 { margin: 0 0 16px; font-size: 23px; }
+.article-cta p:last-child { margin-bottom: 0; }
+.article-cta a.btn,
+.article-cta a[data-blog-cta="primary"] {
   display: inline-block; margin-top: 6px; background: var(--grad-accent); color: #fff; font-weight: 700;
-  padding: 12px 26px; border-radius: 999px; box-shadow: var(--card-shadow);
+  min-height: 44px; padding: 12px 26px; border-radius: 999px; box-shadow: var(--card-shadow);
 }
-.article-cta a.btn:hover { filter: brightness(1.08); text-decoration: none; }
+.article-cta a.btn:hover,
+.article-cta a[data-blog-cta="primary"]:hover { filter: brightness(1.08); text-decoration: none; }
 
 .related { margin-top: 54px; }
 .related h2 { font-size: 22px; margin-bottom: 16px; }

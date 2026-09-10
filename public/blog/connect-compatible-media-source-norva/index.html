@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="How to Connect a Compatible Media Source to Norva | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,14 +99,14 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Connect a Compatible Media Source to Norva</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="connect-compatible-media-source-norva">
       <div class="article-meta">
         <span class="tag">Norva Setup &amp; Account</span>
         <span>By Norva Editorial Team</span>
         <span class="dot">·</span>
         <time datetime="2026-08-10T06:00:00+02:00">10 August 2026</time>
         <span class="dot">·</span>
-        <span>5 min read</span>
+        <span>10 min read</span>
       </div>
       <h1>How to Connect a Compatible Media Source to Norva</h1>
       <p class="lede">Connect one compatible authorised source through Norva’s current source-management flow, protect its settings, wait for the catalogue to load, and verify one known item before adding more sources.</p>
@@ -114,8 +114,8 @@
       <strong data-i18n="ui_web_b5658fc8edda">On this page</strong>
       <ul><li><a href="#before-you-begin">Before you begin</a></li><li><a href="#step-1-use-an-official-norva-entry-point">Step 1: use an official Norva entry point</a></li><li><a href="#step-2-locate-source-management">Step 2: locate source management</a></li><li><a href="#step-3-select-a-documented-compatible-method">Step 3: select a documented compatible method</a></li><li><a href="#step-4-enter-settings-privately">Step 4: enter settings privately</a></li><li><a href="#step-5-save-once-and-allow-the-first-load">Step 5: save once and allow the first load</a></li><li><a href="#step-6-verify-a-known-item">Step 6: verify a known item</a></li><li><a href="#step-7-test-one-account-action">Step 7: test one account action</a></li><li><a href="#if-the-connection-is-partial">If the connection is partial</a></li><li><a href="#security-and-account-clean-up">Security and account clean-up</a></li><li><a href="#limitations">Limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
     </nav>
-      <blockquote><strong>In short:</strong> Sign in through the official Norva interface, open the current source-management area, choose a connection method Norva documents as compatible, and enter settings for a source you own or are authorised to use. Add one source at a time, keep credentials private, then verify categories and one known item before changing advanced settings.</blockquote>
-<p><strong>Draft verification notice:</strong> the exact control names and screenshots must be reproduced by an identified human in the current product before this article can be published. The workflow below deliberately avoids claiming unverified labels.</p>
+      <blockquote><strong>In short:</strong> On the web, open your account menu, then Settings and TV service. Choose M3U link for a complete playlist URL or Xtream login for compatible provider details. Connect only a source you own or are authorised to use, keep its credentials private, and verify one known item before adding more sources. Norva is a player; it does not supply the source or media.</blockquote>
+<p><strong>What was checked:</strong> on 10 September 2026, we used a signed-in test account in the live web app to inspect the forms and submit one user-provided Xtream test access. A later check confirmed <strong>Ready</strong>, source-specific language filtering and search opening a twelve-version title. The screenshots are direct, unaltered web captures with no private connection details shown. No M3U import or native phone/TV walkthrough was tested; successful playback remains a separate check.</p>
 <h2 id="before-you-begin">Before you begin</h2>
 <p>Confirm all four conditions:</p>
 <ul><li>You control the Norva account.</li><li>The source is yours or you have permission to use it.</li><li>The source terms permit the intended connection.</li><li>Norva currently supports the source’s connection method.</li></ul>
@@ -126,29 +126,57 @@
 <p>Sign in to the intended account and profile. If you are on a shared or borrowed device, do not save private credentials unless the device is trusted and the source terms permit it.</p>
 <p><strong>Observable result:</strong> the account opens normally and you can reach its source-management controls.</p>
 <h2 id="step-2-locate-source-management">Step 2: locate source management</h2>
-<p>Navigate to the area used to add or manage media sources. The location and label can differ by device or product version; follow the current in-product wording.</p>
+<p>On the web, open the account menu, choose <strong>Settings</strong>, then the <strong>TV Service</strong> tab. These English labels are translated when another interface language is selected. If opening the app lands on Home, follow this menu path; do not assume that a saved source-settings link has opened the correct panel.</p>
+<p>Choose <strong>Add playlist</strong> or <strong>Add provider</strong> to open the <strong>Add TV service</strong> dialog. Inside it, the <strong>M3U link</strong> and <strong>Xtream login</strong> tabs let you match the form to the information you actually received.</p>
 <p>Before entering anything, check whether another source already exists. Adding the same source twice can create duplicate-looking categories and make later diagnosis confusing.</p>
 <p><strong>Observable result:</strong> an add-source form or supported connection choice is visible.</p>
 <h2 id="step-3-select-a-documented-compatible-method">Step 3: select a documented compatible method</h2>
-<p>Choose only a method Norva currently documents as supported. Do not infer compatibility from a similar-looking field.</p>
+<p>Use the following distinction before pasting anything:</p>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">What you have</th><th scope="col">Choice in Norva</th><th scope="col">First check</th></tr></thead>
+<tbody><tr><td>One complete playlist address</td><td>M3U link</td><td>The full URL comes from your authorised source, not an app download page.</td></tr><tr><td>Compatible server address and credentials, or a full Xtream link</td><td>Xtream login</td><td>The source owner confirms this format and your permission to connect it.</td></tr><tr><td>Only a username and password for another app</td><td>My provider only gave me an app login</td><td>Ask for a compatible source format; do not guess a server address.</td></tr></tbody>
+</table></div>
+<figure class="article-figure"><img src="/assets/blog/source-m3u-live-web-20260910.jpg" alt="Norva M3U source form with a Playlist URL field, optional service name and Add button." width="1116" height="975" loading="lazy" decoding="async"><figcaption>Live web M3U form, 10 September 2026. The fields are empty; this image is not evidence of a completed M3U import.<a class="article-figure-link" href="/assets/blog/source-m3u-live-web-20260910.jpg" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>
+<p>For <strong>M3U link</strong>, enter the complete address in <strong>Playlist URL</strong>. Norva's form describes an <code>http</code> or <code>https</code> address and gives <code>.m3u</code>, <code>.m3u8</code> and <code>get.php</code> as common clues, not proof of permission or compatibility. <strong>Service name</strong> is optional: a neutral nickname helps distinguish sources without exposing credentials.</p>
+<figure class="article-figure"><img src="/assets/blog/source-xtream-live-web-20260910.jpg" alt="Norva Xtream connection form showing the first connection step and options for a full link or manual server details." width="1116" height="975" loading="lazy" decoding="async"><figcaption>Live Xtream entry step, captured before entering the test access. Continue leads to the access-period choice, not directly to a completed import.<a class="article-figure-link" href="/assets/blog/source-xtream-live-web-20260910.jpg" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>
+<p>For <strong>Xtream login</strong>, the current flow begins at <strong>Connect provider</strong>. Use <strong>Provider URL or complete Xtream link</strong>, or expand <strong>Enter server login manually</strong> if that is the format you received. Review each subsequent on-screen step rather than treating <strong>Continue</strong> as confirmation that the source is already connected.</p>
 <p>Match each requested value to the source’s official information. Avoid adding spaces, changing case, or “correcting” an address unless the source documentation instructs you to do so.</p>
 <p>Norva’s privacy policy says source settings are used to connect the service to the source on the user’s behalf. Review that policy before submitting sensitive settings.</p>
+<h3 id="if-you-only-have-an-app-login">If you only have an app login</h3>
+<p>Select <strong>My provider only gave me an app login</strong>. The help panel explains why credentials for a separate application cannot simply be imported as a Norva source and provides a message requesting a compatible M3U link or Xtream server details. Ask the source owner through their official channel; do not paste passwords into public support posts.</p>
+<figure class="article-figure"><img src="/assets/blog/source-app-login-help-live-web-20260910.jpg" alt="Norva help panel explaining that an app login needs compatible source details before it can be connected." width="1116" height="975" loading="lazy" decoding="async"><figcaption>Live web guidance for app-only credentials; no provider account or private link is shown.<a class="article-figure-link" href="/assets/blog/source-app-login-help-live-web-20260910.jpg" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>
 <h2 id="step-4-enter-settings-privately">Step 4: enter settings privately</h2>
 <p>Use copy and paste where practical, then inspect the beginning and end of each non-secret value. Keep passwords, private links, usernames, and tokens out of:</p>
 <ul><li>screenshots;</li><li>screen recordings;</li><li>public support threads;</li><li>analytics notes;</li><li>shared documents;</li><li>clipboard-history tools you do not trust.</li></ul>
 <p>If a television makes secure entry difficult, use the documented pairing or account workflow rather than broadcasting credentials.</p>
 <p><strong>Observable result:</strong> required fields are complete without an exposed secret.</p>
 <h2 id="step-5-save-once-and-allow-the-first-load">Step 5: save once and allow the first load</h2>
-<p>Submit the source once. The player may need time to retrieve categories, catalogue information, or guide data. Do not press Save repeatedly or remove the source while a normal load is still in progress.</p>
+<p>For the M3U form, use <strong>Add</strong> once after checking the URL. For Xtream, <strong>Continue</strong> opens <strong>Provider access period</strong>. The visible choices are <strong>Duration bought</strong>, <strong>Start and end dates</strong>, and <strong>Add this later</strong>. Record only terms you actually know; this is separate from your Norva plan.</p>
+<p>In our test, no access dates were supplied, so we selected <strong>Add this later</strong>, then <strong>Continue</strong>, reviewed <strong>Add later / No new dates</strong>, and used <strong>Finish without dates</strong> once. The step counter changed from five steps to three for this shorter path. Do not invent dates merely to finish setup.</p>
+<figure class="article-figure"><img src="/assets/blog/source-access-period-live-web-20260910.jpg" alt="Norva access-period choice with Add this later selected and the step counter showing two of three." width="1116" height="975" loading="lazy" decoding="async"><figcaption>Actual test path: continue without recording an access period. No purchase, renewal or reminder was configured in this walkthrough.<a class="article-figure-link" href="/assets/blog/source-access-period-live-web-20260910.jpg" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>
+<p>Norva then opened <strong>Preparing your catalog</strong>, displayed <strong>Importing</strong>, and marked the connection check as <strong>Done</strong>. The detected-title counts began to grow while catalogue preparation remained in progress. These are separate observations: accepted credentials do not mean every title is already ready to play.</p>
+<figure class="article-figure"><img src="/assets/blog/source-importing-live-web-20260910.jpg" alt="Norva catalogue-preparation panel for a neutrally named test source, showing Importing and separate connection and catalogue stages." width="1116" height="975" loading="lazy" decoding="async"><figcaption>A real intermediate import state, not a finished catalogue. Counts and progress reflect this test source at capture time; they are not a speed or capacity promise.<a class="article-figure-link" href="/assets/blog/source-importing-live-web-20260910.jpg" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>
+<p>The player may need time to retrieve categories, catalogue information, or guide data. Do not repeatedly submit or remove the source while a normal load is still in progress.</p>
 <p>No universal loading time can be promised. Source size, connection, and device can affect the first result.</p>
 <p><strong>Observable result:</strong> Norva accepts the settings or presents a specific, recordable error.</p>
 <h2 id="step-6-verify-a-known-item">Step 6: verify a known item</h2>
 <p>When the library reaches a stable state:</p>
 <ol><li>check the expected top-level section;</li><li>open one expected category;</li><li>search for one known item;</li><li>verify title, year or episode identity where available;</li><li>inspect source-supplied language or subtitle information;</li><li>avoid assuming missing optional metadata means the whole connection failed.</li></ol>
-<p>Use How to Confirm That a New Source Connected Correctly for a complete verification matrix.</p>
+<p>For example, choose one title that the source owner confirms is present. If its category loads but the title does not appear, note that specific result. If it appears but fails to play, catalogue loading succeeded; playback still needs a separate check. Neither observation proves that the entire source is working or broken.</p>
+<p><strong>Observed in the follow-up:</strong> the same source was marked <strong>Ready</strong> in <strong>Settings → TV Service</strong>. We opened <strong>Movies</strong>, selected <strong>Blog walkthrough test</strong> in <strong>Source</strong>, and used <strong>Audio language → Albanian</strong>. The returned cards displayed <strong>Albanian</strong>. After <strong>Clear all</strong>, searching a known title opened its details with twelve versions, a year and a synopsis. No duplicate source or manual resubmission was needed.</p>
+<figure class="article-figure"><img src="/assets/blog/catalog-audio-filter-live-web-20260910.jpg" alt="Norva Movie filters with the test source and Albanian audio selected, alongside separate category and subtitle controls." width="869" height="975" loading="lazy" decoding="async"><figcaption>Follow-up after the source reached Ready, 10 September 2026. The displayed count is a snapshot of this user's test source, not a promise about Norva's content or catalogue capacity.<a class="article-figure-link" href="/assets/blog/catalog-audio-filter-live-web-20260910.jpg" target="_blank" rel="noopener">Open full-size image (new tab)</a></figcaption></figure>
+<h3 id="do-not-confuse-a-source-label-with-a-verified-audio-track">Do not confuse a source label with a verified audio track</h3>
+<p>The current audio filter brings recognised language labels and detected file-track information into the same browsing control. That makes a source label useful for finding a version, but it does not turn a country, collection name or title prefix into proof of the tracks inside that file. Where actual track information is available, use it to choose the version. A regional indication such as <strong>Nordic languages</strong> does not identify a single spoken language.</p>
+<p>Use a separate check for each layer:</p>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Visible result</th><th scope="col">What it establishes</th><th scope="col">What still needs checking</th></tr></thead>
+<tbody><tr><td>The source shows Ready</td><td>Norva reports the catalogue as ready</td><td>Every item's metadata and playback compatibility</td></tr><tr><td>A title appears under the selected source</td><td>That item can be found in the current catalogue</td><td>Other items and the selected version</td></tr><tr><td>A source category appears</td><td>A grouping label was received</td><td>Whether a verified film genre is available</td></tr><tr><td>A language filter returns a version</td><td>Available language information matched the filter</td><td>Actual selectable tracks in that file and player</td></tr><tr><td>Language unidentified</td><td>No usable audio-language result is being displayed</td><td>Actual track availability and analysis status</td></tr><tr><td>The player page opens</td><td>Navigation to the player worked</td><td>Video frames, advancing playback and usable audio</td></tr></tbody>
+</table></div>
+<p>The latest follow-up tested catalogue navigation, not video playback. An earlier setup attempt opened the player without establishing advancing video before returning <strong>Back</strong>. We therefore do not present the Ready state, language badges or artwork as proof that a viewing session succeeded.</p>
 <h2 id="step-7-test-one-account-action">Step 7: test one account action</h2>
 <p>Add one favourite or save a small amount of playback progress. Return to the library and confirm the visible state.</p>
 <p>This tests the difference between source data and account context. It does not prove that every item, format, or device is compatible.</p>
+<p>Our test favourite was present when the catalogue was opened again later. We then removed it and reloaded to confirm the original state. The immediate return from details had not shown the updated state, so this observation validates persistence for that item, not instantaneous feedback or cross-device synchronisation.</p>
 <p>The broader first-session plan is <a href="/blog/norva-getting-started/">Getting Started With Norva</a>.</p>
 <h2 id="if-the-connection-is-partial">If the connection is partial</h2>
 <p>A partial result is more informative than “it does not work.” Record which layer succeeded:</p>
@@ -160,7 +188,7 @@
 <p>Norva’s privacy and account-deletion pages describe controls available for Norva account data.</p>
 <h2 id="limitations">Limitations</h2>
 <p>A successful connection does not mean every source field is complete, every media format works on every device, or offline access is available. Languages and subtitles depend on the source and media. Offline use depends on device, source, and associated rights.</p>
-<p>The current interface must be checked before publication. This draft contains no claim that the steps were personally tested.</p>
+<p>The evidence covers current web controls, one Xtream submission, a later Ready state, source-specific audio filtering, search/details for one title and a favourite's persistence/removal after reopening. It does not establish that every catalogue record is complete or playable. Successful playback and immediate favourite feedback were not validated. No M3U import, native phone/TV flow, offline use or cross-device continuity was accepted by this web test.</p>
 <h2 id="frequently-asked-questions">Frequently asked questions</h2>
 <h3 id="why-should-i-add-only-one-source-first">Why should I add only one source first?</h3>
 <p>It provides a clean baseline. If a category, title, or error appears, you know which source produced it.</p>
@@ -168,17 +196,13 @@
 <p>Only after redacting every password, private link, username, token, and personal identifier. Use Norva’s official support route.</p>
 <h3 id="what-if-norva-accepts-the-settings-but-nothing-appears">What if Norva accepts the settings but nothing appears?</h3>
 <p>Wait for the normal initial load, then verify the details and connection. Record whether the result is completely empty or partially loaded before contacting support.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">Review Norva’s setup overview</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">How Norva works</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">Norva Terms of Service</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva Privacy Policy</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva support</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">Review Norva’s setup overview</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">https://norva.tv/terms</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/app" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="connect-compatible-media-source-norva">Open Norva and connect your source</a></p>
+<p>After signing in, use the account menu, <strong>Settings</strong>, then <strong>TV Service</strong> as shown above.</p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/#how-it-works">How Norva works</a></li><li><a href="https://norva.tv/terms">Norva Terms of Service</a></li><li><a href="https://norva.tv/privacy">Norva Privacy Policy</a></li><li><a href="https://norva.tv/support">Norva support</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">
@@ -191,6 +215,11 @@
           <span class="tag">Norva Setup &amp; Account</span>
           <div class="card-title">What to Prepare Before Adding Your Media Source</div>
           <p>Verify permission and compatibility, collect source details privately, select one known item, and record the account and device before connecting.</p>
+        </a>
+        <a class="card" href="/blog/what-is-norva-media-player/">
+          <span class="tag">Product Evaluation &amp; Troubleshooting</span>
+          <div class="card-title">What Is Norva? A Straightforward Guide to the Media Player</div>
+          <p>Norva is software that organises and plays media from a compatible source the user owns or is legally authorised to use across supported web, mobile, and TV devices.</p>
         </a>
       </div>
     </section>

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Choose the Right Initial Focus on TV | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Choose the Right Initial Focus on a TV Screen</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="choose-initial-tv-focus">
       <div class="article-meta">
         <span class="tag">Remote &amp; D-pad Navigation</span>
         <span>By Norva Editorial Team</span>
@@ -118,8 +118,8 @@
 <p>Initial focus answers the viewer's first question: “What can I do now?” A poor answer can make a healthy screen feel frozen because no cue appears, or risky because Enter immediately triggers an unintended action.</p>
 <h2 id="separate-fresh-entry-from-return">Separate fresh entry from return</h2>
 <p>A fresh visit and a restored visit have different goals.</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Entry state</th><th>Preferred intent</th><th>Typical target</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Entry state</th><th scope="col">Preferred intent</th><th scope="col">Typical target</th></tr></thead>
 <tbody><tr><td>Fresh browse page</td><td>Begin discovery</td><td>Primary browse region or first useful control</td></tr><tr><td>Deep link to detail</td><td>Confirm identity, then act</td><td>Safe primary action when unambiguous</td></tr><tr><td>Return from detail</td><td>Continue prior journey</td><td>Originating card</td></tr><tr><td>Dialog opened</td><td>Resolve the current decision</td><td>Safe action or first content field</td></tr><tr><td>Empty or error</td><td>Recover</td><td>Valid recovery or Back-compatible control</td></tr></tbody>
 </table></div>
 <p>Do not override a meaningful restored origin with the page's usual first control. That forces people to rebuild context after every reversible journey.</p>
@@ -151,17 +151,12 @@
 <p>Focus a valid recovery or navigation action, display a clear empty or error message, and keep Back predictable.</p>
 <h3 id="should-focus-move-when-loading-completes">Should focus move when loading completes?</h3>
 <p>Not when the current focus remains valid. Move only under a documented state transition or when the existing target becomes unusable.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">Preview Norva's TV Navigation</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#product-preview" data-cta="blog-article">Preview Norva's TV Navigation</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">https://developer.android.com/docs/quality-guidelines/tv-app-quality</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="choose-initial-tv-focus">Preview Norva's TV Navigation</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       
     </article>
   </main>

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Complete Remote and D-Pad Navigation QA Guide | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete QA Guide for Remote and D-Pad Navigation</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="remote-dpad-navigation-qa">
       <div class="article-meta">
         <span class="tag">Remote &amp; D-pad Navigation</span>
         <span>By Norva Editorial Team</span>
@@ -125,8 +125,8 @@
 <p>Use the decision method in <a href="/blog/choose-initial-tv-focus/">choosing initial TV focus</a> and record why the selected target wins over alternatives.</p>
 <h2 id="test-every-directional-edge-once">Test every directional edge once</h2>
 <p>For each focusable target, press Up, Down, Left, and Right separately from a known state. Record the expected and actual destination. Do not hold the key during baseline testing, because key repeat can hide an incorrect intermediate hop.</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Start</th><th>Input</th><th>Expected</th><th>Actual</th><th>State</th><th>Result</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Start</th><th scope="col">Input</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">State</th><th scope="col">Result</th></tr></thead>
 <tbody><tr><td>Last filter</td><td>Down</td><td>Result-band anchor</td><td>Target</td><td>Results loaded</td><td>Pass/fail</td></tr><tr><td>First grid card</td><td>Left</td><td>Sidebar entry</td><td>Target</td><td>Default</td><td>Pass/fail</td></tr><tr><td>Dialog cancel</td><td>Back</td><td>Opener</td><td>Target</td><td>Modal open</td><td>Pass/fail</td></tr></tbody>
 </table></div>
 <p>After single-step coverage, repeat fast presses and reversals to detect queued animation, skipped targets, and stale geometry.</p>
@@ -159,17 +159,12 @@
 <p>No. Geometry is useful within regular regions, but explicit routes are often needed between regions, around overlays, and after dynamic layout changes.</p>
 <h3 id="can-automated-tests-replace-remote-testing">Can automated tests replace remote testing?</h3>
 <p>They can protect deterministic routes and state restoration, but representative hardware and human review remain necessary for visible focus, viewing-distance clarity, remote timing, and display behavior.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">Preview Norva's TV Navigation</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">WAI-ARIA APG: Developing a Keyboard Interface</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#product-preview" data-cta="blog-article">Preview Norva's TV Navigation</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">https://developer.android.com/docs/quality-guidelines/tv-app-quality</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="remote-dpad-navigation-qa">Preview Norva's TV Navigation</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">WAI-ARIA APG: Developing a Keyboard Interface</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

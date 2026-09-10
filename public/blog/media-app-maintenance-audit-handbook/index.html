@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Media App Maintenance and Audit Handbook | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete Media App Maintenance and Audit Handbook</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="media-app-maintenance-audit-handbook">
       <div class="article-meta">
         <span class="tag">Media App Maintenance &amp; Audits</span>
         <span>By Norva Editorial Team</span>
@@ -146,8 +146,8 @@
 <h2 id="retain-less-evidence">Retain less evidence</h2>
 <p>Keep dates, broad device categories, application versions, neutral sample codes, observed results, and owners. Exclude credentials, tokens, private source addresses, full catalogs, detailed viewing histories, and unnecessary household identities. Delete temporary screenshots after the support or security need ends.</p>
 <h2 id="original-evidence-risk-based-maintenance-calendar">Original evidence: risk-based maintenance calendar</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Trigger or cadence</th><th>Scope</th><th>Minimal evidence</th><th>Owner</th><th>Pass condition</th><th>Escalation</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Trigger or cadence</th><th scope="col">Scope</th><th scope="col">Minimal evidence</th><th scope="col">Owner</th><th scope="col">Pass condition</th><th scope="col">Escalation</th></tr></thead>
 <tbody><tr><td>Monthly</td><td>Account and devices</td><td></td><td></td><td></td><td></td></tr><tr><td>Quarterly</td><td>Profiles</td><td></td><td></td><td></td><td></td></tr><tr><td>After application update</td><td>Core smoke route</td><td></td><td></td><td></td><td></td></tr><tr><td>After source or network change</td><td>Known baseline</td><td></td><td></td><td></td><td></td></tr><tr><td>After password or household change</td><td>Access and ownership</td><td></td><td></td><td></td><td></td></tr><tr><td>Storage or preference trigger</td><td>Device-specific state</td><td></td><td></td><td></td><td></td></tr></tbody>
 </table></div>
 <h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
@@ -159,17 +159,12 @@
 <p>Not routinely. A reset is disruptive and may remove useful state; isolate the affected layer and follow current official support guidance first.</p>
 <h3 id="can-one-audit-prove-every-device-is-healthy">Can one audit prove every device is healthy?</h3>
 <p>No. Test representative required screens and record the scope. Expand only when a device represents a distinct essential workflow.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/support" target="_blank" rel="noopener">Review Norva Support</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva privacy policy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">Norva terms of service</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva support</a></li><li><a href="https://www.cisa.gov/secure-our-world/update-business-software" target="_blank" rel="noopener">CISA: Update software</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/support" data-cta="blog-article">Review Norva Support</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">https://norva.tv/terms</a></li><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li><li><a href="https://www.cisa.gov/secure-our-world/update-business-software" target="_blank" rel="noopener">https://www.cisa.gov/secure-our-world/update-business-software</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="media-app-maintenance-audit-handbook">Review Norva Support</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/#features">Norva features</a></li><li><a href="https://norva.tv/privacy">Norva privacy policy</a></li><li><a href="https://norva.tv/terms">Norva terms of service</a></li><li><a href="https://norva.tv/support">Norva support</a></li><li><a href="https://www.cisa.gov/secure-our-world/update-business-software" target="_blank" rel="noopener">CISA: Update software</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="920" viewBox="0 0 640 920" role="img" aria-labelledby="title desc">
+  <title id="title">Recognising the label and understanding its meaning</title>
+  <desc id="desc">The first pair repeats Episode 18 at the same size, with only the text contrast changed. The second pair holds the words Audio English Subtitles Off constant, first running them together then arranging Audio with English and Subtitles with Off. These are explanatory specimens, not Norva screenshots or measured usability results.</desc>
+  <rect width="640" height="920" rx="16" fill="#080B12"/>
+  <g font-family="Inter, Arial, sans-serif" fill="#F8FAFC">
+    <text x="32" y="54" font-size="30" font-weight="700">Two questions. Two different tests.</text>
+    <text x="32" y="96" font-size="24" fill="#94A3B8">Original specimens · not a product screen</text>
+    <text x="32" y="162" font-size="29" font-weight="600">1. Can I recognise the number?</text>
+    <text x="32" y="202" font-size="25" fill="#94A3B8">Only text contrast changes.</text>
+    <rect x="32" y="230" width="576" height="86" rx="10" fill="#1a1a25"/>
+    <text x="56" y="286" font-size="38" fill="#71717a">Episode 18</text>
+    <rect x="32" y="332" width="576" height="86" rx="10" fill="#1a1a25"/>
+    <text x="56" y="388" font-size="38">Episode 18</text>
+    <path d="M32 454H608" stroke="#3f3f46"/>
+    <text x="32" y="506" font-size="29" font-weight="600">2. Which setting is English?</text>
+    <text x="32" y="546" font-size="25" fill="#94A3B8">Same words. Different grouping.</text>
+    <rect x="32" y="574" width="576" height="94" rx="10" fill="#1a1a25"/>
+    <text x="56" y="634" font-size="31">Audio English Subtitles Off</text>
+    <rect x="32" y="684" width="576" height="148" rx="10" fill="#1a1a25"/>
+    <text x="56" y="740" font-size="31">Audio</text>
+    <text x="352" y="740" font-size="31">English</text>
+    <text x="56" y="794" font-size="31">Subtitles</text>
+    <text x="352" y="794" font-size="31">Off</text>
+    <text x="32" y="888" font-size="25" fill="#94A3B8">Test the real task, language and screen.</text>
+  </g>
+</svg>

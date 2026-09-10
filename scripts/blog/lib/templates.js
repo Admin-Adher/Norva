@@ -7,13 +7,14 @@
  */
 
 const { escapeHtml, escapeAttr, jsonLd } = require('./format');
+const { isSafeLink } = require('./markdown');
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const i18nAsset = asset => '/' + asset + '?v=' + crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname,'../../../public',asset),'utf8').replace(/\r\n/g,'\n')).digest('hex').slice(0,10);
 const SITE = 'https://norva.tv';
-const CSS_HREF = '/css/blog.css?v=1'; // hash:assets rewrites ?v= to a content hash at deploy
+const CSS_HREF = i18nAsset('css/blog.css');
 const DEFAULT_OG = `${SITE}/img/devices/norva-device-tv.webp`;
 const LOGO = `${SITE}/img/norva-app-icon-96.png`;
 const TRIAL_HREF = '/account.html?returnTo=%2Fapp%23home';
@@ -44,7 +45,7 @@ const commonHead = ({ title, description, canonical, robots, ogType, ogImage, js
   <meta name="twitter:image" content="${escapeAttr(ogImage || DEFAULT_OG)}">
 ${jsonLdBlocks.map((b) => `  <script type="application/ld+json">\n${b}\n  </script>`).join('\n')}
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="${i18nAsset('js/marketing.js')}"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>`;
 
 const header = () => `  <a class="skip-link" href="#main-content" data-i18n="ui_web_ac576a66d456">Skip to content</a>
@@ -96,6 +97,46 @@ function breadcrumbJsonLd(items) {
       item: it.absolute,
     })),
   });
+}
+
+/** Merge the body's curated references with metadata without two Sources blocks. */
+function articleEditorialSections(a) {
+  let body = a.bodyHtml || '';
+  const sourceBodies = [];
+  body = body.replace(/<h2\b[^>]*>Sources<\/h2>\s*([\s\S]*?)(?=<h[12]\b|$)/gi, (_, content) => {
+    sourceBodies.push(content.trim());
+    return '';
+  });
+  const curated = sourceBodies.join('\n');
+  const linked = new Set(Array.from(curated.matchAll(/<a\b[^>]*href="([^"]+)"/g), (m) => m[1]));
+  const missing = [];
+  for (const source of a.sources || []) {
+    if (!isSafeLink(source) || linked.has(escapeAttr(source))) continue;
+    linked.add(escapeAttr(source));
+    missing.push(source);
+  }
+  const extra = missing.length
+    ? `<ul>${missing.map((url) => `<li><a href="${escapeAttr(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></li>`).join('')}</ul>`
+    : '';
+  const sources = curated || extra
+    ? `<section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>\n${curated}\n${extra}</section>`
+    : '';
+
+  // The authored next-step block is authoritative; never append its CTA twice.
+  let primaryFound = false;
+  const primaryAttrs = `data-cta="blog-article" data-blog-cta="primary" data-blog-slug="${escapeAttr(a.slug)}"`;
+  body = body.replace(/(<h2\b[^>]*>(?:Your )?Next steps?<\/h2>)([\s\S]*?)(?=<h[12]\b|$)/gi, (section, heading, content) => {
+    if (primaryFound) return section;
+    const instrumented = content.replace(/<a\b([^>]*href="[^"]+"[^>]*)>/, (_, attrs) => {
+      primaryFound = true;
+      return `<a ${attrs} ${primaryAttrs}>`;
+    });
+    return primaryFound ? `<section class="article-cta">${heading}${instrumented}</section>` : section;
+  });
+  const cta = !primaryFound && a.cta && isSafeLink(a.cta.href) && a.cta.label
+    ? `<section class="article-cta"><a class="btn" href="${escapeAttr(a.cta.href)}" ${primaryAttrs}>${escapeHtml(a.cta.label)}</a></section>`
+    : '';
+  return { body, sources, cta };
 }
 
 /** Render a single article page. */
@@ -155,18 +196,7 @@ function renderArticlePage(a) {
     </section>`
     : '';
 
-  const sources = (a.sources && a.sources.length)
-    ? `<section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul>${a.sources.map((s) => `<li><a href="${escapeAttr(s)}" target="_blank" rel="noopener">${escapeHtml(s)}</a></li>`).join('')}</ul>
-    </section>`
-    : '';
-
-  const cta = (a.cta && a.cta.href && a.cta.label)
-    ? `<section class="article-cta">
-      <a class="btn" href="${escapeAttr(a.cta.href)}" data-cta="blog-article">${escapeHtml(a.cta.label)}</a>
-    </section>`
-    : '';
+  const { body, sources, cta } = articleEditorialSections(a);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -185,7 +215,7 @@ ${commonHead({
 ${header()}
   <main id="main-content">
     ${breadcrumb(crumbs)}
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="${escapeAttr(a.slug)}">
       <div class="article-meta">
         ${a.cluster ? `<span class="tag">${escapeHtml(a.cluster)}</span>` : ''}
         <span>By ${escapeHtml(a.author && a.author.name ? a.author.name : BYLINE)}</span>
@@ -197,8 +227,7 @@ ${header()}
       <h1>${escapeHtml(a.title)}</h1>
       ${lede}
       ${toc}
-      ${a.bodyHtml}
-      ${cta}
+      ${body}${cta ? '\n      ' + cta : ''}
       ${sources}
       ${related}
     </article>

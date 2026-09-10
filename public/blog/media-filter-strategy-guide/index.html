@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Complete Personal Media Library Filter Guide | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete Guide to Filtering a Personal Media Library</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="media-filter-strategy-guide">
       <div class="article-meta">
         <span class="tag">Filter Strategies</span>
         <span>By Norva Editorial Team</span>
@@ -121,8 +121,8 @@
 <ul><li>“Show films currently available from our connected sources.”</li><li>“Find a favourite with French audio and English subtitles.”</li><li>“Choose a family film released after 2015.”</li><li>“Browse any series in this category, then put recent items first.”</li></ul>
 <p>The sentence determines which controls are filters, which are preferences, and which are sorting.</p>
 <h2 id="build-the-requirement-to-filter-contract">Build the requirement-to-filter contract</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Requirement</th><th>Must/prefer</th><th>Field/control</th><th>Value meaning</th><th>Metadata confidence</th><th>Expected exclusion</th><th>Control item</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Requirement</th><th scope="col">Must/prefer</th><th scope="col">Field/control</th><th scope="col">Value meaning</th><th scope="col">Metadata confidence</th><th scope="col">Expected exclusion</th><th scope="col">Control item</th></tr></thead>
 <tbody><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tbody>
 </table></div>
 <p>For every row, ask whether the field applies to the work, one version, or the current source. “French audio” is version-specific; “favourite” may be profile-specific; “available” is time-sensitive.</p>
@@ -132,8 +132,8 @@
 <p>Use sorting or visual comparison for preferences such as newest first or highest-rated, where no candidate must be excluded.</p>
 <h2 id="check-field-reliability-before-filtering">Check field reliability before filtering</h2>
 <p>Use known positive and negative controls:</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Filter</th><th>Known matching record</th><th>Known non-matching record</th><th>Expected</th><th>Actual</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Filter</th><th scope="col">Known matching record</th><th scope="col">Known non-matching record</th><th scope="col">Expected</th><th scope="col">Actual</th></tr></thead>
 <tbody><tr><td></td><td></td><td></td><td></td><td></td></tr></tbody>
 </table></div>
 <p>If a known matching item disappears, the field, version scope, or filter semantics need investigation. Do not build a multi-filter recipe on an unverified condition.</p>
@@ -166,17 +166,12 @@
 <p>Only when the choice must come from favourites. Otherwise, it can hide useful catalogue-wide candidates too early.</p>
 <h3 id="why-does-adding-a-language-filter-remove-a-known-title">Why does adding a language filter remove a known title?</h3>
 <p>The track may belong to another version, the metadata may be missing, or the filter may use a different scope. Open details and audit the actual selectable track.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">See how Norva works</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://guides.loc.gov/c.php?g=1472768&amp;amp;p=10988945" target="_blank" rel="noopener">Library of Congress: Basic Search and facets</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">Library of Congress: Advanced Search</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">Norva: How it works</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">See How Norva Works</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://guides.loc.gov/c.php?g=1472768&amp;p=10988945" target="_blank" rel="noopener">https://guides.loc.gov/c.php?g=1472768&amp;p=10988945</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">https://guides.loc.gov/catalog/advanced-search</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#how-it-works" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="media-filter-strategy-guide">See how Norva works</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://guides.loc.gov/c.php?g=1472768&amp;p=10988945" target="_blank" rel="noopener">Library of Congress: Basic Search and facets</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">Library of Congress: Advanced Search</a></li><li><a href="https://norva.tv/#how-it-works">Norva: How it works</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

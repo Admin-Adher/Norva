@@ -19,6 +19,10 @@
  *
  * The scheduled GitHub Actions workflow (.github/workflows/blog-autopublish.yml)
  * runs this and commits + deploys when the output changes.
+ *
+ * Local editorial maintenance: --existing-only rebuilds exactly the content IDs
+ * already in published-state.json, without adding due articles or writing state.
+ * Combine with --dry-run to inspect the frozen set without writing any output.
  */
 
 const fs = require('fs');
@@ -40,8 +44,6 @@ const SITEMAP_OUT = path.join(PUBLIC_DIR, 'sitemap-blog.xml');
 
 const MIN_PUBLISHED = parseInt(process.env.BLOG_MIN_PUBLISHED || '4', 10);
 const ROBOTS = process.env.BLOG_ROBOTS || 'index,follow';
-const DRY_RUN = process.argv.includes('--dry-run');
-const RENDER_PUBLISHED_ONLY = process.argv.includes('--render-published-only');
 
 /* ------------------------------ CSV parsing ------------------------------ */
 
@@ -76,8 +78,8 @@ function parseCsv(text) {
   return rows;
 }
 
-function loadCalendar() {
-  const rows = parseCsv(fs.readFileSync(CALENDAR_CSV, 'utf8'));
+function loadCalendar(file = CALENDAR_CSV) {
+  const rows = parseCsv(fs.readFileSync(file, 'utf8'));
   const header = rows[0];
   const idx = (name) => header.indexOf(name);
   const iSeq = idx('sequence');
@@ -100,12 +102,12 @@ function loadCalendar() {
 /* --------------------------- article metadata ---------------------------- */
 
 // Map every content_id (leading number of the filename) to its file path.
-function indexArticleFiles() {
+function indexArticleFiles(directory = ARTICLES_DIR) {
   const byId = new Map();
-  for (const name of fs.readdirSync(ARTICLES_DIR)) {
+  for (const name of fs.readdirSync(directory)) {
     if (!name.endsWith('.md')) continue;
     const m = name.match(/^(\d+)-/);
-    if (m) byId.set(parseInt(m[1], 10), path.join(ARTICLES_DIR, name));
+    if (m) byId.set(parseInt(m[1], 10), path.join(directory, name));
   }
   return byId;
 }
@@ -134,11 +136,39 @@ function bodyPlainText(body) {
 
 /* -------------------------------- build ---------------------------------- */
 
-function main() {
-  const calendar = loadCalendar();
-  const filesById = indexArticleFiles();
-  const nowMs = Date.now();
+function main(options = {}) {
+  const root = options.root || ROOT;
+  const args = options.args || process.argv.slice(2);
+  const dryRun = args.includes('--dry-run');
+  const existingOnly = args.includes('--existing-only') || args.includes('--render-published-only');
+  for (const arg of args) {
+    if (!['--dry-run', '--existing-only', '--render-published-only'].includes(arg)) throw new Error(`Unknown blog build option: ${arg}`);
+  }
+  const contentDir = path.join(root, 'content/blog');
+  const stateFile = path.join(contentDir, 'published-state.json');
+  const publicDir = path.join(root, 'public');
+  const blogOut = path.join(publicDir, 'blog');
+  const sitemapOut = path.join(publicDir, 'sitemap-blog.xml');
+  const calendar = loadCalendar(path.join(contentDir, 'publication-calendar.csv'));
+  const filesById = indexArticleFiles(path.join(contentDir, 'articles'));
+  const nowMs = options.nowMs === undefined ? Date.now() : options.nowMs;
   const nowISO = new Date(nowMs).toISOString();
+
+  // Frozen maintenance mode fails closed when the publication record is absent
+  // or malformed; it must never silently fall back to the time-based schedule.
+  let state = {};
+  if (fs.existsSync(stateFile)) {
+    try {
+      state = JSON.parse(fs.readFileSync(stateFile, 'utf8')).published;
+      if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Missing published map');
+    } catch (error) {
+      if (existingOnly) throw new Error(`Cannot rebuild existing articles: ${error.message}`);
+      state = {};
+    }
+  } else if (existingOnly) {
+    throw new Error('Cannot rebuild existing articles: published-state.json is missing');
+  }
+  let stateChanged = false;
 
   // Validate: every calendar entry must resolve to a draft file.
   const missing = calendar.filter((e) => !filesById.has(e.contentId));
@@ -149,8 +179,16 @@ function main() {
 
   // Determine how many articles are live: the floor, or everything already due.
   const dueByTime = usable.filter((e) => e.scheduledDate.getTime() <= nowMs).length;
-  const liveCount = Math.min(usable.length, Math.max(MIN_PUBLISHED, dueByTime));
-  const liveEntries = usable.slice(0, liveCount);
+  const scheduledLiveCount = Math.min(usable.length, Math.max(MIN_PUBLISHED, dueByTime));
+  const liveEntries = existingOnly
+    ? usable.filter((entry) => Object.prototype.hasOwnProperty.call(state, String(entry.contentId)))
+    : usable.slice(0, scheduledLiveCount);
+  const liveCount = liveEntries.length;
+  if (existingOnly) {
+    const resolvedIds = new Set(liveEntries.map((entry) => String(entry.contentId)));
+    const unresolved = Object.keys(state).filter((id) => !resolvedIds.has(id) || !Number.isFinite(Date.parse(state[id])));
+    if (unresolved.length) throw new Error(`Cannot rebuild existing articles: unresolved ID or invalid publication date (${unresolved.join(', ')})`);
+  }
   const liveSlugs = new Set();
 
   // Resolve each live entry's frontmatter slug (authoritative for the URL).
@@ -172,20 +210,13 @@ function main() {
     });
   }
 
-  // Load or initialise the persisted first-publication state.
-  let state = {};
-  if (fs.existsSync(STATE_FILE)) {
-    try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')).published || {}; } catch (_) { state = {}; }
-  }
-  let stateChanged = false;
-
   const rendered = [];
   for (const { entry, data, body, slug } of loaded) {
     const cid = String(entry.contentId);
 
     // First-publication instant: the planned slot if it has already passed,
     // otherwise the real instant we are publishing early (never back-dated).
-    if (!state[cid]) {
+    if (!existingOnly && !state[cid]) {
       state[cid] = entry.scheduledDate.getTime() <= nowMs ? entry.scheduledPublishAt : nowISO;
       stateChanged = true;
     }
@@ -195,6 +226,7 @@ function main() {
     const headings = [];
     const ctx = {
       headings,
+      publicDir,
       isLinkSuppressed: (url) => {
         const s = slugFromBlogUrl(url);
         if (s === null || s === '') return false; // not a blog article link, or the index
@@ -247,8 +279,10 @@ function main() {
     return d !== 0 ? d : a.sequence - b.sequence;
   });
 
-  if (DRY_RUN) {
-    console.log(`[blog] DRY RUN — ${liveCount} live (floor ${MIN_PUBLISHED}, due-by-time ${dueByTime}) of ${usable.length} scheduled`);
+  if (dryRun) {
+    console.log(existingOnly
+      ? `[blog] DRY RUN — ${liveCount} existing article(s); schedule ignored; publication state read-only`
+      : `[blog] DRY RUN — ${liveCount} live (floor ${MIN_PUBLISHED}, due-by-time ${dueByTime}) of ${usable.length} scheduled`);
     ordered.forEach((a) => console.log(`  · ${a.slug}  (${a.displayDate}, ${a.readingMinutes}m)`));
     return;
   }
@@ -256,7 +290,7 @@ function main() {
   // Write article pages.
   let written = 0;
   for (const article of rendered) {
-    const dir = path.join(BLOG_OUT, article.slug);
+    const dir = path.join(blogOut, article.slug);
     fs.mkdirSync(dir, { recursive: true });
     const html = renderArticlePage(article);
     const out = path.join(dir, 'index.html');
@@ -265,21 +299,27 @@ function main() {
   }
 
   // Write index page.
-  fs.mkdirSync(BLOG_OUT, { recursive: true });
-  fs.writeFileSync(path.join(BLOG_OUT, 'index.html'), renderIndexPage(ordered));
+  fs.mkdirSync(blogOut, { recursive: true });
+  writeIfChanged(path.join(blogOut, 'index.html'), renderIndexPage(ordered));
 
   // Write blog sitemap.
-  writeSitemap(ordered);
+  writeSitemap(ordered, sitemapOut);
 
   // Persist state.
-  if (stateChanged) {
-    fs.writeFileSync(STATE_FILE, `${JSON.stringify({ published: state }, null, 2)}\n`);
+  if (!existingOnly && stateChanged) {
+    fs.writeFileSync(stateFile, `${JSON.stringify({ published: state }, null, 2)}\n`);
   }
 
-  console.log(`[blog] published ${liveCount} article(s) (floor ${MIN_PUBLISHED}, due-by-time ${dueByTime}); ${written} page(s) written/updated; state ${stateChanged ? 'updated' : 'unchanged'}`);
+  console.log(existingOnly
+    ? `[blog] rebuilt ${liveCount} existing article(s); ${written} page(s) written/updated; schedule ignored; publication state unchanged`
+    : `[blog] published ${liveCount} article(s) (floor ${MIN_PUBLISHED}, due-by-time ${dueByTime}); ${written} page(s) written/updated; state ${stateChanged ? 'updated' : 'unchanged'}`);
 }
 
-function writeSitemap(ordered) {
+function writeIfChanged(file, content) {
+  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) fs.writeFileSync(file, content);
+}
+
+function writeSitemap(ordered, file = SITEMAP_OUT) {
   const lastmod = (iso) => new Date(iso).toISOString().slice(0, 10);
   const newest = ordered.length ? ordered[0].updatedAtISO : new Date().toISOString();
   const urls = [];
@@ -302,7 +342,7 @@ function writeSitemap(ordered) {
 ${urls.join('\n')}
 </urlset>
 `;
-  fs.writeFileSync(SITEMAP_OUT, xml);
+  writeIfChanged(file, xml);
 }
 
 if (require.main === module) main();

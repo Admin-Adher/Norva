@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Complete Guide to Reading Live Program Information | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete Guide to Reading Live Program Information</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="live-program-guide-literacy">
       <div class="article-meta">
         <span class="tag">Live Guide Literacy</span>
         <span>By Norva Editorial Team</span>
@@ -117,8 +117,8 @@
       <blockquote><strong>In short:</strong> Read a live guide in four layers: identify the service, identify the program event, interpret its published schedule, and compare it with the correct current clock. Then check data freshness and uncertainty. A highlighted row is an interface interpretation of those inputs—not independent proof that the listed program is airing exactly as scheduled.</blockquote>
 <p>A program guide compresses several kinds of data into one grid. The channel name, show title, start time, progress bar, and “next” label may look like one fact, but they come from different records and calculations. Reading them separately makes errors easier to spot.</p>
 <h2 id="use-the-four-layer-reading-model">Use the four-layer reading model</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Core question</th><th>Typical fields</th><th>Main failure mode</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Core question</th><th scope="col">Typical fields</th><th scope="col">Main failure mode</th></tr></thead>
 <tbody><tr><td>Service</td><td>Where is the event listed?</td><td>Name, logo, service identifier</td><td>Wrong or duplicate channel</td></tr><tr><td>Program event</td><td>What is listed?</td><td>Title, episode, synopsis, rating</td><td>Wrong or incomplete metadata</td></tr><tr><td>Schedule</td><td>When is it published to occur?</td><td>Start, duration, actual times if provided</td><td>Stale or changed schedule</td></tr><tr><td>Current clock</td><td>What time is “now” for this view?</td><td>Zone, offset, date, device clock</td><td>Time-zone or clock mismatch</td></tr></tbody>
 </table></div>
 <p>Do not move to “what is on now?” until all four questions have plausible answers.</p>
@@ -156,17 +156,12 @@
 <p>They may use different service variants, time zones, clocks, caches, or schedule refresh states.</p>
 <h3 id="does-an-empty-guide-mean-the-service-is-unavailable">Does an empty guide mean the service is unavailable?</h3>
 <p>No. It establishes only that usable schedule data is not shown for that block; service status requires separate evidence.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">See How Norva Works</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://dvb.org/metadata/" target="_blank" rel="noopener">DVB Metadata</a></li><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">DVB-I Specification</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">IANA Time Zone Database</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">Norva: How It Works</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">See How Norva Works</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://dvb.org/metadata/" target="_blank" rel="noopener">https://dvb.org/metadata/</a></li><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">https://www.iana.org/time-zones</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#how-it-works" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="live-program-guide-literacy">See How Norva Works</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://dvb.org/metadata/" target="_blank" rel="noopener">DVB Metadata</a></li><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">DVB-I Specification</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">IANA Time Zone Database</a></li><li><a href="https://norva.tv/#how-it-works">Norva: How It Works</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

@@ -1,8 +1,8 @@
 ---
 content_id: "NVB-542"
 title: "Legibility and Readability: Two Different Viewing Problems"
-seo_title: "Legibility vs Readability in Media Interfaces"
-meta_description: "Legibility concerns recognising characters and controls; readability concerns understanding text and layout across a task. Diagnose each before choosing a fix."
+seo_title: "Legibility vs Readability: Two Illustrated Media Examples"
+meta_description: "See how recognising a label differs from understanding it. Use two controlled examples and a repeatable task to describe reading barriers on phone or TV."
 slug: "legibility-and-readability-two-different-viewing-problems"
 canonical_url: "https://norva.tv/blog/legibility-and-readability-two-different-viewing-problems/"
 language: "en"
@@ -38,7 +38,7 @@ product_claims:
 published_at: null
 updated_at: null
 last_fact_check: null
-estimated_reading_minutes: 6
+estimated_reading_minutes: 5
 excerpt: "A task-based distinction between recognising characters and controls versus understanding words, hierarchy, labels, and layout efficiently."
 hero:
   src: ""
@@ -53,30 +53,42 @@ is_pillar: false
 parent_pillar: "/blog/the-complete-guide-to-visual-comfort-in-media-interfaces/"
 related_articles:
   - "/blog/the-complete-guide-to-visual-comfort-in-media-interfaces/"
-  - "/blog/how-to-audit-a-viewing-environment-for-visual-barriers/"
-  - "/blog/what-to-check-when-large-text-causes-layout-reflow/"
+  - "/blog/tv-interface-ergonomics-guide/"
+  - "/blog/remote-dpad-navigation-qa/"
 cta:
-  label: "Explore Norva's Interface Features"
-  href: "https://norva.tv/#features"
+  label: "Report a Reproducible Reading Barrier"
+  href: "https://norva.tv/support"
   intent: "consideration"
 sources:
   - "https://www.w3.org/TR/coga-usable/"
   - "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html"
   - "https://norva.tv/#features"
-proof_assets: []
+proof_assets:
+  - "/assets/blog/legibility-readability-paired-example.svg"
 original_evidence:
   required: true
   status: "present"
-  type: "legibility-readability diagnosis card"
-  summary: "A paired task card tests character and icon identification separately from scanning, comprehension, navigation hierarchy, and decision completion."
-  methodology: "The reviewer holds content and context stable, asks users to identify individual elements, then complete an end-to-end task, and changes only one typography or layout factor per retest."
-  asset_urls: []
+  type: "original paired illustration and repeatable diagnosis template"
+  summary: "Two original examples isolate text contrast and spatial grouping, using the same words within each pair. The reader then records character recognition and task comprehension separately."
+  methodology: "The contrast pair holds text, size, font and background fixed. The grouping pair holds words, font, size and colours fixed while changing line breaks and placement. These are explanatory specimens, not Norva screenshots, user-test results or accessibility-conformance evidence."
+  asset_urls:
+    - "/assets/blog/legibility-readability-paired-example.svg"
 ---
 # Legibility and Readability: Two Different Viewing Problems
 
-> **In short:** Legibility is the ability to distinguish letters, numbers, icons, and control states. Readability is the ability to understand words, sentences, labels, hierarchy, and layout efficiently across a task. A text label can be legible but difficult to read in a dense interface; a clear layout can still fail when characters are too small or low-contrast.
+> **In short:** Legibility concerns recognising the individual characters in text. Readability concerns how easily someone reads and understands the text. For a media interface, we use the same practical distinction to separate recognising labels and control states from understanding their grouping and the task. Clear letters do not guarantee a clear decision; a sensible layout can still contain text that is difficult to distinguish.
 
 Choosing the wrong diagnosis produces weak fixes. Enlarging text may improve legibility but create clipping that harms readability; simplifying labels may improve scanning but not fix low contrast.
+
+## See the difference with the same words
+
+First, compare the two versions of **“Episode 18”** below. The words, font, size and background are identical; only text contrast changes. The question is “Can I identify the number correctly?” This isolates one possible recognition barrier. It does not measure how quickly you read or reproduce a real viewing environment.
+
+Then compare **“Audio English Subtitles Off”** with those same words organised into two rows. Each word remains clear, but the grouping changes. Ask “Is English the audio setting or the subtitle setting?” The task is now to associate labels with values, not to recognise the letters.
+
+![A contrast pair repeats Episode 18 with muted and bright text. A grouping pair shows Audio English Subtitles Off first as a single line and then as Audio: English and Subtitles: Off, with label-value pairs aligned.](/assets/blog/legibility-readability-paired-example.svg "Original explanatory specimens, not Norva interface screenshots. Text is repeated here in the article so the image is not the only way to understand the examples.")
+
+The second arrangement is a candidate improvement, not a measured winner. A different language, longer value or narrower screen can change the outcome. W3C's cognitive-accessibility guidance supports clear grouping and spacing; applying those ideas still requires testing the actual task.
 
 ## Test legibility directly
 
@@ -104,7 +116,7 @@ Ask the viewer to:
 
 A task reveals hierarchy, grouping, wording, density, and sequence problems.
 
-## Original evidence: paired card
+## Use this paired diagnosis card
 
 | Layer | Test | Result | Barrier | Candidate variable |
 |---|---|---|---|---|
@@ -127,7 +139,7 @@ Readability is language- and task-dependent. Involve fluent users for multilingu
 
 ## Test interaction between them
 
-Increase text size one supported step. If characters become clearer but controls overlap or content disappears, the legibility improvement revealed a reflow barrier. Use [the large-text reflow guide](/blog/what-to-check-when-large-text-causes-layout-reflow/) rather than reversing the user's setting.
+Increase text size one supported step. If characters become clearer but controls overlap or content disappears, the legibility improvement revealed a reflow barrier. Record the setting and the missing or overlapping element rather than reversing the user's setting and declaring the problem solved.
 
 Run the comparison with the same title, language, task, viewport, and input. First ask the viewer to identify a specific label or state; then ask them to use it to complete the task. Record identification time only when timing is genuinely useful, and pair it with the viewer's explanation. A fast guess is not evidence that the element was clear. If a change improves recognition but increases navigation errors, document both outcomes instead of collapsing them into one pass or fail.
 
@@ -135,7 +147,7 @@ For icons, test the symbol and its visible label together before judging the ico
 
 ## Include the environment
 
-Glare, distance, lighting, and screen angle can reduce apparent legibility and increase reading effort. Use [the viewing-environment audit](/blog/how-to-audit-a-viewing-environment-for-visual-barriers/) to separate room factors from interface factors.
+Glare, distance, lighting, and screen angle can reduce apparent legibility and increase reading effort. Use [the TV interface ergonomics guide](/blog/tv-interface-ergonomics-guide/) to keep the viewing distance and input method part of the comparison. For an unclear focus state, [the remote and D-pad checklist](/blog/remote-dpad-navigation-qa/) helps describe where focus moved and what happened next.
 
 The [complete visual-comfort guide](/blog/the-complete-guide-to-visual-comfort-in-media-interfaces/) connects these findings with zoom, colour, focus, and motion.
 
@@ -146,6 +158,8 @@ Ask what the viewer can identify and complete. Do not explain difficulty through
 ## Report precisely
 
 State context, distance, zoom or scaling, task, exact element, expected result, observed error, workaround, and privacy-safe screenshot. Replace “text is bad” with “year and rating are indistinguishable at the normal TV distance.”
+
+For a concrete Norva report, choose one item from a compatible source you own or are authorised to use. Try to find its year, then explain the intended action on that screen before selecting it. Report which part failed: identifying the year, understanding an action, or following focus. Note whether the problem occurs on phone, TV or web. Do not include account identifiers, source credentials or private media titles in a shared capture; reproduce with non-sensitive material when possible.
 
 ## Common mistakes and limitations
 
@@ -169,7 +183,7 @@ Address blocking recognition and task failures by impact, then retest because ch
 
 ## Your next step
 
-[Explore Norva's interface features](https://norva.tv/#features)
+[Send a reproducible reading-barrier report to Norva Support](https://norva.tv/support), using the paired card above. One exact screen, task and observed difficulty gives the team something to investigate without guessing the cause.
 
 ## Sources
 

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Catalog Import Will Not Start? First Checks | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Catalog Import Will Not Start? First Checks</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="catalog-import-will-not-start">
       <div class="article-meta">
         <span class="tag">Import &amp; Sync Troubleshooting</span>
         <span>By Norva Editorial Team</span>
@@ -140,8 +140,8 @@
 <h2 id="retry-with-a-defined-boundary">Retry with a defined boundary</h2>
 <p>Follow current Norva support instructions for any retry. Before acting, record what changed since the first request and define the result that will end the test. If the same state recurs, stop. Credential edits, source removal, repeated imports, and device resets are not neutral retries.</p>
 <h2 id="original-evidence-import-start-gate-record">Original evidence: import start gate record</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Gate</th><th>Observation</th><th>Time</th><th>Result</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Gate</th><th scope="col">Observation</th><th scope="col">Time</th><th scope="col">Result</th></tr></thead>
 <tbody><tr><td>Authorization and owner</td><td></td><td></td><td></td></tr><tr><td>Original request and response</td><td></td><td></td><td></td></tr><tr><td>Source official route</td><td></td><td></td><td></td></tr><tr><td>Account, profile, source label</td><td></td><td></td><td></td></tr><tr><td>Device, version, storage</td><td></td><td></td><td></td></tr><tr><td>Network comparison</td><td></td><td></td><td></td></tr><tr><td>Visible active operation</td><td></td><td></td><td></td></tr><tr><td>Guided retry, if any</td><td></td><td></td><td></td></tr></tbody>
 </table></div>
 <h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
@@ -153,17 +153,12 @@
 <p>It confirms only one layer. Account, profile, device, application, and visible operation state still need separate observations.</p>
 <h3 id="should-i-reinstall-the-application-first">Should I reinstall the application first?</h3>
 <p>Not as a first evidence step. Reinstallation can remove useful local context and does not establish the original cause.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/support" target="_blank" rel="noopener">Check Norva Support</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/support" target="_blank" rel="noopener">Norva support</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva privacy policy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">Norva terms of service</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110: HTTP Semantics</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/support" data-cta="blog-article">Check Norva Support</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/support" target="_blank" rel="noopener">https://norva.tv/support</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">https://norva.tv/terms</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc9110</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="catalog-import-will-not-start">Check Norva Support</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/support">Norva support</a></li><li><a href="https://norva.tv/privacy">Norva privacy policy</a></li><li><a href="https://norva.tv/terms">Norva terms of service</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110: HTTP Semantics</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

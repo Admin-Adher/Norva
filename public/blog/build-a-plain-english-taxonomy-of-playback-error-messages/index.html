@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="A Plain-English Taxonomy of Playback Errors | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Build a Plain-English Taxonomy of Playback Error Messages</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="build-a-plain-english-taxonomy-of-playback-error-messages">
       <div class="article-meta">
         <span class="tag">Playback Error Diagnostics</span>
         <span>By Norva Editorial Team</span>
@@ -129,8 +129,8 @@
 <p>Messages may refer to offline state, timeout, connection, or server reachability. Record active path, endpoint scope, name resolution, throughput, delay variation, loss, and time. A generic network message does not prove Wi-Fi or provider fault.</p>
 <p>RFC 9110 defines HTTP semantics, but do not map app wording to a specific status without validated evidence.</p>
 <h2 id="original-evidence-layer-and-language-taxonomy">Original evidence: layer-and-language taxonomy</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Exact wording/code</th><th>Phase</th><th>Plain category</th><th>Scope</th><th>Required evidence</th><th>Safe next check</th><th>Official definition</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Exact wording/code</th><th scope="col">Phase</th><th scope="col">Plain category</th><th scope="col">Scope</th><th scope="col">Required evidence</th><th scope="col">Safe next check</th><th scope="col">Official definition</th></tr></thead>
 <tbody><tr><td>Verbatim</td><td>Startup/midplay</td><td>Availability/session/etc.</td><td>Title/device/path</td><td>Context</td><td>One comparison</td><td>Link/version</td></tr><tr><td>Verbatim</td><td>Seek/track change</td><td>Category</td><td>Scope</td><td>Context</td><td>One comparison</td><td>Verified/unknown</td></tr></tbody>
 </table></div>
 <p>Add separate columns for privacy risk and confidence. Never overwrite the original wording with the category.</p>
@@ -158,17 +158,12 @@
 <p>No. They route safe questions; exact causes and recovery remain version and context dependent.</p>
 <h3 id="is-unknown-a-useful-category">Is “unknown” a useful category?</h3>
 <p>Yes. It prevents invented meaning and signals that official definition or more evidence is required.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
-<h2 id="sources">Sources</h2>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="build-a-plain-english-taxonomy-of-playback-error-messages">Explore Norva's playback features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
 <ul><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110: HTTP Semantics</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">W3C Media Source Extensions</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc9110</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">https://www.w3.org/TR/media-source-2/</a></li></ul>
-    </section>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

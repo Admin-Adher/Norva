@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="The Complete Guide to Video Quality | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete Guide to Understanding Video Quality</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="the-complete-guide-to-understanding-video-quality">
       <div class="article-meta">
         <span class="tag">Video Quality Literacy</span>
         <span>By Norva Editorial Team</span>
@@ -135,8 +135,8 @@
 <p>Scaling, motion processing, sharpening, noise reduction, tone mapping, overscan, and picture modes can alter appearance. Room light, reflections, distance, angle, and screen size influence what the viewer perceives.</p>
 <p>Keep display settings fixed while comparing two encodes. Keep the encode fixed while comparing two display states. Otherwise the cause remains ambiguous.</p>
 <h2 id="original-evidence-quality-chain-worksheet">Original evidence: quality-chain worksheet</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Verified information</th><th>Unknowns</th><th>Symptom at timecode</th><th>Controlled comparison</th><th>Result</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Verified information</th><th scope="col">Unknowns</th><th scope="col">Symptom at timecode</th><th scope="col">Controlled comparison</th><th scope="col">Result</th></tr></thead>
 <tbody><tr><td>Source/encode</td><td>Properties</td><td>Missing data</td><td>Description</td><td>Same scene/version</td><td>Observation</td></tr><tr><td>Delivery/decode</td><td>State/capability</td><td>Missing data</td><td>Description</td><td>One change</td><td>Observation</td></tr><tr><td>Output/display</td><td>Mode/path</td><td>Missing data</td><td>Description</td><td>One change</td><td>Observation</td></tr><tr><td>Environment</td><td>Seat/light</td><td>Missing data</td><td>Description</td><td>One change</td><td>Observation</td></tr></tbody>
 </table></div>
 <p>Use "unknown" instead of inferring metadata from the image.</p>
@@ -153,17 +153,12 @@
 <p>No. Treat it as contextual metadata whose meaning and current delivery state still need verification.</p>
 <h3 id="can-a-better-display-fix-a-poor-encode">Can a better display fix a poor encode?</h3>
 <p>It can process and scale the image, but it cannot reliably recreate source detail that was never retained.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.itu.int/rec/R-REC-BT.500" target="_blank" rel="noopener">ITU-R BT.500: Television Image Quality Assessment</a></li><li><a href="https://www.itu.int/rec/R-REC-BT.2020/en" target="_blank" rel="noopener">ITU-R BT.2020: UHDTV System Parameters</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C: Media Capabilities</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.itu.int/rec/R-REC-BT.500" target="_blank" rel="noopener">https://www.itu.int/rec/R-REC-BT.500</a></li><li><a href="https://www.itu.int/rec/R-REC-BT.2020/en" target="_blank" rel="noopener">https://www.itu.int/rec/R-REC-BT.2020/en</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="the-complete-guide-to-understanding-video-quality">Explore Norva's playback features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.itu.int/rec/R-REC-BT.500" target="_blank" rel="noopener">ITU-R BT.500: Television Image Quality Assessment</a></li><li><a href="https://www.itu.int/rec/R-REC-BT.2020/en" target="_blank" rel="noopener">ITU-R BT.2020: UHDTV System Parameters</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C: Media Capabilities</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

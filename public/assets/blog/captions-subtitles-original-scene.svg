@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="950" viewBox="0 0 640 950" role="img" aria-labelledby="title desc">
+  <title id="title">Dialogue alone versus speech and relevant sound cues</title>
+  <desc id="desc">In an original fictional scene Maya says Wait here from off screen, then someone knocks on a door. The first panel shows only Wait here. The second lists Maya's dialogue and the later door-knock cue, which explains a character turning. The cues occur sequentially; this is not a timing model or a Norva screenshot.</desc>
+  <rect width="640" height="950" rx="16" fill="#080B12"/>
+  <g font-family="Inter, Arial, sans-serif" fill="#F8FAFC">
+    <text x="32" y="54" font-size="30" font-weight="700">What would you miss without sound?</text>
+    <text x="32" y="96" font-size="24" fill="#94A3B8">An original scene · not a product screenshot</text>
+    <text x="32" y="158" font-size="29" font-weight="600">Dialogue-only text</text>
+    <rect x="32" y="184" width="576" height="276" rx="10" fill="#12121a"/>
+    <g transform="translate(0 210)" fill="none" stroke="#94A3B8" stroke-width="3">
+      <path d="M262 0H378V136H262Z"/>
+      <circle cx="356" cy="76" r="4" fill="#94A3B8"/>
+      <path d="M224 40Q206 62 224 84M206 26Q178 62 206 98" stroke="#60A5FA"/>
+    </g>
+    <text x="320" y="412" font-size="37" text-anchor="middle">Wait here.</text>
+    <text x="32" y="520" font-size="29" font-weight="600">Speech + relevant sound cues</text>
+    <rect x="32" y="546" width="576" height="318" rx="10" fill="#12121a"/>
+    <g transform="translate(0 572)" fill="none" stroke="#94A3B8" stroke-width="3">
+      <path d="M262 0H378V136H262Z"/>
+      <circle cx="356" cy="76" r="4" fill="#94A3B8"/>
+      <path d="M224 40Q206 62 224 84M206 26Q178 62 206 98" stroke="#60A5FA"/>
+    </g>
+    <text x="320" y="766" font-size="34" text-anchor="middle">MAYA: Wait here.</text>
+    <text x="320" y="824" font-size="34" text-anchor="middle">[door knocks]</text>
+    <text x="32" y="914" font-size="25" fill="#94A3B8">Lower cues occur in sequence, not together.</text>
+  </g>
+</svg>

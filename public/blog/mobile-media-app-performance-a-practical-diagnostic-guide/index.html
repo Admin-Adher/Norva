@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Mobile Media App Performance Diagnostic Guide | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Mobile Media App Performance: A Practical Diagnostic Guide</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="mobile-media-app-performance-a-practical-diagnostic-guide">
       <div class="article-meta">
         <span class="tag">Mobile Performance</span>
         <span>By Norva Editorial Team</span>
@@ -120,8 +120,8 @@
 <p>Write the exact action and first late response: tap to highlight, gesture to scroll, screen to artwork, final search character to results, play to first frame, or pause to stopped media. The earliest changed event gives a boundary for the next control.</p>
 <p>Do not begin with a broad reset or a generic speed test.</p>
 <h2 id="original-evidence-mobile-performance-map">Original evidence: mobile performance map</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Observable start</th><th>Observable end</th><th>Context</th><th>Matched control</th><th>Limit</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Observable start</th><th scope="col">Observable end</th><th scope="col">Context</th><th scope="col">Matched control</th><th scope="col">Limit</th></tr></thead>
 <tbody><tr><td>Input/rendering</td><td>Tap or gesture</td><td>Stable visual response</td><td>Screen/orientation</td><td>System UI</td><td>Manual timing</td></tr><tr><td>Lifecycle</td><td>Launch/resume action</td><td>Usable screen</td><td>Cold/warm/background</td><td>Repeated state</td><td>State uncertainty</td></tr><tr><td>Resource state</td><td>Fixed workflow</td><td>Result</td><td>Battery/thermal/storage</td><td>One-state change</td><td>Hidden internals</td></tr><tr><td>Network/search</td><td>Request clue</td><td>Stable result</td><td>Path/source</td><td>Local action/path</td><td>Endpoint differs</td></tr><tr><td>Playback/control</td><td>Play or command</td><td>Frame/media state</td><td>Version/output</td><td>Matched media</td><td>Media differs</td></tr></tbody>
 </table></div>
 <p>Keep observed facts, possible explanations, and confirmed causes in separate columns.</p>
@@ -156,17 +156,12 @@
 <p>No. Hardware, system version, screen, app build, power state, network, and media capability can differ.</p>
 <h3 id="when-is-a-performance-report-ready-for-support">When is a performance report ready for support?</h3>
 <p>When it includes a fixed reproduction, environment, raw results, controls, impact, recovery order, privacy review, and explicit unknowns.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva across your devices</a></p>
-<h2 id="sources">Sources</h2>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="mobile-media-app-performance-a-practical-diagnostic-guide">Explore Norva across your devices</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
 <ul><li><a href="https://developer.android.com/topic/performance/vitals" target="_blank" rel="noopener">Android Developers: App Performance Vitals</a></li><li><a href="https://developer.apple.com/documentation/xcode/improving-your-app-s-performance" target="_blank" rel="noopener">Apple Developer: Improving Your App's Performance</a></li><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">W3C Performance Timeline</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Across Your Devices</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://developer.android.com/topic/performance/vitals" target="_blank" rel="noopener">https://developer.android.com/topic/performance/vitals</a></li><li><a href="https://developer.apple.com/documentation/xcode/improving-your-app-s-performance" target="_blank" rel="noopener">https://developer.apple.com/documentation/xcode/improving-your-app-s-performance</a></li><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">https://www.w3.org/TR/performance-timeline/</a></li></ul>
-    </section>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

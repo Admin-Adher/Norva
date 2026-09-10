@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Make Media Catalog Cleanup Reversible | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Make Catalog Cleanup Changes Reversible</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="make-catalog-cleanup-reversible">
       <div class="article-meta">
         <span class="tag">Catalog Cleanup</span>
         <span>By Norva Editorial Team</span>
@@ -140,8 +140,8 @@
 <ul><li>expected versus processed items;</li><li>categories before and after;</li><li>transformations completed;</li><li>exceptions produced;</li><li>retrieval tasks passed;</li><li>source and version context preserved;</li><li>rollback still available.</li></ul>
 <p>Stop if anything is unexplained. The <a href="/blog/catalog-cleanup-master-plan/">complete catalogue cleanup plan</a> uses reconciliation as a phase gate.</p>
 <h2 id="original-evidence-reversible-change-set-record">Original evidence: reversible change-set record</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Field</th><th>Record</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Field</th><th scope="col">Record</th></tr></thead>
 <tbody><tr><td>Change-set ID / scope</td><td></td></tr><tr><td>Baseline and recovery method</td><td></td></tr><tr><td>Intended transformations</td><td></td></tr><tr><td>Exceptions excluded</td><td></td></tr><tr><td>Approver</td><td></td></tr><tr><td>Rollback test result</td><td>Pass / Recheck</td></tr><tr><td>Post-change retrieval result</td><td>Pass / Recheck</td></tr><tr><td>Reconciliation</td><td>Complete / Stop</td></tr></tbody>
 </table></div>
 <p>Link significant choices to the library decision log. Keep the record even after a successful rollback so the next maintainer knows the limitation.</p>
@@ -158,17 +158,12 @@
 <p>Test when the recovery method, source, tool, or change type changes, and before a high-impact batch.</p>
 <h3 id="what-if-rollback-is-impossible">What if rollback is impossible?</h3>
 <p>Reduce scope, seek a supported export or backup, require explicit approval, and avoid the action when its value does not justify the risk.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Review Norva's catalog features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/" target="_blank" rel="noopener">Library of Congress: Personal digital archiving</a></li><li><a href="https://www.ndsa.org/publications/levels-of-digital-preservation/" target="_blank" rel="noopener">NDSA: Levels of Digital Preservation</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">National Archives: Knowing your records</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Review Norva's Catalog Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/" target="_blank" rel="noopener">https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/</a></li><li><a href="https://www.ndsa.org/publications/levels-of-digital-preservation/" target="_blank" rel="noopener">https://www.ndsa.org/publications/levels-of-digital-preservation/</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/knowing</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="make-catalog-cleanup-reversible">Review Norva's catalog features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.loc.gov/static/programs/digital-preservation/personal-digital-archiving/" target="_blank" rel="noopener">Library of Congress: Personal digital archiving</a></li><li><a href="https://www.ndsa.org/publications/levels-of-digital-preservation/" target="_blank" rel="noopener">NDSA: Levels of Digital Preservation</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">National Archives: Knowing your records</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

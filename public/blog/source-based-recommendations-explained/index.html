@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="How Source-Based Recommendations Support Discovery | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How Source-Based Recommendations Support Discovery</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="source-based-recommendations-explained">
       <div class="article-meta">
         <span class="tag">Recommendations &amp; Discovery</span>
         <span>By Norva Editorial Team</span>
@@ -117,8 +117,8 @@
       <blockquote><strong>In short:</strong> Source-based recommendations help you move from one known title to related items already represented by your connected source. Their coverage depends on what that compatible source contains and how its metadata describes each work. Treat every suggestion as a discovery lead, then verify identity, version, availability, language, subtitles, and relevance before shortlisting it.</blockquote>
 <p>This model is useful because it narrows exploration to a library the viewer can actually inspect. It also has a clear boundary: a discovery interface cannot recommend a source item it does not know or repair metadata it never received.</p>
 <h2 id="separate-four-layers">Separate four layers</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Question</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Question</th></tr></thead>
 <tbody><tr><td>Source availability</td><td>Which media records are currently represented?</td></tr><tr><td>Work identity</td><td>Which film, series, season, episode, or version is this?</td></tr><tr><td>Descriptive metadata</td><td>Which creators, subjects, dates, genres, languages, and relations are available?</td></tr><tr><td>Viewer decision</td><td>Does this candidate fit the current discovery brief?</td></tr></tbody>
 </table></div>
 <p>Confusing these layers leads to false conclusions. A missing suggestion can reflect source coverage or incomplete metadata; an irrelevant suggestion can still be an available work whose visible relationship is too broad for the current brief.</p>
@@ -148,17 +148,12 @@
 <p>They can contain different works, versions, and metadata. Compare those inputs before comparing the resulting suggestions.</p>
 <h3 id="does-a-source-based-recommendation-guarantee-relevance">Does a source-based recommendation guarantee relevance?</h3>
 <p>No. It is a lead. The viewer still evaluates the visible relationship against a specific discovery brief.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva Features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">DCMI Metadata Terms</a></li><li><a href="https://www.eidr.org/how-we-work" target="_blank" rel="noopener">EIDR: How We Work</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">https://www.dublincore.org/specifications/dublin-core/dcmi-terms/</a></li><li><a href="https://www.eidr.org/how-we-work" target="_blank" rel="noopener">https://www.eidr.org/how-we-work</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="source-based-recommendations-explained">Explore Norva Features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">DCMI Metadata Terms</a></li><li><a href="https://www.eidr.org/how-we-work" target="_blank" rel="noopener">EIDR: How We Work</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       
     </article>
   </main>

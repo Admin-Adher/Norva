@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Bandwidth, Throughput, Latency, and Jitter | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Bandwidth, Throughput, Latency, and Jitter Explained</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="bandwidth-throughput-latency-and-jitter-explained">
       <div class="article-meta">
         <span class="tag">Home Network Video Basics</span>
         <span>By Norva Editorial Team</span>
@@ -132,8 +132,8 @@
 <p>RFC 2680 defines a one-way packet loss metric with explicit methodology. Consumer results may instead infer loss from missing replies, and some devices can deprioritize diagnostic traffic. A reported zero does not prove every application packet arrived; a nonzero result needs recurrence and scope.</p>
 <p>The packet-loss symptom guide avoids equating one playback pause with proven loss.</p>
 <h2 id="original-evidence-metric-dictionary">Original evidence: metric dictionary</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Metric</th><th>Plain-language question</th><th>Required context</th><th>What it cannot prove alone</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Metric</th><th scope="col">Plain-language question</th><th scope="col">Required context</th><th scope="col">What it cannot prove alone</th></tr></thead>
 <tbody><tr><td>Bandwidth/capacity</td><td>What could this link carry under its definition?</td><td>Link, label, direction</td><td>Application delivery</td></tr><tr><td>Throughput</td><td>What useful rate was measured?</td><td>Endpoint, protocol, duration, route</td><td>Every source path</td></tr><tr><td>Latency</td><td>How much delay did the method observe?</td><td>One-way/round-trip, clocks, path</td><td>Sustained capacity</td></tr><tr><td>Jitter</td><td>How did delay vary?</td><td>Formula, sample, statistic</td><td>Average throughput</td></tr><tr><td>Loss</td><td>Which expected packets were absent?</td><td>Probe type, direction, interval</td><td>Exact playback cause</td></tr></tbody>
 </table></div>
 <p>Attach units to every value and preserve raw results where privacy permits.</p>
@@ -152,17 +152,12 @@
 <p>Labels, provisioning, test methods, units, and overhead definitions vary. Verify what each number represents before treating a difference as an error.</p>
 <h3 id="is-jitter-measured-the-same-way-by-every-tool">Is jitter measured the same way by every tool?</h3>
 <p>No. Check the tool's formula, direction, probe type, sample period, and reported statistic.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
-<h2 id="sources">Sources</h2>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="bandwidth-throughput-latency-and-jitter-explained">Explore Norva's playback features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
 <ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">RFC 6349: TCP Throughput Testing</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2679" target="_blank" rel="noopener">RFC 2679: One-Way Delay Metric</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">RFC 3393: Delay Variation Metric</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2680" target="_blank" rel="noopener">RFC 2680: One-Way Packet Loss Metric</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.rfc-editor.org/rfc/rfc6349" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc6349</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2679" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc2679</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc3393" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc3393</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc2680" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc2680</a></li></ul>
-    </section>
+</section>
       
     </article>
   </main>

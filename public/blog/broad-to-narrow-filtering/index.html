@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Use Broad-to-Narrow Media Library Filtering | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Use Broad-to-Narrow Filtering</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="broad-to-narrow-filtering">
       <div class="article-meta">
         <span class="tag">Filter Strategies</span>
         <span>By Norva Editorial Team</span>
@@ -123,8 +123,8 @@
 <ul><li>represents a specific preference;</li><li>may apply at version or profile level;</li><li>has lower metadata coverage;</li><li>reduces the set sharply.</li></ul>
 <p>Film versus series may be broad. A particular subtitle language on currently available favourites may be narrow.</p>
 <h2 id="build-the-filter-funnel-ledger">Build the filter funnel ledger</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Step</th><th>Condition</th><th>Must/prefer</th><th>Field confidence</th><th style="text-align:right">Before</th><th style="text-align:right">After</th><th>Control retained?</th><th>Continue/stop</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Step</th><th scope="col">Condition</th><th scope="col">Must/prefer</th><th scope="col">Field confidence</th><th scope="col" style="text-align:right">Before</th><th scope="col" style="text-align:right">After</th><th scope="col">Control retained?</th><th scope="col">Continue/stop</th></tr></thead>
 <tbody><tr><td>0</td><td>baseline</td><td></td><td></td><td style="text-align:right"></td><td style="text-align:right"></td><td></td><td></td></tr><tr><td>1</td><td></td><td></td><td></td><td style="text-align:right"></td><td style="text-align:right"></td><td></td><td></td></tr></tbody>
 </table></div>
 <p>Record the baseline query, category, source scope, and sort before filtering. A count without scope cannot be compared later.</p>
@@ -159,17 +159,12 @@
 <p>It depends on the catalogue and values. Use coverage, meaning, and requirement strength rather than a universal hierarchy.</p>
 <h3 id="what-if-the-first-filter-removes-the-control-item">What if the first filter removes the control item?</h3>
 <p>Undo it, verify field scope and metadata, and choose another route. Do not continue building on a failed control.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://guides.loc.gov/c.php?g=1472768&amp;amp;p=10988945" target="_blank" rel="noopener">Library of Congress: Basic Search and facets</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">Library of Congress: Advanced Search</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://guides.loc.gov/c.php?g=1472768&amp;p=10988945" target="_blank" rel="noopener">https://guides.loc.gov/c.php?g=1472768&amp;p=10988945</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">https://guides.loc.gov/catalog/advanced-search</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="broad-to-narrow-filtering">Explore Norva's features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://guides.loc.gov/c.php?g=1472768&amp;p=10988945" target="_blank" rel="noopener">Library of Congress: Basic Search and facets</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">Library of Congress: Advanced Search</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
+</section>
       
     </article>
   </main>

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Read Now-and-Next Guide Information Quickly | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Read Now-and-Next Information Quickly</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="read-now-and-next-guide">
       <div class="article-meta">
         <span class="tag">Live Guide Literacy</span>
         <span>By Norva Editorial Team</span>
@@ -117,8 +117,8 @@
       <blockquote><strong>In short:</strong> Verify six things in order: service, current clock, time zone, “now” interval, following event, and data freshness. The current event should contain the guide clock; the next event should follow it on the same service. If boundaries overlap, leave a gap, or come from stale data, treat the labels as uncertain rather than choosing whichever title looks familiar.</blockquote>
 <p>Now-and-next rows are designed for speed, but their compactness hides the calculation beneath them. A title under “Now” is only as reliable as the selected service, schedule boundaries, clock conversion, and refresh state.</p>
 <h2 id="run-the-six-point-checksum">Run the six-point checksum</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Check</th><th>Pass condition</th><th>If it fails</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Check</th><th scope="col">Pass condition</th><th scope="col">If it fails</th></tr></thead>
 <tbody><tr><td>1. Service</td><td>Correct channel or service variant</td><td>Re-select or identify the service</td></tr><tr><td>2. Clock</td><td>Device or guide clock is plausible</td><td>Correct clock or compare another source</td></tr><tr><td>3. Zone</td><td>Display zone is known</td><td>Resolve zone before comparing times</td></tr><tr><td>4. Now interval</td><td>Start ≤ current time &lt; end</td><td>Mark current event uncertain</td></tr><tr><td>5. Next event</td><td>First valid event after now</td><td>Investigate gap or overlap</td></tr><tr><td>6. Freshness</td><td>Data covers the current boundary</td><td>Refresh or qualify the result</td></tr></tbody>
 </table></div>
 <p>This can be completed in seconds once the fields are visible.</p>
@@ -155,17 +155,12 @@
 <p>Yes. Timing and descriptive metadata can have different errors. Report the affected layer precisely.</p>
 <h3 id="why-is-there-no-next-event">Why is there no next event?</h3>
 <p>The schedule may be incomplete, stale, intentionally sparse, or beyond its coverage window. Check freshness before deciding.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva Features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">DVB-I Specification</a></li><li><a href="https://www.w3.org/WAI/tutorials/forms/labels/" target="_blank" rel="noopener">W3C: Labeling Controls</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf</a></li><li><a href="https://www.w3.org/WAI/tutorials/forms/labels/" target="_blank" rel="noopener">https://www.w3.org/WAI/tutorials/forms/labels/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="read-now-and-next-guide">Explore Norva Features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">DVB-I Specification</a></li><li><a href="https://www.w3.org/WAI/tutorials/forms/labels/" target="_blank" rel="noopener">W3C: Labeling Controls</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       
     </article>
   </main>

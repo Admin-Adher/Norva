@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Find Media With Only Part of the Title | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Find Media With Only Part of the Title</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="search-with-partial-titles">
       <div class="article-meta">
         <span class="tag">Search Techniques</span>
         <span>By Norva Editorial Team</span>
@@ -118,8 +118,8 @@
 <p>Partial memory is often enough because a distinctive word can narrow a personal catalogue sharply. The challenge is choosing a fragment that the stored metadata is likely to contain.</p>
 <h2 id="build-the-partial-title-information-ladder">Build the partial-title information ladder</h2>
 <p>Write each remembered token in a row:</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Token</th><th>Certain?</th><th>Distinctive?</th><th>Spelling confidence</th><th>Could be article/edition word?</th><th>First-query rank</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Token</th><th scope="col">Certain?</th><th scope="col">Distinctive?</th><th scope="col">Spelling confidence</th><th scope="col">Could be article/edition word?</th><th scope="col">First-query rank</th></tr></thead>
 <tbody><tr><td></td><td></td><td></td><td></td><td></td><td></td></tr></tbody>
 </table></div>
 <p>Rank highly when a word is unusual, confidently spelled, and central to the title. Rank lower when it is a common word, an article, a guessed plural, or wording that may belong to an edition rather than the work.</p>
@@ -137,8 +137,8 @@
 <ul><li>remove initial articles;</li><li>remove punctuation and symbols;</li><li>try singular and plural only when uncertain;</li><li>test digits and written numbers separately;</li><li>omit edition labels such as “extended” until identity is found;</li><li>try one stable word from the subtitle rather than the main title;</li><li>try a verified translated, original, or transliterated form;</li><li>correct one likely spelling error.</li></ul>
 <p>The Library of Congress Search Help documents that exact phrases require exact term order in its system, while its catalogue guidance also supports broader “contains” behaviour. That contrast illustrates why a partial query should begin broad unless the interface’s exact syntax is known.</p>
 <h2 id="keep-a-minimal-query-diary">Keep a minimal query diary</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Attempt</th><th>Query</th><th>One change</th><th style="text-align:right">Results</th><th>Interpretation</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Attempt</th><th scope="col">Query</th><th scope="col">One change</th><th scope="col" style="text-align:right">Results</th><th scope="col">Interpretation</th></tr></thead>
 <tbody><tr><td></td><td></td><td></td><td style="text-align:right"></td><td></td></tr></tbody>
 </table></div>
 <p>If changing punctuation produces the same results, stop repeating punctuation variants. If removing one guessed word reveals the title, mark that word unreliable rather than adding several new constraints.</p>
@@ -159,17 +159,12 @@
 <p>Yes, if you remember a distinctive word from it. Some records index subtitles while others may not, so compare with a main-title or person clue.</p>
 <h3 id="does-capitalisation-matter">Does capitalisation matter?</h3>
 <p>Many search systems ignore case, including the Library of Congress search described in its help page, but test the actual media interface rather than assuming.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.loc.gov/help/search/" target="_blank" rel="noopener">Library of Congress: Search Help</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">Library of Congress: Advanced Search</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.loc.gov/help/search/" target="_blank" rel="noopener">https://www.loc.gov/help/search/</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">https://guides.loc.gov/catalog/advanced-search</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="search-with-partial-titles">Explore Norva's features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.loc.gov/help/search/" target="_blank" rel="noopener">Library of Congress: Search Help</a></li><li><a href="https://guides.loc.gov/catalog/advanced-search" target="_blank" rel="noopener">Library of Congress: Advanced Search</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
+</section>
       
     </article>
   </main>

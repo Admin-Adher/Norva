@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Media Player vs. Content Provider: Key Differences | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Media Player vs. Content Provider: What’s the Difference?</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="media-player-vs-content-provider">
       <div class="article-meta">
         <span class="tag">Media Player Fundamentals</span>
         <span>By Norva Editorial Team</span>
@@ -117,8 +117,8 @@
       <blockquote><strong>In short:</strong> A content provider supplies access to media under its own terms. A media player supplies software for organising and playing a compatible source. One controls the catalogue and access; the other controls interface features such as browsing, progress, favourites, and playback controls. Some companies do both, so always check the product description.</blockquote>
 <p>Confusing these roles can lead to the wrong purchase decision. The clearest approach is to ask who controls each part of the experience before you create an account or connect a source.</p>
 <h2 id="a-responsibility-matrix">A responsibility matrix</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Question</th><th>Usually controlled by the source or provider</th><th>Usually controlled by the player</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Question</th><th scope="col">Usually controlled by the source or provider</th><th scope="col">Usually controlled by the player</th></tr></thead>
 <tbody><tr><td>Which titles or programmes are available?</td><td>Yes</td><td>No</td></tr><tr><td>Do you have the right to access them?</td><td>Yes, together with the user</td><td>No</td></tr><tr><td>Which artwork, descriptions, and guide fields are supplied?</td><td>Usually</td><td>The player can organise what it receives</td></tr><tr><td>How are menus, search, filters, and focus designed?</td><td>No</td><td>Yes</td></tr><tr><td>Can progress and favourites sync through the player account?</td><td>No</td><td>Potentially, if documented</td></tr><tr><td>Which audio tracks and subtitles exist?</td><td>Source and media</td><td>The player lets you select available options</td></tr><tr><td>Does a format play on a particular device?</td><td>Partly</td><td>Partly, with the device and its capabilities</td></tr></tbody>
 </table></div>
 <p>The table is deliberately conditional. Real products can combine roles, and a player may enrich or reorganise certain fields. The product’s current terms remain the decisive reference.</p>
@@ -158,17 +158,12 @@
 <p>Start with the source because it generally supplies programme data. If the source is correct but the player presents it incorrectly, collect an example and contact the player’s support team.</p>
 <h3 id="why-does-this-distinction-matter-for-privacy">Why does this distinction matter for privacy?</h3>
 <p>The player and the connected source may each process different data for different purposes. Review the privacy information for every service involved.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/terms" target="_blank" rel="noopener">Review Norva’s product boundaries</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">Norva Terms of Service</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva Privacy Policy</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/terms" data-cta="blog-article">Review Norva’s product boundaries</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/terms" target="_blank" rel="noopener">https://norva.tv/terms</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/terms" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="media-player-vs-content-provider">Review Norva’s product boundaries</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/terms">Norva Terms of Service</a></li><li><a href="https://norva.tv/privacy">Norva Privacy Policy</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

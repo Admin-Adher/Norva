@@ -44,7 +44,7 @@ product_claims:
 published_at: null
 updated_at: null
 last_fact_check: null
-estimated_reading_minutes: 5
+estimated_reading_minutes: 7
 
 excerpt: "A useful first Norva session confirms account security, source authorisation, catalogue loading, one playback path, and one account-level feature before changing advanced settings."
 hero:
@@ -61,12 +61,12 @@ is_pillar: true
 parent_pillar: null
 related_articles:
 - "/blog/connect-compatible-media-source-norva/"
-- "/blog/verify-media-source-connection/"
-- "/blog/pair-tv-with-norva-account/"
+- "/blog/prepare-media-source-setup/"
+- "/blog/what-is-norva-media-player/"
 
 cta:
-  label: "Open Norva’s setup overview"
-  href: "https://norva.tv/#how-it-works"
+  label: "Follow the source-connection guide"
+  href: "https://norva.tv/blog/connect-compatible-media-source-norva/"
   intent: "apply_setup"
 
 sources:
@@ -74,15 +74,18 @@ sources:
 - "https://norva.tv/#features"
 - "https://norva.tv/terms"
 - "https://norva.tv/privacy"
-proof_assets: []
+proof_assets:
+- "/assets/blog/source-m3u-live-web-20260910.jpg"
 
 original_evidence:
   required: true
   status: "present"
   type: "reproducible first-session timebox"
-  summary: "A five-checkpoint timebox prioritises product boundaries, one source, one known item, and one account-state test without promising completion time."
-  methodology: "Allocate roughly two minutes to each checkpoint, allow source loading to continue if needed, and record observable outcomes rather than forcing the session to fit ten minutes."
-  asset_urls: []
+  summary: "A five-checkpoint timebox, direct live web screenshots and a test-account Xtream walkthrough with a later Ready state, source-specific audio filtering and a twelve-version detail view on 10 September 2026."
+  methodology: "The M3U form was captured empty without submitting it. A separate Xtream test used the optional access-period skip path. Follow-up observed Ready, Albanian filtering and badges, filter clearing, search and a twelve-version detail view. A favourite persisted on a later catalogue opening and its removal was confirmed after reload; immediate feedback was not validated. Screenshots exclude connection details. Playback, native and cross-device acceptance remain unvalidated."
+  asset_urls:
+  - "/assets/blog/source-m3u-live-web-20260910.jpg"
+  - "/assets/blog/catalog-audio-filter-live-web-20260910.jpg"
 ---
 
 # Getting Started With Norva: Your First 10 Minutes
@@ -119,13 +122,19 @@ Do not spend this stage fine-tuning artwork or categories. The goal is a secure,
 
 ## Minutes 2–4: connect one source
 
-Use the current source-management path in Norva and enter the required settings privately. Interface labels can change, so this draft must be checked against the live product before publication.
+On the web, open your account menu, choose **Settings**, then **TV service**. The wording follows your interface language. The add-source dialog offers **M3U link** and **Xtream login**: use the format supplied by the owner of your authorised source, not your Norva account password.
+
+![Norva web source form showing the M3U link tab, an empty Playlist URL field and an optional service name.](/assets/blog/source-m3u-live-web-20260910.jpg "Live English web form on 10 September 2026, captured before entering source details. The example address and service name are placeholders; this is not an M3U import result.")
+
+For M3U, the required field is **Playlist URL**; **Service name** is optional. If you only received credentials for another application, use **My provider only gave me an app login** before trying those credentials in a different field. An application login alone does not establish that you have a compatible source.
 
 Connect only one source during the first session. Multiple simultaneous additions make it harder to identify which source produced a category, duplicate, or error.
 
-The detailed draft procedure is [How to Connect a Compatible Media Source to Norva](/blog/connect-compatible-media-source-norva/).
+The field-by-field procedure is [How to Connect a Compatible Media Source to Norva](/blog/connect-compatible-media-source-norva/).
 
-Observable success: the source is accepted and the library begins to load without displaying private connection information.
+Observable result: the source is accepted and catalogue preparation begins. Keep any saved source address out of screenshots; reaching **Importing** is not the same as having a ready library.
+
+In the web test on 10 September 2026, a separate Xtream test connection first reached **Preparing your catalog**. A later check in **Settings → TV Service** showed the same source as **Ready**, without adding it again. The setup used **Add this later** for the optional access period; no dates or reminder preferences were invented. Ready confirms the catalogue state shown by Norva, not that every file has been played or every track analysed.
 
 ## Minutes 4–6: inspect the catalogue
 
@@ -141,7 +150,13 @@ Check:
 
 This is not a full library audit. One known item provides a controlled reference.
 
-If the catalogue does not appear, use [How to Confirm That a New Source Connected Correctly](/blog/verify-media-source-connection/) before changing unrelated preferences.
+In the completed catalogue check, **Movies → Filters → Source** selected the test source. Choosing **Albanian** under **Audio language** returned cards carrying that language badge. Clearing the language filter and searching for a known title opened a detail view with twelve versions, a year and a synopsis. These are observed browsing results for one test source, not a full catalogue audit.
+
+![Norva Movie filters showing the test source, All Categories and Albanian selected under Audio language.](/assets/blog/catalog-audio-filter-live-web-20260910.jpg "Live English web interface, 10 September 2026. Source, category, audio and subtitles can be refined separately. The count belongs to this test catalogue at capture time, not to a catalogue included with Norva.")
+
+Use **Audio language** to narrow the list, then inspect the version you intend to play. Language information can come from recognised source labels or detected file tracks; a filter match alone does not prove which tracks your player will expose. **Nordic languages** is a regional indication, not one specific language. If the result is too narrow, remove the audio chip or use **Clear all** rather than reconnecting the source.
+
+If the catalogue does not appear, return to the connection guide's partial-result checklist before changing unrelated preferences. Record whether the settings were accepted, any categories appeared, or only one item failed. These observations lead to different next checks.
 
 ## Minutes 6–8: test one playback path
 
@@ -156,6 +171,8 @@ Observe:
 
 Playback availability and quality depend on source, device, network, and media. A successful catalogue connection does not guarantee every item will play on every device.
 
+Playback was not revalidated in the latest catalogue check. An earlier attempt during setup opened the player but did not establish advancing video before returning **Back**. Treat playback as a separate checkpoint on your intended device, not as an outcome proved by the screenshots in this guide.
+
 ## Minutes 8–10: verify one personal feature
 
 Choose one account-level action:
@@ -165,9 +182,11 @@ Choose one account-level action:
 - select an available language preference;
 - review trusted-device information if the current account interface exposes it.
 
-If a second supported screen is ready, sign in or pair it through the documented path and check only that one state. The [TV pairing guide](/blog/pair-tv-with-norva-account/) covers the remote-friendly workflow.
+If a second supported screen is ready, follow its on-screen account or pairing instructions and check only that one state. Phone and TV layouts can differ from the web form shown here; do not treat this screenshot as a TV remote-control walkthrough.
 
 Do not attempt a complete compatibility test. Your outcome is a baseline: one source, one item, and one state.
+
+In our web check, a favourite added from the detail page was present on a later catalogue opening. We removed that test favourite and confirmed the original unfavourited state after reload. This checks persistence for one item on one account; it does not establish immediate feedback or cross-device synchronisation.
 
 ## Record a first-session note
 
@@ -181,7 +200,9 @@ Use five rows:
 | Playback path | Observed / not tested / failed |  |
 | Account feature | Observed / not tested / failed |  |
 
-Add the device type, source, and date. Redact all credentials. This note is evidence of your own setup, not a public performance benchmark.
+Add the device type, a non-sensitive source nickname, and date. Never copy the source URL or credentials into this note. This is evidence of your own setup, not a public performance benchmark.
+
+**Verification scope:** checked directly in the signed-in web interface on 10 September 2026: the source forms, one Xtream submission, the later **Ready** status, source-specific audio filtering, clearing a filter, search, a twelve-version detail view and one favourite's persistence/removal after reopening. Screenshots use English; the final favourite check used the restored device language. Successful playback, immediate favourite feedback, cross-device continuity and native phone/TV behaviour have not been accepted by these checks.
 
 ## What to postpone
 
@@ -218,7 +239,7 @@ A secure account, one connected source, one correctly identified item, and one o
 
 ## Your next step
 
-[Open Norva’s setup overview](https://norva.tv/#how-it-works)
+[Follow the source-connection guide](https://norva.tv/blog/connect-compatible-media-source-norva/)
 
 ## Sources
 

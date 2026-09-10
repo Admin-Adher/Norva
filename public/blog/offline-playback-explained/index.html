@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="How Modern Offline Playback Works | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How Offline Playback Works in a Modern Media Player</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="offline-playback-explained">
       <div class="article-meta">
         <span class="tag">Offline &amp; Mobile Viewing</span>
         <span>By Norva Editorial Team</span>
@@ -137,8 +137,8 @@
 <p>Quality choices can affect transfer size, yet there is no universal amount of storage per hour. Encoding, resolution, audio tracks, duration, and source packaging all matter. Use a representative item on your own device and measure the observed size. The <a href="/blog/storage-for-offline-video/">offline storage budgeting guide</a> provides a worksheet without relying on generic estimates.</p>
 <h2 id="original-evidence-four-state-lifecycle-card">Original evidence: four-state lifecycle card</h2>
 <p>Record one item through the complete lifecycle:</p>
-<div class="table-wrap"><table>
-<thead><tr><th>State</th><th>Evidence to observe</th><th>Result</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">State</th><th scope="col">Evidence to observe</th><th scope="col">Result</th></tr></thead>
 <tbody><tr><td>Eligible</td><td>Offline control exists for exact version</td><td>Yes / No</td></tr><tr><td>Prepared</td><td>App reports completion and storage changes</td><td>Pass / Recheck</td></tr><tr><td>Disconnected</td><td>Item opens and plays in airplane mode</td><td>Pass / Recheck</td></tr><tr><td>Reconciled</td><td>Intended progress appears after reconnection</td><td>Pass / Recheck</td></tr></tbody>
 </table></div>
 <p>The card proves only what happened for that item, device, source, and test date. It is a reusable diagnostic, not a compatibility promise.</p>
@@ -152,17 +152,12 @@
 <p>Norva states that eligible offline items are encrypted and stored on the device, not uploaded to Norva. Account information such as progress can be a separate synced state.</p>
 <h3 id="can-an-offline-item-stop-being-available">Can an offline item stop being available?</h3>
 <p>Availability can remain conditional on the device, source, media, account state, and associated rights. Review the current item status before travel.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">Explore how Norva works</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">Norva privacy policy</a></li><li><a href="https://support.apple.com/en-gb/108429" target="_blank" rel="noopener">Apple: Check storage on iPhone and iPad</a></li><li><a href="https://support.google.com/android/answer/7431795?hl=en" target="_blank" rel="noopener">Android Help: Free up space</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">Explore How Norva Works</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li><li><a href="https://norva.tv/privacy" target="_blank" rel="noopener">https://norva.tv/privacy</a></li><li><a href="https://support.apple.com/en-gb/108429" target="_blank" rel="noopener">https://support.apple.com/en-gb/108429</a></li><li><a href="https://support.google.com/android/answer/7431795?hl=en" target="_blank" rel="noopener">https://support.google.com/android/answer/7431795?hl=en</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#how-it-works" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="offline-playback-explained">Explore how Norva works</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/#features">Norva features</a></li><li><a href="https://norva.tv/privacy">Norva privacy policy</a></li><li><a href="https://support.apple.com/en-gb/108429" target="_blank" rel="noopener">Apple: Check storage on iPhone and iPad</a></li><li><a href="https://support.google.com/android/answer/7431795?hl=en" target="_blank" rel="noopener">Android Help: Free up space</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

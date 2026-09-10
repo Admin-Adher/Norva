@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Handoff vs Mirroring vs Casting for Viewing | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Handoff, Mirroring, or Casting: Know Which Workflow You Need</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="handoff-mirroring-or-casting-know-which-workflow-you-need">
       <div class="article-meta">
         <span class="tag">Cross-Device Handoff</span>
         <span>By Norva Editorial Team</span>
@@ -117,8 +117,8 @@
       <blockquote><strong>In short:</strong> Use handoff when you want to stop on one supported device and continue independently on another. Use screen mirroring when you need the second display to reproduce the first screen. Use remote playback when the target receives and plays media while the source controls the session. These are distinct concepts, and Norva cross-device continuity does not by itself prove mirroring or casting support.</blockquote>
 <p>The word “cast” is often used for several different behaviours. That ambiguity causes setup failures: a user expects an independent target app, but the device is looking for a receiver; or they expect an exact screen copy, but only playback controls move.</p>
 <h2 id="compare-the-three-workflows">Compare the three workflows</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Workflow</th><th>Where the visible experience comes from</th><th>Source device after start</th><th>Main verification</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Workflow</th><th scope="col">Where the visible experience comes from</th><th scope="col">Source device after start</th><th scope="col">Main verification</th></tr></thead>
 <tbody><tr><td>Handoff</td><td>Norva experience opened independently on the target</td><td>Can usually stop participating after state is verified</td><td>Account, profile, source, item, version, progress</td></tr><tr><td>Screen mirroring</td><td>A reproduction of the source screen</td><td>Remains central to the displayed session</td><td>Operating-system and display mirroring support</td></tr><tr><td>Remote playback</td><td>Target playback selected or controlled from a source interface</td><td>Often remains a controller</td><td>Sender, receiver, media, network, and rights support</td></tr></tbody>
 </table></div>
 <p>These are conceptual distinctions, not a Norva feature list. This article does not claim that Norva implements screen mirroring, casting, a receiver protocol, or the W3C APIs cited below.</p>
@@ -139,8 +139,8 @@
 <ol><li>Must the target run Norva independently?</li><li>Must the target show the entire source screen?</li><li>Should the source remain a controller?</li><li>May private notifications appear on the target?</li><li>Does the target have access to the same authorised source?</li><li>Is the required function documented for both devices?</li><li>Do current plan and source conditions allow the intended use?</li></ol>
 <p>If the answers conflict, do not activate random connection icons. Clarify the goal first.</p>
 <h2 id="original-evidence-selection-card">Original evidence: selection card</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Goal</th><th>Handoff</th><th>Mirroring</th><th>Remote playback</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Goal</th><th scope="col">Handoff</th><th scope="col">Mirroring</th><th scope="col">Remote playback</th></tr></thead>
 <tbody><tr><td>Continue independently on target</td><td>Strong conceptual fit</td><td>Poor fit</td><td>Possible but different</td></tr><tr><td>Show exact source screen</td><td>Poor fit</td><td>Strong conceptual fit</td><td>Poor fit</td></tr><tr><td>Keep source as controller</td><td>Not required after transition</td><td>Yes</td><td>Usually</td></tr><tr><td>Target needs independent source access</td><td>Yes</td><td>Not necessarily</td><td>Depends on implementation</td></tr><tr><td>Norva support verified here</td><td>Cross-device continuity only</td><td>Not claimed</td><td>Not claimed</td></tr></tbody>
 </table></div>
 <p>The final row is critical: a conceptual match does not establish product availability.</p>
@@ -157,17 +157,12 @@
 <p>Not universally. It may reproduce the entire source screen and keep the source involved. Choose based on the actual goal and supported route.</p>
 <h3 id="can-i-use-the-terms-interchangeably">Can I use the terms interchangeably?</h3>
 <p>Avoid doing so. Name the expected source and target behaviour so support and household members understand the workflow.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Review Norva's verified cross-device features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.w3.org/TR/remote-playback/" target="_blank" rel="noopener">W3C Remote Playback API</a></li><li><a href="https://www.w3.org/TR/presentation-api/" target="_blank" rel="noopener">W3C Presentation API</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Review Norva's Verified Cross-Device Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.w3.org/TR/remote-playback/" target="_blank" rel="noopener">https://www.w3.org/TR/remote-playback/</a></li><li><a href="https://www.w3.org/TR/presentation-api/" target="_blank" rel="noopener">https://www.w3.org/TR/presentation-api/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="handoff-mirroring-or-casting-know-which-workflow-you-need">Review Norva's verified cross-device features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.w3.org/TR/remote-playback/" target="_blank" rel="noopener">W3C Remote Playback API</a></li><li><a href="https://www.w3.org/TR/presentation-api/" target="_blank" rel="noopener">W3C Presentation API</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

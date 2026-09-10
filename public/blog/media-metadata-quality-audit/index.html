@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Run a Media Metadata Quality Audit | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Run a Media Metadata Quality Audit</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="media-metadata-quality-audit">
       <div class="article-meta">
         <span class="tag">Metadata Quality</span>
         <span>By Norva Editorial Team</span>
@@ -123,8 +123,8 @@
 <p>Metadata unrelated to a task can be lower priority. This keeps the audit focused on usability rather than maximum field count.</p>
 <h2 id="build-the-field-use-risk-matrix">Build the field-use-risk matrix</h2>
 <p>Complete one row per critical field:</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Field</th><th>User task</th><th>Quality dimensions</th><th>Failure consequence</th><th>Evidence source</th><th>Sample</th><th>Owner</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Field</th><th scope="col">User task</th><th scope="col">Quality dimensions</th><th scope="col">Failure consequence</th><th scope="col">Evidence source</th><th scope="col">Sample</th><th scope="col">Owner</th></tr></thead>
 <tbody><tr><td>Title</td><td>Identity, search</td><td>Accuracy, consistency</td><td>Wrong or missed result</td><td>Source reference</td><td></td><td></td></tr><tr><td>Year/date</td><td>Identity</td><td>Accuracy, validity</td><td>Versions confused</td><td>Authoritative record</td><td></td><td></td></tr><tr><td>Series/episode</td><td>Navigation</td><td>Completeness, relationship</td><td>Wrong order or orphan</td><td>Source hierarchy</td><td></td><td></td></tr><tr><td>Audio/subtitle</td><td>Choice</td><td>Accuracy, vocabulary</td><td>Wrong expectation</td><td>Actual selectable track</td><td></td><td></td></tr><tr><td>Poster/synopsis</td><td>Recognition</td><td>Accuracy, provenance</td><td>Wrong work selected</td><td>Work identity</td><td></td><td></td></tr></tbody>
 </table></div>
 <p>Dublin Core defines terms such as title, identifier, language, relation, subject, and issued date. Its model is useful for clarifying what a field claims, even when a personal catalogue uses different names.</p>
@@ -155,17 +155,12 @@
 <p>Yes in the broad catalogue sense: it is descriptive and supports recognition. Audit its relationship to the work, source, and rights, not just image resolution.</p>
 <h3 id="should-missing-values-be-filled-manually">Should missing values be filled manually?</h3>
 <p>Only when a supported workflow and reliable evidence exist. Preserve uncertainty rather than inventing precision that future reviewers cannot trace.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">Dublin Core: DCMI Metadata Terms</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">National Archives: Introduction to inventory and scheduling</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">https://www.dublincore.org/specifications/dublin-core/dcmi-terms/</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/inventory-intro</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="media-metadata-quality-audit">Explore Norva's features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.dublincore.org/specifications/dublin-core/dcmi-terms/" target="_blank" rel="noopener">Dublin Core: DCMI Metadata Terms</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">National Archives: Introduction to inventory and scheduling</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

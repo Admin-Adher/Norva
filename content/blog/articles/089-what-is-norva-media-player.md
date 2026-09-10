@@ -1,8 +1,8 @@
 ---
 content_id: "NVB-089"
 title: "What Is Norva? A Straightforward Guide to the Media Player"
-seo_title: "What Is Norva? Media Player Guide"
-meta_description: "Learn what Norva is, what it organizes, how it works across web, mobile, and TV, and what users still need to provide."
+seo_title: "What Is Norva? Check Whether Your Media Source Fits"
+meta_description: "Norva is a media player, not a catalogue. See the source-connection form and check what you need before evaluating the experience on supported web, mobile and TV."
 slug: "what-is-norva-media-player"
 canonical_url: "https://norva.tv/blog/what-is-norva-media-player/"
 language: "en"
@@ -52,12 +52,12 @@ faq_schema:
 is_pillar: true
 parent_pillar: null
 related_articles:
-  - "/blog/what-norva-includes/"
-  - "/blog/norva-plans-explained/"
-  - "/blog/norva-trial-checklist/"
+  - "/blog/media-player-vs-content-provider/"
+  - "/blog/connect-compatible-media-source-norva/"
+  - "/blog/norva-evaluation-framework/"
 cta:
-  label: "See How Norva Works"
-  href: "https://norva.tv/#how-it-works"
+  label: "Check What You Need to Connect Your Source"
+  href: "https://norva.tv/blog/connect-compatible-media-source-norva/"
   intent: "decision"
 sources:
   - "https://norva.tv/"
@@ -66,14 +66,16 @@ sources:
   - "https://norva.tv/#pricing"
   - "https://norva.tv/#faq"
   - "https://norva.tv/terms"
-proof_assets: []
+proof_assets:
+  - "/assets/blog/source-m3u-live-web-20260910.jpg"
 original_evidence:
   required: true
   status: "included"
-  type: "product-fit boundary worksheet"
-  summary: "A needs-and-responsibilities matrix helps readers decide whether Norva's software role matches their existing authorised media setup."
-  methodology: "Readers mark the source, rights, device, organisation, continuity, and profile requirements they can verify before starting a trial."
-  asset_urls: []
+  type: "live web source-form capture and product-fit worksheet"
+  summary: "An empty current web source form illustrates the difference between connecting a compatible authorised source and supplying login credentials for an unrelated application. A needs-and-responsibilities matrix supports an individual evaluation."
+  methodology: "The empty M3U form was captured directly from the signed-in English web interface on 10 September 2026; the image contains built-in placeholders, not provider details. A separate Xtream test later showed Ready; source-specific audio filtering returned labelled cards and search opened a twelve-version detail view. A final check confirmed one favourite persisted and could be removed after reload. Successful playback, immediate favourite feedback and cross-device continuity remain unvalidated. This is not evidence of full compatibility or commercial conversion; product-fit scenarios are illustrative, not customer case studies."
+  asset_urls:
+    - "/assets/blog/source-m3u-live-web-20260910.jpg"
 ---
 
 # What Is Norva? A Straightforward Guide to the Media Player
@@ -81,6 +83,26 @@ original_evidence:
 > **In short:** Norva is a software media player and organiser. You connect a compatible media source that you own or are legally authorised to use, then browse and play that source through a coherent experience on supported web, mobile, and TV devices. The subscription covers the software; it does not include a media catalogue or media access.
 
 That boundary is the simplest way to evaluate Norva. It can improve how an existing authorised source is organised and used across screens, but it is not a replacement for the source itself.
+
+## A good fit starts with a source, not another app's password
+
+Consider three situations:
+
+| Your starting point | What to do before deciding |
+|---|---|
+| You own a media collection, or its owner authorises your access, and you have connection details in a format Norva accepts | Verify the source's rights and supported format, then test a small representative set on your intended device |
+| You only have a username and password for a different viewing application | Ask the source owner whether it provides a compatible connection method that you are authorised to use; do not assume those app credentials can be entered into Norva |
+| You expect a Norva subscription to unlock a supplied catalogue | Norva does not meet that expectation: its subscription covers the software, not media access |
+
+These are illustrative situations, not verified customer setups. A password that signs in to another application's account is not, by itself, a compatible media source. Do not paste unrelated account credentials into a playlist field or attempt to extract another service's private media URLs.
+
+The empty web source form below makes that boundary tangible: this is where compatible source information belongs, not where Norva sells or supplies a catalogue.
+
+![Current Norva web source form with M3U link selected, empty Playlist URL and optional Service name fields, and a help option for users given only an app login.](/assets/blog/source-m3u-live-web-20260910.jpg "Live English web source form on 10 September 2026. Both fields are empty and show example placeholders; this is not an M3U import result.")
+
+In this web form, **M3U link** is selected and **Playlist URL** expects a complete compatible source URL. The example address is placeholder text, not a working source. If all you were given is an app login, the visible **“My provider only gave me an app login”** help option addresses that situation before you try to add anything.
+
+The capture comes directly from the signed-in web interface. A separate Xtream test later showed **Ready** in source settings; source-specific language filtering returned labelled cards, and search opened a known title with twelve versions. Those observations verify catalogue interactions on that test account, not successful playback or universal compatibility. The [connection walkthrough](/blog/connect-compatible-media-source-norva/) records the tested steps and limits. Check your own authorised source on your intended device; another platform's interface may differ.
 
 ## What Norva does
 
@@ -108,7 +130,7 @@ Norva's subscription does not include a catalogue or media access. The user stil
 - a suitable connection for setup, connected playback, and synchronisation;
 - enough local storage when eligible offline access is used.
 
-The [Norva inclusions and responsibilities guide](/blog/what-norva-includes/) provides a side-by-side checklist.
+The [player versus content-provider explanation](/blog/media-player-vs-content-provider/) separates these responsibilities in more detail.
 
 ## How the device experiences differ
 
@@ -120,7 +142,7 @@ The goal is continuity, not an identical layout on every screen. A remote, touch
 
 The Norva plan includes up to two profiles. Norva Family includes up to five. Profiles help keep viewing progress, favourites, and preferences separated within the household.
 
-These numbers describe profile capacity. They should not be presented as device or simultaneous-playback limits. Review the current plan details on the official pricing page before subscribing. The [Norva plans comparison](/blog/norva-plans-explained/) offers a needs-based decision method.
+These numbers describe profile capacity. They should not be presented as device or simultaneous-playback limits. Review the current plan details on the official pricing page before subscribing; the number of household profiles is only one part of your decision.
 
 ## How offline access fits
 
@@ -143,9 +165,9 @@ Use one representative source and a small test set:
 9. test language choices using items known to expose them;
 10. review plan and cancellation terms before deciding.
 
-The [Norva trial checklist](/blog/norva-trial-checklist/) turns these into pass, recheck, and not-applicable results.
+The [Norva evaluation framework](/blog/norva-evaluation-framework/) helps record what passed, what needs a recheck and what is not applicable to your setup. A successful sign-in alone is not a successful media test.
 
-## Original evidence: product-fit boundary worksheet
+## Complete your product-fit worksheet
 
 | Requirement | You provide | Norva role | Verified? |
 | --- | --- | --- | --- |
@@ -186,7 +208,7 @@ Yes, through profiles. Norva includes up to two profiles and Norva Family up to 
 
 ## Your next step
 
-[See how Norva works](https://norva.tv/#how-it-works)
+[Check what you need to connect your source](/blog/connect-compatible-media-source-norva/) before committing to a plan. If the source format or your authorisation is unclear, resolve that first; do not treat an active subscription as proof of compatibility.
 
 ## Sources
 

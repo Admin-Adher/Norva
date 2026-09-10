@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Smart TV Media App Performance: Layer Guide | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Smart TV Media App Performance: A Layer-by-Layer Guide</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="smart-tv-media-app-performance-a-layer-by-layer-guide">
       <div class="article-meta">
         <span class="tag">Smart TV Performance</span>
         <span>By Norva Editorial Team</span>
@@ -129,8 +129,8 @@
 <p>Cold launch, warm launch, foreground resume, and screen revisit are different states. <a href="/blog/cold-start-or-warm-start-measure-the-right-tv-launch/">Measure cold and warm launches separately</a>. Record how the state was established.</p>
 <p>Do not call a cached screen a fresh launch.</p>
 <h2 id="original-evidence-layer-map">Original evidence: layer map</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Observable start</th><th>Observable end</th><th>Context</th><th>Comparison</th><th>Limit</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Observable start</th><th scope="col">Observable end</th><th scope="col">Context</th><th scope="col">Comparison</th><th scope="col">Limit</th></tr></thead>
 <tbody><tr><td>Input/focus</td><td>Key event</td><td>Focus settles</td><td>Remote/TV</td><td>System UI</td><td>Manual timing</td></tr><tr><td>Artwork/search</td><td>Screen/query</td><td>Stable result</td><td>Path/source</td><td>Cached revisit</td><td>Hidden stages</td></tr><tr><td>Launch/state</td><td>App action</td><td>Usable screen</td><td>Cold/warm</td><td>Repeat order</td><td>State uncertainty</td></tr><tr><td>Playback/control</td><td>Press</td><td>Visible response</td><td>Version/path</td><td>Another title</td><td>Media differs</td></tr><tr><td>Output</td><td>Action</td><td>Picture/audio</td><td>Display route</td><td>Local route</td><td>Handshake hidden</td></tr></tbody>
 </table></div>
 <p>Keep account, source, network, and viewing details private.</p>
@@ -158,17 +158,12 @@
 <p>Yes, when start and end events are defined and uncertainty is reported.</p>
 <h3 id="should-every-lag-trigger-a-factory-reset">Should every lag trigger a factory reset?</h3>
 <p>No. Preserve evidence and isolate the smallest layer first.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
-<h2 id="sources">Sources</h2>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="smart-tv-media-app-performance-a-layer-by-layer-guide">Explore Norva's playback features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
 <ul><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">W3C Performance Timeline</a></li><li><a href="https://www.w3.org/TR/longtasks-1/" target="_blank" rel="noopener">W3C Long Tasks API</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.w3.org/TR/performance-timeline/" target="_blank" rel="noopener">https://www.w3.org/TR/performance-timeline/</a></li><li><a href="https://www.w3.org/TR/longtasks-1/" target="_blank" rel="noopener">https://www.w3.org/TR/longtasks-1/</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li></ul>
-    </section>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

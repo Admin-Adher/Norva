@@ -6,6 +6,18 @@
   var consent = cfg.consentMode || 'granted';
   var googleConsentDefaulted = false;
   var debug = Boolean(cfg.debug || /[?&]norva_marketing_debug=1\b/.test(location.search));
+  var blogViewSent = false;
+  var BLOG_CONTEXT_KEY = 'norva_blog_context_v1';
+  var BLOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
+  var EVENT_SOURCES = ['landing', 'hero', 'nav', 'pricing', 'context_widget', 'final_cta',
+    'footer', 'manual', 'automatic', 'settings', 'onboarding', 'player', 'consent', 'blog', 'unknown'];
+  var BLOG_PLACEMENTS = ['nav', 'primary', 'inline', 'footer'];
+  var BLOG_TARGETS = ['signup', 'app', 'source_settings', 'pricing', 'features',
+    'how_it_works', 'product_preview', 'support', 'legal', 'blog', 'home', 'other'];
+  var BLOG_FUNNEL_EVENTS = ['signup_started', 'sign_up', 'login_started', 'login_completed',
+    'pricing_viewed', 'plan_selected', 'checkout_started', 'begin_checkout',
+    'checkout_completed', 'start_trial', 'purchase', 'provider_connect_started',
+    'provider_connected', 'catalog_ready', 'playback_first_frame'];
 
   function nativeSurface() {
     try {
@@ -24,6 +36,113 @@
       if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') out[key] = obj[key];
     });
     return out;
+  }
+
+  function marketingParams(params) {
+    var out = compact(params);
+    // Product "source" describes an interface placement, never acquisition.
+    // Keep the original product/native vocabulary outside this web boundary.
+    var source = out.event_source !== undefined ? out.event_source : out.source;
+    delete out.source;
+    delete out.event_source;
+    if (EVENT_SOURCES.indexOf(source) !== -1) out.event_source = source;
+    return out;
+  }
+
+  function validBlogSlug(value) {
+    return typeof value === 'string' && value.length <= 100
+      && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+  }
+
+  function blogArticle() {
+    var path = String(location.pathname || '');
+    if (path === '/blog/' || path === '/blog') return 'blog_index';
+    var match = /^\/blog\/([a-z0-9-]+)\/?$/.exec(path);
+    if (!match || !validBlogSlug(match[1]) || typeof document.querySelector !== 'function') return '';
+    var article = document.querySelector('[data-blog-article]');
+    // A template-owned marker must agree with the canonical path. Do not read
+    // slugs, account identifiers, or arbitrary labels from query strings.
+    return article && article.getAttribute('data-blog-article') === match[1] ? match[1] : '';
+  }
+
+  function measurementEnvironment() {
+    return location.hostname === 'norva.tv' ? 'production' : 'qa';
+  }
+
+  function blogTarget(el) {
+    try {
+      var origin = location.origin;
+      var url = new URL(el.getAttribute('href'), origin + (location.pathname || '/'));
+      if (!/^https?:$/.test(url.protocol) || url.origin !== origin || url.username || url.password) return 'other';
+      var path = url.pathname;
+      if (path === '/account' || path === '/account.html') return 'signup';
+      if (path === '/app' || path === '/app.html') return url.hash === '#settings/sources' ? 'source_settings' : 'app';
+      if (['/subscribe.html', '/subscription', '/subscription.html', '/paywall.html'].indexOf(path) !== -1) return 'pricing';
+      if (path === '/support' || path === '/support.html') return 'support';
+      if (['/privacy.html', '/terms.html', '/mentions-legales.html'].indexOf(path) !== -1) return 'legal';
+      if (path === '/blog' || path.indexOf('/blog/') === 0) return 'blog';
+      if (path === '/' || path === '/landing.html') {
+        return ({ '#features': 'features', '#how-it-works': 'how_it_works',
+          '#product-preview': 'product_preview', '#pricing': 'pricing' })[url.hash] || 'home';
+      }
+    } catch (_) { /* Invalid destinations never leak into analytics. */ }
+    return 'other';
+  }
+
+  function clearBlogContext() {
+    try { sessionStorage.removeItem(BLOG_CONTEXT_KEY); } catch (_) {}
+  }
+
+  function rememberBlogClick(params) {
+    if (!enabled() || params.cta_target === 'other' || params.article_slug === 'blog_index') return;
+    try {
+      sessionStorage.setItem(BLOG_CONTEXT_KEY, JSON.stringify({
+        v: 1, slug: params.article_slug, placement: params.cta_placement,
+        target: params.cta_target, at: Date.now()
+      }));
+    } catch (_) { /* Storage unavailable: retain event-only measurement. */ }
+  }
+
+  function recentBlogContext() {
+    if (!enabled()) return {};
+    try {
+      var record = JSON.parse(sessionStorage.getItem(BLOG_CONTEXT_KEY) || 'null');
+      if (!record) return {};
+      var age = Date.now() - record.at;
+      if (record.v !== 1 || !validBlogSlug(record.slug)
+          || BLOG_PLACEMENTS.indexOf(record.placement) === -1
+          || BLOG_TARGETS.indexOf(record.target) === -1 || record.target === 'other'
+          || typeof record.at !== 'number' || !Number.isFinite(age)
+          || age < 0 || age >= BLOG_CONTEXT_TTL_MS) {
+        clearBlogContext();
+        return {};
+      }
+      return {
+        blog_article_slug: record.slug,
+        blog_cta_placement: record.placement,
+        blog_cta_target: record.target,
+        blog_context_model: 'last_cta_30m',
+        measurement_environment: measurementEnvironment()
+      };
+    } catch (_) {
+      clearBlogContext();
+      return {};
+    }
+  }
+
+  function blogEvent(name, params) {
+    var gaId = cfg.googleAnalytics && cfg.googleAnalytics.measurementId;
+    if (!enabled() || !gaId) return false;
+    // Blog diagnostics are GA4 events only, not Ads actions or Meta events.
+    googleEvent(name, Object.assign({ send_to: gaId, event_source: 'blog',
+      content_group: 'blog', measurement_environment: measurementEnvironment() }, params));
+    return true;
+  }
+
+  function publishBlogView() {
+    if (blogViewSent || !enabled()) return;
+    var slug = blogArticle();
+    if (slug) blogViewSent = blogEvent('blog_view', { article_slug: slug });
   }
 
   function log() {
@@ -104,6 +223,7 @@
   function init() {
     initGoogle();
     initMeta();
+    publishBlogView();
     log('init', { enabled: enabled(), cfg: cfg });
   }
 
@@ -127,12 +247,19 @@
 
   function track(name, params) {
     if (!enabled()) return;
-    params = compact(params || {});
+    params = marketingParams(params || {});
     // Product analytics keeps a platform-neutral funnel vocabulary for Clarity
     // and native telemetry. Normalize only at the marketing boundary so GA4
     // and Google Ads receive their canonical registration event.
     var marketingName = name === 'signup_completed' ? 'sign_up' : name;
-    googleEvent(marketingName, params);
+    // This is a short-lived, same-tab click association, not a replacement for
+    // GA4 acquisition or evidence of a commercial outcome. Never emit a funnel
+    // event here: decorate only real events already produced by product flows.
+    var blogContext = BLOG_FUNNEL_EVENTS.indexOf(marketingName) !== -1 ? recentBlogContext() : {};
+    var gaId = cfg.googleAnalytics && cfg.googleAnalytics.measurementId;
+    var googleParams = blogContext.blog_article_slug && gaId
+      ? Object.assign({}, params, blogContext, { send_to: gaId }) : params;
+    googleEvent(marketingName, googleParams);
     var metaName = {
       sign_up: 'CompleteRegistration',
       begin_checkout: 'InitiateCheckout',
@@ -153,8 +280,20 @@
   }
 
   document.addEventListener('click', function (event) {
-    var cta = event.target && event.target.closest && event.target.closest('[data-cta], .buy, [data-auth-action]');
+    var cta = event.target && event.target.closest && event.target.closest('[data-blog-cta], [data-cta], .buy, [data-auth-action]');
     if (!cta) return;
+    var slug = blogArticle();
+    if (slug) {
+      var placement = cta.getAttribute('data-blog-cta')
+        || ({ 'blog-nav': 'nav', 'blog-article': 'primary' })[cta.getAttribute('data-cta')];
+      if (BLOG_PLACEMENTS.indexOf(placement) !== -1) {
+        var blogParams = { article_slug: slug, cta_placement: placement, cta_target: blogTarget(cta) };
+        if (blogEvent('blog_cta_click', blogParams)) rememberBlogClick(blogParams);
+      }
+      // Do not duplicate the blog click as an indistinguishable select_content
+      // or forward link text, query strings, or private destination parameters.
+      return;
+    }
     track('select_content', {
       content_type: 'cta',
       item_id: inferCta(cta),
@@ -174,6 +313,7 @@
       // Native Firebase/Clarity own Android telemetry. Never bootstrap gtag or
       // Meta inside Norva's WebView, even after a saved-consent page reload.
       if (nativeSurface()) return;
+      if (consent === 'denied') clearBlogContext();
       updateGoogleConsent(consent);
       init();
     },

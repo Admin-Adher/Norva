@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Control Information Density on a TV Screen | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How to Control Information Density on a TV Screen</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="control-information-density-tv">
       <div class="article-meta">
         <span class="tag">TV Interface Ergonomics</span>
         <span>By Norva Editorial Team</span>
@@ -117,8 +117,8 @@
       <blockquote><strong>In short:</strong> Rank content by the decision it supports. Keep essential identity and primary action visible, show contextual metadata near the focused item, and defer deep detail until requested. Reduce duplication and competing containers before reducing type size. Reserve stable space, preserve a strong focus indicator, and test the complete remote task from normal viewing distance.</blockquote>
 <p>TV density is not simply the number of cards on screen. It is the amount of information competing for attention while a viewer must also track remote focus.</p>
 <h2 id="use-three-information-tiers">Use three information tiers</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Tier</th><th>Purpose</th><th>Examples</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Tier</th><th scope="col">Purpose</th><th scope="col">Examples</th></tr></thead>
 <tbody><tr><td>Essential</td><td>Make the current decision</td><td>Page title, focused item identity, primary action, active filter state</td></tr><tr><td>Contextual</td><td>Explain the focused choice</td><td>Year, type, progress, language or version cue</td></tr><tr><td>Deferred</td><td>Support deeper evaluation</td><td>Full synopsis, complete metadata, all variants, secondary actions</td></tr></tbody>
 </table></div>
 <p>Essential does not mean everything must remain simultaneously visible. It means the viewer can reach or understand it without losing context.</p>
@@ -155,17 +155,12 @@
 <p>Not necessarily. Keep them in a stable contextual or deferred region rather than repeating full text on every card.</p>
 <h3 id="how-many-metadata-fields-belong-on-a-card">How many metadata fields belong on a card?</h3>
 <p>Only those needed to identify and compare that card in its current task. Put the rest in the detail region.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">Preview Norva on TV</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html" target="_blank" rel="noopener">W3C: Understanding Non-text Contrast</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva Features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#product-preview" data-cta="blog-article">Preview Norva on TV</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">https://developer.android.com/docs/quality-guidelines/tv-app-quality</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html" target="_blank" rel="noopener">https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="control-information-density-tv">Preview Norva on TV</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html" target="_blank" rel="noopener">W3C: Understanding Non-text Contrast</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
       
     </article>
   </main>

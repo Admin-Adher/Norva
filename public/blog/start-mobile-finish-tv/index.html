@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Start on Mobile and Finish on TV | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Start on Mobile, Finish on TV: A Practical Cross-Screen Workflow</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="start-mobile-finish-tv">
       <div class="article-meta">
         <span class="tag">Cross-Device &amp; TV Experience</span>
         <span>By Norva Editorial Team</span>
@@ -132,8 +132,8 @@
 <p>If the TV interface is unfamiliar, first review <a href="/blog/navigate-media-app-tv-remote/">efficient remote navigation</a>. Guessing with repeated directional presses can move focus away from the intended card.</p>
 <h2 id="use-the-cross-screen-handoff-card">Use the cross-screen handoff card</h2>
 <p>Record this small set before a deliberate handoff:</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Check</th><th>Mobile</th><th>TV</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Check</th><th scope="col">Mobile</th><th scope="col">TV</th></tr></thead>
 <tbody><tr><td>Account</td><td>Same</td><td>Same</td></tr><tr><td>Profile</td><td></td><td></td></tr><tr><td>Title, season, episode</td><td></td><td></td></tr><tr><td>Version label</td><td></td><td></td></tr><tr><td>Visible progress</td><td>Stop point</td><td>Offered resume point</td></tr><tr><td>Connection available</td><td></td><td></td></tr></tbody>
 </table></div>
 <p>The card is useful when a mismatch occurs because it distinguishes identity from time. It contains no password, source credential, or payment data.</p>
@@ -156,17 +156,12 @@
 <p>Norva can retain those preferences across supported devices, but the corresponding options must exist for the selected source version and media item.</p>
 <h3 id="what-if-the-mobile-device-ended-the-session-offline">What if the mobile device ended the session offline?</h3>
 <p>The newest state may not be available to another screen until connectivity returns. Reconnect, verify the mobile position, then inspect the TV again.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">See Norva's cross-screen experience</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li><li><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">Norva product preview</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#product-preview" data-cta="blog-article">See Norva's Cross-Screen Experience</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li><li><a href="https://norva.tv/#product-preview" target="_blank" rel="noopener">https://norva.tv/#product-preview</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="start-mobile-finish-tv">See Norva's cross-screen experience</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/#features">Norva features</a></li><li><a href="https://norva.tv/#product-preview">Norva product preview</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

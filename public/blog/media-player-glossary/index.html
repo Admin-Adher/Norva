@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Complete Glossary of Media Player Terms | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">The Complete Glossary of Media Player Terms</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="media-player-glossary">
       <div class="article-meta">
         <span class="tag">Media Player Glossary &amp; Concepts</span>
         <span>By Norva Editorial Team</span>
@@ -159,8 +159,8 @@
 <p><strong>Subscription entitlement:</strong> The service-side state that determines access to paid capabilities under current plan and account conditions.</p>
 <p><strong>Payment receipt:</strong> Evidence that a payment transaction occurred. It may help support investigate billing, but it is not itself the live entitlement record.</p>
 <h2 id="original-evidence-concept-map">Original evidence: concept map</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Input</th><th>Key concepts</th><th>Output</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Input</th><th scope="col">Key concepts</th><th scope="col">Output</th></tr></thead>
 <tbody><tr><td>Source</td><td>Authorized media and metadata</td><td>Source, track, rights</td><td>Available records</td></tr><tr><td>Catalog</td><td>Source-derived records</td><td>Import, sync, grouping, metadata</td><td>Browsable organization</td></tr><tr><td>Playback</td><td>Selected media</td><td>Container, codec, decoder, buffer</td><td>Rendered audio and video</td></tr><tr><td>State</td><td>Viewer actions</td><td>Position, completion, resume, favorite</td><td>Viewing context</td></tr><tr><td>Account</td><td>Identity and plan</td><td>Authentication, authorization, entitlement</td><td>Permitted service actions</td></tr><tr><td>Device</td><td>Session and storage</td><td>Pairing, token, cache, offline state</td><td>Screen-specific experience</td></tr></tbody>
 </table></div>
 <h2 id="frequently-asked-questions">Frequently asked questions</h2>
@@ -170,17 +170,12 @@
 <p>Not necessarily. A catalog is the organized representation; the source supplies the media and available metadata.</p>
 <h3 id="does-authentication-prove-media-rights">Does authentication prove media rights?</h3>
 <p>No. Authentication verifies an identity or session. Authorization and legal rights are separate questions.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">See How Norva Works</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">How Norva works</a></li><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">WHATWG HTML media elements</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110 HTTP semantics</a></li><li><a href="https://pages.nist.gov/800-63-4/sp800-63b.html" target="_blank" rel="noopener">NIST digital identity guidance</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">See How Norva Works</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">https://html.spec.whatwg.org/multipage/media.html</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc9110</a></li><li><a href="https://pages.nist.gov/800-63-4/sp800-63b.html" target="_blank" rel="noopener">https://pages.nist.gov/800-63-4/sp800-63b.html</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#how-it-works" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="media-player-glossary">See How Norva Works</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://norva.tv/#how-it-works">How Norva works</a></li><li><a href="https://html.spec.whatwg.org/multipage/media.html" target="_blank" rel="noopener">WHATWG HTML media elements</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc9110" target="_blank" rel="noopener">RFC 9110 HTTP semantics</a></li><li><a href="https://pages.nist.gov/800-63-4/sp800-63b.html" target="_blank" rel="noopener">NIST digital identity guidance</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

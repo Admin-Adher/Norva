@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="800" viewBox="0 0 640 800" role="img" aria-labelledby="title desc">
+  <title id="title">Same resolution, different video bitrate</title>
+  <desc id="desc">Two schematic frames have the same 1920 by 1080 dimensions. Assumed average video rates of 4 and 8 Mbps use 4 and 8 megabits in one second. Twice the data does not imply twice the picture quality. This is an arithmetic illustration, not a Norva screenshot or a media test.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="18" patternUnits="userSpaceOnUse"><path d="M32 0H0V18" fill="none" stroke="#60A5FA" stroke-width="1" opacity=".55"/></pattern>
+  </defs>
+  <rect width="640" height="800" rx="16" fill="#080B12"/>
+  <g font-family="Inter, Arial, sans-serif" fill="#F8FAFC">
+    <text x="32" y="54" font-size="30" font-weight="700">Same frame. Different data rate.</text>
+    <text x="32" y="94" font-size="24" fill="#94A3B8">Original worked example · video only</text>
+    <rect x="32" y="126" width="576" height="276" rx="10" fill="#12121a"/>
+    <text x="56" y="170" font-size="28" font-weight="600">Resolution stays the same</text>
+    <rect x="56" y="198" width="256" height="144" fill="url(#grid)" stroke="#60A5FA" stroke-width="2"/>
+    <rect x="328" y="198" width="256" height="144" fill="url(#grid)" stroke="#60A5FA" stroke-width="2"/>
+    <text x="184" y="378" font-size="25" text-anchor="middle">1920 × 1080</text>
+    <text x="456" y="378" font-size="25" text-anchor="middle">1920 × 1080</text>
+    <text x="32" y="454" font-size="28" font-weight="600">Average video data per second</text>
+    <text x="32" y="500" font-size="28">A · 4 Mbps</text>
+    <rect x="32" y="520" width="264" height="40" rx="6" fill="#60A5FA"/>
+    <text x="320" y="550" font-size="27">4 megabits</text>
+    <text x="32" y="610" font-size="28">B · 8 Mbps</text>
+    <rect x="32" y="630" width="528" height="40" rx="6" fill="#60A5FA"/>
+    <text x="32" y="710" font-size="27">8 megabits · twice the video data</text>
+    <path d="M32 740H608" stroke="#3f3f46"/>
+    <text x="32" y="776" font-size="26" fill="#94A3B8">Neither value is a picture-quality score.</text>
+  </g>
+</svg>

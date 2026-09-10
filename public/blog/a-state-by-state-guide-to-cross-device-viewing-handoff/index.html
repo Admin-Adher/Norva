@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Cross-Device Viewing Handoff: A State Guide | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">A State-by-State Guide to Cross-Device Viewing Handoff</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="a-state-by-state-guide-to-cross-device-viewing-handoff">
       <div class="article-meta">
         <span class="tag">Cross-Device Handoff</span>
         <span>By Norva Editorial Team</span>
@@ -146,8 +146,8 @@
 <p>Select audio and subtitle tracks from what is actually available. Confirm the sound route at a low comfortable level. Resume once, then check that the timeline advances from the intended scene.</p>
 <p>If the item is missing, do not repeatedly refresh or choose a look-alike. Work through the handoff prerequisites one state at a time.</p>
 <h2 id="original-evidence-handoff-state-ledger">Original evidence: handoff state ledger</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Layer</th><th>Source state</th><th>Target state</th><th>Match required before resume?</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Layer</th><th scope="col">Source state</th><th scope="col">Target state</th><th scope="col">Match required before resume?</th></tr></thead>
 <tbody><tr><td>Supported device</td><td></td><td></td><td>Yes</td></tr><tr><td>Account</td><td></td><td></td><td>Yes</td></tr><tr><td>Profile</td><td></td><td></td><td>Yes</td></tr><tr><td>Authorised source access</td><td></td><td></td><td>Yes</td></tr><tr><td>Item/episode</td><td></td><td></td><td>Yes</td></tr><tr><td>Version</td><td></td><td></td><td>Yes</td></tr><tr><td>Approximate position</td><td></td><td></td><td>Investigate differences</td></tr><tr><td>Audio/subtitles</td><td></td><td></td><td>Match the viewing need</td></tr><tr><td>Output/control method</td><td></td><td></td><td>Verify locally</td></tr></tbody>
 </table></div>
 <p>The ledger is reproducible and intentionally separates synchronised account data from local presentation state.</p>
@@ -164,17 +164,12 @@
 <p>No. Profile, item, version, audio, subtitles, source access, and local output can all affect the result.</p>
 <h3 id="what-if-the-target-shows-the-right-title-but-the-wrong-position">What if the target shows the right title but the wrong position?</h3>
 <p>Stay paused. Confirm profile, episode, and version, then refresh only through documented controls or rebuild the item route.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">See how Norva works across devices</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.w3.org/TR/remote-playback/" target="_blank" rel="noopener">W3C Remote Playback API</a></li><li><a href="https://www.w3.org/TR/presentation-api/" target="_blank" rel="noopener">W3C Presentation API</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">Norva: How It Works</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#how-it-works" data-cta="blog-article">See How Norva Works Across Devices</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.w3.org/TR/remote-playback/" target="_blank" rel="noopener">https://www.w3.org/TR/remote-playback/</a></li><li><a href="https://www.w3.org/TR/presentation-api/" target="_blank" rel="noopener">https://www.w3.org/TR/presentation-api/</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#how-it-works" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="a-state-by-state-guide-to-cross-device-viewing-handoff">See how Norva works across devices</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.w3.org/TR/remote-playback/" target="_blank" rel="noopener">W3C Remote Playback API</a></li><li><a href="https://www.w3.org/TR/presentation-api/" target="_blank" rel="noopener">W3C Presentation API</a></li><li><a href="https://norva.tv/#how-it-works">Norva: How It Works</a></li></ul>
+</section>
       
     </article>
   </main>

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Audit a Media Catalog Before Cleanup | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">What to Audit Before Cleaning a Media Catalog</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="audit-library-before-cleanup">
       <div class="article-meta">
         <span class="tag">Catalog Cleanup</span>
         <span>By Norva Editorial Team</span>
@@ -140,8 +140,8 @@
 <ul><li>supported catalogue export or snapshot;</li><li>what the export contains;</li><li>date of last successful creation;</li><li>rollback or restoration test;</li><li>source recovery owner;</li><li>changes that cannot be reversed through the tool;</li><li>approval needed before destructive work.</li></ul>
 <p>Use <a href="/blog/make-catalog-cleanup-reversible/">the reversible cleanup guide</a> to turn this into a change-control process. Do not call an untested export a backup.</p>
 <h2 id="original-evidence-audit-baseline-sheet">Original evidence: audit baseline sheet</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Area</th><th>Count/state</th><th>Observation method</th><th>Example</th><th>Risk/question</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Area</th><th scope="col">Count/state</th><th scope="col">Observation method</th><th scope="col">Example</th><th scope="col">Risk/question</th></tr></thead>
 <tbody><tr><td>Sources</td><td></td><td></td><td></td><td></td></tr><tr><td>Categories</td><td></td><td></td><td></td><td></td></tr><tr><td>Uncategorised</td><td></td><td></td><td></td><td></td></tr><tr><td>Empty categories</td><td></td><td></td><td></td><td></td></tr><tr><td>Duplicate candidates</td><td></td><td></td><td></td><td></td></tr><tr><td>Version groups</td><td></td><td></td><td></td><td></td></tr><tr><td>Unavailable items</td><td></td><td></td><td></td><td></td></tr><tr><td>Recovery</td><td></td><td></td><td></td><td></td></tr></tbody>
 </table></div>
 <p>Add audit date and filters. Feed the results into <a href="/blog/catalog-cleanup-master-plan/">the complete cleanup plan</a> and route uncertain items through the uncategorised triage method.</p>
@@ -158,17 +158,12 @@
 <p>Avoid overlapping broad work. Complete and approve a baseline for the current scope so later changes can be reconciled.</p>
 <h3 id="what-is-the-most-important-audit-output">What is the most important audit output?</h3>
 <p>A dated baseline that another person can understand: what was included, how it was observed, which filters applied, and which issues remain questions.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's catalog features</a></p>
-<h2 id="sources">Sources</h2>
-<ul><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">National Archives: Records inventory introduction</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">National Archives: Knowing your records</a></li><li><a href="https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/" target="_blank" rel="noopener">Library of Congress: Inventory and custody</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Catalog Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/inventory-intro</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">https://www.archives.gov/records-mgmt/scheduling/knowing</a></li><li><a href="https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/" target="_blank" rel="noopener">https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/</a></li><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li></ul>
-    </section>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="audit-library-before-cleanup">Explore Norva's catalog features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
+<ul><li><a href="https://www.archives.gov/records-mgmt/scheduling/inventory-intro" target="_blank" rel="noopener">National Archives: Records inventory introduction</a></li><li><a href="https://www.archives.gov/records-mgmt/scheduling/knowing" target="_blank" rel="noopener">National Archives: Knowing your records</a></li><li><a href="https://www.loc.gov/programs/digital-collections-management/inventory-and-custody/" target="_blank" rel="noopener">Library of Congress: Inventory and custody</a></li><li><a href="https://norva.tv/#features">Norva features</a></li></ul>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">

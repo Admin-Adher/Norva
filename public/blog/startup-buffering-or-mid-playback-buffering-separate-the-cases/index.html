@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <link rel="stylesheet" href="/css/blog.css?v=056387276a">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Norva">
   <meta property="og:title" content="Startup vs Mid-Playback Buffering: Separate Them | Norva Blog">
@@ -81,7 +81,7 @@
 }
   </script>
   <script src="/js/marketing-config.js?v=1"></script>
-  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=a07cf2aabb"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
 </head>
 <body>
@@ -99,7 +99,7 @@
   </header>
   <main id="main-content">
     <nav class="breadcrumb" aria-label="Breadcrumb" data-i18n-aria-label="ui_web_2bd873d6c734"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">Startup Buffering or Mid-Playback Buffering: Separate the Cases</span></nav>
-    <article lang="en" dir="ltr">
+    <article lang="en" dir="ltr" data-blog-article="startup-buffering-or-mid-playback-buffering-separate-the-cases">
       <div class="article-meta">
         <span class="tag">Buffering Diagnostics</span>
         <span>By Norva Editorial Team</span>
@@ -129,8 +129,8 @@
 <p>Sustained throughput shortfall, delay variation, packet loss recovery, household congestion, Wi-Fi roaming, source response, version transition, coded-media issue, decoding pressure, or device resource changes can interrupt continued playback.</p>
 <p><a href="/blog/a-symptom-pattern-atlas-for-video-buffering/">The buffering atlas</a> maps these candidates by device, title, link, and time.</p>
 <h2 id="original-evidence-two-phase-timeline">Original evidence: two-phase timeline</h2>
-<div class="table-wrap"><table>
-<thead><tr><th>Event</th><th>Wall-clock time</th><th>Title time</th><th>Player observation</th><th>Network/path context</th><th>Recovery</th></tr></thead>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Event</th><th scope="col">Wall-clock time</th><th scope="col">Title time</th><th scope="col">Player observation</th><th scope="col">Network/path context</th><th scope="col">Recovery</th></tr></thead>
 <tbody><tr><td>Play activation</td><td>Time</td><td>Position</td><td>State</td><td>Device/link/node</td><td>N/A</td></tr><tr><td>First frame</td><td>Time</td><td>Advancing</td><td>State</td><td>Metrics</td><td>Startup duration</td></tr><tr><td>Stable play</td><td>Time</td><td>Position</td><td>State</td><td>Metrics</td><td>N/A</td></tr><tr><td>Midplay pause</td><td>Time</td><td>Exact</td><td>Audio/picture/message</td><td>Metrics/event</td><td>Method/duration</td></tr><tr><td>Resume</td><td>Time</td><td>Position</td><td>State</td><td>Metrics</td><td>Result</td></tr></tbody>
 </table></div>
 <p>Use a stopwatch or logs consistently; do not claim frame-level precision from manual timing.</p>
@@ -153,17 +153,12 @@
 <p>No. It makes title/version-specific testing more relevant, but source delivery and player behavior still require comparison.</p>
 <h3 id="should-startup-and-midplay-durations-be-averaged-together">Should startup and midplay durations be averaged together?</h3>
 <p>No. They represent different event definitions and should remain separate.</p>
-<h2 id="your-next-step">Your next step</h2>
-<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's playback features</a></p>
-<h2 id="sources">Sources</h2>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="startup-buffering-or-mid-playback-buffering-separate-the-cases">Explore Norva's playback features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources" data-i18n="ui_web_caf85b0888d7">Sources</h2>
 <ul><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">W3C Media Source Extensions</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C Media Capabilities</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc8216" target="_blank" rel="noopener">RFC 8216: HTTP Live Streaming</a></li></ul>
-      <section class="article-cta">
-      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Playback Features</a>
-    </section>
-      <section class="sources">
-      <h2 data-i18n="ui_web_caf85b0888d7">Sources</h2>
-      <ul><li><a href="https://www.w3.org/TR/media-source-2/" target="_blank" rel="noopener">https://www.w3.org/TR/media-source-2/</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">https://www.w3.org/TR/media-capabilities/</a></li><li><a href="https://www.rfc-editor.org/rfc/rfc8216" target="_blank" rel="noopener">https://www.rfc-editor.org/rfc/rfc8216</a></li></ul>
-    </section>
+</section>
       <section class="related">
       <h2 data-i18n="ui_web_89c21c36ad5f">Related reading</h2>
       <div class="related-grid">
