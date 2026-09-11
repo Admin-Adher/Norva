@@ -22,11 +22,14 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 ROOT = pathlib.Path('/home/adrien/.norva/unknown-vod-pilot-20260911')
 MAX_FILES = 100
 MAX_SECONDS = 96 * 3600
 UNKNOWN = {'', 'und', 'un', 'mis', 'mul', 'zxx', 'nar', 'unknown'}
+PENDING = {'planned', 'probed', 'validating', 'start_intent', 'probe_intent'}
+RETRYABLE = {'gateway_release_mismatch', 'adaptive_runtime_not_ready', 'pilot_dependency_unavailable'}
 UUID = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$')
 spec = importlib.util.spec_from_file_location('pilot_helpers',
     pathlib.Path(__file__).with_name('check-strict-lid-adaptive-evidence-batch-20260910.py'))
@@ -297,6 +300,80 @@ def controls():
         and runtime.get('legacyEnabled') is False and runtime.get('workerHealthy') is True)
 
 
+def expected_runtime(plan, state):
+    """Never edit the immutable sample or silently trust a newly deployed build."""
+    path = ROOT / 'runtime.private.json'
+    if not path.exists():
+        return plan['gatewaySha256']
+    approval = private(path)
+    require(approval.get('protocol') == 1 and approval.get('planSha256') == state['planSha256']
+        and approval.get('originalGatewaySha256') == plan['gatewaySha256']
+        and approval.get('expiresEpoch') == plan['expiresEpoch']
+        and re.fullmatch('[a-f0-9]{64}', approval.get('gatewaySha256', '')) is not None)
+    return approval['gatewaySha256']
+
+
+def cache_result(value):
+    if not value:
+        return 'source_unavailable'
+    if value.get('verified'):
+        return 'verified'
+    tracks = value.get('tracks')
+    if not value.get('audioProbed') or not isinstance(tracks, list) or not tracks:
+        return 'no_audio_inventory'
+    if all(isinstance(t, dict) and not track_unknown(t) for t in tracks):
+        return 'identified_from_tracks'
+    return 'incomplete_tracks'
+
+
+def reconcile(plan, state):
+    """Read-only cache refresh, including terminal rows; never reopen a job."""
+    for row in validate(plan):
+        receipt = state['rows'][str(row['sample'])]
+        receipt['cacheResult'] = cache_result(current(row))
+    state['cacheObservedAt'] = now()
+
+
+def failure_code(error):
+    # Exception strings can contain URLs, SQL or credentials. Only closed codes
+    # reach the private journal or stdout, never exception messages/tracebacks.
+    if isinstance(error, RuntimeError) and str(error) in {
+            'gateway_release_mismatch', 'adaptive_runtime_not_ready', 'pilot_guard_declined'}:
+        return str(error)
+    if isinstance(error, (TimeoutError, subprocess.TimeoutExpired, urllib.error.URLError)) or (
+            isinstance(error, RuntimeError) and str(error) == 'bounded_operation_failed'):
+        return 'pilot_dependency_unavailable'
+    return 'pilot_local_or_contract_error'
+
+
+def process_active():
+    path = ROOT / 'process.private.json'
+    if not path.exists():
+        return False
+    receipt = private(path)
+    pid = receipt.get('pid')
+    require(isinstance(pid, int) and pid > 1)
+    proc = pathlib.Path('/proc') / str(pid)
+    try:
+        args = (proc/'cmdline').read_bytes().split(b'\0')
+        script = str(pathlib.Path(__file__).resolve()).encode()
+        if script not in args or b'run' not in args:
+            return False
+        # PID reuse must not be mistaken for the pilot that owns this receipt.
+        return (not receipt.get('startTicks') or receipt['startTicks'] ==
+            (proc/'stat').read_text().rsplit(')', 1)[1].split()[19])
+    except FileNotFoundError:
+        return False
+
+
+def spawn_runner(log_path):
+    with log_path.open('x') as output:
+        process=subprocess.Popen([sys.executable,str(pathlib.Path(__file__).resolve()),'run'],
+            stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,start_new_session=True)
+    ticks=(pathlib.Path('/proc')/str(process.pid)/'stat').read_text().rsplit(')',1)[1].split()[19]
+    return {'pid':process.pid,'startedAt':now(),'startTicks':ticks}
+
+
 def summary(plan, state):
     counts = {}
     for value in state['rows'].values():
@@ -305,12 +382,22 @@ def summary(plan, state):
     for value in state['rows'].values():
         reason=value.get('errorCode') or value.get('deferredReason')
         if reason:reasons[reason]=reasons.get(reason,0)+1
+    results = {}
+    for receipt in state['rows'].values():
+        result = receipt.get('cacheResult', 'not_refreshed')
+        results[result] = results.get(result, 0)+1
     return {'planned': len(plan['rows']), 'providers': len({r['identity_key'] for r in plan['rows']}),
         'initiallyWithoutTracks': sum(not r['has_track_map'] for r in plan['rows']),
         'requestedExampleIncluded': any(r['requested_example'] for r in plan['rows']),
         'states': counts, 'consumedFileProbeSlots': sum(v.get('probeAttempts',0) for v in state['rows'].values()),
         'diagnosticReasons':reasons,
         'updatedAt': state['updatedAt'], 'accuracy': None,
+        'heartbeatAt':state.get('heartbeatAt'), 'runtimeStatus':state.get('runtimeStatus'),
+        'lastErrorCode':state.get('lastErrorCode'), 'consecutiveFailures':state.get('consecutiveFailures',0),
+        'lastSuccessfulTickAt':state.get('lastSuccessfulTickAt'),
+        'pendingFiles':sum(v['state'] in PENDING for v in state['rows'].values()),
+        'cacheResults':results, 'cacheObservedAt':state.get('cacheObservedAt'),
+        'expiresAt':datetime.datetime.fromtimestamp(plan['expiresEpoch'],datetime.timezone.utc).isoformat(),
         'stoppedReason':state.get('stoppedReason'),
         'thresholdsChanged': False, 'oldJobsReset': False}
 
@@ -319,9 +406,11 @@ def step(plan, state):
     require(hashlib.sha256((ROOT/'plan.private.json').read_bytes()).hexdigest() == state['planSha256'])
     rows = validate(plan)
     require(time.time() < plan['expiresEpoch'])
-    lib.require_release(plan['gatewaySha256'])
+    lib.require_release(expected_runtime(plan, state))
     if not controls():
+        state['runtimeStatus'] = 'paused_controls'
         return False
+    state['runtimeStatus'] = 'running'
     failed=sum(v['state']=='probe_failed_or_uncertain' for v in state['rows'].values())
     succeeded=sum(v.get('probeSucceeded') is True for v in state['rows'].values())
     if failed>=3 and succeeded==0:
@@ -342,7 +431,7 @@ def step(plan, state):
                 continue
             receipt['state'] = 'probed'
             receipt['reconciledPersistedProfileAt'] = now()
-        if receipt['state'] not in ('planned','probed','validating','start_intent','probe_intent'):
+        if receipt['state'] not in PENDING:
             continue
         if receipt.get('nextEligibleEpoch',0) > time.time():
             continue
@@ -369,6 +458,10 @@ def step(plan, state):
             receipt['state'] = 'uncertain_requires_review'; continue
         if value.get('verified'):
             receipt['state'] = 'already_verified'; continue
+        if cache_result(value) == 'identified_from_tracks':
+            # Other ordinary workers may already have enriched the shared file.
+            # Declared tracks need no extra refresh, even with >4 audio tracks.
+            receipt['state'] = 'identified_from_tracks'; continue
         if value.get('probeCircuitRetryAt'):
             retry_epoch=datetime.datetime.fromisoformat(value['probeCircuitRetryAt'].replace('Z','+00:00')).timestamp()
             if retry_epoch > time.time():
@@ -410,8 +503,8 @@ def step(plan, state):
         tracks = value['tracks']
         if not any(track_unknown(t) for t in tracks):
             receipt['state'] = 'identified_from_tracks'; continue
-        if value.get('activeJobs',2) >= 2 or value.get('starts24h',20) >= 20:
-            receipt['waitingForQuota'] = True; continue
+        # This is an automatic request. Its service-only RPC owns the bounded
+        # global/provider admission rules; the manual 2/20 quota is unrelated.
         receipt.pop('waitingForQuota', None)
         receipt.update(state='start_intent',startIntentAt=now())
         state['updatedAt']=now(); persist()
@@ -422,6 +515,8 @@ def step(plan, state):
             elif result.get('limited') or result.get('busy'):
                 receipt['state']='probed'
                 receipt.pop('startIntentAt',None)
+                receipt['nextEligibleEpoch']=time.time()+180
+                receipt['deferredReason']='automatic_admission_deferred'
             else:
                 receipt['state']='start_declined'
         except Exception:
@@ -439,12 +534,72 @@ def operate(once=False):
     with lock(wait=not once):
         plan = private(ROOT/'plan.private.json'); validate(plan)
         state = private(ROOT/'state.private.json')
+        require(hashlib.sha256((ROOT/'plan.private.json').read_bytes()).hexdigest() == state['planSha256'])
         while time.time() < plan['expiresEpoch']:
-            step(plan,state)
-            print(json.dumps(summary(plan,state)),flush=True)
-            if once or state.get('stoppedReason') or not any(v['state'] in ('planned','probed','validating','start_intent','probe_intent') for v in state['rows'].values()):
+            if state.get('stoppedReason'):
+                print(json.dumps(summary(plan,state)),flush=True)
                 return
-            time.sleep(60)
+            # Pauses and transient dependency failures remain visible/alive.
+            # A release mismatch never adopts the live hash automatically.
+            # Persisted I/O intentions still prevent replay after an exception.
+            try:
+                step(plan,state)
+                state['consecutiveFailures']=0
+                state['lastErrorCode']=None
+                state['lastSuccessfulTickAt']=now()
+            except Exception as error:
+                code=failure_code(error)
+                state['lastErrorCode']=code
+                state['lastFailureAt']=now()
+                state['consecutiveFailures']=state.get('consecutiveFailures',0)+1
+                state['runtimeStatus']='paused_runtime' if code in RETRYABLE else 'stopped_error'
+                if code not in RETRYABLE:
+                    state['stoppedReason']=code
+            state['heartbeatAt']=state['updatedAt']=now()
+            pending=any(v['state'] in PENDING for v in state['rows'].values())
+            if not pending and not state.get('lastErrorCode') and not state.get('stoppedReason'):
+                state['runtimeStatus']='finished'
+            save(ROOT/'state.private.json',state)
+            print(json.dumps(summary(plan,state)),flush=True)
+            if once or state.get('stoppedReason') or not pending:
+                return
+            delay=min(300,60*(2**min(state.get('consecutiveFailures',0),3)))
+            time.sleep(max(0,min(delay,plan['expiresEpoch']-time.time())))
+        state['runtimeStatus']='expired'
+        state['stoppedReason']='original_pilot_deadline_reached'
+        state['heartbeatAt']=state['updatedAt']=now()
+        save(ROOT/'state.private.json',state)
+        print(json.dumps(summary(plan,state)),flush=True)
+
+
+def resume(expected):
+    """Explicit, audited rebind/restart of this same unexpired pilot only."""
+    with lock():
+        require(not process_active())
+        plan=private(ROOT/'plan.private.json'); validate(plan)
+        state=private(ROOT/'state.private.json')
+        require(hashlib.sha256((ROOT/'plan.private.json').read_bytes()).hexdigest() == state['planSha256'])
+        require(time.time()<plan['expiresEpoch'] and not state.get('stoppedReason'))
+        require(set(state['rows']) == {str(r['sample']) for r in plan['rows']})
+        lib.require_release(expected)
+        # Keep the old runtime receipt, PID, ledger, and logs for investigation.
+        token=uuid.uuid4().hex
+        receipt_path=ROOT/('resume-'+token+'.private.json')
+        approval={'protocol':1,'approvedAt':now(),'planSha256':state['planSha256'],
+            'originalGatewaySha256':plan['gatewaySha256'],'gatewaySha256':expected,
+            'expiresEpoch':plan['expiresEpoch']}
+        save(receipt_path,{'approval':approval,'previousState':state,
+            'previousProcess':private(ROOT/'process.private.json') if (ROOT/'process.private.json').exists() else None,
+            'previousRuntime':private(ROOT/'runtime.private.json') if (ROOT/'runtime.private.json').exists() else None},True)
+        reconcile(plan,state)
+        state.update(runtimeStatus='starting',resumeRequestedAt=now(),resumeReceipt=receipt_path.name,
+            lastErrorCode=None,consecutiveFailures=0,updatedAt=now())
+        save(ROOT/'runtime.private.json',approval)
+        save(ROOT/'state.private.json',state)
+        process=spawn_runner(ROOT/('runner-'+token+'.log'))
+        save(ROOT/'process.private.json',{**process,'resumeReceipt':receipt_path.name})
+    return {'resumed':True,'pid':process['pid'],'planUnchanged':True,'originalDeadlinePreserved':True,
+        'status':summary(plan,state)}
 
 
 def launch():
@@ -463,7 +618,7 @@ if __name__ == '__main__':
     os.umask(0o077)
     try:
         parser=argparse.ArgumentParser(description=__doc__)
-        parser.add_argument('phase',choices=('prepare','once','launch','run','status'))
+        parser.add_argument('phase',choices=('prepare','once','launch','resume','run','status'))
         parser.add_argument('--expected-index-sha256')
         args=parser.parse_args()
         if args.phase=='prepare':
@@ -472,9 +627,12 @@ if __name__ == '__main__':
             operate(args.phase=='once'); sys.exit(0)
         elif args.phase=='launch':
             result=launch()
+        elif args.phase=='resume':
+            result=resume(args.expected_index_sha256)
         else:
             plan=private(ROOT/'plan.private.json');validate(plan)
             result=summary(plan,private(ROOT/'state.private.json'))
+            result['processActive']=process_active()
         print(json.dumps(result))
     except Exception:
         print(json.dumps({'ok':False,'error':'bounded_pilot_operation_failed'}))
