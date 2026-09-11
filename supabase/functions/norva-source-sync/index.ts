@@ -1961,6 +1961,10 @@ function enrichmentFleetSummary(payload: unknown): JsonRecord {
     updated: Math.max(0, Number(body.updated ?? body.persisted) || 0),
     persisted: Math.max(0, Number(body.persisted) || 0),
     resolved: Math.max(0, Number(body.resolved) || 0),
+    scanned: Math.max(0, Number(body.scanned) || 0),
+    languageQueued: Math.max(0, Number(body.queued) || 0),
+    languageIdentified: Math.max(0, Number(body.identified) || 0),
+    languageVerified: Math.max(0, Number(body.verified) || 0),
     deferred,
     registeredEpisodes: Math.max(0, Number(body.registeredEpisodes) || 0),
     failed,
@@ -2724,6 +2728,9 @@ async function runEnrichmentFleetClaim(
           speechTarget,
           target: subtitleProbe ? "subtitle" : undefined,
           fileScope: true,
+          // Durable all-source intake replaces only the movie probe lane.
+          // Existing episode, subtitle, repair and tagged lanes are unchanged.
+          automaticUnknowns: lane === 0,
           repairCohort,
           // Every path stays sequential inside a provider account. The real
           // episode canary completed 14 probes / 72 tracks without one unknown

@@ -1,4 +1,5 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
+import { processAutomaticVodLanguageFile } from "../_shared/automatic-vod-language-fleet.mjs";
 import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
 import { selectionSnapshotPlaybackTags } from "../_shared/selection-snapshot-tracks.mjs";
@@ -367,6 +368,7 @@ async function handleRequest(req: Request): Promise<Response> {
         basicLidConsensusProtocol: 2,
         vodContainerSelfHealProtocol: 1,
         exactFileCodecProfileProtocol: 1,
+        automaticVodLanguageIntakeProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
         languageValidationProtocol: LANGUAGE_VALIDATION_PROTOCOL,
         languageValidationPresenceIntentProtocol: 1,
@@ -3613,7 +3615,7 @@ async function revalidateLanguageValidationClaim(
       code: "LANGUAGE_VALIDATION_PROFILE_CHANGED",
     });
   }
-  const currentIdentityKey = await loadLanguageValidationIdentity(db, userId, sourceId);
+  const currentIdentityKey = await loadLanguageValidationIdentity(db, userId, sourceId, itemType === "movie");
   if (currentIdentityKey !== identityKey) {
     throw new HttpError(409, "Provider identity changed", {
       code: "LANGUAGE_VALIDATION_IDENTITY_CHANGED",
@@ -5035,6 +5037,7 @@ async function loadLanguageValidationIdentity(
   db: SupabaseClient,
   userId: string,
   sourceId: string,
+  allowSourceLocal = false,
 ) {
   const { data, error } = await db
     .from("catalog_source_provider_identities")
@@ -5045,6 +5048,11 @@ async function loadLanguageValidationIdentity(
   if (error) throwDb(error, "Unable to load the provider identity");
   const identityKey = stringOr((data as JsonRecord | null)?.identity_id, "");
   if (!identityKey) {
+    // Only automatic movie work permits a server-derived, owner-local key.
+    // A later verified identity changes the key and invalidates old claims.
+    if (allowSourceLocal && PLAYBACK_SESSION_UUID_PATTERN.test(sourceId)) {
+      return `source:${sourceId}`;
+    }
     throw new HttpError(409, "Verified provider identity is required", {
       code: "LANGUAGE_VALIDATION_IDENTITY_REQUIRED",
     });
@@ -10851,7 +10859,7 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
   // mechanically impossible until the same response attests protocol v1.
   if (itemType === "episode" && providerDrainAttested !== true) return false;
   await assertSourceCatalogVisible(sourceId, userId, db);
-  const currentIdentityKey = await loadLanguageValidationIdentity(db, userId, sourceId);
+  const currentIdentityKey = await loadLanguageValidationIdentity(db, userId, sourceId, itemType === "movie");
   if (currentIdentityKey !== identityKey) return false;
 
   const exactProfile = exactLanguageValidationProfileFromGateway(profile, variantId, itemType);
@@ -10922,6 +10930,78 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
   // minute worker schedules this durable row only after that lease is released,
   // so no enqueue can create a second simultaneous provider connection.
   return PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(started.jobId, ""));
+}
+
+async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string, sourceId: string) {
+  // Do not open provider connections for revoked/expired accounts. The strict
+  // worker repeats this gate when it later claims each audio window.
+  try {
+    await requireLanguageValidationEntitlement(userId, db);
+  } catch (error) {
+    if (languageValidationAccessWasRevoked(error)) {
+      return { mode: "automatic-language", processed: 0, skipped: "account-not-entitled", hasMore: true };
+    }
+    throw error;
+  }
+  const { data, error } = await db.rpc("claim_catalog_vod_language_file", {
+    p_user: userId, p_source: sourceId,
+  });
+  if (error) throwDb(error, "Unable to claim automatic language intake");
+  const claim = recordOrEmpty(data);
+  if (!claim.variantId) return { mode: "automatic-language", processed: 0, ...claim };
+  const variantId = stringOr(claim.variantId, "");
+  const itemId = stringOr(claim.itemId, "");
+  const identityKey = stringOr(claim.identityKey, "");
+  const inspect = async () => {
+    await assertSourceCatalogVisible(sourceId, userId, db);
+    const actualKey = await loadLanguageValidationIdentity(db, userId, sourceId, true);
+    if (actualKey !== identityKey) return { current: false };
+    const { data: raw, error: readError } = await db.from("cloud_catalog_visible_title_variants")
+      .select("id,external_id,codec_profile").eq("user_id", userId).eq("source_id", sourceId)
+      .eq("id", variantId).eq("item_type", "movie").maybeSingle();
+    if (readError) throwDb(readError, "Unable to read automatic language file");
+    if (!raw || raw.external_id !== itemId) return { current: false };
+    const cache = await loadLanguageValidationCache(db, identityKey, "movie", itemId);
+    let ready = false;
+    let exactBound = false;
+    let verified = false;
+    try {
+      const exact = exactLanguageValidationProfileFromGateway(raw.codec_profile, variantId, "movie");
+      const indices = exact.audioTracks.map((track) => Number(track.index)).sort((a, b) => a - b);
+      const fingerprint = await languageValidationProfileFingerprint(exact.profile, exact.audioTracks, exact.fileSizeBytes);
+      const binding = { profileFingerprint: fingerprint, profileProbedAt: exact.profileProbedAt, fileSizeBytes: exact.fileSizeBytes };
+      exactBound = cacheMatchesObservedFileProfile(cache, binding)
+        && !!exactCachedAudioTracks(cache?.audio_tracks, indices);
+      requireStrictLidWindowCount(Number(exact.profile.durationSeconds));
+      ready = exactBound;
+      verified = exactBound && !!cachedStrictLanguageValidation(cache, indices, binding);
+    } catch (_) { /* A bounded exact probe may still repair an absent profile. */ }
+    const tracks = Array.isArray(cache?.audio_tracks) ? cache.audio_tracks as JsonRecord[] : [];
+    const identified = exactBound && tracks.length > 0
+      && tracks.every((track) => !!normalizeIsoLang(stringOrNull(track.lang ?? track.language)));
+    return { current: true, ready, verified, identified, needsProbe: !exactBound, profile: raw.codec_profile };
+  };
+  return await processAutomaticVodLanguageFile({
+    claim, inspect,
+    probe: async () => {
+      const token = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+      return await runCodecProfileBackfill(new Request("http://internal/codec-profile-backfill", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, variantIds: [variantId], allowSourceLocal: true }),
+      }), db);
+    },
+    enqueue: async (file: { profile: unknown }) => await enqueueAutomaticStrictLanguageValidation({
+      db, userId, sourceId, identityKey, itemType: "movie", itemId, variantId, profile: file.profile,
+    }),
+    finish: async (outcome: { state: string; code: string; attempted: boolean }) => {
+      const { data: acknowledged, error: finishError } = await db.rpc("finish_catalog_vod_language_file", {
+        p_user: userId, p_source: sourceId, p_variant: variantId,
+        p_lease_token: claim.leaseToken, p_outcome: outcome.state, p_code: outcome.code, p_attempted: outcome.attempted,
+      });
+      if (finishError) throwDb(finishError, "Unable to acknowledge automatic language intake");
+      if (acknowledged !== true) throw new HttpError(409, "Automatic language intake lease changed");
+    },
+  });
 }
 
 // Automatic UNTAGGED audio enrichment is certificate-only. An exact file may
@@ -15285,7 +15365,8 @@ async function runCodecProfileBackfill(
     diagnosticStage = "source-identity";
     const sourceIdentity = await resolveSourceIdentity(sourceId, userId, db);
     const identityKey = sourceIdentity.key;
-    if (!identityKey || identityKey.startsWith("source:")) {
+    if (!identityKey || (identityKey.startsWith("source:")
+      && !(body.allowSourceLocal === true && identityKey === `source:${sourceId}`))) {
       stopped = "provider-identity-pending";
       results.push({ variantId, status: "deferred", code: stopped });
       break;
@@ -16592,6 +16673,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     return await runEpisodeAudioBackfill(db, body);
   }
   const requestedType = stringOr(body.type, "movie");
+  if (body.automaticUnknowns === true && requestedType === "movie" && sourceId) {
+    return await runAutomaticVodLanguageIntake(db, userId, sourceId);
+  }
   const itemType = requestedType === "series" || requestedType === "episode"
     ? requestedType
     : "movie";
