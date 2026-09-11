@@ -8,12 +8,14 @@ const drained = Object.freeze({ providerDrained: true, providerDrainProtocol: 1 
 // durably acknowledge it and release its distributed provider leases before
 // calling infer. Infer has NO extraction fallback: a cache miss returns 409.
 function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extract, infer,
-    drainTimeoutMs = 8000 } = {}) {
+    drainTimeoutMs = 8000, adoptPassive = async () => false } = {}) {
     if (!store || [claimNetwork, openBroker, extract, infer].some(fn => typeof fn !== 'function')) {
         throw failure('LID_CAPTURE_PIPELINE_CONFIG_INVALID');
     }
     const status = async binding => {
-        const record = await store.get(captureBinding(binding));
+        const normalized = captureBinding(binding);
+        let record = await store.get(normalized);
+        if (!record && await adoptPassive(normalized)) record = await store.get(normalized);
         return { captureProtocol: 1, captured: Boolean(record),
             ...(record ? { expiresAt: record.expiresAt, sha256: record.sha256 } : {}), ...drained };
     };

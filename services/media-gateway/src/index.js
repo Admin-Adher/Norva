@@ -25,6 +25,11 @@ const { createStrictLidCapturePipeline } = require('./strict-lid-capture-pipelin
 const { runStrictLidMultiExtract } = require('./strict-lid-multi-extract');
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('./strict-lid-range-reuse');
 const strictLidRangeReuse = new StrictLidRangeReuse();
+const { passiveProfileFingerprint, passiveCaptureBinding, passiveResourcesAvailable, createPassiveLidCapture } = require('./passive-lid-capture');
+const LANGUAGE_PASSIVE_CAPTURE_ENABLED = process.env.LANGUAGE_PASSIVE_CAPTURE_ENABLED === '1';
+let passiveLidCapture = null;
+let passiveLidTickActive = false;
+let passiveLidCandidatePosition = 0;
 let strictLidCaptureStore = null;
 let strictLidCapturePipeline = null;
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
@@ -2951,6 +2956,7 @@ app.get('/health', (req, res) => {
         }),
         languageCaptureBuffer: strictLidCaptureStore?.snapshot() || { protocol: 1, ready: false },
         languageRangeReuse: strictLidRangeReuse.snapshot(),
+        languagePassiveCapture: passiveLidCapture?.snapshot() || { protocol: 1, enabled: false },
         languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
@@ -7537,9 +7543,86 @@ function setDetectLanguageSecurityHeaders(_req, res, next) {
 
 function capturePipelineError(code) { return Object.assign(new Error(code), { code }); }
 
+function passiveLidResourcesAvailable() {
+    return LANGUAGE_PASSIVE_CAPTURE_ENABLED && passiveResourcesAvailable(languageResourceSampler.snapshot(), {
+        starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
+        foreground: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
+            || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0 || translateQueue.length > 0 || ocrQueue.length > 0,
+        benchmark: lidBenchmarkBusy,
+    });
+}
+
+// Only origin-started, already-ready Gateway HLS with an exact structural
+// profile and an actual output audio mapping is eligible. /raw, direct/native
+// playback, live HLS, uncertain seeks and guessed stream maps remain misses.
+function passiveLidSessionSources(session) {
+    if (!session || session.status !== 'ready' || isLiveSession(session) || Number(session.seekOffset) !== 0
+        || session.actualStartOffset !== 0 || session.sourceTimestamps !== false
+        || !/^[a-f0-9]{64}$/.test(session.ownerKey || '') || !session.sourceUrl || !session.outputDir
+        || !isWithin(OUTPUT_DIR, session.outputDir) || path.resolve(session.outputDir) === path.resolve(OUTPUT_DIR)
+        || session.codecProfile?.metadataComplete !== true) return [];
+    const profileFingerprint = passiveProfileFingerprint(session.codecProfile);
+    if (!profileFingerprint) return [];
+    return hlsMediaPlaylistTargetsForSession(session).filter(target => {
+        if (!['single', 'audio'].includes(target.kind) || !Number.isInteger(target.streamIndex)
+            || target.streamIndex < 0 || target.streamIndex > 128 || !controlledLocalPlaylistName(target.playlistName)) return false;
+        if (target.kind === 'single' && session.actualMappedAudioStreamIndex !== target.streamIndex) return false;
+        const track = session.codecProfile.audioTracks.find(t => Number(t.index) === target.streamIndex);
+        const lang = String(track?.lang || track?.language || '').toLowerCase();
+        return Boolean(track) && (!/^[a-z]{2,3}$/.test(lang) || ['und', 'mul', 'zxx', 'un'].includes(lang));
+    }).map(target => ({ root: session.outputDir, playlistName: target.playlistName,
+        segmentPrefix: target.kind === 'audio' ? `audio_${target.hlsIndex}` : target.playlistName === 'video.m3u8' ? 'video' : 'segment',
+        trackIndex: target.streamIndex, profileFingerprint,
+        ownerHash: session.ownerKey, sourceUrlHash: sha256Hex(session.sourceUrl),
+        durationSeconds: session.codecProfile.durationSeconds, fileSizeBytes: session.codecProfile.fileSizeBytes,
+    }));
+}
+
+function resolvePassiveLidSource(binding, context) {
+    const session = sessions.get(context?.sessionId);
+    const matches = source => source.playlistName === context?.playlistName && source.trackIndex === binding.trackIndex
+        && source.profileFingerprint === binding.profileFingerprint && source.sourceUrlHash === binding.sourceUrlHash
+        && `passive:${source.ownerHash}` === binding.userId && source.durationSeconds === binding.durationSeconds
+        && source.fileSizeBytes === binding.fileSizeBytes;
+    const source = passiveLidSessionSources(session).find(matches);
+    if (!source) return null;
+    return { ...source, isCurrent: () => sessions.get(context.sessionId) === session
+        && passiveLidSessionSources(session).some(candidate => candidate.root === source.root && matches(candidate)) };
+}
+
+async function collectPassiveLidWindow() {
+    if (passiveLidTickActive || !passiveLidCapture || !passiveLidResourcesAvailable()) return;
+    passiveLidTickActive = true;
+    try {
+        const runtime = strictLidWindowRuntimeBinding(); if (!runtime) return;
+        const candidates = [];
+        for (const session of [...sessions.values()].slice(0, 16)) {
+            for (const source of passiveLidSessionSources(session).slice(0, 4)) {
+                for (let ordinal = 1; ordinal <= 6; ordinal++) {
+                    const plan = planStrictSpeechWindow(source.durationSeconds, ordinal); if (!plan) continue;
+                    const binding = passiveCaptureBinding({ jobId: '00000000-0000-4000-8000-000000000000',
+                        userId: 'passive-collector', profileFingerprint: source.profileFingerprint,
+                        sourceUrlHash: source.sourceUrlHash, fileSizeBytes: source.fileSizeBytes,
+                        durationSeconds: source.durationSeconds, trackIndex: source.trackIndex,
+                        windowOrdinal: ordinal, windowCount: plan.windowCount, offsetMilliseconds: plan.anchorOffsetMilliseconds,
+                        method: STRICT_LID_WINDOW_METHOD, configDigest: runtime.configDigest, modelDigest: runtime.modelDigest,
+                        selectionProtocol: 1 }, source.ownerHash);
+                    candidates.push({ binding, context: { sessionId: session.id, playlistName: source.playlistName } });
+                }
+            }
+        }
+        if (!candidates.length) return;
+        // One bounded local attempt per tick. Never wait for missing segments,
+        // request a seek, touch the playback pump, or scan the entire catalogue.
+        const candidate = candidates[passiveLidCandidatePosition++ % candidates.length];
+        await passiveLidCapture.capture(candidate.binding, candidate.context, null);
+    } finally { passiveLidTickActive = false; }
+}
+
 function initializeStrictLidCapturePipeline(store) {
     return createStrictLidCapturePipeline({
         store,
+        adoptPassive: binding => passiveLidCapture?.adopt(binding) || false,
         claimNetwork: context => {
             if (viewerPlaybackActiveLocally() || accountSlotBusyLocally(context.url, sha256Hex(context.userId))) {
                 throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
@@ -11722,6 +11805,9 @@ async function bootstrap() {
             && WHISPER_VAD_BIN_SHA256 === WHISPER_VAD_BIN_BUILD_SHA256
         );
     }
+    if (LANGUAGE_PASSIVE_CAPTURE_ENABLED && !LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
+        throw capturePipelineError('LID_PASSIVE_CAPTURE_REQUIRES_CAPTURE_PIPELINE');
+    }
     if (LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
         if (!LANGUAGE_METADATA_LANE_ENABLED || !WHISPER_RUNTIME_VERIFIED || !WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED) {
             throw capturePipelineError('LID_CAPTURE_RUNTIME_NOT_READY');
@@ -11729,6 +11815,11 @@ async function bootstrap() {
         strictLidCaptureStore = new StrictLidCaptureStore({ root: process.env.LANGUAGE_CAPTURE_PRIVATE_DIR,
             secret: GATEWAY_TOKEN });
         await strictLidCaptureStore.open();
+        if (LANGUAGE_PASSIVE_CAPTURE_ENABLED) {
+            passiveLidCapture = createPassiveLidCapture({ store: strictLidCaptureStore, resolveSource: resolvePassiveLidSource,
+                resourcesAvailable: passiveLidResourcesAvailable, bin: FFMPEG_PATH });
+            setInterval(() => { void collectPassiveLidWindow().catch(() => {}); }, 15000).unref();
+        }
         strictLidCapturePipeline = initializeStrictLidCapturePipeline(strictLidCaptureStore);
         setInterval(() => strictLidRangeReuse.prune(), 30000).unref();
         setInterval(() => strictLidCaptureStore.sweep().catch(() => {

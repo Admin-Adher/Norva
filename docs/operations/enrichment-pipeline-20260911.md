@@ -214,7 +214,7 @@ Not yet deployed. No new provider acquisition has been made for these tests.
 - Full repository **4,460 tests; 4,447 passed, 13 skipped, zero failed**, 113.89 s.
   Receipt: `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-selection-capture.log`.
 
-## Passive capture investigation (not implemented yet)
+## Passive capture adapter (local, not activated)
 
 - Gateway already has a bounded in-band header tee (`maybeCaptureHeaderBytes`
   and `captureBoundedMkvHeaderBytes`). These collect metadata, not certified
@@ -229,3 +229,37 @@ Not yet deployed. No new provider acquisition has been made for these tests.
   resource/memory/disk limits, never wait in the playback byte pump, and never
   request/upload data from an Android client. Unknown mapping/timeline must
   remain a miss, not an inferred independent window.
+
+- Implemented a bounded timer outside the playback pump. It only snapshots
+  complete local EVENT/VOD MPEG-TS segments already produced by an origin-started
+  ready Gateway session with exact file/profile/actual audio stream mapping.
+  No provider transport, forced seek, Android upload or acquisition fallback.
+  Direct/native/raw/live/uncertain timeline/mapping remains ineligible.
+- A private local-only FFmpeg (file/pipe + MPEG-TS whitelist, one thread, 8 s
+  deadline) prepares the existing 20–60 s search region. At most one passive
+  operation, a 24 MiB plaintext snapshot and two existing WAV workspaces; the
+  passive admission stops at eight total retained entries or 16 MiB ciphertext,
+  reserving the remaining shared 64 MiB/32-entry store for active jobs.
+  Startup/foreground/resource pressure aborts preparation; uncertain child
+  teardown blocks further passive preparation until restart. Playback files
+  are never modified. No transcripts are stored here.
+- Deterministic private binding includes owner digest, URL digest, full exact
+  protocol-2 profile, track, independent window and pinned method/runtime.
+  Only an already authorized exact user/job may adopt it through the existing
+  status route. Adoption preserves the original expiry, then uses the same
+  durable SQL handoff before inference; no viewer lease is released. This can
+  reduce later acquisition, not force compute while playback occupies capacity.
+- Opt-in `LANGUAGE_PASSIVE_CAPTURE_ENABLED=1` requires the prepared capture
+  pipeline; default is off. CPU/memory/load telemetry must be fresh and low.
+  There is no production retention/configuration change in this worktree.
+- Actual production-image runtime in a networkless synthetic container:
+  **107/107 tests passed**, zero skipped, including native passive extraction,
+  Linux private-store restart/ownership and actual Gateway adapter selection.
+  The initial fixture used a Node-24-only test helper; it was corrected to run
+  the same Edge function body on the production Node 20 image. No product
+  behavior was weakened to pass it. Receipt:
+  `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/native-passive-proof.log`.
+- Full repository: **4,467 tests; 4,453 passed, 14 skipped, zero failed**,
+  117.98 s. Receipt:
+  `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-passive-capture.log`.
+  Real playback load/QoS and provider yield remain production-canary gates.

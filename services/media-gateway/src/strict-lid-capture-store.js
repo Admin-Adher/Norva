@@ -15,7 +15,7 @@ const HEX = /^[a-f0-9]{64}$/;
 const RECORD = /^[a-f0-9]{64}\.bin$/;
 const PART = /^[a-f0-9]{64}\.[a-f0-9-]{36}\.part$/;
 const WORK = /^compute-[a-f0-9-]{36}$/;
-const WORK_FILE = /^(?:raw\.wav|track-(?:0|[1-9][0-9]{0,2})\.wav|raw\.wav\.selected\.wav|\.norva-strict-lid-[a-f0-9-]{36}-[0-9]+\.txt)$/;
+const WORK_FILE = /^(?:raw\.wav|passive\.ts|track-(?:0|[1-9][0-9]{0,2})\.wav|raw\.wav\.selected\.wav|\.norva-strict-lid-[a-f0-9-]{36}-[0-9]+\.txt)$/;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const error = code => Object.assign(new Error(code), { code });
 
@@ -231,7 +231,7 @@ class StrictLidCaptureStore {
         });
     }
 
-    put(binding, wav, attestation, reservationToken = null) {
+    put(binding, wav, attestation, reservationToken = null, { expiresAt: inheritedExpiry = null } = {}) {
         return this.withLock(async () => {
             if (attestation?.providerDrained !== true || attestation?.providerDrainProtocol !== 1) throw error('LID_CAPTURE_DRAIN_REQUIRED');
             const normalized = captureBinding(binding);
@@ -246,7 +246,10 @@ class StrictLidCaptureStore {
                 if (prior) return { reused: true, expiresAt: prior.expiresAt, sha256: prior.sha256 };
                 await this.removeFile(name);
             }
-            const createdAt = this.now(); const expiresAt = createdAt + this.ttlMs;
+            const createdAt = this.now();
+            if (inheritedExpiry !== null && (!Number.isSafeInteger(inheritedExpiry) || inheritedExpiry <= createdAt
+                || inheritedExpiry > createdAt + this.ttlMs)) throw error('LID_CAPTURE_EXPIRY_INVALID');
+            const expiresAt = inheritedExpiry ?? createdAt + this.ttlMs;
             const record = { protocol: 1, binding: normalized, providerDrained: true, createdAt, expiresAt,
                 sha256: sha(wav), wav: wav.toString('base64') };
             const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv);

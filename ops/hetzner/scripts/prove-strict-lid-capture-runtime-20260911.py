@@ -14,11 +14,13 @@ LABEL = 'capture-runtime-proof-20260911'
 FILES = ['services/media-gateway/src/' + name + '.js' for name in (
     'strict-lid-capture-store', 'strict-lid-capture-pipeline', 'strict-lid-window-checkpoint',
     'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract',
-    'strict-lid-range-reuse', 'index')]
+    'strict-lid-range-reuse', 'passive-lid-capture', 'index')]
 FILES.append('tests/strict-lid-capture-store.test.js')
 FILES.append('tests/strict-lid-multi-extract.test.js')
 FILES.append('tests/strict-lid-range-reuse.test.js')
 FILES.append('tests/media-gateway-strict-lid-broker.test.js')
+FILES.append('tests/passive-lid-capture.test.js')
+FILES.append('supabase/functions/norva-playback/index.ts')
 
 
 def run(args):
@@ -36,7 +38,7 @@ def main():
         members = archive.getmembers()
         assert sorted(m.name for m in members) == sorted(FILES)
         for member in members:
-            maximum = 1500000 if member.name == 'services/media-gateway/src/index.js' else 180000
+            maximum = 4000000 if member.name == 'supabase/functions/norva-playback/index.ts' else 1500000 if member.name == 'services/media-gateway/src/index.js' else 180000
             assert member.isfile() and 0 < member.size < maximum
             target = proof / member.name
             assert target.resolve().is_relative_to(proof.resolve())
@@ -53,7 +55,8 @@ def main():
             '--mount', 'type=bind,src=' + str(proof) + ',dst=/proof,readonly',
             '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '-e', 'NODE_PATH=/app/node_modules', '--entrypoint', 'node', image, '--test',
             '/proof/tests/strict-lid-capture-store.test.js', '/proof/tests/strict-lid-multi-extract.test.js',
-            '/proof/tests/strict-lid-range-reuse.test.js', '/proof/tests/media-gateway-strict-lid-broker.test.js']).strip()
+            '/proof/tests/strict-lid-range-reuse.test.js', '/proof/tests/media-gateway-strict-lid-broker.test.js',
+            '/proof/tests/passive-lid-capture.test.js']).strip()
         output = run(['docker', 'start', '-a', NAME])
         state = json.loads(run(['docker', 'inspect', NAME]))[0]
         assert state['State']['ExitCode'] == 0
