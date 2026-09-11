@@ -10,7 +10,7 @@ throughput improvement is claimed by this document.
 | Workstream | Required implementation and evidence | State |
 | --- | --- | --- |
 | Fast metadata lane | Independent admission, bounded continuous batches, exact-cache reuse, preserved account locks; SQL contention and stop/permission tests | Implemented, isolated tests pass; production gate pending |
-| Mutualized input | Bound header/range reuse, one input for multiple unknown tracks, file-change invalidation, independent temporal evidence; fake-provider byte/connection counts | Pending |
+| Mutualized input | Bound header/range reuse, one input for multiple pending tracks, file-change invalidation, independent temporal evidence; fake-provider byte/connection counts | Multi-track extraction integrated locally; cross-window header/range reuse still pending |
 | Capture then compute | Private bounded expiring store, attested drain and account release before inference, durable retry without new download; restart/expiry/lost-ACK tests | Gateway + Xtream/episode worker integrated locally; Selection client and live acceptance pending |
 | Passive playback capture | Only bytes already received, non-blocking/drop-on-pressure, no second provider request, no implicit phone upload; playback/backpressure tests | Pending |
 | Authorized parallelism | Trusted Selection feed + host policies, prudent unknown-provider default, account vs file identity separation, bounded adaptive feedback; mono-session and refusal tests | Pending |
@@ -75,7 +75,9 @@ Not yet deployed. No new provider acquisition has been made for these tests.
   and the pinned method/model/runtime digests. Defaults: 64 MiB encrypted buffer,
   at most 32 records, 30-minute TTL; at most two private scratch workspaces.
   Scratch PCM is additional bounded working space, not part of the 64 MiB
-  ciphertext budget. No VOD, URL, credential, or transcript is in the journal.
+  ciphertext budget. With four-track batching each workspace can contain four
+  60-second mono 16 kHz PCM WAVs (about 7.7 MB per extraction workspace).
+  No VOD, URL, credential, or transcript is in the journal.
 - Space is reserved before provider acquisition. Store commit requires positive
   broker drain including release grace. All source reads are closed before the
   SQL handoff transaction deletes only that attempt's account and identity
@@ -109,3 +111,35 @@ Not yet deployed. No new provider acquisition has been made for these tests.
   Executable Edge/Gateway tests cover the real worker handoff order, cached
   retry without provider leases, preemption/458, denied handoff, failed evidence
   persistence, lost ACK, signed route claims, and retry timing inside the TTL.
+
+## One input for multiple pending tracks (local, not activated)
+
+- Edge signs up to four remaining exact job audio indices. Gateway validates
+  count, uniqueness, primary index and signed action. Only tracks of the same
+  job/user/file/profile/window can be prefetched together. Known/verified file
+  bypasses remain upstream; this does not alter the strict job evidence model.
+- Space is reserved independently for each companion. A full buffer can drop
+  optional prefetch but never starves the primary track; a cached companion
+  is not downloaded again. One FFmpeg input emits separately mapped PCM WAVs.
+  Each enters the same encrypted store only after a single broker drain.
+- Future-track audio is neither a new vote nor a certificate. That track must
+  reach its normal owned cursor, revalidate access/profile, and pass its own
+  existing temporal-window inference/checkpoint/finalization contracts.
+- Capture FFmpeg accepts only its loopback broker input and finite demuxers,
+  with HTTP/TCP input protocols, bounded stderr/time and no reconnect. A
+  disguised playlist cannot open a second resource through its demuxer.
+  References: [FFmpeg format whitelist](https://ffmpeg.org/ffmpeg-formats.html),
+  [protocol whitelist](https://ffmpeg.org/ffmpeg-protocols.html).
+- Native networkless runtime fixture now **26/26 passed**, no skips. On one
+  **synthetic** 20-second two-track Matroska file: one combined input served
+  1,285,289 bytes in one local request, vs 2,570,578 bytes/two requests for two
+  independent extractions. Both WAVs have 20 seconds and distinct hashes; a
+  nested HLS playlist was rejected without requesting its child URL.
+  This is not an observed 2x speedup on providers or a backlog ETA.
+- Full repository: **4,447 tests; 4,435 passed, 12 skipped, zero failures**
+  (115.39 s). Receipt:
+  `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-multi-capture.log`.
+- Still required: cross-window header/index/range reuse with representation
+  revalidation (no weak-validator shortcut), Selection adapter, and bounded
+  real-provider byte/latency comparison. Passive playback capture and explicit
+  adaptive Selection policies are separate, still-unimplemented workstreams.

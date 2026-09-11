@@ -257,3 +257,37 @@ test('full capture buffer rejects BEFORE opening a provider and inference failur
     assert.equal((await p.pipeline.status(binding())).captured, true);
     assert.equal(p.reads(), 1);
 });
+
+test('four job tracks share one capture; future windows remain exact-bound and are reused without extraction', async t => {
+    const f = await fixture(t); let extracts = 0; let closed = false;
+    const pipeline = createStrictLidCapturePipeline({ store: f.store,
+        claimNetwork: () => ({ release() { assert.equal(closed, true); } }),
+        openBroker: async () => ({ close: async () => { closed = true; } }),
+        extract: async (_broker, group) => {
+            extracts++; assert.equal(group.length, 4);
+            return group.map(b => { const audio = wav(); audio[100] ^= b.trackIndex; return audio; });
+        }, infer: async () => ({}) });
+    const companions = [2, 3, 4].map(trackIndex => binding({ trackIndex }));
+    const captured = await pipeline.capture(binding(), {}, undefined, companions);
+    assert.equal(captured.extractedTrackCount, 4); assert.equal(extracts, 1);
+    const hashes = new Set();
+    for (const b of [binding(), ...companions]) {
+        assert.equal((await pipeline.capture(b, {})).reused, true);
+        hashes.add((await f.store.get(b)).sha256);
+        assert.equal(await f.store.get({ ...b, windowOrdinal: 3, offsetMilliseconds: planStrictSpeechWindow(3600, 3).anchorOffsetMilliseconds }), null);
+    }
+    assert.equal(extracts, 1); assert.equal(hashes.size, 4);
+});
+
+test('optional prefetch cannot starve the current track or combine another file, job or temporal window', async t => {
+    const f = await fixture(t, { maxEntries: 1 }); const p = pipelineFixture(f.store);
+    const result = await p.pipeline.capture(binding(), {}, undefined, [binding({ trackIndex: 2 })]);
+    assert.equal(result.extractedTrackCount, 1); assert.equal(p.reads(), 1);
+    for (const changed of [{ jobId: crypto.randomUUID() }, { sourceUrlHash: 'e'.repeat(64) },
+        { profileFingerprint: 'e'.repeat(64) }, { userId: 'different-owner' }]) {
+        await assert.rejects(p.pipeline.capture(binding(), {}, undefined, [binding({ trackIndex: 2, ...changed })]),
+            { code: 'LID_CAPTURE_GROUP_INVALID' });
+    }
+    await assert.rejects(p.pipeline.capture(binding(), {}, undefined, [binding()]), { code: 'LID_CAPTURE_GROUP_INVALID' });
+    assert.equal(p.reads(), 1);
+});

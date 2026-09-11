@@ -13,8 +13,9 @@ NAME = 'norva-capture-runtime-proof-20260911'
 LABEL = 'capture-runtime-proof-20260911'
 FILES = ['services/media-gateway/src/' + name + '.js' for name in (
     'strict-lid-capture-store', 'strict-lid-capture-pipeline', 'strict-lid-window-checkpoint',
-    'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence')]
+    'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract')]
 FILES.append('tests/strict-lid-capture-store.test.js')
+FILES.append('tests/strict-lid-multi-extract.test.js')
 
 
 def run(args):
@@ -46,7 +47,8 @@ def main():
             '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '1000:1000',
             '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777',
             '--mount', 'type=bind,src=' + str(proof) + ',dst=/proof,readonly',
-            '--entrypoint', 'node', image, '--test', '/proof/tests/strict-lid-capture-store.test.js']).strip()
+            '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '--entrypoint', 'node', image, '--test',
+            '/proof/tests/strict-lid-capture-store.test.js', '/proof/tests/strict-lid-multi-extract.test.js']).strip()
         output = run(['docker', 'start', '-a', NAME])
         state = json.loads(run(['docker', 'inspect', NAME]))[0]
         assert state['State']['ExitCode'] == 0

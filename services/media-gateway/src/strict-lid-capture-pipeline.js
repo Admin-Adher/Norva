@@ -17,9 +17,15 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
         return { captureProtocol: 1, captured: Boolean(record),
             ...(record ? { expiresAt: record.expiresAt, sha256: record.sha256 } : {}), ...drained };
     };
-    async function capture(binding, context, signal) {
+    async function capture(binding, context, signal, companions = []) {
         const normalized = captureBinding(binding);
+        const group = [normalized, ...companions.map(captureBinding)];
+        if (group.length > 4 || new Set(group.map(b => b.trackIndex)).size !== group.length
+            || group.some(b => JSON.stringify({ ...b, trackIndex: normalized.trackIndex }) !== JSON.stringify(normalized))) {
+            throw failure('LID_CAPTURE_GROUP_INVALID');
+        }
         let reservation; let broker; let network; let sourceDrained = true;
+        const reservations = [];
         let closePromise;
         const closeBroker = () => {
             if (closePromise) return closePromise;
@@ -41,20 +47,41 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             if (prior.captured) return { ...prior, reused: true };
             if (signal?.aborted) throw failure('LID_CAPTURE_CANCELLED');
             reservation = await store.reserve(normalized);
+            reservations.push({ binding: normalized, reservation });
             if (reservation.cached) {
                 const cached = await status(normalized);
                 if (!cached.captured) throw failure('LID_CAPTURE_NOT_FOUND');
                 return { ...cached, reused: true };
             }
+            // Future track windows are optional prefetch. A full buffer must
+            // not prevent the current track from progressing, nor redownload
+            // a companion already retained by this or another owned attempt.
+            for (const companion of group.slice(1)) {
+                try {
+                    const reserved = await store.reserve(companion);
+                    reservations.push({ binding: companion, reservation: reserved });
+                } catch (error) {
+                    if (!['LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_ALREADY_RUNNING'].includes(error?.code)) throw error;
+                }
+            }
+            const pending = reservations.filter(r => !r.reservation.cached);
             network = claimNetwork(context);
             // openBroker only opens a loopback listener, never an upstream
             // socket. Once created it becomes the sole drain authority.
             broker = await openBroker(context, signal);
             sourceDrained = false;
-            const wav = await extract(broker, normalized, context, signal);
+            const audio = await extract(broker, pending.length === 1 ? normalized : pending.map(r => r.binding), context, signal);
+            const wavs = pending.length === 1 ? [audio] : audio;
+            if (!Array.isArray(wavs) || wavs.length !== pending.length || wavs.some(wav => !Buffer.isBuffer(wav))) {
+                throw failure('LID_CAPTURE_GROUP_INVALID');
+            }
             await closeBroker();
-            const saved = await store.put(normalized, wav, drained, reservation.token);
-            return { captureProtocol: 1, captured: true, ...saved, ...drained };
+            let saved;
+            for (const [index, item] of pending.entries()) {
+                const result = await store.put(item.binding, wavs[index], drained, item.reservation.token);
+                if (index === 0) saved = result;
+            }
+            return { captureProtocol: 1, captured: true, ...saved, extractedTrackCount: pending.length, ...drained };
         } catch (cause) {
             try { await closeBroker(); } catch { sourceDrained = false; }
             const code = sourceDrained && /^[A-Z][A-Z0-9_]{1,79}$/.test(cause?.code || '')
@@ -68,7 +95,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             // A failed loopback allocation did no provider I/O. No other path
             // releases this reservation without a positive broker drain.
             if (!broker) network?.release(drained);
-            await reservation?.release();
+            for (const item of reservations) await item.reservation.release();
         }
     }
     async function compute(binding, context, signal) {

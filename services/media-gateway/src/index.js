@@ -22,6 +22,7 @@ const LANGUAGE_METADATA_LANE_ENABLED = process.env.LANGUAGE_METADATA_LANE_ENABLE
 const LANGUAGE_CAPTURE_PIPELINE_ENABLED = process.env.LANGUAGE_CAPTURE_PIPELINE_ENABLED === '1';
 const { StrictLidCaptureStore } = require('./strict-lid-capture-store');
 const { createStrictLidCapturePipeline } = require('./strict-lid-capture-pipeline');
+const { runStrictLidMultiExtract } = require('./strict-lid-multi-extract');
 let strictLidCaptureStore = null;
 let strictLidCapturePipeline = null;
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
@@ -7501,22 +7502,39 @@ function initializeStrictLidCapturePipeline(store) {
         extract: (broker, binding, context, signal) => store.withWorkspace(async outputPath => {
             // Create the only FFmpeg destination privately before starting it.
             // The path is generated here, never accepted from a request.
-            const output = await fsp.open(outputPath, 'wx', 0o600); await output.close();
+            const bindings = Array.isArray(binding) ? binding : [binding];
+            const outputs = bindings.map((b, i) => ({ index: b.trackIndex,
+                path: i === 0 ? outputPath : path.join(path.dirname(outputPath), `track-${b.trackIndex}.wav`) }));
+            for (const output of outputs) {
+                const handle = await fsp.open(output.path, 'wx', 0o600); await handle.close();
+            }
             const key = accountJobKey(context.userId, context.url);
             if (isAccountJobBusy(key)) throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
-            const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal);
-            const result = await withAccountJobLock(key, () => extractAudioWav(broker.inputUrl,
-                context.ua, binding.trackIndex, plan.searchStartSeconds, plan.searchDurationSeconds,
-                165000, context.userId, true, signal, true,
-                { strictLoopback: true, providerSourceUrl: context.url, checkpointWindow: true, captureOutputPath: outputPath }));
+            const plan = planStrictSpeechWindow(bindings[0].durationSeconds, bindings[0].windowOrdinal);
+            let registration;
+            const result = await withAccountJobLock(key, () => runStrictLidMultiExtract({
+                bin: FFMPEG_PATH, inputUrl: broker.inputUrl, outputs,
+                startSeconds: plan.searchStartSeconds, durationSeconds: plan.searchDurationSeconds, timeoutMs: 165000,
+                env: loopbackOnlyEnv(), signal,
+                onSpawn: child => {
+                    registration = registerAccountExtraction(proxyKeyFromUrl(context.url), child,
+                        ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION, true);
+                    child.once('close', () => registration?.release?.());
+                },
+                isPreempted: () => registration?.preempted === true || viewerPlaybackActiveLocally(),
+            }));
             if (!result.ok) {
                 if (result.preempted) throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
                 if (broker.terminalError) throw broker.terminalError;
-                throw capturePipelineError(result.timedOut ? 'LID_CAPTURE_EXTRACTION_TIMEOUT' : 'LID_CAPTURE_EXTRACTION_FAILED');
+                throw capturePipelineError(result.code || 'LID_CAPTURE_EXTRACTION_FAILED');
             }
-            const stat = await fsp.stat(outputPath);
-            if (stat.size > 4 * 1024 * 1024) throw capturePipelineError('LID_CAPTURE_AUDIO_TOO_LARGE');
-            return fsp.readFile(outputPath);
+            const audio = [];
+            for (const output of outputs) {
+                const stat = await fsp.stat(output.path);
+                if (stat.size > 4 * 1024 * 1024) throw capturePipelineError('LID_CAPTURE_AUDIO_TOO_LARGE');
+                audio.push(await fsp.readFile(output.path));
+            }
+            return Array.isArray(binding) ? audio : audio[0];
         }),
         infer: async (wavPath, binding, context, signal) => {
             const deadline = Date.now() + 50000;
@@ -7549,8 +7567,12 @@ async function handleStrictLidCaptureRequest(req, res, action) {
     const claims = validation.claims;
     const index = Number(req.query.index);
     const context = strictLidWindowClaimContext(claims, index);
+    const captureIndices = claims.captureTrackIndices === undefined ? [index] : claims.captureTrackIndices;
     if (!/^(?:0|[1-9][0-9]{0,3})$/.test(String(req.query.index ?? '')) || !context
         || claims.captureProtocol !== 1 || claims.captureAction !== action || claims.captureTrackIndex !== index
+        || !Array.isArray(captureIndices) || captureIndices.length < 1 || captureIndices.length > 4 || captureIndices[0] !== index
+        || new Set(captureIndices).size !== captureIndices.length || captureIndices.some(i => !Number.isInteger(i) || i < 0 || i > 128)
+        || (action !== 'capture' && captureIndices.length !== 1)
         || (action === 'infer' && !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(claims.captureRelease || ''))) {
         return res.status(400).json({ code: 'LID_CAPTURE_CLAIMS_INVALID', providerDrained: true, providerDrainProtocol: 1 });
     }
@@ -7567,7 +7589,8 @@ async function handleStrictLidCaptureRequest(req, res, action) {
         let payload;
         if (action === 'status') payload = await strictLidCapturePipeline.status(binding);
         else if (action === 'capture') payload = await strictLidCapturePipeline.capture(binding,
-            { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes }, controller.signal);
+            { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes }, controller.signal,
+            captureIndices.slice(1).map(trackIndex => ({ ...binding, trackIndex })));
         else if (action === 'infer') payload = await strictLidCapturePipeline.compute(binding,
             { accountKey: proxyKeyFromUrl(claims.url) }, controller.signal);
         else if (action === 'ack') { await strictLidCapturePipeline.acknowledge(binding); payload = { acknowledged: true }; }
@@ -8527,10 +8550,8 @@ function extractAudioWav(
                 error: 'preempted by viewer playback before extraction spawn',
             });
         }
+        const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const strictLoopback = inputOptions?.strictLoopback === true;
-        const outputPath = strictLoopback && inputOptions?.captureOutputPath
-            ? inputOptions.captureOutputPath
-            : path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const strictCheckpointWindow = strictLoopback && inputOptions?.checkpointWindow === true;
         const providerSourceUrl = strictLoopback && isHttpUrl(inputOptions?.providerSourceUrl)
             ? String(inputOptions.providerSourceUrl)

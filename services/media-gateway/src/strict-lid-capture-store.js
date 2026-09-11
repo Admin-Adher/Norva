@@ -15,7 +15,7 @@ const HEX = /^[a-f0-9]{64}$/;
 const RECORD = /^[a-f0-9]{64}\.bin$/;
 const PART = /^[a-f0-9]{64}\.[a-f0-9-]{36}\.part$/;
 const WORK = /^compute-[a-f0-9-]{36}$/;
-const WORK_FILE = /^(?:raw\.wav|raw\.wav\.selected\.wav|\.norva-strict-lid-[a-f0-9-]{36}-[0-9]+\.txt)$/;
+const WORK_FILE = /^(?:raw\.wav|track-(?:0|[1-9][0-9]{0,2})\.wav|raw\.wav\.selected\.wav|\.norva-strict-lid-[a-f0-9-]{36}-[0-9]+\.txt)$/;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const error = code => Object.assign(new Error(code), { code });
 

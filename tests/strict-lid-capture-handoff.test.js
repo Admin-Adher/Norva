@@ -20,7 +20,7 @@ function edgeFixture(options = {}) {
     const events = []; const failures = []; let account = false; let identity = false;
     const claim = { jobId: uuid, trackIndex: 1, identityKey: 'fixture', profileFingerprint: hash };
     const current = { identityKey: 'fixture', fingerprint: hash, userId: 'test-owner', itemType: 'movie', sourceId: 'source', itemId: 'item',
-        expectedAudioIndices: [1], exactProfile: { fileSizeBytes: 1000000, profile: { durationSeconds: 3600 } } };
+        expectedAudioIndices: options.indices || [1], exactProfile: { fileSizeBytes: 1000000, profile: { durationSeconds: 3600 } } };
     const captured = { captureProtocol: 1, captured: true, expiresAt: Date.now() + 1800000, sha256: hash, ...drain };
     const db = { rpc: async (name, args = {}) => {
         events.push('rpc:' + name);
@@ -67,6 +67,7 @@ function edgeFixture(options = {}) {
             events.push('fetch:' + action);
             const claims = JSON.parse(request.headers['X-Norva-Byte-Pipe-Token']);
             if (action !== 'legacy') { assert.equal(claims.captureAction, action); assert.equal(claims.captureTrackIndex, 1); }
+            if (action === 'capture') assert.deepEqual(claims.captureTrackIndices, current.expectedAudioIndices.slice(0, 4));
             if (action === 'status') return { ok: !options.statusFails, status: options.statusFails ? 503 : 200,
                 payload: options.cached ? captured : { captureProtocol: 1, captured: false, ...drain } };
             if (action === 'capture') return options.busy ? { ok: false, status: 502, payload: { code: 'PROVIDER_BUSY', upstreamStatus: 458, ...drain } }
@@ -111,6 +112,11 @@ test('actual Edge retry uses local capture without idle checks, provider claims 
     }
 });
 
+test('actual Edge signs at most four remaining exact job tracks in a single provider capture', async () => {
+    const f = edgeFixture({ indices: [1, 2, 4, 8, 16] }); await f.run(); assert.deepEqual(f.failures, []);
+    assert.equal(f.events.filter(e => e === 'fetch:capture').length, 1);
+});
+
 for (const [flag, forbidden] of [['statusFails', 'fetch:capture'], ['handoffFails', 'fetch:infer'],
     ['inferFails', 'fetch:ack'], ['evidenceFails', 'fetch:ack']]) {
     test(`actual Edge ${flag} cannot cross its next durable boundary`, async () => {
@@ -150,7 +156,8 @@ function gatewayFixture(overrides = {}) {
     return { res, called, run: () => context.handleStrictLidCaptureRequest({ query: { index: '1' } }, res, 'infer') };
 }
 test('actual Gateway compute route is gated by protocol, action, track and signed release proof', async () => {
-    for (const claims of [{ captureProtocol: 0 }, { captureAction: 'capture' }, { captureTrackIndex: 2 }, { captureRelease: null }]) {
+    for (const claims of [{ captureProtocol: 0 }, { captureAction: 'capture' }, { captureTrackIndex: 2 }, { captureRelease: null },
+        { captureTrackIndices: [1, 2] }, { captureTrackIndices: [1, 1] }, { captureTrackIndices: [2] }, { captureTrackIndices: [] }]) {
         const f = gatewayFixture({ claims }); await f.run(); assert.equal(f.res.statusCode, 400); assert.deepEqual(f.called, []);
     }
     const off = gatewayFixture({ enabled: false }); await off.run(); assert.equal(off.res.statusCode, 503); assert.deepEqual(off.called, []);

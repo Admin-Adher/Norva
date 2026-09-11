@@ -3705,6 +3705,7 @@ type StrictLidWindowCapabilityClaims = {
   captureProtocol?: 1;
   captureAction?: "status" | "capture" | "infer" | "ack";
   captureTrackIndex?: number;
+  captureTrackIndices?: number[];
   captureRelease?: string;
 };
 
@@ -4161,7 +4162,9 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         profileFingerprint: exactAfterLease.fingerprint,
         windowOrdinal,
         windowCount: windowState.count,
-        ...(useCapturePipeline ? { captureProtocol: 1 as const, captureAction: "capture" as const, captureTrackIndex: trackIndex } : {}),
+        ...(useCapturePipeline ? { captureProtocol: 1 as const, captureAction: "capture" as const, captureTrackIndex: trackIndex,
+          captureTrackIndices: exactAfterLease.expectedAudioIndices.slice(exactAfterLease.expectedAudioIndices.indexOf(trackIndex),
+            exactAfterLease.expectedAudioIndices.indexOf(trackIndex) + 4) } : {}),
       },
     );
     let response: Response;
@@ -7492,11 +7495,16 @@ async function createBytePipeCapability(
     throw new HttpError(503, "Media gateway is not configured");
   }
   if (strictLidWindowClaims) {
+    const captureIndices = strictLidWindowClaims.captureTrackIndices ?? [strictLidWindowClaims.captureTrackIndex];
     if (strictLidWindowClaims.captureProtocol !== undefined && (
       strictLidWindowClaims.captureProtocol !== 1 || strictLidWindowClaims.windowFinalize === true
       || !["status", "capture", "infer", "ack"].includes(String(strictLidWindowClaims.captureAction))
       || !Number.isInteger(strictLidWindowClaims.captureTrackIndex) || Number(strictLidWindowClaims.captureTrackIndex) < 0
       || Number(strictLidWindowClaims.captureTrackIndex) > 128
+      || !Array.isArray(captureIndices) || captureIndices.length < 1 || captureIndices.length > 4
+      || captureIndices[0] !== strictLidWindowClaims.captureTrackIndex || new Set(captureIndices).size !== captureIndices.length
+      || captureIndices.some(index => !Number.isInteger(index) || Number(index) < 0 || Number(index) > 128)
+      || (strictLidWindowClaims.captureAction !== "capture" && captureIndices.length !== 1)
       || (strictLidWindowClaims.captureAction === "infer" && !PLAYBACK_SESSION_UUID_PATTERN.test(strictLidWindowClaims.captureRelease || ""))
     )) throw new HttpError(409, "Private audio capture claims invalid", { code: "LANGUAGE_CAPTURE_CLAIMS_INVALID" });
     const finalizing = strictLidWindowClaims.windowFinalize === true;
@@ -7541,6 +7549,7 @@ async function createBytePipeCapability(
         ...(strictLidWindowClaims.captureProtocol === 1 ? {
           captureProtocol: 1, captureAction: strictLidWindowClaims.captureAction,
           captureTrackIndex: strictLidWindowClaims.captureTrackIndex,
+          captureTrackIndices: captureIndices,
           ...(strictLidWindowClaims.captureAction === "infer" ? { captureRelease: strictLidWindowClaims.captureRelease } : {}),
         } : {}),
         ...(strictLidWindowClaims.windowFinalize === true
