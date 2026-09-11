@@ -136,6 +136,16 @@ def environment(original,values):
     return result
 
 
+def staged_tree(source,destination,allowed):
+    before=edge.hashes(source)
+    if not destination.exists():shutil.copytree(source,destination)
+    staged=edge.hashes(destination)
+    require(set(staged)-set(before)<=set(allowed) and set(before)<=set(staged),'staged_tree_scope_changed')
+    for name,digest in staged.items():
+        require(digest==before.get(name) or (name in allowed and digest==sha(artifact(allowed[name]))),'staged_tree_unreviewed_change')
+    return before
+
+
 def expected_container(plan,name):
     original=plan['containers'][name]
     if name==SERVICES[0]:
@@ -173,7 +183,7 @@ def stage():
     require(lib.edge_root(originals[SERVICES[2]])==old,'edge_trees_differ')
     for name in EDGE_FILES:
         require(lib.reviewed_edge_baseline((old/name).read_bytes(),artifact('base/supabase/functions/'+name)), 'edge_source_drift')
-    before=edge.hashes(old);shutil.copytree(old,ROOT/'functions')
+    before=staged_tree(old,ROOT/'functions',{n:'candidate/supabase/functions/'+n for n in EDGE_FILES})
     for name in EDGE_FILES:
         target=ROOT/'functions'/name;target.write_bytes(artifact('candidate/supabase/functions/'+name));target.chmod(0o644)
     after=edge.hashes(ROOT/'functions')
@@ -187,15 +197,23 @@ def stage():
             subdir='selection-live-'+('runner' if target.endswith('/services') else 'functions')
             source=pathlib.Path(mount['Source'])
             require(source.is_dir() and not source.is_symlink() and source.resolve().is_relative_to(ROOT.parent),'selection_mount_scope')
-            shutil.copytree(source,ROOT/subdir);selection_mounts[target]=subdir
+            allowed={'selection-audio-worker.mjs':'selection/runner/selection-audio-worker.mjs',
+                'selection-audio-task-pool.mjs':'selection/runner/selection-audio-task-pool.mjs'} if target.endswith('/services') else {
+                    '_shared/selection-audio-gateway.mjs':'selection/functions/_shared/selection-audio-gateway.mjs'}
+            staged_tree(source,ROOT/subdir,allowed);selection_mounts[target]=subdir
     require(len(selection_mounts)==2,'selection_layout_changed')
     package=saved('selection/manifest.json')
     for entry in package['files']:
+        if entry['source'] not in ('ops/hetzner/services/selection-audio-task-pool.mjs',
+            'ops/hetzner/services/selection-audio-worker.mjs','supabase/functions/_shared/selection-audio-gateway.mjs'):continue
         layout,relative=entry['target'].split('/',1)
         target=ROOT/('selection-live-'+layout)/relative
-        if target.exists():
+        live_root=pathlib.Path(next(m['Source'] for m in selection['Mounts'] if
+            m['Destination']==('/worker/ops/hetzner/services' if layout=='runner' else '/worker/supabase/functions')))
+        live=live_root/relative
+        if live.exists():
             require('base/'+entry['source'] in manifest['files'] and lib.reviewed_edge_baseline(
-                target.read_bytes(),artifact('base/'+entry['source'])),'selection_source_drift')
+                live.read_bytes(),artifact('base/'+entry['source'])),'selection_source_drift')
         else:require(entry['source']=='ops/hetzner/services/selection-audio-task-pool.mjs','selection_existing_module_missing')
         target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(artifact('selection/'+entry['target']));target.chmod(0o644)
