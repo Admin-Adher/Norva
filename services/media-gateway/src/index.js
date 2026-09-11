@@ -19,6 +19,11 @@ const { decideLanguageBackgroundCapacity, decideLanguageMetadataCapacity, create
 const { createEnrichmentNetworkAdmission } = require('./enrichment-network-admission');
 const enrichmentNetworkAdmission = createEnrichmentNetworkAdmission();
 const LANGUAGE_METADATA_LANE_ENABLED = process.env.LANGUAGE_METADATA_LANE_ENABLED === '1';
+const LANGUAGE_CAPTURE_PIPELINE_ENABLED = process.env.LANGUAGE_CAPTURE_PIPELINE_ENABLED === '1';
+const { StrictLidCaptureStore } = require('./strict-lid-capture-store');
+const { createStrictLidCapturePipeline } = require('./strict-lid-capture-pipeline');
+let strictLidCaptureStore = null;
+let strictLidCapturePipeline = null;
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
 const languageResourceSampler = createLanguageResourceSampler({ readFile: fsp.readFile, os });
 const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
@@ -2941,6 +2946,7 @@ app.get('/health', (req, res) => {
             brokers: strictLidBrokers.size,
             benchmark: lidBenchmarkBusy,
         }),
+        languageCaptureBuffer: strictLidCaptureStore?.snapshot() || { protocol: 1, ready: false },
         languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
@@ -6495,6 +6501,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         return res.status(validation.status).json({ error: validation.error });
     }
     const claims = validation.claims;
+    if (Object.prototype.hasOwnProperty.call(claims, 'captureProtocol')) {
+        return res.status(400).json({ code: 'LID_CAPTURE_DEDICATED_ROUTE_REQUIRED', providerDrained: true, providerDrainProtocol: 1 });
+    }
     const strict = policy.strict;
     const hasStrictWindowMarker = Object.prototype.hasOwnProperty.call(
         claims,
@@ -7476,6 +7485,120 @@ function setDetectLanguageSecurityHeaders(_req, res, next) {
     next();
 }
 
+function capturePipelineError(code) { return Object.assign(new Error(code), { code }); }
+
+function initializeStrictLidCapturePipeline(store) {
+    return createStrictLidCapturePipeline({
+        store,
+        claimNetwork: context => {
+            if (viewerPlaybackActiveLocally() || accountSlotBusyLocally(context.url, sha256Hex(context.userId))) {
+                throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
+            }
+            return claimLanguageEnrichmentNetwork(context.url);
+        },
+        openBroker: (context, signal) => createStrictLidBroker({ sourceUrl: context.url,
+            fileSizeBytes: context.fileSizeBytes, userAgent: context.ua, abortSignal: signal }),
+        extract: (broker, binding, context, signal) => store.withWorkspace(async outputPath => {
+            // Create the only FFmpeg destination privately before starting it.
+            // The path is generated here, never accepted from a request.
+            const output = await fsp.open(outputPath, 'wx', 0o600); await output.close();
+            const key = accountJobKey(context.userId, context.url);
+            if (isAccountJobBusy(key)) throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
+            const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal);
+            const result = await withAccountJobLock(key, () => extractAudioWav(broker.inputUrl,
+                context.ua, binding.trackIndex, plan.searchStartSeconds, plan.searchDurationSeconds,
+                165000, context.userId, true, signal, true,
+                { strictLoopback: true, providerSourceUrl: context.url, checkpointWindow: true, captureOutputPath: outputPath }));
+            if (!result.ok) {
+                if (result.preempted) throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
+                if (broker.terminalError) throw broker.terminalError;
+                throw capturePipelineError(result.timedOut ? 'LID_CAPTURE_EXTRACTION_TIMEOUT' : 'LID_CAPTURE_EXTRACTION_FAILED');
+            }
+            const stat = await fsp.stat(outputPath);
+            if (stat.size > 4 * 1024 * 1024) throw capturePipelineError('LID_CAPTURE_AUDIO_TOO_LARGE');
+            return fsp.readFile(outputPath);
+        }),
+        infer: async (wavPath, binding, context, signal) => {
+            const deadline = Date.now() + 50000;
+            const options = { backgroundKey: context.accountKey, preemptibleBackground: true, abortSignal: signal };
+            const prepared = await runStrictSpeechSampler(wavPath,
+                planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal),
+                { ...options, selectedWavPath: `${wavPath}.selected.wav`, timeoutMs: 8000 });
+            if (!prepared.ok) throw capturePipelineError(prepared.preempted
+                ? 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED' : 'LID_CAPTURE_PREPARATION_FAILED');
+            const batch = await runStrictWhisperBatch([`${wavPath}.selected.wav`], {
+                ...options, timeoutMs: Math.max(1, deadline - Date.now()),
+                evaluateSample: sample => strictLanguageBatchSampleResult(sample, prepared.offset),
+            });
+            if (batch.preempted) throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
+            if (!batch.ok || batch.aborted || signal.aborted) throw capturePipelineError('LID_CAPTURE_INFERENCE_FAILED');
+            const evaluated = batch.evaluatedSamples || batch.samples.map(sample => strictLanguageBatchSampleResult(sample, prepared.offset));
+            if (evaluated.length !== 1) throw capturePipelineError('LID_CAPTURE_EVIDENCE_INVALID');
+            const receipt = createStrictLidWindowReceipt({ secret: GATEWAY_TOKEN, binding,
+                evidence: { ...evaluated[0], selection: prepared.selection } });
+            return { windowCheckpointProtocol: 1, windowOrdinal: binding.windowOrdinal, windowCount: binding.windowCount, receipt };
+        },
+    });
+}
+
+async function handleStrictLidCaptureRequest(req, res, action) {
+    const token = detectLanguageCapabilityFromHeader(req);
+    if (!token) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    const validation = validateDetectLanguageCapability(token, LID_LEGACY_FULL_SCOPE);
+    if (!validation.claims) return res.status(validation.status).json({ error: validation.error });
+    const claims = validation.claims;
+    const index = Number(req.query.index);
+    const context = strictLidWindowClaimContext(claims, index);
+    if (!/^(?:0|[1-9][0-9]{0,3})$/.test(String(req.query.index ?? '')) || !context
+        || claims.captureProtocol !== 1 || claims.captureAction !== action || claims.captureTrackIndex !== index
+        || (action === 'infer' && !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(claims.captureRelease || ''))) {
+        return res.status(400).json({ code: 'LID_CAPTURE_CLAIMS_INVALID', providerDrained: true, providerDrainProtocol: 1 });
+    }
+    if (!LANGUAGE_CAPTURE_PIPELINE_ENABLED || !strictLidCapturePipeline || !strictLidCaptureStore?.snapshot().ready) {
+        return res.status(503).json({ code: 'LID_CAPTURE_DISABLED', providerDrained: true, providerDrainProtocol: 1 });
+    }
+    if (rejectWhileLidBenchmarkRuns(res)) return;
+    const binding = { ...strictLidWindowReceiptBinding(context, context.windowOrdinal), sourceUrlHash: sha256Hex(claims.url) };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), action === 'capture' ? 210000 : 55000);
+    const closed = () => { if (!res.writableEnded) controller.abort(); };
+    res.once('close', closed);
+    try {
+        let payload;
+        if (action === 'status') payload = await strictLidCapturePipeline.status(binding);
+        else if (action === 'capture') payload = await strictLidCapturePipeline.capture(binding,
+            { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes }, controller.signal);
+        else if (action === 'infer') payload = await strictLidCapturePipeline.compute(binding,
+            { accountKey: proxyKeyFromUrl(claims.url) }, controller.signal);
+        else if (action === 'ack') { await strictLidCapturePipeline.acknowledge(binding); payload = { acknowledged: true }; }
+        else throw capturePipelineError('LID_CAPTURE_CLAIMS_INVALID');
+        if (!res.destroyed && !res.writableEnded) return res.json({ ...payload, providerDrained: true, providerDrainProtocol: 1 });
+    } catch (error) {
+        const allowed = new Set(['LANGUAGE_ENRICHMENT_CAPACITY_BUSY', 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED',
+            'LID_CAPTURE_DISABLED', 'LID_CAPTURE_NOT_FOUND', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_ALREADY_RUNNING',
+            'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_DRAIN_UNCONFIRMED', 'LID_CAPTURE_EXTRACTION_TIMEOUT',
+            'LID_CAPTURE_EXTRACTION_FAILED', 'LID_CAPTURE_INFERENCE_FAILED', 'LID_CAPTURE_PREPARATION_FAILED',
+            'PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT', 'PROVIDER_IDLE_TIMEOUT',
+            'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH']);
+        const code = allowed.has(error?.code) ? error.code : 'LID_CAPTURE_FAILED';
+        const providerCodes = new Set(['PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT',
+            'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH']);
+        const status = providerCodes.has(code) && Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599
+            ? error.status : code === 'LID_CAPTURE_NOT_FOUND' ? 409
+            : (['LANGUAGE_ENRICHMENT_CAPACITY_BUSY', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_ALREADY_RUNNING'].includes(code) ? 429
+                : (code === 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED' ? 409 : 502));
+        if (!res.destroyed && !res.writableEnded) return res.status(status).json({ code,
+            ...(action === 'capture' && Number.isInteger(error?.upstreamStatus)
+                && error.upstreamStatus >= 400 && error.upstreamStatus <= 599 ? { upstreamStatus: error.upstreamStatus } : {}),
+            providerDrained: action !== 'capture' || error?.providerDrained === true, providerDrainProtocol: 1 });
+    } finally { clearTimeout(timer); res.off('close', closed); }
+}
+
+for (const action of ['status', 'capture', 'infer', 'ack']) {
+    app.post(`/detect-language/capture/${action}`, setDetectLanguageSecurityHeaders, requireGatewayAuth,
+        (req, res) => handleStrictLidCaptureRequest(req, res, action));
+}
+
 // Preferred service-only route: the signed capability stays out of URL paths,
 // bodies, access logs, Referer propagation and error traces. Security headers
 // run before Bearer authentication so even rejected calls are non-cacheable.
@@ -8404,8 +8527,10 @@ function extractAudioWav(
                 error: 'preempted by viewer playback before extraction spawn',
             });
         }
-        const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const strictLoopback = inputOptions?.strictLoopback === true;
+        const outputPath = strictLoopback && inputOptions?.captureOutputPath
+            ? inputOptions.captureOutputPath
+            : path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const strictCheckpointWindow = strictLoopback && inputOptions?.checkpointWindow === true;
         const providerSourceUrl = strictLoopback && isHttpUrl(inputOptions?.providerSourceUrl)
             ? String(inputOptions.providerSourceUrl)
@@ -11523,6 +11648,18 @@ async function bootstrap() {
             WHISPER_VAD_RUNTIME_VERIFIED && WHISPER_VAD_BIN_BUILD_SHA256
             && WHISPER_VAD_BIN_SHA256 === WHISPER_VAD_BIN_BUILD_SHA256
         );
+    }
+    if (LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
+        if (!LANGUAGE_METADATA_LANE_ENABLED || !WHISPER_RUNTIME_VERIFIED || !WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED) {
+            throw capturePipelineError('LID_CAPTURE_RUNTIME_NOT_READY');
+        }
+        strictLidCaptureStore = new StrictLidCaptureStore({ root: process.env.LANGUAGE_CAPTURE_PRIVATE_DIR,
+            secret: GATEWAY_TOKEN });
+        await strictLidCaptureStore.open();
+        strictLidCapturePipeline = initializeStrictLidCapturePipeline(strictLidCaptureStore);
+        setInterval(() => strictLidCaptureStore.sweep().catch(() => {
+            console.warn('[media-gateway] private capture sweep failed');
+        }), 30000).unref();
     }
     app.listen(PORT, () => {
         console.log(`Norva Media Gateway listening on ${PORT}`);

@@ -20,6 +20,7 @@ fleet.ROOT = ROOT
 fleet.PROOF = 'norva-enrichment-metadata-proof-20260911'
 fleet.LABEL = 'enrichment-metadata-proof-20260911'
 fleet.TABLES += ('catalog_vod_language_sweeps', 'catalog_vod_language_intake', 'catalog_language_capacity', 'catalog_selection_audio_jobs')
+fleet.TABLES = tuple(dict.fromkeys(fleet.TABLES + ('provider_file_probe_leases', 'provider_account_language_validation_leases')))
 fleet.HELPERS += ('vod_language_profile_is_exact', 'catalog_language_execution_available',
     'catalog_language_queue_available')
 fleet.TARGETS += ('start_catalog_file_audio_validation_job', 'claim_catalog_file_audio_validation_job',
@@ -59,6 +60,8 @@ INSERT INTO public.admin_feature_flags(key,enabled) VALUES('adaptive_language_ad
         sql(fleet.artifact('language-adaptive-admission.sql'), True)
         sql(fleet.artifact(MIGRATION), True)
         sql(fleet.artifact('enrichment-metadata-lane.sql'), True)
+        sql(fleet.artifact('20260911191032_strict_lid_capture_handoff.sql'), True)
+        sql(fleet.artifact('strict-lid-capture-handoff.sql'), True)
         sql("SELECT public.report_catalog_language_metadata_capacity(2,'capacity-available',clock_timestamp());", True)
 
         def claim(n):
@@ -72,6 +75,7 @@ INSERT INTO public.admin_feature_flags(key,enabled) VALUES('adaptive_language_ad
         require(fleet.definitions() == before, 'production_function_drift')
         receipt = {'passed': True, 'checks': checks, 'providerRequests': 0, 'productionWrites': 0,
             'migrationSha256': hashlib.sha256(fleet.artifact(MIGRATION).encode()).hexdigest(),
+            'captureMigrationSha256': hashlib.sha256(fleet.artifact('20260911191032_strict_lid_capture_handoff.sql').encode()).hexdigest(),
             'limitations': ['synthetic data', 'visibility wrapper', 'production row triggers not copied']}
         fleet.save('proof-' + str(time.time_ns()) + '.json', receipt)
         print(json.dumps({**receipt, 'checks': len(checks)}))

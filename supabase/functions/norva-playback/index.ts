@@ -3702,6 +3702,10 @@ type StrictLidWindowCapabilityClaims = {
   windowCount: 4 | 6;
   windowOrdinal?: number;
   windowFinalize?: true;
+  captureProtocol?: 1;
+  captureAction?: "status" | "capture" | "infer" | "ack";
+  captureTrackIndex?: number;
+  captureRelease?: string;
 };
 
 function strictLidWindowCountForDuration(durationSeconds: number): 4 | 6 | null {
@@ -3985,6 +3989,23 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
       return;
     }
+    const captureOptions = { db, jobId, leaseOwner, claim, current, targetUrl, trackIndex, windowState, taskDeadlineAt };
+    const { data: captureEnabled, error: captureFlagError } = await db.rpc("catalog_language_capture_pipeline_enabled");
+    const useCapturePipeline = !captureFlagError && captureEnabled === true;
+    if (useCapturePipeline) {
+      // Look up exact local audio before ANY provider circuit/idle check. A
+      // cache miss never makes the inference route download from a provider.
+      const cached = await requestLanguageCaptureWindow(captureOptions, "status");
+      if (!cached.response.ok || cached.payload.captureProtocol !== 1 || typeof cached.payload.captured !== "boolean"
+        || !strictLanguageProviderDrainAttested(cached.payload)) {
+        throw new HttpError(503, "Private audio capture status unavailable", { code: "LANGUAGE_CAPTURE_STATUS_UNAVAILABLE" });
+      }
+      if (cached.payload.captured === true) {
+        const release = await checkpointLanguageCapture(captureOptions, cached.payload);
+        await computeCapturedLanguageWindow(captureOptions, release);
+        return;
+      }
+    }
     const providerAccountScope = "providerAccountScope" in resolved
       ? stringOr(resolved.providerAccountScope, "")
       : "";
@@ -4140,6 +4161,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         profileFingerprint: exactAfterLease.fingerprint,
         windowOrdinal,
         windowCount: windowState.count,
+        ...(useCapturePipeline ? { captureProtocol: 1 as const, captureAction: "capture" as const, captureTrackIndex: trackIndex } : {}),
       },
     );
     let response: Response;
@@ -4182,7 +4204,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     providerAccountLeaseReleaseSafe = false;
     try {
       response = await fetch(
-        `${detectionAccess.gatewayUrl}/detect-language?index=${trackIndex}&strict=1&dur=${LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS}`,
+        `${detectionAccess.gatewayUrl}/detect-language${useCapturePipeline ? "/capture/capture" : ""}?index=${trackIndex}&strict=1&dur=${LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS}`,
         {
           method: "POST",
           headers: {
@@ -4253,7 +4275,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       payload,
       sanitizeTelemetryText(textFromGatewayDetails(payload)),
     );
-    if (response.status === 429 && gatewayCode === "LANGUAGE_ENRICHMENT_CAPACITY_BUSY"
+    if (response.status === 429 && ["LANGUAGE_ENRICHMENT_CAPACITY_BUSY", "LID_CAPTURE_STORE_FULL", "LID_CAPTURE_COMPUTE_BUSY", "LID_CAPTURE_ALREADY_RUNNING"].includes(gatewayCode)
       && providerAccountLeaseReleaseSafe) {
       await settleProviderAttempt("admission_deferred");
       await failLanguageValidationJob(db, {
@@ -4291,6 +4313,17 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
           upstreamStatus,
         ),
       });
+      return;
+    }
+    if (useCapturePipeline) {
+      const release = await checkpointLanguageCapture(captureOptions, payload,
+        { providerAccountHash, providerLeaseOwner, attemptToken: providerAttemptToken });
+      // One SQL transaction persisted the capture and released BOTH own
+      // provider leases. No local CPU call can precede that commit.
+      providerAttemptToken = null;
+      providerAccountLeaseClaimed = false;
+      providerLeaseClaimed = false;
+      await computeCapturedLanguageWindow(captureOptions, release);
       return;
     }
     const receipt = strictLidWindowCheckpointFromGateway(
@@ -4385,6 +4418,87 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     ) {
       await releaseProviderFileProbe(db, identityKey, providerLeaseOwner);
     }
+  }
+}
+
+type LanguageCaptureWindowOptions = {
+  db: SupabaseClient; jobId: string; leaseOwner: string; claim: JsonRecord;
+  current: Awaited<ReturnType<typeof revalidateLanguageValidationClaim>>;
+  targetUrl: string; trackIndex: number; windowState: StrictLidWindowState; taskDeadlineAt: number;
+};
+
+async function requestLanguageCaptureWindow(options: LanguageCaptureWindowOptions,
+  action: "status" | "infer" | "ack", release?: string) {
+  const { db, jobId, current, targetUrl, trackIndex, windowState, taskDeadlineAt } = options;
+  const access = await createBytePipeCapability(`language-capture:${jobId}:${crypto.randomUUID()}`,
+    current.userId, targetUrl, new Date(Date.now() + 120000).toISOString(), db, null, LANGUAGE_VALIDATION_SCOPE,
+    current.exactProfile.fileSizeBytes, Number(current.exactProfile.profile.durationSeconds), {
+      windowCheckpointProtocol: 1, jobId, profileFingerprint: current.fingerprint,
+      windowCount: windowState.count, windowOrdinal: windowState.position + 1,
+      captureProtocol: 1, captureAction: action, captureTrackIndex: trackIndex,
+      ...(action === "infer" ? { captureRelease: release } : {}),
+    });
+  const budget = Math.min(action === "infer" ? 60000 : 5000, languageValidationFetchBudgetMs(taskDeadlineAt));
+  if (budget <= 0) throw new HttpError(503, "Local inference task budget exhausted", { code: "LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED" });
+  let response: Response;
+  try {
+    response = await fetch(`${access.gatewayUrl}/detect-language/capture/${action}?index=${trackIndex}`, {
+      method: "POST", headers: { Authorization: `Bearer ${access.serviceToken}`, "X-Norva-Byte-Pipe-Token": access.capability },
+      signal: AbortSignal.timeout(budget),
+    });
+  } catch (_) { throw new HttpError(503, "Private audio capture transport unavailable", { code: "LANGUAGE_CAPTURE_GATEWAY_UNAVAILABLE" }); }
+  const read = await readLanguageValidationGatewayResponse(response);
+  if (!read.ok) throw new HttpError(503, "Private audio capture response unavailable", { code: "LANGUAGE_CAPTURE_GATEWAY_UNAVAILABLE" });
+  return { response, payload: recordOrEmpty(read.payload) };
+}
+
+async function checkpointLanguageCapture(options: LanguageCaptureWindowOptions, payload: JsonRecord,
+  provider?: { providerAccountHash: string; providerLeaseOwner: string; attemptToken: string | null }) {
+  const { db, jobId, leaseOwner, current, targetUrl, trackIndex, windowState } = options;
+  if (payload.captureProtocol !== 1 || payload.captured !== true || !strictLanguageProviderDrainAttested(payload)
+    || !Number.isSafeInteger(payload.expiresAt) || Number(payload.expiresAt) <= Date.now()
+    || Number(payload.expiresAt) > Date.now() + 2 * 60 * 60 * 1000 || !/^[a-f0-9]{64}$/.test(String(payload.sha256 || ""))
+    || (provider && !provider.attemptToken)) {
+    throw new HttpError(502, "Private audio capture checkpoint invalid", { code: "LANGUAGE_CAPTURE_CHECKPOINT_INVALID" });
+  }
+  const { data, error } = await db.rpc("checkpoint_catalog_file_audio_capture", {
+    p_job_id: jobId, p_lease_owner: leaseOwner, p_stream_index: trackIndex, p_window_ordinal: windowState.position + 1,
+    p_profile_fingerprint: current.fingerprint, p_source_url_hash: await sha256Hex(targetUrl),
+    p_audio_sha256: payload.sha256, p_expires_at: new Date(Number(payload.expiresAt)).toISOString(),
+    p_provider_account_hash: provider?.providerAccountHash ?? null,
+    p_provider_lease_owner: provider?.providerLeaseOwner ?? null, p_attempt_token: provider?.attemptToken ?? null,
+  });
+  if (error || typeof data !== "string" || !PLAYBACK_SESSION_UUID_PATTERN.test(data)) {
+    throw new HttpError(409, "Private audio capture handoff lost ownership", { code: "LANGUAGE_CAPTURE_HANDOFF_REJECTED" });
+  }
+  return data;
+}
+
+async function computeCapturedLanguageWindow(options: LanguageCaptureWindowOptions, release: string) {
+  const { db, jobId, leaseOwner, claim, targetUrl, trackIndex, windowState, taskDeadlineAt } = options;
+  // Access/profile changes still veto inference and certification. Local CPU
+  // can wait while a viewer uses the account; it never owns a provider socket.
+  const current = await revalidateLanguageValidationClaim(db, claim);
+  const inferred = await requestLanguageCaptureWindow({ ...options, current }, "infer", release);
+  const windowOrdinal = windowState.position + 1;
+  const receipt = inferred.response.ok && strictLanguageProviderDrainAttested(inferred.payload)
+    ? strictLidWindowCheckpointFromGateway(inferred.payload, windowOrdinal, windowState.count) : null;
+  if (!receipt) throw new HttpError(503, "Local audio inference deferred", { code: "LANGUAGE_CAPTURE_INFERENCE_DEFERRED" });
+  const { data: checkpoint, error } = await db.rpc("checkpoint_catalog_file_audio_validation_window", {
+    p_job_id: jobId, p_lease_owner: leaseOwner, p_stream_index: trackIndex,
+    p_window_ordinal: windowOrdinal, p_window_count: windowState.count,
+    p_window_protocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL, p_window_token: receipt,
+  });
+  if (error || !checkpoint) throw new HttpError(409, "Local inference receipt was not persisted", {
+    code: "LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_FAILED",
+  });
+  // Never remove audio before evidence is durable. A lost ACK leaves only the
+  // same private TTL buffer, not an extra acquisition or an additional vote.
+  try { await requestLanguageCaptureWindow({ ...options, current }, "ack"); } catch (_) { /* private TTL cleanup */ }
+  if (recordOrEmpty(checkpoint).complete === true) {
+    await finalizeLanguageValidationTrackWindows({ db, jobId, leaseOwner, claim,
+      current: await revalidateLanguageValidationClaim(db, claim), targetUrl, trackIndex, taskDeadlineAt,
+      windowState: { ...windowState, position: windowState.count, tokens: [...windowState.tokens, receipt] } });
   }
 }
 
@@ -4673,6 +4787,14 @@ function languageValidationTaskRetryAt(error: unknown) {
   const details = error instanceof HttpError ? recordOrEmpty(error.details) : {};
   const blockedUntil = stringOrNull(details.blockedUntil);
   if (blockedUntil && Number.isFinite(Date.parse(blockedUntil))) return blockedUntil;
+  // Local retries must occur inside the private audio TTL, not the historical
+  // day-long provider retry. No new provider attempt is made on a cache hit.
+  if (code === "LANGUAGE_CAPTURE_GATEWAY_UNAVAILABLE" || code === "LANGUAGE_CAPTURE_STATUS_UNAVAILABLE") {
+    return new Date(Date.now() + LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS).toISOString();
+  }
+  if (code.startsWith("LANGUAGE_CAPTURE_") || code === "LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED") {
+    return new Date(Date.now() + 30_000).toISOString();
+  }
   if (code === "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE" || code === "PROVIDER_ACCOUNT_BUSY") {
     return new Date(Date.now() + 15_000).toISOString();
   }
@@ -7370,6 +7492,13 @@ async function createBytePipeCapability(
     throw new HttpError(503, "Media gateway is not configured");
   }
   if (strictLidWindowClaims) {
+    if (strictLidWindowClaims.captureProtocol !== undefined && (
+      strictLidWindowClaims.captureProtocol !== 1 || strictLidWindowClaims.windowFinalize === true
+      || !["status", "capture", "infer", "ack"].includes(String(strictLidWindowClaims.captureAction))
+      || !Number.isInteger(strictLidWindowClaims.captureTrackIndex) || Number(strictLidWindowClaims.captureTrackIndex) < 0
+      || Number(strictLidWindowClaims.captureTrackIndex) > 128
+      || (strictLidWindowClaims.captureAction === "infer" && !PLAYBACK_SESSION_UUID_PATTERN.test(strictLidWindowClaims.captureRelease || ""))
+    )) throw new HttpError(409, "Private audio capture claims invalid", { code: "LANGUAGE_CAPTURE_CLAIMS_INVALID" });
     const finalizing = strictLidWindowClaims.windowFinalize === true;
     if (
       strictLidWindowClaims.windowCheckpointProtocol !== LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL ||
@@ -7409,6 +7538,11 @@ async function createBytePipeCapability(
         jobId: strictLidWindowClaims.jobId,
         profileFingerprint: strictLidWindowClaims.profileFingerprint,
         windowCount: strictLidWindowClaims.windowCount,
+        ...(strictLidWindowClaims.captureProtocol === 1 ? {
+          captureProtocol: 1, captureAction: strictLidWindowClaims.captureAction,
+          captureTrackIndex: strictLidWindowClaims.captureTrackIndex,
+          ...(strictLidWindowClaims.captureAction === "infer" ? { captureRelease: strictLidWindowClaims.captureRelease } : {}),
+        } : {}),
         ...(strictLidWindowClaims.windowFinalize === true
           ? { windowFinalize: true }
           : { windowOrdinal: strictLidWindowClaims.windowOrdinal }),

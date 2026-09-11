@@ -100,7 +100,7 @@ test('foreground playback preempts background validation and requires an atteste
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationTrackWindows(',
+    '\ntype LanguageCaptureWindowOptions =',
   );
   const create = between(
     playback,
@@ -288,7 +288,7 @@ test('short exact VOD is terminal before job creation or provider work while bou
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationTrackWindows(',
+    '\ntype LanguageCaptureWindowOptions =',
   );
   const workerDurationGateAt = worker.indexOf('requireStrictLidWindowCount(initialDurationSeconds)');
   assert.ok(workerDurationGateAt >= 0 && workerDurationGateAt < worker.indexOf('resolvePlaybackTarget('));
@@ -384,7 +384,7 @@ test('Gateway JSON is bounded in bytes before parse and overflow cancels without
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationTrackWindows(',
+    '\ntype LanguageCaptureWindowOptions =',
   );
   const finalize = between(
     playback,
@@ -430,7 +430,7 @@ test('strict Gateway 5xx backs off for five minutes while proxy auth and non-5xx
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationTrackWindows(',
+    '\ntype LanguageCaptureWindowOptions =',
   );
   assert.match(worker, /if \(!response\.ok\)[\s\S]*retryAt: languageValidationGatewayRetryAt\([\s\S]*response\.status,[\s\S]*gatewayCode,[\s\S]*upstreamStatus/);
 });
@@ -800,7 +800,7 @@ test('one waitUntil task handles at most one provider track and first 458 is ter
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationTrackWindows(',
+    '\ntype LanguageCaptureWindowOptions =',
   );
   assert.match(worker, /"claim_catalog_file_audio_validation_job"/);
   assert.match(worker, /"claim_provider_file_probe"/);
@@ -830,7 +830,7 @@ test('Edge checkpoints exactly one signed window and never returns its opaque re
   const worker = between(
     playback,
     'async function processOneLanguageValidationTrack(',
-    '\nasync function finalizeLanguageValidationTrackWindows(',
+    '\ntype LanguageCaptureWindowOptions =',
   );
   assert.match(worker, /strictLidWindowStateFromClaim\(claim, initialDurationSeconds\)/);
   assert.match(worker, /windowState\.position === windowState\.count[\s\S]*finalizeLanguageValidationTrackWindows/);
