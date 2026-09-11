@@ -20,6 +20,11 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
   return {
     seed: manifest => rpc('seed_selection_audio_jobs', { p_manifest: manifest }),
     claim: () => rpc('claim_selection_audio_job'),
+    captureEnabled: async () => await rpc('selection_audio_capture_pipeline_enabled') === true,
+    checkpointCapture: (job, args, captured) => rpc('checkpoint_selection_audio_capture', { ...identity(job),
+      p_stream_index:args.trackIndex, p_window_ordinal:args.windowOrdinal, p_profile_fingerprint:args.profile.fingerprint,
+      p_audio_sha256:captured.sha256, p_expires_at:new Date(captured.expiresAt).toISOString() }),
+    deferCapture: job => rpc('defer_selection_audio_capture', identity(job)),
     deferAdmission: job => rpc('defer_selection_audio_admission', identity(job)),
     checkpoint: (job, profile, progress) => rpc('checkpoint_selection_audio_job', { ...identity(job), p_profile: profile, p_progress: progress }),
     finish: (job, result, errorCode = null, retryable = false) => rpc('finish_selection_audio_job', {
@@ -53,7 +58,7 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
   };
 }
 
-export async function processSelectionAudioJob({ repository, gateway, file, job, signal, onProgress = async () => {} }) {
+export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, onProgress = async () => {} }) {
   if (!file || file.externalId !== job.external_id || file.urlSha256 !== job.url_sha256) {
     await repository.finish(job, null, 'SELECTION_AUDIO_FILE_CHANGED', false);
     return { state: 'failed' };
@@ -61,6 +66,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
   let profile = job.profile?.fingerprint ? job.profile : null;
   let progress = job.progress?.trackPosition >= 0 ? job.progress : { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
   let lostLease = false;
+  let localCapturePhase = false;
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
@@ -102,11 +108,40 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
         const args = { file, profile, jobId: job.id, subjectId: 'norva-selection-audio', trackIndex: track.index, signal: controller.signal };
         let windows = profile.durationSeconds >= 120 ? 6 : 4;
         for (let ordinal = progress.receipts.length; ordinal < windows; ordinal++) {
-          const response = await gateway.analyzeTrackWindow({ ...args, windowOrdinal: ordinal + 1 });
+          const windowArgs = { ...args, windowOrdinal: ordinal + 1 };
+          let response;
+          if (captureEnabled) {
+            // Local lookup precedes ALL capture I/O. The private buffer can
+            // survive a lost response, worker restart or inference failure.
+            localCapturePhase = true;
+            let captured = await gateway.getCaptureStatus(windowArgs);
+            if (!captured.captured) {
+              localCapturePhase = false;
+              captured = await gateway.captureWindow({ ...windowArgs, captureTrackIndices:sourceTracks
+                .slice(progress.trackPosition).filter(t => !knownLanguage(t.lang || t.language))
+                .slice(0, 4).map(t => t.index) });
+              localCapturePhase = true;
+            }
+            if (!captured.captured || captured.providerDrained !== true) {
+              throw Object.assign(new Error('SELECTION_AUDIO_DRAIN_UNPROVEN'), { code:'SELECTION_AUDIO_DRAIN_UNPROVEN', retryable:true });
+            }
+            const captureRelease = await repository.checkpointCapture(job, windowArgs, captured);
+            if (typeof captureRelease !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(captureRelease)) {
+              lostLease = true; controller.abort();
+              throw Object.assign(new Error('SELECTION_AUDIO_LEASE_LOST'), { code:'SELECTION_AUDIO_LEASE_LOST' });
+            }
+            response = await gateway.computeCapture({ ...windowArgs, captureRelease });
+          } else response = await gateway.analyzeTrackWindow(windowArgs);
           if (!response.providerDrained || !response.receipt) throw Object.assign(new Error('SELECTION_AUDIO_DRAIN_UNPROVEN'), { code: 'SELECTION_AUDIO_DRAIN_UNPROVEN', retryable: true });
           windows = response.windowCount;
           progress.receipts.push(response.receipt);
           await checkpoint();
+          if (captureEnabled) {
+            // Only durable window evidence permits deletion. Lost ACK leaves
+            // the encrypted excerpt to bounded TTL, never another download.
+            try { await gateway.acknowledgeCapture(windowArgs); } catch { /* private TTL */ }
+          }
+          localCapturePhase = false;
         }
         const detection = await gateway.finalizeTrack({ ...args, receipts: progress.receipts });
         const identified = detection.verified === true && knownLanguage(detection.lang);
@@ -138,6 +173,10 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     clearInterval(heartbeat);
     await checkpointChain;
     if (lostLease) return { state: 'lease_lost' };
+    if (localCapturePhase && captureEnabled) {
+      if (!await repository.deferCapture(job)) return { state:'lease_lost' };
+      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY' };
+    }
     if (error.code === 'SELECTION_AUDIO_CAPACITY_BUSY' && error.providerDrained === true) {
       // A local capacity refusal is not a provider failure. Preserve all
       // receipts/profile and give back only this claim's retry debit by CAS.
@@ -186,8 +225,11 @@ export async function runSelectionAudioWorker(env = process.env) {
       }
       const job = await repository.claim();
       if (job?.external_id) {
+        // Missing migration or a disabled flag never silently activates this
+        // route. Explicit process and database gates are both required.
+        const captureEnabled = env.SELECTION_CAPTURE_PIPELINE_ENABLED === '1' && await repository.captureEnabled();
         const result = await processSelectionAudioJob({ repository, gateway, file: files.get(job.external_id), job,
-          signal: controller.signal, onProgress: health });
+          signal: controller.signal, captureEnabled, onProgress: health });
         console.log(JSON.stringify({ event: 'selection_audio_job', state: result.state,
           error: result.error || null, languages: result.languages || [], hydrated: result.hydrated || 0 }));
       } else await delay(15_000, undefined, { signal: controller.signal });

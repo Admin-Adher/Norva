@@ -11,7 +11,7 @@ throughput improvement is claimed by this document.
 | --- | --- | --- |
 | Fast metadata lane | Independent admission, bounded continuous batches, exact-cache reuse, preserved account locks; SQL contention and stop/permission tests | Implemented, isolated tests pass; production gate pending |
 | Mutualized input | Bound header/range reuse, one input for multiple pending tracks, file-change invalidation, independent temporal evidence; fake-provider byte/connection counts | Multi-track extraction and strong-validator cross-window reuse integrated; real-provider acceptance pending |
-| Capture then compute | Private bounded expiring store, attested drain and account release before inference, durable retry without new download; restart/expiry/lost-ACK tests | Gateway + Xtream/episode worker integrated locally; Selection client and live acceptance pending |
+| Capture then compute | Private bounded expiring store, attested drain and account release before inference, durable retry without new download; restart/expiry/lost-ACK tests | Gateway + Xtream/episode + current audited Selection client integrated locally; live acceptance pending |
 | Passive playback capture | Only bytes already received, non-blocking/drop-on-pressure, no second provider request, no implicit phone upload; playback/backpressure tests | Pending |
 | Authorized parallelism | Trusted Selection feed + host policies, prudent unknown-provider default, account vs file identity separation, bounded adaptive feedback; mono-session and refusal tests | Pending |
 
@@ -183,3 +183,49 @@ Not yet deployed. No new provider acquisition has been made for these tests.
   decreased by 41 since the 17:00 UTC snapshot; these local changes did not cause
   that production progress. Candidate counts are not proof of current admission,
   file accessibility, speech presence or independent language accuracy.
+
+## Selection capture adapter (local, not activated)
+
+- The immutable audited Selection file registry now signs the same four separate
+  capture actions. It cannot submit a different URL, profile or track to this
+  protocol. It checks local status before any capture; up to four still-unknown
+  tracks may share acquisition. Declared tracks continue to bypass inference.
+- Successful provider drain precedes a SQL CAS checkpoint against the exact
+  Selection job, URL digest, work lease, profile and track/window cursor. The
+  installed owner lookup also rechecks current media availability/identity and
+  matching media/variant generation. The independent **job work lease** remains
+  for compute; no fictitious provider-account lease is created for Selection.
+- Only a returned SQL token permits the signed inference call. Only the normal
+  durable window checkpoint permits ACK deletion. Lost ACK is TTL-cleaned;
+  local status/handoff/compute failure retries in 30 seconds with the existing
+  eight-attempt ceiling. Real provider rejection retains its original backoff,
+  and terminal failures are not revived. Receipt finalization is unchanged.
+- Activation requires the worker's `SELECTION_CAPTURE_PIPELINE_ENABLED=1`, both
+  private database capture flags and the prepared Gateway capture runtime.
+  All remain disabled. This adapter does not expand the audited registry or add
+  unsupported HLS acquisition; it does not yet authorize Selection parallelism.
+- Migration `20260911200200_selection_audio_capture_handoff.sql` SHA-256:
+  `c5902aab99e12afa73e103e4522243332e605134368ff1d52cbf95ed4ac56094`.
+  Real isolated PostgreSQL fixture now **121 assertions passed** (25 new):
+  installed service guard, Selection identity/owner functions, RLS/ACL, lease
+  CAS, expiry, file/profile/cursor fences, removed media, generation mismatch,
+  resumability, retention, terminal ceiling and FK cleanup. Production unchanged;
+  synthetic rows/visibility wrapper/no production row triggers remain limitations.
+- Full repository **4,460 tests; 4,447 passed, 13 skipped, zero failed**, 113.89 s.
+  Receipt: `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-selection-capture.log`.
+
+## Passive capture investigation (not implemented yet)
+
+- Gateway already has a bounded in-band header tee (`maybeCaptureHeaderBytes`
+  and `captureBoundedMkvHeaderBytes`). These collect metadata, not certified
+  audio excerpts; do not claim this workstream is complete on that basis.
+- `localViewerTranscriptionSource` and `hlsMediaPlaylistTargetsForSession` can
+  locate audio already produced by a playback process. Reusing those local
+  artifacts is promising, but the existing transcription extractor is not an
+  automatic strict-LID adapter: provenance, actual source stream mapping,
+  original timeline and complete closed segment coverage must first be checked.
+- A passive adapter must accept only controlled complete local segments or
+  immutable already-received ranges, have NO network fallback, enforce local
+  resource/memory/disk limits, never wait in the playback byte pump, and never
+  request/upload data from an Android client. Unknown mapping/timeline must
+  remain a miss, not an inferred independent window.

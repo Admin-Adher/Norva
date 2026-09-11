@@ -67,6 +67,54 @@ test('retry resumes persisted receipts without probing or repeating completed wi
   assert.deepEqual(run.finals[0].receipts, [1,2,3,4,5,6].map(receipt));
 });
 
+test('Selection captures after a miss, persists drain checkpoint, computes locally, and ACKs only durable evidence', async () => {
+  for (const cached of [false,true]) {
+    const run = await harness(); const events = run.events;
+    const captureRelease = '23456789-1234-4234-8234-123456789012';
+    const captured = { captured:true, providerDrained:true, sha256:'d'.repeat(64), expiresAt:Date.now()+1800000 };
+    run.gateway.getCaptureStatus = async () => { events.push('capture-status'); return cached ? captured : { captured:false }; };
+    run.gateway.captureWindow = async args => { events.push('capture'); assert.deepEqual(args.captureTrackIndices,[1]); return captured; };
+    run.repository.checkpointCapture = async (_job,args,capture) => { events.push('capture-checkpoint'); assert.equal(capture,captured); return captureRelease; };
+    run.gateway.computeCapture = async args => {
+      events.push('compute'); assert.equal(args.captureRelease,captureRelease);
+      return { providerDrained:true, receipt:receipt(args.windowOrdinal), windowCount:6 };
+    };
+    run.gateway.acknowledgeCapture = async () => { assert.equal(events.at(-1),'checkpoint'); events.push('capture-ack'); throw Error('lost ack'); };
+    assert.equal((await run.run({ captureEnabled:true })).state,'completed');
+    assert.equal(events.includes('window'),false);
+    assert.equal(events.filter(e=>e==='capture').length,cached ? 0 : 6);
+    assert.equal(events.filter(e=>e==='compute').length,6);
+    for (let i=0;i<events.length;i++) if(events[i]==='compute') assert.equal(events[i-1],'capture-checkpoint');
+    assert.equal(run.finishes[0].result.verified,true);
+  }
+});
+
+test('Selection local failures preserve audio and retry locally; lease loss and capture refusals never infer', async () => {
+  for (const stage of ['status','handoff','compute','evidence','capture']) {
+    const job = { ...baseJob(), attempt_count:3, profile:profile(), progress:{ trackPosition:0, receipts:[], tracks:[], evidence:[] } };
+    const run = await harness({ job, checkpoint:()=>stage !== 'evidence' });
+    let downloads=0, computes=0, acks=0, defers=0;
+    const captured = { captured:true, providerDrained:true, sha256:'d'.repeat(64), expiresAt:Date.now()+1800000 };
+    run.gateway.getCaptureStatus = async () => {
+      if(stage==='status') throw Error('local unavailable'); return stage==='capture' ? { captured:false } : captured;
+    };
+    run.gateway.captureWindow = async () => { downloads++; throw Object.assign(Error('provider refused'),{ code:'SELECTION_AUDIO_GATEWAY_REJECTED', retryable:false }); };
+    run.repository.checkpointCapture = async () => stage==='handoff' ? null : '23456789-1234-4234-8234-123456789012';
+    run.gateway.computeCapture = async args => {
+      computes++; if(stage==='compute') throw Error('local compute failed');
+      return { providerDrained:true, receipt:receipt(args.windowOrdinal), windowCount:6 };
+    };
+    run.repository.deferCapture = async () => { defers++; return true; };
+    run.gateway.acknowledgeCapture = async () => { acks++; };
+    const result = await run.run({ captureEnabled:true });
+    assert.equal(downloads,stage==='capture' ? 1 : 0);
+    assert.equal(computes,['compute','evidence'].includes(stage) ? 1 : 0); assert.equal(acks,0);
+    assert.equal(defers,['status','compute'].includes(stage) ? 1 : 0);
+    assert.equal(result.state,['handoff','evidence'].includes(stage) ? 'lease_lost' : stage==='capture' ? 'failed' : 'retry_wait');
+    assert.equal(run.finishes.length,stage==='capture' ? 1 : 0);
+  }
+});
+
 test('attested local capacity preserves the checkpoint and returns the admission debit without finalizing', async () => {
   for (const owned of [false,true]) {
     const job = { ...baseJob(), profile:profile(), progress:{ trackPosition:0, receipts:[receipt(1)], tracks:[], evidence:[] } };

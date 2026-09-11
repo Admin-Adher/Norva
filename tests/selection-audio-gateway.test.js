@@ -164,6 +164,56 @@ test('shutdown abort and upstream failures expose only bounded local error codes
   assert.equal(calls.length, 1);
 });
 
+test('Selection capture actions are signed and bound; compute has no network capture fallback', async () => {
+  const captured = { ...drain, captureProtocol:1, captured:true, sha256:'e'.repeat(64),
+    expiresAt:Date.parse('2026-09-09T12:30:00Z') };
+  const { gateway, file, calls } = await setup(url => {
+    if (url.endsWith('/probe-audio')) return json(probePayload());
+    if (url.includes('/status?')) return json({ ...drain, captureProtocol:1, captured:false });
+    if (url.includes('/capture/capture?')) return json(captured);
+    if (url.includes('/infer?')) return json({ ...drain, windowCheckpointProtocol:1, windowOrdinal:1, windowCount:6, receipt:receipt(1) });
+    return json({ ...drain, acknowledged:true });
+  });
+  const profile = await gateway.probe(file);
+  const args = { file, profile, jobId, subjectId, trackIndex:1, windowOrdinal:1 };
+  assert.equal((await gateway.getCaptureStatus(args)).captured, false);
+  assert.equal((await gateway.captureWindow(args)).sha256, captured.sha256);
+  await assert.rejects(gateway.computeCapture(args), { code:'SELECTION_AUDIO_CAPTURE_CLAIMS_INVALID' });
+  const captureRelease = '23456789-1234-4234-8234-123456789012';
+  assert.equal((await gateway.computeCapture({ ...args, captureRelease })).receipt, receipt(1));
+  assert.equal((await gateway.acknowledgeCapture(args)).acknowledged, true);
+  assert.equal(calls.length, 5);
+  for (const [index, action] of ['status','capture','infer','ack'].entries()) {
+    const { url, options } = calls[index + 1];
+    const [encoded, signature] = options.headers['X-Norva-Byte-Pipe-Token'].split('.');
+    const raw = Buffer.from(encoded, 'base64url').toString(); const claims = JSON.parse(raw);
+    assert.equal(createHmac('sha256', gatewayToken).update(raw).digest('base64url'), signature);
+    assert.equal(claims.captureProtocol, 1); assert.equal(claims.captureAction, action);
+    assert.equal(claims.captureTrackIndex, 1); assert.deepEqual(claims.captureTrackIndices, [1]);
+    assert.equal(claims.profileFingerprint, profile.fingerprint); assert.equal(options.body, undefined);
+    assert.ok(url.includes(`/capture/${action}?index=1`)); assert.equal(url.includes(file.url), false);
+    if (action === 'infer') assert.equal(claims.captureRelease, captureRelease);
+  }
+});
+
+test('missing, expired, overlong or unbound private captures cannot reach compute or legacy routes', async () => {
+  for (const defective of [{ captureProtocol:0 }, { captured:'true' }, { sha256:'private speech' },
+    { expiresAt:Date.parse('2026-09-09T11:00:00Z') }, { expiresAt:Date.parse('2026-09-09T15:00:00Z') }]) {
+    const { gateway, file, calls } = await setup(url => url.endsWith('/probe-audio') ? json(probePayload())
+      : json({ ...drain, captureProtocol:1, captured:true, sha256:'f'.repeat(64), expiresAt:Date.parse('2026-09-09T12:30:00Z'), ...defective }));
+    const profile = await gateway.probe(file); const args = { file, profile, jobId, subjectId, trackIndex:1, windowOrdinal:1 };
+    await assert.rejects(gateway.getCaptureStatus(args), { code:'SELECTION_AUDIO_CAPTURE_INVALID' });
+    await assert.rejects(gateway.captureWindow({ ...args, captureTrackIndices:[1,2] }), { code:'SELECTION_AUDIO_CAPTURE_CLAIMS_INVALID' });
+    assert.equal(calls.length, 2);
+  }
+  const { gateway, file, calls } = await setup(url => url.endsWith('/probe-audio') ? json(probePayload())
+    : json({ ...drain, code:'LID_CAPTURE_NOT_FOUND' }, 409));
+  const profile = await gateway.probe(file);
+  await assert.rejects(gateway.computeCapture({ file, profile, jobId, subjectId, trackIndex:1, windowOrdinal:1,
+    captureRelease:'23456789-1234-4234-8234-123456789012' }), { code:'SELECTION_AUDIO_GATEWAY_REJECTED' });
+  assert.equal(calls.length, 2); assert.ok(calls[1].url.includes('/capture/infer'));
+});
+
 test('local capacity is distinct from provider rejection and requires a drain attestation', async () => {
   for (const attested of [false,true]) {
     const { gateway, file } = await setup(() => json({ code:'LANGUAGE_ENRICHMENT_CAPACITY_BUSY', ...(attested ? drain : {}) }, 429));

@@ -152,7 +152,8 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       const payload = await boundedJson(response);
       const providerDrained = payload.providerDrained === true && payload.providerDrainProtocol === 1;
       if (!response.ok) {
-        if (response.status === 429 && payload.code === 'LANGUAGE_ENRICHMENT_CAPACITY_BUSY' && providerDrained) {
+        if (response.status === 429 && ['LANGUAGE_ENRICHMENT_CAPACITY_BUSY','LID_CAPTURE_STORE_FULL',
+          'LID_CAPTURE_ALREADY_RUNNING','LID_CAPTURE_COMPUTE_BUSY'].includes(payload.code) && providerDrained) {
           fail('SELECTION_AUDIO_CAPACITY_BUSY', { status:429, retryable:true, providerDrained:true, retryAfterSeconds:30 });
         }
         const busy = [409,429].includes(response.status) && ['account_busy','background_busy','viewer_preempted','LANGUAGE_VALIDATION_VIEWER_PREEMPTED','strict_lid_preempted'].includes(payload.code);
@@ -171,7 +172,7 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     }
   }
 
-  async function context(args, finalize = false) {
+  async function context(args, finalize = false, captureAction = null) {
     const file = await requireFile(args.file);
     if (!HEX.test(args.profile?.fingerprint || '') || args.profile?.externalId !== file.externalId
       || args.profile?.urlSha256 !== file.urlSha256) fail('SELECTION_AUDIO_PROFILE_CHANGED');
@@ -186,7 +187,46 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       fileSizeBytes:profile.fileSizeBytes, durationSeconds:profile.durationSeconds,
       windowCheckpointProtocol:1, jobId, profileFingerprint:profile.fingerprint, windowCount:profile.windowCount,
       ...(finalize ? { windowFinalize:true } : { windowOrdinal }), exp:Math.floor(now()/1000) + 300 };
+    if (captureAction) {
+      const indices = captureAction === 'capture' ? args.captureTrackIndices || [trackIndex] : [trackIndex];
+      if (!['status','capture','infer','ack'].includes(captureAction) || finalize
+        || !Array.isArray(indices) || indices.length < 1 || indices.length > 4 || indices[0] !== trackIndex
+        || new Set(indices).size !== indices.length || indices.some(index => !Number.isInteger(index) || index < 0 || index > 128
+          || !profile.audioTracks.some(track => track.index === index))
+        || (captureAction === 'infer' && !UUID.test(args.captureRelease || ''))) fail('SELECTION_AUDIO_CAPTURE_CLAIMS_INVALID');
+      Object.assign(claims, { captureProtocol:1, captureAction, captureTrackIndex:trackIndex, captureTrackIndices:indices,
+        ...(captureAction === 'infer' ? { captureRelease:args.captureRelease } : {}) });
+    }
     return { profile, capability:await signedCapability(gatewayToken, claims) };
+  }
+
+  function windowReceipt(payload, args, profile) {
+    if (payload.windowCheckpointProtocol !== 1 || payload.windowOrdinal !== args.windowOrdinal
+      || payload.windowCount !== profile.windowCount || typeof payload.receipt !== 'string'
+      || payload.receipt.length < 32 || payload.receipt.length > 64 * 1024 || !/^[a-zA-Z0-9._-]+$/.test(payload.receipt)) {
+      fail('SELECTION_AUDIO_RECEIPT_INVALID', { retryable:true, providerDrained:true });
+    }
+    return { receipt:payload.receipt, windowOrdinal:args.windowOrdinal, windowCount:profile.windowCount, providerDrained:true };
+  }
+
+  async function captureRequest(args, action) {
+    const { profile, capability } = await context(args, false, action);
+    const payload = await request(`/detect-language/capture/${action}?index=${args.trackIndex}`, {
+      capability, signal:args.signal, budgetMs:Math.min(budget, action === 'capture' ? 215_000 : action === 'infer' ? 60_000 : 10_000) });
+    if (action === 'infer') return windowReceipt(payload, args, profile);
+    if (action === 'ack') {
+      if (payload.acknowledged !== true) fail('SELECTION_AUDIO_CAPTURE_ACK_INVALID', { retryable:true, providerDrained:true });
+      return { acknowledged:true, providerDrained:true };
+    }
+    if (payload.captureProtocol !== 1 || typeof payload.captured !== 'boolean' || (action === 'capture' && !payload.captured)) {
+      fail('SELECTION_AUDIO_CAPTURE_INVALID', { retryable:true, providerDrained:true });
+    }
+    if (!payload.captured) return { captured:false, providerDrained:true };
+    if (!HEX.test(payload.sha256 || '') || !Number.isFinite(payload.expiresAt)
+      || payload.expiresAt <= now() || payload.expiresAt > now() + 2 * 3600_000) {
+      fail('SELECTION_AUDIO_CAPTURE_INVALID', { retryable:true, providerDrained:true });
+    }
+    return { captured:true, sha256:payload.sha256, expiresAt:payload.expiresAt, providerDrained:true };
   }
 
   return Object.freeze({
@@ -201,13 +241,12 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     async analyzeTrackWindow(args) {
       const { profile, capability } = await context(args);
       const payload = await request(`/detect-language?index=${args.trackIndex}&strict=1&dur=20`, { capability, signal:args.signal });
-      if (payload.windowCheckpointProtocol !== 1 || payload.windowOrdinal !== args.windowOrdinal
-        || payload.windowCount !== profile.windowCount || typeof payload.receipt !== 'string'
-        || payload.receipt.length < 32 || payload.receipt.length > 64 * 1024 || !/^[a-zA-Z0-9._-]+$/.test(payload.receipt)) {
-        fail('SELECTION_AUDIO_RECEIPT_INVALID', { retryable:true, providerDrained:true });
-      }
-      return { receipt:payload.receipt, windowOrdinal:args.windowOrdinal, windowCount:profile.windowCount, providerDrained:true };
+      return windowReceipt(payload, args, profile);
     },
+    getCaptureStatus: args => captureRequest(args, 'status'),
+    captureWindow: args => captureRequest(args, 'capture'),
+    computeCapture: args => captureRequest(args, 'infer'),
+    acknowledgeCapture: args => captureRequest(args, 'ack'),
     async finalizeTrack(args) {
       const { profile, capability } = await context(args, true);
       if (!Array.isArray(args.receipts) || args.receipts.length !== profile.windowCount
