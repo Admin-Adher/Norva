@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const path = require('node:path');
 const { spawn } = require('node:child_process');
 const {
     MAX_WAV_BYTES, MAX_AUDIO_SECONDS, MAX_VAD_SEGMENTS, PCM_SAMPLE_RATE,
@@ -168,6 +169,7 @@ function localSpeechMeasurement(segments, startSeconds, durationSeconds) {
 async function prepareStrictLidSpeechSample({
     wavPath, plan, bin = null, model = null, timeoutMs = MAX_VAD_TIMEOUT_MS,
     abortSignal = null, onSpawn = null, isPreempted = null, runVadImpl = runStrictLidVadProcess,
+    selectedWavPath = null,
 } = {}) {
     const startedAt = Date.now();
     let analysis = null;
@@ -184,11 +186,24 @@ async function prepareStrictLidSpeechSample({
     let state = stopped();
     if (state.aborted || state.preempted) return failure(state.preempted ? 'preempted' : 'aborted');
     if (!cleanPath(wavPath) || !validPlan(plan)) return failure('invalid-audio');
+    const preserveSource = selectedWavPath !== null;
+    if (preserveSource && (!cleanPath(selectedWavPath)
+        || !path.isAbsolute(wavPath) || !path.isAbsolute(selectedWavPath)
+        || path.resolve(selectedWavPath) === path.resolve(wavPath)
+        || path.dirname(path.resolve(selectedWavPath)) !== path.dirname(path.resolve(wavPath)))) {
+        return failure('invalid-audio');
+    }
     let handle;
+    let selectedHandle;
+    let selectedStat;
+    let selectedComplete = false;
     try {
-        // This is an existing, private extraction file. Read and rewrite through
-        // one descriptor, reject symlinks on supporting platforms and never pad.
-        handle = await fsp.open(wavPath, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0));
+        // Keep the bounded acquisition immutable when a separate sample is
+        // requested. Legacy callers may still use the original in-place API.
+        // The selected sample is exclusive/private, never an existing target.
+        handle = await fsp.open(wavPath,
+            (preserveSource ? fs.constants.O_RDONLY : fs.constants.O_RDWR)
+            | (fs.constants.O_NOFOLLOW || 0));
         const initialStat = await handle.stat();
         if (!initialStat.isFile() || initialStat.size < 44 || initialStat.size > MAX_WAV_BYTES) return failure('invalid-audio');
         const source = Buffer.alloc(initialStat.size);
@@ -224,10 +239,10 @@ async function prepareStrictLidSpeechSample({
             try {
                 // Revalidate injected/process output through the pure bounded
                 // selector before trusting it; a detector failure uses the anchor.
-                chosen = selectSpeechWindow({ segments: vad.segments, durationSeconds: usableDuration,
-                    targetSeconds: 20, preferredStartSeconds: plan.preferredStartMilliseconds / 1000 });
                 const validatedSegments = vad.segments.map((segment) => Array.isArray(segment)
                     ? { start: segment[0], end: segment[1] } : segment);
+                chosen = selectSpeechWindow({ segments: vad.segments, durationSeconds: usableDuration,
+                    targetSeconds: 20, preferredStartSeconds: plan.preferredStartMilliseconds / 1000 });
                 totalSpeech = localSpeechMeasurement(validatedSegments, 0, usableDuration);
                 segments = validatedSegments;
             } catch { vadOutcome = 'invalid-output'; chosen = null; totalSpeech = null; }
@@ -250,17 +265,38 @@ async function prepareStrictLidSpeechSample({
         if (cropped.analysis.sampleCount !== PCM_SAMPLE_RATE * 20) return failure('invalid-audio');
         const currentStat = await handle.stat();
         if (currentStat.size !== initialStat.size || currentStat.mtimeMs !== initialStat.mtimeMs) return failure('invalid-audio');
+        const currentPathStat = await fsp.lstat(wavPath);
+        if (!currentPathStat.isFile() || currentPathStat.dev !== initialStat.dev
+            || currentPathStat.ino !== initialStat.ino) return failure('invalid-audio');
         state = stopped();
         if (state.aborted || state.preempted) return failure(state.preempted ? 'preempted' : 'aborted');
+        let writeHandle = handle;
+        if (preserveSource) {
+            selectedHandle = await fsp.open(selectedWavPath,
+                fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL
+                | (fs.constants.O_NOFOLLOW || 0), 0o600);
+            selectedStat = await selectedHandle.stat();
+            writeHandle = selectedHandle;
+        }
         let bytesWritten = 0;
         while (bytesWritten < cropped.buffer.length) {
-            const written = await handle.write(cropped.buffer, bytesWritten, cropped.buffer.length - bytesWritten, bytesWritten);
+            state = stopped();
+            if (state.aborted || state.preempted) return failure(state.preempted ? 'preempted' : 'aborted');
+            const written = await writeHandle.write(cropped.buffer, bytesWritten, cropped.buffer.length - bytesWritten, bytesWritten);
             if (written.bytesWritten === 0) return failure('failed');
             bytesWritten += written.bytesWritten;
         }
-        await handle.truncate(cropped.buffer.length);
+        await writeHandle.truncate(cropped.buffer.length);
+        if (preserveSource) {
+            const finalSourceStat = await handle.stat();
+            const finalPathStat = await fsp.lstat(wavPath);
+            if (finalSourceStat.size !== initialStat.size || finalSourceStat.mtimeMs !== initialStat.mtimeMs
+                || !finalPathStat.isFile() || finalPathStat.dev !== initialStat.dev
+                || finalPathStat.ino !== initialStat.ino) return failure('invalid-audio');
+        }
         state = stopped();
         if (state.aborted || state.preempted) return failure(state.preempted ? 'preempted' : 'aborted');
+        selectedComplete = true;
         return Object.freeze({
             ok: true, offset: selection.selectedOffsetMilliseconds / 1000, selection,
             diagnostic: diagnostic('selected', {
@@ -275,6 +311,17 @@ async function prepareStrictLidSpeechSample({
         state = stopped();
         return failure(state.preempted ? 'preempted' : (state.aborted ? 'aborted' : 'invalid-audio'));
     } finally {
+        if (selectedHandle) {
+            try { await selectedHandle.close(); } catch { /* no private path in diagnostics */ }
+            if (!selectedComplete && selectedStat) {
+                try {
+                    const owned = await fsp.lstat(selectedWavPath);
+                    if (owned.isFile() && owned.dev === selectedStat.dev && owned.ino === selectedStat.ino) {
+                        await fsp.unlink(selectedWavPath);
+                    }
+                } catch { /* never remove an existing or replaced file */ }
+            }
+        }
         if (handle) { try { await handle.close(); } catch { /* no private path in diagnostics */ } }
     }
 }

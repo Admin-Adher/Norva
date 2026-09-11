@@ -3121,12 +3121,24 @@ async function startPlaybackLanguageValidation(
   await assertOwnedSource(sourceId, userId, db);
   await requireLanguageValidationEntitlement(userId, db);
 
-  const exactProfile = await loadExactLanguageValidationProfile(
-    db,
-    userId,
-    sourceId,
-    itemId,
-  );
+  let exactProfile: Awaited<ReturnType<typeof loadExactLanguageValidationProfile>>;
+  try {
+    exactProfile = await loadExactLanguageValidationProfile(db, userId, sourceId, itemId);
+  } catch (error) {
+    if (
+      error instanceof HttpError && error.status === 409 &&
+      recordOrEmpty(error.details).code === "LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED"
+    ) {
+      // An import need not replay/probe a file already certified by another
+      // owner. This branch is read-only and can return only a bound certificate;
+      // a miss must not seed a profile/cache, acquire a lease or enqueue a job.
+      const shared = await loadOwnedMovieLanguageCertificate(
+        db, userId, sourceId, itemId, expectedAudioIndices,
+      );
+      if (shared) return { status: 200, body: shared };
+    }
+    throw error;
+  }
   const exactAudioIndices = exactProfile.audioTracks
     .map((track) => Number(track.index))
     .sort((left, right) => left - right);
@@ -4704,6 +4716,61 @@ async function requireLanguageValidationEntitlement(userId: string, db: Supabase
   if (limit <= 0) {
     throwEntitlementRequired("concurrent_streams", decision, { limit, current: 0 });
   }
+}
+
+async function loadOwnedMovieLanguageCertificate(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  itemId: string,
+  expectedAudioIndices: number[],
+) {
+  const { data, error } = await db.rpc("read_owned_movie_language_certificate", {
+    p_user_id: userId,
+    p_source_id: sourceId,
+    p_external_id: itemId,
+  });
+  if (error) throwDb(error, "Unable to read the exact shared movie certificate");
+  if (!data) return null;
+  const cache = recordOrEmpty(data);
+  // Legacy or partially bound rows are insufficient without a local profile.
+  if (
+    !/^[a-f0-9]{64}$/.test(stringOr(cache.observed_profile_fingerprint, "")) ||
+    !Number.isFinite(Date.parse(stringOr(cache.observed_profile_probed_at, ""))) ||
+    !Number.isFinite(Date.parse(stringOr(cache.audio_probed_at, "")))
+  ) return null;
+
+  let exactProfile: ReturnType<typeof exactLanguageValidationProfileFromSnapshot>;
+  try {
+    exactProfile = exactLanguageValidationProfileFromSnapshot(
+      cache.observed_profile_snapshot, "", "movie",
+    );
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 409) return null;
+    throw error;
+  }
+  const exactAudioIndices = exactProfile.audioTracks
+    .map((track) => Number(track.index))
+    .sort((left, right) => left - right);
+  const profileFingerprint = await languageValidationProfileFingerprint(
+    exactProfile.profile, exactProfile.audioTracks, exactProfile.fileSizeBytes,
+  );
+  const evidence = cachedStrictLanguageValidation(cache, exactAudioIndices, {
+    profileFingerprint,
+    profileProbedAt: exactProfile.profileProbedAt,
+    fileSizeBytes: exactProfile.fileSizeBytes,
+  });
+  if (!evidence) return null;
+  // Client-rendered indices are a consistency check, never the source of truth.
+  if (!sameIntegerSet(expectedAudioIndices, exactAudioIndices)) {
+    throw new HttpError(409, "Audio stream inventory changed", {
+      code: "AUDIO_INDEX_MAP_MISMATCH", expectedAudioIndices, exactAudioIndices,
+    });
+  }
+  return languageValidationResponse({
+    itemId, audioTracks: evidence,
+    verifiedAt: stringOrNull(cache.audio_lang_verified_at), cached: true,
+  });
 }
 
 async function loadExactLanguageValidationProfile(

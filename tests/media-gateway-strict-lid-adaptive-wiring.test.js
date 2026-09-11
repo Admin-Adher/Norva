@@ -24,6 +24,7 @@ const runtimeSource = between('function strictLidWindowRuntimeBinding(', 'functi
 function samplerHarness({ busy = false, busyChecks = null, runtimeVerified = true, prepare } = {}) {
     const pending = [];
     const children = [];
+    const removedFiles = [];
     const checks = busyChecks ? [...busyChecks] : null;
     const context = {
         Map, Set, Number, String, Math,
@@ -34,6 +35,7 @@ function samplerHarness({ busy = false, busyChecks = null, runtimeVerified = tru
         WHISPER_VAD_BIN: '/local/vad', WHISPER_VAD_MODEL: '/local/model',
         whisperInferenceActive: 0,
         createStrictLidAudioDiagnostic,
+        cleanupStrictLidFiles: async (paths) => { removedFiles.push(...paths); },
         viewerPlaybackActiveLocally: () => checks?.length ? checks.shift() : busy,
         prepareStrictLidSpeechSample: prepare || ((options) => {
             const child = { pid: 321, kills: [], kill(signal) { this.kills.push(signal); return true; } };
@@ -48,7 +50,7 @@ function samplerHarness({ busy = false, busyChecks = null, runtimeVerified = tru
         return { runStrictSpeechSampler, preemptBackgroundWhispersGlobally,
             backgroundWhisperCount, active: () => whisperInferenceActive };
     })()`, context);
-    return { ...api, pending, children };
+    return { ...api, pending, children, removedFiles };
 }
 const backgroundOptions = { backgroundKey: 'internal-test-account', preemptibleBackground: true, timeoutMs: 8000 };
 
@@ -124,6 +126,25 @@ test('sampler exceptions release the ledger and unverified runtime receives no b
     } });
     await unavailable.runStrictSpeechSampler('/local/sample.wav', {}, backgroundOptions);
     assert.equal(unavailable.active(), 0);
+});
+
+test('late viewer preemption cleans only a selected output whose creation succeeded', async () => {
+    for (const ok of [true, false]) {
+        const harness = samplerHarness();
+        const selectedWavPath = '/local/sample.selected.wav';
+        const pending = harness.runStrictSpeechSampler('/local/sample.wav', {}, {
+            ...backgroundOptions, selectedWavPath,
+        });
+        assert.equal(harness.pending[0].options.selectedWavPath, selectedWavPath);
+        harness.preemptBackgroundWhispersGlobally('', 'test');
+        harness.pending[0].resolve({ ok });
+        const result = await pending;
+        assert.equal(result.ok, false);
+        assert.equal(result.preempted, true);
+        assert.deepEqual(harness.removedFiles, ok ? [selectedWavPath] : []);
+        assert.equal(harness.active(), 0);
+        assert.equal(harness.backgroundWhisperCount(), 0);
+    }
 });
 
 function runtimeBinding(overrides = {}, source = runtimeSource) {

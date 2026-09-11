@@ -6764,8 +6764,13 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                     // completed WAVs locally, then load Whisper once for the complete ordered
                     // batch after provider extraction has finished.
                     if (speechPlan) {
+                        // Retain this one bounded acquisition until the request
+                        // finishes. The 20-second selection is a separate file,
+                        // not a second extraction or an additional evidence vote.
+                        const selectedWavPath = `${wavPath}.selected.wav`;
                         const prepared = await runStrictSpeechSampler(wavPath, speechPlan, {
                             ...lidBackgroundOptions,
+                            selectedWavPath,
                             timeoutMs: Math.min(8000, Math.max(0, strictWorkDeadlineAt - Date.now())),
                             abortSignal: requestController.signal,
                         });
@@ -6780,7 +6785,8 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                             continue;
                         }
                         strictWavSamples.push({
-                            offset: prepared.offset, path: wavPath, selection: prepared.selection,
+                            offset: prepared.offset, path: selectedWavPath, sourcePath: wavPath,
+                            selection: prepared.selection,
                         });
                     } else {
                         strictWavSamples.push({ offset: off, path: wavPath });
@@ -7263,7 +7269,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             try { await strictBroker.close(); } catch (_) { /* Edge retains the TTL lease */ }
         }
         if (strictWavSamples.length > 0) {
-            await cleanupStrictLidFiles(strictWavSamples.map((sample) => sample.path));
+            await cleanupStrictLidFiles(strictWavSamples.flatMap((sample) => (
+                sample.sourcePath ? [sample.path, sample.sourcePath] : [sample.path]
+            )));
         }
     }
 }
@@ -8727,6 +8735,7 @@ async function runStrictSpeechSampler(wavPath, plan, options = {}) {
     try {
         const value = await prepareStrictLidSpeechSample({
             wavPath, plan,
+            selectedWavPath: options.selectedWavPath ?? null,
             bin: WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED ? WHISPER_VAD_BIN : null,
             model: WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED ? WHISPER_VAD_MODEL : null,
             timeoutMs: options.timeoutMs,
@@ -8737,7 +8746,14 @@ async function runStrictSpeechSampler(wavPath, plan, options = {}) {
             isPreempted: () => registration?.preempted === true
                 || (preemptibleBackground && viewerPlaybackActiveLocally()),
         });
-        if (registration?.preempted === true) return { ...value, ok: false, preempted: true };
+        if (registration?.preempted === true) {
+            // A late preemption can arrive just after successful preparation.
+            // Only that success authorizes removal of the exclusive output.
+            if (value.ok === true && options.selectedWavPath) {
+                await cleanupStrictLidFiles([options.selectedWavPath]);
+            }
+            return { ...value, ok: false, preempted: true };
+        }
         return value;
     } finally {
         registration?.release?.();
