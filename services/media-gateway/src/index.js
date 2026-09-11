@@ -15,6 +15,9 @@ const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
 const strictLidInference = createStrictLidInference();
+const { decideLanguageBackgroundCapacity, createLanguageResourceSampler } = require('./language-background-capacity');
+const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
+const languageResourceSampler = createLanguageResourceSampler({ readFile: fsp.readFile, os });
 const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
 const { prepareStrictLidSpeechSample } = require('./strict-lid-speech-sampler');
 const { createStrictLidAudioDiagnostic } = require('./strict-lid-audio-evidence');
@@ -2925,6 +2928,16 @@ app.get('/health', (req, res) => {
         maxPendingViewerSubtitleOperations: MAX_PENDING_VIEWER_SUBTITLE_OPERATIONS,
         viewerSubtitleQueueWaitMs: VIEWER_SUBTITLE_QUEUE_WAIT_MS,
         probeStats,
+        languageBackgroundCapacity: decideLanguageBackgroundCapacity(languageResourceSampler.snapshot(), {
+            viewer: viewerPlaybackActiveLocally(),
+            starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
+            foregroundInference: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
+                || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0
+                || translateQueue.length > 0 || ocrQueue.length > 0,
+            backgroundProcesses: backgroundCpuProcesses.size,
+            brokers: strictLidBrokers.size,
+            benchmark: lidBenchmarkBusy,
+        }),
         rawStreamHealth: {
             ...rawStreamStats,
             firstByteTimeoutMs: RAW_FIRST_BYTE_TIMEOUT_MS,
@@ -10544,7 +10557,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                     codecProfileSource = codecProfileSource ? `${codecProfileSource}+gateway_probe` : 'gateway_probe';
                 }
             } catch (err) {
-                rememberProbeFailure(err.message || String(err), sourceUrl);
+                if (!err.probeFailureRecorded) rememberProbeFailure(classifyCodecProbeFailure(err), '');
                 if (err?.status === 458 || err?.code === 'PROVIDER_BUSY') {
                     await removeSessionDir(outputDir).catch(() => {});
                     return res.status(458).json({
@@ -18164,7 +18177,18 @@ async function probeCodecProfileUncached(sourceUrl, userAgent, options = {}) {
         sourceUrl
     ];
 
-    const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl, options);
+    let payload;
+    try {
+        payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl, options);
+    } catch (error) {
+        const code = classifyCodecProbeFailure(error);
+        // Count failures here so the catalogue route and playback route agree.
+        // Do not expose ffprobe stderr: it may contain provider credentials.
+        rememberProbeFailure(code, '');
+        error.probeFailureRecorded = true;
+        error.code = code;
+        throw error;
+    }
     const profile = buildCodecProfile(payload, startedAt, 'gateway_probe');
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
     const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');

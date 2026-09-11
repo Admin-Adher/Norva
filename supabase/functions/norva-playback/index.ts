@@ -383,6 +383,7 @@ async function handleRequest(req: Request): Promise<Response> {
         languageValidationSampleDurationSeconds: LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS,
         languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL,
         languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH,
+        languageAdaptiveAdmissionProtocol: 1,
         languageValidationProviderAttemptProtocol: 1,
         languageValidationViewerPreemptionProtocol: 1,
         languageValidationMaxConsecutiveProviderNoProgress:
@@ -3855,7 +3856,29 @@ async function readLanguageValidationGatewayResponse(
   }
 }
 
+async function refreshLanguageBackgroundCapacity(db: SupabaseClient): Promise<boolean> {
+  // Gateway reports aggregate resource/foreground occupancy only. The database
+  // then makes the actual admission atomic across both Edge replicas. No health
+  // response can increase the existing hard ceiling of two background jobs.
+  try {
+    const runtime = await getRuntimeConfig(db);
+    if (!runtime.mediaGatewayUrl) return false;
+    const response = await fetch(`${runtime.mediaGatewayUrl}/health`, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return false;
+    const health = recordOrEmpty(await response.json());
+    const capacity = recordOrEmpty(health.languageBackgroundCapacity);
+    if (health.ok !== true || capacity.protocol !== 1 || !Number.isInteger(capacity.maxWorkers)
+      || Number(capacity.maxWorkers) < 0 || Number(capacity.maxWorkers) > 2) return false;
+    const { data, error } = await db.rpc("report_catalog_language_capacity", {
+      p_max_workers: capacity.maxWorkers, p_reason: capacity.reason, p_observed_at: capacity.observedAt,
+    });
+    return !error && data === true && Number(capacity.maxWorkers) > 0;
+  } catch (_) { return false; }
+}
+
 async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: string) {
+  // Backpressure does not claim a job, consume an attempt or reset receipts.
+  if (!await refreshLanguageBackgroundCapacity(db)) return;
   // edge-runtime v1.74 may retire a per-worker isolate halfway through its
   // configured lifetime. Bound the complete task, not only the fetch, so DB
   // checkpoint/finalization and provider cleanup retain a deterministic margin.
@@ -10942,6 +10965,9 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
       return { mode: "automatic-language", processed: 0, skipped: "account-not-entitled", hasMore: true };
     }
     throw error;
+  }
+  if (!await refreshLanguageBackgroundCapacity(db)) {
+    return { mode: "automatic-language", processed: 0, skipped: "server-capacity", hasMore: true };
   }
   const { data, error } = await db.rpc("claim_catalog_vod_language_file", {
     p_user: userId, p_source: sourceId,

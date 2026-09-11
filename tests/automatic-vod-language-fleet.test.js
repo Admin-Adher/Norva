@@ -128,6 +128,7 @@ async function edgeFixture({ identified=false, verified=false, missingProfile=fa
     },
   };
   const context=vm.createContext({ Request, Deno:{env:{get:()=> 'internal-test-token'}},
+    refreshLanguageBackgroundCapacity:async()=>true,
     requireLanguageValidationEntitlement:async()=>{if(revoked)throw {code:'revoked'};},
     languageValidationAccessWasRevoked:e=>e.code==='revoked',
     recordOrEmpty:v=>v||{},stringOr:(v,f)=>typeof v==='string'?v:f,stringOrNull:v=>v??null,

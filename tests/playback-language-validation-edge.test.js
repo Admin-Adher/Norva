@@ -308,7 +308,7 @@ test('Gateway JSON is bounded in bytes before parse and overflow cancels without
   let helper = between(
     playback,
     'async function readLanguageValidationGatewayResponse(',
-    '\nasync function processOneLanguageValidationTrack(',
+    '\nasync function refreshLanguageBackgroundCapacity(',
   );
   helper = helper
     .replace(
