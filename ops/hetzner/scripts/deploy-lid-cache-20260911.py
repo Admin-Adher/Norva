@@ -175,7 +175,11 @@ def stage():
     require(document('physical-file-proof.json').get('gatewayImageId') == base_identity['index'],
             'gateway_base_image_not_physically_tested')
     image = 'norva-media-gateway:lid-cache-20260911-candidate-1'
-    run(['docker', 'build', '--network', 'none', '--build-arg', 'BASE_IMAGE=' + base_identity['index'],
+    # Bind the verified local OCI index to a unique build alias. BuildKit must
+    # not interpret a bare sha256:... ID as a remote repository/tag to pull.
+    base_alias = 'norva-lid-cache-base:20260911-candidate-1'
+    run(['docker', 'tag', base_identity['index'], base_alias])
+    run(['docker', 'build', '--network', 'none', '--build-arg', 'BASE_IMAGE=' + base_alias,
          '-t', image, str(context)])
     for name in gw.MODULES:
         run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--cpus', '1', '--memory', '512m',
