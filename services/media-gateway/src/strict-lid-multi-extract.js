@@ -12,7 +12,7 @@ function classifyStrictLidExtractFailure(stderr) {
     if (/permission denied|no space left on device|read-only file system/.test(text)) return 'workspace_unavailable';
     if (/invalid data found|moov atom not found|could not find codec parameters/.test(text)) return 'invalid_media';
     if (/connection timed out|operation timed out/.test(text)) return 'loopback_timeout';
-    if (/server returned (?:4\d\d|5\d\d)|http error (?:4\d\d|5\d\d)/.test(text)) return 'loopback_http_error';
+    if (/(?:server returned|http error) [45](?:\d{2}|xx)\b/.test(text)) return 'loopback_http_error';
     if (/connection refused|connection reset|input\/output error|i\/o error/.test(text)) return 'loopback_transport_error';
     if (/end of file|unexpected eof|file ended prematurely/.test(text)) return 'truncated_input';
     if (/immediate exit requested|operation interrupted/.test(text)) return 'consumer_cancelled';

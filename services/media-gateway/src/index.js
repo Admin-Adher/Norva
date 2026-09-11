@@ -4686,6 +4686,7 @@ function strictLidProviderFailureObservation(error, details = {}) {
     let errorCode = null;
     let errorType = 'Error';
     let reason = null;
+    let proxyConnectStatus = null;
     let current = error;
     const visited = new Set();
     for (let depth = 0; current && depth < 5 && !visited.has(current); depth++) {
@@ -4694,7 +4695,16 @@ function strictLidProviderFailureObservation(error, details = {}) {
         // error handling nor hide a safe transport code in the nested cause.
         try { const code = current.code; if (safeCodes.has(code)) errorCode = code; } catch (_) {}
         try { const name = current.name; if (safeNames.has(name)) errorType = name; } catch (_) {}
-        try { const message = current.message; if (safeReasons.has(message)) reason = safeReasons.get(message); } catch (_) {}
+        try {
+            const message = current.message;
+            if (safeReasons.has(message)) reason = safeReasons.get(message);
+            // Undici maps a refused CONNECT tunnel to UND_ERR_ABORTED. This
+            // status belongs to the proxy, NOT the provider HTTP response.
+            // Match its exact fixed envelope; never retain arbitrary text.
+            const match = typeof message === 'string'
+                ? /^Proxy response \(([45]\d{2})\) !== 200 when HTTP Tunneling$/.exec(message) : null;
+            if (match) proxyConnectStatus = Number(match[1]);
+        } catch (_) {}
         try { current = current.cause; } catch (_) { break; }
     }
     const finiteInteger = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -4709,6 +4719,7 @@ function strictLidProviderFailureObservation(error, details = {}) {
         reason,
         upstreamStatus: Number.isInteger(details.upstreamStatus)
             && details.upstreamStatus >= 100 && details.upstreamStatus <= 599 ? details.upstreamStatus : null,
+        proxyConnectStatus,
         timeout: ['first-byte', 'idle'].includes(details.timeoutKind) ? details.timeoutKind : null,
         elapsedMs: finiteInteger(details.elapsedMs),
         progressBytes: finiteInteger(details.progressBytes),

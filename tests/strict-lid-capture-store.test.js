@@ -291,6 +291,16 @@ test('provider refusal survives safe response filtering and does not trigger a n
     assert.equal(p.reads(), 1); assert.equal(p.sockets(), 0); assert.equal(f.store.snapshot().entries, 0);
 });
 
+test('provider fetch failure has a closed internal code instead of an unclassified extraction', async t => {
+    const f=await fixture(t);const diagnostics=[];
+    const p=pipelineFixture(f.store,{diagnostic:value=>diagnostics.push(value),
+        extractFails:Object.assign(Error('private transport details'),{code:'PROVIDER_FETCH_FAILED'})});
+    await assert.rejects(p.pipeline.capture(binding(),{}),{code:'PROVIDER_FETCH_FAILED',providerDrained:true});
+    assert.equal(diagnostics[0].code,'PROVIDER_FETCH_FAILED');assert.equal(diagnostics[0].stage,'extract');
+    assert.equal(p.reads(),1);assert.equal(p.sockets(),0);assert.equal(f.store.snapshot().entries,0);
+    assert.doesNotMatch(JSON.stringify(diagnostics),/private transport/);
+});
+
 test('full capture buffer rejects BEFORE opening a provider and inference failures preserve reusable audio', async t => {
     const f = await fixture(t, { maxEntries: 1 }); const p = pipelineFixture(f.store, { inferFails: true });
     await p.pipeline.capture(binding(), {});

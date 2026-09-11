@@ -308,7 +308,7 @@ test('strict provider diagnostics retain only safe cause codes and bounded stage
   assert.deepEqual({ ...result }, {
     event: 'strict_lid_provider_failure', protocol: 1, mode: 'strict-language',
     stage: 'request', errorType: 'Error', errorCode: 'ECONNRESET', reason: null,
-    upstreamStatus: null, timeout: null, elapsedMs: 12, progressBytes: 0,
+    upstreamStatus: null, proxyConnectStatus: null, timeout: null, elapsedMs: 12, progressBytes: 0,
     validatorKind: null, targetIdentityMatch: null,
   });
   assert.equal(Object.isFrozen(result), true);
@@ -340,6 +340,27 @@ test('strict provider diagnostics tolerate cyclic, throwing and changing error g
   assert.equal(observe(new Error('The media provider target changed during the byte-range session.')).reason, 'effective-target-changed');
   assert.equal(observe(new Error('The media file changed during language validation.')).reason, 'validator-changed');
   assert.equal(observe(new Error('The media file changed during language validation. secret')).reason, null);
+  assert.equal(observe(new Error('Proxy response (502) !== 200 when HTTP Tunneling private')).proxyConnectStatus,null);
+});
+
+test('real Undici refused CONNECT is diagnosed as proxy status, without a provider response or retry', async t => {
+  const { ProxyAgent, request }=require('undici');
+  const { strictLidProviderFailureObservation: observe }=brokerHarness();
+  let connects=0;let unexpected=0;const sockets=new Set();
+  const proxy=http.createServer((_req,res)=>{unexpected++;res.writeHead(500);res.end();});
+  proxy.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket));});
+  proxy.on('connect',(_req,socket)=>{connects++;socket.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');});
+  await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));
+  const agent=new ProxyAgent(`http://127.0.0.1:${proxy.address().port}`);
+  t.after(async()=>{await agent.close();for(const socket of sockets)socket.destroy();await new Promise(resolve=>proxy.close(resolve));});
+  let observed;
+  await assert.rejects(request('https://fixture.invalid/private-source', {dispatcher:agent,signal:AbortSignal.timeout(3000)}),error=>{
+    observed=observe(error,{stage:'request',progressBytes:0,upstreamStatus:null});
+    assert.equal(error.code,'UND_ERR_ABORTED');return true;
+  });
+  assert.equal(observed.proxyConnectStatus,502);assert.equal(observed.upstreamStatus,null);
+  assert.equal(observed.errorCode,'UND_ERR_ABORTED');assert.equal(connects,1);assert.equal(unexpected,0);
+  assert.doesNotMatch(JSON.stringify(observed),/fixture|private-source|127\.0\.0\.1/);
 });
 
 test('strict transport failure logs the request stage without changing public error or retry policy', async (t) => {

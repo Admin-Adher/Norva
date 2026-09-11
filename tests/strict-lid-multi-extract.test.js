@@ -65,6 +65,11 @@ test('closed extraction diagnostics never expose source text and do not change p
         diagnostic: () => { throw Error('logger unavailable'); } })).processClosed, true);
 });
 
+test('FFmpeg generic 5XX wording is classified without treating URL digits as HTTP evidence', () => {
+    assert.equal(classifyStrictLidExtractFailure('http://127.0.0.1:9999/strict-lid/fixture: Server returned 5XX Server Error reply'), 'loopback_http_error');
+    assert.equal(classifyStrictLidExtractFailure('https://fixture.invalid/502:403'), 'unclassified');
+});
+
 test('a cancelled or viewer-preempted extraction starts no child', async () => {
     const p = processFixture(); const signal = AbortSignal.abort();
     assert.equal((await runStrictLidMultiExtract({ ...base, signal, spawnImpl: p.spawnImpl })).ok, false);
@@ -110,6 +115,7 @@ test('native FFmpeg demuxes two real tracks in one input with fewer source bytes
     server.on('request', (req, res) => {
         requests++;
         if (req.url === '/forbidden.aac') { forbidden++; res.writeHead(500); res.end(); return; }
+        if (req.url === '/strict-lid/unavailable') { res.writeHead(502); res.end('synthetic unavailable'); return; }
         if (req.url === '/strict-lid/playlist') {
             const playlist = `#EXTM3U\n#EXT-X-TARGETDURATION:20\n#EXTINF:20,\nhttp://127.0.0.1:${server.address().port}/forbidden.aac\n#EXT-X-ENDLIST\n`;
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl'); res.end(playlist); return;
@@ -141,6 +147,11 @@ test('native FFmpeg demuxes two real tracks in one input with fewer source bytes
     const rejected = await runStrictLidMultiExtract({ ...base, bin: 'ffmpeg', outputs,
         inputUrl: `http://127.0.0.1:${server.address().port}/strict-lid/playlist`, startSeconds: 0 });
     assert.equal(rejected.ok, false); assert.equal(forbidden, 0);
+    const observations=[];
+    const unavailable=await runStrictLidMultiExtract({...base,bin:'ffmpeg',outputs:[outputs[0]],startSeconds:0,
+        inputUrl:`http://127.0.0.1:${server.address().port}/strict-lid/unavailable`,diagnostic:value=>observations.push(value)});
+    assert.equal(unavailable.ok,false);assert.equal(observations[0].detail,'loopback_http_error');
+    assert.doesNotMatch(JSON.stringify(observations),/127\.0\.0\.1|strict-lid\/unavailable/);
     const counts=[];
     for(const bounded of [false,true]){
         const result=await runStrictLidMultiExtract({...base,bin:'ffmpeg',inputUrl,outputs:[outputs[0]],startSeconds:0,

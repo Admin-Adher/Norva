@@ -542,6 +542,53 @@ The pilot is **not accepted**, new logic is **not promoted to fleet**, and any
 resumption requires a new controlled decision. Remaining extraction failures
 are not claimed fixed by the sample-bound change.
 
+### Post-closure diagnosis — local only
+
+All three CI runs for deployed code `3e47d2a5` are now successful. The pilot
+remains authoritatively stopped/closed; its new feature flags are disabled and
+the original crons restored. No pilot acquisition or quarantine reset has been
+performed during this follow-up.
+
+Read-only aggregation of the four retained Gateway releases found ten transport
+failure events: all before provider response headers, zero progress bytes,
+`UND_ERR_ABORTED`, no recorded deadline expiry, 1,429–1,571 ms. These are events,
+not ten distinct files. Their logs do not preserve the original error messages,
+so they cannot establish whether a proxy refusal caused the real failures.
+
+Local regression tests exposed two diagnostic omissions: FFmpeg's generic
+`Server returned 5XX` wording was unclassified, and the broker's fixed
+`PROVIDER_FETCH_FAILED` code was omitted from the capture diagnostic allowlist.
+Both are corrected locally without modifying retry or networking behavior.
+
+The bundled Undici implementation also maps a refused CONNECT response to
+`UND_ERR_ABORTED`. A real local synthetic CONNECT proxy returning 502 reproduces
+that code with one CONNECT request and no provider request. The candidate
+diagnostic records the exact fixed-envelope proxy status separately from the
+provider HTTP status; it does not serialize messages, URLs, credentials or
+stacks. This distinguishes a possible origin of the failure but is **not** proof
+that the real provider path failed that way. No route/IP/credential rotation,
+certificate bypass, extra acquisition or quarantine retry was introduced.
+
+Focused tests: 98 passed, three native-only skipped. Native isolated runtime:
+131 passed, no skips, network disabled, zero provider requests. This follow-up
+has not been deployed or used to restart the closed pilot.
+Full local suite: **4,492 passed, 14 skipped, zero failures** (112.89 seconds).
+The changes are retained in the isolated branch only, not published to `main`.
+
+Full-goal acceptance remains incomplete:
+
+| Requirement | Current evidence | Remaining gate |
+| --- | --- | --- |
+| Fast metadata lane | Implemented/tested; one new declaration in the pilot | Reliable real batch/throughput acceptance; currently disabled |
+| Exact-file byte and multi-track reuse | Isolated tests and some real range-cache reuse | Representative successful batch; no fleet speed claim |
+| Release provider before local compute | Real 60-second capture, drain, durable handoff and local inference | Complete file-level validation across the pilot |
+| Passive reuse of eligible playback | Implemented/tested, flag disabled | Authorized real playback/QoS acceptance; no second provider flow |
+| Trusted Selection exceptions and conservative future providers | Explicit-policy/admission tests; no blanket exception | Authorized eligible real Selection pilot, then deployment decision |
+
+The full objective is not complete. Resuming the stopped pilot or expanding its
+activation needs a new controlled decision; already failed/quarantined samples
+must not be reset to improve the reported result.
+
 ## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty
