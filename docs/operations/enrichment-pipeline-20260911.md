@@ -514,6 +514,34 @@ not a reproduction of the real overshoot. The real pilot must demonstrate the
 effect. It remains the same 20 files, with no reset of failed probes or attempts.
 The full suite also passes: 4,489 passed, 14 skipped, zero failed (118.78 seconds).
 
+### Pilot closed automatically — 23:06:49 UTC, 11 September
+
+Code `3e47d2a5` was published and deployed. A real capture saved 60,000 ms after
+confirmed provider drain (25,492 ms acquisition/closure), followed by a completed
+local inference (5,428 ms). This is not a complete ASR-certified file.
+
+The exact cohort then stopped on its first newly quarantined sample: eight
+provider attempts without a completed window. Final operator snapshot: 1 new
+English track declaration, 9 failed/inconclusive inventories, 1 quarantined,
+8 partial/pending validations and 1 unprobed file (20 total, 19 probe slots
+consumed). No failed sample was replaced and no job/attempt/quarantine reset.
+
+Closure was independently verified at 23:08:16 UTC: both original intake crons
+exactly restored, five new flags false, pilot mode disabled, private directory
+containing only `owner.lock`, zero remaining audio bytes. The new code remains
+deployed as image
+`sha256:56131749e03ffeaa8672d7994864a8e19d279bccbba7890a8a40c15528186344`.
+All four services/configurations/hashes and the protected original quarantine
+were verified. The original deadline and cohort were never extended.
+
+The observed network peak was two; observed exact leases never exceeded one
+per mono account. Peak encrypted bytes sampled by the operator: 2,561,001 (not
+an exhaustive maximum measurement). No active provider playback circuit was
+present; the latest circuit update remained 6 September, not this pilot.
+The pilot is **not accepted**, new logic is **not promoted to fleet**, and any
+resumption requires a new controlled decision. Remaining extraction failures
+are not claimed fixed by the sample-bound change.
+
 ## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty
