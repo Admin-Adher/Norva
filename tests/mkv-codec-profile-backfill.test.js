@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
+const { stripTypeScriptTypes } = require('node:module');
 
 const ROOT = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
@@ -73,30 +75,67 @@ test('MKV codec backfill defers unresolved provider identities before target res
   assert.doesNotMatch(failClosedBranch, /resolvePlaybackTarget|claimProviderFileProbeStrict|fetch\s*\(/);
 });
 
-test('MKV codec backfill persists only complete exact-file profiles and terminally separates 458 from 407', () => {
+test('MKV codec backfill binds observed versions with independent facets and separates 458 from 407', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
   const route = between(edge, 'async function runCodecProfileBackfill(', '\nasync function runLidBenchmarkEndpoint');
   const gateway = read('services/media-gateway/src/index.js');
 
   assert.match(gateway, /res\.json\(\{[\s\S]*audioLanguages,[\s\S]*audioTracks,[\s\S]*audioDefaultLanguage,[\s\S]*subtitles,[\s\S]*codecProfile: publicMkvCodecProfile\(profile\),?[\s\S]*\}\)/);
-  assert.match(route, /hasReliableVodCodecProfile\(observedProfile\)/);
+  assert.match(route, /observedGatewayFileProfile\(observedProfile\)/);
   assert.match(route, /persistObservedCodecProfile\(db, \{[\s\S]*userId,[\s\S]*sourceId,[\s\S]*itemType: "movie",[\s\S]*itemId: externalId/);
   assert.match(route, /variantId,[\s\S]*strict: true/);
-  assert.match(route, /hasAudioMap[\s\S]*hasSubtitleMap[\s\S]*shareFileTracks\([\s\S]*identityKey,[\s\S]*"movie",[\s\S]*externalId,[\s\S]*hasAudioMap,[\s\S]*hasSubtitleMap/);
+  assert.match(route, /shareObservedGatewayFile\(db, \{[\s\S]*userId, sourceId, variantId, itemType: "movie", itemId: externalId,[\s\S]*audioProbeComplete: hasAudioMap,[\s\S]*subtitleProbeComplete: hasSubtitleMap/);
+  assert.doesNotMatch(route, /shareFileTracks\(/);
   assert.match(route, /providerProbeTerminalCode\([\s\S]*terminalCode === "proxy_auth_failed"[\s\S]*break/);
   assert.match(route, /terminalCode === "provider_busy"[\s\S]*openProviderPlaybackCircuit/);
   assert.doesNotMatch(route, /hasUsefulCodecProfile\(existingProfile\)[\s\S]*already_cached/);
   assert.doesNotMatch(route, /already_complete|alreadyComplete/);
 });
 
-test('low-footprint movie audio probes persist only reliable Gateway codec profiles for the exact variant', () => {
+test('low-footprint movie audio probes bind validated Gateway observations to the exact variant', () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
   const crawler = between(edge, 'async function runOneDimension(', '\nasync function runCatalogMirrorVerify');
 
   assert.match(crawler, /const observedProfile = recordOrEmpty\(gatewayInfo\.codecProfile \?\? gatewayInfo\.codec_profile\)/);
-  assert.match(crawler, /hasReliableVodCodecProfile\(observedProfile\)/);
+  assert.match(crawler, /observedGatewayFileProfile\(observedProfile\)/);
+  assert.match(crawler, /shareObservedGatewayProfileTracks\(db, \{/);
   assert.match(crawler, /persistObservedCodecProfile\(db, \{[\s\S]*variantId:[\s\S]*strict: true/);
   assert.doesNotMatch(crawler, /firstUsefulCodecProfile\(info\?\.codecProfile[\s\S]*persistObservedCodecProfile/);
+});
+
+test('codec backfill forwards failed facets as unknown and never falls back after an atomic rejection', async () => {
+  const edge = read('supabase/functions/norva-playback/index.ts');
+  const route = between(edge, 'async function runCodecProfileBackfill(', '\nasync function runLidBenchmarkEndpoint');
+  const persist = between(route, 'const persistTrackMaps = async (', '\n\n    const beforeClaimBlock');
+  const facetHelper = between(edge, 'function authoritativeProbeFacetComplete(', '\nfunction subtitleProbeObservation(');
+  const requests = [];
+  class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
+  let accepted = true;
+  const run = vm.runInNewContext(stripTypeScriptTypes(facetHelper + '\n' + persist) + '; persistTrackMaps;', {
+    db: {}, userId: 'owner', sourceId: 'source', variantId: 'variant', externalId: 'movie',
+    recordOrEmpty: value => value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+    HttpError,
+    shareFileTracks: async () => { throw Error('raw fallback must never be called'); },
+    shareObservedGatewayFile: async (_db, options) => { requests.push(options); return accepted; },
+  });
+  for (const [audio, audioMarker, subtitleMarker, expectedAudio, expectedSub] of [
+    [[{index: 1}], true, true, true, true],
+    [[{index: 1}], false, true, false, true],
+    [[{index: 1}], true, false, true, false],
+    [[], false, false, false, false],
+    [[], true, true, false, true],
+  ]) {
+    await run({audioTracks: audio, subtitles: []}, audioMarker, subtitleMarker);
+    const options = requests.at(-1);
+    assert.equal(options.audioProbeComplete, expectedAudio);
+    assert.equal(options.subtitleProbeComplete, expectedSub);
+    assert.equal(options.itemType, 'movie');
+    assert.equal(options.variantId, 'variant');
+    assert.equal(options.itemId, 'movie');
+  }
+  accepted = false;
+  await assert.rejects(run({audioTracks: [], subtitles: []}, false, false), error => error.status === 503);
+  assert.equal(requests.length, 6);
 });
 
 test('audio crawler stops each provider account after the first 458 and keeps proxy auth separate', () => {

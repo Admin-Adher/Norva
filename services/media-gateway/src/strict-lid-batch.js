@@ -44,6 +44,57 @@ const STRICT_LID_CJK_CHARACTER_RE = Object.freeze({
     ko: /[\u1100-\u11ff\u3130-\u318f\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/u,
 });
 
+// ASR sound descriptions are not spoken words, irrespective of their language.
+// Conservatively exclude bracketed/parenthesized cues (including unknown cues),
+// special tokens and marked music spans. Do not blacklist real vocabulary such
+// as "music" or "thank you" when it occurs in ordinary, unmarked dialogue.
+// This is a lexical guard, NOT a claim that the remaining ASR text was spoken.
+function prepareStrictSpokenTranscript(raw) {
+    const input = String(raw || '').normalize('NFKC');
+    const limit = 16_384;
+    const text = input.slice(0, limit);
+    const openers = new Map([['[', ']'], ['(', ')'], ['{', '}'], ['【', '】']]);
+    const closers = new Set(openers.values());
+    const stack = [];
+    let music = false;
+    let special = false;
+    let spoken = '';
+    for (let index = 0; index < text.length; index++) {
+        const character = text[index];
+        if (special) {
+            if (character === '|' && text[index + 1] === '>') { special = false; index++; }
+            continue;
+        }
+        if (character === '<' && text[index + 1] === '|') {
+            special = true; index++; spoken += ' '; continue;
+        }
+        if (openers.has(character)) {
+            stack.push(openers.get(character)); spoken += ' '; continue;
+        }
+        if (stack.length) {
+            // A mismatched/unclosed cue is not allowed to re-enter word evidence.
+            if (character === stack[stack.length - 1]) stack.pop();
+            continue;
+        }
+        if (closers.has(character)) { spoken += ' '; continue; }
+        if (character === '♪' || character === '♫') {
+            music = !music; spoken += ' '; continue;
+        }
+        if (!music) spoken += character;
+    }
+    const normalized = spoken.replace(/\s+/gu, ' ').trim();
+    const wordCount = normalized.split(/\s+/u).filter(word => /\p{L}/u.test(word)).length;
+    // Combining marks are part of the same word, not extra "unique" words.
+    const tokens = normalized.toLowerCase().replace(/’/gu, "'")
+        .match(/[\p{L}\p{M}]+(?:'[\p{L}\p{M}]+)*/gu) || [];
+    return {
+        text: normalized,
+        wordCount,
+        uniqueWordCount: new Set(tokens).size,
+        truncated: input.length > limit,
+    };
+}
+
 // Whitespace word counts are not meaningful for Japanese and Chinese: a complete 30-second
 // transcript is commonly one token. Accept an alternate, deterministic CJK evidence unit only
 // when the independent transcript detector is confident and agrees exactly with Whisper. The
@@ -58,15 +109,20 @@ function evaluateStrictTranscriptEvidence({
     transcriptLanguage,
     transcriptConfident,
 }) {
-    const normalizedText = String(text || '').normalize('NFKC').toLowerCase();
-    const uniqueWordCount = new Set(normalizedText.match(/\p{L}+/gu) || []).size;
+    const spoken = prepareStrictSpokenTranscript(text);
+    const normalizedText = spoken.text.toLowerCase();
+    const uniqueWordCount = spoken.uniqueWordCount;
+    // A caller's pre-sanitization count can only reduce evidence, never inflate it.
+    const reportedWords = Number(wordCount || 0);
+    const lexicalWordCount = Number.isFinite(reportedWords) && reportedWords >= 0
+        ? Math.min(reportedWords, spoken.wordCount) : 0;
     const requiredWordCount = Number(minWords);
     const requiredUniqueWordCount = Number(minUniqueWords);
-    const wordEvidenceEnough = Number.isFinite(requiredWordCount)
+    const wordEvidenceEnough = !spoken.truncated && Number.isFinite(requiredWordCount)
         && requiredWordCount > 0
         && Number.isFinite(requiredUniqueWordCount)
         && requiredUniqueWordCount > 0
-        && Number(wordCount || 0) >= requiredWordCount
+        && lexicalWordCount >= requiredWordCount
         && uniqueWordCount >= requiredUniqueWordCount;
     const normalizedWhisperLanguage = String(whisperLanguage || '').toLowerCase();
     const normalizedTranscriptLanguage = String(transcriptLanguage || '').toLowerCase();
@@ -85,7 +141,7 @@ function evaluateStrictTranscriptEvidence({
         && normalizedTranscriptLanguage === normalizedWhisperLanguage;
     const scriptDensity = allLetterCount > 0 ? scriptCharacters.length / allLetterCount : 0;
     const scriptEvidenceEnough = Boolean(
-        scriptPattern
+        !spoken.truncated && scriptPattern
         && transcriptAgrees
         && scriptCharacters.length >= STRICT_LID_MIN_SCRIPT_CHARACTERS
         && uniqueScriptCharacterCount >= STRICT_LID_MIN_UNIQUE_SCRIPT_CHARACTERS
@@ -93,8 +149,8 @@ function evaluateStrictTranscriptEvidence({
         && scriptDensity >= STRICT_LID_MIN_SCRIPT_DENSITY
     );
     const compatibleWordCount = scriptEvidenceEnough
-        ? Math.max(Number(wordCount || 0), Math.floor(scriptCharacters.length / 2))
-        : Number(wordCount || 0);
+        ? Math.max(lexicalWordCount, Math.floor(scriptCharacters.length / 2))
+        : lexicalWordCount;
     const compatibleUniqueWordCount = scriptEvidenceEnough
         ? Math.max(uniqueWordCount, scriptBigrams.size)
         : uniqueWordCount;
@@ -632,6 +688,7 @@ module.exports = {
     buildStrictLidUnverifiedObservability,
     cleanupStrictLidFiles,
     evaluateStrictTranscriptEvidence,
+    prepareStrictSpokenTranscript,
     parseWhisperBatchLid,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,

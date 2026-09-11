@@ -903,10 +903,11 @@ test('vod candidates are circuit-guarded and serialized by provider identity wit
     'audioProbeComplete:false must not be promoted by returned tracks');
   for (const [name, consumer, writeMarker] of [
     ['codec backfill', codecBackfill, 'persistObservedCodecProfile(db, {'],
-    ['episode backfill', episodeBackfill, 'const stored = await shareFileTracks('],
+    ['episode backfill', episodeBackfill, 'await shareObservedGatewayFile('],
   ]) {
     const gateAt = consumer.indexOf('providerProbeResponseAllowsLeaseRelease(');
     assert.ok(gateAt >= 0, `${name} must apply the shared drain gate`);
+    assert.ok(consumer.indexOf(writeMarker) >= 0, `${name} persistence marker must exist`);
     assert.ok(gateAt < consumer.indexOf(writeMarker), `${name} drain gate must precede persistence`);
     assert.match(consumer, /if \(releaseLeaseOnExit\) \{[\s\S]*releaseProviderFileProbe/,
       `${name} must retain the lease when drainage is unattested`);

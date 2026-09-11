@@ -6,7 +6,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { createStrictLidInference } = require('../services/media-gateway/src/strict-lid-inference');
 const { createStrictLidAudioDiagnostic } = require('../services/media-gateway/src/strict-lid-audio-evidence');
-const { evaluateStrictTranscriptEvidence, resolveStrictLidConsensus } = require('../services/media-gateway/src/strict-lid-batch');
+const { evaluateStrictTranscriptEvidence, prepareStrictSpokenTranscript, resolveStrictLidConsensus } = require('../services/media-gateway/src/strict-lid-batch');
 const { planStrictSpeechWindow } = require('../services/media-gateway/src/strict-lid-speech-window');
 const { createStrictLidWindowReceipt, openStrictLidWindowReceipt } = require('../services/media-gateway/src/strict-lid-window-checkpoint');
 
@@ -150,6 +150,8 @@ test('runtime binding prevents receipt mixing when selector identity or quality 
         { WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED: false },
     ]) assert.notEqual(runtimeBinding(override).configDigest, original);
     assert.match(runtimeSource, /qualityFallbackProtocol: 1/);
+    assert.match(runtimeSource, /transcriptLexicalProtocol: 1/);
+    assert.notEqual(runtimeBinding({}, runtimeSource.replace('transcriptLexicalProtocol: 1,', '')).configDigest, original);
     assert.notEqual(runtimeBinding({}, runtimeSource.replace('qualityFallbackProtocol: 1', 'qualityFallbackProtocol: 2')).configDigest, original);
     assert.notEqual(runtimeBinding({}, runtimeSource.replace('speechSearchDurationSeconds: 60', 'speechSearchDurationSeconds: 61')).configDigest, original);
 });
@@ -160,7 +162,7 @@ test('real strict evaluator cross-pass disagreement survives the authenticated r
         ${between('function strictLanguageBatchSampleResult(', 'function strictLidWindowRuntimeBinding(')}
         ${between('function detectLanguageFromText(', "app.post('/sessions'")}
         return strictLanguageBatchSampleResult;
-    })()`, { evaluateStrictTranscriptEvidence, WHISPER_STRICT_MIN_WORDS: 12,
+    })()`, { evaluateStrictTranscriptEvidence, prepareStrictSpokenTranscript, WHISPER_STRICT_MIN_WORDS: 12,
         WHISPER_STRICT_MIN_UNIQUE_WORDS: 8, WHISPER_STRICT_MIN_PROBABILITY: 0.95 });
     const first = { text: 'The quick brown fox and the curious young boy are walking together with their friendly dog near this quiet village today.', lang: 'en', prob: 0.8 };
     const second = { text: 'Je marche dans la ville avec les enfants et nous regardons le jardin où les fleurs sont belles pour cette journée de vacances.', lang: 'fr', prob: 0.99 };

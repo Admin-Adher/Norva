@@ -426,7 +426,11 @@ test('episode lanes are exact, individually bounded, flag-gated, and fail closed
   assert.match(exactWorker, /const beforeClaimBlock = await episodeBackgroundBlockReason/);
   assert.match(exactWorker, /const raceBlock = await episodeBackgroundBlockReason/);
   assert.match(exactWorker, /streamType: "series"/);
-  assert.match(exactWorker, /sourceIdentity\.key,\s*"episode",\s*episodeId/);
+  // Versioned observation now derives the verified provider identity in SQL
+  // from the owned current variant; do not restore the raw unversioned writer.
+  assert.match(exactWorker, /const stored = await shareObservedGatewayFile\(db, \{\s*userId, sourceId, variantId, itemType: "episode", itemId: episodeId,/);
+  assert.match(exactWorker, /profile: recordOrEmpty\(info\.codecProfile \?\? info\.codec_profile\),\s*audioProbeComplete, subtitleProbeComplete/);
+  assert.doesNotMatch(exactWorker, /await shareFileTracks\(\s*db,\s*sourceIdentity\.key,\s*"episode"/);
   assert.match(exactWorker, /itemType: "episode"/);
   assert.match(exactWorker, /const requestedLimit = Math\.max\(1, Math\.min\(6,/);
   assert.match(exactWorker, /episodeProbeCircuitState\(db, sourceIdentity\.key\)/);

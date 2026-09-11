@@ -23,6 +23,7 @@ const {
     buildStrictLidUnverifiedObservability,
     cleanupStrictLidFiles,
     evaluateStrictTranscriptEvidence,
+    prepareStrictSpokenTranscript,
     resolveStrictLidConsensus,
     runWhisperBatchProcess,
     normalizeStrictLidTimelineDurationSeconds,
@@ -1402,7 +1403,7 @@ function basicLidConsensusSample(result) {
 }
 
 function strictLanguageBatchSampleResult(whisper, offset) {
-    const det = detectLanguageFromText(whisper?.text || '');
+    const det = detectLanguageFromText(prepareStrictSpokenTranscript(whisper?.text || '').text);
     const whisperLang = String(whisper?.lang || '').toLowerCase() || null;
     const whisperProbability = Number(whisper?.prob || 0);
     const transcriptEvidence = evaluateStrictTranscriptEvidence({
@@ -1478,6 +1479,7 @@ function strictLidWindowRuntimeBinding() {
         minimumUniqueWords: WHISPER_STRICT_MIN_UNIQUE_WORDS,
         sampleDurationSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         transcriptDiversityProtocol: 1,
+        transcriptLexicalProtocol: 1,
         cjkEvidenceProtocol: 1,
         qualityFallbackProtocol: 1,
         speechSelectionProtocol: 1,
@@ -2709,6 +2711,7 @@ app.get('/health', (req, res) => {
         basicLidConsensusProtocol: 1,
         vodContainerSelfHealProtocol: 1,
         codecProbe: true,
+        codecProfileRefreshProtocol: 1,
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
         codecProbeAnalyzeDurationUs: CODEC_PROBE_ANALYZE_DURATION_US,
         codecProbeSizeBytes: CODEC_PROBE_SIZE_BYTES,
@@ -4368,7 +4371,7 @@ async function providerProbeDrainAttestation(state) {
 async function handleProbeAudioRequest(req, res) {
     const providerDrainState = createProviderProbeDrainState();
     try {
-        const { url, userAgent } = req.body || {};
+        const { url, userAgent, refreshCodecProfile } = req.body || {};
         if (!url || !isHttpUrl(url)) {
             return res.status(400).json({ error: 'url is required' });
         }
@@ -4390,6 +4393,7 @@ async function handleProbeAudioRequest(req, res) {
             background: true,
             backgroundActivityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH,
             providerDrainState,
+            forceProviderProbe: refreshCodecProfile === true,
         });
         let profileSource = normalizeCodecToken(profile?.probeSource || profile?.probe_source);
         let authoritativeTrackMap = profileSource === 'gatewayprobe'
@@ -4431,6 +4435,8 @@ async function handleProbeAudioRequest(req, res) {
             // its empty subtitle list is still authoritative.
             audioProbeComplete: authoritativeTrackMap && audioTracks.length > 0,
             subtitleProbeComplete: authoritativeTrackMap,
+            codecProfileRefreshProtocol: 1,
+            codecProfileRefreshed: refreshCodecProfile === true,
             codecProfile: publicMkvCodecProfile(profile),
             ...drainAttestation,
         });
@@ -6852,7 +6858,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
                         lidDetectOnlyStats.fallbackFullRuns++;
                         lidDetectOnlyStats.fallbackFullMs += fullElapsedMs;
                     }
-                    const det = detectLanguageFromText(whisper.text);
+                    const det = detectLanguageFromText(prepareStrictSpokenTranscript(whisper.text).text);
                     // Strict validation never promotes a single-model guess. Whisper must be
                     // highly confident on each window; when the independent transcript detector
                     // has enough evidence, it must agree. Any accepted-language disagreement
@@ -18019,7 +18025,15 @@ async function probeFromHeaderBytes(sourceUrl, options = {}) {
 // A successful profile for a source URL is reused for CODEC_PROFILE_CACHE_TTL_MS. Failures
 // and empty profiles are NOT cached, so a transient refusal retries on the next call.
 async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
-    if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl) {
+    // An operator-authorized exact-file refresh must inspect today's bytes,
+    // even when the provider reuses the URL. Normal reads keep the cache;
+    // local-only callers can never acquire a provider socket via this flag.
+    const forceProviderProbe = options.forceProviderProbe === true && options.localOnly !== true;
+    if (forceProviderProbe && sourceUrl) {
+        codecProfileCache.delete(sourceUrl);
+        headerByteCache.delete(sourceUrl);
+    }
+    if (!forceProviderProbe && CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl) {
         const hit = codecProfileCache.get(sourceUrl);
         if (hit) {
             if (hit.expiresAt > Date.now()) {
@@ -18029,7 +18043,7 @@ async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
             codecProfileCache.delete(sourceUrl); // expired
         }
     }
-    if ((INBAND_HEADER_PARSE || BOUNDED_MKV_HEADER_PARSE) && sourceUrl) {
+    if (!forceProviderProbe && (INBAND_HEADER_PARSE || BOUNDED_MKV_HEADER_PARSE) && sourceUrl) {
         try {
             const local = await probeFromHeaderBytes(sourceUrl);
             if (local && hasUsefulCodecProfile(local)) {

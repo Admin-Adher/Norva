@@ -3144,6 +3144,17 @@ async function startPlaybackLanguageValidation(
   // fails closed until the server-written identity link exists.
   const identityKey = await loadLanguageValidationIdentity(db, userId, sourceId);
   let cache = await loadLanguageValidationCache(db, identityKey, "movie", itemId);
+  const profileFingerprint = await languageValidationProfileFingerprint(
+    exactProfile.profile, exactProfile.audioTracks, exactProfile.fileSizeBytes,
+  );
+  if (!cacheMatchesObservedFileProfile(cache, {
+    profileFingerprint, profileProbedAt: exactProfile.profileProbedAt,
+    fileSizeBytes: exactProfile.fileSizeBytes,
+  })) {
+    throw new HttpError(409, "A newer shared file profile is available", {
+      code: "LANGUAGE_VALIDATION_PROFILE_CHANGED",
+    });
+  }
   if (!cache || !cache.audio_probed_at) {
     // The v90 finite-MKV lane already proved this exact file's Info + Tracks
     // structure before returning 201. Seed only that server-observed inventory;
@@ -3205,12 +3216,6 @@ async function startPlaybackLanguageValidation(
       });
     }
   }
-  const profileFingerprint = await languageValidationProfileFingerprint(
-    exactProfile.profile,
-    exactProfile.audioTracks,
-    exactProfile.fileSizeBytes,
-  );
-
   const cachedStrict = cachedStrictLanguageValidation(cache, exactAudioIndices, {
     profileFingerprint,
     profileProbedAt: exactProfile.profileProbedAt,
@@ -3474,6 +3479,14 @@ async function languageValidationProfileFingerprint(
   audioTracks: JsonRecord[],
   fileSizeBytes: number,
 ) {
+  return await sha256Hex(languageValidationProfilePayload(profile, audioTracks, fileSizeBytes));
+}
+
+function languageValidationProfilePayload(
+  profile: JsonRecord,
+  audioTracks: JsonRecord[],
+  fileSizeBytes: number,
+) {
   const stableTracks = audioTracks
     .map((track) => ({
       index: Number(track.index),
@@ -3482,7 +3495,7 @@ async function languageValidationProfileFingerprint(
       default: track.default === true,
     }))
     .sort((left, right) => left.index - right.index);
-  return await sha256Hex(JSON.stringify({
+  return JSON.stringify({
     protocol: LANGUAGE_VALIDATION_PROTOCOL,
     metadataComplete: profile.metadataComplete === true,
     probeSource: normalizeCodecToken(profile.probeSource),
@@ -3491,7 +3504,7 @@ async function languageValidationProfileFingerprint(
     durationSeconds: Number(profile.durationSeconds),
     fileSizeBytes,
     audioTracks: stableTracks,
-  }));
+  });
 }
 
 async function runLanguageValidationRetryWorker(req: Request, db: SupabaseClient) {
@@ -3595,6 +3608,14 @@ async function revalidateLanguageValidationClaim(
     });
   }
   const cache = await loadLanguageValidationCache(db, identityKey, itemType, itemId);
+  if (!cacheMatchesObservedFileProfile(cache, {
+    profileFingerprint: fingerprint, profileProbedAt: exactProfile.profileProbedAt,
+    fileSizeBytes: exactProfile.fileSizeBytes,
+  })) {
+    throw new HttpError(409, "Shared observed file profile changed", {
+      code: "LANGUAGE_VALIDATION_PROFILE_CHANGED",
+    });
+  }
   const cachedAudioTracks = cache
     ? exactCachedAudioTracks(cache.audio_tracks, expectedAudioIndices)
     : null;
@@ -4973,7 +4994,7 @@ async function loadLanguageValidationCache(
   const { data, error } = await db
     .from("catalog_file_tracks")
     .select(
-      "audio_tracks,audio_probed_at,audio_lang_verified_at,audio_lang_retry_at,audio_lang_verification",
+      "audio_tracks,audio_probed_at,audio_lang_verified_at,audio_lang_retry_at,audio_lang_verification,observed_profile_fingerprint,observed_profile_probed_at,observed_profile_snapshot",
     )
     .eq("server_host", identityKey)
     .eq("item_type", itemType)
@@ -5008,11 +5029,19 @@ async function hasActiveLanguageValidationJob(
 }
 
 function exactCachedAudioTracks(value: unknown, expectedIndices: number[]): JsonRecord[] | null {
-  if (!Array.isArray(value)) return null;
+  if (
+    !Array.isArray(value) || !expectedIndices.length ||
+    expectedIndices.some((index) => !Number.isSafeInteger(index) || index < 0) ||
+    new Set(expectedIndices).size !== expectedIndices.length
+  ) return null;
   const tracks = value.map((track) => recordOrEmpty(track));
   const indices = tracks.map((track) => Number(track.index));
   if (
-    indices.some((index) => !Number.isInteger(index)) ||
+    tracks.some((track) =>
+      (typeof track.index !== "number" && typeof track.index !== "string") ||
+      (typeof track.index === "string" && !/^\d+$/.test(track.index))
+    ) ||
+    indices.some((index) => !Number.isSafeInteger(index) || index < 0) ||
     new Set(indices).size !== indices.length ||
     !sameIntegerSet(indices, expectedIndices)
   ) {
@@ -5030,15 +5059,20 @@ function cachedStrictLanguageValidation(
     fileSizeBytes: number;
   },
 ): StrictLanguageValidationEvidence[] | null {
-  if (!cache.audio_lang_verified_at) return null;
+  if (!cacheMatchesObservedFileProfile(cache, expectedProfile)) return null;
+  if (!Number.isFinite(Date.parse(stringOr(cache.audio_lang_verified_at, "")))) return null;
   const provenance = recordOrEmpty(cache.audio_lang_verification);
+  const minConsensus = Number(provenance.minConsensus);
   if (
     Number(provenance.protocol) !== LANGUAGE_VALIDATION_PROTOCOL ||
     stringOr(provenance.status, "") !== "verified" ||
     stringOr(provenance.method, "") !== LANGUAGE_VALIDATION_METHOD ||
     provenance.allTracksVerified !== true ||
     Number(provenance.trackCount) !== expectedIndices.length ||
-    Number(provenance.minConsensus) < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+    !Number.isSafeInteger(minConsensus) ||
+    minConsensus < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+    !expectedProfile.profileFingerprint ||
+    !Number.isSafeInteger(expectedProfile.fileSizeBytes) || expectedProfile.fileSizeBytes <= 0 ||
     stringOr(provenance.profileFingerprint, "") !== expectedProfile.profileFingerprint ||
     Number(provenance.fileSizeBytes) !== expectedProfile.fileSizeBytes ||
     Date.parse(stringOr(provenance.profileProbedAt, "")) !==
@@ -5048,9 +5082,10 @@ function cachedStrictLanguageValidation(
   }
   const cachedTracks = exactCachedAudioTracks(cache.audio_tracks, expectedIndices);
   if (!cachedTracks) return null;
-  const provenanceTracks = Array.isArray(provenance.tracks)
-    ? (provenance.tracks as JsonRecord[])
-    : [];
+  // A proof must bind one-to-one to the current stream inventory. A Map alone
+  // silently discards duplicate indices and tolerates extra, stale track proofs.
+  const provenanceTracks = exactCachedAudioTracks(provenance.tracks, expectedIndices);
+  if (!provenanceTracks) return null;
   const proofByIndex = new Map(
     provenanceTracks.map((track) => [Number(track.index), recordOrEmpty(track)]),
   );
@@ -5070,12 +5105,19 @@ function cachedStrictLanguageValidation(
     if (
       proofLanguage !== language ||
       stringOr(proof.method, "") !== LANGUAGE_VALIDATION_METHOD ||
-      !Number.isInteger(sampleCount) ||
+      !Number.isSafeInteger(sampleCount) ||
       sampleCount < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+      !Number.isSafeInteger(consensus) ||
       consensus < LANGUAGE_VALIDATION_MIN_SAMPLES ||
+      consensus > sampleCount || minConsensus > consensus ||
+      proof.rejectedSpeechSampleCount == null ||
       rejectedSpeechSampleCount !== 0 ||
+      !Number.isFinite(minSampleProbability) || minSampleProbability > 1 ||
       minSampleProbability < LANGUAGE_VALIDATION_MIN_PROBABILITY ||
+      !Number.isSafeInteger(minSampleWordCount) ||
       minSampleWordCount < LANGUAGE_VALIDATION_MIN_WORDS ||
+      !Number.isSafeInteger(minSampleUniqueWordCount) ||
+      minSampleUniqueWordCount > minSampleWordCount ||
       minSampleUniqueWordCount < LANGUAGE_VALIDATION_MIN_UNIQUE_WORDS
     ) {
       return null;
@@ -5093,6 +5135,27 @@ function cachedStrictLanguageValidation(
     });
   }
   return result;
+}
+
+function cacheMatchesObservedFileProfile(
+  cache: JsonRecord | null,
+  expected: { profileFingerprint: string; profileProbedAt: string; fileSizeBytes: number },
+) {
+  if (!cache) return true;
+  const fingerprint = cache.observed_profile_fingerprint;
+  const observedAt = cache.observed_profile_probed_at;
+  const snapshot = cache.observed_profile_snapshot;
+  // A partial binding is not a legacy row. Refuse it before repairing a cache
+  // or opening a provider connection with an older owner's profile.
+  if (fingerprint == null && observedAt == null && snapshot == null) return true;
+  const observedMs = Date.parse(stringOr(observedAt, ""));
+  const expectedMs = Date.parse(expected.profileProbedAt);
+  const size = recordOrEmpty(snapshot).fileSizeBytes;
+  return typeof fingerprint === "string" && /^[a-f0-9]{64}$/.test(fingerprint)
+    && fingerprint === expected.profileFingerprint
+    && Number.isFinite(observedMs) && Number.isFinite(expectedMs) && observedMs === expectedMs
+    && typeof size === "number" && Number.isSafeInteger(size) && size > 0
+    && size === expected.fileSizeBytes;
 }
 
 async function assertLanguageValidationIdle(
@@ -5738,6 +5801,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
           requireItemCas: true,
           expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(session),
           allowProofReplacement: Boolean(finalProof || finalCompleteCacheProof),
+          shareFinalGatewayObservation: true,
         });
         fastStartProofPersisted = fastStartProofPersisted || persisted;
       }
@@ -6251,6 +6315,7 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
             requireItemCas: true,
             expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
             allowProofReplacement: Boolean(finalProof || finalCompleteCacheProof),
+            shareFinalGatewayObservation: true,
           });
         }
       }
@@ -7219,8 +7284,15 @@ function exactJsonKeys(value: JsonRecord, expected: string[]) {
 
 function canonicalVodContainer(value: unknown): string | null {
   const token = normalizeCodecToken(value);
-  const canonical = token === "matroska"
+  // FFprobe reports demuxer families, not always a single extension. Accept
+  // the exact known families without accepting arbitrary comma-separated
+  // names (or guessing a container from a filename/codec).
+  const canonical = token === "matroska" || token === "matroskawebm"
     ? "mkv"
+    : token === "movmp4m4a3gp3g2mj2"
+    ? "mp4"
+    : token === "mpegts"
+    ? "ts"
     : token === "mpeg"
     ? "mpg"
     : token === "m4v"
@@ -8014,6 +8086,9 @@ async function persistObservedCodecProfile(
     } | null;
     itemOnly?: boolean;
     allowProofReplacement?: boolean;
+    // Only authenticated final Gateway responses may request this. Request
+    // hints and client telemetry must never promote themselves to shared data.
+    shareFinalGatewayObservation?: boolean;
   },
 ) {
   const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
@@ -8148,12 +8223,90 @@ async function persistObservedCodecProfile(
   if (options.strict && (!Array.isArray(updatedVariants) || updatedVariants.length !== 1)) {
     throw new HttpError(404, "Exact variant codec profile was not persisted");
   }
+  if (options.shareFinalGatewayObservation === true && options.requireItemCas === true &&
+    options.expectedItemCas && item?.id && itemType === "movie" && !variantError &&
+    Array.isArray(updatedVariants) && updatedVariants.length === 1) {
+    // The exact media CAS and visible variant write both succeeded. Share only
+    // the public stream observation, never a private fast-start/cache capability.
+    // This performs DB work only and does not delay close/next-playback response.
+    runBackground(shareObservedGatewayProfileTracks(db, {
+      userId: options.userId, sourceId: options.sourceId, itemId: options.itemId,
+      codecProfile: variantCodecProfile,
+      codecProfileSource: stringOrNull(observedCodecProfile.probeSource),
+    }));
+  }
   return !variantError;
+}
+
+function observedGatewayFileProfile(value: unknown) {
+  const raw = recordOrEmpty(value);
+  const audio = raw.audioTracks ?? raw.audio_tracks;
+  const subtitles = raw.subtitles ?? raw.subtitleTracks ?? raw.subtitle_tracks;
+  const validMap = (tracks: unknown): tracks is JsonRecord[] => {
+    if (!Array.isArray(tracks) || tracks.length > 32) return false;
+    const indices = tracks.map((track) => recordOrEmpty(track).index);
+    return indices.every((index) => typeof index === "number" && Number.isSafeInteger(index) && index >= 0 && index <= 128)
+      && new Set(indices).size === indices.length;
+  };
+  if (!validMap(audio) || !validMap(subtitles)) return null;
+  const profile = normalizeCodecProfile(raw);
+  const source = normalizeCodecToken(profile.probeSource);
+  const duration = Number(profile.durationSeconds);
+  const size = Number(profile.fileSizeBytes);
+  const at = Date.parse(stringOr(profile.probedAt, ""));
+  if ((source !== "gatewayprobe" && !(source === "gatewayinband" && profile.metadataComplete === true))
+    || !canonicalVodContainer(profile.container)
+    || !Number.isFinite(duration) || duration < 1 || duration > 86400
+    || !Number.isSafeInteger(size) || size <= 0 || !Number.isFinite(at) || at > Date.now() + 300000) return null;
+  return { profile, fileSizeBytes: size,
+    audioTracks: (profile.audioTracks as JsonRecord[]), subtitleTracks: (profile.subtitles as JsonRecord[]) };
+}
+
+async function shareObservedGatewayFile(
+  db: SupabaseClient,
+  options: {
+    userId: string; sourceId: string; variantId: string; itemId: string;
+    itemType: "movie" | "episode"; profile: unknown;
+    audioProbeComplete: boolean; subtitleProbeComplete: boolean;
+  },
+) {
+  // Caller must attest a fresh server-origin observation, never a client hint.
+  // Facets remain independent. A failed facet sends no track claims; SQL either
+  // keeps that facet on the same version or clears it on a newly observed file.
+  if (typeof options.audioProbeComplete !== "boolean" || typeof options.subtitleProbeComplete !== "boolean") return false;
+  try {
+    const exact = observedGatewayFileProfile(options.profile);
+    if (!exact || (options.audioProbeComplete && !exact.audioTracks.length)) return false;
+    const audio = (options.audioProbeComplete ? exact.audioTracks : []).map((track) => compactRecord({
+      index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
+      codec: stringOrNull(track.codec), channels: boundedNullableInt(track.channels, 0, 16),
+      default: track.default === true,
+    }));
+    const subtitles = (options.subtitleProbeComplete ? exact.subtitleTracks : []).map((track) => compactRecord({
+      index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
+      codec: stringOrNull(track.codec), subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
+      extractable: booleanOrNull(track.extractable), forced: booleanOrNull(track.forced),
+      default: booleanOrNull(track.default),
+    }));
+    const fingerprint = await languageValidationProfileFingerprint(exact.profile, exact.audioTracks, exact.fileSizeBytes);
+    const { data, error } = await db.rpc("observe_catalog_file_profile", {
+      p_user_id: options.userId, p_source_id: options.sourceId, p_variant_id: options.variantId,
+      p_item_type: options.itemType, p_external_id: options.itemId,
+      p_profile_fingerprint: fingerprint, p_profile: exact.profile,
+      p_audio_tracks: audio, p_subtitle_tracks: subtitles,
+      p_audio_probe_complete: options.audioProbeComplete, p_subtitle_probe_complete: options.subtitleProbeComplete,
+    });
+    // No fallback to an unversioned write after a stale/error response.
+    return !error && recordOrEmpty(data).accepted === true;
+  } catch (_) {
+    return false;
+  }
 }
 
 async function shareObservedGatewayProfileTracks(
   db: SupabaseClient,
-  options: { userId: string; sourceId: string; itemId: string; codecProfile: unknown; codecProfileSource: unknown },
+  options: { userId: string; sourceId: string; itemId: string; codecProfile: unknown; codecProfileSource: unknown;
+    audioProbeComplete?: boolean; subtitleProbeComplete?: boolean },
 ) {
   const origin = stringOr(options.codecProfileSource, "").split("+");
   if (!origin.some((part) => part === "gateway_probe" || part === "gateway_inband")) return false;
@@ -8168,7 +8321,7 @@ async function shareObservedGatewayProfileTracks(
     return indices.every((index) => typeof index === "number" && Number.isInteger(index) && index >= 0 && index <= 128) &&
       new Set(indices).size === indices.length;
   };
-  if (!validMap(audio) || !audio.length || !validMap(subtitles)) return false;
+  if (!validMap(audio) || !validMap(subtitles)) return false;
   if (!Number.isFinite(Date.parse(stringOr(raw.probedAt, "")))) return false;
   try {
     const generation = await readActiveCatalogGenerationSnapshot(db, options.sourceId, options.userId);
@@ -8183,18 +8336,12 @@ async function shareObservedGatewayProfileTracks(
     // Selection/M3U URL replacement has a separate provenance-aware pipeline.
     // Never infer a shared provider identity from an owner-editable URL or hint.
     if (!key || key.startsWith("source:")) return false;
-    const audioTracks = audio.map((track) => compactRecord({
-      index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
-      codec: stringOrNull(track.codec), channels: boundedNullableInt(track.channels, 0, 16),
-      default: booleanOrNull(track.default),
-    }));
-    const subtitleTracks = subtitles.map((track) => compactRecord({
-      index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
-      codec: stringOrNull(track.codec), subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
-      extractable: booleanOrNull(track.extractable), forced: booleanOrNull(track.forced),
-      default: booleanOrNull(track.default),
-    }));
-    return await shareFileTracks(db, key, "movie", options.itemId, audioTracks, subtitleTracks, true, true);
+    return await shareObservedGatewayFile(db, {
+      userId: options.userId, sourceId: options.sourceId,
+      variantId: stringOr(variants[0].id, ""), itemType: "movie", itemId: options.itemId,
+      profile: raw, audioProbeComplete: options.audioProbeComplete ?? audio.length > 0,
+      subtitleProbeComplete: options.subtitleProbeComplete ?? true,
+    });
   } catch (_) {
     // A failed enrichment must never interrupt playback. The regular fenced
     // file crawler remains the retry path; no client or title-language fallback.
@@ -8283,9 +8430,16 @@ function mergeCodecProfileAnnotations(existingValue: unknown, observedValue: unk
   const observedProof = normalizeMkvH264FastStartProof(observed.mkvH264FastStartProof);
   const existingCompleteCacheProof = normalizeMkvH264FastStartProof(existing.mkvCompleteHlsCacheProof);
   const observedCompleteCacheProof = normalizeMkvH264FastStartProof(observed.mkvCompleteHlsCacheProof);
+  const sameObservedFile = Number.isFinite(Date.parse(stringOr(existing.probedAt, "")))
+    && Number.isSafeInteger(Number(existing.fileSizeBytes)) && Number(existing.fileSizeBytes) > 0
+    && Array.isArray(existing.audioTracks) && Array.isArray(observed.audioTracks)
+    && languageValidationProfilePayload(existing, existing.audioTracks, Number(existing.fileSizeBytes))
+      === languageValidationProfilePayload(observed, observed.audioTracks, Number(observed.fileSizeBytes));
   return compactRecord({
     ...observed,
-    subtitles: mergeSubtitleTrackAnnotations(existing.subtitles, observed.subtitles),
+    // An index/order match is not a file-version match. Do not carry an inferred
+    // subtitle language into a replacement file's profile or its later fanout.
+    subtitles: sameObservedFile ? mergeSubtitleTrackAnnotations(existing.subtitles, observed.subtitles) : observed.subtitles,
     mkvH264FastStartProof: observedProof ?? existingProof,
     mkvCompleteHlsCacheProof: observedCompleteCacheProof ?? existingCompleteCacheProof,
   });
@@ -10640,6 +10794,13 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
   requireStrictLidWindowCount(Number(exactProfile.profile.durationSeconds));
 
   let cache = await loadLanguageValidationCache(db, identityKey, itemType, itemId);
+  const profileFingerprint = await languageValidationProfileFingerprint(
+    exactProfile.profile, exactProfile.audioTracks, exactProfile.fileSizeBytes,
+  );
+  if (!cacheMatchesObservedFileProfile(cache, {
+    profileFingerprint, profileProbedAt: exactProfile.profileProbedAt,
+    fileSizeBytes: exactProfile.fileSizeBytes,
+  })) return false;
   let cachedAudioTracks = cache
     ? exactCachedAudioTracks(cache.audio_tracks, exactAudioIndices)
     : null;
@@ -10665,11 +10826,6 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
   }
   if (!cache || !cachedAudioTracks) return false;
 
-  const profileFingerprint = await languageValidationProfileFingerprint(
-    exactProfile.profile,
-    exactProfile.audioTracks,
-    exactProfile.fileSizeBytes,
-  );
   if (cachedStrictLanguageValidation(cache, exactAudioIndices, {
     profileFingerprint,
     profileProbedAt: exactProfile.profileProbedAt,
@@ -14619,6 +14775,7 @@ async function runCompleteHlsCacheCallback(
     requireItemCas: true,
     expectedItemCas: mkvH264FastStartItemCasFromPlaybackSession(playbackSession),
     allowProofReplacement: true,
+    shareFinalGatewayObservation: true,
   });
   return { ok: true, protocol: 1, persisted };
 }
@@ -15072,46 +15229,23 @@ async function runCodecProfileBackfill(
       subtitleMarker: unknown,
     ) => {
       const rawProfile = recordOrEmpty(profileValue);
+      const rawAudio = rawProfile.audioTracks ?? rawProfile.audio_tracks;
       const hasAudioMap = authoritativeProbeFacetComplete(
         audioMarker,
-        Array.isArray(rawProfile.audioTracks ?? rawProfile.audio_tracks),
-      );
+        Array.isArray(rawAudio) && rawAudio.length > 0,
+      ) && Array.isArray(rawAudio) && rawAudio.length > 0;
       const hasSubtitleMap = authoritativeProbeFacetComplete(
         subtitleMarker,
         Array.isArray(rawProfile.subtitles ?? rawProfile.subtitleTracks ?? rawProfile.subtitle_tracks),
       );
-      if (!hasAudioMap && !hasSubtitleMap) {
-        throw new HttpError(502, "Media gateway omitted exact-file track maps");
-      }
-      const profile = normalizeCodecProfile(rawProfile);
-      const audioTracks = (Array.isArray(profile.audioTracks) ? profile.audioTracks as JsonRecord[] : [])
-        .map((track) => compactRecord({
-          index: boundedNullableInt(track.index, 0, 128),
-          lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
-          codec: stringOrNull(track.codec),
-          channels: boundedNullableInt(track.channels, 0, 16),
-          default: booleanOrNull(track.default),
-        }));
-      const subtitleTracks = (Array.isArray(profile.subtitles) ? profile.subtitles as JsonRecord[] : [])
-        .map((track) => compactRecord({
-          index: boundedNullableInt(track.index, 0, 128),
-          lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
-          codec: stringOrNull(track.codec),
-          subtitleType: stringOrNull(track.subtitleType ?? track.subtitle_type),
-          extractable: booleanOrNull(track.extractable),
-          forced: booleanOrNull(track.forced),
-          default: booleanOrNull(track.default),
-        }));
-      const tracksPersisted = await shareFileTracks(
-        db,
-        identityKey,
-        "movie",
-        externalId,
-        audioTracks,
-        subtitleTracks,
-        hasAudioMap,
-        hasSubtitleMap,
-      );
+      // The observation itself can prove replacement even when neither track
+      // facet completed. Never retain the old certificate or turn a failed
+      // facet into a successful empty inventory; the atomic RPC handles both.
+      const tracksPersisted = await shareObservedGatewayFile(db, {
+        userId, sourceId, variantId, itemType: "movie", itemId: externalId,
+        profile: rawProfile, audioProbeComplete: hasAudioMap,
+        subtitleProbeComplete: hasSubtitleMap,
+      });
       if (!tracksPersisted) {
         throw new HttpError(503, "Unable to persist exact-file track maps");
       }
@@ -15156,6 +15290,7 @@ async function runCodecProfileBackfill(
         body: JSON.stringify({
           url: targetUrl,
           userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+          refreshCodecProfile: true,
         }),
         signal: AbortSignal.timeout(60_000),
       });
@@ -15212,8 +15347,13 @@ async function runCodecProfileBackfill(
         break;
       }
 
+      if (info.codecProfileRefreshProtocol !== 1 || info.codecProfileRefreshed !== true) {
+        throw new HttpError(502, "Media gateway did not attest the requested fresh codec probe", {
+          code: "codec_profile_refresh_unattested",
+        });
+      }
       const observedProfile = recordOrEmpty(info.codecProfile ?? info.codec_profile);
-      if (!hasReliableVodCodecProfile(observedProfile)) {
+      if (!observedGatewayFileProfile(observedProfile)) {
         throw new HttpError(502, "Media gateway returned an incomplete codec profile", {
           code: "incomplete_codec_profile",
         });
@@ -16097,6 +16237,13 @@ async function runEpisodeAudioBackfill(
           audioTracks.length > 0,
         );
         if (!audioProbeComplete || !audioTracks.length) {
+          // Complete metadata may prove a replacement even when its audio facet
+          // is not usable. Invalidate the old version before recording failure.
+          await shareObservedGatewayFile(db, {
+            userId, sourceId, variantId, itemType: "episode", itemId: episodeId,
+            profile: recordOrEmpty(info.codecProfile ?? info.codec_profile),
+            audioProbeComplete: false, subtitleProbeComplete: info.subtitleProbeComplete === true,
+          });
           await recordEpisodeProbeOutcome(db, {
             userId,
             sourceId,
@@ -16125,16 +16272,11 @@ async function runEpisodeAudioBackfill(
           info.subtitleProbeComplete,
           audioProbeComplete || subtitles.length > 0,
         );
-        const stored = await shareFileTracks(
-          db,
-          sourceIdentity.key,
-          "episode",
-          episodeId,
-          audioTracks,
-          subtitles,
-          audioProbeComplete,
-          subtitleProbeComplete,
-        );
+        const stored = await shareObservedGatewayFile(db, {
+          userId, sourceId, variantId, itemType: "episode", itemId: episodeId,
+          profile: recordOrEmpty(info.codecProfile ?? info.codec_profile),
+          audioProbeComplete, subtitleProbeComplete,
+        });
         processed += 1;
         if (stored) {
           if (audioTracks.some((track) => !normalizeIsoLang(track.lang))) {
@@ -17583,9 +17725,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
               return null;
             }
             const observedProfile = recordOrEmpty(gatewayInfo.codecProfile ?? gatewayInfo.codec_profile);
-            if (variantItemType === "movie" && hasReliableVodCodecProfile(observedProfile)) {
+            if (variantItemType === "movie" && observedGatewayFileProfile(observedProfile)) {
               try {
-                await persistObservedCodecProfile(db, {
+                const profilePersisted = await persistObservedCodecProfile(db, {
                   userId,
                   sourceId,
                   itemType: "movie",
@@ -17596,6 +17738,17 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
                   variantId: stringOr(variant.id, ""),
                   strict: true,
                 });
+                if (profilePersisted) {
+                  const shared = await shareObservedGatewayProfileTracks(db, {
+                    userId, sourceId, itemId: externalId,
+                    codecProfile: observedProfile, codecProfileSource: "gateway_probe",
+                    audioProbeComplete: authoritativeProbeFacetComplete(gatewayInfo.audioProbeComplete,
+                      Array.isArray(observedProfile.audioTracks) && observedProfile.audioTracks.length > 0),
+                    subtitleProbeComplete: authoritativeProbeFacetComplete(gatewayInfo.subtitleProbeComplete,
+                      Array.isArray(observedProfile.subtitles)),
+                  });
+                  if (!shared) diag.persistenceFailed++;
+                }
               } catch (_) {
                 // The audio/subtitle map below remains independently useful. Keep
                 // the profile write observable and let the next probe repair it.
