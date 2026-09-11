@@ -34,6 +34,14 @@ FILES=(EDGE,)+tuple('services/media-gateway/src/'+name for name in GATEWAY)
 artifact=fleet.artifact;save=fleet.save;saved=fleet.saved
 
 
+def save_snapshot(name,value):
+    # Repeated verification is read-only in production. Keep the previous local
+    # receipt instead of failing after the live verification/activation succeeds.
+    if (ROOT/name).exists():
+        gw.safe_file(ROOT,name).rename(ROOT/(name+'.history-'+str(time.time_ns())))
+    save(name,value)
+
+
 def controls():
     return json.loads(sql("SELECT jsonb_build_object('flags',(SELECT jsonb_object_agg(key,enabled) FROM public.admin_feature_flags WHERE key<>'adaptive_language_admission_enabled'),"
       "'quarantine',(SELECT md5((to_jsonb(j)-'request_origin')::text) FROM public.catalog_file_audio_validation_jobs j WHERE id='5df2bccb-cae4-47fb-97f1-95c1efdc95b3' AND quarantined_at IS NOT NULL));"))
@@ -218,7 +226,7 @@ def verify(enable=False):
       "'capacity',(SELECT to_jsonb(c) FROM public.catalog_language_capacity c));"))
     result={'productionVerified':True,'commit':plan['commit'],'services':list(SERVICES),'capacity':health['languageBackgroundCapacity'],
       'status':status,'runtimeAndThresholdsPreserved':True,'checkedAt':time.time()}
-    save('production-proof.json',result);print(json.dumps(result))
+    save_snapshot('production-proof.json',result);print(json.dumps(result))
 
 
 if __name__=='__main__':
