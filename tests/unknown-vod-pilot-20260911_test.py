@@ -1,0 +1,171 @@
+"""Offline operator tests; no database, secrets, models or provider network."""
+import copy
+import hashlib
+import importlib.util
+import json
+import pathlib
+import sys
+import tempfile
+import time
+import types
+import unittest
+from unittest.mock import patch
+
+try:
+    import fcntl
+except ImportError:  # Operator runs on Linux; allow pure logic tests on Windows.
+    sys.modules['fcntl'] = types.SimpleNamespace(flock=lambda *a: None, LOCK_EX=2, LOCK_NB=4, LOCK_UN=8)
+path = pathlib.Path(__file__).resolve().parents[1]/'ops/hetzner/scripts/run-unknown-vod-pilot-20260911.py'
+spec = importlib.util.spec_from_file_location('pilot', path)
+p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
+
+
+def row(n=1, provider=1, user=1):
+    return {'sample':n,'user_id':f'10000000-0000-4000-8000-{user:012d}',
+        'source_id':f'20000000-0000-4000-8000-{provider:012d}',
+        'variant_id':f'30000000-0000-4000-8000-{n:012d}',
+        'identity_key':f'40000000-0000-4000-8000-{provider:012d}',
+        'external_id':str(n),'requested_example':n==1,'has_track_map':False,
+        'raw_title':'fixture','category_name':'fixture','preference':n}
+
+
+def ready():
+    return {'audioProbed':True,'tracks':[{'index':1,'lang':'und'}],
+        'profile':{'probeSource':'gatewayprobe','probedAt':'2026-09-11T10:00:00Z','container':'mkv',
+        'audioTracks':[{'index':1}],'durationSeconds':6000,'fileSizeBytes':123456},
+        'activeJobs':0,'starts24h':0,'verified':False,'job':None}
+
+
+class PilotTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root=pathlib.Path(self.temp.name)
+        self.patch=patch.object(p,'ROOT',self.root);self.patch.start();self.addCleanup(self.patch.stop)
+        epoch=time.time()
+        self.plan={'protocol':1,'gatewaySha256':'a'*64,'preparedEpoch':epoch,
+            'expiresEpoch':epoch+3600,'rows':[row()]}
+        p.save(self.root/'plan.private.json',self.plan,True)
+        self.state={'planSha256':hashlib.sha256((self.root/'plan.private.json').read_bytes()).hexdigest(),
+            'rows':{'1':{'state':'planned','probeAttempts':0}},'updatedAt':p.now()}
+        for obj,name,value in [(p.lib,'require_release',None),(p,'controls',True)]:
+            ctx=patch.object(obj,name,return_value=value);ctx.start();self.addCleanup(ctx.stop)
+
+    def test_selection_caps_deduplicates_and_balances_providers(self):
+        rows=[row(n,1+n%5,1+n%3) for n in range(1,501)]
+        rows.extend(copy.deepcopy(rows[:50]))
+        chosen=p.choose(rows)
+        self.assertEqual(len(chosen),100)
+        self.assertEqual(len({(r['identity_key'],r['external_id']) for r in chosen}),100)
+        self.assertEqual(chosen[0]['sample'],1)
+        counts=[sum(r['identity_key']==f'40000000-0000-4000-8000-{n:012d}' for r in chosen) for n in range(1,6)]
+        self.assertEqual(counts,[20]*5)
+
+    def test_plan_rejects_over_budget_duplicates_bad_owner_and_long_lifetime(self):
+        for change in ('limit','duplicate','owner','lifetime'):
+            bad=copy.deepcopy(self.plan)
+            if change=='limit':bad['rows']=[row(n) for n in range(1,102)]
+            if change=='duplicate':bad['rows'].append({**row(2),'external_id':'1'})
+            if change=='owner':bad['rows'][0]['user_id']='not-a-uuid'
+            if change=='lifetime':bad['expiresEpoch']=bad['preparedEpoch']+p.MAX_SECONDS+1
+            with self.assertRaises(RuntimeError):p.validate(bad)
+
+    def test_pool_includes_absent_profiles_but_protects_old_jobs(self):
+        sql=p.candidate_sql()
+        self.assertIn('LEFT JOIN public.catalog_file_tracks',sql)
+        self.assertNotIn('codec_profile IS NOT NULL',sql)
+        self.assertIn('NOT EXISTS(SELECT 1 FROM public.catalog_file_audio_validation_jobs',sql)
+        self.assertIn('h.active_generation_id=v.generation_id',sql)
+        self.assertIn('admin_internal_accounts',sql)
+
+    def test_empty_placeholder_is_not_an_audio_inventory(self):
+        self.assertFalse(p.profile_ready({'profile':{},'tracks':None,'audioProbed':False}))
+        self.assertTrue(p.profile_ready(ready()))
+        bad=ready();bad['tracks'][0]['index']=9
+        self.assertFalse(p.profile_ready(bad))
+
+    def test_missing_inventory_gets_only_one_header_attempt(self):
+        value={'profile':{},'tracks':None,'audioProbed':False,'activeJobs':0,'starts24h':0}
+        with patch.object(p,'current',return_value=value),patch.object(p,'header_probe',return_value={
+            'persisted':1,'attempted':1,'deferredBeforeIO':False}) as probe,patch.object(p,'enqueue') as start:
+            p.step(self.plan,self.state);p.step(self.plan,self.state)
+        self.assertEqual(probe.call_count,1);start.assert_not_called()
+        self.assertEqual(self.state['rows']['1']['state'],'probe_insufficient')
+
+    def test_busy_before_io_does_not_consume_budget_or_starve_every_tick(self):
+        value={'activeJobs':0,'starts24h':0}
+        with patch.object(p,'current',return_value=value),patch.object(p,'header_probe',return_value={
+            'persisted':0,'attempted':0,'deferredBeforeIO':True}) as probe:
+            p.step(self.plan,self.state);p.step(self.plan,self.state)
+        self.assertEqual(probe.call_count,1)
+        self.assertEqual(self.state['rows']['1']['probeAttempts'],0)
+        self.assertEqual(self.state['rows']['1']['state'],'planned')
+
+    def test_known_container_tracks_are_not_called_speech_verified(self):
+        value=ready();value['tracks'][0]['lang']='fr'
+        self.state['rows']['1'].update(state='probed',probeAttempts=1)
+        with patch.object(p,'current',return_value=value),patch.object(p,'enqueue') as start:
+            p.step(self.plan,self.state)
+        start.assert_not_called()
+        self.assertEqual(self.state['rows']['1']['state'],'identified_from_tracks')
+        self.assertIsNone(p.summary(self.plan,self.state)['accuracy'])
+
+    def test_normal_job_is_started_once_then_verified_from_database(self):
+        value=ready()
+        self.state['rows']['1'].update(state='probed',probeAttempts=1)
+        with patch.object(p,'current',return_value=value),patch.object(p,'enqueue',return_value={
+            'jobId':'50000000-0000-4000-8000-000000000001'}) as start:
+            p.step(self.plan,self.state)
+            value.update(verified=True,job={'owned':True,'state':'verified','verified':True})
+            p.step(self.plan,self.state)
+        self.assertEqual(start.call_count,1)
+        self.assertEqual(self.state['rows']['1']['state'],'verified')
+
+    def test_lost_start_response_is_reconciled_not_replayed(self):
+        self.state['rows']['1'].update(state='probed',probeAttempts=1)
+        with patch.object(p,'current',return_value=ready()),patch.object(p,'enqueue',side_effect=TimeoutError) as start:
+            p.step(self.plan,self.state);p.step(self.plan,self.state)
+        self.assertEqual(start.call_count,1)
+        self.assertEqual(self.state['rows']['1']['state'],'uncertain_requires_review')
+
+    def test_existing_external_or_quarantined_jobs_are_untouched(self):
+        for owned in (False,True):
+            self.state['rows']['1']={'state':'planned','probeAttempts':0}
+            value=ready();value['job']={'state':'failed','quarantined':True,'owned':owned}
+            with patch.object(p,'current',return_value=value),patch.object(p,'enqueue') as start,patch.object(p,'header_probe') as probe:
+                p.step(self.plan,self.state)
+            start.assert_not_called();probe.assert_not_called()
+            self.assertEqual(self.state['rows']['1']['state'],'external_job_protected')
+
+    def test_quota_preserves_file_without_provider_access(self):
+        for quota in ({'activeJobs':2,'starts24h':0},{'activeJobs':0,'starts24h':20}):
+            with patch.object(p,'current',return_value=quota),patch.object(p,'header_probe') as probe,patch.object(p,'enqueue') as start:
+                p.step(self.plan,self.state)
+            probe.assert_not_called();start.assert_not_called()
+            self.assertTrue(self.state['rows']['1']['waitingForQuota'])
+
+    def test_disabled_controls_stop_before_read_or_write(self):
+        with patch.object(p,'controls',return_value=False),patch.object(p,'current') as read:
+            self.assertFalse(p.step(self.plan,self.state))
+        read.assert_not_called()
+
+    def test_selection_and_audit_receipt_cannot_be_silently_overwritten(self):
+        with self.assertRaises(FileExistsError):p.save(self.root/'plan.private.json',{},True)
+        self.state['planSha256']='b'*64
+        with self.assertRaises(RuntimeError):p.step(self.plan,self.state)
+
+    def test_partial_or_changed_shared_binding_requires_fresh_header(self):
+        value=ready();value['observedFingerprint']='b'*64
+        with patch.object(p.lib,'fingerprint',return_value='a'*64):
+            self.assertFalse(p.profile_ready(value))
+
+    def test_future_cache_retry_defers_without_probe(self):
+        value=ready();value['retryAt']='2099-01-01T00:00:00Z'
+        with patch.object(p,'current',return_value=value),patch.object(p,'header_probe') as probe:
+            p.step(self.plan,self.state)
+        probe.assert_not_called()
+        self.assertEqual(self.state['rows']['1']['state'],'planned')
+
+
+if __name__=='__main__':
+    unittest.main()

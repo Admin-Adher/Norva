@@ -19,7 +19,7 @@ gw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gw)
 gw.MODULES = ('index.js', 'whisper-lid.js')
 BASE = {'index.js': '04645c1c6a2e408284d0fa36d21e27e734da9a645aaddc7fe05666e1b3e71a52',
-        'whisper-lid.js': '7ce4e01c6ea7e6ad87e380f488ef79f7d7ad89380892df5dfaa46a8507cefc63'}
+        'whisper-lid.js': 'b5c631015a3760a1eee14dc8be04189b772c67de1ec6ecfcda4df10d4aba93b3'}
 BASE_IMAGE = 'norva-media-gateway:lid-cache-audio-20260911-candidate-1'
 IMAGE = 'norva-media-gateway:lid-cancellation-20260911-candidate-1'
 TESTS = ('media-gateway-benchmark-cancellation.test.js', 'media-gateway-lid-process-cancellation.test.js')
@@ -67,8 +67,9 @@ def stage(commit):
             '-t', IMAGE, str(context)])
     # Execute real OS process cancellation and route fixtures against /app/src
     # from the exact candidate image, with no network and no credentials.
+    os.chmod(ROOT / 'tests', 0o755)
     for name in TESTS:
-        gw.safe_file(ROOT, 'tests/' + name)
+        os.chmod(gw.safe_file(ROOT, 'tests/' + name), 0o644)
     acceptance = """const fs=require('fs'),cp=require('child_process');
 const root='/tmp/acceptance';fs.mkdirSync(root+'/services/media-gateway/src',{recursive:true});fs.mkdirSync(root+'/tests');
 for(const n of ['index.js','whisper-lid.js'])fs.copyFileSync('/app/src/'+n,root+'/services/media-gateway/src/'+n);
