@@ -30,7 +30,16 @@ def sql(statement,target=NAME,write=False):
     args += [target,'psql','-X','-qAt','-v','ON_ERROR_STOP=1','-U',
              'supabase_admin' if target=='norva-db' and write else 'postgres','-d','postgres']
     if target==NAME:args+=['-h','/tmp']
-    return run(args,statement.encode())
+    result=subprocess.run(args,input=statement.encode(),capture_output=True,timeout=45)
+    if result.returncode:
+        message=result.stderr.decode(errors='replace')
+        reason=next((label for marker,label in (
+            ('function changed','definition_drift'),('permission denied','permission_denied'),
+            ('must be owner','not_function_owner'),('does not exist','missing_database_object'),
+            ('duplicate key','existing_migration'),('Strict LID container guard drifted','guard_drift'))
+            if marker in message),'sql_operation_failed')
+        raise RuntimeError(reason)
+    return result.stdout.decode().strip()
 
 
 def sha(value):return hashlib.sha256(value.encode() if isinstance(value,str) else value).hexdigest()
@@ -131,14 +140,19 @@ def deploy(commit):
     migration=(ROOT/MIGRATION).read_text().replace('\r\n','\n')
     p.require(sha(migration)==evidence['migrationSha256'])
     previous_acl=acl('norva-db')
-    p.save(ROOT/'rollback.private.json',{'definition':before,'acl':previous_acl,'commit':commit},True)
-    # The exact function baseline, migration and history are checked/committed together.
+    rollback={'definition':before,'acl':previous_acl,'commit':commit}
+    if (ROOT/'rollback.private.json').exists():
+        saved=p.private(ROOT/'rollback.private.json')
+        p.require(saved['definition']==before and saved['acl']==previous_acl)
+    else:
+        p.save(ROOT/'rollback.private.json',rollback,True)
+    # This self-hosted installation records scoped releases as private receipts
+    # and function hashes, as the preceding deployment does. Do not invent a
+    # hosted Supabase migration registry or create an unrelated schema.
     guard="DO $guard$ BEGIN IF md5(rtrim(pg_get_functiondef("+p.lib.literal(TARGET)+"::regprocedure),E'\\n')) <> "+p.lib.literal(hashlib.md5(before.encode()).hexdigest())+" THEN RAISE EXCEPTION 'function changed'; END IF; END $guard$;"
     # Compare the same definition without its formatting-only trailing newline.
     body=migration.replace("SET LOCAL statement_timeout = '20s';","SET LOCAL statement_timeout = '20s';\n"+guard)
-    history="INSERT INTO supabase_migrations.schema_migrations(version,name,statements) VALUES ('20260911094000','strict_lid_demuxer_families',ARRAY["+p.lib.literal(migration)+"]::text[]);"
     p.require(body.endswith('COMMIT;\n'))
-    body=body[:-len('COMMIT;\n')]+history+'\nCOMMIT;\n'
     sql(body,'norva-db',write=True)
     p.require(sha(definition())==evidence['afterSha256'])
     p.require(acl('norva-db')==previous_acl)
@@ -152,6 +166,11 @@ if __name__=='__main__':
     try:
         if sys.argv[1]=='proof':proof()
         elif sys.argv[1]=='deploy':deploy(sys.argv[2])
+        elif sys.argv[1]=='status':
+            print(json.dumps({'functionSha256':sha(definition()),'acl':acl('norva-db'),
+                'migrationRegistryPresent':sql("SELECT to_regclass('supabase_migrations.schema_migrations') IS NOT NULL;",'norva-db')=='t',
+                'receiptPresent':(ROOT/'deployed.private.json').exists()}))
         else:raise RuntimeError('invalid_phase')
-    except Exception:
-        print(json.dumps({'ok':False,'error':'bounded_demuxer_operation_failed'}));sys.exit(1)
+    except Exception as error:
+        reason=str(error)
+        print(json.dumps({'ok':False,'error':reason if re.fullmatch('[a-z_]{1,60}',reason) else 'bounded_demuxer_operation_failed'}));sys.exit(1)
