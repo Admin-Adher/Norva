@@ -13,7 +13,7 @@ const diagnosticCodes = new Set(['LID_CAPTURE_CANCELLED', 'LID_CAPTURE_GROUP_INV
     'LANGUAGE_VALIDATION_VIEWER_PREEMPTED', 'LANGUAGE_ENRICHMENT_CAPACITY_BUSY',
     'PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT',
     'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED',
-    'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH']);
+    'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'UND_ERR_ABORTED', 'ABORT_ERR']);
 
 // A capture response never includes a language or a receipt. The caller must
 // durably acknowledge it and release its distributed provider leases before
@@ -30,7 +30,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             elapsedMs: Math.max(0, Date.now() - startedAt), providerDrained: providerDrained === true,
             upstreamStatus: Number.isInteger(cause?.upstreamStatus) && cause.upstreamStatus >= 400
                 && cause.upstreamStatus <= 599 ? cause.upstreamStatus : null,
-            audioMilliseconds: audioMilliseconds.slice(0, 4).map(value => Number.isFinite(value) && value >= 0 && value <= 60000 ? value : null),
+            audioMilliseconds: audioMilliseconds.slice(0, 4).map(value => Number.isFinite(value) && value >= 0 && value <= 90000 ? value : null),
             requestedMilliseconds: Number.isInteger(requestedMilliseconds) && requestedMilliseconds >= 20000
                 && requestedMilliseconds <= 60000 ? requestedMilliseconds : null }); } catch (_) {}
     };

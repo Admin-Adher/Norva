@@ -118,6 +118,13 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(updated['image'],'duration-image');self.assertEqual(updated['gate'],original['gate'])
             duration['sourceAfter']['index.js']='unexpected';duration_path.write_text(json.dumps(duration))
             with self.assertRaisesRegex(RuntimeError,'duration_scope_changed'):ns['saved']('plan.private.json')
+            duration['sourceAfter']['index.js']='i';duration_path.write_text(json.dumps(duration))
+            sample={**duration,'parentDurationSha256':'original-hash',
+                'sourceAfter':{**duration['sourceAfter'],'strict-lid-multi-extract.js':'bounded-samples'}}
+            sample_path=root/'sample-bound-revision.private.json';sample_path.write_text(json.dumps(sample))
+            self.assertEqual(ns['saved']('plan.private.json')['sourceAfter']['strict-lid-multi-extract.js'],'bounded-samples')
+            sample['sourceAfter']['strict-lid-capture-store.js']='unexpected';sample_path.write_text(json.dumps(sample))
+            with self.assertRaisesRegex(RuntimeError,'sample_scope_changed'):ns['saved']('plan.private.json')
 
     def test_diagnostic_deployment_keeps_cohort_and_waits_for_audio_drain(self):
         patch=pathlib.Path(__file__).with_name('deploy-enrichment-pilot20-diagnostics-20260912.py').read_text(encoding='utf8')

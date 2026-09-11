@@ -20,6 +20,8 @@ test('up to four exact audio maps share ONE input, with no playlist/resource dem
     assert.equal(args[args.indexOf('-protocol_whitelist') + 1], 'http,tcp');
     assert.doesNotMatch(args[args.indexOf('-format_whitelist') + 1], /concat|hls|dash|image2|sdp/);
     assert.equal(args.some(x => x.startsWith('-reconnect')), false);
+    assert.deepEqual(args.filter((_,i)=>args[i-1]==='-af'), Array(4).fill('aresample=16000,atrim=end_sample=320000'));
+    assert.equal(args.some(x=>/apad|asetpts/.test(x)),false);
 });
 
 test('direct provider URLs, unbounded windows and ambiguous track/output mappings are rejected before spawn', () => {
@@ -99,8 +101,8 @@ test('native FFmpeg demuxes two real tracks in one input with fewer source bytes
         await fs.rm(root, { recursive: true, force: true });
     });
     await new Promise((resolve, reject) => {
-        const child = spawn('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000:duration=20',
-            '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=16000:duration=20',
+        const child = spawn('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000:duration=22',
+            '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=16000:duration=22',
             '-map', '0:a', '-map', '1:a', '-c:a', 'pcm_s16le', source], { stdio: 'ignore' });
         child.once('error', reject); child.once('close', code => code === 0 ? resolve() : reject(Error('synthetic media generation failed')));
     });
@@ -139,4 +141,14 @@ test('native FFmpeg demuxes two real tracks in one input with fewer source bytes
     const rejected = await runStrictLidMultiExtract({ ...base, bin: 'ffmpeg', outputs,
         inputUrl: `http://127.0.0.1:${server.address().port}/strict-lid/playlist`, startSeconds: 0 });
     assert.equal(rejected.ok, false); assert.equal(forbidden, 0);
+    const counts=[];
+    for(const bounded of [false,true]){
+        const result=await runStrictLidMultiExtract({...base,bin:'ffmpeg',inputUrl,outputs:[outputs[0]],startSeconds:0,
+            spawnImpl:(bin,args,options)=>spawn(bin,args.map(arg=>arg==='aresample=16000,atrim=end_sample=320000'
+                ? 'aresample=16000,asetpts=PTS-0.125/TB'+(bounded?',atrim=end_sample=320000':'') : arg),options)});
+        assert.equal(result.ok,true);
+        counts.push(parsePcm16Wav(await fs.readFile(outputs[0].path)).sampleCount);
+    }
+    assert.equal(counts[1],320000);assert.ok(counts[0]>=counts[1]);
+    t.diagnostic(JSON.stringify({syntheticNegativeTimestampSamples:counts[0],boundedSamples:counts[1],providerRequests:0}));
 });

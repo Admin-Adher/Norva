@@ -491,6 +491,29 @@ The release revision is limited to the store and capture pipeline. It preserves
 the prior diagnostic revision, all original plans, sample/job counters, runtime
 binaries, two acquisitions maximum, mono-account serialization and 30-minute TTL.
 
+### Explicit decoded-sample ceiling
+
+The duration-contract correction was deployed as `d7237ffd`, image
+`sha256:e6b3832af954d0ba6246aef7b1ecb3e49785e7c211c6433d0273d003ca2609b1`.
+Its first real two-track attempt still failed the duration bound. Both measured
+durations exceeded the previous 60,000 ms diagnostic display ceiling: they were
+not short excerpts. The partial-search correction was legitimate but did not
+resolve this separate overshoot. No language success is claimed from that run.
+
+The next change makes each output's PCM budget explicit after 16 kHz resampling:
+`aresample=16000,atrim=end_sample=<planned sample count>`. The existing timestamp
+limit is retained as well. No timestamp reset, padding, new input, reconnect or
+additional temporal region is added. Internal duration reporting now covers the
+parser's existing 90-second range so an overshoot is not hidden as a null value.
+The output store still refuses audio outside its approved temporal/sample bound.
+
+The native runtime advertises `atrim.end_sample` as the first sample excluded
+from the output. Native tests pass **128/128**; the negative-timestamp fixture
+produced 320,000 samples both before and after this guard, so it is explicitly
+not a reproduction of the real overshoot. The real pilot must demonstrate the
+effect. It remains the same 20 files, with no reset of failed probes or attempts.
+The full suite also passes: 4,489 passed, 14 skipped, zero failed (118.78 seconds).
+
 ## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty

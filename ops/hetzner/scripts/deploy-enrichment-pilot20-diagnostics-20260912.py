@@ -21,10 +21,10 @@ REVISION='diagnostic-revision.private.json'
 
 def configure(kind):
     global PATCH,FILES,KIND,SOURCE_ARCHIVE,REVISION
-    d.require(kind=='duration-fix','unknown_patch_kind')
-    KIND=kind;PATCH=ROOT/'duration-fix-20260912'
-    FILES=('strict-lid-capture-pipeline.js','strict-lid-capture-store.js')
-    SOURCE_ARCHIVE='duration-fix-source.tar';REVISION='duration-revision.private.json'
+    d.require(kind in ('duration-fix','sample-bound'),'unknown_patch_kind')
+    KIND=kind;PATCH=ROOT/(kind+'-20260912')
+    FILES=('strict-lid-capture-pipeline.js','strict-lid-capture-store.js' if kind=='duration-fix' else 'strict-lid-multi-extract.js')
+    SOURCE_ARCHIVE=kind+'-source.tar';REVISION='duration-revision.private.json' if kind=='duration-fix' else 'sample-bound-revision.private.json'
 
 
 def paused():
@@ -70,6 +70,7 @@ def stage(commit):
     revision={'originalPlanSha256':d.sha(d.artifact('plan.private.json')),'commit':commit,
         'image':image,'imageIdentity':d.gw.image_identity(image),'sourceAfter':after,'createdAt':d.stamp()}
     if KIND=='duration-fix':revision['parentDiagnosticSha256']=d.sha(d.artifact('diagnostic-revision.private.json'))
+    if KIND=='sample-bound':revision['parentDurationSha256']=d.sha(d.artifact('duration-revision.private.json'))
     d.gw.private_write(PATCH/'revision.private.json',revision)
     print(json.dumps({'diagnosticStaged':True,'modules':2,'providerRequests':0,'commit':commit}))
 
@@ -109,7 +110,7 @@ def deploy():
 if __name__=='__main__':
     os.umask(0o077)
     try:
-        if sys.argv[-1]=='duration-fix':configure('duration-fix')
+        if sys.argv[-1] in ('duration-fix','sample-bound'):configure(sys.argv[-1])
         if sys.argv[1]=='stage':stage(sys.argv[2])
         elif sys.argv[1]=='deploy':deploy()
         else:raise RuntimeError('unknown_phase')

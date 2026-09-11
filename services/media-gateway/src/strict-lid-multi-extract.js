@@ -15,6 +15,7 @@ function classifyStrictLidExtractFailure(stderr) {
     if (/server returned (?:4\d\d|5\d\d)|http error (?:4\d\d|5\d\d)/.test(text)) return 'loopback_http_error';
     if (/connection refused|connection reset|input\/output error|i\/o error/.test(text)) return 'loopback_transport_error';
     if (/end of file|unexpected eof|file ended prematurely/.test(text)) return 'truncated_input';
+    if (/immediate exit requested|operation interrupted/.test(text)) return 'consumer_cancelled';
     return 'unclassified';
 }
 
@@ -43,6 +44,10 @@ function strictLidMultiExtractArgs({ inputUrl, outputs, startSeconds, durationSe
         '-probesize', '2000000', '-analyzeduration', '3000000',
         ...(startSeconds > 0 ? ['-ss', String(startSeconds)] : []), '-i', inputUrl,
         ...outputs.flatMap(o => ['-map', `0:${o.index}`, '-t', String(durationSeconds),
+            // -t follows timestamps, which need not equal decoded sample count.
+            // Bound actual PCM after resampling; keep original timestamps and
+            // never synthesize padding or collect another temporal window.
+            '-af', `aresample=16000,atrim=end_sample=${Math.floor(durationSeconds * 16000 + 1e-9)}`,
             '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav', o.path])];
 }
 
