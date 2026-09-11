@@ -131,13 +131,27 @@ def stage(commit):
     print(json.dumps({'staged':True,'commit':commit,'productionUnchanged':True}))
 
 
-def database():
+def verified_database(proof):
+    current={item['signature']:item for item in fleet.definitions()}
+    expected={item['signature']:item for item in proof['after']}
+    baseline={item['signature']:item for item in proof['before']}
+    require(set(current)==set(expected)==set(baseline),'database_function_set_changed')
+    # The networkless fixture is owned by postgres. Production keeps its own
+    # original owners/ACLs; only function bodies should match the fixture.
+    for signature,item in current.items():
+        require(item['definition']==expected[signature]['definition'],'migration_function_mismatch')
+        require(all(item[key]==baseline[signature][key] for key in ('owner','acl')),'production_function_privileges_changed')
+    safe=sql("SELECT (SELECT count(*)=3 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('report_catalog_language_capacity','catalog_language_execution_available','catalog_language_queue_available') AND p.prosecdef AND NOT has_function_privilege('anon',p.oid,'EXECUTE') AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE') AND has_function_privilege('service_role',p.oid,'EXECUTE')) AND (SELECT relrowsecurity FROM pg_class WHERE oid='public.catalog_language_capacity'::regclass) AND NOT has_table_privilege('authenticated','public.catalog_language_capacity','SELECT');")
+    require(safe=='t','capacity_permissions_failed')
+
+
+def database(resume=False):
     plan=saved('plan.private.json');proof=saved('proof.private.json')
-    require(fleet.definitions()==proof['before'],'function_drift')
+    if not resume:require(fleet.definitions()==proof['before'],'function_drift')
     require(controls()==plan['controls'],'controls_drift')
     require(sha(artifact(MIGRATION))==plan['migrationSha256'],'migration_drift')
-    sql(artifact(MIGRATION),write=True)
-    require(fleet.definitions()==proof['after'],'migration_function_mismatch')
+    if not resume:sql(artifact(MIGRATION),write=True)
+    verified_database(proof)
     require(controls()==plan['controls'],'controls_changed')
     save('database-applied.json',{'applied':True,'migrationSha256':plan['migrationSha256']})
     print(json.dumps({'migrationApplied':True,'automaticAdmissionStillPaused':True,'quarantinePreserved':True}))
@@ -194,6 +208,7 @@ def activate(name):
 def verify(enable=False):
     plan=saved('plan.private.json')
     for name in SERVICES:verify_service(name,plan)
+    verified_database(saved('proof.private.json'))
     require(controls()==plan['controls'],'controls_drift')
     health=gw.health();require(health['languageBackgroundCapacity']['reason']!='capacity-unavailable','telemetry_not_ready')
     if enable:
@@ -214,6 +229,7 @@ if __name__=='__main__':
         elif phase=='unpack':unpack()
         elif phase=='stage':stage(sys.argv[2])
         elif phase=='database':database()
+        elif phase=='database-verify':database(True)
         elif phase=='gateway':activate(SERVICES[0])
         elif phase=='edge1':activate(SERVICES[1])
         elif phase=='edge2':activate(SERVICES[2])
