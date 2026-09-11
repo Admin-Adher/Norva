@@ -46,6 +46,7 @@ function harness() {
     hasExactGatewayInbandVodProfile:() => true,
     requireStrictLidWindowCount:duration => { assert.ok(duration >= 80); return 6; },
     getLidDetectionPolicy:async () => ({enabled:true}),
+    requireAutomaticLanguageEnrichmentAccess:async () => {},
     assertSourceCatalogVisible:async (source,user) => { if (!owners.has(`${user}/${source}`)) throw Error('access-denied'); },
     shareFileTracks:async (...args) => { repairs.push(args); return false; },
     HttpError:Error,

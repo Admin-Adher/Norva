@@ -384,6 +384,7 @@ async function handleRequest(req: Request): Promise<Response> {
         languageValidationRetryWorkerProtocol: LANGUAGE_VALIDATION_RETRY_WORKER_PROTOCOL,
         languageValidationRetryWorkerBatch: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH,
         languageAdaptiveAdmissionProtocol: 1,
+        languageEnrichmentAccessProtocol: 1,
         languageValidationProviderAttemptProtocol: 1,
         languageValidationViewerPreemptionProtocol: 1,
         languageValidationMaxConsecutiveProviderNoProgress:
@@ -3359,15 +3360,19 @@ async function getPlaybackLanguageValidation(
   const job = data as JsonRecord | null;
   if (!job) throw new HttpError(404, "Language validation job not found");
   const sourceId = stringOr(job.source_id, "");
+  let requestOrigin: string;
   try {
     await assertSourceCatalogVisible(sourceId, userId, db);
-    await requireLanguageValidationEntitlement(userId, db);
+    requestOrigin = await requireLanguageValidationJobAccess(db, jobId, userId, sourceId);
   } catch (error) {
     if (languageValidationAccessWasRevoked(error)) {
       await cancelLanguageValidationJob(db, jobId, userId, "LANGUAGE_VALIDATION_ACCESS_REVOKED");
     }
     throw error;
   }
+  // Polling/scheduling through the public endpoint still requires playback
+  // rights. A browse-only caller must not cancel a server-owned automatic job.
+  if (requestOrigin === "automatic") await requireLanguageValidationEntitlement(userId, db);
 
   const expectedAudioIndices = exactLanguageValidationIndices(job.expected_audio_indices);
   const itemId = stringOr(job.external_id, "");
@@ -3577,7 +3582,7 @@ async function revalidateLanguageValidationClaim(
   }
   try {
     await assertSourceCatalogVisible(sourceId, userId, db);
-    await requireLanguageValidationEntitlement(userId, db);
+    await requireLanguageValidationJobAccess(db, jobId, userId, sourceId);
   } catch (error) {
     if (languageValidationAccessWasRevoked(error)) {
       throw new HttpError(409, "Language validation access was revoked", {
@@ -4741,6 +4746,70 @@ async function requireLanguageValidationEntitlement(userId: string, db: Supabase
   if (limit <= 0) {
     throwEntitlementRequired("concurrent_streams", decision, { limit, current: 0 });
   }
+}
+
+// Background catalogue maintenance is not a playback entitlement. These reads
+// never start a trial, reconcile/consume an access grant, or mutate billing.
+// Do not cache this decision: recheck before intake, enqueue and each worker
+// window/finalization, including the check after the provider leases are held.
+async function requireAutomaticLanguageEnrichmentAccess(userId: string, db: SupabaseClient) {
+  const denied = () => new HttpError(403, "Automatic language enrichment access was revoked", {
+    code: "LANGUAGE_ENRICHMENT_ACCESS_REVOKED",
+  });
+  const unavailable = () => new HttpError(503, "Automatic language enrichment access check is unavailable", {
+    // An unavailable auth/DB read is not a failed provider probe or evidence.
+    code: "LANGUAGE_ENRICHMENT_ACCESS_RETRY",
+  });
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(userId)) throw denied();
+  let authResult;
+  try {
+    authResult = await db.auth.admin.getUserById(userId);
+  } catch (_) { throw unavailable(); }
+  if (authResult.error) {
+    if (authResult.error.status === 404 || authResult.error.code === "user_not_found") throw denied();
+    throw unavailable();
+  }
+  const account = recordOrEmpty(authResult.data?.user);
+  if (account.id !== userId || account.deleted_at) throw denied();
+  if (account.banned_until) {
+    const bannedUntil = Date.parse(stringOr(account.banned_until, ""));
+    if (!Number.isFinite(bannedUntil) || bannedUntil > Date.now()) throw denied();
+  }
+
+  let result;
+  try {
+    result = await db.from("cloud_entitlement_projection")
+      .select("status").eq("user_id", userId).maybeSingle();
+  } catch (_) { throw unavailable(); }
+  if (result.error || result.data === undefined) throw unavailable();
+  // Missing/expired subscriptions deliberately qualify. Hard blocks remain
+  // authoritative even for admins; client-editable metadata is never consulted.
+  if (result.data !== null) {
+    const status = stringOr(result.data.status, "").trim().toLowerCase();
+    if (["revoked", "refunded", "fraud"].includes(status)) throw denied();
+    if (!["trialing", "active", "grace", "past_due", "cancelled_at_period_end", "expired", "unknown"].includes(status)) {
+      throw unavailable();
+    }
+  }
+}
+
+async function requireLanguageValidationJobAccess(
+  db: SupabaseClient,
+  jobId: string,
+  userId: string,
+  sourceId: string,
+) {
+  // Origin comes from the service-only durable row, not the claim payload or
+  // HTTP request. Historical jobs remain legacy and keep their playback gate.
+  const { data: job, error } = await db.from("catalog_file_audio_validation_jobs")
+    .select("request_origin").eq("id", jobId).eq("requested_by", userId)
+    .eq("source_id", sourceId).maybeSingle();
+  if (error) throwDb(error, "Unable to verify language validation job origin");
+  if (!job) throw new HttpError(404, "Language validation job not found");
+  const origin = stringOr(job.request_origin, "legacy");
+  if (origin === "automatic") await requireAutomaticLanguageEnrichmentAccess(userId, db);
+  else await requireLanguageValidationEntitlement(userId, db);
+  return origin;
 }
 
 async function loadOwnedMovieLanguageCertificate(
@@ -10882,6 +10951,7 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
   // mechanically impossible until the same response attests protocol v1.
   if (itemType === "episode" && providerDrainAttested !== true) return false;
   await assertSourceCatalogVisible(sourceId, userId, db);
+  await requireAutomaticLanguageEnrichmentAccess(userId, db);
   const currentIdentityKey = await loadLanguageValidationIdentity(db, userId, sourceId, itemType === "movie");
   if (currentIdentityKey !== identityKey) return false;
 
@@ -10956,13 +11026,13 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
 }
 
 async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string, sourceId: string) {
-  // Do not open provider connections for revoked/expired accounts. The strict
-  // worker repeats this gate when it later claims each audio window.
+  // Catalogue maintenance has its own permission; playback and manual LID
+  // still require a subscription. The strict worker repeats this fresh check.
   try {
-    await requireLanguageValidationEntitlement(userId, db);
+    await requireAutomaticLanguageEnrichmentAccess(userId, db);
   } catch (error) {
     if (languageValidationAccessWasRevoked(error)) {
-      return { mode: "automatic-language", processed: 0, skipped: "account-not-entitled", hasMore: true };
+      return { mode: "automatic-language", processed: 0, skipped: "enrichment-access-revoked", hasMore: true };
     }
     throw error;
   }
@@ -10980,6 +11050,7 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
   const identityKey = stringOr(claim.identityKey, "");
   const inspect = async () => {
     await assertSourceCatalogVisible(sourceId, userId, db);
+    await requireAutomaticLanguageEnrichmentAccess(userId, db);
     const actualKey = await loadLanguageValidationIdentity(db, userId, sourceId, true);
     if (actualKey !== identityKey) return { current: false };
     const { data: raw, error: readError } = await db.from("cloud_catalog_visible_title_variants")
@@ -11010,6 +11081,7 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
   return await processAutomaticVodLanguageFile({
     claim, inspect,
     probe: async () => {
+      await requireAutomaticLanguageEnrichmentAccess(userId, db);
       const token = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
       return await runCodecProfileBackfill(new Request("http://internal/codec-profile-backfill", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },

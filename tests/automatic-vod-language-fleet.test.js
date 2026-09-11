@@ -69,6 +69,14 @@ test('structured circuit errors are deferred and cannot leak error text', async 
   const { result } = await run({ inspect: async () => { throw { details: { code: 'PROVIDER_PROBE_CIRCUIT_OPEN' } }; } });
   assert.equal(result.deferred, 1); assert.equal(result.attempted, 0);
 });
+
+for (const code of ['LANGUAGE_ENRICHMENT_ACCESS_RETRY', 'LANGUAGE_ENRICHMENT_ACCESS_REVOKED']) {
+  test(`${code} defers intake without consuming a provider attempt`, async () => {
+    const { result, events } = await run({ inspect: async () => { throw { details: { code } }; } });
+    assert.equal(result.deferred, 1); assert.equal(result.attempted, 0); assert.equal(result.failed, 0);
+    assert.ok(!events.includes('enqueue')); assert.ok(!events.includes('probe'));
+  });
+}
 test('unpersisted HTTP success is not an identified file', async () => {
   const { result } = await run({ inspect: async () => ({ current: true, needsProbe: true }),
     probe: async () => ({ persisted: 0, attempted: 1 }) });
@@ -129,7 +137,7 @@ async function edgeFixture({ identified=false, verified=false, missingProfile=fa
   };
   const context=vm.createContext({ Request, Deno:{env:{get:()=> 'internal-test-token'}},
     refreshLanguageBackgroundCapacity:async()=>true,
-    requireLanguageValidationEntitlement:async()=>{if(revoked)throw {code:'revoked'};},
+    requireAutomaticLanguageEnrichmentAccess:async()=>{if(revoked)throw {code:'revoked'};},
     languageValidationAccessWasRevoked:e=>e.code==='revoked',
     recordOrEmpty:v=>v||{},stringOr:(v,f)=>typeof v==='string'?v:f,stringOrNull:v=>v??null,
     throwDb:()=>{throw new Error('database');},HttpError:Error,
@@ -150,7 +158,7 @@ async function edgeFixture({ identified=false, verified=false, missingProfile=fa
 }
 
 test('real Edge intake rejects revoked accounts before claiming or contacting providers',async()=>{
-  const h=await edgeFixture({revoked:true});assert.equal(h.result.skipped,'account-not-entitled');assert.equal(h.events.length,0);
+  const h=await edgeFixture({revoked:true});assert.equal(h.result.skipped,'enrichment-access-revoked');assert.equal(h.events.length,0);
 });
 for(const flag of ['identified','verified']) test(`real Edge ${flag} cache avoids provider/model work`,async()=>{
   const h=await edgeFixture({[flag]:true});assert.equal(h.result[flag],1);
