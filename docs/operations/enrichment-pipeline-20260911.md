@@ -10,7 +10,7 @@ throughput improvement is claimed by this document.
 | Workstream | Required implementation and evidence | State |
 | --- | --- | --- |
 | Fast metadata lane | Independent admission, bounded continuous batches, exact-cache reuse, preserved account locks; SQL contention and stop/permission tests | Implemented, isolated tests pass; production gate pending |
-| Mutualized input | Bound header/range reuse, one input for multiple pending tracks, file-change invalidation, independent temporal evidence; fake-provider byte/connection counts | Multi-track extraction integrated locally; cross-window header/range reuse still pending |
+| Mutualized input | Bound header/range reuse, one input for multiple pending tracks, file-change invalidation, independent temporal evidence; fake-provider byte/connection counts | Multi-track extraction and strong-validator cross-window reuse integrated; real-provider acceptance pending |
 | Capture then compute | Private bounded expiring store, attested drain and account release before inference, durable retry without new download; restart/expiry/lost-ACK tests | Gateway + Xtream/episode worker integrated locally; Selection client and live acceptance pending |
 | Passive playback capture | Only bytes already received, non-blocking/drop-on-pressure, no second provider request, no implicit phone upload; playback/backpressure tests | Pending |
 | Authorized parallelism | Trusted Selection feed + host policies, prudent unknown-provider default, account vs file identity separation, bounded adaptive feedback; mono-session and refusal tests | Pending |
@@ -139,7 +139,47 @@ Not yet deployed. No new provider acquisition has been made for these tests.
 - Full repository: **4,447 tests; 4,435 passed, 12 skipped, zero failures**
   (115.39 s). Receipt:
   `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-multi-capture.log`.
-- Still required: cross-window header/index/range reuse with representation
-  revalidation (no weak-validator shortcut), Selection adapter, and bounded
-  real-provider byte/latency comparison. Passive playback capture and explicit
-  adaptive Selection policies are separate, still-unimplemented workstreams.
+- Selection adapter and bounded real-provider byte/latency comparison remain.
+  Passive playback capture and explicit adaptive Selection policies are separate,
+  still-unimplemented workstreams.
+
+## Cross-window range reuse (local, not activated)
+
+- Process-private fragments bind user digest + exact source URL digest + profile
+  fingerprint + exact file size. Each new broker performs a current exact 206
+  check with the same **strong ETag and effective target identity** before it
+  can serve retained bytes. Weak/missing validators never seed this cache.
+  Target/size/validator drift and provider rejections invalidate it; no retry,
+  new account, proxy/IP change, or relaxed range validation is introduced.
+- Missing ranges end only at an already retained fragment, not at arbitrary
+  small chunk boundaries. An optional 512 KiB prefix collector copies bytes
+  already received. Intentional seeks may retain a valid prefix after teardown;
+  failed/truncated/invalid responses cannot publish it. Header/tail-index
+  fragments are retained preferentially over interior bytes.
+- Hard defaults: 32 MiB total, 4 MiB per exact file, 16 files, 64 fragments/file,
+  ten-minute fixed TTL, 30-second expiry sweep. This is memory-only, separate
+  from the encrypted audio buffer; restart simply discards these fragments.
+  The existing opt-in capture route is its only acquisition integration.
+- Native networkless runtime fixture: **100/100 passed, zero skipped** using
+  actual Gateway broker functions and actual FFmpeg. On the synthetic chirp
+  file, two distinct 20-second windows produced byte-identical PCM with/without
+  reuse: 5,866,351 vs 4,024,538 media bytes read by the broker; 5 vs 6 local HTTP
+  requests. The extra conditional request matters on high-latency providers;
+  this is neither wire-level billing, guaranteed time savings nor a fleet ETA.
+  All provider traffic in this fixture stayed on isolated loopback.
+- Full repository: **4,456 tests, 4,443 passed, 13 skipped, zero failures**,
+  112.27 seconds. Receipt:
+  `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-range-reuse.log`.
+
+## Refreshed production inventory (read-only, 2026-09-11 19:50 UTC)
+
+- Xtream: 526,651 exact keys; 38 certified; 84,217 complete declared profiles;
+  442,396 residual candidates (434,445 unprobed and 7,951 partial).
+- Selection: 7,695 distinct external-id + URL-digest keys across 82,162 catalogue
+  copies; 9 certified, 1,503 other complete profiles, 6,183 residual candidates.
+- Combined: 534,346 distinct keys; **448,579 candidates** after deduplication,
+  not 507,926 catalogue-level candidate entries. The difference of 59,347 is
+  redundant Selection copies, not successful new detections. Residual count
+  decreased by 41 since the 17:00 UTC snapshot; these local changes did not cause
+  that production progress. Candidate counts are not proof of current admission,
+  file accessibility, speech presence or independent language accuracy.

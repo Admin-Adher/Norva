@@ -13,9 +13,12 @@ NAME = 'norva-capture-runtime-proof-20260911'
 LABEL = 'capture-runtime-proof-20260911'
 FILES = ['services/media-gateway/src/' + name + '.js' for name in (
     'strict-lid-capture-store', 'strict-lid-capture-pipeline', 'strict-lid-window-checkpoint',
-    'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract')]
+    'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract',
+    'strict-lid-range-reuse', 'index')]
 FILES.append('tests/strict-lid-capture-store.test.js')
 FILES.append('tests/strict-lid-multi-extract.test.js')
+FILES.append('tests/strict-lid-range-reuse.test.js')
+FILES.append('tests/media-gateway-strict-lid-broker.test.js')
 
 
 def run(args):
@@ -33,7 +36,8 @@ def main():
         members = archive.getmembers()
         assert sorted(m.name for m in members) == sorted(FILES)
         for member in members:
-            assert member.isfile() and 0 < member.size < 100000
+            maximum = 1500000 if member.name == 'services/media-gateway/src/index.js' else 180000
+            assert member.isfile() and 0 < member.size < maximum
             target = proof / member.name
             assert target.resolve().is_relative_to(proof.resolve())
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -47,8 +51,9 @@ def main():
             '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '1000:1000',
             '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777',
             '--mount', 'type=bind,src=' + str(proof) + ',dst=/proof,readonly',
-            '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '--entrypoint', 'node', image, '--test',
-            '/proof/tests/strict-lid-capture-store.test.js', '/proof/tests/strict-lid-multi-extract.test.js']).strip()
+            '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '-e', 'NODE_PATH=/app/node_modules', '--entrypoint', 'node', image, '--test',
+            '/proof/tests/strict-lid-capture-store.test.js', '/proof/tests/strict-lid-multi-extract.test.js',
+            '/proof/tests/strict-lid-range-reuse.test.js', '/proof/tests/media-gateway-strict-lid-broker.test.js']).strip()
         output = run(['docker', 'start', '-a', NAME])
         state = json.loads(run(['docker', 'inspect', NAME]))[0]
         assert state['State']['ExitCode'] == 0

@@ -23,6 +23,8 @@ const LANGUAGE_CAPTURE_PIPELINE_ENABLED = process.env.LANGUAGE_CAPTURE_PIPELINE_
 const { StrictLidCaptureStore } = require('./strict-lid-capture-store');
 const { createStrictLidCapturePipeline } = require('./strict-lid-capture-pipeline');
 const { runStrictLidMultiExtract } = require('./strict-lid-multi-extract');
+const { StrictLidRangeReuse, createStrictRangeCollector } = require('./strict-lid-range-reuse');
+const strictLidRangeReuse = new StrictLidRangeReuse();
 let strictLidCaptureStore = null;
 let strictLidCapturePipeline = null;
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
@@ -2948,6 +2950,7 @@ app.get('/health', (req, res) => {
             benchmark: lidBenchmarkBusy,
         }),
         languageCaptureBuffer: strictLidCaptureStore?.snapshot() || { protocol: 1, ready: false },
+        languageRangeReuse: strictLidRangeReuse.snapshot(),
         languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
@@ -4849,6 +4852,7 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
 }
 
 function markStrictLidTerminal(context, error) {
+    if (error) context.rangeReuse?.invalidate();
     if (!context.terminalError && error) context.terminalError = error;
     return context.terminalError;
 }
@@ -5412,6 +5416,7 @@ function preemptAbandonedFiniteMkvSeekAttempt(context, attempt) {
 
 async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
+    const rangeReuse = !finiteSeek ? context.rangeReuse : null;
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
         return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
     }
@@ -5482,6 +5487,18 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let finiteWarmupWindowsCompleted = 0;
         while (forwarded < requestedLength) {
             if (attempt.localClosed) break;
+            if (rangeReuse?.confirmed) {
+                const cached = rangeReuse.read(range.start + forwarded, range.end);
+                if (cached) {
+                    if (!responseStarted) {
+                        startFiniteMkvSeekResponse(context, res, range);
+                        responseStarted = true;
+                    }
+                    if (!res.write(cached)) await waitForStrictLidDrain(res, controller.signal);
+                    forwarded += cached.length;
+                    continue;
+                }
+            }
             if (finiteSeek && forwarded === finiteWindowStartOffset) {
                 finiteWindowIsWarmup = (
                     context.finiteWarmupWindowBytes > 0
@@ -5588,6 +5605,15 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 end: finiteSeek ? finiteWindowRange.end : range.end,
                 total: range.total,
             };
+            if (rangeReuse) {
+                // A prior broker's bytes are usable only after CURRENT exact
+                // upstream revalidation. Fetch one byte when the prefix is
+                // already retained; otherwise the missing range itself performs
+                // that check. Never turn this into hundreds of tiny downloads.
+                remainingRange.end = !rangeReuse.confirmed && rangeReuse.hasCandidate(remainingRange.start, range.end)
+                    ? remainingRange.start : rangeReuse.missingEnd(remainingRange.start, range.end);
+            }
+            let strictRangeCollector = null;
             const finiteWindowTrace = finiteSeek
                 ? beginFiniteMkvSeekWindowTrace(context, requestId, range, remainingRange)
                 : null;
@@ -5646,6 +5672,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         'The media service is temporarily unavailable.',
                         { status: 502, upstreamStatus },
                     ));
+                }
+                if (rangeReuse && upstreamStatus === 412) {
+                    throw markStrictLidTerminal(context, strictLidBrokerError('VOD_CHANGED',
+                        'The media file changed during language validation.', { status: 502, upstreamStatus }));
                 }
                 const observedEffectiveUrl = attempt.response?.url || requestSourceUrl;
                 const observedEffectiveUrlSha256 = strictLidEffectiveUrlSha256(observedEffectiveUrl);
@@ -5759,6 +5789,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (!context.effectiveUrlIdentitySha256) {
                     context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
                 }
+                if (rangeReuse?.confirm({ validator: observedValidator, fileSizeBytes: range.total,
+                    effectiveUrlIdentitySha256: observedEffectiveUrlIdentitySha256 })) {
+                    strictRangeCollector = createStrictRangeCollector(remainingRange.start);
+                }
                 if (!finiteSeek && !context.strictResolvedSourceUrl) {
                     context.strictResolvedSourceUrl = observedEffectiveUrl;
                 }
@@ -5804,14 +5838,17 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         'first-byte',
                         chunk.length,
                     );
-                    if (forwarded + chunk.length > requestedLength) {
+                    if (forwarded + chunk.length > requestedLength
+                        || forwarded - offsetBeforeFetch + chunk.length > exactRange.length) {
                         throw markStrictLidTerminal(context, strictLidBrokerError(
                             'RANGE_LENGTH_MISMATCH',
                             'Provider exceeded the exact language-validation byte range.',
                             { status: 502, upstreamStatus },
                         ));
                     }
+                    strictRangeCollector?.push(chunk);
                     forwarded += chunk.length;
+                    context.providerBytes += chunk.length;
                     if (finiteSeek) {
                         bufferedChunks.push(Buffer.from(chunk));
                         // Forward provider progress immediately. Waiting for a
@@ -5862,6 +5899,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 finishFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'completed');
                 diagnosticStage = 'close';
                 await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
+                strictRangeCollector?.commit(rangeReuse);
                 if (finiteSeek && range.start + forwarded === finiteWindowRange.end + 1) {
                     const windowLength = finiteWindowRange.end - finiteWindowRange.start + 1;
                     const payload = Buffer.concat(bufferedChunks, windowLength);
@@ -5934,6 +5972,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     || attempt.stopReason === 'broker_closed';
                 if (intentionallyStopped) {
                     await closeStrictLidBrokerProviderFetch(context, attempt, attempt.stopReason || 'stopped');
+                    // A deliberate FFmpeg seek can leave a valid received prefix.
+                    // Keep it only after teardown, never after a range/validator
+                    // error, timeout or unplanned transport failure.
+                    if (!context.terminalError && !timeoutKind
+                        && (attempt.localClosed || attempt.stopReason === 'superseded' || attempt.stopReason === 'broker_closed')) {
+                        strictRangeCollector?.commit(rangeReuse);
+                    }
                     throw error;
                 }
                 console.warn(JSON.stringify(strictLidProviderFailureObservation(error, {
@@ -6157,7 +6202,8 @@ async function createStrictLidBroker(options = {}) {
     const pathPrefix = options.pathPrefix === 'finite-mkv-seek' ? 'finite-mkv-seek' : 'strict-lid';
     const expectedPath = `/${pathPrefix}/${handle}`;
     const providerProxyKey = proxyKeyFromUrl(sourceUrl);
-    const expectedValidator = normalizeStrictLidExpectedValidator(options.expectedValidator);
+    const rangeReuse = pathPrefix === 'strict-lid' ? options.rangeReuse || null : null;
+    const expectedValidator = normalizeStrictLidExpectedValidator(options.expectedValidator || rangeReuse?.prior?.validator);
     const expectedEffectiveUrlSha256 = /^[a-f0-9]{64}$/.test(String(options.effectiveUrlSha256 || '').toLowerCase())
         ? String(options.effectiveUrlSha256).toLowerCase()
         : null;
@@ -6196,6 +6242,7 @@ async function createStrictLidBroker(options = {}) {
     const controller = new AbortController();
     const context = {
         sourceUrl,
+        rangeReuse,
         strictResolvedSourceUrl: null,
         fileSizeBytes,
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
@@ -6269,11 +6316,12 @@ async function createStrictLidBroker(options = {}) {
         validator: expectedValidator,
         pathPrefix,
         effectiveUrlSha256: expectedEffectiveUrlSha256,
-        effectiveUrlIdentitySha256: expectedEffectiveUrlIdentitySha256,
+        effectiveUrlIdentitySha256: expectedEffectiveUrlIdentitySha256 || rangeReuse?.prior?.effectiveUrlIdentitySha256 || null,
         onProviderIdentity,
         providerIdentityReported: false,
         terminalError: null,
         providerFetches: 0,
+        providerBytes: 0,
         completedProviderFetches: 0,
         interruptedProviderFetches: 0,
         finiteCache: new Map(),
@@ -6357,6 +6405,7 @@ async function createStrictLidBroker(options = {}) {
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
         get terminalError() { return context.terminalError; },
         get providerFetches() { return context.providerFetches; },
+        get providerBytes() { return context.providerBytes; },
         get completedProviderFetches() { return context.completedProviderFetches; },
         get interruptedProviderFetches() { return context.interruptedProviderFetches; },
         get cacheBytes() { return context.finiteCacheBytes; },
@@ -7498,7 +7547,9 @@ function initializeStrictLidCapturePipeline(store) {
             return claimLanguageEnrichmentNetwork(context.url);
         },
         openBroker: (context, signal) => createStrictLidBroker({ sourceUrl: context.url,
-            fileSizeBytes: context.fileSizeBytes, userAgent: context.ua, abortSignal: signal }),
+            fileSizeBytes: context.fileSizeBytes, userAgent: context.ua, abortSignal: signal,
+            rangeReuse: strictLidRangeReuse.begin({ userHash: sha256Hex(context.userId), sourceUrlHash: sha256Hex(context.url),
+                profileHash: context.profileFingerprint, fileSizeBytes: context.fileSizeBytes }) }),
         extract: (broker, binding, context, signal) => store.withWorkspace(async outputPath => {
             // Create the only FFmpeg destination privately before starting it.
             // The path is generated here, never accepted from a request.
@@ -7589,7 +7640,8 @@ async function handleStrictLidCaptureRequest(req, res, action) {
         let payload;
         if (action === 'status') payload = await strictLidCapturePipeline.status(binding);
         else if (action === 'capture') payload = await strictLidCapturePipeline.capture(binding,
-            { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes }, controller.signal,
+            { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes,
+                profileFingerprint: binding.profileFingerprint }, controller.signal,
             captureIndices.slice(1).map(trackIndex => ({ ...binding, trackIndex })));
         else if (action === 'infer') payload = await strictLidCapturePipeline.compute(binding,
             { accountKey: proxyKeyFromUrl(claims.url) }, controller.signal);
@@ -11678,6 +11730,7 @@ async function bootstrap() {
             secret: GATEWAY_TOKEN });
         await strictLidCaptureStore.open();
         strictLidCapturePipeline = initializeStrictLidCapturePipeline(strictLidCaptureStore);
+        setInterval(() => strictLidRangeReuse.prune(), 30000).unref();
         setInterval(() => strictLidCaptureStore.sweep().catch(() => {
             console.warn('[media-gateway] private capture sweep failed');
         }), 30000).unref();

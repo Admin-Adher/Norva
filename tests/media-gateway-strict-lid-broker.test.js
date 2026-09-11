@@ -11,6 +11,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const gatewayPath = path.join(root, 'services/media-gateway/src/index.js');
 const gatewaySource = fs.readFileSync(gatewayPath, 'utf8');
+const { StrictLidRangeReuse, createStrictRangeCollector } = require('../services/media-gateway/src/strict-lid-range-reuse');
 
 function brokerHarness(diagnosticLogs = null) {
   const startMarker = '// ── Strict LID loopback broker (mono-account provider barrier)';
@@ -44,6 +45,7 @@ function brokerHarness(diagnosticLogs = null) {
       clearTimeout,
       console: { ...console, warn: (...args) => diagnosticLogs?.push(args.join(' ')) },
       crypto: require('node:crypto'),
+      createStrictRangeCollector,
       fetch,
       http,
       isHttpUrl(value) {
@@ -175,6 +177,125 @@ function sendExactRange(req, res, data, options = {}) {
   if (options.etag !== false) res.setHeader('ETag', options.etag || '"fixture-v1"');
   res.end(options.body || body);
 }
+
+test('strict range reuse revalidates across brokers and fetches only missing bytes on the same mono account', async t => {
+  const data = Buffer.alloc(40000, 0x69); const requests = []; let bytes = 0; let active = 0; let maximum = 0;
+  const provider = http.createServer((req, res) => {
+    const r = exactRange(req, data.length); requests.push({ ...r, conditional: req.headers['if-range'] });
+    bytes += r.end - r.start + 1; maximum = Math.max(maximum, ++active);
+    res.once('close', () => active--); sendExactRange(req, res, data);
+  });
+  const url = await listen(provider); t.after(() => closeServer(provider));
+  const cache = new StrictLidRangeReuse();
+  const binding = { userHash: 'a'.repeat(64), sourceUrlHash: 'b'.repeat(64), profileHash: 'c'.repeat(64), fileSizeBytes: data.length };
+  const { createStrictLidBroker } = brokerHarness();
+  const first = await createStrictLidBroker({ sourceUrl: url, fileSizeBytes: data.length, rangeReuse: cache.begin(binding) });
+  t.after(() => first.close());
+  let response = await fetch(first.inputUrl, { headers: { Range: 'bytes=0-9999' } });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(0, 10000));
+  await first.close();
+  assert.equal(bytes, 10000); assert.equal(cache.snapshot().bytes, 10000);
+  const second = await createStrictLidBroker({ sourceUrl: url, fileSizeBytes: data.length, rangeReuse: cache.begin(binding) });
+  t.after(() => second.close());
+  response = await fetch(second.inputUrl, { headers: { Range: 'bytes=0-19999' } });
+  assert.equal(response.status, 206); assert.equal(response.headers.get('content-length'), '20000');
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(0, 20000));
+  assert.equal(bytes, 20001); assert.equal(second.providerBytes, 10001);
+  assert.deepEqual(requests.map(r => [r.start, r.end]), [[0, 9999], [0, 0], [10000, 19999]]);
+  assert.equal(requests[1].conditional, '"fixture-v1"');
+  response = await fetch(second.inputUrl, { headers: { Range: 'bytes=8000-11999' } });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(8000, 12000));
+  assert.equal(requests.length, 3); assert.equal(maximum, 1);
+  await second.close();
+  assert.equal(cache.snapshot().reusedBytes, 13999);
+});
+
+test('strict range reuse rejects changed or busy providers before any stale bytes can be served', async t => {
+  for (const rejection of ['etag', 'busy', 'weak', 'precondition']) {
+    let change = false; let calls = 0;
+    const data = Buffer.alloc(5000, 0x66);
+    const provider = http.createServer((req, res) => {
+      calls++;
+      if (change && ['busy', 'precondition'].includes(rejection)) {
+        res.statusCode = rejection === 'busy' ? 458 : 412; return res.end();
+      }
+      sendExactRange(req, res, data, { etag: !change ? '"fixture-v1"' : rejection === 'etag' ? '"different"' : 'W/"fixture-v1"' });
+    });
+    const url = await listen(provider); t.after(() => closeServer(provider));
+    const cache = new StrictLidRangeReuse();
+    const binding = { userHash: 'a'.repeat(64), sourceUrlHash: 'b'.repeat(64), profileHash: 'c'.repeat(64), fileSizeBytes: data.length };
+    const { createStrictLidBroker } = brokerHarness();
+    const first = await createStrictLidBroker({ sourceUrl: url, fileSizeBytes: data.length, rangeReuse: cache.begin(binding) });
+    t.after(() => first.close());
+    await (await fetch(first.inputUrl, { headers: { Range: 'bytes=0-4999' } })).arrayBuffer(); await first.close();
+    change = true;
+    const second = await createStrictLidBroker({ sourceUrl: url, fileSizeBytes: data.length, rangeReuse: cache.begin(binding) });
+    t.after(() => second.close());
+    const response = await fetch(second.inputUrl, { headers: { Range: 'bytes=0-4999' } });
+    assert.ok(response.status >= 400, rejection); await response.arrayBuffer();
+    assert.equal(second.terminalError.code, rejection === 'busy' ? 'PROVIDER_BUSY' : 'VOD_CHANGED');
+    await second.close(); assert.equal(cache.snapshot().bytes, 0); assert.equal(cache.snapshot().reusedBytes, 0);
+    assert.equal(calls, 2, 'no automatic retry after rejection');
+  }
+});
+
+test('a provider without a strong validator stays on the unchanged strict path without false cache hits', async t => {
+  let calls = 0; const data = Buffer.alloc(5000, 0x23);
+  const provider = http.createServer((req, res) => { calls++; sendExactRange(req, res, data, { etag: false }); });
+  const url = await listen(provider); t.after(() => closeServer(provider));
+  const cache = new StrictLidRangeReuse(); const { createStrictLidBroker } = brokerHarness();
+  for (let i = 0; i < 2; i++) {
+    const session = cache.begin({ userHash: 'a'.repeat(64), sourceUrlHash: 'b'.repeat(64), profileHash: 'c'.repeat(64), fileSizeBytes: data.length });
+    const broker = await createStrictLidBroker({ sourceUrl: url, fileSizeBytes: data.length, rangeReuse: session });
+    t.after(() => broker.close());
+    const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-4999' } });
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data); await broker.close();
+  }
+  assert.equal(calls, 2); assert.equal(cache.snapshot().bytes, 0);
+});
+
+test('native FFmpeg uses actual strict broker and reuses headers between distinct temporal windows',
+  { skip: process.env.NORVA_CAPTURE_REAL_FFMPEG !== '1' }, async t => {
+  const fsp = require('node:fs/promises'); const { spawn } = require('node:child_process');
+  const { runStrictLidMultiExtract } = require('../services/media-gateway/src/strict-lid-multi-extract');
+  const { parsePcm16Wav } = require('../services/media-gateway/src/strict-lid-audio-evidence');
+  const dir = await fsp.mkdtemp(path.join(require('node:os').tmpdir(), 'norva-range-ffmpeg-'));
+  const source = path.join(dir, 'synthetic.mkv'); const output = path.join(dir, 'out.wav');
+  t.after(async () => { await fsp.unlink(source).catch(() => {}); await fsp.unlink(output).catch(() => {}); await fsp.rmdir(dir); });
+  await new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+      '-i', 'aevalsrc=sin(2*PI*(300*t+3*t*t)):s=16000:d=60', '-c:a', 'pcm_s16le', source], { stdio: 'ignore' });
+    child.once('error', reject); child.once('close', code => code === 0 ? resolve() : reject(Error('fixture_generation_failed')));
+  });
+  const data = await fsp.readFile(source);
+  const server = http.createServer((req, res) => sendExactRange(req, res, data));
+  const url = await listen(server); t.after(() => closeServer(server));
+  const { createStrictLidBroker } = brokerHarness();
+  const run = async cache => {
+    let receivedBytes = 0; let requests = 0; const hashes = [];
+    for (const start of [0, 30]) {
+      const rangeReuse = cache?.begin({ userHash: 'a'.repeat(64), sourceUrlHash: 'b'.repeat(64),
+        profileHash: 'c'.repeat(64), fileSizeBytes: data.length });
+      const broker = await createStrictLidBroker({ sourceUrl: url, fileSizeBytes: data.length, rangeReuse });
+      try {
+        const result = await runStrictLidMultiExtract({ bin: 'ffmpeg', inputUrl: broker.inputUrl,
+          outputs: [{ index: 0, path: output }], startSeconds: start, durationSeconds: 20, timeoutMs: 30000 });
+        assert.equal(result.ok, true, broker.terminalError?.code || result.code);
+        const wav = await fsp.readFile(output); assert.equal(parsePcm16Wav(wav).durationSeconds, 20);
+        hashes.push(require('node:crypto').createHash('sha256').update(wav).digest('hex'));
+      } finally { await broker.close(); }
+      receivedBytes += broker.providerBytes; requests += broker.providerFetches;
+    }
+    assert.notEqual(hashes[0], hashes[1], 'distinct synthetic temporal evidence is preserved');
+    return { receivedBytes, requests, hashes };
+  };
+  const baseline = await run(null); const cache = new StrictLidRangeReuse(); const reused = await run(cache);
+  assert.deepEqual(reused.hashes, baseline.hashes, 'cache must be transparent to demuxed PCM');
+  assert.ok(cache.snapshot().reusedBytes > 0, 'actual FFmpeg reused its header/cue requests');
+  assert.ok(reused.receivedBytes < baseline.receivedBytes, 'fewer media bytes read by the broker');
+  t.diagnostic(JSON.stringify({ fixture: 'synthetic-two-temporal-windows', baseline, reused,
+    reuse: cache.snapshot(), externalProviderRequests: 0 }));
+});
 
 test('strict provider diagnostics retain only safe cause codes and bounded stage counters', () => {
   const { strictLidProviderFailureObservation: observe } = brokerHarness();
