@@ -138,8 +138,9 @@ class PilotTests(unittest.TestCase):
             self.assertEqual(self.state['rows']['1']['state'],'external_job_protected')
 
     def test_quota_preserves_file_without_provider_access(self):
+        self.state['rows']['1'].update(state='probed',probeAttempts=1)
         for quota in ({'activeJobs':2,'starts24h':0},{'activeJobs':0,'starts24h':20}):
-            with patch.object(p,'current',return_value=quota),patch.object(p,'header_probe') as probe,patch.object(p,'enqueue') as start:
+            with patch.object(p,'current',return_value={**ready(),**quota}),patch.object(p,'header_probe') as probe,patch.object(p,'enqueue') as start:
                 p.step(self.plan,self.state)
             probe.assert_not_called();start.assert_not_called()
             self.assertTrue(self.state['rows']['1']['waitingForQuota'])
@@ -165,6 +166,38 @@ class PilotTests(unittest.TestCase):
             p.step(self.plan,self.state)
         probe.assert_not_called()
         self.assertEqual(self.state['rows']['1']['state'],'planned')
+
+    def test_three_initial_failures_stop_expansion(self):
+        self.state['rows'].update({str(n):{'state':'probe_failed_or_uncertain'} for n in (10,11,12)})
+        with patch.object(p,'current') as read:
+            self.assertFalse(p.step(self.plan,self.state))
+        read.assert_not_called()
+        self.assertEqual(self.state['stoppedReason'],'initial_header_probes_failed')
+
+    def test_viewer_deferral_cools_the_whole_user_before_io(self):
+        with patch.object(p,'current',return_value={}),patch.object(p,'header_probe',return_value={
+                'persisted':0,'attempted':0,'deferredBeforeIO':True,'reason':'live-session'}) as probe:
+            # A visible source with an empty profile still exists.
+            with patch.object(p,'current',return_value={'profile':{}}):
+                p.step(self.plan,self.state)
+            self.state['rows']['1'].pop('nextEligibleEpoch')
+            p.step(self.plan,self.state)
+        self.assertEqual(probe.call_count,1)
+        self.assertGreater(self.state['userCooldowns'][row()['user_id']],time.time())
+        self.assertEqual(self.state['rows']['1']['probeAttempts'],0)
+
+    def test_probe_failure_retains_only_bounded_diagnostic(self):
+        with patch.object(p,'current',return_value={'profile':{}}),patch.object(p,'header_probe',
+                side_effect=p.ProbeFailure('incomplete_codec_profile',502)):
+            p.step(self.plan,self.state)
+        self.assertEqual(self.state['rows']['1']['errorCode'],'incomplete_codec_profile')
+        self.assertEqual(self.state['rows']['1']['httpStatus'],502)
+        self.assertEqual(p.summary(self.plan,self.state)['consumedFileProbeSlots'],1)
+
+    def test_background_child_waits_for_parent_launch_lock(self):
+        with patch.object(p.fcntl,'flock') as flock:
+            with p.lock(wait=True):pass
+        self.assertEqual(flock.call_args_list[0].args[1],p.fcntl.LOCK_EX)
 
 
 if __name__=='__main__':

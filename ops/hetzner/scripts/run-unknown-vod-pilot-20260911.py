@@ -34,6 +34,12 @@ lib = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lib)
 
 
+class ProbeFailure(Exception):
+    def __init__(self, code, status=None):
+        self.code, self.status = code, status
+        super().__init__(code)
+
+
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -65,10 +71,10 @@ def private(path):
 
 
 @contextlib.contextmanager
-def lock():
+def lock(wait=False):
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (ROOT / 'operator.lock').open('a') as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         try:
             yield
         finally:
@@ -232,13 +238,30 @@ def header_probe(row):
     request = urllib.request.Request('https://api.norva.tv/functions/v1/norva-playback/codec-profile-backfill',
         data=json.dumps({'userId': row['user_id'], 'variantIds': [row['variant_id']]}).encode(),
         headers={'Authorization': 'Bearer '+token, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(request, timeout=90) as response:
-        raw = response.read(65537)
-        require(len(raw) <= 65536)
-        value = json.loads(raw)
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            raw = response.read(65537)
+            require(len(raw) <= 65536)
+            value = json.loads(raw)
+    except urllib.error.HTTPError as error:
+        # Read no provider payload into logs. Keep only a bounded application
+        # error identifier and HTTP status, when the API supplies one.
+        try:
+            body=json.loads(error.read(65536))
+            code=body.get('code') or (body.get('details') or {}).get('code')
+        except Exception:
+            code=None
+        if not isinstance(code,str) or not re.fullmatch('[a-zA-Z][a-zA-Z0-9_-]{1,79}',code):
+            code='profile_backfill_http_error'
+        raise ProbeFailure(code,error.code) from None
+    except (TimeoutError,urllib.error.URLError):
+        raise ProbeFailure('profile_backfill_transport_uncertain') from None
     require(value.get('protocol') == 1 and value.get('requested') == 1)
     require(value.get('attempted') in (0, 1) and value.get('persisted') in (0, 1))
-    return {'attempted': value['attempted'], 'persisted': value['persisted'],
+    reason=value.get('skipped') or value.get('stopped')
+    if not isinstance(reason,str) or not re.fullmatch('[a-zA-Z][a-zA-Z0-9_-]{1,79}',reason):
+        reason=None
+    return {'attempted': value['attempted'], 'persisted': value['persisted'], 'reason':reason,
         'deferredBeforeIO': value['attempted'] == 0 and bool(value.get('skipped') or value.get('stopped'))}
 
 
@@ -275,11 +298,17 @@ def summary(plan, state):
     counts = {}
     for value in state['rows'].values():
         key = value['state']; counts[key] = counts.get(key, 0)+1
+    reasons={}
+    for value in state['rows'].values():
+        reason=value.get('errorCode') or value.get('deferredReason')
+        if reason:reasons[reason]=reasons.get(reason,0)+1
     return {'planned': len(plan['rows']), 'providers': len({r['identity_key'] for r in plan['rows']}),
         'initiallyWithoutTracks': sum(not r['has_track_map'] for r in plan['rows']),
         'requestedExampleIncluded': any(r['requested_example'] for r in plan['rows']),
-        'states': counts, 'headerProbeAttempts': sum(v.get('probeAttempts',0) for v in state['rows'].values()),
+        'states': counts, 'consumedFileProbeSlots': sum(v.get('probeAttempts',0) for v in state['rows'].values()),
+        'diagnosticReasons':reasons,
         'updatedAt': state['updatedAt'], 'accuracy': None,
+        'stoppedReason':state.get('stoppedReason'),
         'thresholdsChanged': False, 'oldJobsReset': False}
 
 
@@ -290,6 +319,12 @@ def step(plan, state):
     lib.require_release(plan['gatewaySha256'])
     if not controls():
         return False
+    failed=sum(v['state']=='probe_failed_or_uncertain' for v in state['rows'].values())
+    succeeded=sum(v.get('probeSucceeded') is True for v in state['rows'].values())
+    if failed>=3 and succeeded==0:
+        state['stoppedReason']='initial_header_probes_failed'
+        state['updatedAt']=now();save(ROOT/'state.private.json',state)
+        return False
     persist = lambda: save(ROOT/'state.private.json', state)
     # One new exact file operation per tick. Existing jobs continue under the
     # normal worker, not a parallel test runner with independent provider access.
@@ -298,6 +333,8 @@ def step(plan, state):
         if receipt['state'] not in ('planned','probed','validating','start_intent','probe_intent'):
             continue
         if receipt.get('nextEligibleEpoch',0) > time.time():
+            continue
+        if state.get('userCooldowns',{}).get(row['user_id'],0) > time.time():
             continue
         value = current(row)
         if not value:
@@ -322,9 +359,6 @@ def step(plan, state):
             retry_epoch=datetime.datetime.fromisoformat(value['retryAt'].replace('Z','+00:00')).timestamp()
             if retry_epoch > time.time():
                 receipt['nextEligibleEpoch']=retry_epoch;continue
-        if value.get('activeJobs',2) >= 2 or value.get('starts24h',20) >= 20:
-            receipt['waitingForQuota'] = True; continue
-        receipt.pop('waitingForQuota', None)
         # Capture a fresh exact inventory for the pilot's UI-unknown files,
         # including rows whose old cache and displayed projection disagree.
         # One successful refresh also hydrates the existing shared projections.
@@ -337,17 +371,28 @@ def step(plan, state):
                 result = header_probe(row)
                 if result['deferredBeforeIO']:
                     receipt.update(state='planned',probeAttempts=0,nextEligibleEpoch=time.time()+180)
+                    receipt['deferredReason']=result.get('reason') or 'deferred_before_io'
+                    if result.get('reason') in ('live-session','pregen-active'):
+                        state.setdefault('userCooldowns',{})[row['user_id']]=time.time()+180
                 elif result['persisted'] == 1:
                     receipt['state'] = 'probed'
+                    receipt['probeSucceeded'] = True
+                    receipt.pop('deferredReason',None)
                 else:
                     receipt['state'] = 'probe_insufficient'
+            except ProbeFailure as error:
+                receipt.update(state='probe_failed_or_uncertain',errorCode=error.code,httpStatus=error.status)
             except Exception:
                 receipt['state'] = 'probe_failed_or_uncertain'
+                receipt['errorCode'] = 'profile_backfill_local_or_contract_error'
             state['updatedAt']=now(); persist()
             return True
         tracks = value['tracks']
         if not any(track_unknown(t) for t in tracks):
             receipt['state'] = 'identified_from_tracks'; continue
+        if value.get('activeJobs',2) >= 2 or value.get('starts24h',20) >= 20:
+            receipt['waitingForQuota'] = True; continue
+        receipt.pop('waitingForQuota', None)
         receipt.update(state='start_intent',startIntentAt=now())
         state['updatedAt']=now(); persist()
         try:
@@ -369,13 +414,15 @@ def step(plan, state):
 
 
 def operate(once=False):
-    with lock():
+    # The child may start before launch() has durably saved its PID and released
+    # the parent lock. Wait for that handoff; never race it and exit silently.
+    with lock(wait=not once):
         plan = private(ROOT/'plan.private.json'); validate(plan)
         state = private(ROOT/'state.private.json')
         while time.time() < plan['expiresEpoch']:
             step(plan,state)
             print(json.dumps(summary(plan,state)),flush=True)
-            if once or not any(v['state'] in ('planned','probed','validating','start_intent','probe_intent') for v in state['rows'].values()):
+            if once or state.get('stoppedReason') or not any(v['state'] in ('planned','probed','validating','start_intent','probe_intent') for v in state['rows'].values()):
                 return
             time.sleep(60)
 

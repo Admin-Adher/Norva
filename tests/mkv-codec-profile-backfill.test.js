@@ -36,9 +36,9 @@ test('MKV codec backfill is sequential and fails closed around viewers, circuits
 
   assert.match(route, /for \(const variantId of variantIds\)/);
   assert.doesNotMatch(route, /Promise\.all|mapLimit|concurrency/);
-  assert.match(route, /episodeBackgroundBlockReason\(db, userId, targetUrl\)/);
+  assert.match(route, /codecProfileBackgroundBlockReason\(db, userId, targetUrl\)/);
   assert.match(route, /claimProviderFileProbeStrict\(db, identityKey, leaseOwner, 180\)/);
-  assert.match(route, /episodeBackgroundBlockReason\(db, userId, targetUrl\)[\s\S]*-race/);
+  assert.match(route, /codecProfileBackgroundBlockReason\(db, userId, targetUrl\)[\s\S]*-race/);
   assert.ok((route.match(/assertProviderCircuitClosed\(providerAccountHash, db\)/g) || []).length >= 2);
   assert.ok((route.match(/assertProviderProbeCircuitClosedStrict\(db, identityKey\)/g) || []).length >= 2);
   assert.match(route, /finally \{[\s\S]*releaseProviderFileProbe\(db, identityKey, leaseOwner\)/);
@@ -106,7 +106,7 @@ test('low-footprint movie audio probes bind validated Gateway observations to th
 test('codec backfill forwards failed facets as unknown and never falls back after an atomic rejection', async () => {
   const edge = read('supabase/functions/norva-playback/index.ts');
   const route = between(edge, 'async function runCodecProfileBackfill(', '\nasync function runLidBenchmarkEndpoint');
-  const persist = between(route, 'const persistTrackMaps = async (', '\n\n    const beforeClaimBlock');
+  const persist = between(route, 'const persistTrackMaps = async (', '\n\n    diagnosticStage = "provider-idle-gate"');
   const facetHelper = between(edge, 'function authoritativeProbeFacetComplete(', '\nfunction subtitleProbeObservation(');
   const requests = [];
   class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }

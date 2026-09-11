@@ -15203,6 +15203,8 @@ async function runCodecProfileBackfill(
   req: Request,
   db: SupabaseClient,
 ): Promise<JsonRecord> {
+  let diagnosticStage = "request-validation";
+  try {
   const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
   const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
   if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
@@ -15231,7 +15233,8 @@ async function runCodecProfileBackfill(
   }
   const variantIds = uniqueVariantIds.slice(0, 10);
 
-  const initialBlock = await episodeBackgroundBlockReason(db, userId);
+  diagnosticStage = "initial-idle-gate";
+  const initialBlock = await codecProfileBackgroundBlockReason(db, userId);
   if (initialBlock) {
     return {
       protocol: 1,
@@ -15243,11 +15246,13 @@ async function runCodecProfileBackfill(
     };
   }
 
+  diagnosticStage = "runtime-config";
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
     throw new HttpError(503, "Media gateway is not configured");
   }
 
+  diagnosticStage = "owned-variants";
   const { data: rawVariants, error: variantsError } = await db
     .from("cloud_catalog_visible_title_variants")
     .select("id,source_id,external_id,item_type")
@@ -15277,6 +15282,7 @@ async function runCodecProfileBackfill(
       throw new HttpError(422, "Exact movie variant is incomplete");
     }
 
+    diagnosticStage = "source-identity";
     const sourceIdentity = await resolveSourceIdentity(sourceId, userId, db);
     const identityKey = sourceIdentity.key;
     if (!identityKey || identityKey.startsWith("source:")) {
@@ -15285,6 +15291,7 @@ async function runCodecProfileBackfill(
       break;
     }
 
+    diagnosticStage = "target-resolution";
     const target = await resolvePlaybackTarget(sourceId, "movie", externalId, userId, db);
     const targetUrl = stringOrNull(target?.targetUrl);
     if (!targetUrl) throw new HttpError(404, "Playback target unavailable");
@@ -15318,7 +15325,8 @@ async function runCodecProfileBackfill(
       }
     };
 
-    const beforeClaimBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
+    diagnosticStage = "provider-idle-gate";
+    const beforeClaimBlock = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
     if (beforeClaimBlock) {
       stopped = beforeClaimBlock;
       results.push({ variantId, status: "deferred", code: beforeClaimBlock });
@@ -15337,7 +15345,7 @@ async function runCodecProfileBackfill(
     let releaseLeaseOnExit = true;
     let providerTransportMayBeActive = false;
     try {
-      const raceBlock = await episodeBackgroundBlockReason(db, userId, targetUrl);
+      const raceBlock = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
       if (raceBlock) {
         stopped = `${raceBlock}-race`;
         results.push({ variantId, status: "deferred", code: stopped });
@@ -15348,6 +15356,7 @@ async function runCodecProfileBackfill(
 
       attempted += 1;
       providerTransportMayBeActive = true;
+      diagnosticStage = "gateway-profile-probe";
       const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
         method: "POST",
         headers: {
@@ -15414,17 +15423,20 @@ async function runCodecProfileBackfill(
         break;
       }
 
+      diagnosticStage = "refresh-attestation";
       if (info.codecProfileRefreshProtocol !== 1 || info.codecProfileRefreshed !== true) {
         throw new HttpError(502, "Media gateway did not attest the requested fresh codec probe", {
           code: "codec_profile_refresh_unattested",
         });
       }
       const observedProfile = recordOrEmpty(info.codecProfile ?? info.codec_profile);
+      diagnosticStage = "exact-profile-validation";
       if (!observedGatewayFileProfile(observedProfile)) {
         throw new HttpError(502, "Media gateway returned an incomplete codec profile", {
           code: "incomplete_codec_profile",
         });
       }
+      diagnosticStage = "profile-persistence";
       await persistObservedCodecProfile(db, {
         userId,
         sourceId,
@@ -15436,6 +15448,7 @@ async function runCodecProfileBackfill(
         variantId,
         strict: true,
       });
+      diagnosticStage = "track-map-persistence";
       await persistTrackMaps(
         observedProfile,
         info.audioProbeComplete,
@@ -15463,6 +15476,16 @@ async function runCodecProfileBackfill(
     stopped,
     results,
   };
+  } catch (error) {
+    // Operator diagnostic only: no URL, title, owner, credentials, payload or
+    // database error text. Do not weaken the public error sanitizer.
+    console.warn("[codec-profile-backfill-diagnostic]", {
+      stage: diagnosticStage,
+      status: error instanceof HttpError ? error.status : 500,
+      kind: error instanceof HttpError ? "http" : "exception",
+    });
+    throw error;
+  }
 }
 
 async function runLidBenchmarkEndpoint(req: Request, db: SupabaseClient) {
@@ -15801,6 +15824,37 @@ async function claimProviderFileProbeStrict(
     return !error && data === true;
   } catch (_) {
     return false;
+  }
+}
+
+async function codecProfileBackgroundBlockReason(
+  db: SupabaseClient,
+  userId: string,
+  targetUrl = "",
+): Promise<string | null> {
+  // Keep recent watch/events and subtitle-generation gates. A metadata probe
+  // uses the existing crawler activity reader, not the generic reader which
+  // also treats passive app presence and completed metadata work as playback.
+  const initial = await episodeBackgroundBlockReason(db, userId);
+  if (initial) return initial;
+  try {
+    const { data: sessions, error } = await db.from("cloud_playback_sessions")
+      .select("id").eq("user_id", userId).in("status", ["pending", "ready"])
+      .gt("expires_at", new Date().toISOString()).limit(1);
+    if (error) return "viewer-guard-unavailable";
+    if (sessions?.length) return "live-session";
+    if (!targetUrl) return null;
+    const key = providerAccountKeyFromUrl(targetUrl);
+    if (!key) return "provider-account-unresolved";
+    const hash = await providerAccountHashFromUrl(targetUrl);
+    const { data: shared, error: sharedError } = await db.from("cloud_playback_sessions")
+      .select("id").eq("provider_account_hash", hash).in("status", ["pending", "ready"])
+      .gt("expires_at", new Date().toISOString()).limit(1);
+    if (sharedError) return "provider-guard-unavailable";
+    if (shared?.length) return "provider-account-busy";
+    return await providerAccountBusyForCrawler(db, key) ? "provider-account-busy" : null;
+  } catch (_) {
+    return "background-guard-unavailable";
   }
 }
 
