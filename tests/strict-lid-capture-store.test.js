@@ -195,6 +195,7 @@ test('restart cleans only known orphan inference artifacts; no recursive deletio
 function pipelineFixture(store, options = {}) {
     const events = []; let sockets = 0; let reads = 0;
     const pipeline = createStrictLidCapturePipeline({ store, drainTimeoutMs: 10,
+        diagnostic: options.diagnostic || (() => {}),
         claimNetwork: () => { events.push('admit'); return { release() { events.push('network-release'); } }; },
         openBroker: async () => { events.push('broker'); sockets++;
             return { close: async () => {
@@ -203,7 +204,7 @@ function pipelineFixture(store, options = {}) {
                 sockets--;
             } };
         },
-        extract: async () => { events.push('extract'); reads++; if (options.extractFails) throw options.extractFails; return wav(); },
+        extract: async () => { events.push('extract'); reads++; if (options.extractFails) throw options.extractFails; return wav(options.seconds || 60); },
         infer: async p => {
             events.push('infer'); assert.equal(sockets, 0);
             assert.deepEqual(await fs.readFile(p), wav());
@@ -213,6 +214,23 @@ function pipelineFixture(store, options = {}) {
     });
     return { pipeline, events, reads: () => reads, sockets: () => sockets };
 }
+
+test('internal capture diagnostics distinguish short audio after drain without exposing arbitrary error text', async t => {
+    const f = await fixture(t); const diagnostics = [];
+    const p = pipelineFixture(f.store, { seconds: 20, diagnostic: value => diagnostics.push(value) });
+    await assert.rejects(p.pipeline.capture(binding(), {}), { code: 'LID_CAPTURE_DURATION_INVALID' });
+    assert.equal(p.sockets(), 0); assert.equal(f.store.snapshot().entries, 0);
+    assert.equal(diagnostics[0].stage, 'store');
+    assert.equal(diagnostics[0].code, 'LID_CAPTURE_DURATION_INVALID');
+    assert.equal(diagnostics[0].providerDrained, true);
+    const q = pipelineFixture(f.store, { diagnostic: value => diagnostics.push(value),
+        extractFails: Object.assign(Error('https://private.invalid/secret'), { code: 'SECRET_CREDENTIAL_VALUE' }) });
+    await assert.rejects(q.pipeline.capture(binding(), {}));
+    assert.equal(diagnostics[1].stage, 'extract'); assert.equal(diagnostics[1].code, 'UNCLASSIFIED');
+    assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|SECRET|private-owner|12345678/);
+    const r = pipelineFixture(f.store, { diagnostic: () => { throw Error('logger down'); } });
+    assert.equal((await r.pipeline.capture(binding(), {})).providerDrained, true);
+});
 
 test('pipeline captures only once, attests drain before storage, restarts and computes with ZERO provider reads', async t => {
     const f = await fixture(t); const first = pipelineFixture(f.store);

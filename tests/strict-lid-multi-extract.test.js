@@ -8,7 +8,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
-const { strictLidMultiExtractArgs, runStrictLidMultiExtract } = require('../services/media-gateway/src/strict-lid-multi-extract');
+const { strictLidMultiExtractArgs, runStrictLidMultiExtract, classifyStrictLidExtractFailure } = require('../services/media-gateway/src/strict-lid-multi-extract');
 const { parsePcm16Wav } = require('../services/media-gateway/src/strict-lid-audio-evidence');
 const base = { bin: '/fixture/ffmpeg', inputUrl: 'http://127.0.0.1:9999/strict-lid/fixture',
     outputs: [{ index: 1, path: path.join(os.tmpdir(), 'fixture-one.wav') }], startSeconds: 10, durationSeconds: 20, timeoutMs: 10000 };
@@ -44,6 +44,24 @@ function processFixture({ closeCode = 0, outputOverflow = false, manual = false 
         return child;
     } };
 }
+
+test('closed extraction diagnostics never expose source text and do not change process cleanup', async () => {
+    const diagnostics = []; const p = processFixture({ manual: true });
+    const pending = runStrictLidMultiExtract({ ...base, spawnImpl: p.spawnImpl, diagnostic: d => diagnostics.push(d) });
+    p.child.stderr.emit('data', Buffer.from("SECRET http://private.invalid/password Stream map '0:8' matches no "));
+    p.child.stderr.emit('data', Buffer.from('streams. Secret film name'));
+    p.child.emit('close', 1);
+    const result = await pending;
+    assert.equal(result.ok, false); assert.equal(result.processClosed, true);
+    assert.equal(diagnostics.length, 1); assert.equal(diagnostics[0].detail, 'track_map_missing');
+    assert.equal(diagnostics[0].exitCode, 1);
+    assert.doesNotMatch(JSON.stringify({ result, diagnostics }), /SECRET|private\.invalid|password|Secret film/);
+    assert.equal(classifyStrictLidExtractFailure('https://x.invalid/404?secret=403'), 'unclassified');
+    assert.equal(classifyStrictLidExtractFailure('Server returned 502 Bad Gateway'), 'loopback_http_error');
+    const q = processFixture({ closeCode: 1 });
+    assert.equal((await runStrictLidMultiExtract({ ...base, spawnImpl: q.spawnImpl,
+        diagnostic: () => { throw Error('logger unavailable'); } })).processClosed, true);
+});
 
 test('a cancelled or viewer-preempted extraction starts no child', async () => {
     const p = processFixture(); const signal = AbortSignal.abort();

@@ -1,0 +1,94 @@
+"""Two diagnostic modules only; no new provider request, sample or retry reset."""
+import copy
+import importlib.util
+import json
+import os
+import pathlib
+import re
+import sys
+import tarfile
+import time
+
+ROOT=pathlib.Path('/home/adrien/.norva/enrichment-pilot20-20260911')
+PATCH=ROOT/'diagnostics-20260912'
+spec=importlib.util.spec_from_file_location('release',ROOT/'deploy-enrichment-pilot20-20260911.py')
+d=importlib.util.module_from_spec(spec);spec.loader.exec_module(d)
+FILES=('strict-lid-capture-pipeline.js','strict-lid-multi-extract.js')
+
+
+def paused():
+    marker=d.pilot.private(d.pilot.ROOT/'process20.private.json');proc=pathlib.Path('/proc')/str(marker['pid'])
+    if proc.exists():d.require((proc/'stat').read_text().rsplit(')',1)[1].split()[19]!=marker['startTicks'],'pilot_operator_still_alive')
+    d.require(not (ROOT/'pilot-closed.private.json').exists(),'pilot_already_closed')
+    plan=d.saved('plan.private.json')
+    d.require(d.prior.crons()==[{**j,'active':False} for j in plan['crons']],'pilot_crons_changed')
+    d.require(plan['gate']['expiresAt'] and not d.gw.health()['languageEnrichmentPilot']['expired'],'pilot_expired')
+    d.invariant(plan)
+    return plan
+
+
+def stage(commit):
+    d.require(re.fullmatch('[a-f0-9]{40}',commit) is not None,'commit_invalid')
+    plan=paused();d.verify_service(d.SERVICES[0],plan)
+    d.require(not PATCH.exists() and not (ROOT/'diagnostic-revision.private.json').exists(),'diagnostic_already_staged')
+    PATCH.mkdir(mode=0o700);context=PATCH/'context';context.mkdir(mode=0o700)
+    allowed={'services/media-gateway/src/'+n:n for n in FILES}
+    with tarfile.open(ROOT/'diagnostic-source.tar') as archive:
+        members=[m for m in archive.getmembers() if not m.isdir()]
+        d.require(len(members)==2 and {m.name for m in members}==set(allowed),'diagnostic_archive_scope')
+        for member in members:
+            d.require(member.isfile() and 0<member.size<180000,'diagnostic_archive_entry')
+            target=context/allowed[member.name]
+            target.write_bytes(archive.extractfile(member).read().replace(b'\r\n',b'\n'));target.chmod(0o600)
+    after={**plan['sourceAfter'],**{n:d.sha((context/n).read_bytes()) for n in FILES}}
+    d.require(all(after[n]!=plan['sourceAfter'][n] for n in FILES),'diagnostic_unchanged')
+    current=d.gw.inspect(d.SERVICES[0]);image='norva-media-gateway:enrichment-pilot20-diagnostics-20260912'
+    (context/'Dockerfile').write_text('ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n'+''.join('COPY --chmod=0644 '+n+' /app/src/'+n+'\n' for n in FILES))
+    d.gw.run(['docker','build','--network','none','--build-arg','BASE_IMAGE='+current['Image'],'-t',image,str(context)])
+    for name in FILES:d.gw.run(['docker','run','--rm','--network','none','--read-only','--memory','512m','--cpus','1','--entrypoint','node',image,'--check','/app/src/'+name])
+    revision={'originalPlanSha256':d.sha(d.artifact('plan.private.json')),'commit':commit,
+        'image':image,'imageIdentity':d.gw.image_identity(image),'sourceAfter':after,'createdAt':d.stamp()}
+    d.gw.private_write(PATCH/'revision.private.json',revision)
+    print(json.dumps({'diagnosticStaged':True,'modules':2,'providerRequests':0,'commit':commit}))
+
+
+def deploy():
+    plan=paused();d.idle();d.verify_service(d.SERVICES[0],plan)
+    d.require(not (ROOT/'diagnostic-revision.private.json').exists(),'diagnostic_already_deployed')
+    buffer=d.gw.health()['languageCaptureBuffer']
+    d.require(all(buffer[k]==0 for k in ('entries','bytes','reservations','computations')),'diagnostic_audio_pending')
+    revision=json.loads((PATCH/'revision.private.json').read_text())
+    changed=copy.deepcopy(plan)
+    for key in ('image','imageIdentity','sourceAfter'):changed[key]=revision[key]
+    original=d.gw.inspect(d.SERVICES[0]);expected=d.expected_container(changed,d.SERVICES[0])
+    created=d.gw.docker_api('POST','/containers/create?name=norva-media-gateway-pilot20-diagnostic-candidate',d.gw.clone_payload(expected,changed['image']))
+    receipt={'candidateContainer':created['Id'],'candidateName':'norva-media-gateway-pilot20-diagnostic-candidate'}
+    d.gw.private_write(PATCH/'intent.private.json',{'originalContainer':original,'receipt':receipt,'at':d.stamp()})
+    d.gw.assert_clone(expected,d.gw.inspect(created['Id']),changed['image']);d.idle()
+    try:
+        d.gw.run(['docker','stop','--time','20',original['Id']])
+        d.gw.run(['docker','rename',original['Id'],'norva-media-gateway-pilot20-before-diagnostics'])
+        d.gw.run(['docker','rename',created['Id'],d.SERVICES[0]]);d.gw.run(['docker','start',created['Id']])
+        ready=False
+        for _ in range(25):
+            try:d.verify_service(d.SERVICES[0],changed);ready=True;break
+            except Exception:time.sleep(1)
+        d.require(ready,'diagnostic_gateway_unhealthy')
+    except Exception:
+        d.edge.restore(d.SERVICES[0],{'containers':{d.SERVICES[0]:original}},receipt)
+        raise RuntimeError('diagnostic_failed_original_restored') from None
+    d.save('diagnostic-revision.private.json',revision)
+    d.invariant(plan)
+    print(json.dumps({'diagnosticDeployed':True,'modules':2,'sampleFiles':20,'oldContainerRetained':True,
+        'newProviderRequests':0,'thresholdsChanged':False,'commit':revision['commit']}))
+
+
+if __name__=='__main__':
+    os.umask(0o077)
+    try:
+        if sys.argv[1]=='stage':stage(sys.argv[2])
+        elif sys.argv[1]=='deploy':deploy()
+        else:raise RuntimeError('unknown_phase')
+    except Exception as error:
+        code=str(error)
+        print(json.dumps({'ok':False,'code':code if re.fullmatch('[a-zA-Z0-9_:.-]{1,120}',code) else 'diagnostic_release_failed'}));sys.exit(1)

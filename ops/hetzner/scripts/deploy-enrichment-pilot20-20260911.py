@@ -55,6 +55,17 @@ def saved(name):
         newer=json.loads(gw.safe_file(ROOT,revision.name).read_text())
         require(newer['originalPlanSha256']==sha(artifact(name)),'cohort_revision_drift')
         value['gate']=newer['gate'];value['gatewayEnv']=newer['gatewayEnv']
+    diagnostic_revision=ROOT/'diagnostic-revision.private.json'
+    if name=='plan.private.json' and diagnostic_revision.exists():
+        newer=json.loads(gw.safe_file(ROOT,diagnostic_revision.name).read_text())
+        require(newer['originalPlanSha256']==sha(artifact(name)),'diagnostic_revision_drift')
+        # Same index.js, cohort, deadlines, flags and environment. Only two
+        # internal diagnostic helpers change; the immutable source plan stays.
+        require(newer['sourceAfter']['index.js']==value['sourceAfter']['index.js'],'diagnostic_index_changed')
+        require(set(newer['sourceAfter'])==set(value['sourceAfter']) and all(
+            newer['sourceAfter'][k]==v for k,v in value['sourceAfter'].items()
+            if k not in ('strict-lid-capture-pipeline.js','strict-lid-multi-extract.js')),'diagnostic_scope_changed')
+        for key in ('image','imageIdentity','sourceAfter'):value[key]=newer[key]
     if name=='plan.private.json' and (ROOT/'pilot-closed.private.json').exists():
         closed=json.loads(gw.safe_file(ROOT,'pilot-closed.private.json').read_text())
         value['gate']=None;value['gatewayEnv']=closed['gatewayEnv']
@@ -474,9 +485,27 @@ def watch_finish():
         time.sleep(30)
 
 
-def launch_watchdog():
-    marker=ROOT/'finish-watchdog.private.json';require(not marker.exists(),'watchdog_already_started')
-    with (ROOT/'finish-watchdog.log').open('x') as output:
+def stop_sleeping_watchdog():
+    marker=saved('finish-watchdog.private.json');proc=pathlib.Path('/proc')/str(marker['pid'])
+    args=(proc/'cmdline').read_bytes().split(b'\0')
+    require(str(pathlib.Path(__file__).resolve()).encode() in args and b'watch_finish' in args,'watchdog_identity_changed')
+    require((proc/'stat').read_text().rsplit(')',1)[1].split()[19]==marker['startTicks'],'watchdog_pid_reused')
+    state=pilot.private(pilot.ROOT/'state.private.json');sample=pilot.private(pilot.ROOT/'plan.private.json')
+    require(state.get('runtimeStatus')=='running' and time.time()<sample['expiresEpoch'],'watchdog_closing')
+    require('nanosleep' in (proc/'wchan').read_text(),'watchdog_not_sleeping')
+    import signal
+    os.kill(marker['pid'],signal.SIGTERM)
+    print(json.dumps({'onlySleepingWatchdogStopped':True,'pilotDeadlineUnchanged':True}))
+
+
+def launch_watchdog(resume=False):
+    marker=ROOT/'finish-watchdog.private.json';suffix=''
+    if resume:
+        previous=saved(marker.name);proc=pathlib.Path('/proc')/str(previous['pid'])
+        if proc.exists():require((proc/'stat').read_text().rsplit(')',1)[1].split()[19]!=previous['startTicks'],'watchdog_still_alive')
+        suffix='-resume-'+str(time.time_ns());marker.rename(ROOT/('finish-watchdog'+suffix+'.private.json'))
+    else:require(not marker.exists(),'watchdog_already_started')
+    with (ROOT/('finish-watchdog'+suffix+'.log')).open('x') as output:
         child=subprocess.Popen([sys.executable,str(pathlib.Path(__file__).resolve()),'watch_finish'],
             stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,start_new_session=True)
     save(marker.name,{'pid':child.pid,'startTicks':(pathlib.Path('/proc')/str(child.pid)/'stat').read_text().rsplit(')',1)[1].split()[19],
@@ -489,7 +518,8 @@ if __name__=='__main__':
     try:
         require(ROOT.is_dir() and not ROOT.is_symlink(),'release_root_missing')
         phase=sys.argv[1]
-        if phase in ('preflight','prepare','unpack','stage','pause','database','idle','correct_unstarted_cohort','finish','watch_finish','launch_watchdog'):globals()[phase]()
+        if phase in ('preflight','prepare','unpack','stage','pause','database','idle','correct_unstarted_cohort','finish','watch_finish','launch_watchdog','stop_sleeping_watchdog'):globals()[phase]()
+        elif phase=='resume_watchdog':launch_watchdog(True)
         elif phase in ('gateway','edge1','edge2','selection'):deploy(SERVICES[('gateway','edge1','edge2','selection').index(phase)])
         elif phase in ('verify','enable'):verify(phase=='enable')
         else:raise RuntimeError('unknown_phase')

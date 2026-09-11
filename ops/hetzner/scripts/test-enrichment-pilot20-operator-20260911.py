@@ -1,6 +1,7 @@
 """Offline executable configuration tests; no production imports or I/O."""
 import ast
 import copy
+import json
 import pathlib
 import tempfile
 import types
@@ -88,6 +89,38 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("waiting_for_private_audio_expiry",SOURCE)
         self.assertIn("newLogicPromotedToFleet':False",SOURCE)
         self.assertIn("idle();buffer=gw.health()['languageCaptureBuffer']",SOURCE)
+
+    def test_diagnostic_revision_preserves_immutable_plan_and_all_unrelated_modules(self):
+        selected=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='saved']
+        with tempfile.TemporaryDirectory() as temp:
+            root=pathlib.Path(temp)
+            original={'sourceAfter':{'index.js':'i','unchanged.js':'u',
+                'strict-lid-capture-pipeline.js':'old-p','strict-lid-multi-extract.js':'old-m'},
+                'gatewayEnv':{'SECRET':'retained'},'gate':{'fileKeys':['same-cohort'],'expiresAt':'unchanged'}}
+            before=json.dumps(original);(root/'plan.private.json').write_text(before)
+            revision={'originalPlanSha256':'original-hash','sourceAfter':{**original['sourceAfter'],
+                'strict-lid-capture-pipeline.js':'new-p','strict-lid-multi-extract.js':'new-m'},
+                'image':'new-image','imageIdentity':{'index':'new-digest'}}
+            path=root/'diagnostic-revision.private.json';path.write_text(json.dumps(revision))
+            ns={'json':json,'ROOT':root,'gw':types.SimpleNamespace(safe_file=lambda r,n:r/n),
+                'require':require,'sha':lambda _: 'original-hash','artifact':lambda _:b'original'}
+            exec(compile(ast.Module(body=selected,type_ignores=[]),'diagnostic-revision','exec'),ns)
+            updated=ns['saved']('plan.private.json')
+            self.assertEqual(updated['gatewayEnv'],original['gatewayEnv']);self.assertEqual(updated['gate'],original['gate'])
+            self.assertEqual((root/'plan.private.json').read_text(),before)
+            revision['sourceAfter']['unchanged.js']='unexpected';path.write_text(json.dumps(revision))
+            with self.assertRaisesRegex(RuntimeError,'diagnostic_scope_changed'):ns['saved']('plan.private.json')
+
+    def test_diagnostic_deployment_keeps_cohort_and_waits_for_audio_drain(self):
+        patch=pathlib.Path(__file__).with_name('deploy-enrichment-pilot20-diagnostics-20260912.py').read_text(encoding='utf8')
+        self.assertIn("FILES=('strict-lid-capture-pipeline.js','strict-lid-multi-extract.js')",patch)
+        self.assertIn("for k in ('entries','bytes','reservations','computations')",patch)
+        self.assertIn('d.idle()',patch)
+        self.assertNotIn('write=True',patch)
+        self.assertNotIn('urlopen',patch)
+        self.assertNotIn("pilot.save",patch)
+        self.assertIn('watchdog_pid_reused',SOURCE)
+        self.assertIn('watchdog_closing',SOURCE)
 
 
 if __name__=='__main__':unittest.main()

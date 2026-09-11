@@ -416,6 +416,40 @@ failures are kept in its denominator, not retried with replacement files. No
 throughput improvement, 100% success or new certified language is claimed from
 these first partial observations.
 
+## Pilot diagnostic follow-up, 12 September (UTC+2)
+
+The original 20-file cohort remains immutable. Before the diagnostic pause,
+16 file-probe slots had been consumed: one new English track declaration,
+eight failed/inconclusive inventories, seven files in validation and four still
+waiting. One validation window reached a durable checkpoint; this is not a
+completed/certified file. Pre-existing French/Japanese track labels are not
+counted as pilot discoveries. The observed network peak reached two brokers,
+with no more than one exact-file lease per ordinary account.
+
+Existing Edge diagnostics place seven inventory failures at the Gateway probe
+and one at strict profile validation. The Gateway's latest probe classifier is
+`codec_probe_file_unavailable`; this does not retrospectively classify all
+seven failures. Capture failures were flattened to a generic Gateway error.
+The exact idle operator was therefore stopped, without interrupting Edge work,
+viewers or FFmpeg and without resetting jobs, attempts or sample membership.
+
+The follow-up changes only two Gateway helpers to emit closed internal
+diagnostics: capture stage/result and bounded FFmpeg failure categories. Raw
+stderr is transient (at most 8 KiB), never returned or logged. No provider URL,
+account, capability handle, title, transcript or language prediction is emitted.
+Logger failures cannot affect admission, cleanup or retry decisions. The
+deployment retains the immutable original plan, old image/container and exact
+cohort/deadline. A separately validated revision updates only these two module
+hashes and the image; the closure watchdog reads the revision after restart.
+
+Validation: focused Node tests 43 passed/2 native-only skipped; deployment tests
+8 passed; isolated native runtime tests 127 passed/0 skipped, network disabled,
+zero provider requests. The first full parallel run had one existing
+complete-cache abort-timing failure (4,487 passed, 14 skipped); its focused
+rerun passed 39/39 runnable tests. A complete lower-concurrency rerun is required
+before publishing this diagnostic follow-up. No media or test threshold is
+weakened to conceal the failure.
+
 ## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty
