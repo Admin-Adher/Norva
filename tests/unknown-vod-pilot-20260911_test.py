@@ -84,6 +84,25 @@ class PilotTests(unittest.TestCase):
         bad=ready();bad['tracks'][0]['index']=9
         self.assertFalse(p.profile_ready(bad))
 
+    def test_exact_demuxer_families_keep_their_original_fingerprint(self):
+        for container in ('movmp4m4a3gp3g2mj2','webm','mpeg','mpegts'):
+            value=ready();value['profile']['container']=container
+            before=copy.deepcopy(value)
+            self.assertTrue(p.profile_ready(value))
+            self.assertEqual(value,before)
+        for container in ('hls','dash','unknown','mp4hls','mpegtslive'):
+            value=ready();value['profile']['container']=container
+            self.assertFalse(p.profile_ready(value))
+
+    def test_reconcile_successful_mp4_inventory_never_repeats_network(self):
+        value=ready();value['profile']['container']='movmp4m4a3gp3g2mj2'
+        self.state['rows']['1'].update(state='probe_insufficient',probeSucceeded=True,probeAttempts=1)
+        with patch.object(p,'current',return_value=value),patch.object(p,'header_probe') as probe,\
+                patch.object(p,'enqueue',return_value={'jobId':'50000000-0000-4000-8000-000000000001'}) as start:
+            p.step(self.plan,self.state)
+        probe.assert_not_called();start.assert_called_once()
+        self.assertEqual(self.state['rows']['1']['state'],'validating')
+
     def test_missing_inventory_gets_only_one_header_attempt(self):
         value={'profile':{},'tracks':None,'audioProbed':False,'activeJobs':0,'starts24h':0}
         with patch.object(p,'current',return_value=value),patch.object(p,'header_probe',return_value={
@@ -166,6 +185,14 @@ class PilotTests(unittest.TestCase):
             p.step(self.plan,self.state)
         probe.assert_not_called()
         self.assertEqual(self.state['rows']['1']['state'],'planned')
+
+    def test_existing_provider_circuit_defers_without_consuming_file_attempt(self):
+        value=ready();value['probeCircuitRetryAt']='2099-01-01T00:00:00Z'
+        with patch.object(p,'current',return_value=value),patch.object(p,'header_probe') as probe,patch.object(p,'enqueue') as start:
+            p.step(self.plan,self.state)
+        probe.assert_not_called();start.assert_not_called()
+        self.assertEqual(self.state['rows']['1']['probeAttempts'],0)
+        self.assertGreater(self.state['providerCooldowns'][row()['identity_key']],time.time())
 
     def test_three_initial_failures_stop_expansion(self):
         self.state['rows'].update({str(n):{'state':'probe_failed_or_uncertain'} for n in (10,11,12)})

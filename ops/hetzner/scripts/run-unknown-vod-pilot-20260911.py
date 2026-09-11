@@ -174,6 +174,8 @@ def current(row):
     return query("""SELECT coalesce((SELECT jsonb_build_object('profile',public.vod_language_profile_snapshot(v.codec_profile),
  'tracks',c.audio_tracks,'audioProbed',c.audio_probed_at IS NOT NULL,'verified',c.audio_lang_verified_at IS NOT NULL,
  'retryAt',c.audio_lang_retry_at,'observedFingerprint',c.observed_profile_fingerprint,
+ 'probeCircuitRetryAt',(SELECT open_until FROM public.provider_probe_circuit
+ WHERE identity_key={identity_key} AND open_until>now()),
  'observedAt',c.observed_profile_probed_at,'observedProfile',c.observed_profile_snapshot,
  'job', (SELECT jsonb_build_object('id',j.id,'state',j.state,'createdAt',j.created_at,'errorCode',j.error_code,
  'owned',j.requested_by=v.user_id AND j.source_id=v.source_id AND j.variant_id=v.id,
@@ -211,7 +213,8 @@ def profile_ready(value):
         return False
     if p['probeSource'] == 'gatewayinband' and p.get('metadataComplete') is not True:
         return False
-    if p.get('container') not in {'mkv','matroska','matroskawebm','mp4','mov','avi','ogg','flv','mpg','ts'}:
+    if p.get('container') not in {'mkv','matroska','matroskawebm','webm','mp4','mov',
+            'movmp4m4a3gp3g2mj2','avi','ogg','flv','mpg','mpeg','ts','mpegts'}:
         return False
     try:
         observed = (value.get('observedFingerprint'), value.get('observedAt'), value.get('observedProfile'))
@@ -330,11 +333,22 @@ def step(plan, state):
     # normal worker, not a parallel test runner with independent provider access.
     for row in rows:
         receipt = state['rows'][str(row['sample'])]
+        if receipt['state'] == 'probe_insufficient' and receipt.get('probeSucceeded') is True:
+            # Reconcile a successful persisted inventory after a validator fix.
+            # This may admit the already captured MP4 family, but never repeat
+            # provider I/O, retry a failed request, or reset a validation job.
+            existing = current(row)
+            if not existing or not profile_ready(existing):
+                continue
+            receipt['state'] = 'probed'
+            receipt['reconciledPersistedProfileAt'] = now()
         if receipt['state'] not in ('planned','probed','validating','start_intent','probe_intent'):
             continue
         if receipt.get('nextEligibleEpoch',0) > time.time():
             continue
         if state.get('userCooldowns',{}).get(row['user_id'],0) > time.time():
+            continue
+        if state.get('providerCooldowns',{}).get(row['identity_key'],0) > time.time():
             continue
         value = current(row)
         if not value:
@@ -355,6 +369,12 @@ def step(plan, state):
             receipt['state'] = 'uncertain_requires_review'; continue
         if value.get('verified'):
             receipt['state'] = 'already_verified'; continue
+        if value.get('probeCircuitRetryAt'):
+            retry_epoch=datetime.datetime.fromisoformat(value['probeCircuitRetryAt'].replace('Z','+00:00')).timestamp()
+            if retry_epoch > time.time():
+                state.setdefault('providerCooldowns',{})[row['identity_key']]=retry_epoch
+                receipt['deferredReason']='provider-probe-circuit-open'
+                continue
         if value.get('retryAt'):
             retry_epoch=datetime.datetime.fromisoformat(value['retryAt'].replace('Z','+00:00')).timestamp()
             if retry_epoch > time.time():
