@@ -47,8 +47,14 @@ function runWhisperDetectOnly({
     setTimer = setTimeout,
     clearTimer = clearTimeout,
     onSpawn = null,
+    abortSignal = null,
 }) {
     return new Promise((resolve) => {
+        const abortedResult = (code = null) => ({
+            ok: false, lang: null, prob: 0, code, timedOut: false,
+            aborted: true, error: 'aborted',
+        });
+        if (abortSignal?.aborted) return resolve(abortedResult());
         const args = buildWhisperDetectOnlyArgs({ model, wavPath, threads });
         let child;
         try {
@@ -64,28 +70,21 @@ function runWhisperDetectOnly({
             });
             return;
         }
-        try {
-            if (typeof onSpawn === 'function') onSpawn(child);
-        } catch (error) {
-            child.on?.('error', () => {});
-            try { child.kill('SIGKILL'); } catch (_) {}
-            resolve({
-                ok: false,
-                lang: null,
-                prob: 0,
-                code: null,
-                timedOut: false,
-                error: `spawn hook failed: ${String(error?.message || error)}`,
-            });
-            return;
-        }
-
         let settled = false;
+        let aborted = false;
+        let hookFailed = false;
         let timedOut = false;
         let stdout = '';
         let stderr = '';
         let timer = null;
         let killGraceTimer = null;
+        const onAbort = () => {
+            if (settled || aborted) return;
+            aborted = true;
+            if (timer !== null) clearTimer(timer);
+            if (killGraceTimer !== null) clearTimer(killGraceTimer);
+            try { child.kill('SIGKILL'); } catch (_) {}
+        };
         const timeoutResult = (code = null) => ({
             ok: false,
             lang: null,
@@ -99,6 +98,7 @@ function runWhisperDetectOnly({
             settled = true;
             if (timer !== null) clearTimer(timer);
             if (killGraceTimer !== null) clearTimer(killGraceTimer);
+            abortSignal?.removeEventListener('abort', onAbort);
             resolve(value);
         };
         timer = setTimer(() => {
@@ -112,7 +112,7 @@ function runWhisperDetectOnly({
 
         child.stdout?.on('data', (chunk) => { stdout = appendBounded(stdout, chunk); });
         child.stderr?.on('data', (chunk) => { stderr = appendBounded(stderr, chunk); });
-        child.on('error', (error) => finish(timedOut ? timeoutResult() : {
+        child.on('error', (error) => finish(aborted ? abortedResult() : timedOut ? timeoutResult() : {
             ok: false,
             lang: null,
             prob: 0,
@@ -121,6 +121,12 @@ function runWhisperDetectOnly({
             error: `process error: ${String(error?.message || error)}`,
         }));
         child.on('close', (code) => {
+            if (aborted) { finish(abortedResult(code)); return; }
+            if (hookFailed) {
+                finish({ ok: false, lang: null, prob: 0, code,
+                    timedOut: false, error: 'spawn hook failed' });
+                return;
+            }
             if (timedOut) {
                 finish(timeoutResult(code));
                 return;
@@ -146,6 +152,15 @@ function runWhisperDetectOnly({
                 error: null,
             });
         });
+        // Attach close/error listeners before hooks can preempt the child.
+        if (abortSignal?.aborted) onAbort();
+        else abortSignal?.addEventListener('abort', onAbort, { once: true });
+        try {
+            if (!aborted && typeof onSpawn === 'function') onSpawn(child);
+        } catch (_) {
+            hookFailed = true;
+            try { child.kill('SIGKILL'); } catch (_) {}
+        }
     });
 }
 

@@ -7754,7 +7754,29 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
 
     lidBenchmarkBusy = true;
     let wavPath = null;
+    const clientAbort = new AbortController();
+    const onClientClose = () => {
+        if (!res.writableEnded) clientAbort.abort();
+    };
+    req.once('aborted', onClientClose);
+    res.once('close', onClientClose);
+    let benchmarkPreempted = false;
+    let fastRegistration = null;
+    const backgroundOptions = {
+        backgroundKey: proxyKeyFromUrl(claims.url),
+        preemptibleBackground: true,
+        abortSignal: clientAbort.signal,
+    };
+    const checkBenchmarkActive = (result = null) => {
+        if (result?.preempted === true || fastRegistration?.preempted === true
+            || viewerPlaybackActiveLocally()) benchmarkPreempted = true;
+        if (req.aborted || res.destroyed || result?.aborted === true) clientAbort.abort();
+        if (benchmarkPreempted || clientAbort.signal.aborted) {
+            throw new Error('LID benchmark interrupted');
+        }
+    };
     try {
+        checkBenchmarkActive();
         const extractStartedAt = performance.now();
         const ex = await withAccountJobLock(lockKey, () =>
             extractAudioWav(
@@ -7766,12 +7788,17 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
                 45_000,
                 claims.uid,
                 false,
+                clientAbort.signal,
             ));
         const extractMs = Math.round((performance.now() - extractStartedAt) * 100) / 100;
+        // Own the completed WAV before checking a close/preemption race so the
+        // finally block removes it even when no inference may start.
+        if (ex.ok) wavPath = ex.path;
+        checkBenchmarkActive(ex);
         if (!ex.ok) {
-            return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
+            return res.status(502).json({ error: 'Audio extraction failed',
+                details: sanitizeLanguageWavError(ex.error, claims.url) });
         }
-        wavPath = ex.path;
 
         const stat = await fsp.stat(wavPath);
         const wavBytes = stat.size;
@@ -7819,8 +7846,10 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
         const loadBefore = os.loadavg();
         const runCurrent = async () => {
             const cpuBefore = await readContainerCpuUsageMs();
+            checkBenchmarkActive();
             const startedAt = performance.now();
-            const value = await runWhisperDetect(wavPath);
+            const value = await runWhisperDetect(wavPath, backgroundOptions);
+            checkBenchmarkActive(value);
             currentMs = Math.round((performance.now() - startedAt) * 100) / 100;
             const cpuAfter = await readContainerCpuUsageMs();
             currentContainerCpuMs = cpuBefore == null || cpuAfter == null
@@ -7830,6 +7859,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
         };
         const runDetectOnly = async () => {
             const cpuBefore = await readContainerCpuUsageMs();
+            checkBenchmarkActive();
             const startedAt = performance.now();
             const value = await runWhisperDetectOnly({
                 bin: WHISPER_BIN,
@@ -7837,7 +7867,16 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
                 wavPath,
                 threads: WHISPER_THREADS,
                 timeoutMs: WHISPER_TIMEOUT_MS,
+                abortSignal: clientAbort.signal,
+                onSpawn: (child) => {
+                    fastRegistration = registerPreemptibleBackgroundWhisper(
+                        backgroundOptions.backgroundKey, child,
+                    );
+                },
             });
+            checkBenchmarkActive(value);
+            fastRegistration?.release?.();
+            fastRegistration = null;
             detectOnlyMs = Math.round((performance.now() - startedAt) * 100) / 100;
             const cpuAfter = await readContainerCpuUsageMs();
             detectOnlyContainerCpuMs = cpuBefore == null || cpuAfter == null
@@ -7853,6 +7892,7 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
             detectOnly = await runDetectOnly();
         }
 
+        checkBenchmarkActive();
         const transcript = detectLanguageFromText(current.text);
         const currentLanguage = String(current.lang || '').toLowerCase() || null;
         const currentProbability = Number(current.prob || 0);
@@ -7949,12 +7989,20 @@ app.post('/benchmark-language/:token', requireGatewayAuth, async (req, res) => {
             ...(wavCapture ? { wavCapture } : {}),
         });
     } catch (error) {
+        if (req.aborted || res.destroyed || res.writableEnded || clientAbort.signal.aborted) return;
+        if (benchmarkPreempted) {
+            return res.status(409).json({ error: 'LID benchmark preempted by viewer playback',
+                preempted: true, persisted: false });
+        }
         return res.status(502).json({
             error: 'LID benchmark failed',
-            details: String(error?.message || error),
+            details: sanitizeLanguageWavError(error?.message || error, claims.url),
         });
     } finally {
-        if (wavPath) fsp.unlink(wavPath).catch(() => {});
+        req.removeListener('aborted', onClientClose);
+        res.removeListener('close', onClientClose);
+        fastRegistration?.release?.();
+        if (wavPath) await fsp.unlink(wavPath).catch(() => {});
         lidBenchmarkBusy = false;
     }
 });
@@ -8287,6 +8335,10 @@ function extractAudioWav(
     inputOptions = null,
 ) {
     return new Promise((resolve) => {
+        if (abortSignal?.aborted) {
+            return resolve({ ok: false, aborted: true, timedOut: false,
+                signal: null, error: 'extraction request aborted before spawn' });
+        }
         if (globalPreemptible && viewerPlaybackActiveLocally()) {
             return resolve({
                 ok: false,
@@ -8817,6 +8869,11 @@ async function runStrictWhisperBatch(wavPaths, options = {}) {
 // best-effort (empties on failure). `lang`/`prob` are parsed from whisper's own LID line.
 function runWhisperDetect(wavPath, options = {}) {
     return new Promise((resolve) => {
+        const abortSignal = options.abortSignal;
+        if (abortSignal?.aborted) {
+            return resolve({ text: '', lang: null, prob: 0, aborted: true,
+                error: 'whisper request aborted before spawn' });
+        }
         const backgroundKey = String(options.backgroundKey || '');
         const preemptibleBackground = options.preemptibleBackground === true && Boolean(backgroundKey);
         if (preemptibleBackground && viewerPlaybackActiveLocally()) {
@@ -8828,9 +8885,11 @@ function runWhisperDetect(wavPath, options = {}) {
         whisperInferenceActive += 1;
         let inferenceReleased = false;
         let backgroundRegistration = null;
+        let abortListener = null;
         const releaseInference = () => {
             if (inferenceReleased) return;
             inferenceReleased = true;
+            if (abortListener) abortSignal?.removeEventListener('abort', abortListener);
             backgroundRegistration?.release?.();
             whisperInferenceActive = Math.max(0, whisperInferenceActive - 1);
         };
@@ -8866,6 +8925,7 @@ function runWhisperDetect(wavPath, options = {}) {
             const preempted = backgroundRegistration?.preempted === true;
             finish({
                 text: '', lang: null, prob: 0,
+                ...(abortSignal?.aborted ? { aborted: true } : {}),
                 ...(preempted
                     ? {
                         preempted: true,
@@ -8882,7 +8942,11 @@ function runWhisperDetect(wavPath, options = {}) {
             const prob = m ? (Number(m[2]) || 0) : 0;
             let text = '';
             try { text = await fsp.readFile(outPrefix + '.txt', 'utf8'); } catch (_) { text = ''; }
-            fsp.unlink(outPrefix + '.txt').catch(() => {});
+            await fsp.unlink(outPrefix + '.txt').catch(() => {});
+            if (abortSignal?.aborted) {
+                return finish({ text: '', lang: null, prob: 0, aborted: true,
+                    error: 'whisper request aborted' });
+            }
             if (backgroundRegistration?.preempted === true) {
                 return finish({
                     text: '', lang: null, prob: 0, preempted: true,
@@ -8892,6 +8956,14 @@ function runWhisperDetect(wavPath, options = {}) {
             if (code !== 0 && !text && !lang) console.warn(`[media-gateway] whisper exit ${code}: ${stderr.slice(-300)}`);
             finish({ text: String(text || '').trim(), lang, prob });
         });
+        // Cancellation is terminal for this operation. Wait for the child close
+        // handler before releasing the inference lane or accepting any output.
+        abortListener = () => {
+            clearTimeout(timer);
+            try { child.kill('SIGKILL'); } catch (_) {}
+        };
+        if (abortSignal?.aborted) abortListener();
+        else abortSignal?.addEventListener('abort', abortListener, { once: true });
     });
 }
 

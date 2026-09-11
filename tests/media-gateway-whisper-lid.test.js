@@ -398,9 +398,9 @@ test('LID benchmark is service-only, scoped, read-only and reproducibly pinned',
   assert.match(gateway, /gatewayVersion: GATEWAY_VERSION/);
   assert.match(gateway, /lidProductionCpuBusy\(\)/);
   assert.match(gateway, /digest\('hex'\);\s*\n/);
-  assert.match(gateway, /runWhisperDetect\(wavPath\)/);
+  assert.match(gateway, /runWhisperDetect\(wavPath, backgroundOptions\)/);
   assert.match(gateway, /runWhisperDetectOnly\(\{[\s\S]*wavPath,/);
-  assert.match(gateway, /claims\.uid,\s*\n\s*false,\s*\n\s*\)\)/);
+  assert.match(gateway, /claims\.uid,\s*\n\s*false,\s*\n\s*clientAbort\.signal,\s*\n\s*\)\)/);
   assert.match(gateway, /if \(entry\.preempted \|\| entry\.reportActivity === false\) continue/);
   assert.match(playback, /\.eq\("key", "lid_benchmark_enabled"\)/);
   assert.match(playback, /operator lease expired/);
