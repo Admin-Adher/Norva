@@ -373,8 +373,48 @@ proposed limits below, not the requirement for separate live verification.
   network forbidden. Deployment scripts clone existing container configuration
   and retain previous containers/trees rather than overwriting live files.
 
-Publication, deployed hashes and the real pilot result are not established by
-these local/synthetic checks. They must be recorded after those phases finish.
+### Publication and live activation (12 September, Paris)
+
+- Application series published through `a220bd7ad815e720af90d3746ebc5a2512ab1bd6`;
+  scoped Selection deployment correction published in `1756e48f4a2aca05c376ee681832be6bf74b8e72`.
+  Build Norva, Partners integration, Relay and Pages CI all succeeded for that
+  published revision. The final local full rerun also passed 4,486/4,500,
+  14 skipped, zero failures (111.76 seconds).
+- All five migrations applied with new flags initially false. Live checks:
+  13 service-only SECURITY DEFINER functions, zero anon/authenticated execute
+  grants; all three new private tables use RLS and prohibit client reads.
+  The protected quarantine's complete-row hash was unchanged.
+- Gateway, both Edge replicas and the Selection worker were replaced with
+  retained rollback containers. Installed source/model digests, full Edge
+  function-tree hashes and container configuration were compared. Existing
+  Selection helper versions differ from main: those live dependencies were
+  preserved, only worker + task pool + gateway adapter were replaced. The
+  actual resulting Selection import graph and 2,329-file manifest loaded in
+  a networkless fixture using its production image (zero provider requests).
+- An initial candidate inventory included already complete cache entries. No
+  pilot I/O or job dispatch had occurred. The superseded private sample and
+  unused Gateway container were retained; a guarded before-I/O correction
+  selected exactly 20 genuinely incomplete files, ten inventoried and ten
+  without inventory, across seven providers. No failed sample was replaced.
+- Pilot started at 22:09 UTC with its immutable file fence. The old cron health
+  reports inactive by design during this isolated run. The operator uses a
+  fresh authenticated named-dispatch health check instead; SQL admission and
+  provider occupancy checks are unchanged. Only due owned cohort jobs can be
+  scheduled, so a cooling early sample cannot starve later samples.
+- A separate bounded end-of-pilot watcher waits for playback, owned work and
+  temporary audio to drain/expire, then disables only the new pilot flags and
+  restores the two original cron active bits. New code remains installed;
+  this is NOT automatic promotion of new enrichment behavior to the fleet.
+  Its actual completion is a future verification, not claimed here.
+- Private operational evidence is under
+  `/home/adrien/.norva/enrichment-pilot20-20260911/` (never publish private plans,
+  container Env or provider coordinates). Aggregate progress is produced by
+  `run-enrichment-pilot20-20260911.py status`.
+
+The pilot has started, not finished. Initial busy accounts and HTTP 502 inventory
+failures are kept in its denominator, not retried with replacement files. No
+throughput improvement, 100% success or new certified language is claimed from
+these first partial observations.
 
 ## Earlier release proposal and bounded acceptance
 

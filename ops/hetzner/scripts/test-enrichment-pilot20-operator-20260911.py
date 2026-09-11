@@ -3,6 +3,7 @@ import ast
 import copy
 import pathlib
 import tempfile
+import types
 import unittest
 
 SOURCE=pathlib.Path(__file__).with_name('deploy-enrichment-pilot20-20260911.py').read_text(encoding='utf8')
@@ -63,6 +64,30 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("len(p['rows'])==20",runner)
         self.assertNotIn('UPDATE public.catalog_file_audio_validation_jobs',runner)
         self.assertNotIn('CREATE OR REPLACE',runner)
+        self.assertIn("retry_at<=now()",runner)
+        self.assertIn("quarantined_at IS NULL",runner)
+
+    def test_scoped_health_keeps_security_flags_and_uses_real_recent_dispatch(self):
+        source=pathlib.Path(__file__).with_name('run-enrichment-pilot20-20260911.py').read_text(encoding='utf8')
+        fn=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=='scoped_controls')
+        flags={'paused':False,'runtime':{'audioEnabled':True,'legacyEnabled':False,'workerHealthy':False}}
+        crons=[{'id':1,'active':True},{'id':2,'active':True}]
+        ns={'pilot':types.SimpleNamespace(query=lambda _:flags),'time':types.SimpleNamespace(time=lambda:1000),
+            'dispatch_healthy_at':999,'release':types.SimpleNamespace(saved=lambda _: {'crons':crons},
+                prior=types.SimpleNamespace(crons=lambda:[{**j,'active':False} for j in crons]))}
+        exec(compile(ast.Module(body=[fn],type_ignores=[]),'scoped-health','exec'),ns)
+        self.assertTrue(ns['scoped_controls']())
+        ns['dispatch_healthy_at']=900;self.assertFalse(ns['scoped_controls']())
+        ns['dispatch_healthy_at']=999;flags['runtime']['legacyEnabled']=True;self.assertFalse(ns['scoped_controls']())
+        flags['runtime']['legacyEnabled']=False;flags['paused']=True;self.assertFalse(ns['scoped_controls']())
+
+    def test_cohort_cannot_change_after_first_io_and_closure_waits_for_drain(self):
+        self.assertIn("r.get('probeAttempts',0)==0",SOURCE)
+        self.assertIn("state.get('dispatches',0)==0",SOURCE)
+        self.assertIn("started_cohort_immutable",SOURCE)
+        self.assertIn("waiting_for_private_audio_expiry",SOURCE)
+        self.assertIn("newLogicPromotedToFleet':False",SOURCE)
+        self.assertIn("idle();buffer=gw.health()['languageCaptureBuffer']",SOURCE)
 
 
 if __name__=='__main__':unittest.main()

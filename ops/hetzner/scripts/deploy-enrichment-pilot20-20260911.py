@@ -48,7 +48,17 @@ FLAGS = ('language_metadata_lane_enabled','language_capture_pipeline_enabled','s
     'selection_parallel_capture_enabled','language_exact_file_admission_enabled')
 
 
-def saved(name): return json.loads(gw.safe_file(ROOT,name).read_text())
+def saved(name):
+    value=json.loads(gw.safe_file(ROOT,name).read_text())
+    revision=ROOT/'cohort-revision.private.json'
+    if name=='plan.private.json' and revision.exists():
+        newer=json.loads(gw.safe_file(ROOT,revision.name).read_text())
+        require(newer['originalPlanSha256']==sha(artifact(name)),'cohort_revision_drift')
+        value['gate']=newer['gate'];value['gatewayEnv']=newer['gatewayEnv']
+    if name=='plan.private.json' and (ROOT/'pilot-closed.private.json').exists():
+        closed=json.loads(gw.safe_file(ROOT,'pilot-closed.private.json').read_text())
+        value['gate']=None;value['gatewayEnv']=closed['gatewayEnv']
+    return value
 def save(name,value): gw.private_write(ROOT/name,value)
 def artifact(name): return gw.safe_file(ROOT,name).read_bytes().replace(b'\r\n',b'\n')
 def stamp(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -77,7 +87,7 @@ def preflight():
 
 def prepare():
     require(not (ROOT/'cohort.private.json').exists(),'cohort_already_prepared')
-    rows=pilot.filter_provider_labels(pilot.query(pilot.candidate_sql()))
+    rows=unknown_candidates()
     # Prefer a mixture of already inventoried unknown tracks and unprobed files.
     # Never select an existing terminal/failed/quarantined validation job.
     ready=pilot.choose([r for r in rows if r['has_track_map']],10)
@@ -90,8 +100,70 @@ def prepare():
     require(len({r['fileKey'] for r in chosen})==20,'duplicate_cohort')
     save('cohort.private.json',{'protocol':1,'preparedAt':stamp(),'rows':chosen})
     print(json.dumps({'prepared':20,'providers':len({r['identity_key'] for r in chosen}),
-        'sourceAccounts':len({r['source_id'] for r in chosen}),'withTrackMap':len(ready),
+        'sourceAccounts':len({r['source_id'] for r in chosen}),'withTrackMap':sum(r['has_track_map'] for r in chosen),
         'selectionIncluded':0,'selectionReason':'no_nonterminal_jobs_available','providerRequests':0}))
+
+
+def unknown_candidates():
+    predicate="""WHERE v.item_type='movie' AND (c.audio_probed_at IS NULL
+ OR jsonb_typeof(c.audio_tracks) IS DISTINCT FROM 'array'
+ OR jsonb_array_length(CASE WHEN jsonb_typeof(c.audio_tracks)='array' THEN c.audio_tracks ELSE '[]'::jsonb END)=0
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.audio_tracks)='array'
+ THEN c.audio_tracks ELSE '[]'::jsonb END) a WHERE coalesce(lower(btrim(coalesce(a->>'lang',a->>'language'))),'')
+ IN ('','und','un','mis','mul','zxx','nar','unknown')))"""
+    query=pilot.candidate_sql()
+    require(query.count("WHERE v.item_type='movie'")==1,'candidate_query_changed')
+    return pilot.filter_provider_labels(pilot.query(query.replace("WHERE v.item_type='movie'",predicate)))
+
+
+def correct_unstarted_cohort():
+    # An inventory-quality correction is allowed only BEFORE ANY pilot I/O or
+    # job dispatch. Preserve the superseded private plan; never replace failed
+    # samples or extend the originally approved deadline.
+    plan=saved('plan.private.json');invariant(plan);idle()
+    require(not (ROOT/'cohort-revision.private.json').exists(),'cohort_already_corrected')
+    state=pilot.private(pilot.ROOT/'state.private.json');sample=pilot.private(pilot.ROOT/'plan.private.json')
+    require(all(r['state']=='planned' and r.get('probeAttempts',0)==0 for r in state['rows'].values())
+        and state.get('dispatches',0)==0 and not (pilot.ROOT/'process20.private.json').exists(),'started_cohort_immutable')
+    require(gw.health()['languageCaptureBuffer']['entries']==0,'retained_audio_prevents_reselection')
+    pool=unknown_candidates();ready=pilot.choose([r for r in pool if r['has_track_map']],10)
+    unprobed=pilot.choose([r for r in pool if not r['has_track_map']],20-len(ready))
+    rows=ready+unprobed
+    require(len(rows)==20,'unknown_cohort_too_small')
+    for n,row in enumerate(rows,1):
+        require(pilot.cache_result(pilot.current(row)) in ('incomplete_tracks','no_audio_inventory'),'candidate_already_complete')
+        row['sample']=n;row['fileKey']=sha(json.dumps(['provider',row['identity_key'],'movie',row['external_id']],separators=(',',':')))
+    gate={**plan['gate'],'fileKeys':[r['fileKey'] for r in rows]}
+    revised=copy.deepcopy(plan);revised['gate']=gate
+    revised['gatewayEnv']['LANGUAGE_ENRICHMENT_PILOT_JSON']=json.dumps(gate,separators=(',',':'))
+    original=gw.inspect(SERVICES[0]);verify_service(SERVICES[0],plan)
+    expected=expected_container(revised,SERVICES[0]);image=plan['image']
+    created=gw.docker_api('POST','/containers/create?name=norva-media-gateway-pilot20-cohort-candidate',gw.clone_payload(expected,image))
+    receipt={'candidateContainer':created['Id'],'candidateName':'norva-media-gateway-pilot20-cohort-candidate'}
+    save('cohort-correction-intent.private.json',{'originalContainer':original,'receipt':receipt,'gate':gate,'rows':rows})
+    gw.assert_clone(expected,gw.inspect(created['Id']),image);idle()
+    try:
+        gw.run(['docker','stop','--time','20',original['Id']]);gw.run(['docker','rename',original['Id'],'norva-media-gateway-pilot20-superseded-unused'])
+        gw.run(['docker','rename',created['Id'],SERVICES[0]]);gw.run(['docker','start',created['Id']])
+        ready=False
+        for _ in range(25):
+            try:verify_service(SERVICES[0],revised);ready=True;break
+            except Exception:time.sleep(1)
+        require(ready,'revised_cohort_unhealthy')
+    except Exception:
+        edge.restore(SERVICES[0],{'containers':{SERVICES[0]:original}},receipt)
+        raise RuntimeError('cohort_update_failed_original_restored') from None
+    # Explicitly named, never recursive; originals are recoverable audit data.
+    for name in ('plan.private.json','state.private.json'):
+        source=gw.safe_file(pilot.ROOT,name);target=pilot.ROOT/(name+'.superseded-before-io')
+        require(not target.exists(),'cohort_audit_target_exists');source.rename(target)
+    sample['rows']=rows;pilot.validate(sample);pilot.save(pilot.ROOT/'plan.private.json',sample,True)
+    pilot.save(pilot.ROOT/'state.private.json',{'planSha256':sha((pilot.ROOT/'plan.private.json').read_bytes()),
+        'rows':{str(r['sample']):{'state':'planned','probeAttempts':0} for r in rows},'updatedAt':stamp()},True)
+    save('cohort-revision.private.json',{'reason':'exclude_already_complete_cache_before_any_io','at':stamp(),
+        'originalPlanSha256':sha(artifact('plan.private.json')),'gate':gate,'gatewayEnv':revised['gatewayEnv']})
+    print(json.dumps({'correctedBeforeAnyIO':True,'unknownFiles':20,'inventoriedUnknown':sum(r['has_track_map'] for r in rows),
+        'withoutInventory':len(unprobed),'providers':len({r['identity_key'] for r in rows}),'originalsRetained':True}))
 
 
 def unpack():
@@ -291,7 +363,9 @@ def verify_service(name,plan,candidate=True):
         require(gw.binary_snapshot()==plan['binaries'],'runtime_binary_changed');gw.assert_runtime(gw.health(),plan['runtime'])
         if candidate:
             h=gw.health();p=h.get('languageEnrichmentPilot',{})
-            require(p.get('mode')=='pilot' and p.get('files')==20 and not p.get('expired'),'pilot_fence_missing')
+            mode=plan['gatewayEnv']['LANGUAGE_ENRICHMENT_ACTIVATION_MODE']
+            require(p.get('mode')==mode and p.get('files')==(20 if mode=='pilot' else 0)
+                and (mode!='pilot' or not p.get('expired')),'pilot_fence_missing')
     elif name in SERVICES[1:3]:
         require(edge.hashes(lib.edge_root(current))==plan['edgeAfter' if candidate else 'edgeBefore'],'edge_hash_mismatch')
         lib.edge_health(current)
@@ -339,12 +413,83 @@ def verify(enable=False):
     save('verify-'+str(time.time_ns())+'.json',result);print(json.dumps(result))
 
 
+def finish():
+    """Restore existing fleet behavior, never promote the new logic to fleet."""
+    plan=saved('plan.private.json');invariant(plan)
+    if (ROOT/'pilot-closed.private.json').exists():
+        verify_service(SERVICES[0],plan);prior.alter_crons(plan,False)
+        return True
+    state=pilot.private(pilot.ROOT/'state.private.json');sample=pilot.private(pilot.ROOT/'plan.private.json')
+    require(state.get('runtimeStatus') in ('finished','stopped','expired') or time.time()>=sample['expiresEpoch'],'pilot_not_finished')
+    # All owned work and playback must drain naturally. Keep the expiring store
+    # online until its last record/PCM is removed by ACK or the 30-minute TTL.
+    idle();buffer=gw.health()['languageCaptureBuffer']
+    require(all(buffer[k]==0 for k in ('entries','bytes','reservations','computations')),'waiting_for_private_audio_expiry')
+    require(list((ROOT/'audio-private').iterdir())==[ROOT/'audio-private'/'owner.lock'],'private_audio_cleanup_incomplete')
+    dormant=copy.deepcopy(plan)
+    dormant['gatewayEnv'].update(LANGUAGE_ENRICHMENT_ACTIVATION_MODE='disabled',LANGUAGE_ENRICHMENT_PILOT_JSON='',
+        LANGUAGE_METADATA_LANE_ENABLED='0',LANGUAGE_CAPTURE_PIPELINE_ENABLED='0',LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED='0')
+    dormant['gate']=None
+    current=gw.inspect(SERVICES[0]);expected=expected_container(dormant,SERVICES[0])
+    created=gw.docker_api('POST','/containers/create?name=norva-media-gateway-pilot20-finished',gw.clone_payload(expected,plan['image']))
+    receipt={'candidateContainer':created['Id'],'candidateName':'norva-media-gateway-pilot20-finished'}
+    save('finish-intent.private.json',{'originalContainer':current,'receipt':receipt,'at':stamp()})
+    gw.assert_clone(expected,gw.inspect(created['Id']),plan['image']);idle()
+    try:
+        gw.run(['docker','stop','--time','20',current['Id']]);gw.run(['docker','rename',current['Id'],'norva-media-gateway-pilot20-completed-retained'])
+        gw.run(['docker','rename',created['Id'],SERVICES[0]]);gw.run(['docker','start',created['Id']])
+        ready=False
+        for _ in range(25):
+            try:verify_service(SERVICES[0],dormant);ready=True;break
+            except Exception:time.sleep(1)
+        require(ready,'dormant_gateway_unhealthy')
+    except Exception:
+        edge.restore(SERVICES[0],{'containers':{SERVICES[0]:current}},receipt)
+        raise RuntimeError('pilot_finish_failed_original_restored') from None
+    # These flags were absent/false before the release. Restore exactly that
+    # disabled state, without reverting migrations or changing any other flag.
+    sql("UPDATE public.admin_feature_flags SET enabled=false WHERE key IN ("+','.join(fleet.literal(k) for k in FLAGS)+");",write=True)
+    invariant(plan)
+    save('pilot-closed.private.json',{'closedAt':stamp(),'gatewayEnv':dormant['gatewayEnv'],
+        'newLogicPromotedToFleet':False,'privateAudioRemainingBytes':0,'newCodeStillDeployed':True})
+    prior.alter_crons(plan,False)
+    print(json.dumps({'pilotClosed':True,'oldIntakeCronsRestored':True,'privateAudioRemainingBytes':0,
+        'newCodeStillDeployed':True,'newLogicPromotedToFleet':False}),flush=True)
+    return True
+
+
+def watch_finish():
+    # Independent bounded watchdog: the operator may finish or exit; the
+    # approved pilot is never silently expanded and cron pause is recoverable.
+    deadline=time.time()+26*3600
+    while time.time()<deadline:
+        try:
+            if finish():return
+        except Exception as error:
+            code=str(error)
+            if code not in ('pilot_not_finished','waiting_for_private_audio_expiry','private_audio_cleanup_incomplete',
+                'background_or_playback_active','provider_leases_active') and not code.startswith('active_or_absent:'):
+                print(json.dumps({'at':stamp(),'closurePending':'operator_attention_required'}),flush=True)
+                return
+        time.sleep(30)
+
+
+def launch_watchdog():
+    marker=ROOT/'finish-watchdog.private.json';require(not marker.exists(),'watchdog_already_started')
+    with (ROOT/'finish-watchdog.log').open('x') as output:
+        child=subprocess.Popen([sys.executable,str(pathlib.Path(__file__).resolve()),'watch_finish'],
+            stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.DEVNULL,start_new_session=True)
+    save(marker.name,{'pid':child.pid,'startTicks':(pathlib.Path('/proc')/str(child.pid)/'stat').read_text().rsplit(')',1)[1].split()[19],
+        'startedAt':stamp()})
+    print(json.dumps({'finishWatchdogStarted':True,'promotesToFleet':False,'maximumWatchHours':26}))
+
+
 if __name__=='__main__':
     os.umask(0o077)
     try:
         require(ROOT.is_dir() and not ROOT.is_symlink(),'release_root_missing')
         phase=sys.argv[1]
-        if phase in ('preflight','prepare','unpack','stage','pause','database','idle'):globals()[phase]()
+        if phase in ('preflight','prepare','unpack','stage','pause','database','idle','correct_unstarted_cohort','finish','watch_finish','launch_watchdog'):globals()[phase]()
         elif phase in ('gateway','edge1','edge2','selection'):deploy(SERVICES[('gateway','edge1','edge2','selection').index(phase)])
         elif phase in ('verify','enable'):verify(phase=='enable')
         else:raise RuntimeError('unknown_phase')
