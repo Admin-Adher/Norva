@@ -336,7 +336,47 @@ Not yet deployed. No new provider acquisition has been made for these tests.
   the real function and exercises disabled, enabled, missing-flag, occupied-file
   and drained-refusal paths. No product guard was weakened to make it pass.
 
-## Remaining release decision and bounded acceptance
+## Approved 20-file release (11 September, deployment verification pending)
+
+The user explicitly approved publication and deployment of this lot for exactly
+20 files, at most two acquisitions, one per mono-session account, and a private
+64 MiB working-audio budget with a 30-minute retention limit. This supersedes the
+proposed limits below, not the requirement for separate live verification.
+
+- The Gateway now has a default-disabled admission mode. Pilot mode requires
+  exactly 20 distinct opaque file keys, bound into authenticated metadata calls
+  and signed capture capabilities, with a maximum 24-hour pilot lifetime.
+  Missing, malformed or expired configuration cannot expand into fleet mode.
+- The current cohort has 20 previously untried files across seven provider
+  identities/seven sources; ten have a track map and ten are unprobed. Only
+  existing authorized internal-account sources were selected. A source is not
+  assumed to be a distinct credential account; production account leases decide.
+- Selection has no nonterminal jobs available (192 completed, 523 failed).
+  Those jobs are not reset. Its verified new package will be deployed dormant;
+  no Selection host exception or parallel flag is activated for this cohort.
+- Passive capture stays off. Encrypted records are capped at 32 MiB/16 records,
+  reserving the other 32 MiB for the two bounded PCM/inference workspaces.
+  The buffer remains private, encrypted, owner-locked and limited to 30 minutes.
+- The authenticated retry dispatcher supports only a named list of at most two
+  jobs. The pilot operator submits its immutable cohort jobs, not the general
+  queue. Two ordinary intake crons are paused recoverably during the pilot.
+  SQL job/quarantine, access and provider occupancy checks still apply.
+- A pre-release executable test exposed an out-of-scope `captureIndices` in the
+  real Edge token generator, previously hidden by test stubs. It is fixed and
+  the actual signed/decoded capture capabilities now have regression coverage.
+- Full suite: 4,500 tests, 4,486 passed, 14 skipped, zero failures. Final native
+  production-image fixture: 125 passed, zero skips/failures. Its test-process
+  concurrency is explicitly one to fit the unchanged 64 PID fixture ceiling;
+  production ceilings were not raised. Refreshed SQL proof: 171 assertions.
+- Selection static import closure: 11 modules, no omitted task-pool dependency;
+  package tests exercise actual import in the deployed directory layout, with
+  network forbidden. Deployment scripts clone existing container configuration
+  and retain previous containers/trees rather than overwriting live files.
+
+Publication, deployed hashes and the real pilot result are not established by
+these local/synthetic checks. They must be recorded after those phases finish.
+
+## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty
 checkout, deployed code, feature flags, protected quarantine and old failed

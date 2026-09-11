@@ -3535,10 +3535,26 @@ async function runLanguageValidationRetryWorker(req: Request, db: SupabaseClient
   );
   if (authError || authorized !== true) throw new HttpError(403, "Unauthorized");
 
-  const { data, error } = await db.rpc(
+  // The authenticated operator can wake only its fixed pilot jobs without
+  // scanning or reordering the rest of the durable queue. Claim-time SQL still
+  // enforces due state, quarantine, source access and both provider leases.
+  const requestText = await req.text();
+  if (requestText.length > 2048) throw new HttpError(400,"Worker request too large");
+  let requestedJobs: string[] | null = null;
+  if (requestText.trim()) {
+    let body: JsonRecord;
+    try { body=JSON.parse(requestText); } catch (_) { throw new HttpError(400,"Worker request invalid"); }
+    if (body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body,"jobIds")) {
+      if (Object.keys(body).length !== 1 || !Array.isArray(body.jobIds) || body.jobIds.length > 2
+        || body.jobIds.some((id: unknown) => typeof id !== "string" || !PLAYBACK_SESSION_UUID_PATTERN.test(id))
+        || new Set(body.jobIds).size !== body.jobIds.length) throw new HttpError(400,"Pilot job list invalid");
+      requestedJobs=body.jobIds;
+    }
+  }
+  const { data, error } = requestedJobs === null ? await db.rpc(
     "list_due_catalog_file_audio_validation_jobs",
     { p_limit: LANGUAGE_VALIDATION_RETRY_WORKER_BATCH },
-  );
+  ) : { data:requestedJobs.map(job_id=>({job_id})),error:null };
   if (error) throwDb(error, "Unable to load due language validation jobs");
   const jobIds = (Array.isArray(data) ? data : [])
     .map((row) => stringOr(recordOrEmpty(row).job_id, ""))
@@ -3707,6 +3723,7 @@ type StrictLidWindowCapabilityClaims = {
   captureTrackIndex?: number;
   captureTrackIndices?: number[];
   captureRelease?: string;
+  enrichmentFileKey?: string;
 };
 
 function strictLidWindowCountForDuration(durationSeconds: number): 4 | 6 | null {
@@ -4167,6 +4184,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         profileFingerprint: exactAfterLease.fingerprint,
         windowOrdinal,
         windowCount: windowState.count,
+        enrichmentFileKey: await sha256Hex(JSON.stringify(["provider",current.identityKey,current.itemType,current.itemId])),
         ...(useCapturePipeline ? { captureProtocol: 1 as const, captureAction: "capture" as const, captureTrackIndex: trackIndex,
           captureTrackIndices: exactAfterLease.expectedAudioIndices.slice(exactAfterLease.expectedAudioIndices.indexOf(trackIndex),
             exactAfterLease.expectedAudioIndices.indexOf(trackIndex) + 4) } : {}),
@@ -4445,6 +4463,7 @@ async function requestLanguageCaptureWindow(options: LanguageCaptureWindowOption
     current.exactProfile.fileSizeBytes, Number(current.exactProfile.profile.durationSeconds), {
       windowCheckpointProtocol: 1, jobId, profileFingerprint: current.fingerprint,
       windowCount: windowState.count, windowOrdinal: windowState.position + 1,
+      enrichmentFileKey: await sha256Hex(JSON.stringify(["provider",current.identityKey,current.itemType,current.itemId])),
       captureProtocol: 1, captureAction: action, captureTrackIndex: trackIndex,
       ...(action === "infer" ? { captureRelease: release } : {}),
     });
@@ -7501,8 +7520,11 @@ async function createBytePipeCapability(
   if (!gatewayRoute) {
     throw new HttpError(503, "Media gateway is not configured");
   }
+  const captureIndices = strictLidWindowClaims?.captureTrackIndices ?? [strictLidWindowClaims?.captureTrackIndex];
   if (strictLidWindowClaims) {
-    const captureIndices = strictLidWindowClaims.captureTrackIndices ?? [strictLidWindowClaims.captureTrackIndex];
+    if (strictLidWindowClaims.enrichmentFileKey !== undefined && !/^[a-f0-9]{64}$/.test(strictLidWindowClaims.enrichmentFileKey)) {
+      throw new HttpError(409,"Enrichment file key invalid");
+    }
     if (strictLidWindowClaims.captureProtocol !== undefined && (
       strictLidWindowClaims.captureProtocol !== 1 || strictLidWindowClaims.windowFinalize === true
       || !["status", "capture", "infer", "ack"].includes(String(strictLidWindowClaims.captureAction))
@@ -7553,6 +7575,7 @@ async function createBytePipeCapability(
         jobId: strictLidWindowClaims.jobId,
         profileFingerprint: strictLidWindowClaims.profileFingerprint,
         windowCount: strictLidWindowClaims.windowCount,
+        ...(strictLidWindowClaims.enrichmentFileKey ? { enrichmentFileKey:strictLidWindowClaims.enrichmentFileKey } : {}),
         ...(strictLidWindowClaims.captureProtocol === 1 ? {
           captureProtocol: 1, captureAction: strictLidWindowClaims.captureAction,
           captureTrackIndex: strictLidWindowClaims.captureTrackIndex,
@@ -15759,6 +15782,7 @@ async function runCodecProfileBackfill(
           url: targetUrl,
           userAgent: "VLC/3.0.20 LibVLC/3.0.20",
           refreshCodecProfile: true,
+          enrichmentFileKey: await sha256Hex(JSON.stringify(["provider",identityKey,"movie",externalId])),
         }),
         signal: AbortSignal.timeout(60_000),
       });

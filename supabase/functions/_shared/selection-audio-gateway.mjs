@@ -185,6 +185,7 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     }
     const claims = { v:1, sid:jobId, uid:subjectId, url:file.url, scope:'lid-legacy-full',
       selectionEnrichmentProtocol:1, selectionFeedId:file.feedId,
+      enrichmentFileKey:await selectionAudioSha256(JSON.stringify(['selection',file.externalId,file.urlSha256])),
       fileSizeBytes:profile.fileSizeBytes, durationSeconds:profile.durationSeconds,
       windowCheckpointProtocol:1, jobId, profileFingerprint:profile.fingerprint, windowCount:profile.windowCount,
       ...(finalize ? { windowFinalize:true } : { windowOrdinal }), exp:Math.floor(now()/1000) + 300 };
@@ -233,7 +234,9 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
   return Object.freeze({
     async probe(fileInput, { signal } = {}) {
       const file = await requireFile(fileInput);
-      const payload = await request('/probe-audio', { body:{ url:file.url }, signal, budgetMs:Math.min(budget, 120_000) });
+      const payload = await request('/probe-audio', { body:{ url:file.url,
+        enrichmentFileKey:await selectionAudioSha256(JSON.stringify(['selection',file.externalId,file.urlSha256])) },
+        signal, budgetMs:Math.min(budget, 120_000) });
       if (payload.audioProbeComplete !== true || payload.probeComplete !== true) fail('SELECTION_AUDIO_PROBE_INCOMPLETE', { retryable:true, providerDrained:true });
       const profile = object(payload.codecProfile);
       return normalizeProfile({ ...profile, audioTracks:payload.audioTracks,

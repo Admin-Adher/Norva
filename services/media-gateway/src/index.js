@@ -18,6 +18,9 @@ const strictLidInference = createStrictLidInference();
 const { decideLanguageBackgroundCapacity, decideLanguageMetadataCapacity, createLanguageResourceSampler } = require('./language-background-capacity');
 const { createEnrichmentNetworkAdmission } = require('./enrichment-network-admission');
 const { createSelectionEnrichmentPolicy } = require('./selection-enrichment-policy');
+const { createEnrichmentPilotAdmission } = require('./enrichment-pilot-admission');
+const enrichmentPilot = createEnrichmentPilotAdmission(process.env.LANGUAGE_ENRICHMENT_PILOT_JSON,
+    { mode:process.env.LANGUAGE_ENRICHMENT_ACTIVATION_MODE || 'disabled' });
 const selectionEnrichmentPolicy = createSelectionEnrichmentPolicy(process.env.SELECTION_ENRICHMENT_POLICY_JSON);
 const LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED = process.env.LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED === '1';
 const enrichmentNetworkAdmission = createEnrichmentNetworkAdmission({ selectionPolicy: selectionEnrichmentPolicy,
@@ -2962,6 +2965,7 @@ app.get('/health', (req, res) => {
         languageRangeReuse: strictLidRangeReuse.snapshot(),
         languagePassiveCapture: passiveLidCapture?.snapshot() || { protocol: 1, enabled: false },
         languageSelectionAdmission: enrichmentNetworkAdmission.policySnapshot(),
+        languageEnrichmentPilot: enrichmentPilot.snapshot(),
         languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
@@ -4413,7 +4417,8 @@ async function providerProbeDrainAttestation(state) {
 // probe HERE instead: ffprobe egresses the same sticky residential IP as everything else, so the
 // provider sees one household. Returns the SAME shape as norva-relay /probe-audio so the
 // edge runner consumes it unchanged (audioLanguages / audioTracks / subtitles).
-function claimLanguageEnrichmentNetwork(sourceUrl, selection = null, opaqueTarget = false) {
+function claimLanguageEnrichmentNetwork(sourceUrl, selection = null, opaqueTarget = false, enrichmentFileKey = null) {
+    enrichmentPilot.assertFile(enrichmentFileKey);
     const parsed = new URL(sourceUrl);
     const lease = enrichmentNetworkAdmission.acquire({
         accountKey: proxyKeyFromUrl(sourceUrl) || `unknown-host:${parsed.host.toLowerCase()}`,
@@ -4448,7 +4453,7 @@ async function handleProbeAudioRequest(req, res, options = {}) {
         if (probeKey && accountExtractions.get(probeKey)?.size) {
             return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
         }
-        networkLease = options.claimNetwork?.(url, null, true) || null;
+        networkLease = options.claimNetwork?.(url, null, true, req.body?.enrichmentFileKey) || null;
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.
@@ -6771,7 +6776,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     };
     try {
         if (strict) {
-            networkLease = options.claimNetwork?.(claims.url, null, true) || null;
+            networkLease = options.claimNetwork?.(claims.url, null, true, claims.enrichmentFileKey) || null;
             strictBroker = await createStrictLidBroker({
                 sourceUrl: claims.url,
                 fileSizeBytes: strictFileSizeBytes,
@@ -7567,7 +7572,7 @@ function setDetectLanguageSecurityHeaders(_req, res, next) {
 function capturePipelineError(code) { return Object.assign(new Error(code), { code }); }
 
 function passiveLidResourcesAvailable() {
-    return LANGUAGE_PASSIVE_CAPTURE_ENABLED && passiveResourcesAvailable(languageResourceSampler.snapshot(), {
+    return enrichmentPilot.mode === 'fleet' && LANGUAGE_PASSIVE_CAPTURE_ENABLED && passiveResourcesAvailable(languageResourceSampler.snapshot(), {
         starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
         foreground: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
             || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0 || translateQueue.length > 0 || ocrQueue.length > 0,
@@ -7658,7 +7663,7 @@ function initializeStrictLidCapturePipeline(store) {
             }, enrichmentNetworkAdmission.snapshot(), LANGUAGE_METADATA_LANE_ENABLED).maxWorkers) {
                 throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
             }
-            return claimLanguageEnrichmentNetwork(context.url, context.selectionCapability);
+            return claimLanguageEnrichmentNetwork(context.url, context.selectionCapability, false, context.enrichmentFileKey);
         },
         openBroker: (context, signal, network) => createStrictLidBroker({ sourceUrl: context.url,
             fileSizeBytes: context.fileSizeBytes, userAgent: context.ua, abortSignal: signal,
@@ -7751,6 +7756,9 @@ async function handleStrictLidCaptureRequest(req, res, action) {
     if (!LANGUAGE_CAPTURE_PIPELINE_ENABLED || !strictLidCapturePipeline || !strictLidCaptureStore?.snapshot().ready) {
         return res.status(503).json({ code: 'LID_CAPTURE_DISABLED', providerDrained: true, providerDrainProtocol: 1 });
     }
+    if (!enrichmentPilot.allowsFile(claims.enrichmentFileKey)) {
+        return res.status(429).json({ code:'LANGUAGE_ENRICHMENT_CAPACITY_BUSY',providerDrained:true,providerDrainProtocol:1 });
+    }
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const binding = { ...strictLidWindowReceiptBinding(context, context.windowOrdinal), sourceUrlHash: sha256Hex(claims.url) };
     const controller = new AbortController();
@@ -7762,7 +7770,7 @@ async function handleStrictLidCaptureRequest(req, res, action) {
         if (action === 'status') payload = await strictLidCapturePipeline.status(binding);
         else if (action === 'capture') payload = await strictLidCapturePipeline.capture(binding,
             { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes,
-                profileFingerprint: binding.profileFingerprint,
+                profileFingerprint: binding.profileFingerprint, enrichmentFileKey:claims.enrichmentFileKey,
                 selectionCapability: selectionEnrichmentPolicy.resolve(claims) }, controller.signal,
             captureIndices.slice(1).map(trackIndex => ({ ...binding, trackIndex })));
         else if (action === 'infer') payload = await strictLidCapturePipeline.compute(binding,
@@ -11853,12 +11861,22 @@ async function bootstrap() {
     if (LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED && !LANGUAGE_METADATA_LANE_ENABLED) {
         throw capturePipelineError('ADAPTIVE_HOST_ADMISSION_REQUIRES_METADATA_LANE');
     }
+    if (LANGUAGE_METADATA_LANE_ENABLED && enrichmentPilot.mode === 'disabled') {
+        throw capturePipelineError('ENRICHMENT_ACTIVATION_MODE_REQUIRED');
+    }
+    if (enrichmentPilot.mode === 'pilot' && (!LANGUAGE_METADATA_LANE_ENABLED || !LANGUAGE_CAPTURE_PIPELINE_ENABLED)) {
+        throw capturePipelineError('ENRICHMENT_PILOT_REQUIRES_CAPTURE_PIPELINE');
+    }
     if (LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
         if (!LANGUAGE_METADATA_LANE_ENABLED || !WHISPER_RUNTIME_VERIFIED || !WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED) {
             throw capturePipelineError('LID_CAPTURE_RUNTIME_NOT_READY');
         }
         strictLidCaptureStore = new StrictLidCaptureStore({ root: process.env.LANGUAGE_CAPTURE_PRIVATE_DIR,
-            secret: GATEWAY_TOKEN });
+            secret: GATEWAY_TOKEN,
+            // Approved pilot ceiling is 64 MiB TOTAL working audio. Reserve
+            // half for the two bounded PCM workspaces and inference scratch;
+            // passive TS snapshots are disabled in pilot mode.
+            ...(enrichmentPilot.mode === 'pilot' ? {maxBytes:32*1024*1024,maxEntries:16} : {}) });
         await strictLidCaptureStore.open();
         if (LANGUAGE_PASSIVE_CAPTURE_ENABLED) {
             passiveLidCapture = createPassiveLidCapture({ store: strictLidCaptureStore, resolveSource: resolvePassiveLidSource,

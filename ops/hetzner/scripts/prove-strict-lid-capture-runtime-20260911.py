@@ -14,7 +14,7 @@ LABEL = 'capture-runtime-proof-20260911'
 FILES = ['services/media-gateway/src/' + name + '.js' for name in (
     'strict-lid-capture-store', 'strict-lid-capture-pipeline', 'strict-lid-window-checkpoint',
     'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract',
-    'strict-lid-range-reuse', 'passive-lid-capture', 'enrichment-network-admission', 'selection-enrichment-policy', 'index')]
+    'strict-lid-range-reuse', 'passive-lid-capture', 'enrichment-network-admission', 'selection-enrichment-policy', 'enrichment-pilot-admission', 'index')]
 FILES.append('tests/strict-lid-capture-store.test.js')
 FILES.append('tests/strict-lid-multi-extract.test.js')
 FILES.append('tests/strict-lid-range-reuse.test.js')
@@ -24,12 +24,13 @@ FILES.append('supabase/functions/norva-playback/index.ts')
 FILES.append('tests/selection-enrichment-policy.test.js')
 FILES.append('tests/selection-audio-task-pool.test.js')
 FILES.append('ops/hetzner/services/selection-audio-task-pool.mjs')
+FILES.append('tests/enrichment-pilot-admission.test.js')
 
 
 def run(args):
     p = subprocess.run(args, capture_output=True, timeout=120)
     if p.returncode:
-        raise RuntimeError('isolated_test_command_failed: ' + p.stdout.decode()[-12000:] + p.stderr.decode()[-4000:])
+        raise RuntimeError('isolated_test_command_failed: ' + p.stdout.decode()[:4000] + p.stdout.decode()[-12000:] + p.stderr.decode()[-4000:])
     return p.stdout.decode()
 
 
@@ -56,11 +57,13 @@ def main():
             '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '1000:1000',
             '--tmpfs', '/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777',
             '--mount', 'type=bind,src=' + str(proof) + ',dst=/proof,readonly',
-            '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '-e', 'NODE_PATH=/app/node_modules', '--entrypoint', 'node', image, '--test',
+            # One test process at a time: Node itself uses several native threads,
+            # and the native FFmpeg fixtures must fit the unchanged 64 PID ceiling.
+            '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '-e', 'NODE_PATH=/app/node_modules', '--entrypoint', 'node', image, '--test', '--test-concurrency=1',
             '/proof/tests/strict-lid-capture-store.test.js', '/proof/tests/strict-lid-multi-extract.test.js',
             '/proof/tests/strict-lid-range-reuse.test.js', '/proof/tests/media-gateway-strict-lid-broker.test.js',
             '/proof/tests/passive-lid-capture.test.js', '/proof/tests/selection-enrichment-policy.test.js',
-            '/proof/tests/selection-audio-task-pool.test.js']).strip()
+            '/proof/tests/selection-audio-task-pool.test.js', '/proof/tests/enrichment-pilot-admission.test.js']).strip()
         output = run(['docker', 'start', '-a', NAME])
         state = json.loads(run(['docker', 'inspect', NAME]))[0]
         assert state['State']['ExitCode'] == 0

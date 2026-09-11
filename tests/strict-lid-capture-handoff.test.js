@@ -180,6 +180,7 @@ function gatewayFixture(overrides = {}) {
         validateDetectLanguageCapability: () => ({ claims }),
         strictLidWindowClaimContext: () => ({ windowOrdinal: 1, fileSizeBytes: 1000000 }),
         LANGUAGE_CAPTURE_PIPELINE_ENABLED: overrides.enabled !== false,
+        enrichmentPilot: { allowsFile: () => overrides.pilotDenied !== true },
         strictLidCaptureStore: { snapshot: () => ({ ready: true }) },
         strictLidWindowReceiptBinding: () => ({}), sha256Hex: () => hash, proxyKeyFromUrl: () => 'fixture',
         rejectWhileLidBenchmarkRuns: () => false, FFMPEG_USER_AGENT: 'fixture',
@@ -203,6 +204,34 @@ test('actual Gateway missing stored audio returns 409, never transparently downl
     const f = gatewayFixture({ missing: true }); await f.run(); assert.equal(f.res.statusCode, 409);
     assert.equal(f.res.payload.code, 'LID_CAPTURE_NOT_FOUND'); assert.equal(f.res.payload.providerDrained, true);
     assert.deepEqual(f.called, ['infer']);
+});
+
+test('actual Gateway excludes an out-of-cohort capture action BEFORE touching retained audio or compute', async () => {
+    const f=gatewayFixture({pilotDenied:true});await f.run();
+    assert.equal(f.res.statusCode,429);assert.equal(f.res.payload.providerDrained,true);assert.deepEqual(f.called,[]);
+});
+
+test('actual Edge capability generator signs all capture modes, complete track list and opaque file scope',async()=>{
+    const secret='fixture-secret-that-is-not-a-production-credential';
+    const context=vm.createContext({HttpError,Date,Number,Set,encoder:new TextEncoder(),
+        PLAYBACK_SESSION_UUID_PATTERN:/^[a-f0-9-]{36}$/,LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL:1,
+        getRuntimeConfig:async()=>({mediaGatewayRouting:{defaultRoute:{url:'https://gateway.invalid',token:secret}}}),
+        hmacBase64Url:async(key,value)=>crypto.createHmac('sha256',key).update(value).digest('base64url'),
+        base64Url:bytes=>Buffer.from(bytes).toString('base64url')});
+    vm.runInContext(stripTypeScriptTypes(section(edge,'async function createBytePipeCapability(',
+        'async function createBytePipeAccess('),{mode:'transform'}),context);
+    for(const action of ['status','capture','infer','ack']) {
+        const fields={windowCheckpointProtocol:1,jobId:uuid,profileFingerprint:hash,windowCount:6,windowOrdinal:1,
+            captureProtocol:1,captureAction:action,captureTrackIndex:1,enrichmentFileKey:'b'.repeat(64),
+            ...(action==='capture'?{captureTrackIndices:[1,2,4,8]}:{}),...(action==='infer'?{captureRelease:uuid}:{})};
+        const access=await context.createBytePipeCapability('session','owner','https://fixture.invalid/file',
+            new Date(Date.now()+120000).toISOString(),{},null,'lid-legacy-full',1000000,3600,fields);
+        const [payload64,signature]=access.capability.split('.');
+        const raw=Buffer.from(payload64,'base64url').toString(),payload=JSON.parse(raw);
+        assert.equal(signature,crypto.createHmac('sha256',secret).update(raw).digest('base64url'));
+        assert.equal(payload.enrichmentFileKey,fields.enrichmentFileKey);assert.equal(payload.captureAction,action);
+        assert.deepEqual(payload.captureTrackIndices,action==='capture'?[1,2,4,8]:[1]);
+    }
 });
 
 test('local handoff and inference retries fit inside the private 30-minute buffer lifetime', () => {
