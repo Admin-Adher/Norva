@@ -26,8 +26,15 @@ function edgeFixture(options = {}) {
         events.push('rpc:' + name);
         if (name === 'claim_catalog_file_audio_validation_job') return { data: claim };
         if (name === 'catalog_language_capture_pipeline_enabled') return { data: options.enabled !== false };
+        if (name === 'catalog_language_exact_file_admission_enabled') return { data: options.exactFlagUnavailable ? null : options.exact === true };
         if (name === 'claim_provider_account_language_validation') { account = true; return { data: true }; }
         if (name === 'claim_provider_file_probe') { identity = true; return { data: true }; }
+        if (name === 'claim_provider_exact_file_probe') {
+            assert.equal(account, true, 'mono account must be reserved before an exact file');
+            assert.equal(args.p_identity_key, current.identityKey); assert.equal(args.p_item_type, current.itemType);
+            assert.equal(args.p_external_id, current.itemId); assert.equal(args.p_provider_account_hash, hash);
+            identity = !options.exactBusy; return { data: identity };
+        }
         if (name === 'begin_catalog_file_audio_validation_provider_attempt') return { data: { allowed: true, attemptToken: uuid } };
         if (name === 'provider_account_language_validation_lease_is_current') return { data: account };
         if (name === 'checkpoint_catalog_file_audio_capture') {
@@ -41,6 +48,10 @@ function edgeFixture(options = {}) {
             return options.evidenceFails ? { error: true } : { data: { complete: false } };
         }
         if (name === 'release_provider_account_language_validation') { account = false; return { data: true }; }
+        if (name === 'release_provider_exact_file_probe') {
+            assert.equal(args.p_identity_key, current.identityKey); assert.equal(args.p_external_id, current.itemId);
+            assert.equal(args.p_item_type, current.itemType); identity = false; return { data: true };
+        }
         if (name === 'finish_catalog_file_audio_validation_provider_attempt') return { data: { settled: true } };
         throw Error('unexpected fixture RPC ' + name);
     } };
@@ -91,6 +102,7 @@ function edgeFixture(options = {}) {
         languageValidationTaskErrorIsTerminal: () => false, languageValidationTaskRetryAt: () => null,
         languageValidationGatewayRetryAt: () => null,
     });
+    vm.runInContext(stripTypeScriptTypes(section(edge, 'async function exactFileProbeAdmissionEnabled(', 'async function runAutomaticVodLanguageMetadataBatch('), { mode: 'transform' }), context);
     vm.runInContext(stripTypeScriptTypes(section(edge, 'async function processOneLanguageValidationTrack(', 'async function finalizeLanguageValidationTrackWindows('), { mode: 'transform' }), context);
     return { events, failures, run: () => context.processOneLanguageValidationTrack(db, uuid), slots: () => ({ account, identity }) };
 }
@@ -110,6 +122,30 @@ test('actual Edge retry uses local capture without idle checks, provider claims 
         'rpc:claim_provider_account_language_validation', 'rpc:begin_catalog_file_audio_validation_provider_attempt']) {
         assert.equal(f.events.includes(event), false, event);
     }
+});
+
+test('actual Edge exact-file mode still owns the mono account and hands off both leases before inference', async () => {
+    const f = edgeFixture({ exact: true }); await f.run(); assert.deepEqual(f.failures, []);
+    assert.ok(f.events.indexOf('rpc:claim_provider_account_language_validation') < f.events.indexOf('rpc:claim_provider_exact_file_probe'));
+    assert.equal(f.events.includes('rpc:claim_provider_file_probe'), false);
+    assert.ok(f.events.indexOf('rpc:checkpoint_catalog_file_audio_capture') < f.events.indexOf('fetch:infer'));
+    assert.deepEqual(f.slots(), { account: false, identity: false });
+});
+
+test('actual Edge unavailable exact gate and occupied exact file stop before provider I/O and release their own account', async () => {
+    for (const option of ['exactFlagUnavailable', 'exactBusy']) {
+        const f = edgeFixture({ exact: true, [option]: true }); await f.run();
+        assert.equal(f.failures.length, 1); assert.equal(f.events.includes('fetch:capture'), false);
+        assert.equal(f.events.includes('rpc:claim_provider_file_probe'), false);
+        assert.deepEqual(f.slots(), { account: false, identity: false });
+    }
+});
+
+test('actual Edge provider refusal in exact-file mode releases only after its positive drain receipt', async () => {
+    const f = edgeFixture({ exact: true, busy: true }); await f.run();
+    assert.equal(f.failures[0].terminal, true); assert.equal(f.events.includes('fetch:infer'), false);
+    assert.ok(f.events.includes('rpc:release_provider_exact_file_probe')); assert.equal(f.events.includes('identity-release'), false);
+    assert.deepEqual(f.slots(), { account: false, identity: false });
 });
 
 test('actual Edge signs at most four remaining exact job tracks in a single provider capture', async () => {

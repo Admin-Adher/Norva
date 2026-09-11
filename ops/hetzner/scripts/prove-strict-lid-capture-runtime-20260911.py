@@ -14,13 +14,16 @@ LABEL = 'capture-runtime-proof-20260911'
 FILES = ['services/media-gateway/src/' + name + '.js' for name in (
     'strict-lid-capture-store', 'strict-lid-capture-pipeline', 'strict-lid-window-checkpoint',
     'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract',
-    'strict-lid-range-reuse', 'passive-lid-capture', 'index')]
+    'strict-lid-range-reuse', 'passive-lid-capture', 'enrichment-network-admission', 'selection-enrichment-policy', 'index')]
 FILES.append('tests/strict-lid-capture-store.test.js')
 FILES.append('tests/strict-lid-multi-extract.test.js')
 FILES.append('tests/strict-lid-range-reuse.test.js')
 FILES.append('tests/media-gateway-strict-lid-broker.test.js')
 FILES.append('tests/passive-lid-capture.test.js')
 FILES.append('supabase/functions/norva-playback/index.ts')
+FILES.append('tests/selection-enrichment-policy.test.js')
+FILES.append('tests/selection-audio-task-pool.test.js')
+FILES.append('ops/hetzner/services/selection-audio-task-pool.mjs')
 
 
 def run(args):
@@ -56,7 +59,8 @@ def main():
             '-e', 'NORVA_CAPTURE_REAL_FFMPEG=1', '-e', 'NODE_PATH=/app/node_modules', '--entrypoint', 'node', image, '--test',
             '/proof/tests/strict-lid-capture-store.test.js', '/proof/tests/strict-lid-multi-extract.test.js',
             '/proof/tests/strict-lid-range-reuse.test.js', '/proof/tests/media-gateway-strict-lid-broker.test.js',
-            '/proof/tests/passive-lid-capture.test.js']).strip()
+            '/proof/tests/passive-lid-capture.test.js', '/proof/tests/selection-enrichment-policy.test.js',
+            '/proof/tests/selection-audio-task-pool.test.js']).strip()
         output = run(['docker', 'start', '-a', NAME])
         state = json.loads(run(['docker', 'inspect', NAME]))[0]
         assert state['State']['ExitCode'] == 0

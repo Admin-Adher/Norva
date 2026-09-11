@@ -27,6 +27,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             throw failure('LID_CAPTURE_GROUP_INVALID');
         }
         let reservation; let broker; let network; let sourceDrained = true;
+        const startedAt = Date.now();
         const reservations = [];
         let closePromise;
         const closeBroker = () => {
@@ -70,7 +71,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             network = claimNetwork(context);
             // openBroker only opens a loopback listener, never an upstream
             // socket. Once created it becomes the sole drain authority.
-            broker = await openBroker(context, signal);
+            broker = await openBroker(context, signal, network);
             sourceDrained = false;
             const audio = await extract(broker, pending.length === 1 ? normalized : pending.map(r => r.binding), context, signal);
             const wavs = pending.length === 1 ? [audio] : audio;
@@ -78,6 +79,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
                 throw failure('LID_CAPTURE_GROUP_INVALID');
             }
             await closeBroker();
+            network?.observe?.({ ok:true, durationMs:Date.now()-startedAt, drained:true });
             let saved;
             for (const [index, item] of pending.entries()) {
                 const result = await store.put(item.binding, wavs[index], drained, item.reservation.token);
@@ -86,6 +88,10 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             return { captureProtocol: 1, captured: true, ...saved, extractedTrackCount: pending.length, ...drained };
         } catch (cause) {
             try { await closeBroker(); } catch { sourceDrained = false; }
+            network?.observe?.({ ok:false, drained:sourceDrained,
+                neutral:!broker || signal?.aborted || ['LANGUAGE_VALIDATION_VIEWER_PREEMPTED',
+                    'LANGUAGE_ENRICHMENT_CAPACITY_BUSY','SELECTION_ENRICHMENT_TARGET_NOT_APPROVED'].includes(cause?.code),
+                retryAfterSeconds:cause?.retryAfterSeconds });
             const code = sourceDrained && /^[A-Z][A-Z0-9_]{1,79}$/.test(cause?.code || '')
                 ? cause.code : (sourceDrained ? 'LID_CAPTURE_FAILED' : 'LID_CAPTURE_DRAIN_UNCONFIRMED');
             throw Object.assign(failure(code), { providerDrained: sourceDrained, providerDrainProtocol: 1,

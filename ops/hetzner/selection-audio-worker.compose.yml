@@ -20,6 +20,8 @@ services:
       MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL:?Internal Gateway URL required}
       MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:?Gateway credential required}
       SELECTION_AUDIO_HEALTH_FILE: /tmp/selection-audio-health.json
+      SELECTION_CAPTURE_PIPELINE_ENABLED: ${SELECTION_CAPTURE_PIPELINE_ENABLED:-0}
+      SELECTION_AUDIO_CONCURRENCY: ${SELECTION_AUDIO_CONCURRENCY:-1}
     tmpfs: ['/tmp:rw,noexec,nosuid,size=16m']
     volumes:
       - ${NORVA_SELECTION_AUDIO_RELEASE_ROOT:?Release path required}/functions:/worker/supabase/functions:ro

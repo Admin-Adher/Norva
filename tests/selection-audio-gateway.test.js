@@ -83,6 +83,8 @@ test('strict windows use service auth + signed header claims and durable receipt
     assert.equal(claims.url, file.url);
     assert.equal(claims.uid, subjectId);
     assert.equal(claims.scope, 'lid-legacy-full');
+    assert.equal(claims.selectionEnrichmentProtocol, 1);
+    assert.equal(claims.selectionFeedId, file.feedId);
     assert.equal(claims.profileFingerprint, profile.fingerprint);
     assert.equal(claims.fileSizeBytes, profile.fileSizeBytes);
     assert.equal(claims.durationSeconds, profile.durationSeconds);

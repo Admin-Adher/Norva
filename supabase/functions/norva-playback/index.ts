@@ -3910,6 +3910,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
   let providerAccountLeaseHash = "";
   let providerLeaseOwner = "";
   let identityKey = stringOr(claim.identityKey, "");
+  let exactProviderLease: { itemType: string; externalId: string } | null = null;
   let providerAttemptToken: string | null = null;
   const settleProviderAttempt = async (outcome: "no_progress" | "viewer_preempted" | "admission_deferred") => {
     if (!providerAttemptToken) return null;
@@ -4092,12 +4093,16 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     providerAccountLeaseClaimed = true;
     providerAccountLeaseReleaseSafe = true;
 
+    const useExactProviderLease = useCapturePipeline && await exactFileProbeAdmissionEnabled(db);
+    if (useExactProviderLease) exactProviderLease = { itemType: current.itemType, externalId: current.itemId };
     const { data: providerClaimed, error: providerClaimError } = await db.rpc(
-      "claim_provider_file_probe",
+      useExactProviderLease ? "claim_provider_exact_file_probe" : "claim_provider_file_probe",
       {
         p_identity_key: current.identityKey,
         p_lease_owner: providerLeaseOwner,
         p_ttl_seconds: LANGUAGE_VALIDATION_LEASE_SECONDS,
+        ...(useExactProviderLease ? { p_item_type:current.itemType, p_external_id:current.itemId,
+          p_provider_account_hash:providerAccountHash } : {}),
       },
     );
     if (providerClaimError) {
@@ -4419,7 +4424,9 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       && identityKey
       && providerLeaseOwner
     ) {
-      await releaseProviderFileProbe(db, identityKey, providerLeaseOwner);
+      if (exactProviderLease) {
+        await releaseExactProviderFileProbe(db, identityKey, providerLeaseOwner, exactProviderLease);
+      } else await releaseProviderFileProbe(db, identityKey, providerLeaseOwner);
     }
   }
 }
@@ -11254,6 +11261,47 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
   });
 }
 
+async function exactFileProbeAdmissionEnabled(db: SupabaseClient): Promise<boolean> {
+  const { data, error } = await db.rpc("catalog_language_exact_file_admission_enabled");
+  if (error || typeof data !== "boolean") throw new HttpError(503, "Exact-file admission unavailable", {
+    code:"LANGUAGE_EXACT_FILE_ADMISSION_UNAVAILABLE",
+  });
+  return data === true;
+}
+
+async function releaseExactProviderFileProbe(db: SupabaseClient, identityKey: string, owner: string,
+  exact: { itemType: string; externalId: string }) {
+  try {
+    await db.rpc("release_provider_exact_file_probe", { p_identity_key:identityKey,p_item_type:exact.itemType,
+      p_external_id:exact.externalId,p_lease_owner:owner });
+  } catch (_) { /* own exact-file TTL is the crash-safe fallback */ }
+}
+
+async function claimExactMetadataProbe(db: SupabaseClient, identityKey: string, owner: string,
+  externalId: string, providerAccountHash: string): Promise<boolean> {
+  let accountClaimed = false; let fileClaimed = false;
+  try {
+    const account = await db.rpc("claim_provider_account_language_validation", {
+      p_provider_account_hash:providerAccountHash,p_lease_owner:owner,p_ttl_seconds:180,
+    });
+    if (account.error || account.data !== true) return false;
+    accountClaimed = true;
+    const file = await db.rpc("claim_provider_exact_file_probe", { p_identity_key:identityKey,p_item_type:"movie",
+      p_external_id:externalId,p_provider_account_hash:providerAccountHash,p_lease_owner:owner,p_ttl_seconds:180 });
+    fileClaimed = !file.error && file.data === true;
+    return fileClaimed;
+  } catch (_) { return false; }
+  finally {
+    // Failed admission opened no provider transport. Release only the account
+    // just claimed by this unique owner; never clear a viewer/other worker.
+    if (accountClaimed && !fileClaimed) {
+      try { await db.rpc("release_provider_account_language_validation", {
+        p_provider_account_hash:providerAccountHash,p_lease_owner:owner,
+      }); } catch (_) { /* owner lease expiry */ }
+    }
+  }
+}
+
 async function runAutomaticVodLanguageMetadataBatch(db: SupabaseClient, userId: string, sourceId: string) {
   const { data, error } = await db.rpc("catalog_language_metadata_lane_enabled");
   // Deploying code ahead of SQL, missing permission or a disabled flag retains
@@ -15678,7 +15726,9 @@ async function runCodecProfileBackfill(
     await assertProviderProbeCircuitClosedStrict(db, identityKey);
 
     const leaseOwner = `codec-profile:${crypto.randomUUID()}`;
-    if (!await claimProviderFileProbeStrict(db, identityKey, leaseOwner, 180)) {
+    const useExactLease = await exactFileProbeAdmissionEnabled(db);
+    if (!(useExactLease ? await claimExactMetadataProbe(db, identityKey, leaseOwner, externalId, providerAccountHash)
+      : await claimProviderFileProbeStrict(db, identityKey, leaseOwner, 180))) {
       stopped = "provider-lease-busy";
       results.push({ variantId, status: "deferred", code: stopped });
       break;
@@ -15811,7 +15861,12 @@ async function runCodecProfileBackfill(
       throw error;
     } finally {
       if (releaseLeaseOnExit) {
-        await releaseProviderFileProbe(db, identityKey, leaseOwner);
+        if (useExactLease) {
+          await releaseExactProviderFileProbe(db, identityKey, leaseOwner, { itemType:"movie",externalId });
+          try { await db.rpc("release_provider_account_language_validation", {
+            p_provider_account_hash:providerAccountHash,p_lease_owner:leaseOwner,
+          }); } catch (_) { /* owner lease expiry */ }
+        } else await releaseProviderFileProbe(db, identityKey, leaseOwner);
       }
     }
   }

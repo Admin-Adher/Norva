@@ -2,6 +2,7 @@ import { createSelectionAudioGateway, getSelectionAudioManifest } from '../../..
 import { setTimeout as delay } from 'node:timers/promises';
 import { writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { createSelectionAudioTaskPool } from './selection-audio-task-pool.mjs';
 
 const priorityTitles = /^(Calabozos y Dragones|Raya y el |Avatar 2|Riverdance|Ponyo|X-Men 2$|Uma Aventura Lego$)/i;
 const knownLanguage = value => typeof value === 'string' && /^[a-z]{2}$/.test(value) && value !== 'un';
@@ -21,6 +22,7 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
     seed: manifest => rpc('seed_selection_audio_jobs', { p_manifest: manifest }),
     claim: () => rpc('claim_selection_audio_job'),
     captureEnabled: async () => await rpc('selection_audio_capture_pipeline_enabled') === true,
+    parallelEnabled: async () => await rpc('selection_audio_parallel_capture_enabled') === true,
     checkpointCapture: (job, args, captured) => rpc('checkpoint_selection_audio_capture', { ...identity(job),
       p_stream_index:args.trackIndex, p_window_ordinal:args.windowOrdinal, p_profile_fingerprint:args.profile.fingerprint,
       p_audio_sha256:captured.sha256, p_expires_at:new Date(captured.expiresAt).toISOString() }),
@@ -196,6 +198,10 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
 }
 
 export async function runSelectionAudioWorker(env = process.env) {
+  const concurrency = Number(env.SELECTION_AUDIO_CONCURRENCY || 1);
+  if (![1,2].includes(concurrency) || (concurrency > 1 && env.SELECTION_CAPTURE_PIPELINE_ENABLED !== '1')) {
+    throw new Error('SELECTION_AUDIO_CONCURRENCY_INVALID');
+  }
   const repository = createSelectionAudioRepository({ baseUrl: env.SUPABASE_URL, serviceKey: env.SUPABASE_SERVICE_ROLE_KEY });
   const gateway = createSelectionAudioGateway({ gatewayUrl: env.MEDIA_GATEWAY_URL, gatewayToken: env.MEDIA_GATEWAY_TOKEN });
   const manifest = await getSelectionAudioManifest();
@@ -206,6 +212,9 @@ export async function runSelectionAudioWorker(env = process.env) {
     if (env.SELECTION_AUDIO_HEALTH_FILE) await writeFile(env.SELECTION_AUDIO_HEALTH_FILE, JSON.stringify({ status, at: Date.now() }));
   };
   let seededAt = 0;
+  const pool = createSelectionAudioTaskPool({ maximum:concurrency, onError:() => {
+    console.error(JSON.stringify({ event:'selection_audio_worker', error:'SELECTION_AUDIO_OWNED_TASK_FAILED' }));
+  } });
   while (!controller.signal.aborted) {
     try {
       await health();
@@ -223,16 +232,20 @@ export async function runSelectionAudioWorker(env = process.env) {
           await repository.acknowledgeHydration(completed);
         } catch { /* Durable pending flag retains it for the next pass. */ }
       }
-      const job = await repository.claim();
-      if (job?.external_id) {
-        // Missing migration or a disabled flag never silently activates this
-        // route. Explicit process and database gates are both required.
-        const captureEnabled = env.SELECTION_CAPTURE_PIPELINE_ENABLED === '1' && await repository.captureEnabled();
+      // Missing migration/configuration fails closed; no optimistic concurrency
+      // fallback. The database still caps live jobs across worker replicas.
+      const captureEnabled = env.SELECTION_CAPTURE_PIPELINE_ENABLED === '1' && await repository.captureEnabled();
+      const limit = concurrency > 1 && captureEnabled && await repository.parallelEnabled() ? 2 : 1;
+      await pool.fill({ limit, signal:controller.signal, claim:() => repository.claim(), process:async job => {
         const result = await processSelectionAudioJob({ repository, gateway, file: files.get(job.external_id), job,
           signal: controller.signal, captureEnabled, onProgress: health });
         console.log(JSON.stringify({ event: 'selection_audio_job', state: result.state,
           error: result.error || null, languages: result.languages || [], hydrated: result.hydrated || 0 }));
-      } else await delay(15_000, undefined, { signal: controller.signal });
+      } });
+      // Wake promptly when a slot frees, but keep process health fresh during
+      // long work. No detached provider task is started by this wait.
+      if (pool.size()) await Promise.race([pool.progress(),delay(15_000,undefined,{signal:controller.signal})]);
+      else await delay(15_000, undefined, { signal:controller.signal });
     } catch (error) {
       if (controller.signal.aborted) break;
       console.error(JSON.stringify({ event: 'selection_audio_worker', error: 'SELECTION_AUDIO_WORKER_RETRY' }));
@@ -240,6 +253,7 @@ export async function runSelectionAudioWorker(env = process.env) {
       await delay(30_000, undefined, { signal: controller.signal }).catch(() => {});
     }
   }
+  await pool.drain();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await runSelectionAudioWorker();

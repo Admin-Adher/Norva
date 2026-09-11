@@ -17,7 +17,11 @@ const { createStrictLidInference } = require('./strict-lid-inference');
 const strictLidInference = createStrictLidInference();
 const { decideLanguageBackgroundCapacity, decideLanguageMetadataCapacity, createLanguageResourceSampler } = require('./language-background-capacity');
 const { createEnrichmentNetworkAdmission } = require('./enrichment-network-admission');
-const enrichmentNetworkAdmission = createEnrichmentNetworkAdmission();
+const { createSelectionEnrichmentPolicy } = require('./selection-enrichment-policy');
+const selectionEnrichmentPolicy = createSelectionEnrichmentPolicy(process.env.SELECTION_ENRICHMENT_POLICY_JSON);
+const LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED = process.env.LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED === '1';
+const enrichmentNetworkAdmission = createEnrichmentNetworkAdmission({ selectionPolicy: selectionEnrichmentPolicy,
+    adaptiveHosts: LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED });
 const LANGUAGE_METADATA_LANE_ENABLED = process.env.LANGUAGE_METADATA_LANE_ENABLED === '1';
 const LANGUAGE_CAPTURE_PIPELINE_ENABLED = process.env.LANGUAGE_CAPTURE_PIPELINE_ENABLED === '1';
 const { StrictLidCaptureStore } = require('./strict-lid-capture-store');
@@ -2957,6 +2961,7 @@ app.get('/health', (req, res) => {
         languageCaptureBuffer: strictLidCaptureStore?.snapshot() || { protocol: 1, ready: false },
         languageRangeReuse: strictLidRangeReuse.snapshot(),
         languagePassiveCapture: passiveLidCapture?.snapshot() || { protocol: 1, enabled: false },
+        languageSelectionAdmission: enrichmentNetworkAdmission.policySnapshot(),
         languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
@@ -4408,11 +4413,13 @@ async function providerProbeDrainAttestation(state) {
 // probe HERE instead: ffprobe egresses the same sticky residential IP as everything else, so the
 // provider sees one household. Returns the SAME shape as norva-relay /probe-audio so the
 // edge runner consumes it unchanged (audioLanguages / audioTracks / subtitles).
-function claimLanguageEnrichmentNetwork(sourceUrl) {
+function claimLanguageEnrichmentNetwork(sourceUrl, selection = null, opaqueTarget = false) {
     const parsed = new URL(sourceUrl);
     const lease = enrichmentNetworkAdmission.acquire({
         accountKey: proxyKeyFromUrl(sourceUrl) || `unknown-host:${parsed.host.toLowerCase()}`,
         hostKey: parsed.host.toLowerCase(),
+        selection,
+        opaqueTarget:opaqueTarget && (LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED || selectionEnrichmentPolicy.configured),
     });
     if (lease) return lease;
     const error = new Error('Background network capacity is occupied');
@@ -4424,6 +4431,7 @@ function claimLanguageEnrichmentNetwork(sourceUrl) {
 async function handleProbeAudioRequest(req, res, options = {}) {
     const providerDrainState = createProviderProbeDrainState();
     let networkLease = null;
+    const enrichmentStartedAt = Date.now();
     try {
         const { url, userAgent, refreshCodecProfile } = req.body || {};
         if (!url || !isHttpUrl(url)) {
@@ -4440,7 +4448,7 @@ async function handleProbeAudioRequest(req, res, options = {}) {
         if (probeKey && accountExtractions.get(probeKey)?.size) {
             return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
         }
-        networkLease = options.claimNetwork?.(url) || null;
+        networkLease = options.claimNetwork?.(url, null, true) || null;
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.
@@ -4479,6 +4487,8 @@ async function handleProbeAudioRequest(req, res, options = {}) {
         }
         const drainAttestation = await providerProbeDrainAttestation(providerDrainState);
         networkLease?.release(drainAttestation);
+        networkLease?.observe?.({ ok:true, drained:true, durationMs:Date.now()-enrichmentStartedAt,
+            neutral:!providerDrainState.providerProbeStarted, lane:'metadata' });
         return res.json({
             audioLanguages,
             audioTracks,
@@ -4509,6 +4519,9 @@ async function handleProbeAudioRequest(req, res, options = {}) {
             }
         } else drainAttestation = { providerDrained: true, providerDrainProtocol: 1 };
         networkLease?.release(drainAttestation);
+        networkLease?.observe?.({ ok:false, drained:drainAttestation.providerDrained === true,
+            neutral:!providerDrainState.providerProbeStarted || ['viewer_preempted','account_busy','background_busy'].includes(err.code),
+            retryAfterSeconds:err.retryAfterSeconds });
         const status = Number.isInteger(err.status) ? err.status : 502;
         return res.status(status).json({
             error: err.publicMessage || 'Audio probe failed',
@@ -4636,6 +4649,7 @@ function strictLidBrokerError(code, message, options = {}) {
     error.code = code;
     error.status = Number.isInteger(options.status) ? options.status : 502;
     error.upstreamStatus = Number.isInteger(options.upstreamStatus) ? options.upstreamStatus : null;
+    if (Number.isFinite(options.retryAfterSeconds) && options.retryAfterSeconds >= 0) error.retryAfterSeconds = options.retryAfterSeconds;
     return error;
 }
 
@@ -4766,6 +4780,10 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
     let response = null;
     let status = null;
     for (let redirectCount = 0; ; redirectCount += 1) {
+        // An authorized Selection exception reserves only explicitly configured
+        // hosts. Recheck BEFORE each request, including each redirect target.
+        // Ordinary playback/mono-account callers retain the established path.
+        options.assertProviderTarget?.(effectiveUrl);
         // Undici 7.29 removed the request-level `throwOnError` and
         // `maxRedirections` options. Passing either now fails after allocating a
         // client and can leave its HTTP/1 parser paused. Follow bounded GET
@@ -5661,22 +5679,26 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     redirect: 'follow',
                     signal: upstreamController.signal,
                     dispatcher: context.dispatcher || undefined,
+                    assertProviderTarget: context.assertProviderTarget,
                 });
                 markFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'headers');
                 upstreamStatus = Number(attempt.response.status);
+                const retryAfterValue = String(attempt.response.headers?.get?.('retry-after') || '').slice(0,128);
+                const retryAfterSeconds = /^\d{1,12}$/.test(retryAfterValue) ? Number(retryAfterValue)
+                    : Math.max(0,Math.ceil((Date.parse(retryAfterValue)-Date.now())/1000)) || 0;
                 diagnosticStage = 'headers';
                 if (upstreamStatus === 458) {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
                         'PROVIDER_BUSY',
                         'This TV service is busy. Wait a few seconds, then try again.',
-                        { status: 458, upstreamStatus },
+                        { status: 458, upstreamStatus, retryAfterSeconds },
                     ));
                 }
                 if (upstreamStatus === 407) {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
                         'PROXY_AUTH_FAILED',
                         'The media service is temporarily unavailable.',
-                        { status: 502, upstreamStatus },
+                        { status: 502, upstreamStatus, retryAfterSeconds },
                     ));
                 }
                 if (rangeReuse && upstreamStatus === 412) {
@@ -5696,7 +5718,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         throw markStrictLidTerminal(context, strictLidBrokerError(
                             'PROVIDER_BUSY',
                             'This TV service is busy. Wait a few seconds, then try again.',
-                            { status: 458, upstreamStatus },
+                            { status: 458, upstreamStatus, retryAfterSeconds },
                         ));
                     }
                     if (upstreamController.signal.aborted) {
@@ -5716,7 +5738,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         finiteSeek && upstreamStatus >= 500 && upstreamStatus <= 599
                             ? 'Provider temporarily rejected the finite MKV byte range.'
                             : 'Provider rejected the language-validation byte range.',
-                        { status: 502, upstreamStatus },
+                        { status: 502, upstreamStatus, retryAfterSeconds },
                     );
                     // The provider can keep its mono-account socket reserved for
                     // a short grace period after its CDN closes a declared range
@@ -6249,6 +6271,7 @@ async function createStrictLidBroker(options = {}) {
     const context = {
         sourceUrl,
         rangeReuse,
+        assertProviderTarget: typeof options.assertProviderTarget === 'function' ? options.assertProviderTarget : null,
         strictResolvedSourceUrl: null,
         fileSizeBytes,
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
@@ -6748,7 +6771,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     };
     try {
         if (strict) {
-            networkLease = options.claimNetwork?.(claims.url) || null;
+            networkLease = options.claimNetwork?.(claims.url, null, true) || null;
             strictBroker = await createStrictLidBroker({
                 sourceUrl: claims.url,
                 fileSizeBytes: strictFileSizeBytes,
@@ -7627,10 +7650,24 @@ function initializeStrictLidCapturePipeline(store) {
             if (viewerPlaybackActiveLocally() || accountSlotBusyLocally(context.url, sha256Hex(context.userId))) {
                 throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
             }
-            return claimLanguageEnrichmentNetwork(context.url);
+            if (context.selectionCapability && !decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
+                viewer:false,starting:viewerSessionStartupAdmissions.size > 0,
+                foregroundInference:whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
+                    || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0 || translateQueue.length > 0 || ocrQueue.length > 0,
+                benchmark:lidBenchmarkBusy,
+            }, enrichmentNetworkAdmission.snapshot(), LANGUAGE_METADATA_LANE_ENABLED).maxWorkers) {
+                throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
+            }
+            return claimLanguageEnrichmentNetwork(context.url, context.selectionCapability);
         },
-        openBroker: (context, signal) => createStrictLidBroker({ sourceUrl: context.url,
+        openBroker: (context, signal, network) => createStrictLidBroker({ sourceUrl: context.url,
             fileSizeBytes: context.fileSizeBytes, userAgent: context.ua, abortSignal: signal,
+            assertProviderTarget: target => {
+                context.selectionCapability?.assertTarget(target);
+                if (!network.reserveTarget(new URL(target).host.toLowerCase())) {
+                    throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
+                }
+            },
             rangeReuse: strictLidRangeReuse.begin({ userHash: sha256Hex(context.userId), sourceUrlHash: sha256Hex(context.url),
                 profileHash: context.profileFingerprint, fileSizeBytes: context.fileSizeBytes }) }),
         extract: (broker, binding, context, signal) => store.withWorkspace(async outputPath => {
@@ -7642,7 +7679,8 @@ function initializeStrictLidCapturePipeline(store) {
             for (const output of outputs) {
                 const handle = await fsp.open(output.path, 'wx', 0o600); await handle.close();
             }
-            const key = accountJobKey(context.userId, context.url);
+            const key = selectionEnrichmentPolicy.describe(context.selectionCapability)
+                ? `selection-exact-file:${sha256Hex(context.url)}` : accountJobKey(context.userId, context.url);
             if (isAccountJobBusy(key)) throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
             const plan = planStrictSpeechWindow(bindings[0].durationSeconds, bindings[0].windowOrdinal);
             let registration;
@@ -7724,7 +7762,8 @@ async function handleStrictLidCaptureRequest(req, res, action) {
         if (action === 'status') payload = await strictLidCapturePipeline.status(binding);
         else if (action === 'capture') payload = await strictLidCapturePipeline.capture(binding,
             { url: claims.url, userId: claims.uid, ua: claims.ua || FFMPEG_USER_AGENT, fileSizeBytes: context.fileSizeBytes,
-                profileFingerprint: binding.profileFingerprint }, controller.signal,
+                profileFingerprint: binding.profileFingerprint,
+                selectionCapability: selectionEnrichmentPolicy.resolve(claims) }, controller.signal,
             captureIndices.slice(1).map(trackIndex => ({ ...binding, trackIndex })));
         else if (action === 'infer') payload = await strictLidCapturePipeline.compute(binding,
             { accountKey: proxyKeyFromUrl(claims.url) }, controller.signal);
@@ -11807,6 +11846,12 @@ async function bootstrap() {
     }
     if (LANGUAGE_PASSIVE_CAPTURE_ENABLED && !LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
         throw capturePipelineError('LID_PASSIVE_CAPTURE_REQUIRES_CAPTURE_PIPELINE');
+    }
+    if (selectionEnrichmentPolicy.configured && !LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
+        throw capturePipelineError('SELECTION_POLICY_REQUIRES_CAPTURE_PIPELINE');
+    }
+    if (LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED && !LANGUAGE_METADATA_LANE_ENABLED) {
+        throw capturePipelineError('ADAPTIVE_HOST_ADMISSION_REQUIRES_METADATA_LANE');
     }
     if (LANGUAGE_CAPTURE_PIPELINE_ENABLED) {
         if (!LANGUAGE_METADATA_LANE_ENABLED || !WHISPER_RUNTIME_VERIFIED || !WHISPER_SPEECH_SAMPLER_RUNTIME_VERIFIED) {

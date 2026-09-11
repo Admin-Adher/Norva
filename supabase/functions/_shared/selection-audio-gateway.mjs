@@ -184,6 +184,7 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       fail('SELECTION_AUDIO_WINDOW_INVALID');
     }
     const claims = { v:1, sid:jobId, uid:subjectId, url:file.url, scope:'lid-legacy-full',
+      selectionEnrichmentProtocol:1, selectionFeedId:file.feedId,
       fileSizeBytes:profile.fileSizeBytes, durationSeconds:profile.durationSeconds,
       windowCheckpointProtocol:1, jobId, profileFingerprint:profile.fingerprint, windowCount:profile.windowCount,
       ...(finalize ? { windowFinalize:true } : { windowOrdinal }), exp:Math.floor(now()/1000) + 300 };
