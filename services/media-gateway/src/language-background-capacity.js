@@ -19,6 +19,26 @@ function decideLanguageBackgroundCapacity(sample, activity, now = Date.now()) {
         'capacity-available');
 }
 
+// Metadata has a separate short network lane. A running Whisper process is not
+// by itself a provider connection. Resource pressure and foreground work still
+// stop admission, and the Gateway's synchronous reservation enforces the shared
+// two-network-operation ceiling after this advisory snapshot becomes stale.
+function decideLanguageMetadataCapacity(sample, activity, network, enabled, now = Date.now()) {
+    const result = (maxWorkers, reason) => ({ protocol: 1, maxWorkers, reason, observedAt: new Date(now).toISOString() });
+    if (enabled !== true) return result(0, 'metadata-lane-disabled');
+    const base = decideLanguageBackgroundCapacity(sample, { ...activity, backgroundProcesses: 0, brokers: 0 }, now);
+    if (!base.maxWorkers) return result(0, base.reason);
+    if (!network || !Number.isInteger(network.maximum) || network.maximum < 1 || network.maximum > 2
+        || !Number.isInteger(network.active) || network.active < 0 || network.active > network.maximum) {
+        return result(0, 'capacity-unavailable');
+    }
+    if (network.active >= network.maximum) return result(0, 'network-occupied');
+    // This is an absolute lane ceiling, not a count of additional SQL claims.
+    // SQL counts its own live metadata leases; the local reservation counts all
+    // strict capture + metadata network work, including Selection.
+    return result(Math.min(base.maxWorkers, network.maximum), 'capacity-available');
+}
+
 function createLanguageResourceSampler({ readFile, os, now = Date.now, interval = setInterval }) {
     let previous = null;
     let latest = null;
@@ -52,4 +72,4 @@ function createLanguageResourceSampler({ readFile, os, now = Date.now, interval 
     return { snapshot: () => latest, sample };
 }
 
-module.exports = { decideLanguageBackgroundCapacity, createLanguageResourceSampler };
+module.exports = { decideLanguageBackgroundCapacity, decideLanguageMetadataCapacity, createLanguageResourceSampler };

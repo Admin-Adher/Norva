@@ -152,6 +152,9 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       const payload = await boundedJson(response);
       const providerDrained = payload.providerDrained === true && payload.providerDrainProtocol === 1;
       if (!response.ok) {
+        if (response.status === 429 && payload.code === 'LANGUAGE_ENRICHMENT_CAPACITY_BUSY' && providerDrained) {
+          fail('SELECTION_AUDIO_CAPACITY_BUSY', { status:429, retryable:true, providerDrained:true, retryAfterSeconds:30 });
+        }
         const busy = [409,429].includes(response.status) && ['account_busy','background_busy','viewer_preempted','LANGUAGE_VALIDATION_VIEWER_PREEMPTED','strict_lid_preempted'].includes(payload.code);
         const resetRequired = response.status === 409 && payload.code === 'strict_lid_checkpoint_reset_required' && payload.resetRequired === true;
         const retryable = busy || resetRequired || response.status >= 500 || response.status === 429;

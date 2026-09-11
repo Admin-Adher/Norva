@@ -164,6 +164,13 @@ test('shutdown abort and upstream failures expose only bounded local error codes
   assert.equal(calls.length, 1);
 });
 
+test('local capacity is distinct from provider rejection and requires a drain attestation', async () => {
+  for (const attested of [false,true]) {
+    const { gateway, file } = await setup(() => json({ code:'LANGUAGE_ENRICHMENT_CAPACITY_BUSY', ...(attested ? drain : {}) }, 429));
+    await assert.rejects(gateway.probe(file), { code:attested ? 'SELECTION_AUDIO_CAPACITY_BUSY' : 'SELECTION_AUDIO_GATEWAY_REJECTED', retryable:true });
+  }
+});
+
 test('incomplete inventories and unknown file sizes cannot mint strict sampling claims', async () => {
   for (const payload of [
     { ...probePayload(), audioProbeComplete:false },

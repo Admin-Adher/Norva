@@ -67,6 +67,20 @@ test('retry resumes persisted receipts without probing or repeating completed wi
   assert.deepEqual(run.finals[0].receipts, [1,2,3,4,5,6].map(receipt));
 });
 
+test('attested local capacity preserves the checkpoint and returns the admission debit without finalizing', async () => {
+  for (const owned of [false,true]) {
+    const job = { ...baseJob(), profile:profile(), progress:{ trackPosition:0, receipts:[receipt(1)], tracks:[], evidence:[] } };
+    const run = await harness({ job, analyze:() => { throw Object.assign(Error('capacity'), {
+      code:'SELECTION_AUDIO_CAPACITY_BUSY', providerDrained:true, retryable:true,
+    }); } });
+    let deferred = 0;
+    run.repository.deferAdmission = async current => { assert.equal(current, job); deferred++; return owned; };
+    assert.equal((await run.run()).state, owned ? 'retry_wait' : 'lease_lost');
+    assert.equal(deferred, 1); assert.equal(run.finishes.length, 0); assert.equal(run.windows.length, 1);
+    assert.deepEqual(job.progress.receipts, [receipt(1)]);
+  }
+});
+
 test('ambiguous audio completes durably as unidentified and never promotes a candidate', async () => {
   const run = await harness({ finalize:() => ({ verified:false, lang:null, candidate:'es', providerDrained:true }) });
   assert.equal((await run.run()).state, 'completed');

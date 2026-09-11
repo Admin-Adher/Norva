@@ -20,6 +20,7 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
   return {
     seed: manifest => rpc('seed_selection_audio_jobs', { p_manifest: manifest }),
     claim: () => rpc('claim_selection_audio_job'),
+    deferAdmission: job => rpc('defer_selection_audio_admission', identity(job)),
     checkpoint: (job, profile, progress) => rpc('checkpoint_selection_audio_job', { ...identity(job), p_profile: profile, p_progress: progress }),
     finish: (job, result, errorCode = null, retryable = false) => rpc('finish_selection_audio_job', {
       ...identity(job), p_result: result, p_error_code: errorCode, p_retryable: retryable,
@@ -137,6 +138,12 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     clearInterval(heartbeat);
     await checkpointChain;
     if (lostLease) return { state: 'lease_lost' };
+    if (error.code === 'SELECTION_AUDIO_CAPACITY_BUSY' && error.providerDrained === true) {
+      // A local capacity refusal is not a provider failure. Preserve all
+      // receipts/profile and give back only this claim's retry debit by CAS.
+      if (!await repository.deferAdmission(job)) return { state: 'lease_lost' };
+      return { state: 'retry_wait', error: 'SELECTION_AUDIO_CAPACITY_BUSY' };
+    }
     if (error.resetRequired) {
       profile = null;
       progress = { trackPosition: 0, receipts: [], tracks: [], evidence: [] };

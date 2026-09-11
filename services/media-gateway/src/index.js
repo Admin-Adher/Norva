@@ -15,7 +15,10 @@ const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
 const strictLidInference = createStrictLidInference();
-const { decideLanguageBackgroundCapacity, createLanguageResourceSampler } = require('./language-background-capacity');
+const { decideLanguageBackgroundCapacity, decideLanguageMetadataCapacity, createLanguageResourceSampler } = require('./language-background-capacity');
+const { createEnrichmentNetworkAdmission } = require('./enrichment-network-admission');
+const enrichmentNetworkAdmission = createEnrichmentNetworkAdmission();
+const LANGUAGE_METADATA_LANE_ENABLED = process.env.LANGUAGE_METADATA_LANE_ENABLED === '1';
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
 const languageResourceSampler = createLanguageResourceSampler({ readFile: fsp.readFile, os });
 const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
@@ -2938,6 +2941,14 @@ app.get('/health', (req, res) => {
             brokers: strictLidBrokers.size,
             benchmark: lidBenchmarkBusy,
         }),
+        languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
+            viewer: viewerPlaybackActiveLocally(),
+            starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
+            foregroundInference: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
+                || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0
+                || translateQueue.length > 0 || ocrQueue.length > 0,
+            benchmark: lidBenchmarkBusy,
+        }, enrichmentNetworkAdmission.snapshot(), LANGUAGE_METADATA_LANE_ENABLED),
         rawStreamHealth: {
             ...rawStreamStats,
             firstByteTimeoutMs: RAW_FIRST_BYTE_TIMEOUT_MS,
@@ -4381,8 +4392,22 @@ async function providerProbeDrainAttestation(state) {
 // probe HERE instead: ffprobe egresses the same sticky residential IP as everything else, so the
 // provider sees one household. Returns the SAME shape as norva-relay /probe-audio so the
 // edge runner consumes it unchanged (audioLanguages / audioTracks / subtitles).
-async function handleProbeAudioRequest(req, res) {
+function claimLanguageEnrichmentNetwork(sourceUrl) {
+    const parsed = new URL(sourceUrl);
+    const lease = enrichmentNetworkAdmission.acquire({
+        accountKey: proxyKeyFromUrl(sourceUrl) || `unknown-host:${parsed.host.toLowerCase()}`,
+        hostKey: parsed.host.toLowerCase(),
+    });
+    if (lease) return lease;
+    const error = new Error('Background network capacity is occupied');
+    error.code = 'LANGUAGE_ENRICHMENT_CAPACITY_BUSY';
+    error.status = 429;
+    throw error;
+}
+
+async function handleProbeAudioRequest(req, res, options = {}) {
     const providerDrainState = createProviderProbeDrainState();
+    let networkLease = null;
     try {
         const { url, userAgent, refreshCodecProfile } = req.body || {};
         if (!url || !isHttpUrl(url)) {
@@ -4399,6 +4424,7 @@ async function handleProbeAudioRequest(req, res) {
         if (probeKey && accountExtractions.get(probeKey)?.size) {
             return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
         }
+        networkLease = options.claimNetwork?.(url) || null;
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.
@@ -4436,6 +4462,7 @@ async function handleProbeAudioRequest(req, res) {
             if (t.default && !audioDefaultLanguage) audioDefaultLanguage = t.language || null;
         }
         const drainAttestation = await providerProbeDrainAttestation(providerDrainState);
+        networkLease?.release(drainAttestation);
         return res.json({
             audioLanguages,
             audioTracks,
@@ -4464,7 +4491,8 @@ async function handleProbeAudioRequest(req, res) {
                     code: 'provider_drain_unconfirmed',
                 });
             }
-        }
+        } else drainAttestation = { providerDrained: true, providerDrainProtocol: 1 };
+        networkLease?.release(drainAttestation);
         const status = Number.isInteger(err.status) ? err.status : 502;
         return res.status(status).json({
             error: err.publicMessage || 'Audio probe failed',
@@ -4474,7 +4502,9 @@ async function handleProbeAudioRequest(req, res) {
     }
 }
 
-app.post('/probe-audio', requireGatewayAuth, handleProbeAudioRequest);
+app.post('/probe-audio', requireGatewayAuth, (req, res) => handleProbeAudioRequest(req, res, {
+    claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimLanguageEnrichmentNetwork : undefined,
+}));
 
 // ── Strict LID loopback broker (mono-account provider barrier) ───────────────
 // Strict multi-window language validation must seek through one finite file several times.
@@ -6606,13 +6636,14 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     res.once('close', onRequestClose);
     let strictBroker = null;
     let strictBrokerDrained = false;
+    let networkLease = null;
     const strictWavSamples = [];
-    const closeStrictBrokerForResponse = async () => {
-        if (!strict || strictBrokerDrained) return;
-        if (strictWorkBudgetTimer !== null) {
+    const closeStrictBrokerForResponse = async (forResponse = true) => {
+        if (forResponse && strictWorkBudgetTimer !== null) {
             clearTimeout(strictWorkBudgetTimer);
             strictWorkBudgetTimer = null;
         }
+        if (!strict || strictBrokerDrained) return;
         if (strictBroker) {
             const remainingMs = Math.max(0, strictRequestDeadlineAt - Date.now());
             if (!remainingMs) throw new Error('strict language provider drain exceeded request budget');
@@ -6636,6 +6667,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         // that state is also safe to hand off. Once a broker existed, close()
         // above is the sole authority for socket + release-grace completion.
         strictBrokerDrained = true;
+        networkLease?.release({ providerDrained: true });
     };
     const sendDetectionJson = async (status, payload) => {
         await closeStrictBrokerForResponse();
@@ -6651,6 +6683,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
     };
     try {
         if (strict) {
+            networkLease = options.claimNetwork?.(claims.url) || null;
             strictBroker = await createStrictLidBroker({
                 sourceUrl: claims.url,
                 fileSizeBytes: strictFileSizeBytes,
@@ -7075,6 +7108,12 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         }
         if (requestController.signal.aborted && !res.writableEnded) return;
         if (strict && strictWavSamples.length > 0) {
+            // All source bytes are now local. Closing here makes the shared
+            // network reservation available to another authorized account while
+            // Whisper computes. Keep the original CPU/request deadline active.
+            // The distributed account lease still awaits Edge's response; its
+            // earlier durable handoff is a separate capture-protocol workstream.
+            if (options.claimNetwork) await closeStrictBrokerForResponse(false);
             const batchTimeoutMs = strictLidWhisperBatchTimeoutMs(
                 strictWorkDeadlineAt,
                 Boolean(strictWindowContext),
@@ -7279,8 +7318,9 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             strictWorkBudgetTimer = null;
         }
         if (strictBroker && !strictBrokerDrained) {
-            try { await strictBroker.close(); } catch (_) { /* Edge retains the TTL lease */ }
+            try { await strictBroker.close(); strictBrokerDrained = true; } catch (_) { /* Edge retains the TTL lease */ }
         }
+        if (strictBrokerDrained || !strictBroker) networkLease?.release({ providerDrained: true });
         if (strictWavSamples.length > 0) {
             await cleanupStrictLidFiles(strictWavSamples.flatMap((sample) => (
                 sample.sourcePath ? [sample.path, sample.sourcePath] : [sample.path]
@@ -7447,6 +7487,7 @@ app.post('/detect-language', setDetectLanguageSecurityHeaders, requireGatewayAut
     }
     return handleDetectLanguageRequest(req, res, capabilityToken, {
         requiredScope: LID_LEGACY_FULL_SCOPE,
+        claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimLanguageEnrichmentNetwork : undefined,
     });
 });
 
@@ -7465,7 +7506,9 @@ app.post('/detect-language/finalize', setDetectLanguageSecurityHeaders, requireG
 // Temporary compatibility route for already-issued clients. New callers must
 // use the header route above because this path can be captured by access logs.
 app.get('/detect-language/:token', async (req, res) => (
-    handleDetectLanguageRequest(req, res, String(req.params.token || ''))
+    handleDetectLanguageRequest(req, res, String(req.params.token || ''), {
+        claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimLanguageEnrichmentNetwork : undefined,
+    })
 ));
 
 // Service-only production handoff for the isolated LID cascade. The gateway is responsible

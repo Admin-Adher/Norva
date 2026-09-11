@@ -1,5 +1,35 @@
 // Intake only: no inference, transcription, provider URL or credential belongs
 // here. The existing exact probe and strict worker remain authoritative.
+// No timer or detached recursion: an ordinary fleet tick can consume a small
+// batch while its existing lifetime has room. Each item still obtains fresh
+// access, capacity and distributed source/account claims. A blocked provider
+// ends this batch; the fleet dispatcher remains responsible for other sources.
+export async function processAutomaticVodLanguageBatch({ runOne, now = Date.now, maximum = 4, budgetMs = 60_000 }) {
+  if (!Number.isInteger(maximum) || maximum < 1 || maximum > 4 || !Number.isFinite(budgetMs)
+    || budgetMs < 0 || budgetMs > 60_000) throw new Error('Invalid metadata batch budget');
+  const deadline = now() + budgetMs;
+  const totals = { protocol: 1, mode: 'automatic-language', processed: 0, attempted: 0,
+    queued: 0, identified: 0, verified: 0, deferred: 0, failed: 0, scanned: 0, steps: 0, hasMore: true };
+  for (let index = 0; index < maximum; index++) {
+    // Do not begin a second provider operation with less than one ordinary
+    // bounded probe + cleanup allowance left. This is a dispatch bound; the
+    // existing probe itself retains its own request and provider-drain budgets.
+    if (index > 0 && now() + 30_000 > deadline) break;
+    const result = await runOne();
+    totals.steps++;
+    for (const key of ['processed', 'attempted', 'queued', 'identified', 'verified', 'deferred', 'failed', 'scanned']) {
+      if (Number.isSafeInteger(result[key]) && result[key] > 0) totals[key] += result[key];
+    }
+    for (const key of ['outcome', 'code', 'skipped', 'exhausted', 'hasMore']) {
+      if (result[key] !== undefined) totals[key] = result[key];
+      else if (['outcome', 'code', 'skipped', 'exhausted'].includes(key)) delete totals[key];
+    }
+    if (result.skipped || result.exhausted || result.hasMore === false || result.deferred > 0 || result.failed > 0) break;
+    if (!(result.processed > 0) && !(result.scanned > 0)) break;
+  }
+  return totals;
+}
+
 export async function processAutomaticVodLanguageFile({ claim, inspect, probe, enqueue, finish }) {
   let attempted = false;
   let outcome;

@@ -1,5 +1,5 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
-import { processAutomaticVodLanguageFile } from "../_shared/automatic-vod-language-fleet.mjs";
+import { processAutomaticVodLanguageFile, processAutomaticVodLanguageBatch } from "../_shared/automatic-vod-language-fleet.mjs";
 import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
 import { selectionSnapshotPlaybackTags } from "../_shared/selection-snapshot-tracks.mjs";
@@ -3861,7 +3861,7 @@ async function readLanguageValidationGatewayResponse(
   }
 }
 
-async function refreshLanguageBackgroundCapacity(db: SupabaseClient): Promise<boolean> {
+async function refreshLanguageBackgroundCapacity(db: SupabaseClient, lane: "analysis" | "metadata" = "analysis"): Promise<boolean> {
   // Gateway reports aggregate resource/foreground occupancy only. The database
   // then makes the actual admission atomic across both Edge replicas. No health
   // response can increase the existing hard ceiling of two background jobs.
@@ -3871,10 +3871,10 @@ async function refreshLanguageBackgroundCapacity(db: SupabaseClient): Promise<bo
     const response = await fetch(`${runtime.mediaGatewayUrl}/health`, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) return false;
     const health = recordOrEmpty(await response.json());
-    const capacity = recordOrEmpty(health.languageBackgroundCapacity);
+    const capacity = recordOrEmpty(lane === "metadata" ? health.languageMetadataCapacity : health.languageBackgroundCapacity);
     if (health.ok !== true || capacity.protocol !== 1 || !Number.isInteger(capacity.maxWorkers)
       || Number(capacity.maxWorkers) < 0 || Number(capacity.maxWorkers) > 2) return false;
-    const { data, error } = await db.rpc("report_catalog_language_capacity", {
+    const { data, error } = await db.rpc(lane === "metadata" ? "report_catalog_language_metadata_capacity" : "report_catalog_language_capacity", {
       p_max_workers: capacity.maxWorkers, p_reason: capacity.reason, p_observed_at: capacity.observedAt,
     });
     return !error && data === true && Number(capacity.maxWorkers) > 0;
@@ -3906,7 +3906,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
   let providerLeaseOwner = "";
   let identityKey = stringOr(claim.identityKey, "");
   let providerAttemptToken: string | null = null;
-  const settleProviderAttempt = async (outcome: "no_progress" | "viewer_preempted") => {
+  const settleProviderAttempt = async (outcome: "no_progress" | "viewer_preempted" | "admission_deferred") => {
     if (!providerAttemptToken) return null;
     const attemptToken = providerAttemptToken;
     try {
@@ -4253,6 +4253,15 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       payload,
       sanitizeTelemetryText(textFromGatewayDetails(payload)),
     );
+    if (response.status === 429 && gatewayCode === "LANGUAGE_ENRICHMENT_CAPACITY_BUSY"
+      && providerAccountLeaseReleaseSafe) {
+      await settleProviderAttempt("admission_deferred");
+      await failLanguageValidationJob(db, {
+        jobId, leaseOwner, errorCode: "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        retryAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      return;
+    }
     if (isProviderBusyFailure({
       code: gatewayCode,
       upstreamStatus: upstreamStatus ?? response.status,
@@ -11025,7 +11034,7 @@ async function enqueueAutomaticStrictLanguageValidation(options: {
   return PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(started.jobId, ""));
 }
 
-async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string, sourceId: string) {
+async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string, sourceId: string, lane: "analysis" | "metadata" = "analysis") {
   // Catalogue maintenance has its own permission; playback and manual LID
   // still require a subscription. The strict worker repeats this fresh check.
   try {
@@ -11036,7 +11045,7 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
     }
     throw error;
   }
-  if (!await refreshLanguageBackgroundCapacity(db)) {
+  if (!await refreshLanguageBackgroundCapacity(db, lane)) {
     return { mode: "automatic-language", processed: 0, skipped: "server-capacity", hasMore: true };
   }
   const { data, error } = await db.rpc("claim_catalog_vod_language_file", {
@@ -11099,6 +11108,16 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
       if (finishError) throwDb(finishError, "Unable to acknowledge automatic language intake");
       if (acknowledged !== true) throw new HttpError(409, "Automatic language intake lease changed");
     },
+  });
+}
+
+async function runAutomaticVodLanguageMetadataBatch(db: SupabaseClient, userId: string, sourceId: string) {
+  const { data, error } = await db.rpc("catalog_language_metadata_lane_enabled");
+  // Deploying code ahead of SQL, missing permission or a disabled flag retains
+  // the previous one-file path. No unsigned request can enable the new lane.
+  if (error || data !== true) return await runAutomaticVodLanguageIntake(db, userId, sourceId);
+  return await processAutomaticVodLanguageBatch({
+    runOne: () => runAutomaticVodLanguageIntake(db, userId, sourceId, "metadata"),
   });
 }
 
@@ -15163,7 +15182,8 @@ function providerProbeRejectedBeforeSpawn(
 ): boolean {
   return (
     (status === 409 && providerCode === "account_busy") ||
-    (status === 429 && providerCode === "background_busy")
+    (status === 429 && providerCode === "background_busy") ||
+    (status === 429 && providerCode === "language_enrichment_capacity_busy")
   );
 }
 
@@ -15560,6 +15580,12 @@ async function runCodecProfileBackfill(
         () => { releaseLeaseOnExit = false; },
       );
       providerTransportMayBeActive = !leaseReleaseSafe;
+      if (response.status === 429 && providerCode === "language_enrichment_capacity_busy" && leaseReleaseSafe) {
+        attempted -= 1; // Rejected before spawn: no provider request to charge.
+        stopped = "server-capacity";
+        results.push({ variantId, status: "deferred", code: stopped });
+        break;
+      }
       const terminalCode = providerProbeTerminalCode({
         status: response.status,
         code: providerCode ?? undefined,
@@ -16437,6 +16463,7 @@ async function runEpisodeAudioBackfill(
         const locallyRejected = (
           (response.status === 409 && providerCode === "account_busy")
           || (response.status === 429 && providerCode === "background_busy")
+          || (response.status === 429 && providerCode === "language_enrichment_capacity_busy")
         );
         const leaseReleaseSafe = providerProbeResponseAllowsLeaseRelease(
           response.status,
@@ -16467,7 +16494,7 @@ async function runEpisodeAudioBackfill(
           skipped = "viewer-preempted";
           break;
         }
-        if (response.status === 429 && providerCode === "background_busy") {
+        if (response.status === 429 && (providerCode === "background_busy" || providerCode === "language_enrichment_capacity_busy")) {
           await recordEpisodeProbeOutcome(db, {
             userId,
             sourceId,
@@ -16772,7 +16799,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   }
   const requestedType = stringOr(body.type, "movie");
   if (body.automaticUnknowns === true && requestedType === "movie" && sourceId) {
-    return await runAutomaticVodLanguageIntake(db, userId, sourceId);
+    return await runAutomaticVodLanguageMetadataBatch(db, userId, sourceId);
   }
   const itemType = requestedType === "series" || requestedType === "episode"
     ? requestedType

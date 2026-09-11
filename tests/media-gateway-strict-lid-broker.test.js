@@ -2423,6 +2423,7 @@ test('service-only header LID route authenticates before capability handling and
     {
     LID_CAPABILITY_HEADER: 'x-norva-byte-pipe-token',
     LID_LEGACY_FULL_SCOPE: 'lid-legacy-full',
+    LANGUAGE_METADATA_LANE_ENABLED: false,
     GATEWAY_TOKEN: 'service-secret',
     app,
     console: {
