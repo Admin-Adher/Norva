@@ -42,6 +42,20 @@ def document(relative):
     return json.loads(read(relative))
 
 
+def reviewed_edge_baseline(live, expected):
+    live = live.replace(b'\r\n', b'\n')
+    expected = expected.replace(b'\r\n', b'\n')
+    if live == expected:
+        return True
+    # Historical mail overlay prepended this exact static import. The current
+    # Git version places the same import after the Selection imports. Inspection
+    # proved every other byte equal. Allow ONLY this reviewed ordering difference;
+    # never discard another live modification while copying the tested candidate.
+    line = b"import { requestEmailProvider } from '../_shared/email-provider-request.mjs';\n"
+    return live.startswith(line) and live.count(line) == expected.count(line) == 1 \
+        and live[len(line):] == expected.replace(line, b'', 1)
+
+
 def sql(query, write=False):
     args = ['docker', 'exec', '-i', '-e',
             'PGOPTIONS=-c statement_timeout=30000 -c lock_timeout=3000' +
@@ -131,7 +145,8 @@ def stage():
     sources = [edge_root(containers[name]) for name in SERVICES[1:]]
     require(len(set(sources)) == 1, 'edge_replica_source_drift')
     live_edge = (sources[0] / EDGE_FILE).read_bytes()
-    require(digest(live_edge) == digest(read('base/supabase/functions/' + EDGE_FILE)), 'edge_baseline_drift')
+    base_edge = read('base/supabase/functions/' + EDGE_FILE)
+    require(reviewed_edge_baseline(live_edge, base_edge), 'edge_baseline_drift')
     candidate = {'gateway': {name: digest(read('candidate/services/media-gateway/src/' + name)) for name in gw.MODULES},
                  'edge': digest(read('candidate/supabase/functions/' + EDGE_FILE)),
                  'migration': digest(read('candidate/' + MIGRATION))}
@@ -172,7 +187,8 @@ def stage():
     plan = {'protocol': 1, 'commit': release['commit'], 'containers': containers, 'sourcesBefore': before,
             'edgeBefore': digest(live_edge), 'candidate': candidate, 'runtime': runtime, 'binaries': binaries,
             'image': image, 'imageIdentity': gw.image_identity(image), 'oldImageIdentity': base_identity,
-            'edgeSource': str(sources[0]), 'controlsBefore': state, 'unrelatedEdgeFilesPreserved': unchanged}
+            'edgeSource': str(sources[0]), 'controlsBefore': state, 'unrelatedEdgeFilesPreserved': unchanged,
+            'reviewedEmailImportOrderOnly': digest(live_edge) != digest(base_edge)}
     private_write(ROOT / 'plan.private.json', plan)
     print(json.dumps({'staged': True, 'commit': release['commit'], 'builtOnly': True,
         'unrelatedEdgeFilesPreserved': unchanged, 'hashes': candidate, 'productionUnchanged': True}), flush=True)

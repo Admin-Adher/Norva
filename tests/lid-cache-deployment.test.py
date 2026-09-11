@@ -12,6 +12,17 @@ spec.loader.exec_module(operator)
 
 
 class ReleaseGuards(unittest.TestCase):
+    def test_only_the_reviewed_static_email_import_reordering_is_allowed(self):
+        line = b"import { requestEmailProvider } from '../_shared/email-provider-request.mjs';\n"
+        expected = b'import selection;\n' + line + b'body\n'
+        live = line + b'import selection;\nbody\n'
+        self.assertTrue(operator.reviewed_edge_baseline(expected, expected))
+        self.assertTrue(operator.reviewed_edge_baseline(live, expected))
+        self.assertTrue(operator.reviewed_edge_baseline(live.replace(b'\n', b'\r\n'), expected))
+        for changed in [live + b'other change', live.replace(b'body', b'changed'),
+                        live + line, live.replace(b'requestEmailProvider', b'otherProvider')]:
+            self.assertFalse(operator.reviewed_edge_baseline(changed, expected))
+
     def test_runtime_allowlist_is_two_js_modules_and_no_new_binary(self):
         self.assertEqual(operator.gw.MODULES, ('index.js', 'strict-lid-batch.js'))
         source = SOURCE.read_text()
