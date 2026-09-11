@@ -30,8 +30,13 @@ def paused():
 def stage(commit):
     d.require(re.fullmatch('[a-f0-9]{40}',commit) is not None,'commit_invalid')
     plan=paused();d.verify_service(d.SERVICES[0],plan)
-    d.require(not PATCH.exists() and not (ROOT/'diagnostic-revision.private.json').exists(),'diagnostic_already_staged')
-    PATCH.mkdir(mode=0o700);context=PATCH/'context';context.mkdir(mode=0o700)
+    d.require(not (PATCH/'revision.private.json').exists() and not (ROOT/'diagnostic-revision.private.json').exists(),'diagnostic_already_staged')
+    # A failed offline image build may resume only from these same two inputs.
+    d.require(not PATCH.is_symlink(),'diagnostic_stage_symlink')
+    PATCH.mkdir(mode=0o700,exist_ok=True);context=PATCH/'context'
+    d.require(not context.is_symlink(),'diagnostic_context_symlink');context.mkdir(mode=0o700,exist_ok=True)
+    d.require({p.name for p in PATCH.iterdir()}=={'context'} and
+        {p.name for p in context.iterdir()}<=set(FILES)|{'Dockerfile'},'diagnostic_stage_foreign_file')
     allowed={'services/media-gateway/src/'+n:n for n in FILES}
     with tarfile.open(ROOT/'diagnostic-source.tar') as archive:
         members=[m for m in archive.getmembers() if not m.isdir()]
@@ -39,12 +44,17 @@ def stage(commit):
         for member in members:
             d.require(member.isfile() and 0<member.size<180000,'diagnostic_archive_entry')
             target=context/allowed[member.name]
-            target.write_bytes(archive.extractfile(member).read().replace(b'\r\n',b'\n'));target.chmod(0o600)
+            content=archive.extractfile(member).read().replace(b'\r\n',b'\n')
+            d.require(not target.is_symlink() and (not target.exists() or target.read_bytes()==content),'diagnostic_staged_source_drift')
+            if not target.exists():target.write_bytes(content);target.chmod(0o600)
     after={**plan['sourceAfter'],**{n:d.sha((context/n).read_bytes()) for n in FILES}}
     d.require(all(after[n]!=plan['sourceAfter'][n] for n in FILES),'diagnostic_unchanged')
     current=d.gw.inspect(d.SERVICES[0]);image='norva-media-gateway:enrichment-pilot20-diagnostics-20260912'
     (context/'Dockerfile').write_text('ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n'+''.join('COPY --chmod=0644 '+n+' /app/src/'+n+'\n' for n in FILES))
-    d.gw.run(['docker','build','--network','none','--build-arg','BASE_IMAGE='+current['Image'],'-t',image,str(context)])
+    base='norva-enrichment-pilot20-diagnostic-base:20260912'
+    d.gw.run(['docker','tag',current['Image'],base])
+    d.require(d.gw.image_identity(base)['index']==current['Image'],'diagnostic_base_drift')
+    d.gw.run(['docker','build','--network','none','--build-arg','BASE_IMAGE='+base,'-t',image,str(context)])
     for name in FILES:d.gw.run(['docker','run','--rm','--network','none','--read-only','--memory','512m','--cpus','1','--entrypoint','node',image,'--check','/app/src/'+name])
     revision={'originalPlanSha256':d.sha(d.artifact('plan.private.json')),'commit':commit,
         'image':image,'imageIdentity':d.gw.image_identity(image),'sourceAfter':after,'createdAt':d.stamp()}

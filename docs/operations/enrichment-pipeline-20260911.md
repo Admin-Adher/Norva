@@ -446,9 +446,12 @@ Validation: focused Node tests 43 passed/2 native-only skipped; deployment tests
 8 passed; isolated native runtime tests 127 passed/0 skipped, network disabled,
 zero provider requests. The first full parallel run had one existing
 complete-cache abort-timing failure (4,487 passed, 14 skipped); its focused
-rerun passed 39/39 runnable tests. A complete lower-concurrency rerun is required
-before publishing this diagnostic follow-up. No media or test threshold is
-weakened to conceal the failure.
+rerun passed 39/39 runnable tests. The complete rerun with four concurrent test
+processes passed **4,488 tests, 14 skipped, zero failures** (136.87 seconds).
+No media or test threshold was weakened. The initial offline image build failed
+before creating an image; staging now explicitly tags and verifies the already
+local base image, as in the original deployment, and resumes only identical
+two-file build inputs. No running container was changed by that failure.
 
 ## Earlier release proposal and bounded acceptance
 
