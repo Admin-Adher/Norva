@@ -94,7 +94,7 @@ class ConfigurationTests(unittest.TestCase):
         selected=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='saved']
         with tempfile.TemporaryDirectory() as temp:
             root=pathlib.Path(temp)
-            original={'sourceAfter':{'index.js':'i','unchanged.js':'u',
+            original={'sourceAfter':{'index.js':'i','unchanged.js':'u','strict-lid-capture-store.js':'old-s',
                 'strict-lid-capture-pipeline.js':'old-p','strict-lid-multi-extract.js':'old-m'},
                 'gatewayEnv':{'SECRET':'retained'},'gate':{'fileKeys':['same-cohort'],'expiresAt':'unchanged'}}
             before=json.dumps(original);(root/'plan.private.json').write_text(before)
@@ -110,6 +110,14 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual((root/'plan.private.json').read_text(),before)
             revision['sourceAfter']['unchanged.js']='unexpected';path.write_text(json.dumps(revision))
             with self.assertRaisesRegex(RuntimeError,'diagnostic_scope_changed'):ns['saved']('plan.private.json')
+            revision['sourceAfter']['unchanged.js']='u';path.write_text(json.dumps(revision))
+            duration={**revision,'parentDiagnosticSha256':'original-hash','image':'duration-image',
+                'sourceAfter':{**revision['sourceAfter'],'strict-lid-capture-store.js':'new-s'}}
+            duration_path=root/'duration-revision.private.json';duration_path.write_text(json.dumps(duration))
+            updated=ns['saved']('plan.private.json')
+            self.assertEqual(updated['image'],'duration-image');self.assertEqual(updated['gate'],original['gate'])
+            duration['sourceAfter']['index.js']='unexpected';duration_path.write_text(json.dumps(duration))
+            with self.assertRaisesRegex(RuntimeError,'duration_scope_changed'):ns['saved']('plan.private.json')
 
     def test_diagnostic_deployment_keeps_cohort_and_waits_for_audio_drain(self):
         patch=pathlib.Path(__file__).with_name('deploy-enrichment-pilot20-diagnostics-20260912.py').read_text(encoding='utf8')

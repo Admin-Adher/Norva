@@ -71,7 +71,8 @@ test('missing drain or wrong audio duration cannot enter the inference buffer', 
     for (const attestation of [{}, { providerDrained: true }, { providerDrained: false, providerDrainProtocol: 1 }]) {
         await assert.rejects(f.store.put(binding(), wav(), attestation), { code: 'LID_CAPTURE_DRAIN_REQUIRED' });
     }
-    await assert.rejects(f.store.put(binding(), wav(20), drain), { code: 'LID_CAPTURE_DURATION_INVALID' });
+    await assert.rejects(f.store.put(binding(), wav(19), drain), { code: 'LID_CAPTURE_DURATION_INVALID' });
+    await assert.rejects(f.store.put(binding(), wav(61), drain), { code: 'LID_CAPTURE_DURATION_INVALID' });
     assert.equal(f.store.snapshot().entries, 0);
 });
 
@@ -217,12 +218,14 @@ function pipelineFixture(store, options = {}) {
 
 test('internal capture diagnostics distinguish short audio after drain without exposing arbitrary error text', async t => {
     const f = await fixture(t); const diagnostics = [];
-    const p = pipelineFixture(f.store, { seconds: 20, diagnostic: value => diagnostics.push(value) });
+    const p = pipelineFixture(f.store, { seconds: 19, diagnostic: value => diagnostics.push(value) });
     await assert.rejects(p.pipeline.capture(binding(), {}), { code: 'LID_CAPTURE_DURATION_INVALID' });
     assert.equal(p.sockets(), 0); assert.equal(f.store.snapshot().entries, 0);
     assert.equal(diagnostics[0].stage, 'store');
     assert.equal(diagnostics[0].code, 'LID_CAPTURE_DURATION_INVALID');
     assert.equal(diagnostics[0].providerDrained, true);
+    assert.deepEqual(diagnostics[0].audioMilliseconds, [19000]);
+    assert.equal(diagnostics[0].requestedMilliseconds, 60000);
     const q = pipelineFixture(f.store, { diagnostic: value => diagnostics.push(value),
         extractFails: Object.assign(Error('https://private.invalid/secret'), { code: 'SECRET_CREDENTIAL_VALUE' }) });
     await assert.rejects(q.pipeline.capture(binding(), {}));
@@ -230,6 +233,28 @@ test('internal capture diagnostics distinguish short audio after drain without e
     assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|SECRET|private-owner|12345678/);
     const r = pipelineFixture(f.store, { diagnostic: () => { throw Error('logger down'); } });
     assert.equal((await r.pipeline.capture(binding(), {})).providerDrained, true);
+});
+
+test('a bounded partial search survives storage without padding and still produces a full 20-second selected sample', async t => {
+    const { prepareStrictLidSpeechSample } = require('../services/media-gateway/src/strict-lid-speech-sampler');
+    const f = await fixture(t);const partial=wav(59.95);const planned=planStrictSpeechWindow(3600,2);
+    await f.store.put(binding(),partial,drain);
+    await f.restart();assert.deepEqual((await f.store.get(binding())).wav,partial);
+    await f.store.withPlaintext(binding(),async sourcePath=>{
+        const selected=sourcePath+'.selected.wav';
+        const result=await prepareStrictLidSpeechSample({wavPath:sourcePath,plan:planned,selectedWavPath:selected});
+        assert.equal(result.ok,true);assert.deepEqual(await fs.readFile(sourcePath),partial);
+        const {parsePcm16Wav}=require('../services/media-gateway/src/strict-lid-audio-evidence');
+        assert.equal(parsePcm16Wav(await fs.readFile(selected)).sampleCount,320000);
+        assert.equal(result.selection.selectedDurationMilliseconds,20000);
+    });
+    // Exactly the selector minimum is retained, but without speech evidence a
+    // missing preferred anchor still fails downstream. No fabricated padding.
+    const shortBinding=binding({trackIndex:2});await f.store.put(shortBinding,wav(20),drain);
+    await f.store.withPlaintext(shortBinding,async sourcePath=>{
+        const result=await prepareStrictLidSpeechSample({wavPath:sourcePath,plan:planned,selectedWavPath:sourcePath+'.selected.wav'});
+        assert.equal(result.ok,false);
+    });
 });
 
 test('pipeline captures only once, attests drain before storage, restarts and computes with ZERO provider reads', async t => {

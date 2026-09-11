@@ -13,7 +13,7 @@ NAME = 'norva-capture-runtime-proof-20260911'
 LABEL = 'capture-runtime-proof-20260911'
 FILES = ['services/media-gateway/src/' + name + '.js' for name in (
     'strict-lid-capture-store', 'strict-lid-capture-pipeline', 'strict-lid-window-checkpoint',
-    'strict-lid-speech-window', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract',
+    'strict-lid-speech-window', 'strict-lid-speech-sampler', 'strict-lid-batch', 'strict-lid-audio-evidence', 'strict-lid-multi-extract',
     'strict-lid-range-reuse', 'passive-lid-capture', 'enrichment-network-admission', 'selection-enrichment-policy', 'enrichment-pilot-admission', 'index')]
 FILES.append('tests/strict-lid-capture-store.test.js')
 FILES.append('tests/strict-lid-multi-extract.test.js')

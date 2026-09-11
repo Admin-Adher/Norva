@@ -19,6 +19,15 @@ const WORK_FILE = /^(?:raw\.wav|passive\.ts|track-(?:0|[1-9][0-9]{0,2})\.wav|raw
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const error = code => Object.assign(new Error(code), { code });
 
+// A search region is a maximum, not a required amount of decoded speech.
+// Match the established selector's minimum full 20-second evidence window.
+// It will still reject a missing anchor/invalid VAD window. Never pad, shift
+// the planned origin, or retain samples beyond this disjoint search stratum.
+function usableCaptureDuration(parsed, plan) {
+    return parsed.sampleCount >= plan.sampleDurationMilliseconds * 16
+        && parsed.sampleCount <= plan.searchDurationMilliseconds * 16;
+}
+
 function captureBinding(input) {
     const window = normalizeStrictLidWindowBinding(input);
     if (window.selectionProtocol !== 1 || !HEX.test(input.sourceUrlHash || '')) throw error('LID_CAPTURE_BINDING_INVALID');
@@ -211,7 +220,7 @@ class StrictLidCaptureStore {
             const wav = Buffer.from(record.wav, 'base64');
             const parsed = parsePcm16Wav(wav);
             const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal);
-            if (sha(wav) !== record.sha256 || parsed.durationSeconds * 1000 !== plan.searchDurationMilliseconds) return null;
+            if (sha(wav) !== record.sha256 || !usableCaptureDuration(parsed, plan)) return null;
             return { ...record, binding, wav };
         } catch (_) { return null; }
     }
@@ -237,7 +246,7 @@ class StrictLidCaptureStore {
             const normalized = captureBinding(binding);
             const plan = planStrictSpeechWindow(normalized.durationSeconds, normalized.windowOrdinal);
             const parsed = parsePcm16Wav(wav);
-            if (parsed.durationSeconds * 1000 !== plan.searchDurationMilliseconds) throw error('LID_CAPTURE_DURATION_INVALID');
+            if (!usableCaptureDuration(parsed, plan)) throw error('LID_CAPTURE_DURATION_INVALID');
             await this.prune();
             const name = this.name(normalized);
             if (reservationToken !== null && this.reservations.get(name) !== reservationToken) throw error('LID_CAPTURE_RESERVATION_LOST');

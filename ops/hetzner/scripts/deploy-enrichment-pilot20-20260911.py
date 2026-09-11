@@ -66,6 +66,15 @@ def saved(name):
             newer['sourceAfter'][k]==v for k,v in value['sourceAfter'].items()
             if k not in ('strict-lid-capture-pipeline.js','strict-lid-multi-extract.js')),'diagnostic_scope_changed')
         for key in ('image','imageIdentity','sourceAfter'):value[key]=newer[key]
+    duration_revision=ROOT/'duration-revision.private.json'
+    if name=='plan.private.json' and duration_revision.exists():
+        newer=json.loads(gw.safe_file(ROOT,duration_revision.name).read_text())
+        require(newer['originalPlanSha256']==sha(artifact(name)),'duration_revision_drift')
+        require(newer['parentDiagnosticSha256']==sha(artifact('diagnostic-revision.private.json')),'duration_parent_changed')
+        require(set(newer['sourceAfter'])==set(value['sourceAfter']) and all(
+            newer['sourceAfter'][k]==v for k,v in value['sourceAfter'].items()
+            if k not in ('strict-lid-capture-pipeline.js','strict-lid-capture-store.js')),'duration_scope_changed')
+        for key in ('image','imageIdentity','sourceAfter'):value[key]=newer[key]
     if name=='plan.private.json' and (ROOT/'pilot-closed.private.json').exists():
         closed=json.loads(gw.safe_file(ROOT,'pilot-closed.private.json').read_text())
         value['gate']=None;value['gatewayEnv']=closed['gatewayEnv']

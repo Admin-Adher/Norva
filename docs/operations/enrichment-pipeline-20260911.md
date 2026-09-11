@@ -453,6 +453,44 @@ before creating an image; staging now explicitly tags and verifies the already
 local base image, as in the original deployment, and resumes only identical
 two-file build inputs. No running container was changed by that failure.
 
+### Capture-duration contract correction
+
+Diagnostic revision `2e0e107a` was published, deployed and verified on all four
+services; its image was
+`sha256:58e47fc42ce86963a7a2b023020e556ca4a3ce6a211163a72af12a025c42b7ea`.
+The unchanged cohort resumed, then its idle operator was paused again when a
+real capture reached confirmed provider drain but failed at storage with
+`LID_CAPTURE_DURATION_INVALID`. Another extraction failed earlier and remains
+unclassified; neither is silently counted as a detected language.
+
+The concrete contract mismatch is in the new store: it required the exact full
+search-window duration, whereas the established speech selector already uses
+available audio up to that search limit and still requires a complete 20-second
+selected sample. The correction accepts decoded samples between that existing
+minimum and the planned maximum, using integer PCM sample counts. It adds no
+padding, changes no origin/stratum, performs no extra fetch and lowers no speech
+or language-consensus threshold. The unchanged selector still rejects an
+unavailable fallback anchor or invalid VAD selection. Storage reads enforce the
+same bound, hash, file/account binding, encryption and original expiry.
+
+The regression test retains a 59.95-second source byte-for-byte across restart,
+then selects exactly 320,000 PCM samples (20 seconds). A 19-second capture and
+audio beyond the planned region are refused. A 20-second partial without a
+usable anchor/speech selection still fails downstream. Internal diagnostics
+now record the requested and actual durations, never content or identities.
+
+The independent synthetic timing lab (AAC/MP4, AC3/MKV, MP3/AVI, FLAC/MKV) did
+not reproduce a timestamp-reset defect; no speculative FFmpeg timestamp filter
+was adopted. All eight synthetic comparisons returned 60 seconds with identical
+shared PCM. This is not a reproduction of any real provider file.
+
+Validation of the duration correction: **4,489 tests passed, 14 skipped, zero
+failed** (116.71 seconds); native isolated proof **128 passed, no skips**, using
+the deployed image with candidate modules mounted read-only and network disabled.
+The release revision is limited to the store and capture pipeline. It preserves
+the prior diagnostic revision, all original plans, sample/job counters, runtime
+binaries, two acquisitions maximum, mono-account serialization and 30-minute TTL.
+
 ## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty

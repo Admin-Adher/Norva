@@ -1,6 +1,8 @@
 'use strict';
 
 const { captureBinding } = require('./strict-lid-capture-store');
+const { parsePcm16Wav } = require('./strict-lid-audio-evidence');
+const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
 const failure = code => Object.assign(new Error(code), { code });
 const drained = Object.freeze({ providerDrained: true, providerDrainProtocol: 1 });
 const diagnosticCodes = new Set(['LID_CAPTURE_CANCELLED', 'LID_CAPTURE_GROUP_INVALID', 'LID_CAPTURE_NOT_FOUND',
@@ -22,12 +24,15 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
     if (!store || [claimNetwork, openBroker, extract, infer].some(fn => typeof fn !== 'function')) {
         throw failure('LID_CAPTURE_PIPELINE_CONFIG_INVALID');
     }
-    const observe = (stage, cause, startedAt, providerDrained) => {
+    const observe = (stage, cause, startedAt, providerDrained, audioMilliseconds = [], requestedMilliseconds = null) => {
         try { diagnostic({ event: 'strict_lid_capture_diagnostic', stage,
             code: cause ? diagnosticCodes.has(cause.code) ? cause.code : 'UNCLASSIFIED' : 'OK',
             elapsedMs: Math.max(0, Date.now() - startedAt), providerDrained: providerDrained === true,
             upstreamStatus: Number.isInteger(cause?.upstreamStatus) && cause.upstreamStatus >= 400
-                && cause.upstreamStatus <= 599 ? cause.upstreamStatus : null }); } catch (_) {}
+                && cause.upstreamStatus <= 599 ? cause.upstreamStatus : null,
+            audioMilliseconds: audioMilliseconds.slice(0, 4).map(value => Number.isFinite(value) && value >= 0 && value <= 60000 ? value : null),
+            requestedMilliseconds: Number.isInteger(requestedMilliseconds) && requestedMilliseconds >= 20000
+                && requestedMilliseconds <= 60000 ? requestedMilliseconds : null }); } catch (_) {}
     };
     const status = async binding => {
         const normalized = captureBinding(binding);
@@ -46,6 +51,8 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
         let reservation; let broker; let network; let sourceDrained = true;
         const startedAt = Date.now();
         let stage = 'lookup';
+        let audioMilliseconds = [];
+        const requestedMilliseconds = planStrictSpeechWindow(normalized.durationSeconds, normalized.windowOrdinal).searchDurationMilliseconds;
         const reservations = [];
         let closePromise;
         const closeBroker = () => {
@@ -100,6 +107,9 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             if (!Array.isArray(wavs) || wavs.length !== pending.length || wavs.some(wav => !Buffer.isBuffer(wav))) {
                 throw failure('LID_CAPTURE_GROUP_INVALID');
             }
+            audioMilliseconds = wavs.map(wav => {
+                try { return parsePcm16Wav(wav).sampleCount / 16; } catch (_) { return null; }
+            });
             stage = 'drain';
             await closeBroker();
             network?.observe?.({ ok:true, durationMs:Date.now()-startedAt, drained:true });
@@ -109,11 +119,11 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
                 const result = await store.put(item.binding, wavs[index], drained, item.reservation.token);
                 if (index === 0) saved = result;
             }
-            observe('capture_saved', null, startedAt, sourceDrained);
+            observe('capture_saved', null, startedAt, sourceDrained, audioMilliseconds, requestedMilliseconds);
             return { captureProtocol: 1, captured: true, ...saved, extractedTrackCount: pending.length, ...drained };
         } catch (cause) {
             try { await closeBroker(); } catch { sourceDrained = false; }
-            observe(stage, cause, startedAt, sourceDrained);
+            observe(stage, cause, startedAt, sourceDrained, audioMilliseconds, requestedMilliseconds);
             network?.observe?.({ ok:false, drained:sourceDrained,
                 neutral:!broker || signal?.aborted || ['LANGUAGE_VALIDATION_VIEWER_PREEMPTED',
                     'LANGUAGE_ENRICHMENT_CAPACITY_BUSY','SELECTION_ENRICHMENT_TARGET_NOT_APPROVED'].includes(cause?.code),
