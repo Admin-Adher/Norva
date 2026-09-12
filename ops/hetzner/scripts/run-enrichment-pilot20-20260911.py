@@ -17,6 +17,7 @@ import time
 import urllib.request
 
 ROOT=pathlib.Path('/home/adrien/.norva/enrichment-pilot20-20260911')
+MAX_FILES=20
 spec=importlib.util.spec_from_file_location('release',ROOT/'deploy-enrichment-pilot20-20260911.py')
 release=importlib.util.module_from_spec(spec);spec.loader.exec_module(release)
 pilot=release.pilot
@@ -38,10 +39,20 @@ def scoped_controls():
 pilot.controls=scoped_controls
 
 
+def configure(release_module, expected_files):
+    """Bind an explicitly authorized subset to its own plan, ledger and fence."""
+    global release,pilot,ROOT,MAX_FILES,dispatch_healthy_at
+    release.require(isinstance(expected_files,int) and not isinstance(expected_files,bool)
+        and 1<=expected_files<=20,'subset_size_invalid')
+    release=release_module;ROOT=release.ROOT;pilot=release.pilot;MAX_FILES=expected_files
+    pilot.ROOT=ROOT/'pilot';pilot.MAX_FILES=expected_files
+    pilot.controls=scoped_controls;dispatch_healthy_at=0
+
+
 def plans():
     p=pilot.private(pilot.ROOT/'plan.private.json');s=pilot.private(pilot.ROOT/'state.private.json')
     pilot.validate(p)
-    release.require(len(p['rows'])==20 and release.sha((pilot.ROOT/'plan.private.json').read_bytes())==s['planSha256'],'pilot_plan_drift')
+    release.require(len(p['rows'])==MAX_FILES and release.sha((pilot.ROOT/'plan.private.json').read_bytes())==s['planSha256'],'pilot_plan_drift')
     return p,s
 
 
@@ -92,7 +103,7 @@ def dispatch(ids):
 
 def snapshot(state):
     h=release.gw.health();gate=h.get('languageEnrichmentPilot') or {};buffer=h.get('languageCaptureBuffer') or {}
-    release.require(gate.get('mode')=='pilot' and gate.get('files')==20 and not gate.get('expired'),'pilot_gateway_fence_changed')
+    release.require(gate.get('mode')=='pilot' and gate.get('files')==MAX_FILES and not gate.get('expired'),'pilot_gateway_fence_changed')
     release.require(buffer.get('ready') is True and buffer.get('maxBytes')==32*1024*1024 and buffer.get('ttlMs')==1800000,'pilot_buffer_changed')
     stats=json.loads(release.sql("SELECT jsonb_build_object('activeAccountLeases',(SELECT count(*) FROM public.provider_account_language_validation_leases WHERE expires_at>now()),"
         "'exactFileLeases',(SELECT count(*) FROM public.provider_exact_file_probe_leases WHERE expires_at>now()),"

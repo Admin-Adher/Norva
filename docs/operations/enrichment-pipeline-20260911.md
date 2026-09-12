@@ -589,6 +589,49 @@ The full objective is not complete. Resuming the stopped pilot or expanding its
 activation needs a new controlled decision; already failed/quarantined samples
 must not be reset to improve the reported result.
 
+### Explicitly authorized remaining subset — 12 September
+
+The user authorized publishing/deploying the diagnostic and resuming only the
+nine nonfinalized samples, preserving quarantines, two global acquisitions, one
+per mono-session account, 64 MiB private working space and a 30-minute audio TTL.
+Fresh SQL at 01:56:45 UTC found that ordinary background processing had already
+made eight of those nine terminal: two verified, two newly quarantined and four
+strict-consensus-inconclusive failures. Only original sample 20 remains eligible.
+These later results are **not** attributed to the previously closed new-pipeline
+pilot. The original twenty-file denominator and all old receipts remain intact.
+
+`resume-enrichment-pilot9-20260912.py` prepares a separate private, hash-bound
+continuation plan. It copies existing attempts/receipts and the original expiry,
+excludes current terminal/external/uncertain work, protects terminal job rows by
+full-row hashes and never replaces an excluded file. The server fence now accepts
+an explicitly enumerated nonempty subset of at most twenty files; its runtime
+fence and operator must agree on the exact subset size. Empty/malformed/expired
+configurations still fail closed. The nine authorized originals, actual subset
+and original denominator are separately recorded. An independent watchdog waits
+for operator exit, provider drain and private audio cleanup before disabling the
+new flags and restoring the original crons. No fleet or Selection expansion.
+
+Executable offline operator/configuration proofs: 16 passed. Full application
+suite: 4,493 passed, 14 skipped, zero failures (121.72 seconds).
+Native isolated runtime: 132 passed, zero skips/failures, with networking
+disabled and no provider requests (8.66 seconds).
+
+The user's additional Oxylabs diagnostic made ten sequential requests to its
+official `https://ip.oxylabs.io/location` endpoint: all five configured HTTP slots
+and all five corresponding SOCKS5 slots returned HTTP 200 with valid IP replies,
+648–2,312 ms, 14,298 total response-body bytes. HTTP and SOCKS5 used the same exit
+IP for every matching slot. No provider VOD was requested, and no proxy setting,
+credential, affinity or route was changed. The routing/credential environment is
+identical to the retained 5 September Gateway and 16 other retained releases.
+Two older 2 September configurations differ in routing options; the configured
+proxy credential pools themselves were not exposed in this report.
+
+This excludes a general authentication/outage/configuration regression at test
+time, not intermittent or destination-specific refusals, throughput issues or
+account quota exhaustion. The earlier ten `UND_ERR_ABORTED` events still cannot
+be assigned conclusively to Oxylabs without the new per-request diagnostic.
+Reference: [Oxylabs ISP connection test and response codes](https://developers.oxylabs.io/help-center/getting-started/start-using-isp-proxies).
+
 ## Earlier release proposal and bounded acceptance
 
 Nothing in this ledger authorizes a production write. The original dirty

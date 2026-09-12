@@ -9,9 +9,9 @@ function createEnrichmentPilotAdmission(raw, {mode='disabled',now=Date.now}={}) 
     if (mode==='pilot') {
         let config;try {config=typeof raw==='string'?JSON.parse(raw):raw;} catch {throw invalid();}
         const created=Date.parse(config?.createdAt),expires=Date.parse(config?.expiresAt);
-        if (config?.protocol!==1 || !Array.isArray(config.fileKeys) || config.fileKeys.length!==20
+        if (config?.protocol!==1 || !Array.isArray(config.fileKeys) || config.fileKeys.length<1 || config.fileKeys.length>20
             || config.fileKeys.some(key=>typeof key!=='string'||!/^[a-f0-9]{64}$/.test(key))
-            || new Set(config.fileKeys).size!==20 || !Number.isFinite(created) || !Number.isFinite(expires)
+            || new Set(config.fileKeys).size!==config.fileKeys.length || !Number.isFinite(created) || !Number.isFinite(expires)
             || created>now()+5000 || expires<=created || expires-created>24*3600000) throw invalid();
         keys=new Set(config.fileKeys);expiresAt=expires;
     } else if (raw!==undefined && raw!==null && raw!=='') throw invalid();

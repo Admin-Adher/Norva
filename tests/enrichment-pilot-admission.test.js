@@ -24,7 +24,7 @@ test('expired or malformed pilot never silently enables the whole fleet, includi
     let at=now;const gate=create(config(),{mode:'pilot',now:()=>at});at+=3600000;
     assert.equal(gate.allowsFile(config().fileKeys[0]),false);assert.equal(gate.snapshot().expired,true);
     assert.equal(create(config(),{mode:'pilot',now:()=>at}).allowsFile(config().fileKeys[0]),false);
-    for(const value of [null,{},'{', {...config(),fileKeys:config().fileKeys.slice(1)},
+    for(const value of [null,{},'{', {...config(),fileKeys:[]},
         {...config(),fileKeys:[...config().fileKeys,'a'.repeat(64)]},
         {...config(),fileKeys:Array(20).fill('a'.repeat(64))},
         {...config(),expiresAt:new Date(now+25*3600000).toISOString()},
@@ -32,6 +32,19 @@ test('expired or malformed pilot never silently enables the whole fleet, includi
         assert.throws(()=>create(value,{mode:'pilot',now:()=>now}),{code:'ENRICHMENT_PILOT_CONFIG_INVALID'});
     }
     assert.throws(()=>create(config()),{code:'ENRICHMENT_PILOT_CONFIG_INVALID'});
+});
+
+test('an approved remaining subset admits no completed, failed or quarantined former sample',()=>{
+    for (const size of [1,9,19,20]) {
+        const all=config(), subset={...all,fileKeys:all.fileKeys.slice(0,size)};
+        const gate=create(subset,{mode:'pilot',now:()=>now});
+        assert.equal(gate.snapshot().files,size);
+        for (const [index,key] of all.fileKeys.entries()) assert.equal(gate.allowsFile(key),index<size);
+        subset.fileKeys.push('f'.repeat(64));
+        assert.equal(gate.allowsFile('f'.repeat(64)),false);
+        assert.equal(create({...all,fileKeys:all.fileKeys.slice(0,size)},
+            {mode:'pilot',now:()=>now+3600000}).allowsFile(all.fileKeys[0]),false);
+    }
 });
 
 test('runtime gates every new acquisition and local capture action, but never the foreground playback byte pump',()=>{
