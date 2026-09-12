@@ -2207,7 +2207,11 @@ async function createPlaybackSessionCore(
     body.gatewayAutoMode === true;
   const serverPromotedRelay = clientMode === "relay" &&
     !browserNativeMp4 &&
-    (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode");
+    (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode"
+      // A finite .ts object is not an HLS manifest. Once its container is
+      // server-observed, a browser relay must be remuxed without requiring a
+      // failed native attempt first. Direct/native clients retain their lane.
+      || authoritativeVodContainer === "ts");
   const mode = serverDirectPublicHls
     ? "direct"
     : serverDemotedAutomaticMp4
