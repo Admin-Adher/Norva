@@ -3,7 +3,36 @@
 Base: `d86db0e13871f8d5b43d9faf67516b6b2cd0a969`. Isolated worktree;
 the user's original checkout is not part of this release.
 
-## Current state — 12 September, after the maintenance deployment
+## Current state — 12 September, independent pilot launched
+
+The explicit new approval has been executed: application fix `4a77a5ca` and the
+independent operator `6f67d892bafa31012935e27404e608611ad2b534` are on `main`.
+All three CI workflows for each commit succeeded. Gateway image
+`sha256:7b27b71ea57b0494a898ac59415a85a7d1ba305ecb7955fc6c3ccea4c8dfb052`
+was deployed after ordinary work drained naturally. At 03:26:47 UTC, all four
+services, eleven Gateway modules, runtime/binaries and protected old terminal
+jobs/evidence verified. The new twenty-file fence and metadata/capture/exact-file
+flags are active; Selection capture/parallel flags and passive playback capture
+remain disabled. No old job or provider cooldown was reset.
+
+The distinct lot spans four providers and five source accounts; 115 distinct
+prior-cohort files and three cooling providers were excluded. Its immutable
+deadline is 2026-09-13T03:23:29Z. A mistyped commit argument in the first staging
+attestation was corrected before any provider I/O, after matching the two source
+hashes; the prior attestation is retained and the cohort/deadline did not change.
+The independent operator and watchdog are alive. Limits remain two acquisitions,
+one per mono-session account, 64 MiB private working audio and thirty-minute TTL.
+
+At 03:29:55 UTC: four newly complete declared-track inventories (two French,
+one Arabic, one English), two partial inventories including the initial partial
+file, fourteen not yet inventoried; zero speech-certified files. One attempted
+file failed the exact-profile completeness contract (application HTTP 502), and
+busy accounts were deferred. This is not a final cohort result, ASR accuracy,
+proxy-failure diagnosis or fleet-throughput proof. Full-objective acceptance
+remains incomplete. Sanitized local report:
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/BILAN-PILOTE-INDEPENDANT-20-20260912.md`.
+
+## Earlier state — after the maintenance deployment
 
 The sections below retain earlier implementation/release observations; their
 "local" or "not deployed" labels describe those earlier observations, not the
