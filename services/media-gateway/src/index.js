@@ -5196,6 +5196,7 @@ async function fallbackStrictLidBrokerDispatcher(context, publicError = null) {
 
 async function closeStrictLidBrokerAttempt(context, attempt, reason = 'completed') {
     if (!attempt) return;
+    clearTimeout(attempt.finiteDrainTimer);
     if (!attempt.closePromise) {
         attempt.closePromise = (async () => {
             attempt.stopReason = reason;
@@ -5445,12 +5446,26 @@ function finishFiniteMkvSeekWindowTrace(context, trace, outcome) {
     trace.outcome = String(outcome || 'stopped').slice(0, 80);
 }
 
-function preemptAbandonedFiniteMkvSeekAttempt(context, attempt) {
+function preemptAbandonedFiniteMkvSeekAttempt(context, attempt, force = false) {
     if (
         !attempt?.localClosed ||
         attempt.stopReason === 'superseded' ||
         attempt.controller?.signal?.aborted
     ) return false;
+    // An already validated, small TS window often has only milliseconds of
+    // body left. Finishing it preserves both the cache and the pinned tunnel;
+    // aborting it incurs the mono-account release grace and another CONNECT.
+    // Never delay viewer/session cancellation or wait indefinitely for a slow
+    // provider. The provider mutex stays held until completion/teardown.
+    if (!force && context.finiteAbandonedDrainMs > 0 && attempt.reader) {
+        if (!attempt.finiteDrainTimer) {
+            attempt.finiteDrainTimer = setTimeout(() => {
+                preemptAbandonedFiniteMkvSeekAttempt(context, attempt, true);
+            }, context.finiteAbandonedDrainMs);
+            attempt.finiteDrainTimer?.unref?.();
+        }
+        return false;
+    }
     attempt.stopReason = 'superseded';
     attempt.superseded = true;
     context.finitePlannedSupersessions++;
@@ -5605,6 +5620,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             let releaseFiniteProviderSlot = null;
             try {
             if (finiteSeek) {
+                // Let libav's next cue/close settle before speculative TS
+                // continuation I/O. Previously a cached response could trigger
+                // an upstream GET which was cancelled 1-2 ms later, needlessly
+                // cooling a healthy mono-session connection for 2.5 seconds.
+                if (context.finiteSeekContinuationGraceMs > 0 && forwarded > 0 && finiteBufferedBytes === 0) {
+                    await new Promise(resolve => setTimeout(resolve, context.finiteSeekContinuationGraceMs));
+                    if (attempt.localClosed || controller.signal.aborted) break;
+                }
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
                 if (attempt.localClosed) break;
                 if (
@@ -6379,6 +6402,10 @@ async function createStrictLidBroker(options = {}) {
         finiteSeekLookbehindBytes: pathPrefix === 'finite-mkv-seek'
             && Number.isSafeInteger(options.finiteSeekLookbehindBytes)
             ? Math.max(0, Math.min(256 * 1024, options.finiteSeekLookbehindBytes)) : 0,
+        finiteSeekContinuationGraceMs: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteSeekContinuationGraceMs)
+            ? Math.max(0, Math.min(100, options.finiteSeekContinuationGraceMs)) : 0,
+        finiteAbandonedDrainMs: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteAbandonedDrainMs)
+            ? Math.max(0, Math.min(1500, options.finiteAbandonedDrainMs)) : 0,
         finiteWarmupWindowBytes: 0,
         finiteWarmupCueGraceMs: Number.isFinite(Number(options.finiteWarmupCueGraceMs))
             ? Math.max(0, Math.min(250, Number(options.finiteWarmupCueGraceMs)))
@@ -13661,6 +13688,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         pathPrefix: 'finite-mkv-seek',
         finiteWindowBytes: effectiveWindowBytes,
         finiteSeekLookbehindBytes: finiteTs ? 256 * 1024 : 0,
+        finiteSeekContinuationGraceMs: finiteTs ? 50 : 0,
+        finiteAbandonedDrainMs: finiteTs ? 1500 : 0,
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
         finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
@@ -13688,6 +13717,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
     session.startupTimings.finiteTsSeekLookbehindBytes = finiteTs ? 256 * 1024 : 0;
+    session.startupTimings.finiteTsSeekContinuationGraceMs = finiteTs ? 50 : 0;
+    session.startupTimings.finiteTsAbandonedDrainMs = finiteTs ? 1500 : 0;
     session.startupTimings.finiteMkvSeekWarmupCueGraceMs = finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS;
     session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
     session.startupTimings.finiteMkvResumePrefixWeakValidationBytes = FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES;

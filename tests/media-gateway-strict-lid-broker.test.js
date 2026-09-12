@@ -154,6 +154,8 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
         sourceUrl: url, fileSizeBytes: size, pathPrefix: 'finite-mkv-seek', dispatcher: null,
         finiteWindowBytes: windowMiB*1024*1024, finiteWarmupWindowBytes: 256*1024,
         finiteSeekLookbehindBytes: lookbehindBytes,
+        finiteSeekContinuationGraceMs: lookbehindBytes ? 50 : 0,
+        finiteAbandonedDrainMs: lookbehindBytes ? 1500 : 0,
         finiteWarmupCueGraceMs: 0, finiteSequentialWindowBytes: 8*1024*1024,
         finiteCacheBytes: 64*1024*1024, finiteResumePrefixCandidate: null, onFiniteResumePrefix: null,
         completedReleaseDelayMs: 0, supersededReleaseDelayMs: 100,
@@ -276,6 +278,57 @@ test('strict language acquisition ignores the finite TS lookbehind option', {tim
     finiteSeekLookbehindBytes:256*1024,releaseDelayMs:0});t.after(()=>broker.close());
   const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=16-23'}});await r.arrayBuffer();
   assert.deepEqual(calls,['bytes=16-23']);assert.equal(broker.seekLookbehindBytes,0);
+});
+
+test('finite TS continuation grace avoids opening a provider window after libav closes its cached read', {timeout:8000},async(t)=>{
+  const data=Buffer.alloc(64,7),calls=[];
+  const provider=http.createServer((req,res)=>{calls.push(req.headers.range);sendExactRange(req,res,data);});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:8,finiteSeekContinuationGraceMs:60,releaseDelayMs:0});t.after(()=>broker.close());
+  const first=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-31'}}),reader=first.body.getReader();
+  assert.equal((await reader.read()).value.length,8);await reader.cancel();
+  const second=await fetch(broker.inputUrl,{headers:{Range:'bytes=24-31'}});
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()),data.subarray(24,32));
+  assert.deepEqual(calls,['bytes=0-7','bytes=24-31']);assert.equal(broker.interruptedProviderFetches,0);
+});
+
+for(const drain of [true,false])test(`finite TS abandoned drain ${drain?'finishes a small exact body':'expires without provider overlap'}`,{timeout:8000},async(t)=>{
+  const data=Buffer.alloc(64,7);let calls=0,active=0,peak=0,timer;
+  const provider=http.createServer((req,res)=>{
+    calls++;active++;peak=Math.max(peak,active);let closed=false;
+    const close=()=>{if(!closed){closed=true;active--}};res.once('finish',close);res.once('close',close);
+    if(calls>1)return sendExactRange(req,res,data);
+    res.writeHead(206,{'Content-Length':'16','Content-Range':'bytes 0-15/64',ETag:'"fixture-v1"'});
+    res.write(data.subarray(0,4));
+    if(drain)timer=setTimeout(()=>res.end(data.subarray(4,16)),30);
+  });
+  const sourceUrl=await listen(provider);t.after(()=>{clearTimeout(timer);return closeServer(provider)});
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:16,finiteAbandonedDrainMs:80,
+    completedReleaseDelayMs:0,supersededReleaseDelayMs:30,releaseDelayMs:0});t.after(()=>broker.close());
+  const first=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-31'}}),reader=first.body.getReader();
+  await reader.read();await reader.cancel();const started=Date.now();
+  const second=await fetch(broker.inputUrl,{headers:{Range:'bytes=32-39'}});
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()),data.subarray(32,40));
+  assert.equal(calls,2);assert.equal(peak,1);assert.equal(active,0);
+  assert.equal(broker.interruptedProviderFetches,drain?0:1);
+  if(!drain)assert.ok(Date.now()-started>=90,'bounded drain then normal slot release');
+});
+
+test('viewer cancellation bypasses an abandoned TS drain immediately', {timeout:8000},async(t)=>{
+  const data=Buffer.alloc(64);let active=0;
+  const provider=http.createServer((req,res)=>{active++;res.once('close',()=>active--);
+    res.writeHead(206,{'Content-Length':'16','Content-Range':'bytes 0-15/64',ETag:'"fixture-v1"'});res.write(data.subarray(0,4));});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:16,finiteAbandonedDrainMs:1500,releaseDelayMs:0});t.after(()=>broker.close());
+  const first=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-31'}}),reader=first.body.getReader();
+  await reader.read();await reader.cancel();
+  const pending=fetch(broker.inputUrl,{headers:{Range:'bytes=32-39'}}).catch(()=>null);
+  await new Promise(r=>setTimeout(r,20));const started=Date.now();await broker.close('viewer-preempted');await pending;
+  assert.ok(Date.now()-started<800,'cancellation must not wait the 1500ms optional drain');
+  await new Promise(r=>setTimeout(r,20));assert.equal(active,0);
 });
 
 function audioExtractionHarness(spawnImpl, timers = {}) {

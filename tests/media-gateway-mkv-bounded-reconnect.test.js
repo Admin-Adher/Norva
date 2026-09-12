@@ -3808,6 +3808,8 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
     }
     assert.equal(brokerOptions.finiteWindowBytes, 1024 * 1024);
     assert.equal(brokerOptions.finiteSeekLookbehindBytes, finiteTs ? 256 * 1024 : 0);
+    assert.equal(brokerOptions.finiteSeekContinuationGraceMs, finiteTs ? 50 : 0);
+    assert.equal(brokerOptions.finiteAbandonedDrainMs, finiteTs ? 1500 : 0);
     assert.equal(brokerOptions.finiteWarmupCueGraceMs, finiteTs ? 0 : 50);
     assert.equal(brokerOptions.finiteWarmupWindowBytes, 256 * 1024);
     assert.equal(brokerOptions.finiteSequentialWindowBytes, 2 * 1024 * 1024);
