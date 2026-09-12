@@ -13380,6 +13380,9 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
     let metadataComplete = false;
     let metadataCompleteAtBytes = null;
     let lastMetadataCheckBytes = 0;
+    let earlyProbeAttempted = false;
+    let earlyProbeMs = 0;
+    let earlyProfileValidated = false;
     const metadataCheckIntervalBytes = Math.min(targetBytes, 64 * 1024);
     const detectCompleteMetadata = (force = false) => {
         const captured = headerByteCache.get(String(session?.sourceUrl || ''));
@@ -13406,10 +13409,9 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
 
         // Info + Tracks prove that the topology exists, but they do not prove
         // that every ffprobe/Matroska combination can demux a file truncated at
-        // that exact byte. Some provider files need packet data after Tracks
-        // before ffprobe emits streams. Remember where metadata completed, but
-        // retain the full bounded prefix on this same provider socket so the
-        // first response can expose its exact audio/subtitle graph reliably.
+        // that exact byte. A bounded LOCAL probe below must confirm the complete
+        // graph before reading can stop early; otherwise keep the full prefix
+        // on this same provider socket, including the needed packet data.
         captured.metadataComplete = true;
         captured.metadataCompleteAtBytes = captured.len;
         metadataCompleteAtBytes = captured.len;
@@ -13419,6 +13421,30 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
 
     metadataComplete = detectCompleteMetadata(prefetchedBytes >= targetBytes);
     while (prefetchedBytes < targetBytes) {
+        if (metadataComplete && prefetchedBytes >= 256_000 && !earlyProbeAttempted) {
+            earlyProbeAttempted = true;
+            const entry = headerByteCache.get(session.sourceUrl);
+            const probeStartedAt = Date.now();
+            const profile = await probeFromHeaderBytes(session.sourceUrl, {
+                signal: parentSignal,
+                fileSizeBytes: fileSizeBytesForSession(session),
+                timeoutMs: 1_000,
+            });
+            earlyProbeMs = Math.max(0, Date.now() - probeStartedAt);
+            if (parentSignal?.aborted) throw abortedVodInputPumpError();
+            if (
+                entry && headerByteCache.get(session.sourceUrl) === entry &&
+                entry.captureOwner === String(session?.id || session.sourceUrl) &&
+                hasCompleteMkvPlaybackProfile(profile)
+            ) {
+                // Reuse only this capture's locally validated result. Neither
+                // structural tags alone nor a historical profile can stop I/O.
+                entry.validatedPrefetchProfile = profile;
+                entry.validatedPrefetchProfileBytes = entry.len;
+                earlyProfileValidated = true;
+                break;
+            }
+        }
         const next = await readRawPrefixChunk(
             attempt.reader,
             parentSignal,
@@ -13455,11 +13481,11 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
     const captured = headerByteCache.get(String(session?.sourceUrl || ''));
     if (
         captured?.captureOwner === String(session?.id || session?.sourceUrl || '') &&
-        captured.len >= targetBytes
+        (captured.len >= targetBytes || earlyProfileValidated)
     ) {
         captured.done = true;
         captured.capturing = false;
-        captured.completionReason = 'bounded-prefix-target';
+        captured.completionReason = earlyProfileValidated ? 'local-profile-validated' : 'bounded-prefix-target';
         captured.updatedAt = Date.now();
     }
 
@@ -13478,6 +13504,9 @@ async function prefetchRetainedBoundedMkvHeader(session, opened, parentSignal = 
     session.startupTimings.providerColdHeaderPrefetchReachedEof = reachedEof;
     session.startupTimings.providerColdHeaderMetadataComplete = metadataComplete;
     session.startupTimings.providerColdHeaderMetadataCompleteAtBytes = metadataCompleteAtBytes;
+    session.startupTimings.providerColdHeaderEarlyProbeAttempted = earlyProbeAttempted;
+    session.startupTimings.providerColdHeaderEarlyProbeMs = earlyProbeMs;
+    session.startupTimings.providerColdHeaderEarlyProfileValidated = earlyProfileValidated;
     session.startupTimings.providerColdHeaderPrefetchAvoidedBytes = Math.max(
         0,
         targetBytes - prefetchedBytes,
@@ -14526,7 +14555,13 @@ async function enrichSessionCodecProfileFromBoundedHeader(session, signal = null
     try {
         // Bypass the general cache: a useful-but-partial historical entry must
         // not hide the fuller prefix captured by this exact playback.
-        local = await probeFromHeaderBytes(session.sourceUrl, {
+        const reusablePrefetch = capturedEntry?.done === true &&
+            capturedEntry.captureOwner === String(session?.id || session.sourceUrl) &&
+            capturedEntry.validatedPrefetchProfileBytes === capturedEntry.len &&
+            hasCompleteMkvPlaybackProfile(capturedEntry.validatedPrefetchProfile);
+        local = reusablePrefetch && !signal?.aborted
+            ? capturedEntry.validatedPrefetchProfile
+            : await probeFromHeaderBytes(session.sourceUrl, {
             signal,
             fileSizeBytes: fileSizeBytesForSession(session),
         });
@@ -18571,7 +18606,11 @@ async function probeFromHeaderBytes(sourceUrl, options = {}) {
             '-print_format', 'json',
             tmpFile
         ];
-        const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl, {
+        const requestedTimeoutMs = Number(options?.timeoutMs);
+        const timeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
+            ? Math.min(CODEC_PROBE_TIMEOUT_MS, Math.max(1, requestedTimeoutMs))
+            : CODEC_PROBE_TIMEOUT_MS;
+        const payload = await runFfprobe(args, timeoutMs, sourceUrl, {
             signal: options?.signal || null,
         });
         const profile = {

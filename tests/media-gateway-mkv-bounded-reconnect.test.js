@@ -161,6 +161,7 @@ function pumpHarness(overrides = {}) {
         ))),
         normalizeCodecToken: (value) => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, ''),
         hasCompleteMkvPlaybackProfile: () => false,
+        probeFromHeaderBytes: async () => null,
         isLiveSession: (session) => ['live', 'channel'].includes(String(
             session?.playbackHint?.streamType || session?.playbackHint?.stream_type || '',
         ).toLowerCase()),
@@ -1003,6 +1004,56 @@ test('cold MKV retains the bounded prefix after Info and Tracks so local ffprobe
     assert.equal(tracker.maxActive, 1);
     assert.equal(tracker.active, 0);
 });
+
+for (const outcome of ['complete', 'incomplete', 'no-profile', 'replaced-owner', 'aborted']) {
+    test(`early MKV local probe: ${outcome}, one provider socket and intact retained bytes`, async () => {
+        const fixture = Buffer.concat([completeMatroskaPrefix(100_000), Buffer.alloc(500_000, 0x5a)]);
+        const targetBytes = 400_000;
+        const tracker = makeTracker(), headerByteCache = new Map(), controller = new AbortController();
+        const session = mkvSession(fixture.length);
+        let probes = 0;
+        const h = pumpHarness({
+            BOUNDED_MKV_HEADER_PARSE: true, INBAND_HEADER_BYTES: targetBytes, headerByteCache,
+            hasCompleteMkvPlaybackProfile: p => p?.locallyComplete === true,
+            probeFromHeaderBytes: async (url, options) => {
+                probes++;
+                assert.equal(url, session.sourceUrl);
+                assert.equal(options.timeoutMs, 1_000);
+                assert.equal(options.signal, controller.signal);
+                if (outcome === 'aborted') controller.abort();
+                if (outcome === 'replaced-owner') headerByteCache.set(url, {
+                    ...headerByteCache.get(url), captureOwner: 'another-playback',
+                });
+                return outcome === 'no-profile' ? null : { locallyComplete: outcome !== 'incomplete' };
+            },
+        });
+        const chunks = [fixture.subarray(0, 100_000), fixture.subarray(100_000, 256_000),
+            fixture.subarray(256_000, targetBytes), fixture.subarray(targetBytes)];
+        let cursor = 0;
+        const opened = { range: { start: 0, end: fixture.length - 1 }, attempt: {
+            preloadedChunks: [], reader: { read: async () => cursor < chunks.length
+                ? { done: false, value: chunks[cursor++] } : { done: true } },
+        } };
+        if (outcome === 'aborted') {
+            await assert.rejects(h.prefetchRetainedBoundedMkvHeader(session, opened, controller.signal),
+                { code: 'VOD_INPUT_ABORTED' });
+        } else {
+            const bytes = await h.prefetchRetainedBoundedMkvHeader(session, opened, controller.signal);
+            assert.equal(bytes, outcome === 'complete' ? 256_000 : targetBytes);
+            assert.equal(session.startupTimings.providerColdHeaderEarlyProfileValidated, outcome === 'complete');
+            assert.equal(Buffer.concat([...opened.attempt.preloadedChunks, ...chunks.slice(cursor)]).equals(fixture), true);
+            const entry = headerByteCache.get(session.sourceUrl);
+            if (outcome === 'complete') {
+                assert.equal(entry.completionReason, 'local-profile-validated');
+                assert.equal(entry.done, true);
+                assert.equal(entry.validatedPrefetchProfileBytes, 256_000);
+                assert.equal(session.startupTimings.providerColdHeaderPrefetchAvoidedBytes, 144_000);
+            } else assert.equal(entry.validatedPrefetchProfile, undefined);
+        }
+        assert.equal(probes, 1, 'one local attempt at most; incomplete graphs retain the full-prefix fallback');
+        assert.equal(tracker.calls.length, 0, 'this phase never opens an additional provider connection');
+    });
+}
 
 test('cold MKV retries one interrupted metadata prefetch without overlapping provider sockets or replaying stale bytes', async () => {
     const prefixBytes = 300_000;
@@ -2865,7 +2916,7 @@ function metadataHarness(overrides = {}) {
         CODEC_PROFILE_CACHE_MAX: 16,
         CODEC_PROBE_ANALYZE_DURATION_US: 4_000_000,
         CODEC_PROBE_TIMEOUT_MS: 5_000,
-        OUTPUT_DIR: '/virtual/norva-gateway-test',
+        OUTPUT_DIR: overrides.OUTPUT_DIR || '/virtual/norva-gateway-test',
         headerByteCache,
         codecProfileCache,
         fsp,
@@ -3270,6 +3321,87 @@ test('local ffprobe probesize spans every retained header byte beyond the legacy
     assert.equal(args[probeSizeAt + 1], String(byteLength));
     assert.ok(Number(args[probeSizeAt + 1]) > 2_000_000);
     assert.equal(h.writes[0].bytes.length, byteLength);
+});
+
+test('validated early metadata is reused only for the same finished capture and unchanged byte count', async () => {
+    for (const change of [{}, { captureOwner: 'foreign' }, { validatedPrefetchProfileBytes: 12 }, { done: false }]) {
+        const sourceUrl = 'https://provider.example/movie/account/early-local.mkv';
+        const headerByteCache = new Map();
+        const h = metadataHarness({ headerByteCache });
+        const profile = h.buildCodecProfile(exactMetadataPayload(), Date.now(), 'gateway_inband');
+        profile.metadataComplete = true;
+        const entry = { chunks: [completeMatroskaPrefix(256_000)], len: 256_000, done: true,
+            captureOwner: 'early-session', validatedPrefetchProfile: profile,
+            validatedPrefetchProfileBytes: 256_000, ...change };
+        headerByteCache.set(sourceUrl, entry);
+        const session = { id: 'early-session', sourceUrl, codecProfile: { fileSizeBytes: 600_000 } };
+        assert.equal(await h.enrichSessionCodecProfileFromBoundedHeader(session), true);
+        assert.equal(h.ffprobeCalls.length, Object.keys(change).length ? 1 : 0);
+        assert.equal(session.codecProfile.audioTracks.length, 2);
+    }
+});
+
+test('early local probe timeout is capped without changing the normal probe budget', async () => {
+    const sourceUrl = 'https://provider.example/movie/account/local-budget.mkv';
+    const h = metadataHarness({ headerByteCache: new Map([[sourceUrl, {
+        chunks: [completeMatroskaPrefix(256_000)], len: 256_000, done: true,
+    }]]) });
+    await h.probeFromHeaderBytes(sourceUrl, { timeoutMs: 1_000 });
+    await h.probeFromHeaderBytes(sourceUrl, { timeoutMs: 90_000 });
+    await h.probeFromHeaderBytes(sourceUrl);
+    assert.deepEqual(h.ffprobeCalls.map(call => call[1]), [1_000, 5_000, 5_000]);
+});
+
+test('native local early probe preserves every real MKV track and the byte-exact single provider body',
+    { skip: process.env.NORVA_MKV_EARLY_PROBE_NATIVE !== '1', timeout: 60000 }, async () => {
+    const os = require('node:os'), { spawnSync } = require('node:child_process');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'norva-mkv-early-prefix-'));
+    const run = (bin, args, timeout = 20000) => {
+        const result = spawnSync(bin, args, { encoding: 'utf8', timeout });
+        assert.equal(result.status, 0, result.stderr); return result.stdout;
+    };
+    try {
+        const input = path.join(dir, 'source.mkv'), subtitle = path.join(dir, 'source.srt');
+        fs.writeFileSync(subtitle, '1\n00:00:00,000 --> 00:00:08,000\nSynthetic test\n');
+        run('ffmpeg', ['-v','error','-y','-f','lavfi','-i','testsrc2=size=640x360:rate=30',
+            '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-f','lavfi','-i',
+            'sine=frequency=660:sample_rate=48000','-i',subtitle,'-t','8','-map','0:v','-map','1:a',
+            '-map','2:a','-map','3:s','-c:v','libx264','-threads','1','-preset','ultrafast','-crf','18',
+            '-c:a','aac','-c:s','srt',input]);
+        const fixture = fs.readFileSync(input), headerByteCache = new Map(), tracker = makeTracker();
+        assert.ok(fixture.length > 512_000);
+        const meta = metadataHarness({ headerByteCache, OUTPUT_DIR: dir, fsp: fs.promises,
+            runFfprobe: async (args, timeout) => JSON.parse(run('ffprobe', args, timeout)) });
+        const full = JSON.parse(run('ffprobe', ['-v','error','-show_streams','-show_format','-of','json',input]));
+        const session = mkvSession(fixture.length);
+        const h = pumpHarness({ BOUNDED_MKV_HEADER_PARSE: true, headerByteCache,
+            hasCompleteMkvPlaybackProfile: meta.hasCompleteMkvPlaybackProfile,
+            probeFromHeaderBytes: meta.probeFromHeaderBytes,
+            fetch: async (_url, options) => {
+                tracker.calls.push(options.headers);
+                const chunks = [];
+                for (let i = 0; i < fixture.length; i += 64_000) chunks.push(fixture.subarray(i, i + 64_000));
+                return trackedResponse(tracker, { status: 206, chunks, headers: {
+                    'Content-Range': `bytes 0-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length), ETag: '"synthetic-early-v1"',
+                } });
+            } });
+        await h.ensureBoundedMkvInputPump(session);
+        assert.equal(session.startupTimings.providerColdHeaderEarlyProfileValidated, true);
+        assert.equal(session.startupTimings.providerColdHeaderPrefetchBytes, 256_000);
+        assert.equal(await meta.enrichSessionCodecProfileFromBoundedHeader(session), true);
+        assert.equal(meta.ffprobeCalls.length, 1, 'validated local result is not probed twice');
+        assert.equal(session.codecProfile.audioTracks.length, full.streams.filter(s => s.codec_type === 'audio').length);
+        assert.equal(session.codecProfile.subtitles.length, full.streams.filter(s => s.codec_type === 'subtitle').length);
+        const writable = new CapturingWritable();
+        await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+        assert.deepEqual(writable.bytes(), fixture);
+        assert.equal(tracker.calls.length, 1);
+        assert.equal(tracker.maxActive, 1);
+        assert.equal(tracker.active, 0);
+        console.log('MKV early prefix native proof', JSON.stringify({ bytes: 256_000, total: fixture.length,
+            audioTracks: session.codecProfile.audioTracks.length, subtitles: session.codecProfile.subtitles.length }));
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('viewer startup admission is bounded, provider-first and abort-aware before QoS reservation', async () => {
