@@ -81,7 +81,7 @@ test('MKV codec backfill binds observed versions with independent facets and sep
   const gateway = read('services/media-gateway/src/index.js');
 
   assert.match(gateway, /res\.json\(\{[\s\S]*audioLanguages,[\s\S]*audioTracks,[\s\S]*audioDefaultLanguage,[\s\S]*subtitles,[\s\S]*codecProfile: publicMkvCodecProfile\(profile\),?[\s\S]*\}\)/);
-  assert.match(route, /observedGatewayFileProfile\(observedProfile\)/);
+  assert.match(route, /observedGatewayFileProfile\(observedProfile, \(reason\) => \{ diagnosticProfileReason = reason; \}\)/);
   assert.match(route, /persistObservedCodecProfile\(db, \{[\s\S]*userId,[\s\S]*sourceId,[\s\S]*itemType: "movie",[\s\S]*itemId: externalId/);
   assert.match(route, /variantId,[\s\S]*strict: true/);
   assert.match(route, /shareObservedGatewayFile\(db, \{[\s\S]*userId, sourceId, variantId, itemType: "movie", itemId: externalId,[\s\S]*audioProbeComplete: hasAudioMap,[\s\S]*subtitleProbeComplete: hasSubtitleMap/);

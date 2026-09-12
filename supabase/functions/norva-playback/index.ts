@@ -8587,26 +8587,41 @@ async function persistObservedCodecProfile(
   return !variantError;
 }
 
-function observedGatewayFileProfile(value: unknown) {
+function observedGatewayFileProfile(value: unknown, onInvalid?: (reason: string) => void) {
   const raw = recordOrEmpty(value);
   const audio = raw.audioTracks ?? raw.audio_tracks;
   const subtitles = raw.subtitles ?? raw.subtitleTracks ?? raw.subtitle_tracks;
-  const validMap = (tracks: unknown): tracks is JsonRecord[] => {
-    if (!Array.isArray(tracks) || tracks.length > 32) return false;
-    const indices = tracks.map((track) => recordOrEmpty(track).index);
-    return indices.every((index) => typeof index === "number" && Number.isSafeInteger(index) && index >= 0 && index <= 128)
-      && new Set(indices).size === indices.length;
+  // Internal, fixed-vocabulary diagnostics only. No input value, identifier or
+  // provider metadata reaches the observer, and logging cannot alter admission.
+  const invalid = (reason: string) => {
+    try { onInvalid?.(reason); } catch (_) { /* diagnostics are non-authoritative */ }
+    return null;
   };
-  if (!validMap(audio) || !validMap(subtitles)) return null;
+  const mapIssue = (tracks: unknown, facet: "audio" | "subtitle"): string | null => {
+    if (!Array.isArray(tracks)) return `${facet}_map_missing`;
+    if (tracks.length > 32) return `${facet}_map_too_large`;
+    const indices = tracks.map((track) => recordOrEmpty(track).index);
+    if (!indices.every((index) => typeof index === "number" && Number.isSafeInteger(index) && index >= 0 && index <= 128)) {
+      return `${facet}_index_invalid`;
+    }
+    return new Set(indices).size === indices.length ? null : `${facet}_index_duplicate`;
+  };
+  const audioIssue = mapIssue(audio, "audio");
+  if (audioIssue) return invalid(audioIssue);
+  const subtitleIssue = mapIssue(subtitles, "subtitle");
+  if (subtitleIssue) return invalid(subtitleIssue);
   const profile = normalizeCodecProfile(raw);
   const source = normalizeCodecToken(profile.probeSource);
   const duration = Number(profile.durationSeconds);
   const size = Number(profile.fileSizeBytes);
   const at = Date.parse(stringOr(profile.probedAt, ""));
-  if ((source !== "gatewayprobe" && !(source === "gatewayinband" && profile.metadataComplete === true))
-    || !canonicalVodContainer(profile.container)
-    || !Number.isFinite(duration) || duration < 1 || duration > 86400
-    || !Number.isSafeInteger(size) || size <= 0 || !Number.isFinite(at) || at > Date.now() + 300000) return null;
+  if (source !== "gatewayprobe" && source !== "gatewayinband") return invalid("probe_source_invalid");
+  if (source === "gatewayinband" && profile.metadataComplete !== true) return invalid("inband_map_incomplete");
+  if (!canonicalVodContainer(profile.container)) return invalid("container_unrecognized");
+  if (!Number.isFinite(duration) || duration < 1 || duration > 86400) return invalid("duration_invalid");
+  if (!Number.isSafeInteger(size) || size <= 0) return invalid("file_size_invalid");
+  if (!Number.isFinite(at)) return invalid("probe_timestamp_invalid");
+  if (at > Date.now() + 300000) return invalid("probe_timestamp_future");
   return { profile, fileSizeBytes: size,
     audioTracks: (profile.audioTracks as JsonRecord[]), subtitleTracks: (profile.subtitles as JsonRecord[]) };
 }
@@ -15616,6 +15631,7 @@ async function runCodecProfileBackfill(
   db: SupabaseClient,
 ): Promise<JsonRecord> {
   let diagnosticStage = "request-validation";
+  let diagnosticProfileReason: string | null = null;
   try {
   const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
   const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
@@ -15853,7 +15869,7 @@ async function runCodecProfileBackfill(
       }
       const observedProfile = recordOrEmpty(info.codecProfile ?? info.codec_profile);
       diagnosticStage = "exact-profile-validation";
-      if (!observedGatewayFileProfile(observedProfile)) {
+      if (!observedGatewayFileProfile(observedProfile, (reason) => { diagnosticProfileReason = reason; })) {
         throw new HttpError(502, "Media gateway returned an incomplete codec profile", {
           code: "incomplete_codec_profile",
         });
@@ -15910,6 +15926,7 @@ async function runCodecProfileBackfill(
       stage: diagnosticStage,
       status: error instanceof HttpError ? error.status : 500,
       kind: error instanceof HttpError ? "http" : "exception",
+      ...(diagnosticProfileReason ? { profileReason: diagnosticProfileReason } : {}),
     });
     throw error;
   }

@@ -32,6 +32,45 @@ proxy-failure diagnosis or fleet-throughput proof. Full-objective acceptance
 remains incomplete. Sanitized local report:
 `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/BILAN-PILOTE-INDEPENDANT-20-20260912.md`.
 
+### Follow-up observations and local diagnostics, not another deployment
+
+The immutable cohort's metadata pass reached all twenty files: ten complete
+declared-track inventories, six admitted to speech validation, four unsuccessful
+or uncertain header operations. The exact-cache totals differ: one failed
+operation was the initially partial file, so there are seven partial inventories
+and three still absent. Old failures and quarantine hashes remain unchanged.
+
+A read-only activity audit found five fresh `catalog-refresh` ledger rows, no
+active playback and no provider-account/exact-file leases at that instant. Four
+of the five cohort source accounts could be matched via their recorded playback
+account hashes: all four were blocked by the foreground-validation RPC but not
+by the catalogue-refresh RPC. This is the existing five-minute activity grace,
+not evidence of a live viewer or an upstream provider refusal. It was not
+disabled or shortened. Once it elapsed, real acquisitions began naturally.
+
+At 03:44:12 UTC the Gateway had completed two captures of approximately sixty
+seconds: 22.586 s and 37.689 s including positive provider drain. The first local
+inference completed in 4.428 s after that drain; one strict temporal window was
+checkpointed and the next was running. This strengthens the capture-before-CPU
+evidence, but is still not a complete VOD certificate, independent accuracy
+measurement, multi-track reuse measurement or passive-playback QoS proof.
+
+One rejected metadata response failed at `exact-profile-validation`; another
+at `gateway-profile-probe`. Their generic application HTTP 502 alone cannot
+establish which provider/proxy/file property failed. A **local, not deployed**
+follow-up adds fifteen fixed-vocabulary profile rejection reasons (missing or
+oversized maps, invalid or duplicate indices, provenance, incomplete in-band
+metadata, container, duration, size and timestamps). It does not relax the
+acceptance predicate or expose these reasons in public errors. The actual route
+test confirms that only the fixed reason is logged privately and that the
+drained lease is released. Compatibility/boundary tests preserve the previous
+predicate; no retry or new provider request was made for this diagnosis.
+
+Validation of this local follow-up: 22 focused tests passed; full suite 4,513
+tests, 4,499 passed, 14 skipped, zero failures, 104.883 s. Full log:
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-profile-diagnostics-20260912.log`.
+It remains separate from the unchanged live pilot and its source attestation.
+
 ## Earlier state — after the maintenance deployment
 
 The sections below retain earlier implementation/release observations; their
