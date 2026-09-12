@@ -11794,14 +11794,31 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 .watch-loading-art.is-animated .watch-loading-animation { visibility: visible; }
 .watch-loading-art.is-animated .watch-loading-still { visibility: hidden; }
 
+.watch-loading-status {
+  display: grid;
+  gap: var(--space-sm);
+  max-width: 38ch;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .watch-loading-label {
   margin: 0;
   color: var(--color-text-primary);
-  font-size: 1rem;
-  font-weight: 500;
+  font-size: max(18px, 1.125rem);
+  font-weight: 600;
   line-height: 1.5;
-  text-align: center;
-  overflow-wrap: anywhere;
+}
+
+.watch-loading-help {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: max(16px, 1rem);
+  line-height: 1.5;
+}
+
+@media (max-height: 450px) {
+  .watch-loading-art { width: min(192px, 32dvh); }
 }
 
 .watch-video-section.has-playback-loading {

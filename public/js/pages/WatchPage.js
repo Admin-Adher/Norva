@@ -8831,14 +8831,19 @@ class WatchPage {
     }
 
     refreshLoadingArtwork() {
-        const label = this.loadingSpinner?.querySelector?.('.watch-loading-label');
-        if (label) {
-            const offline = navigator.onLine === false;
-            const key = offline ? 'ui_web_4d5c943931a4' : 'ui_web_5d1fa38bcf0d';
-            const fallback = offline ? 'You are offline' : 'Preparing…';
-            if (label.dataset.i18n !== key) {
-                label.dataset.i18n = key;
-                label.textContent = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
+        const offline = navigator.onLine === false;
+        const copy = offline ? [
+            ['.watch-loading-label', 'ui_web_4d5c943931a4', 'You are offline'],
+            ['.watch-loading-help', 'ui_watch_preparing_video_offline', 'Check your internet connection to continue preparing your video.'],
+        ] : [
+            ['.watch-loading-label', 'ui_watch_preparing_video', 'Preparing your video'],
+            ['.watch-loading-help', 'ui_watch_preparing_video_help', 'Playback will start automatically when your video is ready.'],
+        ];
+        for (const [selector, key, fallback] of copy) {
+            const element = this.loadingSpinner?.querySelector?.(selector);
+            if (element && element.dataset.i18n !== key) {
+                element.dataset.i18n = key;
+                element.textContent = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
             }
         }
         const still = this.loadingSpinner?.querySelector?.('.watch-loading-still');

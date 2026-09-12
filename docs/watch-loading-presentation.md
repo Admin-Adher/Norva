@@ -7,6 +7,9 @@ The web Watch player covers its video with the supplied Norva alien while it pre
 | Spinner inside auto-hiding transport controls | Opaque, independent loading cover | Controls cannot disappear together with loading feedback or receive accidental input. |
 | Playback shortcuts available during preparation | Transport UI inert and shortcuts ignored; canonical Back retained | Preparation remains uninterrupted without trapping the viewer. |
 | No branded loading fallback | Alien animation, static poster for reduced motion/data saving, text if artwork fails | Accessibility and recovery do not depend on animation decoding. |
+| Generic “Preparing…” label | “Preparing your video” plus automatic-playback explanation | Viewers know what is being prepared and that no further action is needed. |
+
+The preparation heading and help text have dedicated keys in all ten web locales. Both belong to one polite, atomic status region. Offline feedback replaces both lines with connection guidance; it does not promise immediate playback. Copy adds no timer, progress estimate or playback dependency. The supporting line wraps within 38 characters of typographic width rather than being truncated.
 
 ## Artwork provenance and budget
 

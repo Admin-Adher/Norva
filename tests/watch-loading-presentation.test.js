@@ -35,7 +35,7 @@ function fixture() {
     }
     const section = element(), overlay = element(), loader = element(), video = element();
     const top = element(), back = element(), title = element(), controls = element(), play = element();
-    const still = element(), animation = element(), art = element(), label = element(), extras = element();
+    const still = element(), animation = element(), art = element(), label = element(), help = element(), extras = element();
     const motion = { ...events(), matches: false };
     const connection = { ...events(), saveData: false };
     const window = { ...events(), matchMedia: () => motion };
@@ -46,16 +46,17 @@ function fixture() {
     overlay.children = [top, controls]; top.children = [back, title]; controls.children = [play];
     overlay.querySelector = () => top;
     loader.closest = () => section;
-    loader.querySelector = selector => ({ '.watch-loading-still': still, '.watch-loading-animation': animation, '.watch-loading-art': art, '.watch-loading-label': label })[selector];
+    loader.querySelector = selector => ({ '.watch-loading-still': still, '.watch-loading-animation': animation, '.watch-loading-art': art, '.watch-loading-label': label, '.watch-loading-help': help })[selector];
     still.dataset.src = '/img/watch/norva-loading-still.webp';
     animation.dataset.src = '/img/watch/norva-loading-60fps.webp';
-    label.dataset.i18n = 'ui_web_5d1fa38bcf0d';
+    label.dataset.i18n = 'ui_watch_preparing_video';
+    help.dataset.i18n = 'ui_watch_preparing_video_help';
     const context = { window, document, navigator, console, setTimeout, clearTimeout };
     vm.runInNewContext(source, context);
     const page = Object.create(window.WatchPage.prototype);
     Object.assign(page, { loadingSpinner: loader, overlay, video, backBtn: back, centerPlayBtn: play });
     document.activeElement = play;
-    return { page, section, overlay, loader, video, back, title, controls, play, extras, still, animation, art, label, document, window, navigator, motion, connection };
+    return { page, section, overlay, loader, video, back, title, controls, play, extras, still, animation, art, label, help, document, window, navigator, motion, connection };
 }
 
 test('preparation masks transport UI, retains Back and does not hide or pause video', () => {
@@ -132,8 +133,13 @@ test('offline status is localized separately from terminal playback recovery', (
     f.navigator.onLine = false; f.window.dispatch('offline');
     assert.equal(f.label.dataset.i18n, 'ui_web_4d5c943931a4');
     assert.equal(f.label.textContent, 'You are offline');
+    assert.equal(f.help.dataset.i18n, 'ui_watch_preparing_video_offline');
+    assert.equal(f.help.textContent, 'Check your internet connection to continue preparing your video.');
     f.navigator.onLine = true; f.window.dispatch('online');
-    assert.equal(f.label.dataset.i18n, 'ui_web_5d1fa38bcf0d');
+    assert.equal(f.label.dataset.i18n, 'ui_watch_preparing_video');
+    assert.equal(f.label.textContent, 'Preparing your video');
+    assert.equal(f.help.dataset.i18n, 'ui_watch_preparing_video_help');
+    assert.equal(f.help.textContent, 'Playback will start automatically when your video is ready.');
     f.page.hideLoading({ restoreFocus: false });
 });
 
@@ -186,7 +192,7 @@ test('asset/layout contracts: VOD only, lazy artwork, accessible status, no vide
     assert.ok(loader < html.indexOf('id="watch-overlay"'));
     assert.equal((html.match(/id="watch-loading"/g) || []).length, 1);
     assert.match(html, /id="player-loading">\s*<div class="loading-spinner"/);
-    assert.match(html, /class="watch-loading-label" role="status" aria-live="polite"/);
+    assert.match(html, /class="watch-loading-status" role="status" aria-live="polite" aria-atomic="true">\s*<p class="watch-loading-label"[^>]+>[^<]+<\/p>\s*<p class="watch-loading-help"/);
     assert.match(html, /data-src="\/img\/watch\/norva-loading-60fps\.webp"/);
     assert.doesNotMatch(html, /\ssrc="\/img\/watch\/norva-loading-60fps\.webp"/);
     const start = css.indexOf('/* VOD preparation only;');
@@ -212,4 +218,20 @@ test('asset/layout contracts: VOD only, lazy artwork, accessible status, no vide
     assert.equal(durations.length, 216);
     assert.equal(durations.reduce((a, b) => a + b, 0), 3600);
     assert.ok(durations.every(ms => ms === 16 || ms === 17));
+});
+
+test('preparation copy identifies the video in every locale without changing generic preparation text', () => {
+    const catalog = require('../scripts/i18n/catalog.cjs').load();
+    const locales = require('../i18n/locales.json');
+    for (const key of ['ui_watch_preparing_video', 'ui_watch_preparing_video_help', 'ui_watch_preparing_video_offline']) {
+        for (const { code } of locales) assert.ok(catalog[key][code]?.trim(), `${key}: ${code}`);
+    }
+    assert.equal(catalog.ui_watch_preparing_video.fr, 'Préparation de votre vidéo');
+    assert.equal(catalog.ui_web_5d1fa38bcf0d.fr, 'Préparation…');
+    const f = fixture(); f.page.showLoading();
+    let writes = 0;
+    for (const el of [f.label, f.help]) Object.defineProperty(el, 'textContent', { set() { writes++; } });
+    f.page.refreshLoadingArtwork();
+    assert.equal(writes, 0, 'artwork/visibility refresh must not repeat live-region announcements');
+    f.page.hideLoading({ restoreFocus: false });
 });

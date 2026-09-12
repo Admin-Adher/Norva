@@ -24202,6 +24202,48 @@
     "id": "Audiens tidak tersedia. Muat ulang halaman sebelum mengirim.",
     "fil": "Hindi available ang audience. I-refresh ang pahina bago magpadala."
   },
+  "ui_watch_preparing_video": {
+    "source": "Preparing your video",
+    "refs": ["public/app.html", "public/js/pages/WatchPage.js"],
+    "en": "Preparing your video",
+    "fr": "Préparation de votre vidéo",
+    "pt-BR": "Preparando seu vídeo",
+    "es": "Preparando tu vídeo",
+    "hi": "आपका वीडियो तैयार हो रहा है",
+    "tr": "Videonuz hazırlanıyor",
+    "bn": "আপনার ভিডিও প্রস্তুত হচ্ছে",
+    "ar": "جارٍ تجهيز الفيديو",
+    "id": "Menyiapkan video Anda",
+    "fil": "Inihahanda ang iyong video"
+  },
+  "ui_watch_preparing_video_help": {
+    "source": "Playback will start automatically when your video is ready.",
+    "refs": ["public/app.html", "public/js/pages/WatchPage.js"],
+    "en": "Playback will start automatically when your video is ready.",
+    "fr": "La lecture démarrera automatiquement dès que la vidéo sera prête.",
+    "pt-BR": "A reprodução começará automaticamente quando seu vídeo estiver pronto.",
+    "es": "La reproducción comenzará automáticamente cuando tu vídeo esté listo.",
+    "hi": "वीडियो तैयार होते ही अपने आप चलने लगेगा।",
+    "tr": "Videonuz hazır olduğunda oynatma otomatik olarak başlayacak.",
+    "bn": "ভিডিও প্রস্তুত হলেই স্বয়ংক্রিয়ভাবে চলতে শুরু করবে।",
+    "ar": "سيبدأ التشغيل تلقائيًا عندما يصبح الفيديو جاهزًا.",
+    "id": "Pemutaran akan dimulai secara otomatis saat video Anda siap.",
+    "fil": "Awtomatikong magsisimula ang pag-play kapag handa na ang iyong video."
+  },
+  "ui_watch_preparing_video_offline": {
+    "source": "Check your internet connection to continue preparing your video.",
+    "refs": ["public/js/pages/WatchPage.js"],
+    "en": "Check your internet connection to continue preparing your video.",
+    "fr": "Vérifiez votre connexion Internet pour poursuivre la préparation de votre vidéo.",
+    "pt-BR": "Verifique sua conexão com a internet para continuar preparando seu vídeo.",
+    "es": "Comprueba tu conexión a Internet para continuar preparando tu vídeo.",
+    "hi": "वीडियो की तैयारी जारी रखने के लिए अपना इंटरनेट कनेक्शन जाँचें।",
+    "tr": "Videonuzun hazırlanmasına devam etmek için internet bağlantınızı kontrol edin.",
+    "bn": "ভিডিওর প্রস্তুতি চালিয়ে যেতে আপনার ইন্টারনেট সংযোগ পরীক্ষা করুন।",
+    "ar": "تحقّق من اتصالك بالإنترنت لمتابعة تجهيز الفيديو.",
+    "id": "Periksa koneksi internet Anda untuk melanjutkan persiapan video.",
+    "fil": "Suriin ang iyong koneksyon sa internet upang magpatuloy sa paghahanda ng video."
+  },
   "notif_transactional": {
     "source": "Transactional system",
     "refs": [
