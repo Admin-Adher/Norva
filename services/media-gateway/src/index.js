@@ -5519,8 +5519,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     try {
         const requestedLength = range.end - range.start + 1;
         const bufferedChunks = finiteSeek ? [] : null;
-        let finiteWindowStartOffset = 0;
         let finiteWindowRange = null;
+        let finiteProviderRange = null;
+        let finiteBufferedBytes = 0;
         let finiteWindowIsWarmup = false;
         let forwarded = 0;
         let reconnects = 0;
@@ -5543,7 +5544,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     continue;
                 }
             }
-            if (finiteSeek && forwarded === finiteWindowStartOffset) {
+            if (finiteSeek && !finiteWindowRange) {
                 finiteWindowIsWarmup = (
                     context.finiteWarmupWindowBytes > 0
                     && !context.finiteWarmupWindowConsumed
@@ -5578,10 +5579,28 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                     if (!res.write(cached)) await waitForStrictLidDrain(res, controller.signal);
                     forwarded += cached.length;
-                    finiteWindowStartOffset = forwarded;
                     finiteWindowRange = null;
                     continue;
                 }
+                // TS timestamp seeking repeatedly steps backwards by a few
+                // packets. Retain a small preceding slice in THIS broker, not
+                // another account/session's cache. Libav still receives exactly
+                // its requested bytes and remains responsible for PTS seeking.
+                // Stop at an already cached suffix instead of downloading it
+                // again when a backwards step just misses that cache entry.
+                if (context.finiteSeekLookbehindBytes > 0) {
+                    for (const entry of context.finiteCache.values()) {
+                        if (entry.start > finiteWindowRange.start && entry.start <= finiteWindowRange.end) {
+                            finiteWindowRange.end = entry.start - 1;
+                        }
+                    }
+                }
+                finiteProviderRange = { ...finiteWindowRange,
+                    start: Math.max(0, finiteWindowRange.start - (
+                        forwarded === 0 && !finiteWindowIsWarmup ? context.finiteSeekLookbehindBytes : 0
+                    )),
+                };
+                finiteBufferedBytes = 0;
             }
             let releaseFiniteProviderSlot = null;
             try {
@@ -5606,7 +5625,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 // fetched twice merely because FFmpeg pipelines cue requests.
                 const queuedCacheHit = finiteMkvSeekCacheLookup(
                     context,
-                    finiteWindowRange,
+                    { ...finiteWindowRange, start: range.start + forwarded },
                     { countMiss: false, allowPrefix: true },
                 );
                 if (queuedCacheHit) {
@@ -5620,7 +5639,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         await waitForStrictLidDrain(res, controller.signal);
                     }
                     forwarded += queuedCacheHit.length;
-                    finiteWindowStartOffset = forwarded;
+                    bufferedChunks.length = 0;
+                    finiteBufferedBytes = 0;
                     finiteWindowRange = null;
                     continue;
                 }
@@ -5643,9 +5663,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 setTimer: context.setTimer,
                 clearTimer: context.clearTimer,
             });
-            const offsetBeforeFetch = forwarded;
             const remainingRange = {
-                start: range.start + forwarded,
+                start: finiteSeek ? finiteProviderRange.start + finiteBufferedBytes : range.start + forwarded,
                 end: finiteSeek ? finiteWindowRange.end : range.end,
                 total: range.total,
             };
@@ -5658,6 +5677,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     ? remainingRange.start : rangeReuse.missingEnd(remainingRange.start, range.end);
             }
             let strictRangeCollector = null;
+            let receivedBytes = 0;
             const finiteWindowTrace = finiteSeek
                 ? beginFiniteMkvSeekWindowTrace(context, requestId, range, remainingRange)
                 : null;
@@ -5886,8 +5906,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         'first-byte',
                         chunk.length,
                     );
-                    if (forwarded + chunk.length > requestedLength
-                        || forwarded - offsetBeforeFetch + chunk.length > exactRange.length) {
+                    if (receivedBytes + chunk.length > exactRange.length) {
                         throw markStrictLidTerminal(context, strictLidBrokerError(
                             'RANGE_LENGTH_MISMATCH',
                             'Provider exceeded the exact language-validation byte range.',
@@ -5895,10 +5914,21 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         ));
                     }
                     strictRangeCollector?.push(chunk);
-                    forwarded += chunk.length;
+                    const localChunk = finiteSeek
+                        ? chunk.subarray(Math.max(0, range.start + forwarded - (remainingRange.start + receivedBytes)))
+                        : chunk;
+                    receivedBytes += chunk.length;
+                    if (forwarded + localChunk.length > requestedLength) {
+                        throw markStrictLidTerminal(context, strictLidBrokerError(
+                            'RANGE_LENGTH_MISMATCH', 'Provider exceeded the exact language-validation byte range.',
+                            { status: 502, upstreamStatus },
+                        ));
+                    }
+                    forwarded += localChunk.length;
                     context.providerBytes += chunk.length;
                     if (finiteSeek) {
                         bufferedChunks.push(Buffer.from(chunk));
+                        finiteBufferedBytes += chunk.length;
                         // Forward provider progress immediately. Waiting for a
                         // complete finite window before writing left FFmpeg's
                         // loopback socket silent for longer than rw_timeout on
@@ -5907,11 +5937,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         // Keep materialising the bounded window for the cache
                         // and mono-slot guarantee, but defer local backpressure
                         // only until that provider window is fully drained.
-                        if (!responseStarted) {
+                        if (localChunk.length && !responseStarted) {
                             startFiniteMkvSeekResponse(context, res, range);
                             responseStarted = true;
                         }
-                        if (!res.write(chunk)) finiteLocalBackpressured = true;
+                        if (localChunk.length && !res.write(localChunk)) finiteLocalBackpressured = true;
                     } else if (!res.write(chunk)) {
                         await waitForStrictLidDrain(res, controller.signal);
                     }
@@ -5919,7 +5949,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // Some provider transports report a reset instead of EOF
                     // after delivering the complete body; an extra read would
                     // turn valid media into a false reconnect/failure.
-                    if (forwarded - offsetBeforeFetch === exactRange.length) break;
+                    if (receivedBytes === exactRange.length) break;
                 }
                 if (controller.signal.aborted) {
                     throw controller.signal.reason || new Error('strict LID provider read stopped');
@@ -5927,7 +5957,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (upstreamController.signal.aborted) {
                     throw upstreamController.signal.reason || new Error('strict LID provider read stopped');
                 }
-                const providerBytes = forwarded - offsetBeforeFetch;
+                const providerBytes = receivedBytes;
                 if (providerBytes !== exactRange.length) {
                     throw strictLidBrokerError(
                         'RANGE_LENGTH_MISMATCH',
@@ -5949,16 +5979,16 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 await closeStrictLidBrokerProviderFetch(context, attempt, 'completed');
                 strictRangeCollector?.commit(rangeReuse);
                 if (finiteSeek && range.start + forwarded === finiteWindowRange.end + 1) {
-                    const windowLength = finiteWindowRange.end - finiteWindowRange.start + 1;
+                    const windowLength = finiteProviderRange.end - finiteProviderRange.start + 1;
                     const payload = Buffer.concat(bufferedChunks, windowLength);
-                    if (payload.length !== windowLength) {
+                    if (finiteBufferedBytes !== windowLength || payload.length !== windowLength) {
                         throw strictLidBrokerError(
                             'RANGE_LENGTH_MISMATCH',
                             'Provider did not materialize the exact finite MKV seek window.',
                             { status: 502 },
                         );
                     }
-                    finiteMkvSeekCacheStore(context, finiteWindowRange, payload);
+                    finiteMkvSeekCacheStore(context, finiteProviderRange, payload);
                     if (finiteWindowIsWarmup) {
                         activateFiniteMkvResumePrefixCandidate(
                             context,
@@ -5968,6 +5998,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                     maybePublishFiniteMkvResumePrefix(context);
                     bufferedChunks.length = 0;
+                    finiteBufferedBytes = 0;
                     // The exact provider window is fully materialized. Release
                     // the mono-account slot before writing to the local socket:
                     // a paused/obsolete FFmpeg response must never block the
@@ -5987,7 +6018,6 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         await waitForStrictLidDrain(res, controller.signal);
                     }
                     finiteLocalBackpressured = false;
-                    finiteWindowStartOffset = forwarded;
                     finiteWindowRange = null;
                     if (finiteWindowIsWarmup && context.finiteWarmupCueGraceMs > 0) {
                         await sleep(context.finiteWarmupCueGraceMs);
@@ -6004,7 +6034,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     }
                 }
             } catch (error) {
-                const progressBytes = forwarded - offsetBeforeFetch;
+                const progressBytes = receivedBytes;
                 const timeoutKind = attempt.deadline?.timeoutKind || null;
                 finishFiniteMkvSeekWindowTrace(
                     context,
@@ -6344,6 +6374,11 @@ async function createStrictLidBroker(options = {}) {
         finiteWindowBytes: Number.isFinite(Number(options.finiteWindowBytes))
             ? Math.max(1, Math.min(16 * 1024 * 1024, Number(options.finiteWindowBytes)))
             : FINITE_MKV_SEEK_WINDOW_BYTES,
+        // Opt-in only for verified finite TS playback, never strict language
+        // acquisition. Extra retained bytes are bounded and session-private.
+        finiteSeekLookbehindBytes: pathPrefix === 'finite-mkv-seek'
+            && Number.isSafeInteger(options.finiteSeekLookbehindBytes)
+            ? Math.max(0, Math.min(256 * 1024, options.finiteSeekLookbehindBytes)) : 0,
         finiteWarmupWindowBytes: 0,
         finiteWarmupCueGraceMs: Number.isFinite(Number(options.finiteWarmupCueGraceMs))
             ? Math.max(0, Math.min(250, Number(options.finiteWarmupCueGraceMs)))
@@ -6471,6 +6506,7 @@ async function createStrictLidBroker(options = {}) {
         get warmupWindowBytes() { return context.finiteWarmupWindowBytes; },
         get warmupProviderWindows() { return context.finiteWarmupProviderWindows; },
         get sequentialWindowBytes() { return context.finiteSequentialWindowBytes; },
+        get seekLookbehindBytes() { return context.finiteSeekLookbehindBytes; },
         get windowTrace() {
             return context.finiteWindowTrace.map((trace) => ({
                 requestId: trace.requestId,
@@ -13594,7 +13630,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     if (parentSignal?.aborted) throw abortedVodInputPumpError();
 
     const exactAudioTrackCount = audioTracksForSession(session).length;
-    const effectiveWindowBytes = finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 4 * 1024 * 1024) : exactAudioTrackCount > 1
+    const effectiveWindowBytes = finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
         ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
         : FINITE_MKV_SEEK_WINDOW_BYTES;
     const finiteResumePrefixCandidate = finiteTs ? null : finiteMkvResumePrefixCache.get({
@@ -13624,6 +13660,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
         finiteWindowBytes: effectiveWindowBytes,
+        finiteSeekLookbehindBytes: finiteTs ? 256 * 1024 : 0,
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
         finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
@@ -13650,6 +13687,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteTsSeekBroker = finiteTs;
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
+    session.startupTimings.finiteTsSeekLookbehindBytes = finiteTs ? 256 * 1024 : 0;
     session.startupTimings.finiteMkvSeekWarmupCueGraceMs = finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS;
     session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
     session.startupTimings.finiteMkvResumePrefixWeakValidationBytes = FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES;
@@ -19995,6 +20033,7 @@ function debugSession(session) {
                 warmupWindowBytes: Number(session.finiteMkvSeekBroker.warmupWindowBytes || 0),
                 warmupProviderWindows: Number(session.finiteMkvSeekBroker.warmupProviderWindows || 0),
                 sequentialWindowBytes: Number(session.finiteMkvSeekBroker.sequentialWindowBytes || 0),
+                seekLookbehindBytes: Number(session.finiteMkvSeekBroker.seekLookbehindBytes || 0),
                 windowTrace: session.finiteMkvSeekBroker.windowTrace,
             }
             : null,

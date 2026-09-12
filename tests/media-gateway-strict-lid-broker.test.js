@@ -146,12 +146,14 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
     });
     const url = await listen(provider);
     const results = [];
-    for (const windowMiB of [0, 1, 4, 8]) {
+    for (const {windowMiB,lookbehindBytes} of [0, 1, 4, 8].map(windowMiB=>({windowMiB,lookbehindBytes:0}))
+      .concat([{windowMiB:1,lookbehindBytes:256*1024}])) {
       const buffered = windowMiB > 0;
       requests = 0; peak = 0; bytes = 0;
       if (buffered) broker = await brokerHarness().createStrictLidBroker({
         sourceUrl: url, fileSizeBytes: size, pathPrefix: 'finite-mkv-seek', dispatcher: null,
         finiteWindowBytes: windowMiB*1024*1024, finiteWarmupWindowBytes: 256*1024,
+        finiteSeekLookbehindBytes: lookbehindBytes,
         finiteWarmupCueGraceMs: 0, finiteSequentialWindowBytes: 8*1024*1024,
         finiteCacheBytes: 64*1024*1024, finiteResumePrefixCandidate: null, onFiniteResumePrefix: null,
         completedReleaseDelayMs: 0, supersededReleaseDelayMs: 100,
@@ -165,10 +167,10 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
       if (broker) { await broker.close(); broker = null; }
       const hashes = await run(['-v','error','-i',output,'-map','0:v:0','-frames:v','12','-f','framemd5','-']);
       const audio = await run(['-v','error','-i',output,'-map','0:a:0','-t','1','-f','md5','-']);
-      const result = { buffered, windowMiB, elapsedMs, requests, peak, bytes,
+      const result = { buffered, windowMiB, lookbehindBytes, elapsedMs, requests, peak, bytes,
         frames: hashes.split('\n').filter(x => x && !x.startsWith('#')).map(x => x.split(',').at(-1).trim()), audio };
       results.push(result);
-      console.log('native TS broker metrics', JSON.stringify({ buffered, windowMiB, elapsedMs, requests, peak, bytes }));
+      console.log('native TS broker metrics', JSON.stringify({ buffered, windowMiB, lookbehindBytes, elapsedMs, requests, peak, bytes }));
       assert.equal(active, 0);
     }
     for (const result of results.slice(1)) {
@@ -184,6 +186,96 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
     if (provider) await closeServer(provider);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('finite TS lookbehind returns only requested bytes and reuses backwards timestamp searches', { timeout: 8000 }, async (t) => {
+  const data = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
+  const calls = [];
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 16,
+    finiteSeekLookbehindBytes: 8, finiteCacheBytes: 128, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const [from, to] of [[125,127],[122,127],[119,127],[90,95],[85,95],[80,95],[0,10]]) {
+    const r = await fetch(broker.inputUrl, { headers: { Range: `bytes=${from}-${to}` } });
+    assert.equal(r.headers.get('content-range'), `bytes ${from}-${to}/128`);
+    assert.equal(r.headers.get('content-length'), String(to-from+1));
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), data.subarray(from,to+1));
+  }
+  assert.deepEqual(calls, ['bytes=117-127','bytes=82-95','bytes=72-81','bytes=0-10']);
+  assert.equal(broker.interruptedProviderFetches,0);
+  assert.ok(broker.cacheHits >= 4);
+});
+
+test('finite TS lookbehind resumes a truncated preceding slice without duplicate local bytes', { timeout: 8000 }, async (t) => {
+  const data = Buffer.from(Array.from({ length: 64 }, (_, i) => i)), calls = [];
+  const provider = http.createServer((req,res) => {
+    const {start,end} = exactRange(req,data.length); calls.push(req.headers.range);
+    if (calls.length !== 1) return sendExactRange(req,res,data,{etag:'"vod-v1"'});
+    res.writeHead(206, {'Content-Length':String(end-start+1), 'Content-Range':`bytes ${start}-${end}/64`, ETag:'"vod-v1"'});
+    res.write(data.subarray(start,start+3)); setTimeout(() => res.destroy(),20);
+  });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:16,finiteSeekLookbehindBytes:8,
+    releaseDelayMs:0, finiteRetryDelaysMs:[0], finiteNoProgressRetryLimit:1 });
+  t.after(() => broker.close());
+  const response = await fetch(broker.inputUrl,{headers:{Range:'bytes=12-15'}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data.subarray(12,16));
+  assert.deepEqual(calls,['bytes=4-15','bytes=7-15']);
+  assert.equal(broker.interruptedProviderFetches,1);
+  assert.equal(broker.terminalError,null);
+});
+
+for (const fail of ['validator','range','busy']) test(`finite TS lookbehind keeps ${fail} terminal before serving a preceding slice`, {timeout:8000}, async(t) => {
+  const data=Buffer.alloc(64,1); let calls=0;
+  const provider=http.createServer((req,res)=>{
+    calls++;
+    if(fail==='busy'){res.writeHead(458,{'Content-Length':'0'});return res.end();}
+    sendExactRange(req,res,data,{etag:fail==='validator'?'"changed"':'"original"',contentRange:fail==='range'?'bytes 4-15/65':undefined});
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:16,finiteSeekLookbehindBytes:8,
+    expectedValidator:{header:'If-Range',kind:'etag',value:'"original"'},releaseDelayMs:0});t.after(()=>broker.close());
+  const response=await fetch(broker.inputUrl,{headers:{Range:'bytes=12-15'}});
+  await response.arrayBuffer();
+  assert.notEqual(response.status,206);assert.equal(calls,1);assert.ok(broker.terminalError);
+});
+
+test('finite TS lookbehind coalesces another reader after a partial reconnect without replaying bytes', {timeout:8000}, async(t)=>{
+  const data=Buffer.from(Array.from({length:64},(_,i)=>i));let calls=0,active=0,peak=0,started;
+  const firstStarted=new Promise(r=>{started=r});
+  const provider=http.createServer((req,res)=>{
+    calls++;active++;peak=Math.max(peak,active);let ended=false;
+    const release=()=>{if(!ended){ended=true;active--}};res.once('finish',release);res.once('close',release);
+    if(calls!==1)return sendExactRange(req,res,data);
+    const {start,end}=exactRange(req,64);
+    res.writeHead(206,{'Content-Length':String(end-start+1),'Content-Range':`bytes ${start}-${end}/64`,ETag:'"fixture-v1"'});
+    res.write(data.subarray(start,14));started();setTimeout(()=>res.destroy(),30);
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:16,finiteSeekLookbehindBytes:8,finiteCacheBytes:64,
+    releaseDelayMs:0,finiteRetryDelaysMs:[40]});t.after(()=>broker.close());
+  const first=fetch(broker.inputUrl,{headers:{Range:'bytes=12-31'}}).then(async r=>Buffer.from(await r.arrayBuffer()));
+  await firstStarted;
+  const second=fetch(broker.inputUrl,{headers:{Range:'bytes=12-31'}}).then(async r=>Buffer.from(await r.arrayBuffer()));
+  for(const body of await Promise.all([first,second]))assert.deepEqual(body,data.subarray(12,32));
+  assert.equal(peak,1);assert.equal(active,0);assert.equal(broker.interruptedProviderFetches,1);
+  assert.equal(broker.terminalError,null);
+});
+
+test('strict language acquisition ignores the finite TS lookbehind option', {timeout:8000}, async(t)=>{
+  const data=Buffer.alloc(32),calls=[];
+  const provider=http.createServer((req,res)=>{calls.push(req.headers.range);sendExactRange(req,res,data);});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:32,dispatcher:null,
+    finiteSeekLookbehindBytes:256*1024,releaseDelayMs:0});t.after(()=>broker.close());
+  const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=16-23'}});await r.arrayBuffer();
+  assert.deepEqual(calls,['bytes=16-23']);assert.equal(broker.seekLookbehindBytes,0);
 });
 
 function audioExtractionHarness(spawnImpl, timers = {}) {
