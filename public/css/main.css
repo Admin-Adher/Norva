@@ -11970,6 +11970,7 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 .audio-option {
   display: block;
   width: 100%;
+  min-height: 44px;
   padding: var(--space-sm) var(--space-md);
   background: none;
   border: none;

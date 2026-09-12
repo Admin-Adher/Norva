@@ -105,6 +105,87 @@ class FakeClock {
   }
 }
 
+test('native finite TS far seek: serialized broker preserves decoded media without provider overlap',
+  { skip: process.env.NORVA_TS_BROKER_NATIVE !== '1', timeout: 180_000 }, async () => {
+  const { spawn } = require('node:child_process');
+  const { finiteTsHttpArgs, finiteTsDemuxArgs } = require('../services/media-gateway/src/finite-ts-startup');
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'norva-ts-broker-'));
+  const bin = process.env.FFMPEG_PATH || 'ffmpeg';
+  const run = (args) => new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', b => { out += b; }); child.stderr.on('data', b => { err = (err + b).slice(-3000); });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+    child.on('error', e => { clearTimeout(timer); reject(e); });
+    child.on('close', code => { clearTimeout(timer); code === 0 ? resolve(out) : reject(Error(`native FFmpeg ${code}: ${err}`)); });
+  });
+  let provider, broker;
+  try {
+    const fixture = path.join(dir, 'vod.ts');
+    await run(['-v','error','-y','-f','lavfi','-i','testsrc2=size=320x180:rate=25',
+      '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','300',
+      '-c:v','libx264','-threads','1','-preset','ultrafast','-g','300','-keyint_min','300',
+      '-sc_threshold','0','-bf','0','-c:a','aac','-ac','2','-f','mpegts',fixture]);
+    const size = fs.statSync(fixture).size;
+    assert.ok(size > 8 * 1024 * 1024 && size < 64 * 1024 * 1024, `fixture size ${size}`);
+    let active = 0, peak = 0, requests = 0, bytes = 0;
+    provider = http.createServer((req, res) => {
+      const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
+      const from = range ? Number(range[1]) : 0, to = Math.min(size - 1, range?.[2] ? Number(range[2]) : size - 1);
+      if (from >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+      requests++; active++; peak = Math.max(peak, active);
+      let stream, settled = false;
+      const finish = () => { if (!settled) { settled = true; active--; } clearTimeout(timer); stream?.destroy(); };
+      const timer = setTimeout(() => {
+        res.writeHead(206, { 'Content-Type': 'video/mp2t', 'Content-Length': to-from+1,
+          'Content-Range': `bytes ${from}-${to}/${size}`, 'Accept-Ranges': 'bytes', ETag: '"ts-fixture-v1"' });
+        stream = fs.createReadStream(fixture, { start: from, end: to });
+        stream.on('data', b => { bytes += b.length; }); stream.pipe(res);
+      }, 80);
+      res.once('finish', finish); res.once('close', finish);
+    });
+    const url = await listen(provider);
+    const results = [];
+    for (const windowMiB of [0, 1, 4, 8]) {
+      const buffered = windowMiB > 0;
+      requests = 0; peak = 0; bytes = 0;
+      if (buffered) broker = await brokerHarness().createStrictLidBroker({
+        sourceUrl: url, fileSizeBytes: size, pathPrefix: 'finite-mkv-seek', dispatcher: null,
+        finiteWindowBytes: windowMiB*1024*1024, finiteWarmupWindowBytes: 256*1024,
+        finiteWarmupCueGraceMs: 0, finiteSequentialWindowBytes: 8*1024*1024,
+        finiteCacheBytes: 64*1024*1024, finiteResumePrefixCandidate: null, onFiniteResumePrefix: null,
+        completedReleaseDelayMs: 0, supersededReleaseDelayMs: 100,
+      });
+      const output = path.join(dir, `${buffered}.ts`), started = Date.now();
+      await run(['-v','error','-y', ...(buffered ? ['-seekable','1','-rw_timeout','50000000'] : finiteTsHttpArgs()),
+        ...finiteTsDemuxArgs(), '-analyzeduration','500000','-probesize','524288','-ss','222',
+        '-i', buffered ? broker.inputUrl : url, '-ss','15','-t','8','-map','0:v:0','-map','0:a:0',
+        '-c:v','libx264','-threads','1','-preset','ultrafast','-g','50','-c:a','aac','-f','mpegts',output]);
+      const elapsedMs = Date.now() - started;
+      if (broker) { await broker.close(); broker = null; }
+      const hashes = await run(['-v','error','-i',output,'-map','0:v:0','-frames:v','12','-f','framemd5','-']);
+      const audio = await run(['-v','error','-i',output,'-map','0:a:0','-t','1','-f','md5','-']);
+      const result = { buffered, windowMiB, elapsedMs, requests, peak, bytes,
+        frames: hashes.split('\n').filter(x => x && !x.startsWith('#')).map(x => x.split(',').at(-1).trim()), audio };
+      results.push(result);
+      console.log('native TS broker metrics', JSON.stringify({ buffered, windowMiB, elapsedMs, requests, peak, bytes }));
+      assert.equal(active, 0);
+    }
+    for (const result of results.slice(1)) {
+      assert.deepEqual(result.frames, results[0].frames, 'same twelve decoded frames at the requested far seek');
+      assert.equal(result.audio, results[0].audio, 'same aligned decoded audio');
+      assert.equal(result.peak, 1, 'never two provider HTTP operations at once');
+      // A one-MiB exploratory window can tie baseline depending on FFmpeg's
+      // prefetch scheduling. The selected four-MiB production window must win.
+      if (result.windowMiB === 4) assert.ok(result.requests < results[0].requests, 'selected window reduces provider round trips');
+    }
+  } finally {
+    await broker?.close();
+    if (provider) await closeServer(provider);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function audioExtractionHarness(spawnImpl, timers = {}) {
   const start = gatewaySource.indexOf('function extractAudioWav(');
   const end = gatewaySource.indexOf('// V2 chunked pipeline', start);

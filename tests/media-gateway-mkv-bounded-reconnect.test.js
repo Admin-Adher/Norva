@@ -3694,7 +3694,7 @@ test('ffprobe timeout preserves terminal 458/407 stderr, waits for pipe close, a
     }
 });
 
-test('finite MKV seek preparation drains the retained provider before opening one pinned broker', async () => {
+for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} seek preparation drains the retained provider before opening one pinned broker`, async () => {
     const source = readGateway();
     const block = sourceBetween(
         source,
@@ -3732,8 +3732,8 @@ test('finite MKV seek preparation drains the retained provider before opening on
             INBAND_HEADER_BYTES: 4 * 1024 * 1024,
             FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS: 4 * 60_000,
             finiteMkvResumePrefixCache: {
-                get: () => null,
-                put: () => true,
+                get: () => { assert.equal(finiteTs, false, 'TS must not read Matroska prefix cache'); return null; },
+                put: () => { assert.equal(finiteTs, false, 'TS must not write Matroska prefix cache'); return true; },
             },
             providerNodeRouteForSession: () => ({ slot: 3, nodeTransport: 'http' }),
             alternateProviderNodeTransportRoute: () => ({ slot: 3, nodeTransport: 'socks5' }),
@@ -3743,7 +3743,8 @@ test('finite MKV seek preparation drains the retained provider before opening on
             }),
             pinProviderNodeRouteForSession: (session, route) => { session.providerNodeRoute = route; },
             proxyKeyFromUrl: () => 'provider.example/user',
-            isFiniteMkvVodSession: () => true,
+            isFiniteMkvVodSession: () => !finiteTs,
+            finiteTsProfileEligible: (session) => session.exactTsProof === true,
             fileSizeBytesForSession: (session) => session.fileSizeBytes,
             audioTracksForSession: (session) => session.codecProfile?.audioTracks || [],
             normalizeStrictLidExpectedValidator: (value) => value,
@@ -3770,6 +3771,8 @@ test('finite MKV seek preparation drains the retained provider before opening on
     );
     const session = {
         sourceUrl: 'https://provider.example/movie/user/pass/title.mkv',
+        finiteTsResumeAligned: finiteTs,
+        exactTsProof: finiteTs,
         userAgent: 'Norva/Seek',
         seekOffset: 2062,
         fileSizeBytes: 3_633_791_388,
@@ -3785,7 +3788,8 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.deepEqual(events, ['preopen-close', 'release-wait', 'broker-open']);
     assert.equal(session.finiteMkvSeekBroker.inputUrl, broker.inputUrl);
     assert.equal(session.startupTimings.boundedMkvInputPump, false);
-    assert.equal(session.startupTimings.finiteMkvSeekBroker, true);
+    assert.equal(session.startupTimings.finiteMkvSeekBroker, !finiteTs);
+    assert.equal(session.startupTimings.finiteTsSeekBroker, finiteTs);
     assert.equal(session.startupTimings.mkvSeekPreopenReleaseWaitMs, 2500);
     assert.equal(brokerOptions.sourceUrl, session.sourceUrl);
     assert.equal(brokerOptions.fileSizeBytes, session.fileSizeBytes);
@@ -3793,13 +3797,22 @@ test('finite MKV seek preparation drains the retained provider before opening on
     assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
     assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
-    assert.equal(brokerOptions.finiteWindowBytes, 1 * 1024 * 1024);
-    assert.equal(brokerOptions.finiteWarmupCueGraceMs, 50);
+    if (finiteTs) {
+        assert.equal(brokerOptions.onFiniteResumePrefix, null);
+        assert.equal(brokerOptions.finiteResumePrefixCandidate, null);
+        assert.equal(brokerOptions.finiteWarmupCueGraceMs, 0);
+        const rejected = { ...session, finiteMkvSeekBroker: null, exactTsProof: false };
+        assert.equal(await harness.prepareFiniteMkvSeekBroker(rejected), null);
+        const cancelled = new AbortController(); cancelled.abort();
+        await assert.rejects(harness.prepareFiniteMkvSeekBroker({ ...session, finiteMkvSeekBroker: null }, cancelled.signal), { code: 'VOD_INPUT_ABORTED' });
+    }
+    assert.equal(brokerOptions.finiteWindowBytes, (finiteTs ? 2 : 1) * 1024 * 1024);
+    assert.equal(brokerOptions.finiteWarmupCueGraceMs, finiteTs ? 0 : 50);
     assert.equal(brokerOptions.finiteWarmupWindowBytes, 256 * 1024);
     assert.equal(brokerOptions.finiteSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(brokerOptions.finiteCacheBytes, 32 * 1024 * 1024);
     assert.equal(session.startupTimings.finiteMkvSeekMultiAudioWindow, true);
-    assert.equal(session.startupTimings.finiteMkvSeekWarmupCueGraceMs, 50);
+    assert.equal(session.startupTimings.finiteMkvSeekWarmupCueGraceMs, finiteTs ? 0 : 50);
     assert.equal(session.startupTimings.finiteMkvSeekWarmupWindowBytes, 256 * 1024);
     assert.equal(session.startupTimings.finiteMkvSeekSequentialWindowBytes, 2 * 1024 * 1024);
     assert.equal(typeof brokerOptions.dispatcherFactory, 'function');

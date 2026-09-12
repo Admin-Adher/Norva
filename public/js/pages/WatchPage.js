@@ -830,7 +830,7 @@ class WatchPage {
                     source: 'hls',
                     index: this.hls.subtitleTrack,
                     ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
-                    label: track.name || track.lang || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(this.hls.subtitleTrack + 1)}) : `Subtitle ${this.hls.subtitleTrack + 1}`),
+                    label: this.getSubtitleMenuLabel(track, this.hls.subtitleTracks, this.hls.subtitleTrack),
                     language: track.lang || null
                 };
             }
@@ -844,7 +844,7 @@ class WatchPage {
                     return {
                         source: 'native',
                         index: i,
-                        label: track.label || track.language || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(i + 1)}) : `Subtitle ${i + 1}`),
+                        label: this.getSubtitleMenuLabel(track, Array.from(textTracks), i),
                         language: track.language || null
                     };
                 }
@@ -4401,7 +4401,7 @@ class WatchPage {
 
         if (/^soundhandler$/i.test(value)) return true;
         if (type === 'subtitle') {
-            return /^(subtitle|subtitles?|sous[-\s]?titres?|captions?|track)\s*\d*$/i.test(value);
+            return /^(subtitle|subtitles?|sous[-\s]?titres?|captions?|track)(?:\s*\d+)*\s*$/i.test(value);
         }
         if (type === 'audio') {
             return /^(audio|track)\s*\d*$/i.test(value);
@@ -4438,13 +4438,31 @@ class WatchPage {
     getSubtitleTrackLabel(track, fallback = 'Subtitles') {
         if (!track) return fallback;
 
-        const title = !this.isGenericTrackTitle(track.title, 'subtitle') ? String(track.title).trim() : '';
-        const languageLabel = this.getLanguageDisplayName(track.inferredLanguage || track.language);
+        // HLS uses name/lang and native TextTrack uses label/language. All
+        // three paths must use the same labels; a generated "Subtitle 1"
+        // must not mask the declared language that arrived with that track.
+        const rawTitle = track.title || track.name || track.label;
+        const title = !this.isGenericTrackTitle(rawTitle, 'subtitle') ? String(rawTitle).trim() : '';
+        const language = [track.language, track.lang, track.inferredLanguage]
+            .map(value => this.normalizeTrackLanguage(value))
+            .find(value => value && value !== 'und');
+        const languageLabel = this.getLanguageDisplayName(language);
         const roleLabels = this.getSubtitleRoleLabels(track);
         const parts = [];
 
         if (languageLabel) parts.push(languageLabel);
-        if (title && (!languageLabel || title.toLowerCase() !== languageLabel.toLowerCase())) {
+        const titleIsLanguageCode = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(title)
+            && this.normalizeTrackLanguage(title) === language;
+        // Common English/native language names are metadata too, not custom
+        // edition names (avoid e.g. "French - Français" after localization).
+        let titleIsLanguageName = false;
+        if (title && language && language !== 'und') {
+            try {
+                titleIsLanguageName = ['en', 'fr', language].some(locale =>
+                    new Intl.DisplayNames([locale], { type: 'language' }).of(language)?.toLowerCase() === title.toLowerCase());
+            } catch (_) { /* An invalid locale must not hide a useful title. */ }
+        }
+        if (title && !titleIsLanguageCode && !titleIsLanguageName && (!languageLabel || title.toLowerCase() !== languageLabel.toLowerCase())) {
             parts.push(title);
         }
         roleLabels.forEach(label => {
@@ -4471,12 +4489,15 @@ class WatchPage {
     getSubtitleRoleLabels(track) {
         const labels = [];
         const title = String(track?.title || track?.label || track?.name || '').toLowerCase();
+        const attrs = track?.attrs || {};
 
-        if (this.hasTrackDisposition(track, ['forced']) || /\b(forced|force)\b/i.test(title)) {
+        if (this.hasTrackDisposition(track, ['forced']) || String(attrs.FORCED).toUpperCase() === 'YES'
+            || /\b(forced|force)\b/i.test(title)) {
             labels.push('Forced');
         }
 
         if (this.hasTrackDisposition(track, ['hearingImpaired', 'hearing_impaired', 'sdh'])
+            || /(?:^|,)public\.accessibility\.(?:transcribes-spoken-dialog|describes-music-and-sound)(?:,|$)/i.test(String(attrs.CHARACTERISTICS || ''))
             || /\b(sdh|hearing|malentendant|malentendants|cc)\b/i.test(title)) {
             labels.push('SDH');
         }
@@ -4484,7 +4505,8 @@ class WatchPage {
         return labels;
     }
 
-    getSubtitleMenuLabel(track, allTracks = [], index = -1, fallback = 'Subtitles') {
+    getSubtitleMenuLabel(track, allTracks = [], index = -1, fallback = null) {
+        fallback ??= globalThis.NorvaI18n?.t('ui_web_0ee695bdeb26', { defaultValue: 'Subtitles' }) ?? 'Subtitles';
         const base = this.getSubtitleTrackLabel(track, fallback);
         const tracks = Array.isArray(allTracks) ? allTracks : [];
         const normalizedBase = base.toLowerCase();
@@ -5909,10 +5931,22 @@ class WatchPage {
     gatewayStartupBufferOptions(startupPolicy = null) {
         const policy = this.normalizeGatewayStartupPolicy(startupPolicy);
         if (!policy) {
+            // A server-selected graph can miss its rate threshold on only two
+            // early segments. Preserve the fallback, but allow new, sustained
+            // browser evidence to supersede that estimate, never a timer alone.
+            const raw = startupPolicy || {};
+            const adaptive = Number(raw.protocol) === 2 && raw.eligible === false
+                && raw.reason === 'encode-rate-below-minimum'
+                && ['copy', 'audio-transcode', 'video-transcode'].includes(raw.pipeline)
+                && raw.targetBufferSeconds === null
+                && Number(raw.minimumEncodeRateX) >= (raw.pipeline === 'video-transcode' ? 2 : 1.15)
+                && Number(raw.minimumEncodeRateX) <= 20
+                && Number.isFinite(raw.observedEncodeRateX) && raw.observedEncodeRateX > 0;
             return {
                 minimumSeconds: 96,
                 timeoutMs: 360000,
                 policy: null,
+                ...(adaptive ? { adaptive: true } : {}),
             };
         }
         // A growing multi-audio EVENT manifest publishes one video playlist
@@ -5974,6 +6008,8 @@ class WatchPage {
         const minimumSeconds = Math.max(1, Number(options.minimumSeconds) || 24);
         const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 45000);
         const deadline = Date.now() + timeoutMs;
+        let growth = null;
+        this._gatewayStartupAdaptiveEvidence = null;
         while (Date.now() < deadline) {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
             const bufferedAhead = this.gatewayBufferedAheadSeconds();
@@ -6000,6 +6036,39 @@ class WatchPage {
                 ? hls.currentLevel
                 : 0;
             const details = levels[currentLevel]?.details || levels[0]?.details || null;
+            if (options.adaptive === true && this.video?.paused && Number(this.video.currentTime) <= 0.25) {
+                const now = Date.now();
+                // Exclude the first burst (already present at the Gateway) and
+                // require several later appends over real elapsed time. Disjoint
+                // ranges, buffer regressions and long gaps restart observation.
+                if (!growth || bufferedAhead < growth.lastBuffer - 0.25
+                    || now - growth.lastAt > 2500 || now - growth.at > 12000) {
+                    growth = bufferedAhead > 0 ? { at: now, buffer: bufferedAhead,
+                        lastBuffer: bufferedAhead, lastAt: now, appends: 0 } : null;
+                } else if (bufferedAhead >= growth.lastBuffer + 0.25) {
+                    growth.lastBuffer = bufferedAhead;
+                    growth.lastAt = now;
+                    growth.appends += 1;
+                }
+                const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
+                    .slice(-8).map(fragment => Number(fragment.duration));
+                const boundedSegments = durations.length >= 3
+                    && durations.every(duration => Number.isFinite(duration) && duration > 0 && duration <= 12.25);
+                const reserve = boundedSegments ? Math.max(12, 2 * Math.max(...durations)) : Infinity;
+                const elapsedMs = growth ? now - growth.at : 0;
+                const addedSeconds = growth ? bufferedAhead - growth.buffer : 0;
+                const rate = elapsedMs > 0 ? addedSeconds * 1000 / elapsedMs : 0;
+                if (growth && elapsedMs >= 2000 && growth.appends >= 3 && addedSeconds >= 8
+                    && rate >= 2 && bufferedAhead >= reserve && now - growth.lastAt <= 1000
+                    && Number(this.video.readyState) >= 3 && Number(this.video.videoWidth) > 0) {
+                    this._gatewayStartupAdaptiveEvidence = {
+                        elapsedMs, appends: growth.appends, addedSeconds,
+                        bufferedSeconds: bufferedAhead, rateX: Number(rate.toFixed(3)),
+                    };
+                    this.recordPlaybackStartupPhase?.('adaptiveBufferReady', playbackAttemptId);
+                    return true;
+                }
+            }
             const totalDuration = Number(details?.totalduration);
             if (details?.live === false && Number.isFinite(totalDuration) && totalDuration > 0) {
                 const completeTarget = Math.max(1, Math.min(minimumSeconds, totalDuration) - 0.5);
@@ -12698,7 +12767,7 @@ class WatchPage {
                     source: 'hls',
                     index,
                     ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
-                    label: track.name || track.lang || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(index + 1)}) : `Subtitle ${index + 1}`),
+                    label: this.getSubtitleMenuLabel(track, hlsSubtitleTracks, index),
                     active
                 };
             });
@@ -12781,7 +12850,7 @@ class WatchPage {
                 // have their own menu rows, so listing them here too would double them up.
                 if (this._isManagedTextTrack(track)) continue;
                 if (track.kind === 'subtitles' || track.kind === 'captions') {
-                    const label = track.label || track.language || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(i + 1)}) : `Subtitle ${i + 1}`);
+                    const label = this.getSubtitleMenuLabel(track, Array.from(tracks), i);
                     const active = track.mode === 'showing';
                     anyActive = anyActive || active;
                     options.push({
@@ -12803,7 +12872,7 @@ class WatchPage {
                     source: 'hls',
                     index,
                     ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
-                    label: track.name || track.lang || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a8c2b53b2061", {defaultValue: "Subtitle {{p0}}", p0:(index + 1)}) : `Subtitle ${index + 1}`),
+                    label: this.getSubtitleMenuLabel(track, hlsSubtitleTracks, index),
                     active
                 };
             });
@@ -13147,13 +13216,11 @@ class WatchPage {
         } else if (selectedIsOff) {
             this.setSubtitleSwitchFeedback('off');
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
-            this.setSubtitleSwitchFeedback('ready', tracks[index]?.label || (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected'));
+            this.setSubtitleSwitchFeedback('ready', this.getSubtitleMenuLabel(tracks[index], Array.from(tracks), index));
         } else if (source === 'hls' && this.hls && index >= 0) {
             this.setSubtitleSwitchFeedback(
                 'ready',
-                this.hls.subtitleTracks?.[index]?.name
-                    || this.hls.subtitleTracks?.[index]?.lang
-                    || (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected'),
+                this.getSubtitleMenuLabel(this.hls.subtitleTracks?.[index], this.hls.subtitleTracks, index),
             );
         }
         if (playbackPreferences) this.saveResumeSnapshotThrottled(true);

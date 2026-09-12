@@ -168,7 +168,7 @@ test('exact HLS subtitle rows replace stale probe rows in the captions menu', ()
 
   page.updateCaptionsTracks();
   assert.match(captionsList.innerHTML, /data-source="hls" data-index="0" data-stream-index="4">English/);
-  assert.match(captionsList.innerHTML, /data-source="hls" data-index="1" data-stream-index="7">Français/);
+  assert.match(captionsList.innerHTML, /data-source="hls" data-index="1" data-stream-index="7">French/);
   assert.doesNotMatch(captionsList.innerHTML, /Stale probe row|data-source="probe"/);
 });
 
@@ -214,8 +214,8 @@ test('partial exact HLS keeps every exact source row selectable while marking on
 
   page.updateCaptionsTracks();
   assert.match(captionsList.innerHTML, /data-source="hls" data-index="0" data-stream-index="4">English/);
-  assert.match(captionsList.innerHTML, /data-source="hls" data-index="1" data-stream-index="7">Français/);
-  assert.match(captionsList.innerHTML, /class="captions-option loadable"[^>]+data-source="unprepared-hls"[^>]+data-stream-index="9"[^>]+title="Loads at the current position"[^>]*>Spanish - Español · Load/);
+  assert.match(captionsList.innerHTML, /data-source="hls" data-index="1" data-stream-index="7">French/);
+  assert.match(captionsList.innerHTML, /class="captions-option loadable"[^>]+data-source="unprepared-hls"[^>]+data-stream-index="9"[^>]+title="Loads at the current position"[^>]*>Spanish · Load/);
   assert.doesNotMatch(captionsList.innerHTML, /disabled|Unavailable this playback/);
   assert.doesNotMatch(captionsList.innerHTML, /data-source="probe"/);
 });
@@ -314,7 +314,7 @@ test('an unprepared or stale Gateway subtitle choice cannot mutate or restart ac
   assert.equal(page.hls.subtitleDisplay, true);
   assert.equal(page.hls.subtitleTrack, 0);
   assert.equal(restartCalls, 0);
-  assert.deepEqual(feedback, { state: 'deferred', label: 'Spanish - Español' });
+  assert.deepEqual(feedback, { state: 'deferred', label: 'Spanish' });
 });
 
 test('a prepared HLS subtitle switches in place without restarting or moving the movie', async () => {
@@ -366,10 +366,10 @@ test('a prepared HLS subtitle switches in place without restarting or moving the
     source: 'hls',
     index: 1,
     streamIndex: 7,
-    label: 'Français',
+    label: 'French',
     language: 'fra',
   });
-  assert.deepEqual(feedback, { state: 'ready', label: 'Français' });
+  assert.deepEqual(feedback, { state: 'ready', label: 'French' });
 });
 
 test('pending HLS subtitle restoration waits for the immutable rendition map', () => {

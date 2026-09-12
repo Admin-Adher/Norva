@@ -647,9 +647,53 @@ async function handleRequest(req: Request): Promise<Response> {
       unavailableMessage: "Norva Playback is temporarily unavailable",
     });
     console.error("[norva-playback]", publicEdgeErrorLog(error, status, payload));
+    if (status >= 500) console.error("[norva-playback:diagnostic]", playbackErrorDiagnostic(error, req));
     return json(req, payload, status);
   }
 }
+
+// Internal, bounded categories and source locations only. Never return raw
+// messages, SQL, provider URLs, identifiers, credentials or stack text to a
+// viewer (or to these logs). Keep the existing public error envelope unchanged.
+function playbackErrorDiagnostic(error: unknown, req: Request) {
+    // Diagnostics must not replace the original public error, even for a
+    // malformed thrown object with accessors that throw while being inspected.
+    try {
+  const path = new URL(req.url).pathname;
+  const route = /\/session$/.test(path) ? "session"
+    : /\/language-validation$/.test(path) ? "language-validation" : "other";
+  const allowedCodes = new Set(["57014", "53300", "40P01", "40001", "08006", "08001",
+    "42703", "42883", "42P01", "42501", "23505", "23503", "PGRST002", "PGRST003",
+    "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "ABORT_ERR"]);
+  const codes: string[] = [], locations: Array<{ module: string; line: number; column: number }> = [];
+  const seen = new Set<unknown>();
+  let current = error, category = "unclassified";
+  for (let depth = 0; depth < 4 && current && typeof current === "object" && !seen.has(current); depth++) {
+    seen.add(current);
+    const value = current as Record<string, unknown>;
+    const code = String(value.code || "");
+    if (allowedCodes.has(code) && !codes.includes(code)) codes.push(code);
+    const message = String(value.message || "").slice(0, 2048).toLowerCase();
+    if (/statement timeout|canceling statement/.test(message)) category = "database-statement-timeout";
+    else if (/connection pool|remaining connection slots|too many clients/.test(message)) category = "database-capacity";
+    else if (/(?:column|relation|function) .*does not exist|schema cache/.test(message)) category = "database-schema";
+    else if (category === "unclassified" && /timeout|timed out|deadline/.test(message)) category = "timeout";
+    else if (category === "unclassified" && /fetch failed|connection|network|dns/.test(message)) category = "transport";
+    else if (category === "unclassified" && /abort|cancel|superseded/.test(message)) category = "cancelled";
+    const stack = String(value.stack || "").slice(0, 8192);
+    for (const match of stack.matchAll(/\/(norva-playback\/index\.ts|_shared\/(?:local-auth\.ts|catalog-visibility-response\.mjs|catalog-generation-mutations\.mjs)):(\d{1,6}):(\d{1,5})\)?(?:\s|$)/g)) {
+      if (locations.length >= 4) break;
+      const location = { module: match[1], line: Number(match[2]), column: Number(match[3]) };
+      if (!locations.some(item => item.module === location.module && item.line === location.line && item.column === location.column)) locations.push(location);
+    }
+    current = value.cause ?? (value.details && typeof value.details === "object" ? value.details : null);
+  }
+    return { protocol: 1, route, category, codes, locations };
+    } catch {
+      return { protocol: 1, route: "other", category: "unclassified", codes: [], locations: [] };
+    }
+  }
 
 type ActiveCatalogPatchResult = {
   data: JsonRecord[];

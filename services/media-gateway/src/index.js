@@ -11284,6 +11284,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         if (FINITE_TS_FAST_START_ENABLED && applyFiniteTsAccurateResume(session, {
             backend: VIDEO_ENCODER_CONFIG.backend, ready: VIDEO_ENCODER_PREFLIGHT.ready,
         })) session.videoModeReason = 'finite-ts-accurate-resume';
+        if (session.finiteTsResumeAligned === true && normalizedSeekOffset > 30) {
+            // The exact finite TS uses the existing single-provider range lane.
+            // Repeated demuxer seeks can reuse resident windows instead of
+            // reconnecting directly through the provider proxy every time.
+            await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
+            session.startupTimings.finiteTsResumeMode = 'serialized-window-seek';
+        }
         applyVaapiVodStartupReadiness(session);
         session.hlsCacheDescriptor = session.videoMode === 'copy'
             ? mkvH264HlsCacheDescriptorForSession(session)
@@ -12023,6 +12030,7 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
             const finiteMkvSeekFailureCode = String(session.inputFailure?.code || '').trim();
             if (
                 finiteMkvSeekBrokerFailed
+                && session.finiteTsSeekBroker !== true
                 && finiteMkvSeekFailureCode === 'PROVIDER_RECONNECT_EXHAUSTED'
                 && Number(session.finiteMkvLinearFallbacks || 0) < 1
             ) {
@@ -13523,7 +13531,7 @@ async function closePreopenedBoundedMkvInput(session) {
 
 function usesFiniteMkvSeekBroker(session) {
     return Boolean(
-        isFiniteMkvVodSession(session) &&
+        (isFiniteMkvVodSession(session) || session?.finiteTsSeekBroker === true) &&
         Number(session?.seekOffset || 0) > 0 &&
         session?.finiteMkvSeekBroker?.inputUrl
     );
@@ -13560,7 +13568,9 @@ function applyFiniteMkvSeekProviderIdentity(session, identity) {
 }
 
 async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
-    if (!isFiniteMkvVodSession(session) || Number(session?.seekOffset || 0) <= 0) return null;
+    const finiteMkv = isFiniteMkvVodSession(session);
+    const finiteTs = !finiteMkv && session?.finiteTsResumeAligned === true && finiteTsProfileEligible(session);
+    if ((!finiteMkv && !finiteTs) || Number(session?.seekOffset || 0) <= 0) return null;
     if (session.finiteMkvSeekBroker) return session.finiteMkvSeekBroker;
     const fileSizeBytes = fileSizeBytesForSession(session);
     if (!fileSizeBytes) {
@@ -13584,10 +13594,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     if (parentSignal?.aborted) throw abortedVodInputPumpError();
 
     const exactAudioTrackCount = audioTracksForSession(session).length;
-    const effectiveWindowBytes = exactAudioTrackCount > 1
+    const effectiveWindowBytes = finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 4 * 1024 * 1024) : exactAudioTrackCount > 1
         ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
         : FINITE_MKV_SEEK_WINDOW_BYTES;
-    const finiteResumePrefixCandidate = finiteMkvResumePrefixCache.get({
+    const finiteResumePrefixCandidate = finiteTs ? null : finiteMkvResumePrefixCache.get({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
     });
@@ -13614,14 +13624,14 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
         finiteWindowBytes: effectiveWindowBytes,
-        finiteWarmupCueGraceMs: FINITE_MKV_RESUME_CUE_GRACE_MS,
+        finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
         finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
-        finiteResumePrefixTargetBytes: Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
+        finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
         finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
         finiteResumePrefixCandidate,
-        onFiniteResumePrefix: (prefix) => finiteMkvResumePrefixCache.put({
+        onFiniteResumePrefix: finiteTs ? null : (prefix) => finiteMkvResumePrefixCache.put({
             sourceUrl: session.sourceUrl,
             ...prefix,
         }),
@@ -13633,12 +13643,14 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         abortSignal: parentSignal,
     });
     session.finiteMkvSeekBroker = broker;
+    session.finiteTsSeekBroker = finiteTs;
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.boundedMkvInputPump = false;
-    session.startupTimings.finiteMkvSeekBroker = true;
+    session.startupTimings.finiteMkvSeekBroker = !finiteTs;
+    session.startupTimings.finiteTsSeekBroker = finiteTs;
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
-    session.startupTimings.finiteMkvSeekWarmupCueGraceMs = FINITE_MKV_RESUME_CUE_GRACE_MS;
+    session.startupTimings.finiteMkvSeekWarmupCueGraceMs = finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS;
     session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
     session.startupTimings.finiteMkvResumePrefixWeakValidationBytes = FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES;
     session.startupTimings.finiteMkvSeekSequentialWindowBytes = FINITE_MKV_SEEK_WINDOW_BYTES;
