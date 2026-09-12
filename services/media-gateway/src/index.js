@@ -7583,7 +7583,7 @@ function setDetectLanguageSecurityHeaders(_req, res, next) {
 function capturePipelineError(code) { return Object.assign(new Error(code), { code }); }
 
 function passiveLidResourcesAvailable() {
-    return enrichmentPilot.mode === 'fleet' && LANGUAGE_PASSIVE_CAPTURE_ENABLED && passiveResourcesAvailable(languageResourceSampler.snapshot(), {
+    return enrichmentPilot.allowsPassive() && LANGUAGE_PASSIVE_CAPTURE_ENABLED && passiveResourcesAvailable(languageResourceSampler.snapshot(), {
         starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
         foreground: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
             || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0 || translateQueue.length > 0 || ocrQueue.length > 0,
@@ -7602,6 +7602,8 @@ function passiveLidSessionSources(session) {
         || session.codecProfile?.metadataComplete !== true) return [];
     const profileFingerprint = passiveProfileFingerprint(session.codecProfile);
     if (!profileFingerprint) return [];
+    const sourceUrlHash=sha256Hex(session.sourceUrl);
+    if (!enrichmentPilot.allowsPassiveSource(session.ownerKey,sourceUrlHash,profileFingerprint)) return [];
     return hlsMediaPlaylistTargetsForSession(session).filter(target => {
         if (!['single', 'audio'].includes(target.kind) || !Number.isInteger(target.streamIndex)
             || target.streamIndex < 0 || target.streamIndex > 128 || !controlledLocalPlaylistName(target.playlistName)) return false;
@@ -7611,7 +7613,7 @@ function passiveLidSessionSources(session) {
     }).map(target => ({ root: session.outputDir, playlistName: target.playlistName,
         segmentPrefix: target.kind === 'audio' ? `audio_${target.hlsIndex}` : target.playlistName === 'video.m3u8' ? 'video' : 'segment',
         trackIndex: target.streamIndex, profileFingerprint,
-        ownerHash: session.ownerKey, sourceUrlHash: sha256Hex(session.sourceUrl),
+        ownerHash: session.ownerKey, sourceUrlHash,
         durationSeconds: session.codecProfile.durationSeconds, fileSizeBytes: session.codecProfile.fileSizeBytes,
     }));
 }
@@ -11883,10 +11885,11 @@ async function bootstrap() {
         }
         strictLidCaptureStore = new StrictLidCaptureStore({ root: process.env.LANGUAGE_CAPTURE_PRIVATE_DIR,
             secret: GATEWAY_TOKEN,
-            // Approved pilot ceiling is 64 MiB TOTAL working audio. Reserve
-            // half for the two bounded PCM workspaces and inference scratch;
-            // passive TS snapshots are disabled in pilot mode.
-            ...(enrichmentPilot.mode === 'pilot' ? {maxBytes:32*1024*1024,maxEntries:16} : {}) });
+            // Keep the approved 64 MiB working-audio ceiling in both modes.
+            // 32 MiB encrypted + two bounded workspaces. With passive capture,
+            // its one 16 MiB TS snapshot + <=3 MiB WAV and the other workspace's
+            // <=4*3 MiB WAVs total <=63 MiB, including reserved ciphertext.
+            maxBytes:32*1024*1024,maxEntries:16 });
         await strictLidCaptureStore.open();
         if (LANGUAGE_PASSIVE_CAPTURE_ENABLED) {
             passiveLidCapture = createPassiveLidCapture({ store: strictLidCaptureStore, resolveSource: resolvePassiveLidSource,

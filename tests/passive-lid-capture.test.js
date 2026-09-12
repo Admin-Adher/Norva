@@ -105,14 +105,21 @@ test('actual Gateway adapter accepts only exact ready origin playback and never 
     const start=src.indexOf('function passiveLidSessionSources('),end=src.indexOf('\nasync function collectPassiveLidWindow',start);
     assert.ok(start>=0&&end>start);
     const sessions=new Map();const output=path.resolve(os.tmpdir(),'passive-adapter-output');
+    let allowSource=true;let scope;
     const {sources,resolve}=require('node:vm').runInNewContext(`(()=>{${src.slice(start,end)};return{sources:passiveLidSessionSources,resolve:resolvePassiveLidSource};})()`,{
         path,sessions,OUTPUT_DIR:output,passiveTrackLanguageUnknown,passiveProfileFingerprint,sha256Hex:hash,
         isLiveSession:s=>s.live===true,isWithin:(root,p)=>path.dirname(p)===root,
         controlledLocalPlaylistName:n=>n==='playlist.m3u8',hlsMediaPlaylistTargetsForSession:s=>s.targets,
+        enrichmentPilot:{allowsPassiveSource:(...args)=>allowSource&&scope.allowsPassiveSource(...args)},
     });
     const target=normalBinding();const session={id:'synthetic-session',status:'ready',seekOffset:0,actualStartOffset:0,sourceTimestamps:false,
         ownerKey:hash(target.userId),sourceUrl:'https://example.invalid/private/test.mkv',outputDir:path.join(output,'session'),
         codecProfile:profile(),actualMappedAudioStreamIndex:1,targets:[{kind:'single',streamIndex:1,playlistName:'playlist.m3u8'}]};
+    const at=Date.now();scope=require('../services/media-gateway/src/enrichment-pilot-admission').createEnrichmentPilotAdmission({
+        protocol:1,createdAt:new Date(at).toISOString(),expiresAt:new Date(at+60000).toISOString(),fileKeys:['d'.repeat(64)],
+        passiveSources:[{ownerHash:session.ownerKey,sourceUrlHash:hash(session.sourceUrl),
+            profileFingerprint:passiveProfileFingerprint(session.codecProfile),fileKey:'d'.repeat(64)}],
+    },{mode:'pilot',now:()=>at});
     sessions.set(session.id,session);
     assert.equal(sources(session).length,1);
     for(const lang of ['und','mis','nar','unknown','qaa',' UND_us ']) {
@@ -124,10 +131,14 @@ test('actual Gateway adapter accepts only exact ready origin playback and never 
             `declared ${lang} needs no passive audio work`);
     }
     for(const changed of [{status:'starting'},{live:true},{seekOffset:20},{actualStartOffset:20},{sourceTimestamps:true},
-        {actualMappedAudioStreamIndex:null},{ownerKey:''},{outputDir:output},{codecProfile:{...profile(),metadataComplete:false}},
+        {actualMappedAudioStreamIndex:null},{ownerKey:''},{ownerKey:'f'.repeat(64)},
+        {sourceUrl:'https://example.invalid/private/other.mkv'},{codecProfile:{...profile(),durationSeconds:121}},
+        {outputDir:output},{codecProfile:{...profile(),metadataComplete:false}},
         {codecProfile:{...profile(),audioTracks:[{...profile().audioTracks[0],lang:'en'}]}}]) assert.equal(sources({...session,...changed}).length,0);
     const binding=passiveCaptureBinding({...target,sourceUrlHash:hash(session.sourceUrl)},session.ownerKey);
     const source=resolve(binding,{sessionId:session.id,playlistName:'playlist.m3u8'});assert.ok(source);assert.equal(source.isCurrent(),true);
+    allowSource=false;assert.equal(sources(session).length,0);assert.equal(source.isCurrent(),false);
+    assert.equal(resolve(binding,{sessionId:session.id,playlistName:'playlist.m3u8'}),null);allowSource=true;
     assert.equal(resolve({...binding,sourceUrlHash:'f'.repeat(64)},{sessionId:session.id,playlistName:'playlist.m3u8'}),null);
     session.actualMappedAudioStreamIndex=3;assert.equal(source.isCurrent(),false);
 });
@@ -164,6 +175,19 @@ test('pressure, missing segments, changed sessions, hard links and an uncertain 
     assert.equal((await fs.stat(path.join(f.media,'segment-00000.ts'))).size,188,'playback data untouched');
 });
 
+test('a passive snapshot over 16 MiB remains a miss, leaves playback intact and frees its workspace',async t=>{
+    const f=await fixture(t);const b=passiveCaptureBinding(normalBinding(),hash(normalBinding().userId));
+    const first=path.join(f.media,'segment-00000.ts');const payload=Buffer.alloc(16*1024*1024+1,0x47);
+    await fs.writeFile(first,payload);let extracted=false;
+    const adapter=createPassiveLidCapture({store:f.store,resolveSource:()=>f.source,resourcesAvailable:()=>true,
+        extract:async()=>{extracted=true;throw Error('oversized snapshot must never reach FFmpeg');}});
+    assert.equal((await adapter.capture(b,{})).captured,false);assert.equal(extracted,false);
+    assert.equal((await fs.stat(first)).size,payload.length);
+    const state=f.store.snapshot();assert.equal(state.entries,0);assert.equal(state.bytes,0);
+    assert.equal(state.reservations,0);assert.equal(state.computations,0);
+    assert.deepEqual((await fs.readdir(f.store.root)).filter(n=>n.startsWith('compute-')),[]);
+});
+
 test('native passive FFmpeg extracts a bounded local HLS snapshot with no provider-capable input',
     {skip:process.env.NORVA_CAPTURE_REAL_FFMPEG!=='1'},async t=>{
     const f=await fixture(t);
@@ -176,6 +200,6 @@ test('native passive FFmpeg extracts a bounded local HLS snapshot with no provid
     const target=normalBinding();const b=passiveCaptureBinding(target,hash(target.userId));
     const adapter=createPassiveLidCapture({store:f.store,resolveSource:()=>f.source,resourcesAvailable:()=>true,bin:'ffmpeg'});
     const result=await adapter.capture(b,{});assert.equal(result.captured,true);
-    assert.equal((await f.store.get(b)).wav.length>640000,true);assert.ok(adapter.snapshot().snapshotBytes<24*1024*1024);
+    assert.equal((await f.store.get(b)).wav.length>640000,true);assert.ok(adapter.snapshot().snapshotBytes<=16*1024*1024);
     t.diagnostic(JSON.stringify({syntheticPassive:true,externalProviderRequests:0,...adapter.snapshot()}));
 });

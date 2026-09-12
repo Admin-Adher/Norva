@@ -11,7 +11,7 @@ const { captureBinding } = require('./strict-lid-capture-store');
 const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
 const fail = code => Object.assign(new Error(code), { code });
 const drain = Object.freeze({ providerDrained:true, providerDrainProtocol:1 });
-const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
+const MAX_MEDIA_BYTES = 16 * 1024 * 1024;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 // Eligibility only: these are the three-letter tags mapped by the existing
 // Edge normalizeIsoLang contract, not predictions or new supported languages.

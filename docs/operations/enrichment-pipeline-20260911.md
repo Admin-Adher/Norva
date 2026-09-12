@@ -3,7 +3,46 @@
 Base: `d86db0e13871f8d5b43d9faf67516b6b2cd0a969`. Isolated worktree;
 the user's original checkout is not part of this release.
 
-## Current state — 12 September, independent pilot closed and verified
+## Current state — 12 September, authorized post-pilot follow-ups
+
+The user explicitly authorized publication and deployment of the current and
+future in-scope enrichment corrections. This does not widen the approved two
+acquisitions / one per mono account, 64 MiB working audio / thirty-minute TTL,
+playback priority or no-quarantine-reset limits. Real acceptance remains a gate
+for activating each new lane, not another publication-permission request.
+
+Profile rejection diagnostics (`e79f6df3`) and the next operator's same-job
+expired-lease recovery (`750a747e`) are published. On 12 September at 06:56 UTC,
+both Edge replicas were updated to SHA-256
+`f6052c3e7416a4740db990d0517f8229e72ddbb211a72a34bf4e504386bb1d49`.
+Fresh production verification confirms both healthy, both original crons
+restored, 158 unrelated Edge files preserved, Gateway/runtime/model/proxy
+unchanged and flags/quarantines preserved. The new operator is installed in a
+separate namespace, not launched over the completed pilot. The recovery helper
+and eight executable guard tests are published as `76381818`; all three CI
+workflows succeeded. Application suite: 4,499 passed, fourteen skipped, no failure.
+
+The next patch adds optional exact-account + URL + structural-profile passive
+canary grants to the already bounded, expiring file admission manifest. No
+grant means no passive pilot. Invalid/foreign/expired grants remain denied;
+public health exposes counts only. This avoids needing fleet activation for a
+real playback trial. The private encrypted store is capped at 32 MiB in both
+modes; the single concurrent passive TS snapshot is capped at 16 MiB, retaining
+the approved 64 MiB total working-audio envelope with the shared workspaces.
+This is a private working-file limit, not a process-RSS claim.
+
+Current patch validation: 4,503 application tests passed, fourteen skipped,
+zero failures (104.02 seconds). Sixteen tests also passed with real FFmpeg in
+the exact production image, with networking disabled, no skips, no provider
+requests and no production mutation. Native proof:
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/scoped-passive-native-proof-20260912.json`.
+This passive patch is not yet deployed or enabled. Real playback/QoS validation
+still requires the user to reconnect the test account; no credentials or login
+link should be shared with the agent. Selection acceptance and full five-part
+goal completion are still pending; the completed pilot and all old failed jobs
+remain immutable.
+
+## Historical result — 12 September, independent pilot closed and verified
 
 Final verification at 04:22:13 UTC: **16 of the unchanged 20 VOD enriched**,
 ten by complete declared-track inventories and six by speech validation (four
