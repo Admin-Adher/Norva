@@ -2,7 +2,8 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const http = require('node:http'), { spawn } = require('node:child_process');
-const { FiniteTsSeekIndex, indexedTsInputUrl } = require('../services/media-gateway/src/finite-ts-seek-index');
+const { FiniteTsSeekIndex, indexedTsInputUrl, probeTsOrigin } = require('../services/media-gateway/src/finite-ts-seek-index');
+const { crc32 } = require('../services/media-gateway/src/finite-ts-landmarks');
 const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
 const brokerHarness = require('./fixtures/finite-ts-index-broker');
 const { videoEncoderInputArgs, videoEncoderOutputArgs, resolveVideoEncoderConfig } = require('../services/media-gateway/src/video-encoder');
@@ -24,6 +25,23 @@ test('native initial playback prepares the first exact indexed resume, with rest
     await run(['-v','error','-y','-f','lavfi','-i','testsrc2=size=320x180:rate=25',
         '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','120','-c:v','libx264','-threads','1','-preset','ultrafast',
         '-g','300','-keyint_min','300','-sc_threshold','0','-bf','2','-c:a','aac','-ac','2','-f','mpegts',input]);
+    // Provider TS commonly carries a third, non-rendered timed-ID3 stream.
+    // Add its exact PMT registration (without altering any A/V packets) and
+    // prove FFmpeg still reports the same origin before the complete A/B test.
+    const plain = fs.readFileSync(input), originalOrigin = await probeTsOrigin(plain.subarray(0, 262144));
+    assert.ok(originalOrigin);
+    for (let at = 0; at + 188 <= plain.length; at += 188) {
+        const packet = plain.subarray(at, at + 188);
+        if ((((packet[1] & 31) << 8) | packet[2]) !== 4096 || !(packet[1] & 64)) continue;
+        const start = 5 + packet[4], oldSize = 3 + ((packet[start + 1] & 15) << 8) + packet[start + 2];
+        const old = Buffer.from(packet.subarray(start, start + oldSize - 4));
+        const section = Buffer.concat([old, Buffer.from([0x15,0xe1,2,0xf0,6,5,4,0x49,0x44,0x33,0x20]), Buffer.alloc(4)]);
+        section[1] = 0xb0 | ((section.length - 3) >> 8); section[2] = (section.length - 3) & 255;
+        section.writeUInt32BE(crc32(section.subarray(0, -4)), section.length - 4);
+        assert.ok(start + section.length <= 188); packet.fill(255, start); section.copy(packet, start);
+    }
+    fs.writeFileSync(input, plain);
+    assert.deepEqual(await probeTsOrigin(plain.subarray(0, 262144)), originalOrigin, 'timed ID3 does not change A/V origin or stream order');
     const size = fs.statSync(input).size;
     let active = 0, peak = 0, count = 0, etag = '"native-v1"';
     const server = http.createServer((req, res) => {

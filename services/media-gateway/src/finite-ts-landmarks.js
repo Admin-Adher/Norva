@@ -101,6 +101,7 @@ class TsLandmarks {
                 const type = pmt[i], id = pmt.readUInt16BE(i + 1) & 8191;
                 if (type === 0x1b) videos.push(id);
                 else if ([3, 4, 15, 17, 0x81, 0x87].includes(type)) audios.push(id);
+                else if (type === 0x15) { /* timed ID3 metadata, not an A/V or subtitle rendition */ }
                 else { this.invalid(); return; } // subtitles/private/multiple graphs: fallback
                 i += 5 + (pmt.readUInt16BE(i + 3) & 4095);
             }

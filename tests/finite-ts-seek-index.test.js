@@ -4,7 +4,7 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { FiniteTsSeekIndex, indexedTsInputUrl, proofHash } = require('../services/media-gateway/src/finite-ts-seek-index');
 const { TsLandmarks, crc32 } = require('../services/media-gateway/src/finite-ts-landmarks');
 const proof = size => ({ fileSizeBytes: size, validator: { kind: 'etag', value: '"v1"' }, effectiveUrlIdentitySha256: 'b'.repeat(64) });
-function fixture({ splitGraph = false, discontinuity = false } = {}) {
+function fixture({ splitGraph = false, discontinuity = false, extraType = null } = {}) {
     const packets = [], counters = new Map();
     const packet = (pid, payload, flags = 0) => {
         const b = Buffer.alloc(188, 255), cc = counters.get(pid) || 0; counters.set(pid, (cc + 1) & 15);
@@ -14,7 +14,8 @@ function fixture({ splitGraph = false, discontinuity = false } = {}) {
     };
     const psi = input => { const b = Buffer.concat([Buffer.from(input), Buffer.alloc(4)]); b.writeUInt32BE(crc32(b.subarray(0, -4)), b.length - 4); return Buffer.concat([Buffer.from([0]), b]); };
     const pat = psi([0,0xb0,13,0,1,0xc1,0,0,0,1,0xf0,0]);
-    const pmt = psi([2,0xb0,23,0,1,0xc1,0,0,0xe1,0,0xf0,0,0x1b,0xe1,0,0xf0,0,15,0xe1,1,0xf0,0]);
+    const pmt = psi([2,0xb0,extraType === null ? 23 : 28,0,1,0xc1,0,0,0xe1,0,0xf0,0,0x1b,0xe1,0,0xf0,0,15,0xe1,1,0xf0,0,
+        ...(extraType === null ? [] : [extraType,0xe1,2,0xf0,0])]);
     for (let second = 0; second <= 120; second++) {
         packet(0, pat); packet(4096, pmt);
         const pts = (second + 1.4) * 90000;
@@ -40,6 +41,16 @@ test('passive index records complete SPS/PPS/IDR points across arbitrarily split
     for (let at = 0; at < data.length; at += 5003) parser.push(at, data.subarray(at, at + 5003));
     assert.equal(invalid.length, 0); assert.equal(points.length, 10);
     assert.equal(points[5].pts / 90000, 61.4); assert.ok(points.every(p => data[p.byteOffset] === 0x47));
+});
+
+test('timed ID3 metadata is not confused with audio, subtitles or unknown private tracks', () => {
+    for (const type of [0x15, 0x06, 0x0f]) {
+        const data = fixture({ extraType: type }), points = [], invalid = [];
+        const parser = new TsLandmarks({ onPoint: p => points.push(p), onInvalid: () => invalid.push(true) });
+        parser.push(0, data);
+        if (type === 0x15) { assert.equal(invalid.length, 0); assert.equal(points.length, 10); }
+        else assert.ok(invalid.length > 0, 'private and second audio tracks retain the fallback');
+    }
 });
 test('initial playback prepares a first seek; metadata survives a new process and needs current proof', async t => {
     const data = fixture(), store = scoped(t), scope = { ownerKey: 'a'.repeat(64), sourceUrl: 'https://private.invalid/u/p/file', fileSizeBytes: data.length };

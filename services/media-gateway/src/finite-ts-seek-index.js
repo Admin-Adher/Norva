@@ -7,6 +7,7 @@ const { spawn } = require('node:child_process');
 const { TsLandmarks } = require('./finite-ts-landmarks');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const HEX = /^[a-f0-9]{64}$/;
+const PARSER_REVISION = 2;
 const TTL = 7 * 24 * 60 * 60_000, MAX_FILES = 256, MAX_FILE = 128 * 1024, MAX_POINTS = 512;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const validPoint = (p, size) => p && ['byteOffset', 'packetOffset', 'pts', 'dts', 'videoPid', 'audioPid'].every(k => integer(p[k]))
@@ -43,7 +44,9 @@ function probeTsOrigin(bytes, bin = 'ffprobe') {
                 const data = JSON.parse(output), streams = data.streams || [];
                 const video = streams.find(s => s.codec_type === 'video'), audio = streams.find(s => s.codec_type === 'audio');
                 const startSeconds = Number(data.format?.start_time);
-                if (streams.length !== 2 || !video || !audio || video.index !== 0 || audio.index !== 1
+                const metadata = streams.filter(s => s !== video && s !== audio);
+                if (streams.length < 2 || streams.length > 3 || !video || !audio || video.index !== 0 || audio.index !== 1
+                    || metadata.some(s => s.index !== 2 || s.codec_type !== 'data' || s.codec_name !== 'timed_id3')
                     || video.codec_name !== 'h264' || !Number.isFinite(startSeconds) || startSeconds < 0
                     || startSeconds >= 86400 || !/^0x[a-f0-9]+$/i.test(video.id) || !/^0x[a-f0-9]+$/i.test(audio.id)) return finish(null);
                 finish({ startSeconds, videoPid: Number(video.id), audioPid: Number(audio.id) });
@@ -70,7 +73,9 @@ class FiniteTsSeekIndex {
     }
     key({ ownerKey, sourceUrl, fileSizeBytes }) {
         if (!HEX.test(ownerKey || '') || !integer(fileSizeBytes) || !fileSizeBytes || typeof sourceUrl !== 'string') return null;
-        return sha(JSON.stringify([ownerKey, sourceUrl, fileSizeBytes]));
+        // A corrected parser must not inherit an unsupported-graph verdict
+        // from an older parser. Older metadata remains under the same TTL/quota.
+        return sha(JSON.stringify([PARSER_REVISION, ownerKey, sourceUrl, fileSizeBytes]));
     }
     async read(key, size, diskOnly = false) {
         try {
@@ -90,7 +95,7 @@ class FiniteTsSeekIndex {
                 value = JSON.parse(await handle.readFile('utf8'));
             } finally { await handle.close(); }
             const { digest, ...data } = value;
-            if (sha(JSON.stringify(data)) !== digest || data.protocol !== 1 || data.key !== key || data.size !== size
+            if (sha(JSON.stringify(data)) !== digest || data.protocol !== 1 || data.parserRevision !== PARSER_REVISION || data.key !== key || data.size !== size
                 || !HEX.test(data.proof || '') || !integer(data.createdAt) || data.createdAt > this.now()
                 || this.now() - data.createdAt >= TTL || !Array.isArray(data.points) || data.points.length > MAX_POINTS
                 || !integer(data.coveredUntil) || data.coveredUntil > size
@@ -216,7 +221,7 @@ class FiniteTsSeekIndex {
                 if (currentProof && currentProof !== bound) { data = null; currentProof = null; return; }
                 currentProof = bound;
                 if (!data || data.proof !== bound) {
-                    data = { protocol: 1, key, size: scope.fileSizeBytes, proof: bound,
+                    data = { protocol: 1, parserRevision: PARSER_REVISION, key, size: scope.fileSizeBytes, proof: bound,
                         createdAt: store.now(), origin: null, points: [], unsafe: false, coveredUntil: 0 };
                 }
                 if (data.unsafe) return;
@@ -250,7 +255,7 @@ class FiniteTsSeekIndex {
         };
         this.io = this.io.then(run).catch(() => { this.stats.failures++; }); return this.io;
     }
-    status() { return { protocol: 1, ...this.stats, ttlMs: TTL, maxFiles: MAX_FILES,
+    status() { return { protocol: 1, parserRevision: PARSER_REVISION, ...this.stats, ttlMs: TTL, maxFiles: MAX_FILES,
         maxBytes: MAX_FILES * MAX_FILE, maxPointsPerFile: MAX_POINTS, maxHotMetadataBytes: 32 * MAX_FILE, mediaBytesPersisted: 0,
         minIndexedPrerollSeconds: 2, maxIndexedPrerollSeconds: 30 }; }
 }
