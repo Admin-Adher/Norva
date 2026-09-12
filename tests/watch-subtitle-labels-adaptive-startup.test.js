@@ -99,3 +99,41 @@ test('adaptive observation never survives cancellation or an HLS instance replac
         assert.equal(result.result, false); assert.equal(result.evidence, null);
     }
 });
+
+test('the actual manifest callback passes later-rate observation to the startup gate', async () => {
+    const start = source.indexOf('this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {');
+    const end = source.indexOf('\n        });', start) + '\n        });'.length;
+    assert.ok(start >= 0 && end > start);
+    let callback, received;
+    const activeHls = { on: (_name, fn) => { callback = fn; }, audioTracks: [] };
+    const page = watch();
+    page.hls = activeHls; page.isStalePlaybackAttempt = () => false;
+    page.waitForGatewayStartupBuffer = async (_id, _hls, options) => { received = options; return true; };
+    const options = page.gatewayStartupBufferOptions(pendingPolicy);
+    const snippet = source.slice(start, end);
+    // Execute the event wiring, not a regex and not a direct gate invocation.
+    vm.runInNewContext(`(function(){${snippet}}).call(page)`, {
+        page, Hls: { Events: { MANIFEST_PARSED: 'manifest' } }, playbackAttemptId: 3,
+        activeHls, gatewayAudioContext: false, autoplay: false, autoplayGateRunning: false,
+        isGatewaySession: true, gatewayStartupBuffer: options, gatewayStartupBufferReady: false, options: {},
+    });
+    await callback('manifest', {});
+    assert.equal(received.adaptive, true); assert.equal(received.minimumSeconds, 96);
+});
+
+test('an accelerating source can earn a new reserve but a late slowdown or disjoint buffer cannot', async () => {
+    const recovered = await gate(t => t < 1500 ? 6 : 6 + Math.floor((t - 1500) / 400) * 4);
+    assert.equal(recovered.result, true); assert.ok(recovered.now >= 2700);
+    const stall = await gate(t => t < 1500 ? 6 + Math.floor(t / 400) * 2 : 12);
+    assert.equal(stall.result, false);
+    const regression = await gate(t => t < 1800 ? 6 + Math.floor(t / 400) * 2 : 0);
+    assert.equal(regression.result, false);
+});
+
+test('twelve-second segments produced at 2x retain evidence across their six-second delivery gaps', async () => {
+    const longSegments = page => { page.hls.levels[0].details.fragments.forEach(f => { f.duration = 12; }); };
+    const fast = await gate(t => 12 + 12 * Math.floor(t / 6000), longSegments, { timeoutMs: 25000 });
+    assert.equal(fast.result, true); assert.equal(fast.now, 18000); assert.equal(fast.evidence.rateX, 2);
+    const slow = await gate(t => 12 + 12 * Math.floor(t / 12000), longSegments, { timeoutMs: 25000 });
+    assert.equal(slow.result, false); assert.equal(slow.evidence, null);
+});

@@ -6038,11 +6038,22 @@ class WatchPage {
             const details = levels[currentLevel]?.details || levels[0]?.details || null;
             if (options.adaptive === true && this.video?.paused && Number(this.video.currentTime) <= 0.25) {
                 const now = Date.now();
+                const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
+                    .slice(-8).map(fragment => Number(fragment.duration));
+                const boundedSegments = durations.length >= 3
+                    && durations.every(duration => Number.isFinite(duration) && duration > 0 && duration <= 12.25);
+                const longestSegment = boundedSegments ? Math.max(...durations) : 0;
+                // A twelve-second segment produced at 2x arrives every six
+                // seconds. A fixed 2.5s gap discarded that valid evidence. The
+                // grace follows known segments, remains bounded, and does not
+                // itself authorize Play: measured growth must still exceed 2x.
+                const maximumGapMs = Math.min(10000, Math.max(2500, longestSegment * 1000));
+                const observationMs = Math.max(12000, maximumGapMs * 4);
                 // Exclude the first burst (already present at the Gateway) and
                 // require several later appends over real elapsed time. Disjoint
                 // ranges, buffer regressions and long gaps restart observation.
                 if (!growth || bufferedAhead < growth.lastBuffer - 0.25
-                    || now - growth.lastAt > 2500 || now - growth.at > 12000) {
+                    || now - growth.lastAt > maximumGapMs || now - growth.at > observationMs) {
                     growth = bufferedAhead > 0 ? { at: now, buffer: bufferedAhead,
                         lastBuffer: bufferedAhead, lastAt: now, appends: 0 } : null;
                 } else if (bufferedAhead >= growth.lastBuffer + 0.25) {
@@ -6050,11 +6061,7 @@ class WatchPage {
                     growth.lastAt = now;
                     growth.appends += 1;
                 }
-                const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
-                    .slice(-8).map(fragment => Number(fragment.duration));
-                const boundedSegments = durations.length >= 3
-                    && durations.every(duration => Number.isFinite(duration) && duration > 0 && duration <= 12.25);
-                const reserve = boundedSegments ? Math.max(12, 2 * Math.max(...durations)) : Infinity;
+                const reserve = boundedSegments ? Math.max(12, 2 * longestSegment) : Infinity;
                 const elapsedMs = growth ? now - growth.at : 0;
                 const addedSeconds = growth ? bufferedAhead - growth.buffer : 0;
                 const rate = elapsedMs > 0 ? addedSeconds * 1000 / elapsedMs : 0;
@@ -6343,7 +6350,8 @@ class WatchPage {
                             // unqualified, slow or malformed policies keep the deep
                             // 96-second anti-stall buffer used by the legacy path.
                             minimumSeconds: gatewayStartupBuffer.minimumSeconds,
-                            timeoutMs: gatewayStartupBuffer.timeoutMs
+                            timeoutMs: gatewayStartupBuffer.timeoutMs,
+                            adaptive: gatewayStartupBuffer.adaptive === true,
                         },
                     );
                 } catch (error) {

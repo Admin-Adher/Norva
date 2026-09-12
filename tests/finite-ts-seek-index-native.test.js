@@ -1,0 +1,113 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+const http = require('node:http'), { spawn } = require('node:child_process');
+const { FiniteTsSeekIndex, indexedTsInputUrl } = require('../services/media-gateway/src/finite-ts-seek-index');
+const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
+const brokerHarness = require('./fixtures/finite-ts-index-broker');
+const { videoEncoderInputArgs, videoEncoderOutputArgs, resolveVideoEncoderConfig } = require('../services/media-gateway/src/video-encoder');
+test('native initial playback prepares the first exact indexed resume, with restart and mono-slot proof',
+    { skip: process.env.NORVA_TS_INDEX_NATIVE !== '1', timeout: 180000 }, async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'norva-ts-index-native-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const bin = process.env.FFMPEG_PATH || 'ffmpeg';
+    const run = args => new Promise((resolve, reject) => {
+        const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '', err = '';
+        child.stdout.on('data', b => { out += b; if (out.length > 2 * 1024 * 1024) child.kill('SIGKILL'); });
+        child.stderr.on('data', b => { err = (err + b).slice(-2000); });
+        const timer = setTimeout(() => child.kill('SIGKILL'), 45000);
+        child.on('error', e => { clearTimeout(timer); reject(e); });
+        child.on('close', code => { clearTimeout(timer); code === 0 ? resolve(out) : reject(Error(`native ${code}: ${err}`)); });
+    });
+    const input = path.join(root, 'vod.ts');
+    await run(['-v','error','-y','-f','lavfi','-i','testsrc2=size=320x180:rate=25',
+        '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','120','-c:v','libx264','-threads','1','-preset','ultrafast',
+        '-g','300','-keyint_min','300','-sc_threshold','0','-bf','2','-c:a','aac','-ac','2','-f','mpegts',input]);
+    const size = fs.statSync(input).size;
+    let active = 0, peak = 0, count = 0, etag = '"native-v1"';
+    const server = http.createServer((req, res) => {
+        const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
+        const start = range ? Number(range[1]) : 0, end = Math.min(size - 1, range?.[2] ? Number(range[2]) : size - 1);
+        if (start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+        count++; active++; peak = Math.max(peak, active);
+        let stream, settled = false;
+        const finish = () => { if (!settled) { settled = true; active--; } clearTimeout(timer); stream?.destroy(); };
+        const timer = setTimeout(() => {
+            res.writeHead(206, { 'Content-Type': 'video/mp2t', 'Content-Length': end - start + 1,
+                'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', ETag: etag });
+            stream = fs.createReadStream(input, { start, end }); stream.pipe(res);
+        }, 80);
+        res.once('close', finish); res.once('finish', finish);
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    t.after(() => new Promise(r => { server.close(r); server.closeAllConnections(); }));
+    const sourceUrl = `http://127.0.0.1:${server.address().port}/vod`;
+    const scope = { ownerKey: 'a'.repeat(64), sourceUrl, fileSizeBytes: size };
+    const indexRoot = path.join(root, 'index');
+    const store = new FiniteTsSeekIndex({ root: indexRoot });
+    const ranges = new FinitePlaybackRangeReuse();
+    const create = async (observer, useRanges = true) => brokerHarness().createStrictLidBroker({ ...scope,
+        dispatcher: null, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 1024 * 1024,
+        finiteWarmupWindowBytes: 262144, finiteSequentialWindowBytes: 8 * 1024 * 1024,
+        finiteSeekLookbehindBytes: 256 * 1024, finiteSeekContinuationGraceMs: 50,
+        finiteAbandonedDrainMs: 1500, finiteCacheBytes: 64 * 1024 * 1024, finiteResumePrefixTargetBytes: 0,
+        finiteResumeRanges: useRanges ? ranges.begin(scope) : null, onFiniteWindow: window => observer?.observe(window),
+        completedReleaseDelayMs: 0, supersededReleaseDelayMs: 100 });
+    const observer = await store.begin(scope), first = await create(observer);
+    t.after(() => first.close());
+    await run(['-v','error','-seekable','1','-skip_estimate_duration_from_pts','1','-analyzeduration','500000','-probesize','524288',
+        '-i',first.inputUrl,'-t','45','-map','0:v:0','-map','0:a:0','-c','copy','-f','null','-']);
+    // Complete only already-open bounded windows, just as normal viewer stop.
+    await new Promise(r => setTimeout(r, 200));
+    await first.close(); await observer.close(); assert.equal(active, 0);
+    assert.ok(observer.hasCandidate(87), `initial seek candidate ${JSON.stringify(store.status())}`);
+    const results = [];
+    for (const encoder of ['software', ...(process.env.NORVA_TS_INDEX_VAAPI === '1' ? ['vaapi'] : [])]) for (const indexed of [false, true]) {
+        const config = resolveVideoEncoderConfig({ MEDIA_GATEWAY_VIDEO_ENCODER: encoder });
+        const reloaded = new FiniteTsSeekIndex({ root: indexRoot });
+        // A/B never borrows the other arm's media windows or landmarks. Both
+        // start with empty RAM caches; only initial playback's metadata exists.
+        const next = await reloaded.begin(scope), broker = await create(indexed ? next : null, false);
+        t.after(() => broker.close()); count = 0; peak = 0;
+        const at = Date.now(); let point, url = broker.inputUrl;
+        if (indexed) {
+            assert.equal(next.candidate(87), null);
+            const fresh = await fetch(url, { headers: { Range: 'bytes=0-262143' } });
+            await fresh.arrayBuffer(); point = next.candidate(87); assert.ok(point);
+            url = indexedTsInputUrl(url, point, size); assert.ok(url);
+        }
+        const output = path.join(root, `${indexed}.ts`);
+        await run(['-v','error','-y', ...videoEncoderInputArgs(config, true), '-seekable','1','-skip_estimate_duration_from_pts','1','-analyzeduration','500000','-probesize','524288',
+            ...(indexed ? ['-copyts','-protocol_whitelist','subfile,http,tcp'] : ['-ss','72']),
+            '-i',url,'-ss', indexed ? String(point.absoluteSeconds) : '15','-t','2','-map','0:v:0','-map','0:a:0',
+            ...videoEncoderOutputArgs(config, { forceAligned: true, targetSeconds: 2 }), '-threads','1','-c:a','aac','-f','mpegts',output]);
+        const elapsedMs = Date.now() - at;
+        await broker.close(); await next.close();
+        const decoded = await run(['-v','error','-i',output,'-t','0.48','-map','0:v:0','-map','0:a:0','-threads','1','-f','framehash','-']);
+        const video = decoded.split('\n').filter(l => /^0,/.test(l)).map(l => l.split(',').at(-1));
+        const audio = decoded.split('\n').filter(l => /^1,/.test(l)).map(l => l.split(',').at(-1));
+        results.push({ encoder, indexed, elapsedMs, requests: count, peak, video, audio, reusedBytes: broker.resumeRangeReusedBytes,
+            preroll: point ? point.absoluteSeconds - point.pts / 90000 : 15 });
+        assert.equal(active, 0); assert.equal(peak, 1);
+    }
+    for (let i = 0; i < results.length; i += 2) {
+        assert.ok(results[i].video.length >= 10 && results[i].audio.length >= 10);
+        assert.deepEqual(results[i + 1].video, results[i].video, 'same first decoded video frames');
+        assert.deepEqual(results[i + 1].audio, results[i].audio, 'same precisely aligned decoded audio');
+        assert.ok(results[i + 1].requests < results[i].requests, 'first indexed seek reduces provider round trips');
+    }
+    etag = '"native-v2"';
+    const changed = await store.begin(scope), changedBroker = await create(changed);
+    t.after(() => changedBroker.close());
+    const response = await fetch(changedBroker.inputUrl, { headers: { Range: 'bytes=0-262143' } }); await response.arrayBuffer();
+    assert.equal(changed.candidate(87), null); await changedBroker.close(); await changed.close();
+    const multiple = path.join(root, 'multiple.ts');
+    await run(['-v','error','-y','-i',input,'-map','0:v:0','-map','0:a:0','-map','0:a:0','-c','copy','-f','mpegts',multiple]);
+    const multiBytes = fs.readFileSync(multiple);
+    const multiObserver = await store.begin({ ...scope, sourceUrl: sourceUrl + '/multi', fileSizeBytes: multiBytes.length });
+    multiObserver.observe({ start: 0, bytes: multiBytes, proof: { fileSizeBytes: multiBytes.length,
+        validator: { kind: 'etag', value: '"multi-v1"' }, effectiveUrlIdentitySha256: 'd'.repeat(64) } });
+    await multiObserver.close(); assert.equal(multiObserver.hasCandidate(87), false, 'unsupported multiple-track graph keeps ordinary seeking');
+    console.log('native initial index metrics', JSON.stringify(results.map(({video,audio,...r}) => ({ ...r, frames:video.length,audioFrames:audio.length }))));
+});

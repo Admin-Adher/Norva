@@ -3742,6 +3742,7 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
                     return { protocol: 'current-proof-required' };
                 },
             },
+            finiteTsSeekIndex: { begin: async () => null },
             providerNodeRouteForSession: () => ({ slot: 3, nodeTransport: 'http' }),
             alternateProviderNodeTransportRoute: () => ({ slot: 3, nodeTransport: 'socks5' }),
             pinnedProxyAgentFactoryForRoute: (route) => () => ({
