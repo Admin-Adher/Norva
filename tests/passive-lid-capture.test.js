@@ -6,7 +6,7 @@ const path=require('node:path');
 const os=require('node:os');
 const crypto=require('node:crypto');
 const { spawn }=require('node:child_process');
-const { passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,createPassiveLidCapture }=require('../services/media-gateway/src/passive-lid-capture');
+const { passiveTrackLanguageUnknown,passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,createPassiveLidCapture }=require('../services/media-gateway/src/passive-lid-capture');
 const { StrictLidCaptureStore }=require('../services/media-gateway/src/strict-lid-capture-store');
 const { createStrictLidCapturePipeline }=require('../services/media-gateway/src/strict-lid-capture-pipeline');
 const { planStrictSpeechWindow }=require('../services/media-gateway/src/strict-lid-speech-window');
@@ -81,13 +81,32 @@ test('passive resource admission allows idle headroom but rejects startup, stale
         {...sample,memoryRatio:.65},{...sample,hostLoadRatio:.6},{...sample,cpuRatio:NaN}]) assert.equal(passiveResourcesAvailable(bad,{},at),false);
 });
 
+test('passive track eligibility matches the actual Edge declared-language contract, including aliases and nonlanguage markers',async()=>{
+    const src=await fs.readFile(path.join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
+    const start=src.indexOf('function normalizeIsoLang('),end=src.indexOf('\ntype BasicLidEvidence',start);
+    assert.ok(start>=0&&end>start);
+    const original=src.slice(start,end);
+    const code=original.replace('value: string | null): string | null','value)')
+        .replace('const map: Record<string, string>','const map');
+    const normalize=require('node:vm').runInNewContext(`(${code.trim()})`);
+    const aliases=[...original.matchAll(/\b([a-z]{2,3}): "[a-z]{2}"/g)].map(m=>m[1]);
+    assert.ok(aliases.length>70,'exercise the real alias map, not a tiny duplicated fixture');
+    const cases=[null,undefined,'','unknown','un','und','mis','mul','zxx','nar','qaa','xyz','engl','français',
+        '0','1en','fr/en',...aliases,...Array.from({length:676},(_,i)=>String.fromCharCode(97+Math.floor(i/26),97+i%26))];
+    for(const value of cases) {
+        for(const tag of typeof value==='string'?[value,` ${value.toUpperCase()} `,`${value}-US`,`${value}_Latn`]:[value]) {
+            assert.equal(passiveTrackLanguageUnknown(tag),normalize(tag)===null,`eligibility differs for ${JSON.stringify(tag)}`);
+        }
+    }
+});
+
 test('actual Gateway adapter accepts only exact ready origin playback and never invents an audio mapping',async()=>{
     const src=await fs.readFile(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
     const start=src.indexOf('function passiveLidSessionSources('),end=src.indexOf('\nasync function collectPassiveLidWindow',start);
     assert.ok(start>=0&&end>start);
     const sessions=new Map();const output=path.resolve(os.tmpdir(),'passive-adapter-output');
     const {sources,resolve}=require('node:vm').runInNewContext(`(()=>{${src.slice(start,end)};return{sources:passiveLidSessionSources,resolve:resolvePassiveLidSource};})()`,{
-        path,sessions,OUTPUT_DIR:output,passiveProfileFingerprint,sha256Hex:hash,
+        path,sessions,OUTPUT_DIR:output,passiveTrackLanguageUnknown,passiveProfileFingerprint,sha256Hex:hash,
         isLiveSession:s=>s.live===true,isWithin:(root,p)=>path.dirname(p)===root,
         controlledLocalPlaylistName:n=>n==='playlist.m3u8',hlsMediaPlaylistTargetsForSession:s=>s.targets,
     });
@@ -96,6 +115,14 @@ test('actual Gateway adapter accepts only exact ready origin playback and never 
         codecProfile:profile(),actualMappedAudioStreamIndex:1,targets:[{kind:'single',streamIndex:1,playlistName:'playlist.m3u8'}]};
     sessions.set(session.id,session);
     assert.equal(sources(session).length,1);
+    for(const lang of ['und','mis','nar','unknown','qaa',' UND_us ']) {
+        assert.equal(sources({...session,codecProfile:{...profile(),audioTracks:[{...profile().audioTracks[0],lang}]}}).length,1,
+            `unknown ${lang} must remain eligible for already-received audio`);
+    }
+    for(const lang of ['en','en-US','pt_BR',' ENG ','fre','fil',' hi ']) {
+        assert.equal(sources({...session,codecProfile:{...profile(),audioTracks:[{...profile().audioTracks[0],lang}]}}).length,0,
+            `declared ${lang} needs no passive audio work`);
+    }
     for(const changed of [{status:'starting'},{live:true},{seekOffset:20},{actualStartOffset:20},{sourceTimestamps:true},
         {actualMappedAudioStreamIndex:null},{ownerKey:''},{outputDir:output},{codecProfile:{...profile(),metadataComplete:false}},
         {codecProfile:{...profile(),audioTracks:[{...profile().audioTracks[0],lang:'en'}]}}]) assert.equal(sources({...session,...changed}).length,0);

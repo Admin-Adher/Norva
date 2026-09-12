@@ -3,6 +3,68 @@
 Base: `d86db0e13871f8d5b43d9faf67516b6b2cd0a969`. Isolated worktree;
 the user's original checkout is not part of this release.
 
+## Current state — 12 September, after the maintenance deployment
+
+The sections below retain earlier implementation/release observations; their
+"local" or "not deployed" labels describe those earlier observations, not the
+current entire release. Current production was reverified against the private
+release plan for `b2c21b5b6921ec21b097f044b88dd4f7a3daa280`: all four services,
+Gateway source/runtime hashes and protected terminal/quarantine rows match.
+Its image is `sha256:0a8278bc5b08db316d2cd47b7fa8b2890939da4f05246b158296e643c0a46487`.
+All three CI workflows for that published commit succeeded.
+
+The user-authorized interruption preserved the first subtitle job, which finished
+naturally with 604 segments, and interrupted only the second still-pending job.
+A CRLF/LF attestation mismatch triggered a successful rollback before the final
+normalized-source deployment. The replacement and later pilot closure succeeded.
+No partial VTT was discarded or promoted to a completed result by the operator.
+
+Only original sample 20 remained admissible in the authorized nine-file subset.
+Its existing provider probe circuit expires at 2026-09-12T23:28:17Z, after the
+original pilot deadline, 2026-09-12T22:00:15Z. The subset made zero provider
+acquisitions. Its exact idle operator was stopped and its watchdog closed it:
+ordinary crons restored, all five new flags disabled, no retained audio, and new
+code left installed. No deadline extension, replacement sample or reset of a
+failed/quarantined job. Selection currently has 192 completed and 523 failed
+queue entries, with no nonterminal queue entry for an immediate continuation.
+Three provider probe circuits are currently open. These are admission facts,
+not proof of inaccessible media or of model accuracy.
+
+### Additional local correction: passive eligibility agrees with the server
+
+The passive adapter incorrectly treated `mis`, `nar` and unsupported three-letter
+tags as known, while regional/whitespace variants such as `en-US`, `pt_BR` and
+` ENG ` could be needlessly collected. A test of the actual Gateway adapter
+reproduced the exclusion of `mis`. Eligibility now follows the existing Edge
+`normalizeIsoLang` contract, without changing that contract or publishing any
+language result. A differential test executes the actual Edge function over
+its full alias map, all 676 two-letter combinations, nonlanguage markers,
+regional suffixes, case and whitespace variants. This is compatibility coverage,
+not validation that every syntactically accepted tag names a real language.
+
+Validation: 60 focused tests passed, two native-only skips on Windows; full suite
+4,494 passed, 14 skipped, zero failures (119.52 s). Native production-image copy:
+133 passed, no skips/failures (12.49 s), network none, 0.5 CPU ceiling, no
+production environment/mounts and zero provider requests. The initial native
+preflight waited for ordinary work to finish; nothing else was interrupted.
+This follow-up remains local, unactivated and separate from the deployed release.
+
+### Full-objective acceptance is still incomplete
+
+| Requirement | Strongest evidence available | Missing acceptance evidence |
+| --- | --- | --- |
+| Fast metadata queue | Implemented, SQL/admission tests and one new declaration in the original pilot | Representative successful live batch and measured throughput; new lane currently off |
+| Reuse headers/ranges and one input for multiple tracks | Real FFmpeg synthetic byte comparisons; bounded exact-file reuse tests | Successful representative provider batch, not a synthetic speedup extrapolation |
+| Release provider before local inference | One real 60-second capture, positive drain, SQL handoff, local inference; restart/ACK tests | Complete file-level outcomes across an accepted live batch |
+| Reuse ongoing playback with no second provider stream | Actual adapter tests, synthetic local HLS extraction/adoption and corrected eligibility | Separately authorized real playback/QoS canary; passive flag remains off |
+| Authorized Selection/ordinary/future-provider concurrency | Policy, redirect, contention, refusal and conservative-default tests; original peak two acquisitions | Fresh eligible Selection cohort and explicit host policy, then bounded live acceptance; no host exception currently enabled |
+
+A new distinct pilot window/cohort needs explicit authorization; the original
+twenty remain in the historical denominator. Real passive playback acceptance
+and Selection host-policy activation are separate gates, not implied by a new
+ordinary-provider cohort. The full five-part goal must not be marked complete
+from these tests or the deployment alone.
+
 The objective covers **all five workstreams** below. A unit-tested helper or a
 disabled route is not an end-to-end completion. No production activation or
 throughput improvement is claimed by this document.

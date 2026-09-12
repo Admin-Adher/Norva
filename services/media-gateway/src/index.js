@@ -32,7 +32,7 @@ const { createStrictLidCapturePipeline } = require('./strict-lid-capture-pipelin
 const { runStrictLidMultiExtract } = require('./strict-lid-multi-extract');
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('./strict-lid-range-reuse');
 const strictLidRangeReuse = new StrictLidRangeReuse();
-const { passiveProfileFingerprint, passiveCaptureBinding, passiveResourcesAvailable, createPassiveLidCapture } = require('./passive-lid-capture');
+const { passiveTrackLanguageUnknown, passiveProfileFingerprint, passiveCaptureBinding, passiveResourcesAvailable, createPassiveLidCapture } = require('./passive-lid-capture');
 const LANGUAGE_PASSIVE_CAPTURE_ENABLED = process.env.LANGUAGE_PASSIVE_CAPTURE_ENABLED === '1';
 let passiveLidCapture = null;
 let passiveLidTickActive = false;
@@ -7607,8 +7607,7 @@ function passiveLidSessionSources(session) {
             || target.streamIndex < 0 || target.streamIndex > 128 || !controlledLocalPlaylistName(target.playlistName)) return false;
         if (target.kind === 'single' && session.actualMappedAudioStreamIndex !== target.streamIndex) return false;
         const track = session.codecProfile.audioTracks.find(t => Number(t.index) === target.streamIndex);
-        const lang = String(track?.lang || track?.language || '').toLowerCase();
-        return Boolean(track) && (!/^[a-z]{2,3}$/.test(lang) || ['und', 'mul', 'zxx', 'un'].includes(lang));
+        return Boolean(track) && passiveTrackLanguageUnknown(track.lang || track.language);
     }).map(target => ({ root: session.outputDir, playlistName: target.playlistName,
         segmentPrefix: target.kind === 'audio' ? `audio_${target.hlsIndex}` : target.playlistName === 'video.m3u8' ? 'video' : 'segment',
         trackIndex: target.streamIndex, profileFingerprint,

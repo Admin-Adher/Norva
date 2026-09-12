@@ -13,6 +13,21 @@ const fail = code => Object.assign(new Error(code), { code });
 const drain = Object.freeze({ providerDrained:true, providerDrainProtocol:1 });
 const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+// Eligibility only: these are the three-letter tags mapped by the existing
+// Edge normalizeIsoLang contract, not predictions or new supported languages.
+// A differential test executes that actual Edge function over its entire map.
+const DECLARED_AUDIO_ALIASES = new Set((
+    'afr aze glg guj kan kaz khm kir lat mal mar nep oci ori pan scr tgl yor zul '+
+    'alb sqi ara arm hye baq eus ben bos bul bur mya cat chi zho cze ces dan dut nld '+
+    'eng est fil fin fre fra geo kat ger deu gre ell heb hin hrv hun ice isl ind ita '+
+    'jpn kor lav lit mac mkd may msa nob nor per fas pol por rum ron rus slo slk slv '+
+    'spa srp swe tam tel tha tur ukr urd vie'
+).split(' '));
+function passiveTrackLanguageUnknown(value) {
+    const code=String(value || '').toLowerCase().trim().split(/[-_]/)[0];
+    return !code || ['un','und','mis','mul','zxx','nar'].includes(code)
+        || (!/^[a-z]{2}$/.test(code) && !DECLARED_AUDIO_ALIASES.has(code));
+}
 const token = value => String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
 const channels = value => {
     if (value === null || value === undefined || value === '') return null;
@@ -230,4 +245,4 @@ function createPassiveLidCapture({ store, resolveSource, resourcesAvailable, bin
     });
 }
 
-module.exports={ passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,extractPassiveWav,createPassiveLidCapture };
+module.exports={ passiveTrackLanguageUnknown,passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,extractPassiveWav,createPassiveLidCapture };
