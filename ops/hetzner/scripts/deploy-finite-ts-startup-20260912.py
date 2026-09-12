@@ -12,12 +12,12 @@ import sys
 import tarfile
 import time
 
-ROOT = pathlib.Path('/home/adrien/.norva/finite-ts-startup-20260912')
+ROOT = pathlib.Path('/home/adrien/.norva/finite-ts-startup-20260912-r2')
 PARENT = ROOT.parent/'scoped-passive-dormant-20260912'
 NATIVE = ROOT.parent/'finite-ts-native-20260912-r4/native-proof.json'
 APP_COMMIT = '5cfcba4a54cf9de8d39b5405583c6e0615c4194f'
 FILES = ('index.js', 'passive-lid-capture.js', 'finite-ts-startup.js')
-IMAGE = 'norva-media-gateway:finite-ts-startup-20260912'
+IMAGE = 'norva-media-gateway:finite-ts-startup-20260912-r2'
 
 
 def load(name):
@@ -31,10 +31,42 @@ def load(name):
 parent = load('finite_ts_parent_release')
 op = load('finite_ts_scoped_operator')
 op.ROOT, op.NATIVE, op.APP_COMMIT, op.FILES, op.IMAGE = ROOT, NATIVE, APP_COMMIT, FILES, IMAGE
-op.PREFIX = op.SERVICE+'-finite-ts-20260912'
+op.PREFIX = op.SERVICE+'-finite-ts-20260912-r2'
 # The existing guard must relaunch this entry point, not an old release.
 op.__file__ = __file__
 gw, require = op.gw, op.require
+
+
+def source_snapshot(container=None):
+    container = container or op.SERVICE
+    result = gw.source_snapshot(container)
+    # The inherited operator's module inventory predates this new module.
+    # Extend this release's attestation, never mutate historical inventories.
+    script = "const fs=require('fs'),c=require('crypto'),p='/app/src/finite-ts-startup.js';" \
+        "process.stdout.write(JSON.stringify(fs.existsSync(p)?c.createHash('sha256').update(" \
+        "fs.readFileSync(p).toString('utf8').replace(/\\r\\n/g,'\\n')).digest('hex'):null));"
+    result['finite-ts-startup.js'] = json.loads(gw.run(['docker', 'exec', container, 'node', '-e', script]))
+    return result
+
+
+def verify_gateway(plan, candidate):
+    current = gw.inspect(op.SERVICE)
+    image = IMAGE if candidate else plan['original']['Config']['Image']
+    expected_id = op.saved('receipt.private.json')['candidateContainer'] if candidate else plan['original']['Id']
+    require(current['Id'] == expected_id, 'gateway_container_not_owned')
+    gw.assert_clone(plan['original'], current, image)
+    gw.assert_container_image(current, plan['imageIdentity'] if candidate else plan['originalImageIdentity'])
+    require(source_snapshot() == plan['after' if candidate else 'before'], 'gateway_source_changed')
+    require(gw.binary_snapshot() == plan['binaries'], 'runtime_binary_changed')
+    health = gw.health(); gw.assert_runtime(health, plan['runtime'])
+    fence = health.get('languageEnrichmentPilot') or {}
+    require(health.get('ok') is True and fence.get('mode') == 'disabled' and fence.get('files') == 0
+        and fence.get('passiveSources') == 0, 'dormant_admission_changed')
+    require(current['State']['Running'] and current['RestartCount'] == 0
+        and not current['State']['OOMKilled'], 'gateway_unhealthy')
+
+
+op.verify_gateway = verify_gateway
 
 
 def verify_parent():
@@ -71,9 +103,9 @@ def stage():
             require(gw.sha(content) == native['sourceHashes'][entry.name], 'native_source_drift')
             (context/allowed[entry.name]).write_bytes(content)
             (context/allowed[entry.name]).chmod(0o600)
-    before = gw.source_snapshot()
+    before = source_snapshot()
     after = {**before, **{name: gw.sha((context/name).read_bytes()) for name in FILES}}
-    base_tag = 'norva-finite-ts-base:20260912'
+    base_tag = 'norva-finite-ts-base:20260912-r2'
     gw.run(['docker', 'tag', current['Image'], base_tag])
     require(gw.image_identity(base_tag)['index'] == current['Image'], 'build_base_drift')
     (context/'Dockerfile').write_text('ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n'+
