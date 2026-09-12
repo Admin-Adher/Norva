@@ -22,7 +22,7 @@ separate namespace, not launched over the completed pilot. The recovery helper
 and eight executable guard tests are published as `76381818`; all three CI
 workflows succeeded. Application suite: 4,499 passed, fourteen skipped, no failure.
 
-The next patch adds optional exact-account + URL + structural-profile passive
+The passive patch adds optional exact-account + URL + structural-profile passive
 canary grants to the already bounded, expiring file admission manifest. No
 grant means no passive pilot. Invalid/foreign/expired grants remain denied;
 public health exposes counts only. This avoids needing fleet activation for a
@@ -36,11 +36,32 @@ zero failures (104.02 seconds). Sixteen tests also passed with real FFmpeg in
 the exact production image, with networking disabled, no skips, no provider
 requests and no production mutation. Native proof:
 `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/scoped-passive-native-proof-20260912.json`.
-This passive patch is not yet deployed or enabled. Real playback/QoS validation
-still requires the user to reconnect the test account; no credentials or login
-link should be shared with the agent. Selection acceptance and full five-part
-goal completion are still pending; the completed pilot and all old failed jobs
-remain immutable.
+Published application commit `73913e4fe5a443f9afcb3e6024b6ca0658804575` was deployed
+dormant at 07:24:32 UTC, using image
+`sha256:89d5c5063412c7417ecd840c8bd025ba002146adc25d122162d4a83d9b4bf7a7`.
+Its three changed modules match the native-test source hashes. Fresh verification
+at 07:24:48 confirms the exact image, eleven attested modules, preserved runtime,
+models, proxy, Edge replicas, Selection worker, flags and protected old evidence.
+Both crons are restored, both release processes exited and no provider request
+was issued by this deployment. The old container is retained. Operational helper
+`b0ce9ecc336b548dc2df60eabb0baaf14d490889` includes ten executable recovery tests,
+including interruption between container renames and refusal to stop active work.
+All three CI workflows succeeded for both commits.
+
+Sanitized production proof:
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/scoped-passive-production-proof-20260912.json`.
+Passive capture is still disabled. Real playback/QoS validation requires the
+user to reconnect the test account; no credentials or login link should be
+shared with the agent. At 07:27:25 UTC the immutable Selection registry and
+current queue were also rechecked, without provider I/O: 2,329 files, 715
+initially unknown (192 completed, 523 failed), zero unknown without a job and
+zero nonterminal jobs. The other 1,614 already have declared language metadata;
+they are not newly enriched results. No old failed Selection job was restarted
+and no blanket feed/host exception was configured. Readiness proof:
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/selection-readiness-postrelease-20260912.json`.
+Selection acceptance and full five-part goal completion remain pending; the
+completed pilot and all old failed jobs remain immutable. Historical statements
+below describe their dated release state, not the latest active images.
 
 ## Historical result — 12 September, independent pilot closed and verified
 
