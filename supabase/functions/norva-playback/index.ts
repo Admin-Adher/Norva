@@ -8909,6 +8909,10 @@ function normalizeGatewayStartupPolicy(value: unknown) {
   const eligibleGraph =
     ((pipeline === "copy" || pipeline === "audio-transcode") &&
       reason === "mkv-h264-copy-ready") ||
+    ((pipeline === "copy" || pipeline === "audio-transcode") &&
+      reason === "finite-ts-verified-ready" && targetBufferSeconds !== null &&
+      targetBufferSeconds >= 12 && targetBufferSeconds <= 24 &&
+      minimumEncodeRateX !== null && minimumEncodeRateX >= 1.5) ||
     (pipeline === "copy" && reason === "complete-hls-cache-hit") ||
     (pipeline === "video-transcode" &&
       reason === "vaapi-transcode-ready" &&

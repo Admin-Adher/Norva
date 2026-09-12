@@ -1,5 +1,13 @@
 'use strict';
 
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
+const FINITE_TS_PROBE_BYTES = 512 * 1024;
+const FINITE_TS_ANALYZE_US = 500_000;
+
 const token = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const index = (value) => value !== null && value !== undefined && value !== ''
@@ -52,4 +60,98 @@ function finiteTsHttpArgs() {
     return ['-multiple_requests', '1', '-short_seek_size', '262144'];
 }
 
-module.exports = { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs };
+function finiteTsStartupPolicy(session, pipeline) {
+    if (!finiteTsProfileEligible(session) || !['copy', 'audio-transcode'].includes(pipeline)) return null;
+    const evidence = record(session.finiteTsStartupEvidence);
+    const timings = record(session.startupTimings);
+    const rate = Number(timings.sustainedMediaProductionRateX);
+    const buffer = Number(timings.playlistBufferSeconds);
+    const maximum = Number(evidence.maxSegmentSeconds);
+    const verified = evidence.verified === true && evidence.segmentCount >= 2
+        && evidence.segmentCount <= 3 && maximum > 0 && maximum <= 12.25
+        && Number(timings.playlistSegmentCount) >= evidence.segmentCount
+        && buffer >= 12 && Number(timings.playlistPostFirstBufferSeconds) >= 4;
+    const eligible = verified && Number.isFinite(rate) && rate >= 1.5 && rate <= 20;
+    // Keep two long segments for medium-rate inputs; a fast source can start
+    // from one while the next independently decoded segment is already ready.
+    const target = Math.min(24, Math.max(rate < 2 ? 24 : 12,
+        Math.ceil(maximum * (rate >= 4 ? 1 : 2))));
+    return { protocol: 2, eligible, pipeline, targetBufferSeconds: eligible ? target : null,
+        minimumEncodeRateX: 1.5, observedEncodeRateX: Number.isFinite(rate) && rate > 0 ? rate : null,
+        reason: eligible ? 'finite-ts-verified-ready' : !verified ? 'ts-startup-decode-unverified' : 'encode-rate-below-minimum' };
+}
+
+function decodeStartupSegment(bin, descriptor, { signal, spawnImpl = spawn, timeoutMs = 1500 } = {}) {
+    return new Promise(resolve => {
+        if (signal?.aborted) return resolve(false);
+        let child, timer, killTimer, output = '', failed = false, settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true; clearTimeout(timer); clearTimeout(killTimer);
+            signal?.removeEventListener('abort', stop); resolve(value);
+        };
+        const stop = () => {
+            failed = true;
+            try { child?.kill('SIGKILL'); } catch (_) {}
+            killTimer ||= setTimeout(() => finish(false), 1000);
+        };
+        try {
+            // The only input is an already-open local segment descriptor.
+            // No URL, playlist, extra provider read, or full-film analysis.
+            child = spawnImpl(bin, ['-hide_banner', '-v', 'error', '-nostdin', '-xerror',
+                '-err_detect', 'explode', '-threads', '1', '-protocol_whitelist', 'pipe',
+                '-format_whitelist', 'mpegts', '-f', 'mpegts', '-i', 'pipe:3',
+                // Simultaneous per-stream frame caps can finish the muxer
+                // before it emits audio. A tiny common time window preserves
+                // both streams; the independent decoded-frame check stays.
+                '-map', '0:V:0', '-map', '0:a:0', '-t', '0.5',
+                '-threads', '1', '-f', 'framehash', 'pipe:1'],
+            { stdio: ['ignore', 'pipe', 'pipe', descriptor], windowsHide: true });
+        } catch (_) { finish(false); return; }
+        child.stdout.on('data', chunk => { output += chunk.toString(); if (output.length > 16384) stop(); });
+        child.stderr.on('data', chunk => { if (chunk.length) stop(); });
+        child.once('error', () => { stop(); });
+        child.once('close', code => {
+            const counts = [0, 0];
+            for (const line of output.split('\n')) {
+                const match = /^([01]),\s*-?\d+,\s*-?\d+,\s*\d+,\s*(\d+),\s*[a-f0-9]{64}\s*$/.exec(line);
+                if (match && Number(match[2]) > 0) counts[Number(match[1])]++;
+            }
+            finish(!failed && !signal?.aborted && code === 0 && counts.every(n => n >= 2));
+        });
+        signal?.addEventListener('abort', stop, { once: true });
+        if (signal?.aborted) stop();
+        timer = setTimeout(stop, timeoutMs);
+    });
+}
+
+async function verifyFiniteTsStartupSegments({ root, files, durations, bin, signal, decode = decodeStartupSegment }) {
+    const reject = reason => ({ protocol: 1, verified: false, reason });
+    if (!path.isAbsolute(root || '') || !Array.isArray(files) || files.length < 2
+        || !Array.isArray(durations) || durations.length !== files.length
+        || !files.every(name => /^segment-\d{5,8}\.ts$/.test(name))) return reject('invalid-segment-scope');
+    const chosen = files.slice(0, 3), lengths = durations.slice(0, 3);
+    if (lengths.some(n => !Number.isFinite(n) || n <= 0 || n > 12.25)) return reject('segment-duration');
+    try {
+        const resolved = path.resolve(root), directory = await fsp.lstat(resolved);
+        if (!directory.isDirectory() || directory.isSymbolicLink() || await fsp.realpath(resolved) !== resolved) return reject('invalid-segment-root');
+        for (const name of chosen) {
+            if (signal?.aborted) return reject('aborted');
+            const linked = await fsp.lstat(path.join(resolved, name));
+            if (!linked.isFile() || linked.isSymbolicLink()) return reject('invalid-segment-file');
+            const handle = await fsp.open(path.join(resolved, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+            try {
+                const before = await handle.stat();
+                if (!before.isFile() || before.nlink !== 1 || before.ino !== linked.ino || before.dev !== linked.dev
+                    || before.size <= 0 || before.size > 32 * 1024 * 1024) return reject('segment-size');
+                if (!await decode(bin, handle.fd, { signal })) return reject('segment-decode');
+                const after = await handle.stat();
+                if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.nlink !== 1) return reject('segment-changed');
+            } finally { await handle.close(); }
+        }
+        return { protocol: 1, verified: true, segmentCount: chosen.length, maxSegmentSeconds: Math.max(...lengths) };
+    } catch (_) { return reject('segment-unavailable'); }
+}
+
+module.exports = { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs,
+    FINITE_TS_PROBE_BYTES, FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments, decodeStartupSegment };

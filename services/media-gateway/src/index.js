@@ -12,7 +12,8 @@ const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
-const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs } = require('./finite-ts-startup');
+const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
+    FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments } = require('./finite-ts-startup');
 const FINITE_TS_FAST_START_ENABLED = process.env.FINITE_TS_FAST_START_ENABLED !== 'false';
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
@@ -15157,6 +15158,17 @@ function inputProbeArgsForSession(session) {
     session.finiteTsFastInput = knownFast && finiteTsProfileEligible(session);
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.finiteTsFastInput = session.finiteTsFastInput;
+    if (session.finiteTsFastInput) {
+        // Two long (e.g. 12-second) segments already cover this reserve.
+        // Short segments still need enough finalized media and rate evidence.
+        session.minHlsStartupSegments = 2;
+        session.minHlsStartupBufferSeconds = 12;
+    } else if (session.finiteTsStartupReadiness === true) {
+        session.minHlsStartupSegments = MIN_HLS_STARTUP_SEGMENTS;
+        session.minHlsStartupBufferSeconds = MIN_HLS_STARTUP_BUFFER_SECONDS;
+    }
+    session.finiteTsStartupReadiness = session.finiteTsFastInput;
+    session.finiteTsStartupEvidence = null;
     if (live) sessionStartupStats.liveInputProbeAttempts += 1;
     else if (knownFast) sessionStartupStats.fastInputProbeAttempts += 1;
     else sessionStartupStats.fullInputProbeAttempts += 1;
@@ -15164,14 +15176,14 @@ function inputProbeArgsForSession(session) {
         '-analyzeduration', String(
             live
                 ? LIVE_INPUT_ANALYZE_DURATION_US
-                : knownFast
+                : session.finiteTsFastInput ? FINITE_TS_ANALYZE_US : knownFast
                     ? KNOWN_VOD_INPUT_ANALYZE_DURATION_US
                     : VOD_INPUT_ANALYZE_DURATION_US
         ),
         '-probesize', String(
             live
                 ? LIVE_INPUT_PROBE_SIZE_BYTES
-                : knownFast
+                : session.finiteTsFastInput ? FINITE_TS_PROBE_BYTES : knownFast
                     ? KNOWN_VOD_INPUT_PROBE_SIZE_BYTES
                     : VOD_INPUT_PROBE_SIZE_BYTES
         ),
@@ -17019,6 +17031,10 @@ function startupPolicyForSession(session) {
     const pipeline = videoMode === 'encode'
         ? 'video-transcode'
         : (audioMode === 'copy' ? 'copy' : 'audio-transcode');
+    if (session?.finiteTsFastInput === true && FINITE_TS_FAST_START_ENABLED) {
+        const finiteTsPolicy = finiteTsStartupPolicy(session, pipeline);
+        if (finiteTsPolicy) return finiteTsPolicy;
+    }
     const assessment = asRecord(session?.mkvH264FastStart);
     const observedEncodeRateX = observedMediaProductionRateX(session);
     const copySelected = assessment.eligible === true && videoMode === 'copy';
@@ -19220,7 +19236,7 @@ async function inspectHlsMediaPlaylistArtifact(session, target) {
         Number.isFinite(firstSegmentCompletedAtMs) && firstSegmentCompletedAtMs >= productionStartedAtMs
     ) ? firstSegmentCompletedAtMs - productionStartedAtMs : null;
     const playlistProductionSpanMs = (
-        stats.length >= 3 &&
+        stats.length >= (session?.finiteTsFastInput === true ? 2 : 3) &&
         Number.isFinite(firstSegmentCompletedAtMs) &&
         Number.isFinite(lastSegmentCompletedAtMs) &&
         lastSegmentCompletedAtMs > firstSegmentCompletedAtMs
@@ -19456,6 +19472,20 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 session.startupTimings.playlistProductionSpanMs = video.playlistProductionSpanMs;
                 session.startupTimings.playlistPostFirstBufferSeconds = video.playlistPostFirstBufferSeconds;
                 session.startupTimings.sustainedMediaProductionRateX = video.sustainedMediaProductionRateX;
+                if (session.finiteTsFastInput === true && FINITE_TS_FAST_START_ENABLED
+                    && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)
+                    && videoModeForSession(session) === 'copy' && !session.finiteTsStartupEvidence) {
+                    const proofStartedAt = Date.now();
+                    session.finiteTsStartupEvidence = video.inspection.discontinuityCount === 0
+                        && video.inspection.mediaSequence === 0
+                        ? await verifyFiniteTsStartupSegments({ root: session.outputDir,
+                            files: video.inspection.segmentFiles, durations: video.inspection.segmentDurations,
+                            bin: FFMPEG_PATH, signal: abortSignal })
+                        : { verified: false, reason: 'discontinuous-playlist' };
+                    session.startupTimings.finiteTsStartupProofMs = Date.now() - proofStartedAt;
+                    session.startupTimings.finiteTsStartupDecoded = session.finiteTsStartupEvidence.verified === true;
+                    session.startupTimings.finiteTsStartupProofReason = session.finiteTsStartupEvidence.reason || 'decoded';
+                }
                 if (multiAudioHlsEnabled(session)) {
                     session.startupTimings.multiAudioHls = {
                         ...multiAudioHlsDiagnosticsForSession(session),

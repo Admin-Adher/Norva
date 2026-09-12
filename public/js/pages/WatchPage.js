@@ -5871,10 +5871,12 @@ class WatchPage {
         const reason = String(policy.reason || '').trim().toLowerCase();
         if (reason !== 'mkv-h264-copy-ready'
             && reason !== 'complete-hls-cache-hit'
-            && reason !== 'vaapi-transcode-ready') return null;
+            && reason !== 'vaapi-transcode-ready'
+            && reason !== 'finite-ts-verified-ready') return null;
         if (reason === 'complete-hls-cache-hit' && pipeline !== 'copy') return null;
         if (reason === 'vaapi-transcode-ready' && pipeline !== 'video-transcode') return null;
         if (reason === 'mkv-h264-copy-ready' && pipeline === 'video-transcode') return null;
+        if (reason === 'finite-ts-verified-ready' && pipeline === 'video-transcode') return null;
 
         const targetBufferSeconds = Number(policy.targetBufferSeconds ?? policy.target_buffer_seconds);
         const minimumEncodeRateX = Number(policy.minimumEncodeRateX ?? policy.minimum_encode_rate_x);
@@ -5886,6 +5888,7 @@ class WatchPage {
             || minimumEncodeRateX < 1.15
             || minimumEncodeRateX > 20
             || (reason === 'vaapi-transcode-ready' && minimumEncodeRateX < 2)
+            || (reason === 'finite-ts-verified-ready' && (minimumEncodeRateX < 1.5 || targetBufferSeconds < 12))
             || !Number.isFinite(observedEncodeRateX)
             || observedEncodeRateX < minimumEncodeRateX
             || observedEncodeRateX > 20) {
@@ -6239,6 +6242,7 @@ class WatchPage {
         let autoplayGateRunning = false;
         this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            this.recordPlaybackStartupPhase?.('manifestParsed', playbackAttemptId);
             // hls.js does not emit AUDIO_TRACKS_UPDATED when audio is muxed into
             // the sole video playlist. MANIFEST_PARSED is the positive proof that
             // the current Hls instance completed enumeration with zero alternates.
@@ -6264,9 +6268,10 @@ class WatchPage {
                         activeHls,
                         {
                             // A signed session policy may shorten the gate only
-                            // after Gateway proved a file-exact H.264 copy graph
+                            // after Gateway proved the file-exact output graph
+                            // (including locally decoded TS startup segments)
                             // and measured production above realtime. Unknown,
-                            // encoded, slow or malformed policies keep the deep
+                            // unqualified, slow or malformed policies keep the deep
                             // 96-second anti-stall buffer used by the legacy path.
                             minimumSeconds: gatewayStartupBuffer.minimumSeconds,
                             timeoutMs: gatewayStartupBuffer.timeoutMs
@@ -6284,6 +6289,7 @@ class WatchPage {
                     return;
                 }
                 gatewayStartupBufferReady = true;
+                this.recordPlaybackStartupPhase?.('startupBufferReady', playbackAttemptId);
                 if (Number.isInteger(Number(options.audioSwitchRequestId))) {
                     this.updateGatewayAudioSwitchMetrics(
                         Number(options.audioSwitchRequestId),

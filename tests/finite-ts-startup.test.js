@@ -8,7 +8,8 @@ const os = require('node:os');
 const vm = require('node:vm');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
-const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs } = require('../services/media-gateway/src/finite-ts-startup');
+const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
+    FINITE_TS_ANALYZE_US, verifyFiniteTsStartupSegments } = require('../services/media-gateway/src/finite-ts-startup');
 const gateway = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8').replace(/\r\n/g, '\n');
 const exact = () => ({
     codecProfileSource: 'request',
@@ -25,6 +26,7 @@ function probeHarness(enabled = true) {
     const to = gateway.indexOf('\nfunction isInsufficientInputProbeFailure(', from);
     return vm.runInNewContext(`(() => { ${gateway.slice(from, to)}; return { inputProbeArgsForSession, knownVodInputProbeEligible }; })()`, {
         finiteTsProfileEligible, finiteTsDemuxArgs, FINITE_TS_FAST_START_ENABLED: enabled,
+        FINITE_TS_PROBE_BYTES, FINITE_TS_ANALYZE_US, MIN_HLS_STARTUP_SEGMENTS: 3, MIN_HLS_STARTUP_BUFFER_SECONDS: 10,
         KNOWN_VOD_INPUT_PROBE_FAST_PATH_ENABLED: true,
         asRecord: (v) => v && typeof v === 'object' ? v : {},
         normalizeCodecToken: (v) => String(v || '').toLowerCase().replace(/[^a-z0-9.,]+/g, ''),
@@ -77,12 +79,16 @@ test('finite TS rejects live TV, provider hints, incomplete or conflicting maps 
 test('TS reduced probing suppresses only redundant tail duration discovery and resets on full fallback', () => {
     const h = probeHarness(); const session = exact();
     assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), [
-        '-analyzeduration', '2000000', '-probesize', '2000000', '-skip_estimate_duration_from_pts', '1',
+        '-analyzeduration', '500000', '-probesize', '524288', '-skip_estimate_duration_from_pts', '1',
     ]);
     assert.equal(session.finiteTsFastInput, true);
+    assert.equal(session.minHlsStartupSegments, 2);
+    assert.equal(session.minHlsStartupBufferSeconds, 12);
     session.forceFullInputProbe = true;
     assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), ['-analyzeduration', '8000000', '-probesize', '8000000']);
     assert.equal(session.finiteTsFastInput, false);
+    assert.equal(session.minHlsStartupSegments, 3);
+    assert.equal(session.minHlsStartupBufferSeconds, 10);
     assert.equal(session.startupTimings.finiteTsFastInput, false);
     assert.equal(probeHarness(false).knownVodInputProbeEligible(exact()), false);
 });
@@ -149,8 +155,8 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
                 const output = path.join(dir, `${seek}-${fast}.ts`);
                 const start = Date.now();
                 await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y',
-                    ...(fast ? finiteTsHttpArgs() : []), '-analyzeduration', fast ? '2000000' : '8000000',
-                    '-probesize', fast ? '2000000' : '8000000', ...(fast ? finiteTsDemuxArgs() : []),
+                    ...(fast ? finiteTsHttpArgs() : []), '-analyzeduration', fast ? String(FINITE_TS_ANALYZE_US) : '8000000',
+                    '-probesize', fast ? String(FINITE_TS_PROBE_BYTES) : '8000000', ...(fast ? finiteTsDemuxArgs() : []),
                     ...(seek ? ['-ss', String(seek)] : []), '-i', url, '-t', '8',
                     '-map', '0:V:0', '-map', '0:1', '-c:v', 'copy', '-c:a', 'aac', '-threads', '1', '-f', 'mpegts', output]);
                 const metrics = { seek, fast, elapsedMs: Date.now() - start, requests: requests.length,
@@ -173,6 +179,35 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         assert.ok(results[0].tailRequests > results[1].tailRequests, JSON.stringify(results));
         assert.equal(results[1].tailRequests, 0);
         console.log('finite TS synthetic measurements', JSON.stringify(results));
+        // Actual local decoding is the admission evidence, never the producer's
+        // independent_segments flag alone. No network is available to this path.
+        await run(ffmpeg, ['-v', 'error', '-y', '-i', fixture, '-t', '16', '-map', '0:v:0', '-map', '0:a:0',
+            '-c', 'copy', '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'event', '-hls_list_size', '0',
+            '-hls_segment_filename', path.join(dir, 'segment-%05d.ts'), path.join(dir, 'ts.m3u8')]);
+        const startupFiles = ['segment-00000.ts', 'segment-00001.ts', 'segment-00002.ts'];
+        const proof = await verifyFiniteTsStartupSegments({ root: dir, files: startupFiles, durations: [4, 4, 4], bin: ffmpeg });
+        assert.equal(proof.verified, true, JSON.stringify(proof));
+        // The real slow witness has 12-second GOPs: two complete, independently
+        // decoded segments must suffice; a third is not a prerequisite.
+        const longDir = path.join(dir, 'long-gop'); fs.mkdirSync(longDir);
+        await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=25',
+            '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '25',
+            '-c:v', 'libx264', '-threads', '1', '-preset', 'ultrafast', '-g', '300', '-keyint_min', '300',
+            '-sc_threshold', '0', '-bf', '0', '-c:a', 'aac', '-ac', '2', '-f', 'hls', '-hls_time', '4',
+            '-hls_playlist_type', 'event', '-hls_list_size', '0',
+            '-hls_segment_filename', path.join(longDir, 'segment-%05d.ts'), path.join(longDir, 'long.m3u8')]);
+        const longDurations = [...fs.readFileSync(path.join(longDir,'long.m3u8'),'utf8')
+            .matchAll(/#EXTINF:([\d.]+)/g)].slice(0,2).map(m=>Number(m[1]));
+        assert.deepEqual(longDurations, [12,12]);
+        assert.equal((await verifyFiniteTsStartupSegments({ root: longDir,
+            files: ['segment-00000.ts','segment-00001.ts'], durations: longDurations, bin: ffmpeg })).verified, true);
+        // A video-only graph and a truncated/corrupt segment cannot earn the gate.
+        await run(ffmpeg, ['-v', 'error', '-y', '-i', fixture, '-t', '4', '-an', '-c:v', 'copy', '-f', 'mpegts', path.join(dir, 'segment-99999.ts')]);
+        assert.equal((await verifyFiniteTsStartupSegments({ root: dir,
+            files: ['segment-00000.ts', 'segment-99999.ts'], durations: [4, 4], bin: ffmpeg })).verified, false);
+        fs.writeFileSync(path.join(dir, 'segment-99998.ts'), Buffer.alloc(188 * 4, 0x47));
+        assert.equal((await verifyFiniteTsStartupSegments({ root: dir,
+            files: ['segment-00000.ts', 'segment-99998.ts'], durations: [4, 4], bin: ffmpeg })).verified, false);
         // Reproduce the separate real MKV witness failure: CRF/CQP video plus
         // copied AAC has no nominal bitrate and FFmpeg emits an empty master.
         const mkv = path.join(dir, 'witness.mkv');

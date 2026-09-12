@@ -2172,6 +2172,23 @@ const MediaUtils = (() => {
         return '';
     }
 
+    function versionContainerLabel(item = {}) {
+        const profile = codecProfileFromItem(item);
+        const authority = String(profile.probeSource || profile.probe_source || '').toLowerCase();
+        const observed = authority === 'gateway_probe'
+            || (authority === 'gateway_inband' && profile.metadataComplete === true);
+        const at = Date.parse(String(profile.probedAt || profile.probed_at || ''));
+        const container = String(profile.container || '').trim().toLowerCase();
+        if (observed && Number.isFinite(at) && at <= Date.now() + 300000) {
+            if (['ts', 'mpegts'].includes(container)) return 'MPEG-TS';
+            if (['mkv', 'matroska', 'matroska,webm'].includes(container)) return 'MKV';
+            if (['mp4', 'mov,mp4,m4a,3gp,3g2,mj2'].includes(container)) return 'MP4';
+        }
+        // Presentation only. Never replace the provider URL's extension or
+        // overwrite the stored catalogue identity when its label was wrong.
+        return String(item.container_extension || item.containerExtension || '').toUpperCase();
+    }
+
     // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string,
     //         providerLanguageHints?: boolean } (version cards only, never filters).
     // Returns { headline, languageStatus, meta, badge, tier, audioSource }.
@@ -2185,7 +2202,7 @@ const MediaUtils = (() => {
 
         const providerHint = versionProviderHint(item);
         const provider = resolveVersionProvider(item, resolve);
-        const container = String(item.container_extension || item.containerExtension || '').toUpperCase();
+        const container = versionContainerLabel(item);
         const quality = versionQuality(item);
         const subtitleState = versionTrackState(item, 'subtitle');
         const subtitleLanguageState = versionFileLanguageState(item, 'subtitle');
@@ -2212,7 +2229,7 @@ const MediaUtils = (() => {
                 a,
                 versionProviderHint(it),
                 resolveVersionProvider(it, resolve),
-                String(it.container_extension || it.containerExtension || '').toUpperCase(),
+                versionContainerLabel(it),
                 versionQuality(it) || ''
             ].join('|');
         };

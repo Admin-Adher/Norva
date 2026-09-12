@@ -13,6 +13,7 @@ window.ProviderVersionCardsQA = (() => {
         id: `qa-${index}`, stream_id: String(index), series_id: String(index), sourceId: 'qa-source',
         item_type: kind, raw_title: `${prefix} ▎ Example Film`, title: 'Example Film',
         metadata: { categoryName: category }, container_extension: prefix === 'SO' ? 'mp4' : 'mkv',
+        codec_profile: index === 1 ? { container:'mpegts', probeSource:'gateway_probe', probedAt:new Date().toISOString() } : null,
         audio_language_validation_status: audio ? 'probed' : 'not_analyzed',
         audio_tracks_scope: 'file', audio_tracks: audio ? audio.map((lang, n) => ({index:n + 1,lang})) : [],
         audio_probed_at: audio ? '2026-09-10T10:00:00Z' : null,
@@ -57,6 +58,9 @@ window.ProviderVersionCardsQA = (() => {
         if (buttons.length !== 12) throw Error('version count');
         if (document.querySelector('.version-language-status')) throw Error('internal provenance exposed');
         const versions = currentKind === 'movie' ? controller.currentMovieVersions : controller._orderedVersions;
+        const exactTs = versions.find(v=>v.stream_id==='1');
+        if (!MediaUtils.versionDescriptor(exactTs).meta.includes('MPEG-TS')) throw Error('exact TS format hidden');
+        if (exactTs.container_extension !== 'mkv') throw Error('provider identity changed');
         if (versions.filter(item => MediaUtils.versionDescriptor(item,{providerLanguageHints:true}).languageStatus).length !== 7) throw Error('internal provenance lost');
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('horizontal overflow');
         for (const button of buttons) {
