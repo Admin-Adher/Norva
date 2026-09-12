@@ -17,6 +17,8 @@ import time
 
 PARENT=pathlib.Path('/home/adrien/.norva/enrichment-pilot20-20260911')
 ROOT=PARENT/'resume9-20260912'
+if pathlib.Path(__file__).resolve().parent==PARENT/'resume9-normalized-20260912':
+    ROOT=PARENT/'resume9-normalized-20260912'
 spec=importlib.util.spec_from_file_location('parent_release',PARENT/'deploy-enrichment-pilot20-20260911.py')
 d=importlib.util.module_from_spec(spec);spec.loader.exec_module(d)
 gw,prior,sql,fleet,require,sha=d.gw,d.prior,d.sql,d.fleet,d.require,d.sha
@@ -29,6 +31,12 @@ IMAGE='norva-media-gateway:enrichment-pilot9-proxy-diagnostic-20260912'
 def stamp():return d.stamp()
 def saved(name):return pilot.private(ROOT/name)
 def save(name,value):gw.private_write(ROOT/name,value)
+
+
+def canonical_source(raw):
+    # The live source attestation normalizes CRLF. Normalize the build input,
+    # too, so the immutable plan and the dispatch guard attest identical bytes.
+    return raw.replace(b'\r\n',b'\n')
 
 
 def select_remaining(original,old_state,values):
@@ -109,7 +117,7 @@ def stage(commit):
         require(len(entries)==len(FILES) and {m.name for m in entries}==set(allowed),'resume_archive_scope')
         for entry in entries:
             require(entry.isfile() and 0<entry.size<(1500000 if allowed[entry.name]=='index.js' else 180000),'resume_archive_entry')
-            target=context/allowed[entry.name];target.write_bytes(archive.extractfile(entry).read());target.chmod(0o600)
+            target=context/allowed[entry.name];target.write_bytes(canonical_source(archive.extractfile(entry).read()));target.chmod(0o600)
     after={**parent['sourceAfter'],**{n:sha((context/n).read_bytes()) for n in FILES}}
     current=gw.inspect(d.SERVICES[0]);base='norva-enrichment-pilot9-proxy-base:20260912'
     gw.run(['docker','tag',current['Image'],base]);require(gw.image_identity(base)['index']==current['Image'],'resume_base_drift')

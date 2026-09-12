@@ -21,6 +21,16 @@ class ResumeTests(unittest.TestCase):
         exec(compile(ast.Module(body=selected,type_ignores=[]),'resume-functions','exec'),ns)
         return ns
 
+    def test_windows_archive_hash_matches_normalized_live_and_dispatch_attestation(self):
+        import hashlib
+        ns=self.functions({'canonical_source'},{})
+        raw=b"'use strict';\r\nconst unchanged=1;\r\n"
+        normalized=ns['canonical_source'](raw)
+        self.assertEqual(normalized,b"'use strict';\nconst unchanged=1;\n")
+        self.assertEqual(ns['canonical_source'](normalized),normalized)
+        self.assertEqual(hashlib.sha256(normalized).hexdigest(),hashlib.sha256(raw.replace(b'\r\n',b'\n')).hexdigest())
+        self.assertIn('target.write_bytes(canonical_source(archive.extractfile(entry).read()))',SOURCE)
+
     def setup_selection(self):
         original={'rows':[{'sample':i,'fileKey':str(i),'external_id':'file-'+str(i)} for i in range(1,21)]}
         old={'rows':{str(i):{'state':'validating' if i<9 else 'planned' if i==9 else 'failed',
