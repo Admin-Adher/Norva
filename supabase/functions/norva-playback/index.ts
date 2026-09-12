@@ -2066,6 +2066,15 @@ async function createPlaybackSessionCore(
   defaultDeviceId: string | null = null,
   mediaCacheLifecycle: MediaCacheSingleflightLifecycle,
 ) {
+  const startupTraceStarted = performance.now();
+  const startupTraceAt = new Date().toISOString();
+  let startupTraceLast = startupTraceStarted;
+  const startupTrace: Record<string, number> = {};
+  const markStartup = (phase: string) => {
+    const now = performance.now();
+    startupTrace[phase] = Math.max(0, Math.round(now - startupTraceLast));
+    startupTraceLast = now;
+  };
   const body = await readJson(req);
   const sourceId = stringOrNull(body.sourceId ?? body.source_id);
   const deviceId = stringOrNull(body.deviceId ?? body.device_id) ?? defaultDeviceId;
@@ -2080,6 +2089,7 @@ async function createPlaybackSessionCore(
   await assertSourceCatalogVisible(sourceId, userId, db);
   const playbackGeneration = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
   if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+  markStartup("ownershipMs");
 
   const requestedMode = stringOr(body.mode, "auto");
   const mediaCacheReadPolicy = stringOr(
@@ -2139,6 +2149,7 @@ async function createPlaybackSessionCore(
       requestedPlaybackHint,
     );
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
+  markStartup("targetResolutionMs");
   const targetUrl = resolved.targetUrl;
   const selectionFileSnapshot = (itemType === "movie" || itemType === "series") && !episodeCoordinates
     ? await selectionSnapshotPlaybackTags({ userId, sourceId, itemId, targetUrl, itemType, db })
@@ -2245,6 +2256,7 @@ async function createPlaybackSessionCore(
       : {}),
   });
   const entitlement = await requirePlaybackEntitlement(userId, db);
+  markStartup("policyAndEntitlementMs");
   let sessionId = crypto.randomUUID();
   let mediaCacheRuntimeConfig: RuntimeConfig | null = null;
   // Only exact Matroska VOD enters the shared HLS lane. Browser-native MP4
@@ -2346,6 +2358,7 @@ async function createPlaybackSessionCore(
   await assertProviderCircuitClosed(providerAccountHash, db);
 
   await requirePlaybackCapacity(userId, db, providerAccountHash, entitlement);
+  markStartup("cacheAndCapacityMs");
 
   const sessionStatus = mode === "transcode" ? "pending" : "ready";
   const { data: claimRows, error: claimError } = await db.rpc(
@@ -2386,6 +2399,7 @@ async function createPlaybackSessionCore(
     if (sessionError) throwDb(sessionError, "Unable to load claimed playback session");
     throw new HttpError(500, "Unable to load claimed playback session");
   }
+  markStartup("claimMs");
 
   // Viewer playback is authoritative. The DB claim removed the background
   // validation lease under the provider advisory lock; now close every real
@@ -2419,6 +2433,7 @@ async function createPlaybackSessionCore(
   }
 
   const playbackCreatedAt = stringOr(session.created_at, new Date().toISOString());
+  markStartup("validationDrainMs");
   // A catalogue metadata call can finish before the Gateway's 60-second reporter
   // tick yet leave a single-slot provider connection draining upstream. Read its
   // last opaque activity before upgrading the holder to `session`, then wait only
@@ -2451,6 +2466,10 @@ async function createPlaybackSessionCore(
     await sleep(PROVIDER_NATIVE_TAKEOVER_GRACE_MS);
   }
   if (catalogRefreshDrainMs > 0) await sleep(catalogRefreshDrainMs);
+  markStartup("catalogueAndTakeoverMs");
+  startupTrace.catalogueWaitMs = catalogRefreshDrainMs;
+  startupTrace.takeoverWaitMs = releasedSuperseded > 0
+    ? (mode === "transcode" ? PROVIDER_SLOT_RELEASE_DELAY_MS : PROVIDER_NATIVE_TAKEOVER_GRACE_MS) : 0;
 
   // Prepare the cross-device coordinator only after all known provider drains.
   // Its 120-second lock then covers the actual Gateway startup/commit budget,
@@ -2471,6 +2490,8 @@ async function createPlaybackSessionCore(
     : null;
   const startupWaitMs = edgeCoordination?.waitMs ?? 0;
   if (startupWaitMs) await sleep(startupWaitMs);
+  markStartup("coordinatorMs");
+  startupTrace.coordinatorWaitMs = startupWaitMs;
 
   if (mode === "direct") {
     // Direct playback gets exactly one transport. A hidden gateway fallback
@@ -2852,6 +2873,7 @@ async function createPlaybackSessionCore(
       mediaCacheLifecycle.producer,
       mediaCacheReadBypassOnce,
     );
+    markStartup("gatewayMs");
     if (mediaCacheLifecycle.producer) mediaCacheLifecycle.transferredToGateway = true;
     if (req.signal.aborted) throw playbackRequestAbortError();
     const gatewayCommit = await commitEdgeSessionCoordinator(edgeCoordination, {
@@ -2945,25 +2967,28 @@ async function createPlaybackSessionCore(
   // the authoritative write for this lifecycle; an intermediate public profile
   // write would advance updated_at and make the later exact CAS always miss.
   if (sourceId && gateway.codecProfile && !deferGatewayProfilePersistenceForMkvFastStart) {
-    const profilePersisted = await persistObservedCodecProfile(db, {
-      userId,
-      sourceId,
-      itemType,
-      itemId,
-      codecProfile: gateway.codecProfile,
-      startupMs: gateway.startupMs,
-      audioMode: gateway.audioMode,
-    });
-    if (profilePersisted && itemType === "movie") {
-      // Reuse the already completed Gateway probe without delaying first frame
-      // or opening another provider connection. A request-echoed codec hint is
-      // not Gateway evidence and cannot enter the shared file cache.
-      runBackground(shareObservedGatewayProfileTracks(db, {
-        userId, sourceId, itemId,
+    // The HLS session is ready. Persisting catalogue projections must not hold
+    // its response; keep the write -> share ordering inside one supervised
+    // background promise. The MKV final-file CAS bypass above is unchanged.
+    runBackground((async () => {
+      const profilePersisted = await persistObservedCodecProfile(db, {
+        userId,
+        sourceId,
+        itemType,
+        itemId,
         codecProfile: gateway.codecProfile,
-        codecProfileSource: gateway.codecProfileSource,
-      }));
-    }
+        startupMs: gateway.startupMs,
+        audioMode: gateway.audioMode,
+      });
+      if (profilePersisted && itemType === "movie") {
+        // A request-echoed profile still cannot become shared Gateway proof.
+        await shareObservedGatewayProfileTracks(db, {
+          userId, sourceId, itemId,
+          codecProfile: gateway.codecProfile,
+          codecProfileSource: gateway.codecProfileSource,
+        });
+      }
+    })());
   }
   const responseCodecProfile = stripMkvH264FastStartProof(mergeCodecProfileAnnotations(
     firstUsefulCodecProfile(requestedPlaybackHint.codecProfile, requestedPlaybackHint.codec_profile),
@@ -3008,6 +3033,10 @@ async function createPlaybackSessionCore(
     }
     throw playbackRequestAbortError();
   }
+  markStartup("readyResponseMs");
+  // Internal timing only: no account, source, target URL or access token.
+  console.info(JSON.stringify({ event: "playback_gateway_startup_phases",
+    startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
   return {
     session: publicPlaybackSession(session),
     playback: {

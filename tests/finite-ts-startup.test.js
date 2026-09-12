@@ -131,9 +131,11 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         assert.ok(size < 64 * 1024 * 1024);
         let requests = []; let active = 0; let peak = 0;
         server = http.createServer((req, res) => {
+            const served = req.url === '/long.ts' ? path.join(dir,'long-gop/source.ts') : fixture;
+            const servedSize = fs.statSync(served).size;
             const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
             const start = range ? Number(range[1]) : 0;
-            const end = Math.min(size - 1, range?.[2] ? Number(range[2]) : size - 1);
+            const end = Math.min(servedSize - 1, range?.[2] ? Number(range[2]) : servedSize - 1);
             requests.push(start); active++; peak = Math.max(peak, active);
             let stream; let timer; let settled = false;
             const settle = () => { if (!settled) { settled = true; active--; } clearTimeout(timer); stream?.destroy(); };
@@ -141,8 +143,8 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
             res.once('close', settle);
             timer = setTimeout(() => {
                 res.writeHead(range ? 206 : 200, { 'Content-Type': 'video/mp2t', 'Accept-Ranges': 'bytes',
-                    'Content-Length': end - start + 1, ...(range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
-                stream = fs.createReadStream(fixture, { start, end }); stream.pipe(res);
+                    'Content-Length': end - start + 1, ...(range ? { 'Content-Range': `bytes ${start}-${end}/${servedSize}` } : {}) });
+                stream = fs.createReadStream(served, { start, end }); stream.pipe(res);
             }, 50);
         });
         await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -206,7 +208,7 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         const gaps=[];
         for(const aligned of [false,true]) {
             const out=path.join(longDir,aligned?'aligned.ts':'copy-gap.ts');
-            await run(ffmpeg,['-v','error','-y','-ss',aligned?'2':'17','-i',longSource,...(aligned?['-ss','15']:[]),'-t','15',
+            await run(ffmpeg,['-v','error','-y',...(aligned?[]:['-ss','17']),'-i',longSource,...(aligned?['-ss','17']:[]),'-t','15',
                 '-map','0:v:0','-map','0:a:0',...(aligned?['-c:v','libx264','-threads','1','-preset','ultrafast','-g','50','-c:a','aac']:['-c','copy']),'-f','mpegts',out]);
             const p=JSON.parse(await run(ffprobe,['-v','error','-show_entries','stream=codec_type,start_time','-of','json',out]));
             const video=Number(p.streams.find(s=>s.codec_type==='video').start_time),audio=Number(p.streams.find(s=>s.codec_type==='audio').start_time);
@@ -215,6 +217,22 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         console.log('finite TS seek synchronization',JSON.stringify({copyGapSeconds:gaps[0],alignedGapSeconds:gaps[1]}));
         assert.ok(gaps[0]>6,'reproduce the leading gap on a mid-GOP copy seek');
         assert.ok(Math.abs(gaps[1])<0.1,'accurate decode seek keeps both tracks on the same start');
+        const near=[];
+        for(const forward of [false,true]) {
+            requests=[];peak=0;
+            const out=path.join(longDir,forward?'forward.ts':'binary.ts'),started=Date.now();
+            await run(ffmpeg,['-v','error','-y',...finiteTsHttpArgs(),...finiteTsDemuxArgs(),
+                '-analyzeduration',String(FINITE_TS_ANALYZE_US),'-probesize',String(FINITE_TS_PROBE_BYTES),
+                ...(forward?[]:['-ss','2']),'-i',url.replace('/fixture.ts','/long.ts'),'-ss',forward?'17':'15',
+                '-t','8','-map','0:v:0','-map','0:a:0','-c:v','libx264','-threads','1','-preset','ultrafast','-g','50','-c:a','aac','-f','mpegts',out]);
+            const hash=await run(ffmpeg,['-v','error','-i',out,'-map','0:v:0','-frames:v','12','-f','framemd5','-']);
+            near.push({forward,requests:requests.length,peak,elapsedMs:Date.now()-started,
+                frames:hash.split('\n').filter(x=>x&&!x.startsWith('#')).map(x=>x.split(',').at(-1).trim())});
+        }
+        assert.deepEqual(near[1].frames,near[0].frames,'near-origin optimization preserves the exact decoded frames');
+        assert.ok(near[1].requests<near[0].requests,'forward decoding avoids the short binary HTTP seek');
+        assert.ok(near[1].peak<=near[0].peak,'no added HTTP overlap');
+        console.log('finite TS near-origin requests',JSON.stringify(near.map(({frames,...rest})=>rest)));
         // A video-only graph and a truncated/corrupt segment cannot earn the gate.
         await run(ffmpeg, ['-v', 'error', '-y', '-i', fixture, '-t', '4', '-an', '-c:v', 'copy', '-f', 'mpegts', path.join(dir, 'segment-99999.ts')]);
         assert.equal((await verifyFiniteTsStartupSegments({ root: dir,

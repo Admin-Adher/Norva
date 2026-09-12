@@ -33,6 +33,28 @@ test('real TS evidence reaches Edge and browser without the old 96-second fallba
     }
 });
 
+test('a ready playback response does not wait for catalogue persistence, but sharing still waits for its success', {timeout:2000}, async()=>{
+    const source=fs.readFileSync(path.join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
+    const start=source.indexOf('  if (sourceId && gateway.codecProfile && !deferGatewayProfilePersistenceForMkvFastStart)');
+    const end=source.indexOf('  const responseCodecProfile',start);assert.ok(start>0 && end>start);
+    const code='async function respond(){'+source.slice(start,end)+' return "ready";}';
+    for(const outcome of [true,false,'error','mkv-cas']) {
+        let release,reject,calls=0,shared=0;const queue=[];
+        const pending=new Promise((resolve,fail)=>{release=resolve;reject=fail;});
+        const env={sourceId:'source',userId:'owner',itemType:'movie',itemId:'file',db:{},
+            gateway:{codecProfile:{container:'ts'},codecProfileSource:'request',startupMs:20,audioMode:'transcode'},
+            deferGatewayProfilePersistenceForMkvFastStart:outcome==='mkv-cas',
+            persistObservedCodecProfile:()=>{calls++;return pending;},
+            shareObservedGatewayProfileTracks:async (_db,args)=>{assert.equal(args.codecProfileSource,'request');shared++;},
+            runBackground:task=>queue.push(Promise.resolve(task).catch(()=>{}))};
+        vm.createContext(env);vm.runInContext(code,env);
+        assert.equal(await env.respond(),'ready');assert.equal(shared,0);
+        assert.equal(calls,outcome==='mkv-cas'?0:1);
+        if(outcome==='error')reject(Error('catalogue unavailable'));else release(outcome===true);
+        await Promise.all(queue);assert.equal(shared,outcome===true?1:0);
+    }
+});
+
 test('actual Gateway playlist adapter admits two complete long segments only after local proof',async()=>{
     const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8').replace(/\r\n/g,'\n');
     const block=(name,next)=>{
@@ -115,8 +137,9 @@ test('a verified HD TS resume uses aligned A/V, accurate input seeking and the e
     assert.equal(finiteTsStartupPolicy(s,'video-transcode').eligible,false);
     const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8').replace(/\r\n/g,'\n');
     const seek=vm.runInNewContext('('+source.slice(source.indexOf('function seekArgsForSession('),source.indexOf('\nfunction usesSourceTimestampedCopySeek(')).trim()+')');
-    assert.deepEqual(JSON.parse(JSON.stringify(seek(s,true))),{preInputSeek:['-ss','2'],postInputSeek:['-ss','15']});
+    assert.deepEqual(JSON.parse(JSON.stringify(seek(s,true))),{preInputSeek:[],postInputSeek:['-ss','17']});
     assert.deepEqual(JSON.parse(JSON.stringify(seek({...s,seekOffset:8},true))),{preInputSeek:[],postInputSeek:['-ss','8']});
+    assert.deepEqual(JSON.parse(JSON.stringify(seek({...s,seekOffset:31},true))),{preInputSeek:['-ss','16'],postInputSeek:['-ss','15']});
     const audio=vm.runInNewContext('('+source.slice(source.indexOf('function shouldCopyAudio('),source.indexOf('\nfunction ',source.indexOf('function shouldCopyAudio(')+1)).trim()+')');
     assert.equal(audio(s),false);
     for(const mutate of [x=>{x.seekOffset=0;},x=>{x.codecProfile.videoWidth=3840;},x=>{delete x.codecProfile.videoWidth;},

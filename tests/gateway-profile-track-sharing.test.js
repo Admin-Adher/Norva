@@ -147,7 +147,11 @@ test('source-local identities, changed generations/profiles and database failure
 });
 
 test('sharing is background-only after successful movie persistence and preserves canonical speech evidence', () => {
-  assert.match(edge,/if \(profilePersisted && itemType === "movie"\)[\s\S]{0,400}runBackground\(shareObservedGatewayProfileTracks/);
+  const responseStart=edge.indexOf('  if (sourceId && gateway.codecProfile && !deferGatewayProfilePersistenceForMkvFastStart)');
+  const responseEnd=edge.indexOf('  const responseCodecProfile',responseStart);
+  assert.ok(responseStart>0 && responseEnd>responseStart);
+  const response=edge.slice(responseStart,responseEnd);
+  assert.match(response,/runBackground\(\(async \(\) => \{[\s\S]*await persistObservedCodecProfile[\s\S]*if \(profilePersisted && itemType === "movie"\)[\s\S]*await shareObservedGatewayProfileTracks/);
   assert.match(edge,/codecProfileSource: stringOrNull\(gatewayBody\.codecProfileSource\)/);
   const share = edge.slice(edge.indexOf('async function shareFileTracks('),edge.indexOf('// Distributed crawler lease:'));
   assert.match(share,/canonicalArgs = \{[\s\S]*p_audio_tracks: Array\.isArray\(row\.audio_tracks\)/);

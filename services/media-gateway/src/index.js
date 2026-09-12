@@ -15074,7 +15074,9 @@ function seekArgsForSession(session, encodeVideo, linearSeekBridgePlan = null) {
         // TS has no Matroska cue index: a direct input seek may land after
         // the requested frame. Decode a bounded preroll before accurate A/V
         // output trimming, instead of leaving leading audio without video.
-        const inputSeek = Math.max(0, seekOffset - 15);
+        // Near the origin, a TS binary seek for a few seconds can cost many
+        // provider round trips. Read at most 30s forward on the same input.
+        const inputSeek = seekOffset <= 30 ? 0 : Math.max(0, seekOffset - 15);
         return { preInputSeek: inputSeek > 0 ? ['-ss', String(inputSeek)] : [],
             postInputSeek: ['-ss', String(seekOffset - inputSeek)] };
     }
