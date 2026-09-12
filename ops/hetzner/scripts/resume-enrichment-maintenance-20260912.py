@@ -26,9 +26,10 @@ gw,sql,require=r.gw,r.sql,r.require
 ordinary_replace=r.replace_gateway
 
 
-def subtitle_rows(ids=()):
+def subtitle_rows(ids=(),observed=False):
     require(all(r.pilot.UUID.fullmatch(x) for x in ids),'subtitle_identifier_invalid')
     extra=' OR job_id IN ('+','.join(r.fleet.literal(x)+'::uuid' for x in ids)+')' if ids else ''
+    if observed:extra+=' OR created_at IN ('+','.join(r.fleet.literal(x)+'::timestamptz' for x in sorted(OBSERVED_CREATED))+')'
     return json.loads(sql("SELECT coalesce(jsonb_agg(x ORDER BY created_at),'[]'::jsonb) FROM (SELECT job_id::text,"
         "created_at,status,stage,kind,md5(jsonb_build_array(provider_key,item_type,external_id,kind,lang,job_id,created_at)::text) AS identity_hash,"
         "md5(to_jsonb(s)::text) AS row_hash,md5(vtt) AS vtt_hash,length(vtt) AS vtt_chars,segments,audio_sec,source_lang "
@@ -54,7 +55,11 @@ def guard_health(health,processing):
     require(type(busy) is bool and type(queue) is int and queue>=0 and
         type(inference) is int and inference in (0,1) and type(background) is int and
         background==inference and (inference==0 or busy),'non_subtitle_inference_present')
-    require(queue+int(busy)==len(processing) and len(processing)<=2,'subtitle_queue_scope_changed')
+    # transcribeBusy also stays true while the drain loop waits on a deferred
+    # queue. It is not an additional running job in that state.
+    require(len(processing)<=2 and queue<=len(processing) and
+        0<=len(processing)-queue<=int(busy) and inference<=len(processing)-queue and
+        (not busy or len(processing)>0),'subtitle_queue_scope_changed')
     admitted=copy.deepcopy(health)
     admitted.update(transcribeBusy=False,transcribeQueueDepth=0,whisperInferenceActive=0)
     # All original viewer, acquisition, OCR, translation, CPU and runtime checks.
@@ -80,10 +85,11 @@ def maintenance_idle(approval):
 def freeze():
     require(not (ROOT/'subtitle-authorization.private.json').exists(),'subtitle_authorization_already_frozen')
     plan=r.saved('plan.private.json');r.invariant(plan)
-    rows=subtitle_rows();approved_subset(rows,rows)
+    rows=subtitle_rows(observed=True);approved_subset(rows,rows)
     approval={'at':r.stamp(),'jobs':rows,'gatewayId':plan['gatewayBefore']['Id'],
         'scope':'interrupt_only_two_previously_observed_subtitle_jobs','partialVttMustBePreserved':True,
         'planSha256':r.sha((ROOT/'plan.private.json').read_bytes()),
+        'operatorSha256':r.sha(pathlib.Path(__file__).read_bytes()),
         'previousClosureSha256':r.sha((PREVIOUS/'closed.private.json').read_bytes())}
     maintenance_idle(approval);r.save('subtitle-authorization.private.json',approval)
     print(json.dumps({'authorizedJobsBound':len(rows),'partialSegments':[v['segments'] for v in rows],
@@ -131,6 +137,7 @@ def replace_gateway(plan,active,label):
         'maintenance_already_attempted')
     approval=r.saved('subtitle-authorization.private.json')
     require(approval['planSha256']==r.sha((ROOT/'plan.private.json').read_bytes()) and
+        approval['operatorSha256']==r.sha(pathlib.Path(__file__).read_bytes()) and
         approval['previousClosureSha256']==r.sha((PREVIOUS/'closed.private.json').read_bytes()),'maintenance_evidence_changed')
     original=gw.inspect(r.d.SERVICES[0])
     require(original['Id']==approval['gatewayId']==plan['gatewayBefore']['Id'],'maintenance_gateway_changed')

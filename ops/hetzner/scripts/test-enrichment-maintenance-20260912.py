@@ -81,6 +81,11 @@ class MaintenanceTests(unittest.TestCase):
             ('transcribeBusy',False),('transcribeBusy',1),('whisperInferenceActive',True)):
             with self.assertRaises(RuntimeError):self.ns['guard_health']({**health,key:value},jobs())
 
+    def test_busy_drain_with_one_deferred_job_is_not_counted_as_two_jobs(self):
+        health={**baseline_health(),'whisperInferenceActive':0,'backgroundWhisperInferenceActive':0}
+        self.ns['guard_health'](health,jobs()[1:])
+        with self.assertRaises(RuntimeError):self.ns['guard_health'](health,[])
+
     def test_all_original_viewer_acquisition_cpu_and_other_job_guards_remain(self):
         health=baseline_health()
         for key in ('activeSessions','activeStrictLidBrokers','backgroundCpuProcessCount','rawPumpCount',
@@ -119,7 +124,7 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(calls,[])
 
     def test_failed_candidate_restores_original_and_does_not_requeue_jobs(self):
-        events=[];approval={'planSha256':'digest','previousClosureSha256':'digest','gatewayId':'old','jobs':jobs()}
+        events=[];approval={'planSha256':'digest','operatorSha256':'digest','previousClosureSha256':'digest','gatewayId':'old','jobs':jobs()}
         original={'Id':'old'};plan={'gatewayBefore':original,'parentPlan':{},'imageIdentity':'image'}
         with tempfile.TemporaryDirectory() as folder:
             root=pathlib.Path(folder)
@@ -128,6 +133,7 @@ class MaintenanceTests(unittest.TestCase):
             def run(args):events.append(('docker',args[1],args[-1]))
             def cancel(_):events.append('cancel');raise RuntimeError('injected_post_stop_failure')
             ns=functions({'replace_gateway'},{'require':require,'ROOT':root,'PREVIOUS':root,
+                '__file__':str(root/'plan.private.json'),'pathlib':pathlib,
                 'ordinary_replace':lambda *_:events.append('ordinary'),
                 'maintenance_idle':lambda _:events.append('guard'),'cancel_stopped':cancel,
                 'gw':types.SimpleNamespace(inspect=inspect,image_identity=lambda _:'image',run=run,
