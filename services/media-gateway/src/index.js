@@ -13815,7 +13815,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     // header read is retained by the same serialized broker for FFmpeg.
     session.finiteTsIndexPlan = null;
     if (finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
-        && !session.multiAudioHls && !session.exactSubtitleHls && !session.forceFullInputProbe
+        // Frozen plans exist even when disabled (for example not_finite_mkv).
+        // Only active rendition graphs exclude this single-A/V shortcut.
+        && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
+        && !session.forceFullInputProbe
         && tsObserver?.hasCandidate(Number(session.seekOffset))) {
         const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=0-${Math.min(fileSizeBytes, 262144) - 1}` },
             signal: parentSignal || undefined });

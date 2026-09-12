@@ -9,8 +9,8 @@ import sys
 import tarfile
 import time
 
-ROOT = pathlib.Path('/home/adrien/.norva/initial-playback-index-native-20260912-r8')
-PARENT = ROOT.parent/'initial-playback-continuity-20260912/deploy-initial-playback-continuity-20260912.py'
+ROOT = pathlib.Path('/home/adrien/.norva/initial-playback-index-native-20260912-r9')
+PARENT = ROOT.parent/'initial-playback-idr-retry-20260912/retry-idr-deploy.py'
 FILES = {'services/media-gateway/src/'+name for name in
     ('index.js', 'finite-ts-startup.js', 'strict-lid-range-reuse.js', 'finitePlaybackRangeReuse.js', 'finite-ts-seek-index.js', 'finite-ts-landmarks.js', 'video-encoder.js')}
 FILES.update({'tests/media-gateway-strict-lid-broker.test.js', 'tests/finite-ts-seek-index.test.js', 'tests/finite-ts-seek-index-native.test.js', 'tests/fixtures/finite-ts-index-broker.js'})
@@ -22,6 +22,7 @@ def main():
     live = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = live
     spec.loader.exec_module(live)
+    live = live.m
     live.verify()
     gw = live.gw
     health = gw.health()

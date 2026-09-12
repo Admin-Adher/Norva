@@ -95,6 +95,62 @@ test('initial playback prepares a first seek; metadata survives a new process an
     assert.ok(!text.includes('private.invalid') && !text.includes('u/p/') && !text.includes('"v1"'));
     assert.equal(store.status().mediaBytesPersisted, 0);
 });
+
+test('real Gateway preparation admits disabled frozen topologies but rejects active renditions', async () => {
+    const vm = require('node:vm');
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const block = source.slice(source.indexOf('async function prepareFiniteMkvSeekBroker('),
+        source.indexOf('\nfunction applyFiniteMkvSeekBrokerFailure('));
+    const point = { byteOffset: 188, packetOffset: 376, pts: 84 * 90000, dts: 84 * 90000,
+        absoluteSeconds: 87, signature: 'a'.repeat(64), videoPid: 256, audioPid: 257 };
+    for (const scenario of ['absent', 'disabled', 'audio-active', 'subtitle-active', 'full-probe', 'two-audio', 'unproven']) {
+        let drained = false, fetches = 0, brokerOptions;
+        const broker = { inputUrl: 'http://127.0.0.1:12345/finite-mkv-seek/' + 'A'.repeat(43) };
+        const constants = Object.fromEntries([...new Set(block.match(/\b(?:FINITE_[A-Z_]+|INBAND_HEADER_BYTES|PROVIDER_SLOT_RELEASE_DELAY_MS)\b/g))]
+            .map(key => [key, 262144]));
+        const prepare = vm.runInNewContext(`(${block})`, {
+            ...constants, Number,
+            isFiniteMkvVodSession: () => false,
+            finiteTsProfileEligible: () => true,
+            fileSizeBytesForSession: () => 1000000,
+            closePreopenedBoundedMkvInput: async () => {},
+            audioTracksForSession: s => s.codecProfile.audioTracks,
+            finiteTsSeekIndex: { begin: async () => ({
+                hasCandidate: () => true,
+                candidate: () => { assert.equal(drained, true, 'fresh identity window must finish before the index is used'); return scenario === 'unproven' ? null : point; },
+                observe: () => {},
+            }) },
+            providerNodeRouteForSession: () => ({}),
+            alternateProviderNodeTransportRoute: () => ({}),
+            pinnedProxyAgentFactoryForRoute: () => () => ({}),
+            finitePlaybackRangeReuse: { begin: () => ({}) },
+            asRecord: value => value || {},
+            createStrictLidBroker: async options => { brokerOptions = options; return broker; },
+            indexedTsInputUrl,
+            fetch: async (url, options) => {
+                fetches++; assert.equal(url, broker.inputUrl); assert.equal(options.headers.Range, 'bytes=0-262143');
+                return { status: 206, arrayBuffer: async () => { drained = true; } };
+            },
+        });
+        const session = { finiteTsResumeAligned: true, seekOffset: 87, userAgent: 'Norva test',
+            sourceUrl: 'https://private.invalid/file', ownerKey: 'a'.repeat(64),
+            codecProfile: { audioTracks: scenario === 'two-audio' ? [{ index: 1 }, { index: 2 }] : [{ index: 1 }] },
+            forceFullInputProbe: scenario === 'full-probe',
+            ...(scenario === 'absent' ? {} : {
+                multiAudioHls: { enabled: scenario === 'audio-active', reason: 'not_finite_mkv' },
+                exactSubtitleHls: { enabled: scenario === 'subtitle-active', reason: 'no-subtitles' },
+            }) };
+        await prepare(session, new AbortController().signal);
+        assert.equal(typeof brokerOptions.onFiniteWindow, 'function');
+        const eligible = ['absent', 'disabled'].includes(scenario);
+        assert.equal(session.startupTimings.finiteTsIndexUsed, eligible, scenario);
+        assert.equal(fetches, eligible || scenario === 'unproven' ? 1 : 0, scenario);
+        if (eligible) {
+            assert.equal(session.startupTimings.finiteTsIndexPrerollSeconds, 3);
+            assert.match(session.finiteTsIndexPlan.inputUrl, /^subfile,,start,188,/);
+        } else assert.equal(session.finiteTsIndexPlan, null);
+    }
+});
 for (const defect of ['weak', 'changed', 'target', 'size', 'owner', 'source', 'expired', 'corrupt', 'symlink']) {
     test(`persistent navigation rejects ${defect} evidence`, async t => {
         const data = fixture(), store = scoped(t), scope = { ownerKey: 'a'.repeat(64), sourceUrl: 'https://one.invalid/file', fileSizeBytes: data.length };
