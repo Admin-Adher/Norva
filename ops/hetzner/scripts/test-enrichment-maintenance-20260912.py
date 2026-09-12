@@ -154,6 +154,7 @@ class MaintenanceTests(unittest.TestCase):
         self.assertNotIn('expiresEpoch=',SOURCE);self.assertNotIn('alter_crons(',SOURCE)
         self.assertIn("r.ROOT=ROOT;r.pilot.ROOT=ROOT/'pilot';r.__file__=__file__",SOURCE)
         self.assertIn("if not active:return ordinary_replace(plan,active,label)",SOURCE)
+        self.assertIn("AND updated_at>now()-interval '24 hours'",SOURCE)
 
 
 if __name__=='__main__':unittest.main()

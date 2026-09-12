@@ -76,7 +76,10 @@ def maintenance_idle(approval):
         "'selection',(SELECT count(*) FROM public.catalog_selection_audio_jobs WHERE state='running' AND lease_until>now()),"
         "'account',(SELECT count(*) FROM public.provider_account_language_validation_leases WHERE expires_at>now()),"
         "'exactFile',(SELECT count(*) FROM public.provider_exact_file_probe_leases WHERE expires_at>now()),"
-        "'storyboards',(SELECT count(*) FROM public.catalog_storyboards WHERE status='processing'));"))
+        # Historical storyboard rows can remain processing after old restarts.
+        # Current queue entries heartbeat; keep a conservative 24-hour window.
+        "'storyboards',(SELECT count(*) FROM public.catalog_storyboards WHERE status='processing' "
+        "AND updated_at>now()-interval '24 hours'));"))
     require(set(state)=={'playback','jobs','intake','selection','account','exactFile','storyboards'} and
         all(type(v) is int and v==0 for v in state.values()),'other_work_active')
     return rows
