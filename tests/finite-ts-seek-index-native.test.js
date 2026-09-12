@@ -98,7 +98,7 @@ test('native initial playback prepares the first exact indexed resume, with rest
     await first.close(); await observer.close(); assert.equal(active, 0);
     assert.ok(observer.hasCandidate(87), `initial seek candidate ${JSON.stringify(store.status())}`);
     const results = [];
-    for (const encoder of ['software', ...(process.env.NORVA_TS_INDEX_VAAPI === '1' ? ['vaapi'] : [])]) for (const indexed of [false, true]) {
+    for (const encoder of ['software', ...(process.env.NORVA_TS_INDEX_VAAPI === '1' ? ['vaapi'] : [])]) for (const seekOffset of [41, 87]) for (const indexed of [false, true]) {
         const config = resolveVideoEncoderConfig({ MEDIA_GATEWAY_VIDEO_ENCODER: encoder });
         const reloaded = new FiniteTsSeekIndex({ root: indexRoot });
         // A/B never borrows the other arm's media windows or landmarks. Both
@@ -107,14 +107,16 @@ test('native initial playback prepares the first exact indexed resume, with rest
         t.after(() => broker.close()); count = 0; peak = 0;
         const at = Date.now(); let point, url = broker.inputUrl;
         if (indexed) {
-            assert.equal(next.candidate(87), null);
+            assert.equal(next.candidate(seekOffset), null);
             const fresh = await fetch(url, { headers: { Range: 'bytes=0-262143' } });
-            await fresh.arrayBuffer(); point = next.candidate(87); assert.ok(point);
+            await fresh.arrayBuffer(); point = next.candidate(seekOffset); assert.ok(point);
+            if (seekOffset === 41) assert.ok(point.absoluteSeconds - point.pts / 90000 < 6,
+                'the intact IDR coinciding with the 36s audio counter reset remains usable');
             url = indexedTsInputUrl(url, point, size); assert.ok(url);
         }
         const output = path.join(root, `${indexed}.ts`);
         await run(['-v','error','-y', ...videoEncoderInputArgs(config, true), '-seekable','1','-skip_estimate_duration_from_pts','1','-analyzeduration','500000','-probesize','524288',
-            ...(indexed ? ['-copyts','-protocol_whitelist','subfile,http,tcp'] : ['-ss','72']),
+            ...(indexed ? ['-copyts','-protocol_whitelist','subfile,http,tcp'] : ['-ss',String(seekOffset - 15)]),
             '-i',url,'-ss', indexed ? String(point.absoluteSeconds) : '15','-t','2','-map','0:v:0','-map','0:a:0',
             ...videoEncoderOutputArgs(config, { forceAligned: true, targetSeconds: 2 }), '-threads','1','-c:a','aac','-f','mpegts',output]);
         const elapsedMs = Date.now() - at;
@@ -122,7 +124,7 @@ test('native initial playback prepares the first exact indexed resume, with rest
         const decoded = await run(['-v','error','-i',output,'-t','0.48','-map','0:v:0','-map','0:a:0','-threads','1','-f','framehash','-']);
         const video = decoded.split('\n').filter(l => /^0,/.test(l)).map(l => l.split(',').at(-1));
         const audio = decoded.split('\n').filter(l => /^1,/.test(l)).map(l => l.split(',').at(-1));
-        results.push({ encoder, indexed, elapsedMs, requests: count, peak, video, audio, reusedBytes: broker.resumeRangeReusedBytes,
+        results.push({ encoder, seekOffset, indexed, elapsedMs, requests: count, peak, video, audio, reusedBytes: broker.resumeRangeReusedBytes,
             preroll: point ? point.absoluteSeconds - point.pts / 90000 : 15 });
         assert.equal(active, 0); assert.equal(peak, 1);
     }

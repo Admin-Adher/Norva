@@ -93,14 +93,16 @@ class TsLandmarks {
                 // Some concatenated HLS VOD reset ES counters to zero without
                 // resetting clocks. Accept only a complete new PES, an exact
                 // zero reset and a tightly continuous A/V timeline. Discard the
-                // interrupted PES and learn no point until two clean seconds.
+                // interrupted VIDEO PES only: an audio counter must not erase
+                // an intact IDR. The index consumer requires two clean seconds
+                // of preroll after the independently decodable video point.
                 if (cc !== 0 || !clock || before === null || clock.dts <= before
                     || clock.dts - before > (video ? 9000 : 90000)
                     || (!video && (this.lastDts === null || Math.abs(clock.dts - this.lastDts) > 90000))) {
                     this.invalid(); return;
                 }
-                this.pes = null;
-                this.cleanAfterPts = Math.max(this.cleanAfterPts || 0, clock.pts + 180000);
+                if (video) this.pes = null;
+                this.cleanAfterPts = Math.max(this.cleanAfterPts || 0, clock.pts);
             }
             this.cc.set(pid, cc);
         }

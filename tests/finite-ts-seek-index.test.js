@@ -70,7 +70,11 @@ test('only clock-continuous zero counter resets at complete PES boundaries retai
             b[3] = (b[3] & 240) | (((b[3] & 15) - shift) & 15); frame++;
         }
         new TsLandmarks({ onPoint: p => points.push(p), onInvalid: () => invalid.push(true) }).push(0, data);
-        if (defect === null) { assert.equal(invalid.length, 0); assert.ok(points.some(p => p.pts >= 126000 + 90 * 3000)); }
+        if (defect === null) {
+            assert.equal(invalid.length, 0);
+            assert.ok(points.some(p => p.pts === 126000 + 36 * 3000), 'a complete post-reset IDR remains independently usable');
+            assert.ok(points.some(p => p.pts >= 126000 + 90 * 3000));
+        }
         else assert.ok(invalid.length > 0, defect);
     }
 });
