@@ -2159,7 +2159,11 @@ async function createPlaybackSessionCore(
     ? recordOrEmpty(resolved.containerObservation)
     : {};
   requestedPlaybackHint = bindServerMkvFastStartProof(
-    mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint),
+    bindObservedContainerPlaybackHint(
+      mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint),
+      itemType === "movie" ? resolved.playbackHint : {},
+      resolvedContainerObservation,
+    ),
     // Exact-episode resolution currently carries the caller hint forward and
     // exposes no persisted episode profile. Do not mistake that echo for
     // server authority; episode fast-start remains fail-closed until its proof
@@ -7767,6 +7771,27 @@ function normalizeGatewaySourceContainerMismatch(
       fileSizeBytes,
     },
   };
+}
+
+function bindObservedContainerPlaybackHint(
+  mergedValue: unknown,
+  ownedValue: unknown,
+  observationValue: unknown,
+) {
+  const merged = recordOrEmpty(mergedValue);
+  const observation = recordOrEmpty(observationValue);
+  const container = canonicalVodContainer(observation.container);
+  if (!container || observation.evidenceKind !== containerEvidenceKind(container)
+      || !/^[0-9a-f]{64}$/.test(stringOr(observation.prefixSha256, ""))) return merged;
+  const owned = recordOrEmpty(ownedValue);
+  // An already-open tab can still send MKV after the server proved MPEG-TS.
+  // Restore the exact owned profile, never the caller's stale/forged profile,
+  // while retaining stream selections, seek position and explicit mode.
+  return playbackHintForObservedContainer({
+    ...merged,
+    codec_profile: undefined,
+    codecProfile: firstUsefulCodecProfile(owned.codecProfile, owned.codec_profile),
+  }, container);
 }
 
 function playbackHintForObservedContainer(value: unknown, observedContainer: string) {

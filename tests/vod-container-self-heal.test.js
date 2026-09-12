@@ -30,7 +30,7 @@ function mismatchNormalizer() {
   const source = sourceBetween(
     edge,
     'function exactJsonKeys(',
-    '\nfunction playbackHintForObservedContainer(',
+    '\nfunction bindObservedContainerPlaybackHint(',
   );
   const executable = stripTypeScriptTypes(source, { mode: 'strip' });
   return vm.runInNewContext(
@@ -66,6 +66,36 @@ function validMismatch() {
     },
   };
 }
+
+test('a server-observed container overrides a stale open-tab label without trusting client codec evidence',()=>{
+  const source=sourceBetween(read(EDGE_PATH),'function bindObservedContainerPlaybackHint(',
+    '\nasync function sourceContainerAuthorityFromObservation(');
+  const normalize=mismatchNormalizer();
+  const recordOrEmpty=value=>value&&typeof value==='object'?value:{};
+  const bind=vm.runInNewContext(`(()=>{${stripTypeScriptTypes(source,{mode:'strip'})};return bindObservedContainerPlaybackHint;})()`,{
+    recordOrEmpty,canonicalVodContainer:value=>['ts','mkv','mp4'].includes(value)?value:null,
+    containerEvidenceKind:value=>({ts:'mpeg-ts-sync-v1',mkv:'ebml-v1',mp4:'iso-bmff-ftyp-v1'})[value],
+    stringOr:(v,f)=>typeof v==='string'?v:f,stringOrNull:v=>typeof v==='string'&&v?v:null,
+    firstUsefulCodecProfile:(...values)=>values.find(v=>v&&Object.keys(v).length)||{},
+    compactRecord:v=>Object.fromEntries(Object.entries(v).filter(([,v])=>v!==undefined&&v!==null)),
+    stripMkvH264FastStartProof:v=>Object.fromEntries(Object.entries(v).filter(([k])=>k!=='mkvH264FastStartProof')),
+  });
+  const stale={container:'mkv',codecProfile:{container:'mkv',videoCodec:'hevc',mkvH264FastStartProof:'client'},
+    codec_profile:{container:'mkv'},seekOffset:17,audioStreamIndex:1,subtitleStreamIndex:2,gatewayMode:'remux'};
+  const profile={container:'ts',probeSource:'gateway_probe',probedAt:'2026-09-12T00:00:00Z',videoCodec:'h264',audioTracks:[{index:1,codec:'aac'}]};
+  const observation={container:'ts',evidenceKind:'mpeg-ts-sync-v1',prefixSha256:'a'.repeat(64)};
+  const result=bind(stale,{codecProfile:profile},observation);
+  assert.equal(result.container,'ts');assert.equal(result.containerExplicit,true);
+  assert.equal(result.codecProfile.videoCodec,'h264');assert.equal(result.codecProfile.mkvH264FastStartProof,undefined);
+  assert.equal(result.audioStreamIndex,1);assert.equal(result.subtitleStreamIndex,2);assert.equal(result.seekOffset,17);assert.equal(result.gatewayMode,'remux');
+  assert.equal(stale.container,'mkv');assert.equal(profile.container,'ts');
+  assert.equal(JSON.stringify(bind(stale,{},observation).codecProfile),'{"container":"ts"}');
+  assert.equal(bind(stale,{codecProfile:profile},{}),stale);
+  assert.equal(bind(stale,{codecProfile:profile},{...observation,prefixSha256:'invalid'}),stale);
+  assert.equal(bind(stale,{codecProfile:profile},{...observation,evidenceKind:'ebml-v1'}),stale);
+  assert.ok(normalize);
+  assert.match(read(EDGE_PATH),/bindServerMkvFastStartProof\(\s*bindObservedContainerPlaybackHint\(/);
+});
 
 function containerUrlRewriter() {
   const edge = read(EDGE_PATH);
