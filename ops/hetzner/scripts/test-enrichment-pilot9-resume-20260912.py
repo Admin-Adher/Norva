@@ -2,6 +2,7 @@
 import ast
 import copy
 import pathlib
+import tempfile
 import types
 import unittest
 
@@ -104,6 +105,34 @@ class ResumeTests(unittest.TestCase):
         self.assertIn("replace_gateway(plan,False,'completed')",body)
         self.assertIn('prior.alter_crons(plan,False)',body)
         self.assertLess(body.index('d.idle()'),body.index('replace_gateway('))
+
+    def test_predeployment_closure_restores_crons_while_unrelated_inference_continues(self):
+        events=[]
+        plan={'expiresEpoch':2000,'rows':[{}],'parentPlan':{}}
+        with tempfile.TemporaryDirectory() as directory:
+            ns=self.functions({'finish'},{'ROOT':pathlib.Path(directory),'require':require,
+                'saved':lambda name:plan if name=='plan.private.json' else {'launchDeadline':1500},
+                'invariant':lambda _:events.append('invariant'),'time':types.SimpleNamespace(time=lambda:1000),
+                'pilot':types.SimpleNamespace(ROOT=pathlib.Path(directory),private=lambda _:{'runtimeStatus':'stopped'}),
+                'process_active':lambda *_:False,'d':types.SimpleNamespace(SERVICES=['gateway'],FLAGS=['flag'],
+                    idle=lambda:(_ for _ in ()).throw(AssertionError('must not await unrelated inference')),
+                    verify_service=lambda *_:events.append('unchanged_gateway_verified')),
+                'sql':lambda *_,**__:events.append('flags_disabled'),'fleet':types.SimpleNamespace(literal=lambda k:"'"+k+"'"),
+                'prior':types.SimpleNamespace(alter_crons=lambda _,pause:events.append(('crons_paused',pause))),
+                'save':lambda *_:events.append('closed_receipt'),'stamp':lambda:'now','json':__import__('json'),
+                'print':lambda *_args,**_kwargs:None})
+            self.assertTrue(ns['finish']())
+            self.assertIn('unchanged_gateway_verified',events)
+            self.assertIn(('crons_paused',False),events)
+            self.assertIn('closed_receipt',events)
+
+    def test_predeployment_abort_cannot_interrupt_or_overwrite_a_started_release(self):
+        fn=next(n for n in TREE.body if isinstance(n,ast.FunctionDef) and n.name=='abort_before_deploy')
+        body=ast.get_source_segment(SOURCE,fn)
+        self.assertIn('before-resume-intent.private.json',body)
+        self.assertIn('operator.private.json',body)
+        self.assertIn("plan['gatewayBefore']['Id']",body)
+        self.assertNotIn('kill(',body);self.assertNotIn('replace_gateway(',body)
 
 
 if __name__=='__main__':unittest.main()

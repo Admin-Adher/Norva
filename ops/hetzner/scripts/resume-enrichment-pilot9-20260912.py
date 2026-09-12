@@ -236,8 +236,8 @@ def finish():
     missing=(ROOT/'operator.private.json').exists() and not process_active('operator','run')
     if not (expired or stopped or missing or launch_failed):return False
     require(not process_active('operator','run'),'waiting_for_subset_operator_exit')
-    d.idle()
     if (ROOT/'deployed.private.json').exists():
+        d.idle()
         buffer=gw.health().get('languageCaptureBuffer') or {}
         require(all(buffer.get(k)==0 for k in ('entries','bytes','reservations','computations')),'waiting_for_private_audio_expiry')
         require({p.name for p in (ROOT/'audio-private').iterdir()}<={'owner.lock'},'private_audio_cleanup_incomplete')
@@ -249,6 +249,21 @@ def finish():
         'processedSubset':len(plan['rows']),'runtimeStatus':state.get('runtimeStatus'),'stoppedReason':state.get('stoppedReason')})
     print(json.dumps({'closed':True,'oldIntakeCronsRestored':True,'audioBytes':0,'quarantinesPreserved':True}),flush=True)
     return True
+
+
+def abort_before_deploy():
+    """Restore our scheduling pause without interrupting unrelated transcription."""
+    plan=saved('plan.private.json');invariant(plan)
+    require(not (ROOT/'deployed.private.json').exists() and
+        not (ROOT/'before-resume-intent.private.json').exists(),'deployment_already_started')
+    require(not (ROOT/'operator.private.json').exists(),'subset_operator_already_started')
+    require(gw.inspect(d.SERVICES[0])['Id']==plan['gatewayBefore']['Id'],'gateway_before_changed')
+    d.verify_service(d.SERVICES[0],plan['parentPlan'])
+    state=pilot.private(pilot.ROOT/'state.private.json')
+    state.update(runtimeStatus='stopped',stoppedReason='preexisting_transcription_requires_maintenance_window',updatedAt=stamp())
+    pilot.save(pilot.ROOT/'state.private.json',state)
+    save('predeployment-abort.private.json',{'at':stamp(),'providerRequests':0,'existingTranscriptionUntouched':True})
+    finish()
 
 
 def watch():
@@ -274,7 +289,7 @@ if __name__=='__main__':
     try:
         phase=sys.argv[1]
         if phase=='stage':stage(sys.argv[2])
-        elif phase in ('begin','deploy','launch','watch','status','finish'):globals()[phase]()
+        elif phase in ('begin','deploy','launch','watch','status','finish','abort_before_deploy'):globals()[phase]()
         elif phase=='run':configure_runner().run()
         else:raise RuntimeError('unknown_phase')
     except Exception as error:
