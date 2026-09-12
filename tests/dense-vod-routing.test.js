@@ -431,8 +431,9 @@ function memoryStorage(seed = {}) {
     };
 }
 
-function loadCloudApi({ native = false, engine = true, createSessionError = null } = {}) {
+function loadCloudApi({ native = false, engine = true, createSessionError = null, sessionResponse = null } = {}) {
     const calls = [];
+    const callOptions = [];
     const localStorage = memoryStorage({
         'norva-cloud-session': JSON.stringify({
             access_token: 'test-token',
@@ -440,9 +441,11 @@ function loadCloudApi({ native = false, engine = true, createSessionError = null
         })
     });
     const sessionStorage = memoryStorage();
-    const createSession = async (request) => {
+    const createSession = async (request, options) => {
         calls.push(request);
+        callOptions.push(options);
         if (createSessionError) throw createSessionError;
+        if (sessionResponse) return sessionResponse;
         const url = request.mode === 'transcode'
             ? 'https://gateway.test/sessions/test/playlist.m3u8'
             : request.mode === 'direct'
@@ -502,7 +505,7 @@ function loadCloudApi({ native = false, engine = true, createSessionError = null
     };
     vm.createContext(sandbox);
     vm.runInContext(read('public/js/api.js'), sandbox, { filename: 'api.js' });
-    return { API: window.API, calls };
+    return { API: window.API, calls, callOptions };
 }
 
 test('dense browser VOD without exact codecs uses one full Gateway conversion lane', async () => {
@@ -806,6 +809,61 @@ test('unknown-codec MOV remains on the bounded engine because it is not browser-
     assert.strictEqual(result.mode, 'engine');
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true);
+});
+
+test('server-promoted engine request hands the one ready HLS session to the Gateway player', async () => {
+    const sourceId = '00000000-0000-4000-8000-000000000001';
+    const url = 'https://gateway.test/sessions/promoted/playlist.m3u8';
+    const startupPolicy = { eligible: true, targetBufferSeconds: 12 };
+    const response = {
+        session: { id: 'promoted-session' },
+        playback: { url, mode: 'transcode', status: 'ready', startupPolicy }
+    };
+    const { API, calls, callOptions } = loadCloudApi({ sessionResponse: response });
+    const controller = new AbortController();
+    const result = await API.proxy.xtream.getStreamUrl(sourceId, 'observed-ts', 'movie', 'ts', {
+        seekOffset: 46, audioStreamIndex: 1, subtitleStreamIndex: 2
+    }, { signal: controller.signal });
+    assert.strictEqual(calls.length, 1, 'promotion must reuse the server session');
+    assert.strictEqual(callOptions[0].signal, controller.signal, 'cancellation reaches the original session');
+    assert.strictEqual(calls[0].mode, 'relay');
+    assert.strictEqual(calls[0].enginePipe, true, 'exercise the actual engine return branch');
+    assert.strictEqual(calls[0].seekOffset, 46);
+    assert.strictEqual(calls[0].playbackHint.audioStreamIndex, 1);
+    assert.strictEqual(calls[0].playbackHint.subtitleStreamIndex, 2);
+    assert.strictEqual(result.mode, 'transcode', 'an HLS manifest is not a raw byte-range input');
+    assert.strictEqual(result.url, url);
+    assert.strictEqual(result.streamUrl, url);
+    assert.strictEqual(result.playbackUrl, url);
+    assert.strictEqual(result.playback, response.playback);
+    assert.strictEqual(result.playback.startupPolicy, startupPolicy);
+    assert.strictEqual(result.sessionId, 'promoted-session');
+    assert.strictEqual(result.cloudSourceId, sourceId);
+});
+
+test('unpromoted raw engine session remains client-decoded with no duplicate request', async () => {
+    const response = {
+        session: { id: 'raw-session' },
+        playback: { url: 'https://gateway.test/raw/test', mode: 'relay' }
+    };
+    const { API, calls } = loadCloudApi({ sessionResponse: response });
+    const result = await API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001', 'raw-mov', 'movie', 'mov', {}
+    );
+    assert.strictEqual(result.mode, 'engine');
+    assert.strictEqual(result.url, response.playback.url);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].enginePipe, true);
+});
+
+test('failed engine promotion stays terminal and never requests a second provider lane', async () => {
+    const cancelled = Object.assign(new Error('cancelled'), { name: 'AbortError' });
+    const { API, calls } = loadCloudApi({ createSessionError: cancelled });
+    await assert.rejects(API.proxy.xtream.getStreamUrl(
+        '00000000-0000-4000-8000-000000000001', 'cancelled-ts', 'movie', 'ts', {}
+    ), error => error === cancelled);
+    assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].enginePipe, true);
 });
 

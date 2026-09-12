@@ -2302,9 +2302,11 @@ const CloudAdapter = (() => {
                     ...(userAgent ? { userAgent } : {})
                 };
                 // Engine mode: fetch a RAW pass-through URL (byte-range + CORS)
-                // via the relay and hand it to the in-browser engine. No gateway
-                // transcode session is created, so there is no Railway dependency
-                // and Resume seeks straight to the saved offset client-side.
+                // via the relay and hand it to the in-browser engine.
+                // Normally Resume seeks client-side without a transcode session.
+                // The server may instead promote an observed container to HLS;
+                // honor that single session rather than feed its manifest to the
+                // byte-range engine or open another provider connection.
                 if (mode === 'engine') {
                     const enginePayload = await cloudPlaybackApi().createSession({
                         ...baseSession,
@@ -2325,8 +2327,9 @@ const CloudAdapter = (() => {
                         streamUrl: engineUrl,
                         playbackUrl: engineUrl,
                         cloud: true,
-                        mode: 'engine',
-                        sessionId: enginePayload.session?.id
+                        mode: enginePayload.playback?.mode === 'transcode' ? 'transcode' : 'engine',
+                        sessionId: enginePayload.session?.id,
+                        cloudSourceId
                     };
                 }
                 let payload;
