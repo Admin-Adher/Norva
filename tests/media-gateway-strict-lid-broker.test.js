@@ -21,7 +21,7 @@ function brokerHarness(diagnosticLogs = null) {
   assert.ok(start >= 0 && end > start, 'strict LID broker source block must remain extractable');
   const source = gatewaySource.slice(start, end);
   return vm.runInNewContext(
-    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256, strictLidBrokers, strictLidProviderFailureObservation }; })()`,
+    `(() => { ${source}; return { parseStrictLidRange, createStrictLidBroker, createStrictLidRangeDeadline, strictLidEffectiveUrlIdentitySha256, strictLidBrokers, strictLidProviderFailureObservation, strictLidProviderRequest }; })()`,
     {
       AbortController,
       Buffer,
@@ -105,6 +105,170 @@ class FakeClock {
   }
 }
 
+test('finite seek closes during initial cooldown without opening another provider request', async t => {
+  let calls = 0;
+  const data = Buffer.alloc(64, 7);
+  const provider = http.createServer((req, res) => { calls++; sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: 64,
+    dispatcher: null, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8, completedReleaseDelayMs: 150 });
+  t.after(() => broker.close());
+  await (await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-7' } })).arrayBuffer();
+  const request = http.get(broker.inputUrl, { agent: false, headers: { Range: 'bytes=40-47' } });
+  request.on('error', () => {});
+  while (broker.maxQueuedRequests < 1) await new Promise(r => setTimeout(r, 2));
+  await new Promise(r => setTimeout(r, 20)); request.destroy();
+  await new Promise(r => setTimeout(r, 180));
+  assert.equal(calls, 1); assert.equal(broker.avoidedProviderOpens, 1);
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
+
+test('finite seek closes during retry cooldown before the next provider GET', async t => {
+  let calls = 0, firstSeen;
+  const first = new Promise(resolve => { firstSeen = resolve; });
+  const provider = http.createServer((_req, res) => { calls++; res.writeHead(503); res.end(); firstSeen(); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: 64,
+    dispatcher: null, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8,
+    releaseDelayMs: 0, finiteRetryDelaysMs: [150], finiteNoProgressRetryLimit: 1 });
+  t.after(() => broker.close());
+  const request = http.get(broker.inputUrl, { agent: false, headers: { Range: 'bytes=0-7' } });
+  request.on('error', () => {}); await first;
+  await new Promise(r => setTimeout(r, 20)); request.destroy();
+  await new Promise(r => setTimeout(r, 180));
+  assert.equal(calls, 1); assert.equal(broker.avoidedProviderOpens, 1);
+  assert.equal(broker.terminalError, null, 'an abandoned request is not a new terminal provider failure');
+});
+
+test('finite seek rechecks demand after asynchronous dispatcher disposal', async t => {
+  let now = 1, calls = 0, generation = 0, retire, retiring;
+  const entered = new Promise(resolve => { retiring = resolve; });
+  const gate = new Promise(resolve => { retire = resolve; });
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl: 'https://fixture.invalid/file',
+    fileSizeBytes: 64, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8, releaseDelayMs: 0,
+    now: () => now, dispatcherMaxAgeMs: 5,
+    dispatcherFactory: () => { const current = ++generation; return { async destroy() {
+      if (current === 1) { retiring(); await gate; }
+    } }; }, fetchImpl: async () => { calls++; throw Error('should not open'); } });
+  t.after(async () => { retire(); await broker.close(); }); now = 10;
+  const request = http.get(broker.inputUrl, { agent: false, headers: { Range: 'bytes=0-7' } });
+  request.on('error', () => {}); await entered; request.destroy();
+  await new Promise(r => setTimeout(r, 20)); retire();
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(calls, 0); assert.equal(broker.avoidedProviderOpens, 1);
+  assert.equal(broker.interruptedProviderFetches, 0);
+  assert.equal(broker.windowTrace[0].outcome, 'avoided-closed');
+});
+
+test('a newer cue does not truncate a still-live primed header reader', async t => {
+  const data = Buffer.from(Array.from({ length: 64 }, (_, i) => i));
+  let release, firstSeen, active = 0, peak = 0;
+  const gate = new Promise(r => { release = r; }), entered = new Promise(r => { firstSeen = r; });
+  const provider = http.createServer(async (req, res) => {
+    active++; peak = Math.max(peak, active); let done = false;
+    const end = () => { if (!done) { done = true; active--; } }; res.once('finish', end); res.once('close', end);
+    if (req.headers.range === 'bytes=0-1') { firstSeen(); await gate; }
+    sendExactRange(req, res, data);
+  });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes:64, dispatcher:null,
+    pathPrefix:'finite-mkv-seek', finiteWarmupWindowBytes:2, finiteWarmupCueGraceMs:30,
+    finiteWindowBytes:8, finiteSequentialWindowBytes:24, releaseDelayMs:0 });
+  t.after(async () => { release(); await broker.close(); });
+  const head = fetch(broker.inputUrl, { headers:{Range:'bytes=0-39'} }).then(r => r.arrayBuffer()); await entered;
+  const cue = fetch(broker.inputUrl, { headers:{Range:'bytes=62-63'} }).then(r => r.arrayBuffer());
+  while (broker.maxQueuedRequests < 2) await new Promise(r => setTimeout(r, 2));
+  release();
+  assert.deepEqual(Buffer.from(await head), data.subarray(0,40));
+  assert.deepEqual(Buffer.from(await cue), data.subarray(62)); assert.equal(peak,1);
+});
+
+for (const defect of ['expired', 'busy', 'changed', 'ignored', 'target']) test(`finite final URL reuse fails closed on ${defect} without resolving again`, async t => {
+  let entries = 0, assets = 0;
+  const data = Buffer.alloc(64, 7);
+  const provider = http.createServer((req, res) => {
+    if (req.url === '/entry') { entries++; res.writeHead(302, { Location:'/asset?ticket=private' }); return res.end(); }
+    assets++;
+    if (assets === 2) {
+      const status = { expired:403, busy:458, ignored:200, target:302 }[defect];
+      if (status) { res.writeHead(status, defect === 'target' ? { Location:'/different-file' } : {}); return res.end(); }
+    }
+    sendExactRange(req,res,data,{ etag:defect === 'changed' && assets > 1 ? '"v2"' : '"v1"' });
+  });
+  const origin = new URL(await listen(provider)).origin; t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl:origin+'/entry',fileSizeBytes:64,
+    dispatcher:null,pathPrefix:'finite-mkv-seek',finiteWindowBytes:8,releaseDelayMs:0 }); t.after(()=>broker.close());
+  await (await fetch(broker.inputUrl,{headers:{Range:'bytes=0-7'}})).arrayBuffer();
+  const response = await fetch(broker.inputUrl,{headers:{Range:'bytes=40-47'}});
+  assert.notEqual(response.status,206); await response.arrayBuffer();
+  assert.equal(broker.terminalError.code, { expired:'PROVIDER_REQUEST_FAILED', busy:'PROVIDER_BUSY',
+    changed:'VOD_CHANGED', ignored:'RANGE_UNSUPPORTED', target:'VOD_CHANGED' }[defect]);
+  const count = assets;
+  await (await fetch(broker.inputUrl,{headers:{Range:'bytes=50-57'}})).arrayBuffer();
+  assert.equal(entries,1); assert.equal(assets,count);
+  assert.doesNotMatch(JSON.stringify(broker.windowTrace),/ticket|private|\/asset|https?:/);
+});
+
+test('redirect target policy runs before I/O and origin credentials are stripped across hosts', async t => {
+  const observed = [];
+  const destination = http.createServer((req,res)=>{ observed.push(req.headers); res.writeHead(403); res.end(); });
+  const dest = await listen(destination); t.after(()=>closeServer(destination));
+  const source = http.createServer((_req,res)=>{ res.writeHead(302,{Location:dest+'/asset'}); res.end(); });
+  const origin = await listen(source); t.after(()=>closeServer(source));
+  const { strictLidProviderRequest } = brokerHarness();
+  const result = await strictLidProviderRequest(origin, { headers:{ Authorization:'secret',Cookie:'secret',
+    'Proxy-Authorization':'secret',Range:'bytes=0-7'}, assertProviderTarget:url=>assert.ok(url.startsWith(origin)||url.startsWith(dest)) });
+  assert.equal(result.redirects,1); assert.equal(observed.length,1);
+  for(const name of ['authorization','cookie','proxy-authorization']) assert.equal(observed[0][name],undefined);
+  assert.equal(observed[0].range,'bytes=0-7');
+  await assert.rejects(strictLidProviderRequest(origin,{assertProviderTarget:url=>{ if(url.startsWith(dest))throw Error('target denied'); }}),/target denied/);
+  assert.equal(observed.length,1,'denied destination was never opened');
+});
+
+test('finite TS repeat broker revalidates current data before using private sparse fragments', async t => {
+  const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
+  const cache = new FinitePlaybackRangeReuse(); const data=Buffer.from(Array.from({length:128},(_,i)=>i));
+  let calls=0, etag='"v1"', status=206;
+  const provider=http.createServer((req,res)=>{calls++; if(status!==206){res.writeHead(status);res.end();return;}sendExactRange(req,res,data,{etag});});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const run=async()=>{
+    const before=calls;
+    const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:128,dispatcher:null,
+      pathPrefix:'finite-mkv-seek',finiteWindowBytes:8,finiteWarmupWindowBytes:2,releaseDelayMs:0,
+      finiteResumeRanges:cache.begin({ownerKey:'a'.repeat(64),sourceUrl,fileSizeBytes:128})});
+    try{
+      for(const [from,to] of [[0,1],[120,127],[32,39]]){
+        const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=${from}-${to}`}});
+        if(status!==206){assert.notEqual(response.status,206);await response.arrayBuffer();return {calls:calls-before,reused:broker.resumeRangeReusedBytes};}
+        assert.equal(response.status,206);assert.deepEqual(Buffer.from(await response.arrayBuffer()),data.subarray(from,to+1));
+      }
+      return {calls:calls-before,reused:broker.resumeRangeReusedBytes};
+    }finally{await broker.close();}
+  };
+  assert.deepEqual(await run(),{calls:3,reused:0});
+  assert.deepEqual(await run(),{calls:1,reused:16});
+  etag='"v2"';assert.deepEqual(await run(),{calls:3,reused:0},'stale cache is ignored with no forced representation');
+  await run();status=403;assert.deepEqual(await run(),{calls:1,reused:0},'cache never bypasses current provider refusal');
+});
+
+test('sparse resume clips a missing provider range BEFORE opening it and preserves a continuous local response', async t => {
+  const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
+  const cache=new FinitePlaybackRangeReuse(),data=Buffer.from(Array.from({length:128},(_,i)=>i)),calls=[];
+  const provider=http.createServer((req,res)=>{calls.push(req.headers.range);sendExactRange(req,res,data,{etag:'"v1"'});});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const options={sourceUrl,fileSizeBytes:128,dispatcher:null,pathPrefix:'finite-mkv-seek',finiteWindowBytes:64,
+    finiteWarmupWindowBytes:2,finiteCacheBytes:128,releaseDelayMs:0};
+  const make=()=>brokerHarness().createStrictLidBroker({...options,
+    finiteResumeRanges:cache.begin({ownerKey:'a'.repeat(64),sourceUrl,fileSizeBytes:128})});
+  const seed=await make();
+  try { await (await fetch(seed.inputUrl,{headers:{Range:'bytes=32-39'}})).arrayBuffer(); } finally { await seed.close(); }
+  calls.length=0;const broker=await make();t.after(()=>broker.close());
+  const response=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-127'}});
+  assert.equal(response.status,206);assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+  assert.ok(calls.includes('bytes=2-31'));assert.ok(!calls.some(r=>r==='bytes=2-63'));
+  assert.equal(broker.resumeRangeReusedBytes,8);assert.equal(broker.terminalError,null);
+});
+
 test('native finite TS far seek: serialized broker preserves decoded media without provider overlap',
   { skip: process.env.NORVA_TS_BROKER_NATIVE !== '1', timeout: 180_000 }, async () => {
   const { spawn } = require('node:child_process');
@@ -146,8 +310,10 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
     });
     const url = await listen(provider);
     const results = [];
-    for (const {windowMiB,lookbehindBytes} of [0, 1, 4, 8].map(windowMiB=>({windowMiB,lookbehindBytes:0}))
-      .concat([{windowMiB:1,lookbehindBytes:256*1024}])) {
+    const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
+    const resumeCache = new FinitePlaybackRangeReuse();
+    for (const {windowMiB,lookbehindBytes,reuse} of [0, 1, 4, 8].map(windowMiB=>({windowMiB,lookbehindBytes:0}))
+      .concat(['cold','warm'].map(reuse => ({windowMiB:1,lookbehindBytes:256*1024,reuse})))) {
       const buffered = windowMiB > 0;
       requests = 0; peak = 0; bytes = 0;
       if (buffered) broker = await brokerHarness().createStrictLidBroker({
@@ -158,6 +324,7 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
         finiteAbandonedDrainMs: lookbehindBytes ? 1500 : 0,
         finiteWarmupCueGraceMs: 0, finiteSequentialWindowBytes: 8*1024*1024,
         finiteCacheBytes: 64*1024*1024, finiteResumePrefixCandidate: null, onFiniteResumePrefix: null,
+        finiteResumeRanges: reuse ? resumeCache.begin({ownerKey:'a'.repeat(64),sourceUrl:url,fileSizeBytes:size}) : null,
         completedReleaseDelayMs: 0, supersededReleaseDelayMs: 100,
       });
       const output = path.join(dir, `${buffered}.ts`), started = Date.now();
@@ -166,13 +333,14 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
         '-i', buffered ? broker.inputUrl : url, '-ss','15','-t','8','-map','0:v:0','-map','0:a:0',
         '-c:v','libx264','-threads','1','-preset','ultrafast','-g','50','-c:a','aac','-f','mpegts',output]);
       const elapsedMs = Date.now() - started;
+      const reusedBytes = broker?.resumeRangeReusedBytes || 0;
       if (broker) { await broker.close(); broker = null; }
       const hashes = await run(['-v','error','-i',output,'-map','0:v:0','-frames:v','12','-f','framemd5','-']);
       const audio = await run(['-v','error','-i',output,'-map','0:a:0','-t','1','-f','md5','-']);
-      const result = { buffered, windowMiB, lookbehindBytes, elapsedMs, requests, peak, bytes,
+      const result = { buffered, windowMiB, lookbehindBytes, reuse, reusedBytes, elapsedMs, requests, peak, bytes,
         frames: hashes.split('\n').filter(x => x && !x.startsWith('#')).map(x => x.split(',').at(-1).trim()), audio };
       results.push(result);
-      console.log('native TS broker metrics', JSON.stringify({ buffered, windowMiB, lookbehindBytes, elapsedMs, requests, peak, bytes }));
+      console.log('native TS broker metrics', JSON.stringify({ buffered, windowMiB, lookbehindBytes, reuse, reusedBytes, elapsedMs, requests, peak, bytes }));
       assert.equal(active, 0);
     }
     for (const result of results.slice(1)) {
@@ -183,6 +351,9 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
       // prefetch scheduling. The selected four-MiB production window must win.
       if (result.windowMiB === 4) assert.ok(result.requests < results[0].requests, 'selected window reduces provider round trips');
     }
+    const cold=results.find(r=>r.reuse==='cold'),warm=results.find(r=>r.reuse==='warm');
+    assert.ok(warm.requests < cold.requests,'validated repeat resume uses fewer provider operations');
+    assert.ok(warm.reusedBytes > 0,'previous-session bytes actually used');
   } finally {
     await broker?.close();
     if (provider) await closeServer(provider);
@@ -746,7 +917,7 @@ test('strict LID never re-resolves the provider entry when the pinned signed tar
   assert.equal(rangeRequests, 2, 'Expired signed targets stay terminal with no hidden reconnect');
 });
 
-test('strict signed-target pinning leaves finite playback entry resolution unchanged', async (t) => {
+test('finite playback reuses its validated signed target instead of resolving the entry per range', async (t) => {
   let originRequests = 0;
   const data = Buffer.alloc(64, 7);
   const provider = http.createServer((req, res) => {
@@ -768,7 +939,9 @@ test('strict signed-target pinning leaves finite playback entry resolution uncha
     assert.equal(response.status, 206);
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start, end + 1));
   }
-  assert.equal(originRequests, 2);
+  assert.equal(originRequests, 1);
+  assert.equal(broker.resolvedTargetReuses, 1);
+  assert.equal(broker.providerRedirects, 1);
   assert.equal(broker.terminalError, null);
 });
 

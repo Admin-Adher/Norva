@@ -86,6 +86,7 @@ const {
 } = require('./providerProxyPool');
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
 const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
+const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
 const { publishSharedMediaCacheSession } = require('./sharedMediaCachePublication');
@@ -2664,6 +2665,7 @@ const codecProfileCache = new Map();
 // sourceUrl -> { chunks: Buffer[], len, done, capturing, updatedAt }. Leading bytes tee'd
 // from /raw so a codec probe can read the header locally (no 2nd provider connection).
 const headerByteCache = new Map();
+const finitePlaybackRangeReuse = new FinitePlaybackRangeReuse();
 const finiteMkvResumePrefixCache = new FiniteMkvResumePrefixCache({
     maxBytes: FINITE_MKV_RESUME_PREFIX_CACHE_MAX_BYTES,
     maxEntryBytes: Math.max(INBAND_HEADER_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES),
@@ -2890,7 +2892,7 @@ app.get('/health', (req, res) => {
         },
         boundedMkvInputPumpProtocol: 1,
         finiteMkvSeekBroker: {
-            protocol: 9,
+            protocol: 10,
             active: Array.from(sessions.values()).filter((session) => (
                 Boolean(session?.finiteMkvSeekBroker)
             )).length,
@@ -2920,10 +2922,13 @@ app.get('/health', (req, res) => {
             resumeHeaderPrefetch: BOUNDED_MKV_HEADER_PARSE && INBAND_HEADER_CACHE_MAX > 0,
             interruptedRangeReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
             effectiveUrlPinned: true,
+            resolvedTargetReuse: 'validated-session-only',
+            obsoleteRequestRecheck: true,
             validatorPinnedWhenAvailable: true,
             proxyAgentMaxAgeMs: FINITE_MKV_SEEK_PROXY_AGENT_MAX_AGE_MS,
         },
         finiteMkvResumePrefixCache: finiteMkvResumePrefixCache.publicStatus(),
+        finitePlaybackRangeReuse: finitePlaybackRangeReuse.publicStatus(),
         finiteMkvLinearSeekBridge: {
             protocol: 1,
             enabled: FINITE_MKV_LINEAR_SEEK_BRIDGE_ENABLED,
@@ -4799,6 +4804,8 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
     let effectiveUrl = String(sourceUrl || '');
     let response = null;
     let status = null;
+    let headers = { ...options.headers };
+    let redirects = 0;
     for (let redirectCount = 0; ; redirectCount += 1) {
         // An authorized Selection exception reserves only explicitly configured
         // hosts. Recheck BEFORE each request, including each redirect target.
@@ -4811,7 +4818,7 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
         // provider target can still be bound into playback integrity evidence.
         response = await undiciRequest(effectiveUrl, {
             method: options.method || 'GET',
-            headers: options.headers || {},
+            headers,
             signal: options.signal,
             dispatcher: options.dispatcher || undefined,
         });
@@ -4846,6 +4853,19 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
             error.code = 'UND_ERR_INVALID_URL';
             throw error;
         }
+        if (nextUrl.username || nextUrl.password) {
+            const error = new Error('Provider returned credentials in a redirect target');
+            error.code = 'UND_ERR_INVALID_URL';
+            throw error;
+        }
+        if (nextUrl.origin !== new URL(effectiveUrl).origin) {
+            // Range/representation headers may follow a CDN redirect, but
+            // origin-bound credentials must never be forwarded to another host.
+            headers = Object.fromEntries(Object.entries(headers).filter(([name]) => (
+                !['authorization', 'cookie', 'proxy-authorization', 'host'].includes(name.toLowerCase())
+            )));
+        }
+        redirects += 1;
         effectiveUrl = nextUrl.href;
     }
     // Error statuses are classified from their status alone. Start consuming
@@ -4879,7 +4899,7 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
         await new Promise((resolve) => setImmediate(resolve));
     }
     const rawHeaders = response.headers || {};
-    const headers = {
+    const responseHeaders = {
         get(name) {
             const value = rawHeaders[String(name || '').toLowerCase()];
             if (Array.isArray(value)) return value.join(', ');
@@ -4889,7 +4909,8 @@ async function strictLidProviderRequest(sourceUrl, options = {}) {
     return {
         status,
         url: effectiveUrl,
-        headers,
+        redirects,
+        headers: responseHeaders,
         body,
         bodySettled,
     };
@@ -5473,6 +5494,14 @@ function preemptAbandonedFiniteMkvSeekAttempt(context, attempt, force = false) {
     return true;
 }
 
+function finiteSeekDemandClosed(context, attempt, res) {
+    if (!context.closed && !attempt?.controller.signal.aborted
+        && !attempt?.localClosed && !res.destroyed && !res.writableEnded) return false;
+    if (attempt) attempt.localClosed = true;
+    context.finiteAvoidedProviderOpens++;
+    return true;
+}
+
 async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     const finiteSeek = context.pathPrefix === 'finite-mkv-seek';
     const rangeReuse = !finiteSeek ? context.rangeReuse : null;
@@ -5482,6 +5511,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     if (finiteSeek && (res.destroyed || res.writableEnded)) return;
     if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
     await waitForStrictLidBrokerSlot(context);
+    // The response can close BEFORE its close listener is installed below.
+    if (finiteSeek && finiteSeekDemandClosed(context, null, res)) return;
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
         return sendStrictLidBrokerError(res, strictLidBrokerError('STRICT_LID_SUPERSEDED', 'Strict language media request was superseded', { status: 409 }));
     }
@@ -5547,6 +5578,18 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let finiteWarmupWindowsCompleted = 0;
         while (forwarded < requestedLength) {
             if (attempt.localClosed) break;
+            if (context.finiteResumeRanges && !finiteWindowRange) {
+                const cached = context.finiteResumeRanges.read(range.start + forwarded, range.end);
+                if (cached) {
+                    if (!responseStarted) {
+                        startFiniteMkvSeekResponse(context, res, range);
+                        responseStarted = true;
+                    }
+                    if (!res.write(cached)) await waitForStrictLidDrain(res, controller.signal);
+                    forwarded += cached.length;
+                    continue;
+                }
+            }
             if (rangeReuse?.confirmed) {
                 const cached = rangeReuse.read(range.start + forwarded, range.end);
                 if (cached) {
@@ -5610,6 +5653,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         }
                     }
                 }
+                if (context.finiteResumeRanges) {
+                    finiteWindowRange.end = context.finiteResumeRanges.missingEnd(
+                        finiteWindowRange.start, finiteWindowRange.end,
+                    );
+                }
                 finiteProviderRange = { ...finiteWindowRange,
                     start: Math.max(0, finiteWindowRange.start - (
                         forwarded === 0 && !finiteWindowIsWarmup ? context.finiteSeekLookbehindBytes : 0
@@ -5629,19 +5677,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     if (attempt.localClosed || controller.signal.aborted) break;
                 }
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
-                if (attempt.localClosed) break;
-                if (
-                    finiteWarmupWindowsCompleted > 0
-                    && requestId !== context.latestRequestId
-                ) {
-                    // A newer Cues/tail request won the provider queue while
-                    // this primed header continuation was waiting. Starting it
-                    // now would only cool the pinned tunnel on cancellation.
-                    attempt.localClosed = true;
-                    preemptAbandonedFiniteMkvSeekAttempt(context, attempt);
-                    try { res.destroy(); } catch (_) {}
-                    break;
-                }
+                if (finiteSeekDemandClosed(context, attempt, res)) break;
                 // Another overlapping local range may have filled this exact
                 // window while this attempt waited for the mono-provider slot.
                 // Recheck under the provider mutex so one byte window is never
@@ -5669,6 +5705,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
             }
             await waitForStrictLidBrokerSlot(context, controller.signal);
+            if (finiteSeek && finiteSeekDemandClosed(context, attempt, res)) break;
             if (controller.signal.aborted) {
                 throw controller.signal.reason || new Error('strict LID provider read stopped');
             }
@@ -5714,6 +5751,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // is already closed here. Renew an ageing CONNECT tunnel at
                     // this safe boundary without ever changing proxy slot/IP.
                     await refreshStrictLidBrokerDispatcher(context, false);
+                    if (finiteSeekDemandClosed(context, attempt, res)) {
+                        finishFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'avoided-closed');
+                        await closeStrictLidBrokerProviderFetch(context, attempt, 'not-opened');
+                        break;
+                    }
                 }
                 const headers = {
                     Range: `bytes=${remainingRange.start}-${remainingRange.end}`,
@@ -5734,8 +5776,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 // the validated target for FFmpeg seeks without changing the
                 // original account's pinned dispatcher. An expired target is
                 // terminal: never silently re-resolve or relax identity checks.
-                const requestSourceUrl = !finiteSeek && context.strictResolvedSourceUrl
+                const requestSourceUrl = context.strictResolvedSourceUrl
                     ? context.strictResolvedSourceUrl : context.sourceUrl;
+                if (context.strictResolvedSourceUrl) context.resolvedTargetReuses++;
                 attempt.response = await context.fetchImpl(requestSourceUrl, {
                     method: 'GET',
                     headers,
@@ -5745,6 +5788,12 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     assertProviderTarget: context.assertProviderTarget,
                 });
                 markFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'headers');
+                const redirects = Number(attempt.response.redirects);
+                if (Number.isSafeInteger(redirects) && redirects >= 0) context.providerRedirects += redirects;
+                if (finiteWindowTrace) {
+                    finiteWindowTrace.resolvedTargetReused = Boolean(context.strictResolvedSourceUrl);
+                    finiteWindowTrace.redirects = Number.isSafeInteger(redirects) ? redirects : null;
+                }
                 upstreamStatus = Number(attempt.response.status);
                 const retryAfterValue = String(attempt.response.headers?.get?.('retry-after') || '').slice(0,128);
                 const retryAfterSeconds = /^\d{1,12}$/.test(retryAfterValue) ? Number(retryAfterValue)
@@ -5858,8 +5907,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 // validator checks above still reject a different representation.
                 // Last-Modified alone, a missing ETag, or a different CDN path/
                 // host never relaxes the strict target fence. No retry is added.
-                const strictQueryRenewal = !finiteSeek
-                    && context.validator?.kind === 'etag'
+                const strictQueryRenewal = context.validator?.kind === 'etag'
                     && observedValidator?.kind === 'etag'
                     && observedValidator.value === context.validator.value
                     && Boolean(context.effectiveUrlIdentitySha256)
@@ -5867,7 +5915,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (
                     context.effectiveUrlSha256
                     && observedEffectiveUrlSha256 !== context.effectiveUrlSha256
-                    && !finiteSeek
+                    && (!finiteSeek || context.strictResolvedSourceUrl)
                     && !strictQueryRenewal
                 ) {
                     throw markStrictLidTerminal(context, strictLidBrokerError(
@@ -5884,8 +5932,12 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     effectiveUrlIdentitySha256: observedEffectiveUrlIdentitySha256 })) {
                     strictRangeCollector = createStrictRangeCollector(remainingRange.start);
                 }
-                if (!finiteSeek && !context.strictResolvedSourceUrl) {
+                if (!context.strictResolvedSourceUrl) {
                     context.strictResolvedSourceUrl = observedEffectiveUrl;
+                    if (finiteSeek) {
+                        context.effectiveUrlSha256 = observedEffectiveUrlSha256;
+                        context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
+                    }
                 }
                 if (!context.providerIdentityReported && context.onProviderIdentity) {
                     context.providerIdentityReported = true;
@@ -6012,6 +6064,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         );
                     }
                     finiteMkvSeekCacheStore(context, finiteProviderRange, payload);
+                    if (context.finiteResumeRanges?.confirm({
+                        fileSizeBytes: context.fileSizeBytes,
+                        validator: observedValidator,
+                        effectiveUrlIdentitySha256: observedEffectiveUrlIdentitySha256,
+                    })) context.finiteResumeRanges.remember(finiteProviderRange.start, payload);
                     if (finiteWindowIsWarmup) {
                         activateFiniteMkvResumePrefixCandidate(
                             context,
@@ -6044,16 +6101,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     finiteWindowRange = null;
                     if (finiteWindowIsWarmup && context.finiteWarmupCueGraceMs > 0) {
                         await sleep(context.finiteWarmupCueGraceMs);
-                        if (requestId !== context.latestRequestId && !attempt.localClosed) {
-                            // The primer gave FFmpeg enough EBML metadata to ask
-                            // for Cues/tail data. Do not open the now-obsolete
-                            // header continuation only to abort its pinned tunnel
-                            // a few milliseconds later.
-                            attempt.localClosed = true;
-                            preemptAbandonedFiniteMkvSeekAttempt(context, attempt);
-                            try { res.destroy(); } catch (_) {}
-                            break;
-                        }
+                        // A newer cue is not evidence that this response closed.
+                        // Legitimate overlapping local readers must receive their
+                        // complete declared range, through the same provider mutex.
+                        if (finiteSeekDemandClosed(context, attempt, res)) break;
                     }
                 }
             } catch (error) {
@@ -6093,6 +6144,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     targetIdentityMatch: diagnosticTargetIdentityMatch,
                 })));
                 if (context.terminalError) {
+                    context.finiteResumeRanges?.invalidate();
                     await closeStrictLidBrokerProviderFetch(context, attempt, 'failed');
                     throw error;
                 }
@@ -6346,6 +6398,10 @@ async function createStrictLidBroker(options = {}) {
         rangeReuse,
         assertProviderTarget: typeof options.assertProviderTarget === 'function' ? options.assertProviderTarget : null,
         strictResolvedSourceUrl: null,
+        finiteResumeRanges: pathPrefix === 'finite-mkv-seek' ? options.finiteResumeRanges || null : null,
+        resolvedTargetReuses: 0,
+        providerRedirects: 0,
+        finiteAvoidedProviderOpens: 0,
         fileSizeBytes,
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
         dispatcher: initialDispatcher,
@@ -6516,6 +6572,10 @@ async function createStrictLidBroker(options = {}) {
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
         get terminalError() { return context.terminalError; },
         get providerFetches() { return context.providerFetches; },
+        get resolvedTargetReuses() { return context.resolvedTargetReuses; },
+        get providerRedirects() { return context.providerRedirects; },
+        get avoidedProviderOpens() { return context.finiteAvoidedProviderOpens; },
+        get resumeRangeReusedBytes() { return context.finiteResumeRanges?.reusedBytes || 0; },
         get providerBytes() { return context.providerBytes; },
         get completedProviderFetches() { return context.completedProviderFetches; },
         get interruptedProviderFetches() { return context.interruptedProviderFetches; },
@@ -6546,6 +6606,8 @@ async function createStrictLidBroker(options = {}) {
                 durationMs: trace.durationMs,
                 bytes: trace.bytes,
                 outcome: trace.outcome,
+                resolvedTargetReused: trace.resolvedTargetReused === true,
+                redirects: trace.redirects ?? null,
             }));
         },
         get dispatcherRefreshes() { return context.dispatcherRefreshes; },
@@ -13697,6 +13759,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
         finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
         finiteResumePrefixCandidate,
+        finiteResumeRanges: finiteTs ? finitePlaybackRangeReuse.begin({
+            ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
+        }) : null,
         onFiniteResumePrefix: finiteTs ? null : (prefix) => finiteMkvResumePrefixCache.put({
             sourceUrl: session.sourceUrl,
             ...prefix,
@@ -13750,6 +13815,10 @@ async function closeFiniteMkvSeekBroker(session) {
     session.finiteMkvSeekBroker = null;
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.finiteMkvSeekProviderFetches = Number(broker.providerFetches || 0);
+    session.startupTimings.finiteSeekResolvedTargetReuses = Number(broker.resolvedTargetReuses || 0);
+    session.startupTimings.finiteSeekProviderRedirects = Number(broker.providerRedirects || 0);
+    session.startupTimings.finiteSeekAvoidedProviderOpens = Number(broker.avoidedProviderOpens || 0);
+    session.startupTimings.finiteSeekResumeRangeReusedBytes = Number(broker.resumeRangeReusedBytes || 0);
     session.startupTimings.finiteMkvSeekCompletedProviderFetches = Number(
         broker.completedProviderFetches || 0,
     );
@@ -20049,6 +20118,10 @@ function debugSession(session) {
         finiteMkvSeekBroker: session.finiteMkvSeekBroker
             ? {
                 providerFetches: Number(session.finiteMkvSeekBroker.providerFetches || 0),
+                resolvedTargetReuses: Number(session.finiteMkvSeekBroker.resolvedTargetReuses || 0),
+                providerRedirects: Number(session.finiteMkvSeekBroker.providerRedirects || 0),
+                avoidedProviderOpens: Number(session.finiteMkvSeekBroker.avoidedProviderOpens || 0),
+                resumeRangeReusedBytes: Number(session.finiteMkvSeekBroker.resumeRangeReusedBytes || 0),
                 completedProviderFetches: Number(session.finiteMkvSeekBroker.completedProviderFetches || 0),
                 interruptedProviderFetches: Number(session.finiteMkvSeekBroker.interruptedProviderFetches || 0),
                 dispatcherRefreshes: Number(session.finiteMkvSeekBroker.dispatcherRefreshes || 0),
@@ -21715,6 +21788,7 @@ setInterval(() => {
         if (entry.expiresAt <= now) codecProfileCache.delete(key);
     }
     finiteMkvResumePrefixCache.prune(now);
+    finitePlaybackRangeReuse.prune();
     // Purge stale in-band header buffers (only needed transiently around playback start).
     if (INBAND_HEADER_TTL_MS > 0) {
         for (const [key, entry] of headerByteCache) {

@@ -3735,6 +3735,13 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
                 get: () => { assert.equal(finiteTs, false, 'TS must not read Matroska prefix cache'); return null; },
                 put: () => { assert.equal(finiteTs, false, 'TS must not write Matroska prefix cache'); return true; },
             },
+            finitePlaybackRangeReuse: {
+                begin: options => {
+                    assert.equal(finiteTs, true, 'sparse playback cache is restricted to verified TS');
+                    assert.equal(options.ownerKey, 'c'.repeat(64));
+                    return { protocol: 'current-proof-required' };
+                },
+            },
             providerNodeRouteForSession: () => ({ slot: 3, nodeTransport: 'http' }),
             alternateProviderNodeTransportRoute: () => ({ slot: 3, nodeTransport: 'socks5' }),
             pinnedProxyAgentFactoryForRoute: (route) => () => ({
@@ -3771,6 +3778,7 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
     );
     const session = {
         sourceUrl: 'https://provider.example/movie/user/pass/title.mkv',
+        ownerKey: 'c'.repeat(64),
         finiteTsResumeAligned: finiteTs,
         exactTsProof: finiteTs,
         userAgent: 'Norva/Seek',
@@ -4033,7 +4041,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /effectiveUrlSha256:\s*session\.vodInputEffectiveUrlSha256/);
     assert.match(source, /effectiveUrlIdentitySha256:\s*session\.vodInputEffectiveUrlIdentitySha256/);
     assert.match(source, /boundedMkvInputPumpProtocol:\s*1/);
-    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*9/);
+    assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?protocol:\s*10/);
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?4 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);

@@ -24,6 +24,10 @@ class StrictLidRangeReuse {
     drop(key, entry) {
         if (this.entries.get(key) !== entry) return;
         this.entries.delete(key); this.bytes -= entry.bytes; entry.live = false;
+        // Existing broker handles may outlive TTL/LRU eviction. Release their
+        // retained buffers too; the global bound must reflect real ownership.
+        entry.fragments.length = 0;
+        entry.bytes = 0;
     }
     prune() {
         const at = this.now();
@@ -68,6 +72,9 @@ class StrictLidRangeReuse {
         };
         return Object.freeze({
             prior,
+            // Immutable coordinates only, for playback to distinguish fragments
+            // retained before this session from bytes acquired during it.
+            priorRanges: Object.freeze((entry?.fragments || []).map(f => Object.freeze({ start: f.start, end: f.end }))),
             // Only informs a one-byte conditional revalidation request. It
             // exposes no cached bytes before the upstream response is checked.
             hasCandidate: (start, end) => Boolean(find(start, end)),
