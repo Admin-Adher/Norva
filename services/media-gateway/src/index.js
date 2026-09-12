@@ -18199,6 +18199,11 @@ function mappedSubtitleStreamIndexForSession(session) {
 
 function shouldCopyAudio(session) {
     if (session?.finiteTsResumeAligned === true) return false;
+    // Input seeking trims decoded video to the requested frame, but copied
+    // AAC can retain packets from the preceding MKV cue. Decode audio too so
+    // both streams start together; origin and all-copy graphs stay unchanged.
+    if (Number(session?.seekOffset) > 0 && isFiniteMkvVodSession(session)
+        && videoModeForSession(session) === 'encode') return false;
     // Multi-rendition HLS has one normalized contract for every source track:
     // AAC-LC, 48 kHz, stereo. Never copy a subset or advertise source 5.1.
     if (multiAudioHlsEnabled(session) || session.forceMkvH264FastStartAudioTranscode === true) return false;
