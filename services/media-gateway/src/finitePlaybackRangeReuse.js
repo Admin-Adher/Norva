@@ -11,6 +11,8 @@ class FinitePlaybackRangeReuse {
         this.store = new StrictLidRangeReuse({ maxBytes: 64 * 1024 * 1024,
             perFileBytes: 8 * 1024 * 1024, maxFiles: 32, maxFragments: 64,
             ttlMs: 30 * 60_000, ...options });
+        this.maxRetainedWindowBytes = 1280 * 1024;
+        this.skippedSequentialWindows = 0;
     }
 
     begin({ ownerKey, sourceUrl, fileSizeBytes } = {}) {
@@ -45,7 +47,18 @@ class FinitePlaybackRangeReuse {
                 const next = fragments.priorRanges.find(f => f.start > start && f.start <= end);
                 return next ? next.start - 1 : end;
             },
-            remember: (start, payload) => fragments.remember(start, payload, { providerDrained: true }),
+            remember: (start, payload) => {
+                // Retain the small timestamp-search windows (+256 KiB lookbehind),
+                // not the 8 MiB sequential playback bodies. A large body would
+                // evict the useful interior seek fragments, then evict itself
+                // because the protected header/tail already occupy the budget.
+                // The ordinary per-session playback cache remains unchanged.
+                if (Buffer.isBuffer(payload) && payload.length > this.maxRetainedWindowBytes) {
+                    this.skippedSequentialWindows++;
+                    return false;
+                }
+                return fragments.remember(start, payload, { providerDrained: true });
+            },
             get reusedBytes() { return reusedBytes; },
             invalidate: fragments.invalidate,
         });
@@ -57,7 +70,9 @@ class FinitePlaybackRangeReuse {
         return { ...this.store.snapshot(), scope: 'process-private-owner-exact-source',
             revalidation: 'current-drained-range-strong-etag-size-target',
             maxBytes: this.store.maxBytes, perFileBytes: this.store.perFileBytes,
-            maxFiles: this.store.maxFiles, maxFragments: this.store.maxFragments, ttlMs: this.store.ttlMs };
+            maxFiles: this.store.maxFiles, maxFragments: this.store.maxFragments, ttlMs: this.store.ttlMs,
+            maxRetainedWindowBytes: this.maxRetainedWindowBytes,
+            skippedSequentialWindows: this.skippedSequentialWindows };
     }
 }
 

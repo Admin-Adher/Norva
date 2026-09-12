@@ -9,8 +9,8 @@ import sys
 import tarfile
 import time
 
-ROOT = pathlib.Path('/home/adrien/.norva/resume-reuse-native-20260912-r3')
-PARENT = ROOT.parent/'ts-seek-drain-20260912/deploy-ts-seek-drain-20260912.py'
+ROOT = pathlib.Path('/home/adrien/.norva/resume-reuse-native-20260912-r4')
+PARENT = ROOT.parent/'resume-reuse-20260912/deploy-resume-reuse-20260912.py'
 FILES = {'services/media-gateway/src/'+name for name in
     ('index.js', 'finite-ts-startup.js', 'strict-lid-range-reuse.js', 'finitePlaybackRangeReuse.js')}
 FILES.add('tests/media-gateway-strict-lid-broker.test.js')

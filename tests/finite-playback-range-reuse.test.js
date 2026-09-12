@@ -55,6 +55,28 @@ test('cache is isolated by owner, exact credential-bearing source and file size'
     assert.equal(cache.begin({ ...binding, ownerKey: '' }), null);
 });
 
+test('long sequential playback cannot evict the retained timestamp-search windows', () => {
+    const cache = new FinitePlaybackRangeReuse();
+    const large = { ...binding, fileSizeBytes: 64 * 1024 * 1024 };
+    const observed = { ...proof, fileSizeBytes: large.fileSizeBytes };
+    const first = cache.begin(large); first.confirm(observed);
+    first.remember(0, Buffer.alloc(256 * 1024, 1));
+    first.remember(large.fileSizeBytes - 256 * 1024, Buffer.alloc(256 * 1024, 2));
+    const seekStart = 16 * 1024 * 1024;
+    assert.equal(first.remember(seekStart, Buffer.alloc(1280 * 1024, 3)), true);
+    const retained = cache.publicStatus().bytes;
+    for (let start = 24 * 1024 * 1024; start < 48 * 1024 * 1024; start += 8 * 1024 * 1024) {
+        assert.equal(first.remember(start, Buffer.alloc(8 * 1024 * 1024, 4)), false);
+    }
+    assert.equal(cache.publicStatus().bytes, retained);
+    assert.equal(cache.publicStatus().evictions, 0);
+    assert.equal(cache.publicStatus().skippedSequentialWindows, 3);
+    const second = cache.begin(large);
+    assert.equal(second.read(seekStart, seekStart + 15), null);
+    second.confirm(observed);
+    assert.deepEqual(second.read(seekStart, seekStart + 15), Buffer.alloc(16, 3));
+});
+
 test('global/per-file byte bounds, LRU, fragment counts and absolute expiry survive live handles', () => {
     let now = 1;
     const cache = new FinitePlaybackRangeReuse({ maxBytes: 24, perFileBytes: 16,
