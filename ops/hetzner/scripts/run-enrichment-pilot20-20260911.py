@@ -71,7 +71,7 @@ def collect(plan,state):
                 receipt['state']='quarantined';state['stoppedReason']='cohort_quarantine_requires_review'
             elif job['state'] in ('completed','verified','failed','expired','cancelled'):
                 receipt['state']='verified' if job.get('verified') and value.get('verified') else 'validation_'+job['state']
-            elif job['state'] in ('queued','retry_wait'):
+            elif job['state'] in ('queued','retry_wait','running','finalizing'):
                 jobs.append(job['id'])
             if re.search('PROVIDER_(BUSY|COOLDOWN|CONNECTION|REJECT)|HTTP_(401|403|429|458)',job.get('errorCode') or ''):
                 state['stoppedReason']='provider_refusal_requires_review'
@@ -80,10 +80,14 @@ def collect(plan,state):
     release.require(all(pilot.UUID.fullmatch(x) for x in jobs),'cohort_job_identifier_invalid')
     # A cooling first sample must not starve the other 19. Respect the stored
     # due time instead of repeatedly waking the same not-yet-due two jobs.
+    # A retired Edge isolate can leave an owned job running past its lease.
+    # Wake that SAME job only after database-confirmed expiry; the existing
+    # claim RPC atomically rechecks admission and preserves cursors/counters.
     return json.loads(release.sql("SELECT coalesce(jsonb_agg(id),'[]'::jsonb) FROM (SELECT id FROM public.catalog_file_audio_validation_jobs"
         " WHERE id IN ("+','.join(release.fleet.literal(j)+'::uuid' for j in jobs)+") AND quarantined_at IS NULL"
-        " AND (state='queued' OR (state='retry_wait' AND (retry_at IS NULL OR retry_at<=now())))"
-        " ORDER BY coalesce(retry_at,created_at),id LIMIT 2)x;"))
+        " AND (state='queued' OR (state='retry_wait' AND (retry_at IS NULL OR retry_at<=now()))"
+        " OR (state IN ('running','finalizing') AND lease_expires_at<=now()))"
+        " ORDER BY coalesce(retry_at,lease_expires_at,created_at),id LIMIT 2)x;"))
 
 
 def dispatch(ids):

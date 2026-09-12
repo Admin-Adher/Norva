@@ -3,7 +3,41 @@
 Base: `d86db0e13871f8d5b43d9faf67516b6b2cd0a969`. Isolated worktree;
 the user's original checkout is not part of this release.
 
-## Current state — 12 September, independent pilot launched
+## Current state — 12 September, independent pilot closed and verified
+
+Final verification at 04:22:13 UTC: **16 of the unchanged 20 VOD enriched**,
+ten by complete declared-track inventories and six by speech validation (four
+English, two Arabic). The six job certificates agree with the exact shared
+cache. Four technical header/profile operations failed before speech analysis;
+they remain in the denominator and were not reopened. One of those four was
+already partially inventoried before the pilot and is not counted as a success.
+The 80% enrichment rate is not a human-reference language-accuracy estimate.
+
+The retained exact pilot container reports 36 successful captures and 36 local
+inferences, each with positive provider-drain attestation. Capture median:
+23,950.5 ms, range 16,883–158,496 ms; inference median: 2,951 ms, range
+1,630–4,428 ms. Every capture returned approximately sixty seconds of audio,
+not necessarily sixty seconds of dialogue. Last active strong-validator range
+reuse: 93 hits, 8,314,994 reused bytes. Peak concurrent brokers: two; peak
+encrypted storage: 2,561,004 bytes. All six speech jobs had a single track, so
+this cohort does not prove real multi-track batching or passive playback QoS.
+
+The one-shot expired-lease recovery described below completed the same final
+job, without a reset or modified live runner. At 04:21:22 UTC the watchdog
+closed the pilot. Fresh verification confirms the same published Gateway image,
+four services, restored original cron specifications, all five new flags off,
+zero retained working audio, operator/watchdog exited, old evidence and
+quarantines unchanged. The installed code is retained dormant; no fleet,
+Selection or passive-capture expansion occurred.
+
+The profile-diagnostic follow-up and expired-job operator correction are local
+only, not published/deployed. Global acceptance still needs authorized real
+passive-playback/QoS validation and an eligible Selection cohort plus exact
+feed/host policy. Do not mark the five-part objective complete from this pilot.
+Sanitized final evidence:
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/independent20-final-closure-20260912.json`.
+
+## Deployment history — 12 September, independent pilot launched
 
 The explicit new approval has been executed: application fix `4a77a5ca` and the
 independent operator `6f67d892bafa31012935e27404e608611ad2b534` are on `main`.
@@ -70,6 +104,47 @@ Validation of this local follow-up: 22 focused tests passed; full suite 4,513
 tests, 4,499 passed, 14 skipped, zero failures, 104.883 s. Full log:
 `C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-pipeline-20260911/full-tests-profile-diagnostics-20260912.log`.
 It remains separate from the unchanged live pilot and its source attestation.
+
+### Five voice certificates, expired-job recovery and Selection readiness
+
+At 04:14:44 UTC, the independent cohort had ten complete declared inventories,
+five voice-verified files (three English and two Arabic), four header/profile
+failures and one ongoing voice job. All five certificates were also present in
+the exact cache. These are pipeline results, not human-reference accuracy.
+
+Two simultaneous acquisitions were observed, and the live exact-file lease
+table's unique provider-account constraint and supporting index were verified.
+At 04:14:44 UTC, strong-validator range reuse had 69 hits and avoided 6,779,390
+repeated response-body bytes. The earlier zero-hit observation was temporary;
+no validator relaxation or speculative cache change was made.
+
+The last voice job had remained `running` with an expired five-minute work lease
+since 03:42:48 UTC, zero provider attempts and no capture started. The scoped
+operator only selected queued/retry-wait jobs, unlike the ordinary durable
+worker which also reclaims expired running/finalizing jobs. At 04:11:49 UTC,
+after checking ownership, the unchanged immutable plan, deadline, idle Gateway,
+old evidence, lease expiry and zero provider attempts, one authenticated request
+woke that same job. Its private exclusive intent/receipt prevents duplicate
+recovery after an uncertain response. No SQL row was reset, no failed job or
+quarantine reopened, no cohort/deadline or live runner hash changed. By 04:15:51,
+four acquisitions had started and three temporal windows were checkpointed.
+
+A local-only operator correction adds database-confirmed expired running and
+finalizing leases to the exact cohort SELECT. It preserves the two-job maximum,
+ownership/start-intent checks, quarantine exclusion and atomic server admission.
+Six executable regressions cover expiry boundaries, live/missing leases,
+terminal/foreign/unowned work and due-time ordering; four failed before the
+correction and all six pass afterward. All 25 focused operator/resume tests
+pass. The live runner is intentionally unchanged while its attested pilot runs.
+
+Read-only Selection inventory at 04:03:14 UTC matched 2,329 exact manifest files
+from three supported feeds: 715 initially unknown, 192 completed jobs, 523
+failed jobs, zero nonterminal jobs and zero unknown files without a job. The
+three feeds each currently resolve to one manifest origin host. No provider
+request, job reset, manifest change or exception activation was made. This is
+not permission/rights evidence. A fresh Selection acceptance workload and the
+explicit feed+host policy still need a separate authorized decision. Passive
+playback capture likewise remains disabled pending real playback/QoS acceptance.
 
 ## Earlier state — after the maintenance deployment
 
