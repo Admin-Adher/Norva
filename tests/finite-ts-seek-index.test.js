@@ -52,6 +52,28 @@ test('timed ID3 metadata is not confused with audio, subtitles or unknown privat
         else assert.ok(invalid.length > 0, 'private and second audio tracks retain the fallback');
     }
 });
+
+test('only clock-continuous zero counter resets at complete PES boundaries retain navigation', () => {
+    for (const defect of [null, 'nonzero', 'clock-jump', 'partial']) {
+        const data = fixture(), points = [], invalid = [];
+        let shift = 0;
+        // The fixture clocks normally advance one second. Insert a reset after
+        // changing all video clocks to 30 fps, just like the real provider case.
+        for (let at = 0, frame = 0; at < data.length; at += 188) {
+            const b = data.subarray(at, at + 188);
+            if ((((b[1] & 31) << 8) | b[2]) !== 256) continue;
+            let pts = 126000 + frame * 3000;
+            if (frame >= 30 && defect === 'clock-jump') pts += 900000;
+            b[13] = 0x21 | (Math.floor(pts / 2 ** 30) << 1); b[14] = Math.floor(pts / 2 ** 22) & 255;
+            b[15] = ((Math.floor(pts / 2 ** 15) & 127) << 1) | 1; b[16] = Math.floor(pts / 128) & 255; b[17] = ((pts & 127) << 1) | 1;
+            if (frame === 30) { shift = (b[3] & 15) - (defect === 'nonzero' ? 3 : 0); if (defect === 'partial') b[1] &= ~64; }
+            b[3] = (b[3] & 240) | (((b[3] & 15) - shift) & 15); frame++;
+        }
+        new TsLandmarks({ onPoint: p => points.push(p), onInvalid: () => invalid.push(true) }).push(0, data);
+        if (defect === null) { assert.equal(invalid.length, 0); assert.ok(points.some(p => p.pts >= 126000 + 90 * 3000)); }
+        else assert.ok(invalid.length > 0, defect);
+    }
+});
 test('initial playback prepares a first seek; metadata survives a new process and needs current proof', async t => {
     const data = fixture(), store = scoped(t), scope = { ownerKey: 'a'.repeat(64), sourceUrl: 'https://private.invalid/u/p/file', fileSizeBytes: data.length };
     const observer = await store.begin(scope);

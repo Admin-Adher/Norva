@@ -28,6 +28,15 @@ function timestamp(b, start, prefix) {
     return ((b[start] >> 1) & 7) * 2 ** 30 + b[start + 1] * 2 ** 22
         + (b[start + 2] >> 1) * 2 ** 15 + b[start + 3] * 128 + (b[start + 4] >> 1);
 }
+function pesClock(payload, video) {
+    if (payload.length < 14 || payload.readUIntBE(0, 3) !== 1 || (payload[6] & 192) !== 128
+        || 9 + payload[8] > payload.length
+        || (video ? payload[3] < 0xe0 || payload[3] > 0xef : payload[3] < 0xc0 || payload[3] > 0xdf)) return null;
+    const flags = payload[7] >> 6;
+    if (![2, 3].includes(flags) || payload[8] < (flags === 3 ? 10 : 5)) return null;
+    const pts = timestamp(payload, 9, flags === 3 ? 3 : 2), dts = flags === 3 ? timestamp(payload, 14, 1) : pts;
+    return pts !== null && dts !== null && pts >= dts && pts - dts <= 180000 ? { pts, dts } : null;
+}
 
 class TsLandmarks {
     constructor({ onPoint, onInvalid = () => {} } = {}) {
@@ -38,7 +47,7 @@ class TsLandmarks {
     reset() {
         this.pmtPid = null; this.videoPid = null; this.audioPids = [];
         this.pat = null; this.pmt = null; this.patOffset = null; this.pmtOffset = null;
-        this.cc = new Map(); this.pes = null; this.lastDts = null;
+        this.cc = new Map(); this.pes = null; this.lastDts = null; this.lastAudioDts = null; this.cleanAfterPts = null;
     }
     invalid() { this.onInvalid(); this.reset(); }
     push(start, bytes) {
@@ -72,16 +81,29 @@ class TsLandmarks {
             at += len;
         }
         if (!(control & 1) || at >= 188 || pid === 8191) return;
+        const payload = b.subarray(at);
         // Continuity is relevant only to the PSI and elementary streams which
         // prove this graph; private/other-program PIDs never become evidence.
         if (pid === 0 || pid === this.pmtPid || pid === this.videoPid || this.audioPids.includes(pid)) {
             const previous = this.cc.get(pid), cc = b[3] & 15;
             if (previous !== undefined && cc !== ((previous + 1) & 15)) {
-                this.invalid(); return;
+                const video = pid === this.videoPid, audio = this.audioPids.includes(pid);
+                const clock = start && (video || audio) ? pesClock(payload, video) : null;
+                const before = video ? this.lastDts : this.lastAudioDts;
+                // Some concatenated HLS VOD reset ES counters to zero without
+                // resetting clocks. Accept only a complete new PES, an exact
+                // zero reset and a tightly continuous A/V timeline. Discard the
+                // interrupted PES and learn no point until two clean seconds.
+                if (cc !== 0 || !clock || before === null || clock.dts <= before
+                    || clock.dts - before > (video ? 9000 : 90000)
+                    || (!video && (this.lastDts === null || Math.abs(clock.dts - this.lastDts) > 90000))) {
+                    this.invalid(); return;
+                }
+                this.pes = null;
+                this.cleanAfterPts = Math.max(this.cleanAfterPts || 0, clock.pts + 180000);
             }
             this.cc.set(pid, cc);
         }
-        const payload = b.subarray(at);
         if (pid === 0 && start) {
             const pat = section(payload, 0);
             if (!pat) { this.invalid(); return; }
@@ -111,6 +133,14 @@ class TsLandmarks {
             this.signature = signature; this.pmt = Buffer.from(pmt);
             this.pmtOffset = pos;
             this.videoPid = videos[0]; this.audioPids = audios;
+        } else if (this.audioPids.includes(pid) && start) {
+            const clock = pesClock(payload, false);
+            if (clock) {
+                if (this.lastAudioDts !== null && (clock.dts <= this.lastAudioDts || clock.dts - this.lastAudioDts > 900000)) {
+                    this.invalid(); return;
+                }
+                this.lastAudioDts = clock.dts;
+            }
         } else if (pid === this.videoPid) {
             if (start) {
                 this.finishPes();
@@ -139,7 +169,8 @@ class TsLandmarks {
     finishPes() {
         const p = this.pes; this.pes = null;
         if (!p || p.overflow || !p.signature || !Number.isSafeInteger(p.anchor)
-            || p.pos < p.anchor || p.pos - p.anchor > 65536) return;
+            || p.pos < p.anchor || p.pos - p.anchor > 65536
+            || (this.cleanAfterPts !== null && p.pts < this.cleanAfterPts)) return;
         const payload = Buffer.concat(p.chunks, p.length);
         let sps = false, pps = false, idr = false;
         for (let i = 0; i + 4 < payload.length; i++) {

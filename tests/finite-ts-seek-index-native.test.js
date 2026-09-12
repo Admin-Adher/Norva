@@ -42,6 +42,23 @@ test('native initial playback prepares the first exact indexed resume, with rest
     }
     fs.writeFileSync(input, plain);
     assert.deepEqual(await probeTsOrigin(plain.subarray(0, 262144)), originalOrigin, 'timed ID3 does not change A/V origin or stream order');
+    const shifts = new Map(), resets = new Map();
+    for (let at = 0; at + 188 <= plain.length; at += 188) {
+        const b = plain.subarray(at, at + 188), pid = ((b[1] & 31) << 8) | b[2];
+        if (![256, 257].includes(pid)) continue;
+        const start = (b[3] & 32) ? 5 + b[4] : 4, q = b.subarray(start);
+        if ((b[1] & 64) && q.length >= 19 && q.readUIntBE(0, 3) === 1) {
+            const dt = q[7] >> 6 === 3 ? 14 : 9;
+            const dts = ((q[dt] >> 1) & 7) * 2 ** 30 + q[dt + 1] * 2 ** 22 + (q[dt + 2] >> 1) * 2 ** 15 + q[dt + 3] * 128 + (q[dt + 4] >> 1);
+            const count = resets.get(pid) || 0;
+            if (count < 2 && dts / 90000 >= originalOrigin.startSeconds + [12, 36][count]) {
+                shifts.set(pid, b[3] & 15); resets.set(pid, count + 1);
+            }
+        }
+        b[3] = (b[3] & 240) | (((b[3] & 15) - (shifts.get(pid) || 0)) & 15);
+    }
+    assert.deepEqual([...resets.values()], [2, 2], 'both audio and video counter resets exercised');
+    fs.writeFileSync(input, plain);
     const size = fs.statSync(input).size;
     let active = 0, peak = 0, count = 0, etag = '"native-v1"';
     const server = http.createServer((req, res) => {

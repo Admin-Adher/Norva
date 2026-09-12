@@ -7,7 +7,7 @@ const { spawn } = require('node:child_process');
 const { TsLandmarks } = require('./finite-ts-landmarks');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const HEX = /^[a-f0-9]{64}$/;
-const PARSER_REVISION = 2;
+const PARSER_REVISION = 3;
 const TTL = 7 * 24 * 60 * 60_000, MAX_FILES = 256, MAX_FILE = 128 * 1024, MAX_POINTS = 512;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const validPoint = (p, size) => p && ['byteOffset', 'packetOffset', 'pts', 'dts', 'videoPid', 'audioPid'].every(k => integer(p[k]))
