@@ -190,10 +190,12 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         // The real slow witness has 12-second GOPs: two complete, independently
         // decoded segments must suffice; a third is not a prerequisite.
         const longDir = path.join(dir, 'long-gop'); fs.mkdirSync(longDir);
+        const longSource = path.join(longDir,'source.ts');
         await run(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=25',
-            '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '25',
+            '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '40',
             '-c:v', 'libx264', '-threads', '1', '-preset', 'ultrafast', '-g', '300', '-keyint_min', '300',
-            '-sc_threshold', '0', '-bf', '0', '-c:a', 'aac', '-ac', '2', '-f', 'hls', '-hls_time', '4',
+            '-sc_threshold', '0', '-bf', '0', '-c:a', 'aac', '-ac', '2', '-f', 'mpegts',longSource]);
+        await run(ffmpeg,['-v','error','-y','-i',longSource,'-map','0:v:0','-map','0:a:0','-c','copy','-f','hls','-hls_time','4',
             '-hls_playlist_type', 'event', '-hls_list_size', '0',
             '-hls_segment_filename', path.join(longDir, 'segment-%05d.ts'), path.join(longDir, 'long.m3u8')]);
         const longDurations = [...fs.readFileSync(path.join(longDir,'long.m3u8'),'utf8')
@@ -201,6 +203,18 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         assert.deepEqual(longDurations, [12,12]);
         assert.equal((await verifyFiniteTsStartupSegments({ root: longDir,
             files: ['segment-00000.ts','segment-00001.ts'], durations: longDurations, bin: ffmpeg })).verified, true);
+        const gaps=[];
+        for(const aligned of [false,true]) {
+            const out=path.join(longDir,aligned?'aligned.ts':'copy-gap.ts');
+            await run(ffmpeg,['-v','error','-y','-ss',aligned?'2':'17','-i',longSource,...(aligned?['-ss','15']:[]),'-t','15',
+                '-map','0:v:0','-map','0:a:0',...(aligned?['-c:v','libx264','-threads','1','-preset','ultrafast','-g','50','-c:a','aac']:['-c','copy']),'-f','mpegts',out]);
+            const p=JSON.parse(await run(ffprobe,['-v','error','-show_entries','stream=codec_type,start_time','-of','json',out]));
+            const video=Number(p.streams.find(s=>s.codec_type==='video').start_time),audio=Number(p.streams.find(s=>s.codec_type==='audio').start_time);
+            gaps.push(video-audio);
+        }
+        console.log('finite TS seek synchronization',JSON.stringify({copyGapSeconds:gaps[0],alignedGapSeconds:gaps[1]}));
+        assert.ok(gaps[0]>6,'reproduce the leading gap on a mid-GOP copy seek');
+        assert.ok(Math.abs(gaps[1])<0.1,'accurate decode seek keeps both tracks on the same start');
         // A video-only graph and a truncated/corrupt segment cannot earn the gate.
         await run(ffmpeg, ['-v', 'error', '-y', '-i', fixture, '-t', '4', '-an', '-c:v', 'copy', '-f', 'mpegts', path.join(dir, 'segment-99999.ts')]);
         assert.equal((await verifyFiniteTsStartupSegments({ root: dir,

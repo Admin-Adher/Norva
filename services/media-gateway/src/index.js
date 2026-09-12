@@ -13,7 +13,8 @@ const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
-    FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments } = require('./finite-ts-startup');
+    FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
+    applyFiniteTsAccurateResume } = require('./finite-ts-startup');
 const FINITE_TS_FAST_START_ENABLED = process.env.FINITE_TS_FAST_START_ENABLED !== 'false';
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
@@ -11280,6 +11281,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 : (finiteMkvPlayback && normalizedSeekOffset > 0
                     ? 'seekable_matroska_resume'
                     : (session.videoMode === 'encode' ? 'unsafe_or_unknown_video' : 'copy')))));
+        if (FINITE_TS_FAST_START_ENABLED && applyFiniteTsAccurateResume(session, {
+            backend: VIDEO_ENCODER_CONFIG.backend, ready: VIDEO_ENCODER_PREFLIGHT.ready,
+        })) session.videoModeReason = 'finite-ts-accurate-resume';
         applyVaapiVodStartupReadiness(session);
         session.hlsCacheDescriptor = session.videoMode === 'copy'
             ? mkvH264HlsCacheDescriptorForSession(session)
@@ -14742,7 +14746,8 @@ function startFfmpeg(session) {
     }
     const forceAlignedHlsVideoEncode = (
         session.forceExactMatroskaH264Reencode === true ||
-        session.forceAlignedMultiAudioVideoEncode === true
+        session.forceAlignedMultiAudioVideoEncode === true ||
+        session.finiteTsResumeAligned === true
     );
     const seekableMkvInput = usesFiniteMkvSeekBroker(session);
     const pumpedMkvInput = isFiniteMkvVodSession(session) && !seekableMkvInput;
@@ -15065,6 +15070,14 @@ function startFfmpeg(session) {
 function seekArgsForSession(session, encodeVideo, linearSeekBridgePlan = null) {
     const seekOffset = Number(session.seekOffset) > 0 ? Math.floor(Number(session.seekOffset)) : 0;
     if (seekOffset <= 0) return { preInputSeek: [], postInputSeek: [] };
+    if (encodeVideo && session.finiteTsResumeAligned === true) {
+        // TS has no Matroska cue index: a direct input seek may land after
+        // the requested frame. Decode a bounded preroll before accurate A/V
+        // output trimming, instead of leaving leading audio without video.
+        const inputSeek = Math.max(0, seekOffset - 15);
+        return { preInputSeek: inputSeek > 0 ? ['-ss', String(inputSeek)] : [],
+            postInputSeek: ['-ss', String(seekOffset - inputSeek)] };
+    }
     // A resumed finite MKV is exposed to FFmpeg only through the private,
     // serialized loopback range broker. Input seeking can therefore use the
     // Matroska cue index without revealing the provider URL or opening two
@@ -15158,6 +15171,7 @@ function inputProbeArgsForSession(session) {
     session.finiteTsFastInput = knownFast && finiteTsProfileEligible(session);
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.finiteTsFastInput = session.finiteTsFastInput;
+    session.startupTimings.finiteTsResumeAligned = session.finiteTsResumeAligned === true;
     if (session.finiteTsFastInput) {
         // Two long (e.g. 12-second) segments already cover this reserve.
         // Short segments still need enough finalized media and rate evidence.
@@ -18182,6 +18196,7 @@ function mappedSubtitleStreamIndexForSession(session) {
 }
 
 function shouldCopyAudio(session) {
+    if (session?.finiteTsResumeAligned === true) return false;
     // Multi-rendition HLS has one normalized contract for every source track:
     // AAC-LC, 48 kHz, stereo. Never copy a subset or advertise source 5.1.
     if (multiAudioHlsEnabled(session) || session.forceMkvH264FastStartAudioTranscode === true) return false;
@@ -19474,7 +19489,8 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 session.startupTimings.sustainedMediaProductionRateX = video.sustainedMediaProductionRateX;
                 if (session.finiteTsFastInput === true && FINITE_TS_FAST_START_ENABLED
                     && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)
-                    && videoModeForSession(session) === 'copy' && !session.finiteTsStartupEvidence) {
+                    && (videoModeForSession(session) === 'copy' || session.finiteTsResumeAligned === true)
+                    && !session.finiteTsStartupEvidence) {
                     const proofStartedAt = Date.now();
                     session.finiteTsStartupEvidence = video.inspection.discontinuityCount === 0
                         && video.inspection.mediaSequence === 0

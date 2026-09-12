@@ -60,8 +60,27 @@ function finiteTsHttpArgs() {
     return ['-multiple_requests', '1', '-short_seek_size', '262144'];
 }
 
+function applyFiniteTsAccurateResume(session, encoder) {
+    if (!finiteTsProfileEligible(session) || !(Number(session.seekOffset) > 0)
+        || encoder?.backend !== 'vaapi' || encoder?.ready !== true) return false;
+    const profile = record(session.codecProfile);
+    const width = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const height = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0
+        || width > 1920 || height > 1080) return false;
+    // A copy seek can start audio at 17s but video at the next IDR (24s).
+    // Decode from the input seek point and trim both streams accurately; never
+    // jump the viewer forward across that gap or alter the provider identity.
+    session.videoMode = 'encode';
+    session.finiteTsResumeAligned = true;
+    session.hlsTargetSeconds = 2;
+    return true;
+}
+
 function finiteTsStartupPolicy(session, pipeline) {
-    if (!finiteTsProfileEligible(session) || !['copy', 'audio-transcode'].includes(pipeline)) return null;
+    const encoded = pipeline === 'video-transcode' && session?.finiteTsResumeAligned === true
+        && session?.startupTimings?.videoEncoder === 'vaapi';
+    if (!finiteTsProfileEligible(session) || (!['copy', 'audio-transcode'].includes(pipeline) && !encoded)) return null;
     const evidence = record(session.finiteTsStartupEvidence);
     const timings = record(session.startupTimings);
     const rate = Number(timings.sustainedMediaProductionRateX);
@@ -71,14 +90,16 @@ function finiteTsStartupPolicy(session, pipeline) {
         && evidence.segmentCount <= 3 && maximum > 0 && maximum <= 12.25
         && Number(timings.playlistSegmentCount) >= evidence.segmentCount
         && buffer >= 12 && Number(timings.playlistPostFirstBufferSeconds) >= 4;
-    const eligible = verified && Number.isFinite(rate) && rate >= 1.5 && rate <= 20;
+    const minimum = encoded ? 2 : 1.5;
+    const eligible = verified && Number.isFinite(rate) && rate >= minimum && rate <= 20;
     // Keep two long segments for medium-rate inputs; a fast source can start
     // from one while the next independently decoded segment is already ready.
     const target = Math.min(24, Math.max(rate < 2 ? 24 : 12,
         Math.ceil(maximum * (rate >= 4 ? 1 : 2))));
     return { protocol: 2, eligible, pipeline, targetBufferSeconds: eligible ? target : null,
-        minimumEncodeRateX: 1.5, observedEncodeRateX: Number.isFinite(rate) && rate > 0 ? rate : null,
-        reason: eligible ? 'finite-ts-verified-ready' : !verified ? 'ts-startup-decode-unverified' : 'encode-rate-below-minimum' };
+        minimumEncodeRateX: minimum, observedEncodeRateX: Number.isFinite(rate) && rate > 0 ? rate : null,
+        reason: eligible ? (encoded ? 'vaapi-transcode-ready' : 'finite-ts-verified-ready')
+            : !verified ? 'ts-startup-decode-unverified' : 'encode-rate-below-minimum' };
 }
 
 function decodeStartupSegment(bin, descriptor, { signal, spawnImpl = spawn, timeoutMs = 1500 } = {}) {
@@ -154,4 +175,5 @@ async function verifyFiniteTsStartupSegments({ root, files, durations, bin, sign
 }
 
 module.exports = { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs,
-    FINITE_TS_PROBE_BYTES, FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments, decodeStartupSegment };
+    FINITE_TS_PROBE_BYTES, FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
+    decodeStartupSegment, applyFiniteTsAccurateResume };

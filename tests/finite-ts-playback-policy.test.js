@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const os = require('node:os');
 const { EventEmitter } = require('node:events');
-const { finiteTsStartupPolicy, decodeStartupSegment, verifyFiniteTsStartupSegments } = require('../services/media-gateway/src/finite-ts-startup');
+const { finiteTsStartupPolicy, decodeStartupSegment, verifyFiniteTsStartupSegments, applyFiniteTsAccurateResume } = require('../services/media-gateway/src/finite-ts-startup');
 const fixture = () => ({codecProfileSource:'request',playbackIdentity:{itemType:'movie'},playbackHint:{container:'ts'},audioStreamIndex:1,
     codecProfile:{container:'ts',probeSource:'gateway_probe',probedAt:new Date().toISOString(),durationSeconds:5471,
         fileSizeBytes:951409344,videoCodec:'h264',audioTracks:[{index:1,codec:'aac'}]},finiteTsFastInput:true,
@@ -98,6 +98,34 @@ test('missing decode, undersized reserve, bad containers, long GOPs and live sou
         const s=fixture();change(s);assert.notEqual(finiteTsStartupPolicy(s,'copy')?.eligible,true);
     }
     assert.equal(finiteTsStartupPolicy(fixture(),'video-transcode'),null);
+});
+
+test('a verified HD TS resume uses aligned A/V, accurate input seeking and the existing measured VAAPI contract',()=>{
+    const s=fixture();s.seekOffset=17;Object.assign(s.codecProfile,{videoWidth:1280,videoHeight:720});
+    const before=JSON.stringify(s.codecProfile);
+    assert.equal(applyFiniteTsAccurateResume(s,{backend:'vaapi',ready:true}),true);
+    assert.equal(s.videoMode,'encode');assert.equal(s.hlsTargetSeconds,2);
+    assert.equal(JSON.stringify(s.codecProfile),before);
+    s.startupTimings.videoEncoder='vaapi';
+    const {edge,watch}=clients();
+    const policy=finiteTsStartupPolicy(s,'video-transcode');
+    assert.equal(policy.minimumEncodeRateX,2);assert.equal(policy.reason,'vaapi-transcode-ready');
+    assert.equal(watch.gatewayStartupBufferOptions(edge(policy)).minimumSeconds,12);
+    s.startupTimings.sustainedMediaProductionRateX=1.9;
+    assert.equal(finiteTsStartupPolicy(s,'video-transcode').eligible,false);
+    const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8').replace(/\r\n/g,'\n');
+    const seek=vm.runInNewContext('('+source.slice(source.indexOf('function seekArgsForSession('),source.indexOf('\nfunction usesSourceTimestampedCopySeek(')).trim()+')');
+    assert.deepEqual(JSON.parse(JSON.stringify(seek(s,true))),{preInputSeek:['-ss','2'],postInputSeek:['-ss','15']});
+    assert.deepEqual(JSON.parse(JSON.stringify(seek({...s,seekOffset:8},true))),{preInputSeek:[],postInputSeek:['-ss','8']});
+    const audio=vm.runInNewContext('('+source.slice(source.indexOf('function shouldCopyAudio('),source.indexOf('\nfunction ',source.indexOf('function shouldCopyAudio(')+1)).trim()+')');
+    assert.equal(audio(s),false);
+    for(const mutate of [x=>{x.seekOffset=0;},x=>{x.codecProfile.videoWidth=3840;},x=>{delete x.codecProfile.videoWidth;},
+        x=>{x.playbackIdentity.itemType='live';},x=>{x.codecProfile.probeSource='provider';}]) {
+        const x=fixture();x.seekOffset=17;Object.assign(x.codecProfile,{videoWidth:1280,videoHeight:720});mutate(x);
+        assert.equal(applyFiniteTsAccurateResume(x,{backend:'vaapi',ready:true}),false);
+        assert.equal(x.finiteTsResumeAligned,undefined);
+    }
+    assert.equal(applyFiniteTsAccurateResume(s,{backend:'software',ready:true}),false);
 });
 test('both policy boundaries reject underbuffered or mismatched TS policies and preserve existing MKV rules',()=>{
     const {edge,watch}=clients(), good=finiteTsStartupPolicy(fixture(),'copy');
