@@ -30,7 +30,7 @@ queue entries, with no nonterminal queue entry for an immediate continuation.
 Three provider probe circuits are currently open. These are admission facts,
 not proof of inaccessible media or of model accuracy.
 
-### Additional local correction: passive eligibility agrees with the server
+### Published follow-up: passive eligibility agrees with the server
 
 The passive adapter incorrectly treated `mis`, `nar` and unsupported three-letter
 tags as known, while regional/whitespace variants such as `en-US`, `pt_BR` and
@@ -47,7 +47,32 @@ Validation: 60 focused tests passed, two native-only skips on Windows; full suit
 133 passed, no skips/failures (12.49 s), network none, 0.5 CPU ceiling, no
 production environment/mounts and zero provider requests. The initial native
 preflight waited for ordinary work to finish; nothing else was interrupted.
-This follow-up remains local, unactivated and separate from the deployed release.
+This follow-up was published on `main` as `4a77a5ca177ba1af68b9996b1c657044c01dfed8`
+after explicit approval. At the start of this new operation the current Gateway
+is still the verified `b2c21b5b` release; passive capture remains disabled.
+
+### Authorized independent pilot — 12 September
+
+The user's latest approval explicitly authorizes publication/deployment and a
+**new distinct twenty-file pilot**: global acquisitions <=2, one per mono-session
+account, private audio working budget <=64 MiB, retention <=30 minutes. Its new
+immutable window is at most 24 hours, never an extension of the old pilot.
+`deploy-independent-pilot20-20260912.py` uses a separate root, plan, state, image
+and retained rollback pair. Selection first excludes the original twenty and
+the earlier hundred-file cohort, all existing validation jobs, already-complete
+metadata and open provider/file cooldowns. Every actual operation still rechecks
+production playback, source and account admission.
+
+The operator reuses the audited capture runner and its stop-on-quarantine/refusal
+rules, starts its watchdog before pausing exactly the two enrichment intake crons,
+and waits for genuine idle before replacing the Gateway. Closure disables only
+the five new flags and restores the original cron states. Old plans and terminal
+job rows are hash-protected. No old failures/quarantines are reset; no Selection
+host exception or passive playback collection is activated. Twelve executable
+Python tests cover selection, cooldowns, file/account identity, bounded scope,
+idle checks, private-audio closure and preservation of the existing baseline.
+Preparation is read-only with respect to providers; launch/results require their
+own later live receipt and must not be inferred from these tests.
 
 ### Full-objective acceptance is still incomplete
 
@@ -59,8 +84,8 @@ This follow-up remains local, unactivated and separate from the deployed release
 | Reuse ongoing playback with no second provider stream | Actual adapter tests, synthetic local HLS extraction/adoption and corrected eligibility | Separately authorized real playback/QoS canary; passive flag remains off |
 | Authorized Selection/ordinary/future-provider concurrency | Policy, redirect, contention, refusal and conservative-default tests; original peak two acquisitions | Fresh eligible Selection cohort and explicit host policy, then bounded live acceptance; no host exception currently enabled |
 
-A new distinct pilot window/cohort needs explicit authorization; the original
-twenty remain in the historical denominator. Real passive playback acceptance
+The new distinct pilot window/cohort is now explicitly authorized; the original
+twenty remain in their historical denominator. Real passive playback acceptance
 and Selection host-policy activation are separate gates, not implied by a new
 ordinary-provider cohort. The full five-part goal must not be marked complete
 from these tests or the deployment alone.
