@@ -6,7 +6,7 @@ const path=require('node:path');
 const os=require('node:os');
 const crypto=require('node:crypto');
 const { spawn }=require('node:child_process');
-const { passiveTrackLanguageUnknown,passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,createPassiveLidCapture }=require('../services/media-gateway/src/passive-lid-capture');
+const { passiveTrackLanguageUnknown,passiveProfileEvidenceEligible,passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,createPassiveLidCapture }=require('../services/media-gateway/src/passive-lid-capture');
 const { StrictLidCaptureStore }=require('../services/media-gateway/src/strict-lid-capture-store');
 const { createStrictLidCapturePipeline }=require('../services/media-gateway/src/strict-lid-capture-pipeline');
 const { planStrictSpeechWindow }=require('../services/media-gateway/src/strict-lid-speech-window');
@@ -81,6 +81,49 @@ test('passive resource admission allows idle headroom but rejects startup, stale
         {...sample,memoryRatio:.65},{...sample,hostLoadRatio:.6},{...sample,cpuRatio:NaN}]) assert.equal(passiveResourcesAvailable(bad,{},at),false);
 });
 
+test('passive evidence accepts exact Gateway probes without inventing EBML completeness and rejects incomplete inband/hints',()=>{
+    const now=Date.parse('2026-09-12T12:00:00Z');
+    for(const container of ['mkv','matroska,webm','mp4','mov','mov,mp4,m4a,3gp,3g2,mj2','m4v',
+        'avi','ogg','flv','mpg','mpeg','ts','mpegts']) {
+        for(const metadataComplete of [true,false,undefined]) {
+            const p={...profile(),container,metadataComplete};const before=structuredClone(p);
+            assert.equal(passiveProfileEvidenceEligible(p,now),true,container);
+            assert.deepEqual(p,before,'observation and protocol identity remain unchanged');
+        }
+    }
+    assert.equal(passiveProfileEvidenceEligible({...profile(),probeSource:'gateway_inband'},now),true);
+    for(const change of [{probeSource:'gateway_inband',metadataComplete:false},{probeSource:'request'},
+        {probeSource:'provider'},{probeSource:''},{container:'mp4,secret'},{container:'webm'},
+        {probedAt:''},{probedAt:new Date(now+300001).toISOString()},{durationSeconds:79},{durationSeconds:86401},
+        {fileSizeBytes:null},{audioTracks:[]},{audioTracks:[null]},{audioTracks:[{index:1},{index:1}]}]) {
+        assert.equal(passiveProfileEvidenceEligible({...profile(),...change},now),false);
+    }
+    assert.equal(passiveProfileEvidenceEligible({...profile(),probedAt:new Date(now+300000).toISOString()},now),true);
+});
+
+test('passive supported demuxers and probe authority agree with the actual Edge observation predicate',async()=>{
+    const src=await fs.readFile(path.join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
+    const begin=src.indexOf('function canonicalVodContainer('),end=src.indexOf('\nfunction containerEvidenceKind(',begin);
+    const original=src.slice(begin,end);
+    assert.match(original,/^function canonicalVodContainer\(value: unknown\): string \| null/);
+    const code=original.replace('value: unknown): string | null','value)');
+    const actual=require('node:vm').runInNewContext(`(${code})`,{normalizeCodecToken:v=>String(v||'').toLowerCase().replace(/[^a-z0-9.]+/g,'')});
+    for(const container of ['mkv','matroska','matroskawebm','mp4','mov','movmp4m4a3gp3g2mj2','m4v','avi',
+        'ogg','flv','mpg','mpeg','ts','mpegts','webm','hls','m3u8','mp4,unknown','unknown','']) {
+        assert.equal(passiveProfileEvidenceEligible({...profile(),container,metadataComplete:false}),!!actual(container));
+    }
+    const exact=src.slice(src.indexOf('function exactLanguageValidationProfileFromSnapshot('),src.indexOf('\nasync function loadExactEpisodeLanguageValidationProfile('));
+    const authority=exact.match(/const exactGatewayProfile = ([\s\S]*?);/);
+    assert.ok(authority);
+    const edgeAuthority=require('node:vm').runInNewContext(`(profile,probeSource)=>(${authority[1]})`);
+    for(const probeSource of ['gatewayprobe','gatewayinband','request','provider','']) {
+        for(const metadataComplete of [true,false,undefined]) {
+            const p={...profile(),probeSource,metadataComplete};
+            assert.equal(passiveProfileEvidenceEligible(p),edgeAuthority(p,probeSource));
+        }
+    }
+});
+
 test('passive track eligibility matches the actual Edge declared-language contract, including aliases and nonlanguage markers',async()=>{
     const src=await fs.readFile(path.join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
     const start=src.indexOf('function normalizeIsoLang('),end=src.indexOf('\ntype BasicLidEvidence',start);
@@ -107,7 +150,7 @@ test('actual Gateway adapter accepts only exact ready origin playback and never 
     const sessions=new Map();const output=path.resolve(os.tmpdir(),'passive-adapter-output');
     let allowSource=true;let scope;
     const {sources,resolve}=require('node:vm').runInNewContext(`(()=>{${src.slice(start,end)};return{sources:passiveLidSessionSources,resolve:resolvePassiveLidSource};})()`,{
-        path,sessions,OUTPUT_DIR:output,passiveTrackLanguageUnknown,passiveProfileFingerprint,sha256Hex:hash,
+        path,sessions,OUTPUT_DIR:output,passiveTrackLanguageUnknown,passiveProfileEvidenceEligible,passiveProfileFingerprint,sha256Hex:hash,
         isLiveSession:s=>s.live===true,isWithin:(root,p)=>path.dirname(p)===root,
         controlledLocalPlaylistName:n=>n==='playlist.m3u8',hlsMediaPlaylistTargetsForSession:s=>s.targets,
         enrichmentPilot:{allowsPassiveSource:(...args)=>allowSource&&scope.allowsPassiveSource(...args)},
@@ -141,6 +184,17 @@ test('actual Gateway adapter accepts only exact ready origin playback and never 
     assert.equal(resolve(binding,{sessionId:session.id,playlistName:'playlist.m3u8'}),null);allowSource=true;
     assert.equal(resolve({...binding,sourceUrlHash:'f'.repeat(64)},{sessionId:session.id,playlistName:'playlist.m3u8'}),null);
     session.actualMappedAudioStreamIndex=3;assert.equal(source.isCurrent(),false);
+    session.actualMappedAudioStreamIndex=1;
+    for(const [probeSource,metadataComplete,expected] of [['gateway_probe',false,1],['gateway_inband',false,0],
+        ['gateway_inband',true,1],['request',true,0]]) {
+        session.codecProfile={...profile(),container:'ts',probeSource,metadataComplete};
+        scope=require('../services/media-gateway/src/enrichment-pilot-admission').createEnrichmentPilotAdmission({
+            protocol:1,createdAt:new Date(at).toISOString(),expiresAt:new Date(at+60000).toISOString(),fileKeys:['d'.repeat(64)],
+            passiveSources:[{ownerHash:session.ownerKey,sourceUrlHash:hash(session.sourceUrl),
+                profileFingerprint:passiveProfileFingerprint(session.codecProfile),fileKey:'d'.repeat(64)}],
+        },{mode:'pilot',now:()=>at});
+        assert.equal(sources(session).length,expected,`${probeSource} completeness=${metadataComplete}`);
+    }
 });
 
 test('closed local segments become private audio, survive restart, and are adopted without extending expiry or opening a provider',async t=>{

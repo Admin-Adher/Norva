@@ -35,6 +35,25 @@ const channels = value => {
     return Number.isFinite(number) ? Math.max(0, Math.min(16, number)) : null;
 };
 
+// Same server-observation authority as the Edge strict-validation snapshot:
+// a full Gateway probe does not need the EBML-prefix completeness flag. An
+// in-band prefix still does. Never upgrade that flag or infer authority from
+// the provider's filename/language hints. Identity remains the unchanged
+// protocol-2 fingerprint below, including the actual completeness flag.
+function passiveProfileEvidenceEligible(profile, now = Date.now()) {
+    if (!profile || !Array.isArray(profile.audioTracks)
+        || profile.audioTracks.some(track => !track || typeof track !== 'object' || Array.isArray(track))
+        || !passiveProfileFingerprint(profile)) return false;
+    const source = token(profile.probeSource);
+    if (source !== 'gatewayprobe' && !(source === 'gatewayinband' && profile.metadataComplete === true)) return false;
+    const container = token(profile.container);
+    if (!['mkv','matroska','matroskawebm','mp4','mov','movmp4m4a3gp3g2mj2','m4v',
+        'avi','ogg','flv','mpg','mpeg','ts','mpegts'].includes(container)) return false;
+    const at = typeof profile.probedAt === 'string' ? Date.parse(profile.probedAt) : NaN;
+    return Number.isFinite(now) && Number.isFinite(at) && at <= now + 300000
+        && profile.durationSeconds >= 80 && profile.durationSeconds <= 86400;
+}
+
 // Must stay byte-for-byte compatible with the Edge protocol-2 structural
 // profile payload. Tests compare actual Edge and Gateway implementations.
 function passiveProfileFingerprint(profile) {
@@ -245,4 +264,4 @@ function createPassiveLidCapture({ store, resolveSource, resourcesAvailable, bin
     });
 }
 
-module.exports={ passiveTrackLanguageUnknown,passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,extractPassiveWav,createPassiveLidCapture };
+module.exports={ passiveTrackLanguageUnknown,passiveProfileEvidenceEligible,passiveProfileFingerprint,passiveCaptureBinding,passiveResourcesAvailable,passiveWindowPlan,extractPassiveWav,createPassiveLidCapture };

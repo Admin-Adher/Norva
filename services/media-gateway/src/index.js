@@ -12,6 +12,8 @@ const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
+const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs } = require('./finite-ts-startup');
+const FINITE_TS_FAST_START_ENABLED = process.env.FINITE_TS_FAST_START_ENABLED !== 'false';
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
 const strictLidInference = createStrictLidInference();
@@ -32,7 +34,7 @@ const { createStrictLidCapturePipeline } = require('./strict-lid-capture-pipelin
 const { runStrictLidMultiExtract } = require('./strict-lid-multi-extract');
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('./strict-lid-range-reuse');
 const strictLidRangeReuse = new StrictLidRangeReuse();
-const { passiveTrackLanguageUnknown, passiveProfileFingerprint, passiveCaptureBinding, passiveResourcesAvailable, createPassiveLidCapture } = require('./passive-lid-capture');
+const { passiveTrackLanguageUnknown, passiveProfileEvidenceEligible, passiveProfileFingerprint, passiveCaptureBinding, passiveResourcesAvailable, createPassiveLidCapture } = require('./passive-lid-capture');
 const LANGUAGE_PASSIVE_CAPTURE_ENABLED = process.env.LANGUAGE_PASSIVE_CAPTURE_ENABLED === '1';
 let passiveLidCapture = null;
 let passiveLidTickActive = false;
@@ -7599,7 +7601,7 @@ function passiveLidSessionSources(session) {
         || session.actualStartOffset !== 0 || session.sourceTimestamps !== false
         || !/^[a-f0-9]{64}$/.test(session.ownerKey || '') || !session.sourceUrl || !session.outputDir
         || !isWithin(OUTPUT_DIR, session.outputDir) || path.resolve(session.outputDir) === path.resolve(OUTPUT_DIR)
-        || session.codecProfile?.metadataComplete !== true) return [];
+        || !passiveProfileEvidenceEligible(session.codecProfile)) return [];
     const profileFingerprint = passiveProfileFingerprint(session.codecProfile);
     if (!profileFingerprint) return [];
     const sourceUrlHash=sha256Hex(session.sourceUrl);
@@ -14760,13 +14762,14 @@ function startFfmpeg(session) {
         // An HLS response is finite even when the channel is live. Reopening
         // a completed playlist/segment can trap the demuxer in EOF reconnects
         // until startup times out. Let HLS manage its own playlist reloads.
-        '-reconnect_at_eof', isLiveHlsSession(session) ? '0' : '1',
+        '-reconnect_at_eof', (isLiveHlsSession(session) || session.finiteTsFastInput === true) ? '0' : '1',
         // Deliberately no -reconnect_on_http_error: provider/account 4xx is
         // terminal and must never create a retry cascade on a mono-slot account.
         '-reconnect_delay_max', '5',
         '-rw_timeout', '15000000',
         '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+        ...(session.finiteTsFastInput === true ? finiteTsHttpArgs() : []),
     ]);
     const args = [
         '-hide_banner',
@@ -15150,6 +15153,9 @@ function inputProbeArgsForSession(session) {
     const live = isLiveSession(session);
     const knownFast = !live && knownVodInputProbeEligible(session);
     session.fastInputProbe = knownFast;
+    session.finiteTsFastInput = knownFast && finiteTsProfileEligible(session);
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.finiteTsFastInput = session.finiteTsFastInput;
     if (live) sessionStartupStats.liveInputProbeAttempts += 1;
     else if (knownFast) sessionStartupStats.fastInputProbeAttempts += 1;
     else sessionStartupStats.fullInputProbeAttempts += 1;
@@ -15167,7 +15173,8 @@ function inputProbeArgsForSession(session) {
                 : knownFast
                     ? KNOWN_VOD_INPUT_PROBE_SIZE_BYTES
                     : VOD_INPUT_PROBE_SIZE_BYTES
-        )
+        ),
+        ...(session.finiteTsFastInput ? finiteTsDemuxArgs() : []),
     ];
 }
 
@@ -15187,6 +15194,7 @@ function knownVodInputProbeEligible(session) {
         || profileSource.includes('gateway_probe');
     if (!detailedProfileSource) return false;
     const container = normalizeCodecToken(hint.container || profile.container).split(',')[0];
+    if (['ts', 'mpegts'].includes(container)) return FINITE_TS_FAST_START_ENABLED && finiteTsProfileEligible(session);
     // This is a VOD demux optimization, never a live-stream shortcut. Restrict
     // it to finite file containers for which the full-budget fallback below is
     // safe when an allegedly exact profile turns out to be stale.
