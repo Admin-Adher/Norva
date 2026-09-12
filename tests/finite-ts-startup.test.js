@@ -173,6 +173,30 @@ test('native FFmpeg: finite TS starts and seeks with identical media, fewer tail
         assert.ok(results[0].tailRequests > results[1].tailRequests, JSON.stringify(results));
         assert.equal(results[1].tailRequests, 0);
         console.log('finite TS synthetic measurements', JSON.stringify(results));
+        // Reproduce the separate real MKV witness failure: CRF/CQP video plus
+        // copied AAC has no nominal bitrate and FFmpeg emits an empty master.
+        const mkv = path.join(dir, 'witness.mkv');
+        await run(ffmpeg, ['-v', 'error', '-y', '-i', fixture, '-t', '8', '-c', 'copy', mkv]);
+        await run(ffmpeg, ['-v', 'error', '-y', '-i', mkv, '-map', '0:v:0', '-map', '0:a:0',
+            '-c:v', 'libx264', '-crf', '23', '-preset', 'ultrafast', '-threads', '1', '-g', '50', '-c:a', 'copy',
+            '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-master_pl_name', 'playlist.m3u8',
+            '-var_stream_map', 'v:0,a:0,name:video', path.join(dir, '%v.m3u8')]);
+        const master = fs.readFileSync(path.join(dir, 'playlist.m3u8'), 'utf8');
+        assert.equal(master.includes('#EXT-X-STREAM-INF'), false, 'reproduce the observed empty FFmpeg master');
+        const { buildExactSubtitleHlsPlan, seedExactSubtitlePlaylists, rewriteExactHlsMaster } = require('../services/media-gateway/src/sharedHlsTracks');
+        const subtitlePlan = buildExactSubtitleHlsPlan({ subtitles: [{ index: 2, codec: 'subrip', language: 'eng', extractable: true }] });
+        assert.equal(subtitlePlan.enabled, true);
+        seedExactSubtitlePlaylists(subtitlePlan, dir);
+        const child = fs.readFileSync(path.join(dir, 'video.m3u8'), 'utf8');
+        const segments = [...child.matchAll(/#EXTINF:([\d.]+),[^\n]*\n([^\n]+)/g)];
+        const segmentPeak = Math.max(...segments.map(([, duration, name]) => fs.statSync(path.join(dir, name.trim())).size * 8 / Number(duration)));
+        const repaired = rewriteExactHlsMaster(master, { subtitlePlan,
+            fallbackVariant: { playlistName: 'video.m3u8', bandwidth: Math.ceil(segmentPeak * 1.25) } });
+        fs.writeFileSync(path.join(dir, 'repaired.m3u8'), repaired);
+        const parsed = JSON.parse(await run(ffprobe, ['-v', 'error', '-show_streams', '-of', 'json', path.join(dir, 'repaired.m3u8')]));
+        assert.equal(parsed.streams.filter(s => s.codec_type === 'video').length, 1);
+        assert.equal(parsed.streams.filter(s => s.codec_type === 'audio').length, 1);
+        console.log('synthetic MKV master repaired with measured bandwidth and retained subtitle rendition');
     } finally {
         if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
         fs.rmSync(dir, { recursive: true, force: true });

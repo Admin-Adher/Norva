@@ -224,6 +224,23 @@ test('master finalization keeps useful audio labels and exposes exact subtitle a
   assert.equal(idempotent, rewritten);
 });
 
+test('a bitrate-less subtitle master is rebuilt only from the measured single-video graph', () => {
+  const empty = '#EXTM3U\n#EXT-X-VERSION:6\n';
+  const subtitlePlan = buildExactSubtitleHlsPlan(profile([exactTextTrack(3, 'eng', 'English')]));
+  const fallbackVariant = { playlistName: 'video.m3u8', bandwidth: 2_500_000 };
+  const repaired = rewriteExactHlsMaster(empty, { subtitlePlan, fallbackVariant });
+  assert.match(repaired, /#EXT-X-STREAM-INF:BANDWIDTH=2500000,SUBTITLES="norva_subtitles"\nvideo\.m3u8/);
+  assert.match(repaired, /TYPE=SUBTITLES[^\n]+URI="subtitle_0\.m3u8"/);
+  assert.equal(rewriteExactHlsMaster(repaired, { subtitlePlan, fallbackVariant }), repaired);
+  for (const mutation of [null, { ...fallbackVariant, playlistName: '../video.m3u8' },
+    { ...fallbackVariant, bandwidth: NaN }, { ...fallbackVariant, bandwidth: 0 }]) {
+    assert.throws(() => rewriteExactHlsMaster(empty, { subtitlePlan, fallbackVariant: mutation }), /no video variant/);
+  }
+  assert.throws(() => rewriteExactHlsMaster(empty, { subtitlePlan, fallbackVariant, audioPlan: { enabled: true } }), /no video variant/);
+  assert.throws(() => rewriteExactHlsMaster('#EXTM3U\n#EXTINF:2,\nvideo.ts\n', { subtitlePlan, fallbackVariant }), /no video variant/);
+  assert.throws(() => rewriteExactHlsMaster(empty+'#EXT-X-MEDIA:TYPE=AUDIO\n', { subtitlePlan, fallbackVariant }), /no video variant/);
+});
+
 test('manifest-last finalization rejects incomplete WebVTT and atomically publishes the exact graph', async (t) => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'norva-exact-hls-'));
   t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
@@ -264,4 +281,34 @@ test('manifest-last finalization rejects incomplete WebVTT and atomically publis
   assert.match(published, /subtitle_0\.m3u8/);
   assert.match(published, /subtitle_1\.m3u8/);
   assert.deepEqual((await fs.promises.readdir(root)).filter((name) => name.endsWith('.tmp')), []);
+});
+
+test('Gateway readiness measures the subtitle-only graph and serves a playable tokenized root', async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'norva-subtitle-root-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8').replace(/\r\n/g, '\n');
+  const from = source.indexOf('function parseHlsAttributeList(');
+  const to = source.indexOf('\nasync function stopSession(', from);
+  const rewriteFrom = source.indexOf('function rewriteMultiAudioMasterNames(');
+  const rewriteTo = source.indexOf('\nfunction sanitizeLog(', rewriteFrom);
+  const asRecord = value => value && typeof value === 'object' ? value : {};
+  const sandbox = { fs, path, fsp: fs.promises, asRecord, rewriteExactHlsMaster,
+    multiAudioHlsEnabled: () => false, exactSubtitleHlsEnabled: s => s.exactSubtitleHls?.enabled === true,
+    mappedAudioStreamIndexForSession: () => 1, MIN_HLS_STARTUP_BUFFER_SECONDS: 6, MIN_HLS_STARTUP_SEGMENTS: 3,
+    isWithin: (base, item) => path.dirname(item) === base,
+    waitForVodInputRetry: async () => true, abortedVodInputPumpError: () => new Error('aborted') };
+  const h = require('node:vm').runInNewContext(`(()=>{${source.slice(from,to)}\n${source.slice(rewriteFrom,rewriteTo)};return {waitForPlaylist,rewritePlaylistSegments};})()`, sandbox);
+  const subtitlePlan = buildExactSubtitleHlsPlan(profile([exactTextTrack(3, 'eng', 'English')]));
+  const master = '#EXTM3U\n#EXT-X-VERSION:6\n';
+  await fs.promises.writeFile(path.join(root,'playlist.m3u8'), master);
+  await fs.promises.writeFile(path.join(root,'video.m3u8'), '#EXTM3U\n#EXT-X-TARGETDURATION:2\n'+
+    [0,1,2].map(n=>`#EXTINF:2,\nvideo-${n}.ts\n`).join(''));
+  for (const n of [0,1,2]) await fs.promises.writeFile(path.join(root,`video-${n}.ts`),Buffer.alloc(2048));
+  const session = { status:'starting',outputDir:root,playlistPath:path.join(root,'playlist.m3u8'),exactSubtitleHls:subtitlePlan };
+  await h.waitForPlaylist(session,1000);
+  assert.equal(session.measuredSubtitleVariant.bandwidth,10240);
+  const served = h.rewritePlaylistSegments(master,'test-token',session);
+  assert.match(served,/#EXT-X-STREAM-INF:BANDWIDTH=10240,SUBTITLES="norva_subtitles"/);
+  assert.match(served,/video\.m3u8\?token=test-token/);
+  assert.match(served,/URI="subtitle_0\.m3u8\?token=test-token"/);
 });

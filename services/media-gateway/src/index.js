@@ -14687,6 +14687,7 @@ function finalizeSessionExactHlsTrackGraph(session) {
         masterRequired: session.hlsMasterRequired === true,
         audioPlan: session.multiAudioHls,
         subtitlePlan: session.exactSubtitleHls,
+        fallbackVariant: session.measuredSubtitleVariant,
     }).then((result) => {
         session.exactHlsTrackGraphFinalization = result;
         session.exactHlsTrackGraphError = null;
@@ -19238,6 +19239,8 @@ async function inspectHlsMediaPlaylistArtifact(session, target) {
         inspection,
         firstSegmentBytes: stats[0].size,
         playlistSegmentBytes: stats.reduce((sum, stat) => sum + stat.size, 0),
+        peakSegmentBitRate: Math.ceil(Math.max(...stats.map((stat, index) =>
+            stat.size * 8 / inspection.segmentDurations[index]))),
         firstSegmentReadyMs,
         playlistProductionSpanMs,
         playlistPostFirstBufferSeconds,
@@ -19346,6 +19349,7 @@ async function inspectMediaCacheLiveJoinGraph(session) {
         const publicMaster = rewriteExactHlsMaster(master, {
             audioPlan: session.multiAudioHls,
             subtitlePlan: session.exactSubtitleHls,
+            fallbackVariant: session.measuredSubtitleVariant,
         });
         if (!String(publicMaster).startsWith('#EXTM3U')) return reject('master-rewrite-invalid');
 
@@ -19432,6 +19436,17 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                     ? inspected.find((result) => result.kind === 'video')
                     : inspected[0];
                 if (!video) throw new Error('video_playlist_not_ready');
+                if (!multiAudioHlsEnabled(session) && exactSubtitleHlsEnabled(session)) {
+                    const bandwidth = Math.ceil(video.peakSegmentBitRate * 1.25);
+                    session.measuredSubtitleVariant = { playlistName: video.playlistName, bandwidth };
+                    // Do not report ready just because the child segments exist:
+                    // the actual root served to the browser must be playable too.
+                    rewriteExactHlsMaster(masterPlaylist, {
+                        audioPlan: session.multiAudioHls,
+                        subtitlePlan: session.exactSubtitleHls,
+                        fallbackVariant: session.measuredSubtitleVariant,
+                    });
+                }
                 session.startupTimings = session.startupTimings || {};
                 session.startupTimings.playlistSegmentCount = video.inspection.segmentCount;
                 session.startupTimings.playlistBufferSeconds = video.inspection.durationSeconds;
@@ -21208,6 +21223,7 @@ function rewriteMultiAudioMasterNames(playlist, session) {
         return rewriteExactHlsMaster(playlist, {
             audioPlan: session?.multiAudioHls,
             subtitlePlan: session?.exactSubtitleHls,
+            fallbackVariant: session?.measuredSubtitleVariant,
         });
     } catch (_) {
         // Media playlists have no EXT-X-STREAM-INF and therefore are not masters.

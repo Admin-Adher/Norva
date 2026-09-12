@@ -372,7 +372,21 @@ function rewriteExactHlsMaster(masterValue, options = {}) {
     if (subtitlePlan.enabled !== true || !Array.isArray(subtitlePlan.renditions)) {
         return withoutNorvaSubtitles.join('\n');
     }
-    const firstVariant = withoutNorvaSubtitles.findIndex((line) => /^#EXT-X-STREAM-INF:/i.test(line));
+    let firstVariant = withoutNorvaSubtitles.findIndex((line) => /^#EXT-X-STREAM-INF:/i.test(line));
+    // FFmpeg CQP/CRF video with copied AAC can omit STREAM-INF because neither
+    // codec reports a nominal bitrate. Only repair the frozen single-video,
+    // exact-subtitle graph after Gateway measured real finalized segments.
+    // Never reinterpret a media playlist or invent a multi-audio topology.
+    const fallback = record(options.fallbackVariant);
+    const headerOnly = withoutNorvaSubtitles.every(line => !line.trim()
+        || /^#EXTM3U\s*$/.test(line) || /^#EXT-X-VERSION:\d+\s*$/.test(line)
+        || /^#EXT-X-INDEPENDENT-SEGMENTS\s*$/.test(line));
+    if (firstVariant < 0 && headerOnly && record(options.audioPlan).enabled !== true
+        && subtitlePlan.renditions.length > 0 && fallback.playlistName === 'video.m3u8'
+        && Number.isSafeInteger(fallback.bandwidth) && fallback.bandwidth > 0 && fallback.bandwidth <= 1_000_000_000) {
+        firstVariant = withoutNorvaSubtitles.length;
+        withoutNorvaSubtitles.push(`#EXT-X-STREAM-INF:BANDWIDTH=${fallback.bandwidth}`, 'video.m3u8', '');
+    }
     if (firstVariant < 0) {
         throw new SharedHlsTrackError('HLS_MASTER_VARIANT_MISSING', 'HLS master has no video variant');
     }
@@ -451,6 +465,7 @@ async function finalizeExactHlsTrackGraph(options = {}) {
     const rewritten = rewriteExactHlsMaster(master, {
         audioPlan: options.audioPlan,
         subtitlePlan,
+        fallbackVariant: options.fallbackVariant,
     });
     const tempPath = `${masterPath}.norva-${process.pid}-${Date.now()}.tmp`;
     try {
