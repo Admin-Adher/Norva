@@ -1701,6 +1701,17 @@
         <section class="watch-video-section">
           <video id="watch-video" playsinline></video>
 
+          <!-- Separate from the auto-hiding controls: the video keeps decoding underneath. -->
+          <div class="watch-loading watch-loading-cover" id="watch-loading" aria-hidden="true">
+            <div class="watch-loading-content">
+              <div class="watch-loading-art" aria-hidden="true">
+                <img class="watch-loading-still" data-src="/img/watch/norva-loading-still.webp" width="256" height="256" alt="" decoding="async" fetchpriority="low">
+                <img class="watch-loading-animation" data-src="/img/watch/norva-loading-60fps.webp" width="256" height="256" alt="" decoding="async" fetchpriority="low">
+              </div>
+              <p class="watch-loading-label" role="status" aria-live="polite" aria-atomic="true" data-i18n="ui_web_5d1fa38bcf0d">Preparing…</p>
+            </div>
+          </div>
+
           <!-- Player Controls Overlay -->
           <div class="watch-overlay" id="watch-overlay">
             <!-- Top Bar: Back + Title -->
@@ -1727,11 +1738,6 @@
                 <path d="M8 5v14l11-7z" />
               </svg>
             </button>
-
-            <!-- Loading Spinner -->
-            <div class="watch-loading" id="watch-loading">
-              <div class="loading-spinner"></div>
-            </div>
 
             <!-- Bottom Bar: Controls -->
             <div class="watch-bottom-bar">

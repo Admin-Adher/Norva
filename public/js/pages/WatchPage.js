@@ -451,7 +451,10 @@ class WatchPage {
         this.applySubtitleStyle();
         this.setupCastIntegration();
         this.video?.addEventListener('error', (e) => this.onError(e));
-        this.video?.addEventListener('waiting', () => this.showLoading());
+        this.video?.addEventListener('waiting', () => {
+            // A queued media event after Back must not restart artwork off-route.
+            if (this.video.currentSrc && document.getElementById('page-watch')?.classList.contains('active')) this.showLoading();
+        });
         this.video?.addEventListener('canplay', () => {
             this.applyPendingLocalSeek();
             this.updateBufferedTimeline();
@@ -6582,6 +6585,7 @@ class WatchPage {
 
     stop({ enqueueStoryboard = true, preservePlaybackResolutionAttempt = false } = {}) {
         this.clearPlaybackErrorRefreshTimer();
+        if (!preservePlaybackResolutionAttempt) this.hideLoading({ restoreFocus: false });
         if (!preservePlaybackResolutionAttempt) this.abortPlaybackResolution();
         if (enqueueStoryboard) {
             this._subtitleSwitchRequestId += 1;
@@ -6718,6 +6722,7 @@ class WatchPage {
     }
 
     togglePlay() {
+        if (this._loadingPresentationActive) return;
         if (this.video.paused) {
             // Nothing loaded yet (e.g. mid media-switch, before the engine attaches its
             // MediaSource) → play() would reject with NotSupportedError. No-op instead.
@@ -8792,10 +8797,108 @@ class WatchPage {
     showLoading() {
         this.loadingSpinner?.classList.add('show');
         this.centerPlayBtn?.classList.remove('show');
+        const section = this.loadingSpinner?.closest?.('.watch-video-section');
+        if (!section || this._loadingPresentationActive) return;
+        this._loadingPresentationActive = true;
+        section.classList.add('has-playback-loading');
+        this.loadingSpinner.setAttribute('aria-hidden', 'false');
+        this._loadingVideoAriaHidden = this.video?.getAttribute('aria-hidden');
+        this.video?.setAttribute('aria-hidden', 'true');
+        clearTimeout(this.overlayTimeout);
+
+        // Keep the canonical Back button accessible. Hide/inert only transport
+        // UI, not the video itself: display:none would disrupt frame observers.
+        const topBar = this.overlay?.querySelector('.watch-top-bar');
+        const masked = [
+            ...Array.from(section.children).filter(el => el !== this.overlay && el !== this.loadingSpinner && el !== this.video),
+            ...Array.from(this.overlay?.children || []).filter(el => el !== topBar),
+            ...Array.from(topBar?.children || []).filter(el => el !== this.backBtn),
+        ];
+        const focused = document.activeElement;
+        this._loadingMaskedElements = masked.map(el => ({ el, inert: el.inert, ariaHidden: el.getAttribute('aria-hidden') }));
+        this._loadingReturnFocus = masked.some(el => el.contains(focused)) ? focused : null;
+        if (this._loadingReturnFocus) this.backBtn?.focus({ preventScroll: true });
+        masked.forEach(el => { el.inert = true; el.setAttribute('aria-hidden', 'true'); });
+
+        this._loadingMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+        this._loadingArtworkRefresh = () => this.refreshLoadingArtwork();
+        this._loadingMotionQuery?.addEventListener('change', this._loadingArtworkRefresh);
+        document.addEventListener('visibilitychange', this._loadingArtworkRefresh);
+        window.addEventListener('online', this._loadingArtworkRefresh);
+        window.addEventListener('offline', this._loadingArtworkRefresh);
+        navigator.connection?.addEventListener?.('change', this._loadingArtworkRefresh);
+        this.refreshLoadingArtwork();
     }
 
-    hideLoading() {
+    refreshLoadingArtwork() {
+        const label = this.loadingSpinner?.querySelector?.('.watch-loading-label');
+        if (label) {
+            const offline = navigator.onLine === false;
+            const key = offline ? 'ui_web_4d5c943931a4' : 'ui_web_5d1fa38bcf0d';
+            const fallback = offline ? 'You are offline' : 'Preparing…';
+            if (label.dataset.i18n !== key) {
+                label.dataset.i18n = key;
+                label.textContent = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
+            }
+        }
+        const still = this.loadingSpinner?.querySelector?.('.watch-loading-still');
+        const animation = this.loadingSpinner?.querySelector?.('.watch-loading-animation');
+        const art = this.loadingSpinner?.querySelector?.('.watch-loading-art');
+        if (!still || !animation || !art) return;
+        if (!still.getAttribute('src')) {
+            still.onerror = () => { still.style.visibility = 'hidden'; };
+            still.src = still.dataset.src;
+        }
+        const animate = this._loadingPresentationActive && !document.hidden
+            && !this._loadingMotionQuery?.matches && !navigator.connection?.saveData
+            && !this._loadingArtworkFailed;
+        if (!animate) {
+            animation.onload = null;
+            animation.onerror = null;
+            animation.removeAttribute('src');
+            art.classList.remove('is-animated');
+            return;
+        }
+        if (animation.getAttribute('src')) return;
+        animation.onload = () => {
+            if (this._loadingPresentationActive && animation.getAttribute('src')) art.classList.add('is-animated');
+        };
+        animation.onerror = () => {
+            this._loadingArtworkFailed = true;
+            this.refreshLoadingArtwork();
+        };
+        // Never await artwork: network, decoding and first-frame readiness belong
+        // exclusively to playback. The still/text remain usable on a slow link.
+        animation.src = animation.dataset.src;
+    }
+
+    hideLoading({ restoreFocus = true } = {}) {
         this.loadingSpinner?.classList.remove('show');
+        if (!this._loadingPresentationActive) return;
+        this._loadingPresentationActive = false;
+        this.loadingSpinner?.setAttribute('aria-hidden', 'true');
+        this.loadingSpinner?.closest('.watch-video-section')?.classList.remove('has-playback-loading');
+        this._loadingMotionQuery?.removeEventListener('change', this._loadingArtworkRefresh);
+        document.removeEventListener('visibilitychange', this._loadingArtworkRefresh);
+        window.removeEventListener('online', this._loadingArtworkRefresh);
+        window.removeEventListener('offline', this._loadingArtworkRefresh);
+        navigator.connection?.removeEventListener?.('change', this._loadingArtworkRefresh);
+        this.refreshLoadingArtwork();
+        for (const { el, inert, ariaHidden } of this._loadingMaskedElements || []) {
+            el.inert = inert;
+            if (ariaHidden === null) el.removeAttribute('aria-hidden');
+            else el.setAttribute('aria-hidden', ariaHidden);
+        }
+        if (this._loadingVideoAriaHidden == null) this.video?.removeAttribute('aria-hidden');
+        else this.video?.setAttribute('aria-hidden', this._loadingVideoAriaHidden);
+        if (restoreFocus && this._loadingReturnFocus?.isConnected && document.activeElement === this.backBtn) {
+            this.showOverlay();
+            this._loadingReturnFocus.focus({ preventScroll: true });
+        }
+        this._loadingMaskedElements = null;
+        this._loadingReturnFocus = null;
+        this._loadingMotionQuery = null;
+        this._loadingArtworkRefresh = null;
     }
 
     // === Audio & Captions ===
@@ -13252,6 +13355,7 @@ class WatchPage {
 
     startOverlayTimer() {
         clearTimeout(this.overlayTimeout);
+        if (this._loadingPresentationActive) return;
         this.overlayTimeout = setTimeout(() => this.hideOverlay(), 3000);
     }
 
@@ -13262,8 +13366,16 @@ class WatchPage {
         const watchPage = document.getElementById('page-watch');
         if (!watchPage?.classList.contains('active')) return;
 
-        // Don't handle if typing in input
+        // Don't handle if typing in input (including another app dialog).
         if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+
+        // Transport shortcuts must not seek/pause/restart a preparation. Keep
+        // Tab, Back (Enter/Space on its button), Escape and OS shortcuts working.
+        if (this._loadingPresentationActive && e.key !== 'Escape') {
+            if (!e.ctrlKey && !e.metaKey && !e.altKey && e.target !== this.backBtn
+                && /^( |[0-9kjlmfcn]|Arrow(Left|Right|Up|Down))$/.test(e.key)) e.preventDefault();
+            return;
+        }
 
         switch (e.key) {
             case ' ':

@@ -11753,6 +11753,95 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   animation: spin 1s linear infinite;
 }
 
+/* VOD preparation only; Live TV retains its own loading feedback. An opaque
+   sibling covers video rather than hiding it (first-frame callbacks must run). */
+.watch-loading.watch-loading-cover {
+  inset: 0;
+  transform: none;
+  background: var(--color-bg-primary);
+  padding: calc(var(--space-2xl) + env(safe-area-inset-top, 0px)) var(--space-lg)
+    calc(var(--space-lg) + env(safe-area-inset-bottom, 0px) + var(--ios-ui-bottom, 0px));
+  overflow: auto;
+}
+
+.watch-loading-cover.show {
+  display: grid;
+  place-items: center;
+}
+
+.watch-loading-content {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-sm);
+  max-width: 100%;
+}
+
+.watch-loading-art {
+  display: grid;
+  width: min(256px, 48vw, 42dvh);
+  aspect-ratio: 1;
+}
+
+.watch-loading-art img {
+  grid-area: 1 / 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.watch-loading-animation { visibility: hidden; }
+.watch-loading-art.is-animated .watch-loading-animation { visibility: visible; }
+.watch-loading-art.is-animated .watch-loading-still { visibility: hidden; }
+
+.watch-loading-label {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.watch-video-section.has-playback-loading {
+  /* Suppress the inline video's baseline overflow, not its decoding/rendering. */
+  overflow: hidden;
+}
+
+.watch-video-section.has-playback-loading .watch-overlay {
+  display: flex !important;
+  opacity: 1;
+  z-index: 16;
+  background: none;
+  transition: none;
+  pointer-events: none;
+}
+
+.watch-video-section.has-playback-loading > :not(#watch-video):not(#watch-overlay):not(#watch-loading),
+.watch-video-section.has-playback-loading .watch-overlay > :not(.watch-top-bar),
+.watch-video-section.has-playback-loading .watch-top-bar > :not(.watch-back-btn) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.watch-video-section.has-playback-loading .watch-back-btn {
+  visibility: visible;
+  pointer-events: auto;
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.watch-video-section.has-playback-loading .watch-back-btn:focus-visible {
+  outline: 2px solid var(--color-accent-hover);
+  outline-offset: var(--space-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-loading-art.is-animated .watch-loading-animation { visibility: hidden; }
+  .watch-loading-art.is-animated .watch-loading-still { visibility: visible; }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
