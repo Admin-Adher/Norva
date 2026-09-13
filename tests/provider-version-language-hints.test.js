@@ -148,6 +148,36 @@ test('an accepted file language, including a rare ISO language, stays ahead of a
     }
 });
 
+test('the six reported files use their supplier label after a fresh header replaces obsolete legacy tags', () => {
+    const french = load('fr');
+    const fixtures = [
+        ['FRQ ▎ Stranger in a Cab', 'FR ▎QUEBEC FRENCH', 'Français'],
+        ['NL ▎ Cha Cha Real Smooth', 'NL ▎PRIME VIDEO', 'Néerlandais'],
+        ['NL ▎ Bring Her Back', 'NL ▎PRIME VIDEO', 'Néerlandais'],
+        ['NL ▎ Man on the Run', 'NL ▎PRIME VIDEO', 'Néerlandais'],
+        ['EN ▎ \u200e Band on the Run', 'EN ▎CINEMA MOVIES', 'Anglais'],
+        ['NL ▎ \u200e Band on the Run', 'NL ▎BIOSCOOP', 'Néerlandais'],
+    ];
+    for (const [raw, category, expected] of fixtures) {
+        // The 2026-09-13 header probe found an AAC track, but no language tag.
+        // Provider display must not be confused with verified spoken audio.
+        const item = make(raw, category, {
+            audio_language_validation_status: 'pending',
+            audio_tracks_scope: 'file', audio_probed_at: '2026-09-13T13:44:00Z',
+            audio_tracks: [{index: 1, codec: 'aac', channels: 2, default: true}],
+            audio_languages_scope: 'file', audio_languages_observed: true, audio_languages: [],
+            codec_profile: {audioTracks: [{index: 1, codec: 'aac', channels: 2}]},
+        });
+        const result = hinted(item, french);
+        assert.equal(result.headline, expected, raw);
+        assert.equal(result.accessibleHeadline, expected);
+        assert.equal(result.audioSource, 'provider-label');
+        assert.equal(french.catalogLanguageInfo(item).text, expected);
+        assert.doesNotMatch(result.headline, /à confirmer|Étiquette du fournisseur|RN|CH|HZ|NA/);
+        assert.equal(french.versionDescriptor(item).headline, 'Langue non identifiée');
+    }
+});
+
 test('subtitle-only declarations, including translated labels, never name the soundtrack', () => {
     for (const item of [
         make('AR-SUBS - Example', 'AR'), make('FR-ST - Example', 'FR'),
