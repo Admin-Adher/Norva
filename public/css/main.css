@@ -14238,9 +14238,15 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 }
 
 @media (min-width: 1025px) {
+  /* Native selects size themselves from their longest option (including facet
+     counts). Let controls wrap instead of squeezing every label into one cell. */
+  html:not(.tv-mode) .catalog-filter-disclosure-toolbar {
+    flex-wrap: wrap;
+  }
+
   html:not(.tv-mode) .catalog-filter-panel {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-sm);
     padding: 12px var(--space-md);
@@ -14252,7 +14258,15 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
 
   html:not(.tv-mode) .catalog-filter-panel > * {
     min-width: 0;
-    max-width: none;
+    max-width: 100%;
+  }
+
+  html:not(.tv-mode) .catalog-filter-panel > .filter-select,
+  html:not(.tv-mode) .catalog-filter-disclosure-toolbar > .filter-select {
+    flex: 0 0 auto;
+    width: max-content;
+    max-width: 100%;
+    min-height: 44px;
   }
 
   html:not(.tv-mode) .catalog-filter-panel .filter-toggle,

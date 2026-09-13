@@ -50,3 +50,18 @@ test('phone sheet and TV fallback remain explicit overrides', () => {
   assert.match(app, /if \(!isDesktopWeb\(\)\) return/);
   assert.match(app, /navigator\.userAgent\.includes\('NorvaTV-AndroidTV'\)/);
 });
+
+test('desktop filter widths follow option content instead of equal grid columns', () => {
+  const desktop = css.match(/@media \(min-width: 1025px\) \{\r?\n[\s\S]*?\r?\n\}\r?\n\r?\n\.filter-select/)[0];
+  const panel = desktop.match(/html:not\(\.tv-mode\) \.catalog-filter-panel \{([^}]+)\}/)[1];
+  assert.match(panel, /display:\s*flex/);
+  assert.match(panel, /flex-wrap:\s*wrap/);
+  assert.doesNotMatch(panel, /grid-template-columns/);
+  const selects = desktop.match(/html:not\(\.tv-mode\) \.catalog-filter-panel > \.filter-select,\s*html:not\(\.tv-mode\) \.catalog-filter-disclosure-toolbar > \.filter-select \{([^}]+)\}/)[1];
+  assert.match(selects, /flex:\s*0 0 auto/);
+  assert.match(selects, /width:\s*max-content/);
+  assert.match(selects, /max-width:\s*100%/);
+  assert.match(selects, /min-height:\s*44px/);
+  assert.match(desktop, /\.catalog-filter-panel > \*\s*\{[^}]*max-width:\s*100%/);
+  assert.match(desktop, /\.catalog-filter-disclosure-toolbar\s*\{[^}]*flex-wrap:\s*wrap/);
+});
