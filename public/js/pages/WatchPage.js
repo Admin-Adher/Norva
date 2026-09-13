@@ -10055,8 +10055,8 @@ class WatchPage {
             const languages = window.MediaUtils?.providerAudioLanguages?.(item) || [];
             if (languages.length === 1) return this.getLanguageDisplayName(languages[0]);
             if (languages.length > 1) return null;
-            // Provider filename tags are useful immediately, but remain explicitly
-            // labelled as provider evidence until an embedded tag or Whisper wins.
+            // Provider filename tags are display hints only. Their provenance and
+            // validation stay in the record, not in the public track label.
             const name = this.currentEpisodeRawTitle() || this.content?.rawTitle
                 || this.content?.raw_title || this.content?.title || '';
             const info = window.MediaUtils?.parseVersionInfo?.(name);
@@ -10068,12 +10068,12 @@ class WatchPage {
                 );
                 if (orig && orig !== 'und') {
                     const display = this.getLanguageDisplayName(orig);
-                    if (display) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38fc9a457587", {defaultValue: "{{p0}} · Provider label", p0:(display)}) : `${display} · Provider label`);
+                    if (display) return display;
                 }
-                return (globalThis.NorvaI18n?.t("ui_web_6b9188d3e5f8", { defaultValue: "Original version · Provider label" }) ?? 'Original version · Provider label');
+                return (globalThis.NorvaI18n?.t("ui_web_8a0d7658de66", { defaultValue: "Original audio" }) ?? 'Original audio');
             }
             const display = this.getLanguageDisplayName(audioSig.language);
-            return display ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_38fc9a457587", {defaultValue: "{{p0}} · Provider label", p0:(display)}) : `${display} · Provider label`) : null;
+            return display || null;
         } catch (_) {
             return null;
         }

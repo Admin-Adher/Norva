@@ -71,7 +71,8 @@ test('many exact-file language observations stay compact and keep platform secon
         subtitle_languages: ['ara', 'cze', 'dan', 'deu', 'eng', 'fre']
     }));
     assert.strictEqual(d.headline, '5 audio languages');
-    assert.match(d.meta, /^6 ST · NF · Provider label ·/);
+    assert.match(d.meta, /^6 ST · NF ·/);
+    assert.equal(d.internalProviderLabel, 'NF · Provider label');
 });
 
 test('an exact observed-but-untagged file suppresses a misleading prefix guess', () => {
@@ -114,7 +115,8 @@ test('large multi-audio Netflix file stays compact and Netflix is metadata', () 
         subtitle_tracks: subtitleTracks
     }));
     assert.strictEqual(d.headline, '5 audio languages');
-    assert.match(d.meta, /^32 ST · NF · Provider label ·/);
+    assert.match(d.meta, /^32 ST · NF ·/);
+    assert.equal(d.internalProviderLabel, 'NF · Provider label');
 });
 
 test('non-empty tenant observation wins over a known-empty global track cache', () => {
@@ -218,26 +220,29 @@ test('a verified title union remains displayable without consulting release-name
 test('Netflix and Nordic are never presented as observed audio', () => {
     const nf = desc(mk('NF - X'));
     assert.strictEqual(nf.headline, 'Language unidentified');
-    assert.match(nf.meta, /NF · Provider label/);
+    assert.match(nf.meta, /NF ·/);
+    assert.equal(nf.internalProviderLabel, 'NF · Provider label');
 
     const nordic = desc(mk('X', { category_name: 'NORDIC FILM NEW RELEASE' }));
     assert.strictEqual(nordic.headline, 'Language unidentified');
-    assert.match(nordic.meta, /Nordic · Provider label/);
+    assert.match(nordic.meta, /Nordic ·/);
+    assert.equal(nordic.internalProviderLabel, 'Nordic · Provider label');
 });
 
-test('every regional provider prefix remains a qualified hint, never an audio claim', () => {
+test('every regional provider prefix remains secondary with internal provenance, never an audio claim', () => {
     const prefixes = ['AR', 'DE', 'GR', 'HU', 'NL', 'PL', 'RU', 'SO'];
     const siblings = prefixes.map(prefix => mk(`${prefix} - Example Film`));
     const results = siblings.map(item => desc(item, siblings));
     for (const [index, result] of results.entries()) {
         assert.strictEqual(result.headline, 'Language unidentified');
-        assert.ok(result.meta.startsWith(`${prefixes[index]} · Provider label · `));
+        assert.ok(result.meta.startsWith(`${prefixes[index]} · `));
+        assert.equal(result.internalProviderLabel, `${prefixes[index]} · Provider label`);
         assert.doesNotMatch(result.meta, /Hungarian|Somali|Arabic|German|verified|confirmed/i);
     }
     assert.strictEqual(new Set(results.map(result => `${result.headline}|${result.meta}`)).size, 8);
 });
 
-test('a qualified supplier code remains secondary when observed audio disagrees', () => {
+test('a supplier code remains secondary with internal provenance when observed audio disagrees', () => {
     const item = mk('HU - Example Film', {
         audio_language_validation_status: 'verified', audio_tracks_scope: 'file',
         audio_tracks: [{ index: 1, lang: 'eng' }]
@@ -245,19 +250,22 @@ test('a qualified supplier code remains secondary when observed audio disagrees'
     const before = JSON.stringify(item);
     const d = desc(item);
     assert.strictEqual(d.headline, 'English');
-    assert.match(d.meta, /^HU · Provider label · /);
+    assert.match(d.meta, /^HU · /);
+    assert.equal(d.internalProviderLabel, 'HU · Provider label');
     assert.strictEqual(M.analyzeLanguageCompatibility(item, { preferredAudioLanguage: 'hu' }).audio.state, 'confirmed_absent');
     assert.strictEqual(JSON.stringify(item), before, 'display must not alter language evidence');
 });
 
-test('same-prefix versions use qualified provider categories, not internal IDs, to disambiguate', () => {
+test('same-prefix versions use categories, not internal qualifications or IDs, to disambiguate', () => {
     const siblings = ['HU | CINEMA', 'HU | CLASSICS'].map((category, index) => mk('HU - Example Film', {
         category_name: category, id: `private-variant-${index}`, external_id: `private-stream-${index}`
     }));
     const results = siblings.map(item => desc(item, siblings));
     assert.notStrictEqual(results[0].meta, results[1].meta);
-    assert.match(results[0].meta, /HU CINEMA · Provider label$/);
-    assert.match(results[1].meta, /HU CLASSICS · Provider label$/);
+    assert.match(results[0].meta, /HU CINEMA$/);
+    assert.match(results[1].meta, /HU CLASSICS$/);
+    assert.equal(results[0].internalProviderCategoryLabel, 'HU CINEMA · Provider label');
+    assert.equal(results[1].internalProviderCategoryLabel, 'HU CLASSICS · Provider label');
     assert.doesNotMatch(results.map(result => result.meta).join(' '), /private-/);
 });
 
@@ -265,7 +273,7 @@ test('absent, noisy and punctuation-only titles do not manufacture provider hint
     for (const raw of ['', 'Example Film', 'TOP - Example Film', '---', '🚀']) {
         assert.doesNotMatch(desc(mk(raw)).meta, /Provider label/);
     }
-    assert.match(desc(mk('HU ▎ Example Film')).meta, /^HU · Provider label · /);
+    assert.match(desc(mk('HU ▎ Example Film')).meta, /^HU · /);
 });
 
 test('a grouped title track map cannot contaminate a child variant', () => {

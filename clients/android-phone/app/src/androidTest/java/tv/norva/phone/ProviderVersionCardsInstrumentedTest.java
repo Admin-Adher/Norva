@@ -19,6 +19,7 @@ public class ProviderVersionCardsInstrumentedTest {
         + "<style>body{overflow:auto}main{padding:var(--space-md)}</style><body><main id='qa-host'></main>"
         + "<script src='/js/i18n.js'></script><script src='/js/utils/mediaUtils.js'></script>"
         + "<script src='/js/pages/MoviesPage.js'></script><script src='/js/pages/SeriesPage.js'></script>"
+        + "<script src='/js/pages/WatchPage.js'></script>"
         + "<script src='/js/icons.js'></script><script src='/js/pages/HomePage.js'></script><script src='/js/utils/GenreRails.js'></script>"
         + "<script src='/provider-version-cards.js'></script><script src='/catalog-language-surfaces.js'></script></body></html>";
 
@@ -75,6 +76,10 @@ public class ProviderVersionCardsInstrumentedTest {
                         evaluate(instrumentation, holder.get(), "window.versionResult='pending';(async()=>{try{"
                             + "await NorvaI18n.setPreference('"+locale+"');await "+fixture+".mount('"+kind+"'"+(catalogue ? ",9" : "")+");"
                             + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();"
+                            + "const audioPage=Object.create(WatchPage.prototype);audioPage.content={rawTitle:'ES | Example'};"
+                            + "audioPage.audioLanguageValidationStatus='pending';audioPage.audioTracks=[{index:1,codec:'ac3',channels:6,channelLayout:'5.1(side)'}];"
+                            + "if(audioPage.getProbeAudioTracks()[0].label!==audioPage.getLanguageDisplayName('es')+' · AC3 · 5.1')throw Error('public player qualifier');"
+                            + "if(audioPage.audioLanguageValidationStatus!=='pending')throw Error('player hint upgraded validation');"
                             + "if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);"
                             + "window.versionResult='ok';}catch(e){window.versionResult=String(e);}})();");
                         String result = "\"pending\"";

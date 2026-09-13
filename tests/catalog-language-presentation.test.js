@@ -104,12 +104,12 @@ test('observed tracks, verified results and known-empty audio always outrank sup
     assert.equal(info(invalidMovie).headline, 'Language unidentified');
 });
 
-test('title unions stay aggregate while pending maps allow only qualified supplier presentation', () => {
+test('title unions stay aggregate while pending maps keep supplier provenance internal', () => {
     const union = info({ item_type:'movie', audioLanguages:['fr','en'], audioLanguageValidationStatus:'probed_union',
         defaultVariant:make('AR | Example') });
     assert.match(union.headline, /FR.*EN/); assert.equal(union.languageStatus, '');
     assert.equal(info(make('AR | Example', '', { audio_tracks_scope:'file', audio_tracks:[{lang:'fr'}],
-        audio_language_validation_status:'pending' })).headline, 'Arabic · Provider label');
+        audio_language_validation_status:'pending' })).headline, 'Arabic');
 });
 
 test('ordinary title words, subtitle-only tags, conflicts and ambiguous territories stay unknown', () => {

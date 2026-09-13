@@ -29,7 +29,7 @@ const unidentifiedByLocale = [
     'ভাষা শনাক্ত হয়নি', 'اللغة غير محددة', 'Bahasa belum teridentifikasi', 'Hindi natukoy ang wika',
 ];
 
-test('regional provider codes remain qualified secondary labels in all app locales', () => {
+test('regional provider codes remain secondary while their qualification stays internal in all app locales', () => {
     const r = runtime();
     const labels = [
         'Provider label', 'Étiquette du fournisseur', 'Etiqueta do fornecedor',
@@ -44,7 +44,8 @@ test('regional provider codes remain qualified secondary labels in all app local
         for (const item of siblings) {
             const d = r.MediaUtils.versionDescriptor(item, { siblings });
             assert.equal(d.headline, unidentifiedByLocale[index], `${code}: audio stays unidentified`);
-            assert.equal(d.meta, `${item.raw_title.slice(0, 2)} · ${labels[index]}`, `${code}: qualified supplier code`);
+            assert.equal(d.meta, item.raw_title.slice(0, 2), `${code}: supplier code only`);
+            assert.equal(d.internalProviderLabel, `${item.raw_title.slice(0, 2)} · ${labels[index]}`, `${code}: internal qualified supplier code`);
         }
     }
 });

@@ -776,7 +776,7 @@ test('a muxed-mono manifest without an audioTracks event payload still proves ze
     const { page } = harness;
     page.content = { id: 'movie-mono-payload', type: 'movie' };
     page.audioLanguageValidationStatus = 'probed';
-    page.playingAudioVersionLabel = () => 'English · Provider label';
+    page.playingAudioVersionLabel = () => 'English';
     page.audioTracks = [{ index: 7, language: 'eng', codec: 'eac3', channels: 6 }];
     page.selectedAudioStreamIndex = 7;
     page.directAudioStreamIndex = 7;
@@ -846,7 +846,7 @@ test('unverified muxed mono exposes one honest informational row without enablin
     const { page } = harness;
     page.content = { id: 'movie-amar', type: 'movie', rawTitle: 'ES ▎ Amar' };
     page.audioLanguageValidationStatus = 'not_analyzed';
-    page.playingAudioVersionLabel = () => 'Spanish · Provider label';
+    page.playingAudioVersionLabel = () => 'Spanish';
     page.currentPlaybackMode = 'gateway-session';
     page.audioTracks = [{
         index: 1,
@@ -879,7 +879,7 @@ test('unverified muxed mono exposes one honest informational row without enablin
         'unmapped Gateway topology remains non-switchable');
     const tracks = page.getVisibleAudioTracks();
     assert.deepEqual(Array.from(tracks, (track) => [track.source, track.index]), [['none', -1]]);
-    assert.equal(tracks[0].label, 'Spanish · Provider label · AC3 · 5.1');
+    assert.equal(tracks[0].label, 'Spanish · AC3 · 5.1');
     assert.doesNotMatch(tracks[0].label, /pending|verified/i);
     assert.equal(await page.selectAudioTrack(tracks[0].source, tracks[0].index), undefined);
     assert.equal(restartCalls, 0);

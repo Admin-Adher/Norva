@@ -2008,11 +2008,11 @@ const MediaUtils = (() => {
             }) ?? 'Nordic languages' };
         }
         const label = languageDisplayFull(tag);
-        return { tag, label: tag === 'so'
+        return { tag, label, confirmationStatus: tag === 'so'
             ? (globalThis.NorvaI18n?.t('ui_web_provider_language_to_confirm', {
                 defaultValue: '{{language}} · to confirm', language: label
             }) ?? `${label} · to confirm`)
-            : label };
+            : '' };
     }
 
     function versionProviderLanguageStatus(item) {
@@ -2046,7 +2046,7 @@ const MediaUtils = (() => {
         const aggregateKnown = aggregate && aggregate !== audioLanguageAnalysisLabel(item);
         const declared = !displayable ? providerAudioBadge(item) : '';
         // A pending/unaccepted file tag is not a confirmed soundtrack. Keep an
-        // explicit catalogue declaration visible, qualified as supplier data,
+        // explicit catalogue declaration visible, with supplier provenance internal,
         // instead of letting that unaccepted tag suppress it altogether. The
         // raw profile, strict badges, scoring and accepted observations do not
         // change. A known-empty audio inventory still cannot create audio.
@@ -2058,16 +2058,15 @@ const MediaUtils = (() => {
         );
         const interpreted = providerHints && (!observed || unacceptedTrackTag) && !aggregateKnown && !declared
             ? versionProviderLanguageHint(item) : null;
-        const interpretedLabel = interpreted && unacceptedTrackTag
-            ? providerHintLabel(interpreted.label) : interpreted?.label;
         const headline = !displayable
-            ? declared || interpretedLabel || audioLanguageAnalysisLabel(item)
-            : observed || (aggregateKnown ? aggregate : '') || interpretedLabel || audioLanguageAnalysisLabel(item);
+            ? declared || interpreted?.label || audioLanguageAnalysisLabel(item)
+            : observed || (aggregateKnown ? aggregate : '') || interpreted?.label || audioLanguageAnalysisLabel(item);
         const languageStatus = providerHints && (interpreted || declared) ? versionProviderLanguageStatus(item) : '';
         const codes = displayable ? (state.known && state.tracks.length ? versionTrackLanguages(state.tracks)
             : languages.known ? languages.languages : []) : [];
         const accessibleHeadline = codes.length > 1 ? codes.map(languageDisplayFull).join(' / ') : headline;
         return { headline, accessibleHeadline, languageStatus,
+            languageConfirmationStatus: interpreted?.confirmationStatus || '',
             audioSource: interpreted ? 'provider-label' : declared && providerHints ? 'provider-declared' : source };
     }
 
@@ -2234,8 +2233,8 @@ const MediaUtils = (() => {
         const subtitleState = versionTrackState(item, 'subtitle');
         const subtitleLanguageState = versionFileLanguageState(item, 'subtitle');
         const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
-        const { headline, accessibleHeadline, languageStatus, audioSource } = languagePresentation(item, {}, opts.providerLanguageHints === true);
-        const metaParts = [subtitleLabel, languageStatus ? providerHint : providerHintLabel(providerHint), provider, container];
+        const { headline, accessibleHeadline, languageStatus, languageConfirmationStatus, audioSource } = languagePresentation(item, {}, opts.providerLanguageHints === true);
+        const metaParts = [subtitleLabel, providerHint, provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Keep provider labels secondary, without repeating the audio headline.
         let meta = metaParts.filter(p => p && p !== headline).join(' · ');
@@ -2262,11 +2261,12 @@ const MediaUtils = (() => {
         };
         const mySig = sigOf(item);
         const collides = siblings.length > 1 && siblings.filter(s => sigOf(s) === mySig).length > 1;
+        let internalProviderCategoryLabel = '';
         if (collides) {
             const cat = versionCategoryLabel(item);
             if (cat && cat !== headline && cat !== providerHint) {
-                const qualifiedCategory = providerHintLabel(cat);
-                meta = meta ? `${meta} · ${qualifiedCategory}` : qualifiedCategory;
+                internalProviderCategoryLabel = providerHintLabel(cat);
+                meta = meta ? `${meta} · ${cat}` : cat;
             }
         }
 
@@ -2274,6 +2274,9 @@ const MediaUtils = (() => {
             headline,
             accessibleHeadline,
             languageStatus,
+            languageConfirmationStatus,
+            internalProviderLabel: providerHintLabel(providerHint),
+            internalProviderCategoryLabel,
             meta,
             badge,
             tier,

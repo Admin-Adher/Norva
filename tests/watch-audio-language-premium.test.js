@@ -10,9 +10,16 @@ const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, 'public/js/pages/WatchPage.js'), 'utf8');
 const mediaUtilsSource = fs.readFileSync(path.join(ROOT, 'public/js/utils/mediaUtils.js'), 'utf8');
 
-function loadWatchPage() {
+function loadWatchPage(locale) {
   const window = {};
   const context = { window, console, Intl, setTimeout, clearTimeout, Promise, URL };
+  if (locale) {
+    const translations = {...require('../i18n/web-dynamic.json'),...require('../i18n/web-extra.json'),...require('../i18n/reviewed.json')};
+    context.NorvaI18n = {language:locale,t(key,args={}) {
+      return (translations[key]?.[locale] || args.defaultValue || key)
+        .replace(/\{\{(\w+)\}\}/g,(_,name)=>args[name] ?? '');
+    }};
+  }
   vm.runInNewContext(mediaUtilsSource, context, { filename: 'mediaUtils.js' });
   vm.runInNewContext(source, context, { filename: 'WatchPage.js' });
   return { WatchPage: window.WatchPage, window };
@@ -27,7 +34,7 @@ test('unknown speech never renders a pending placeholder and preserves honest te
 
   assert.equal(
     page.getProbeAudioTracks()[0].label,
-    'Spanish · Provider label · AC3 · 5.1',
+    'Spanish · AC3 · 5.1',
   );
   assert.doesNotMatch(source, /Audio language pending/);
 
@@ -43,6 +50,27 @@ test('an exact embedded tag remains stronger than a provider filename hint', () 
   page.audioTracks = [{ index: 1, language: 'fr', codec: 'aac', channels: 2 }];
 
   assert.equal(page.getProbeAudioTracks()[0].label, 'French · AAC · Stereo');
+});
+
+test('player language hints omit internal qualifiers in every locale without changing validation', () => {
+  for (const {code} of require('../i18n/locales.json')) {
+    const {WatchPage,window} = loadWatchPage(code);
+    const page = Object.create(WatchPage.prototype);
+    page.content = {rawTitle:'ES ▎ Amar',title:'Amar'};
+    page.audioLanguageValidationStatus = 'pending';
+    page.audioTracks = [{index:1,codec:'ac3',channels:6,channelLayout:'5.1(side)'}];
+    const before = JSON.stringify({content:page.content,tracks:page.audioTracks});
+    const spanish = page.getLanguageDisplayName('es');
+    assert.equal(page.playingAudioVersionLabel(),spanish,code);
+    assert.equal(page.getProbeAudioTracks()[0].label,`${spanish} · AC3 · 5.1`,code);
+    assert.equal(page.audioLanguageValidationStatus,'pending');
+    assert.equal(JSON.stringify({content:page.content,tracks:page.audioTracks}),before);
+    assert.equal(window.MediaUtils.providerAudioLanguages(page.content).length,0);
+    page.content = {rawTitle:'VOSTFR - Example',original_language:'ja'};
+    assert.equal(page.playingAudioVersionLabel(),page.getLanguageDisplayName('ja'),code);
+    delete page.content.original_language;
+    assert.equal(page.playingAudioVersionLabel(),require('../i18n/reviewed.json').ui_web_8a0d7658de66[code],code);
+  }
 });
 
 test('a rendered movie records one exact-file Whisper intent and submits it only through the server route', async () => {

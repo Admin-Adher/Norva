@@ -94,8 +94,10 @@ window.CatalogLanguageQA = (() => {
     function verify() {
         const host = document.getElementById('qa-host');
         const pendingView = MediaUtils.catalogLanguageInfo(items[9]);
-        const qualifiedEnglish = NorvaI18n.t('ui_web_38fc9a457587',{p0:MediaUtils.languageDisplayFull('en')});
-        if (pendingView.headline !== qualifiedEnglish || pendingView.audioSource !== 'provider-label') throw Error('unaccepted tag hides or overstates supplier language');
+        if (pendingView.headline !== MediaUtils.languageDisplayFull('en') || pendingView.audioSource !== 'provider-label') throw Error('unaccepted tag hides language or loses internal provenance');
+        const providerMention = NorvaI18n.t('ui_web_38fc9a457587',{p0:'QA'}).replace('QA','').replace(/^[\s·]+/,'');
+        const confirmMention = NorvaI18n.t('ui_web_provider_language_to_confirm',{language:'QA'}).replace('QA','').replace(/^[\s·]+/,'');
+        if ([providerMention,confirmMention].some(text => host.outerHTML.includes(text))) throw Error('internal qualification exposed');
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('page horizontal overflow: '+surface);
         if (surface.endsWith('-detail')) {
             const meta = host.querySelector(surface === 'movie-detail' ? '#movie-detail-meta' : '#series-meta');

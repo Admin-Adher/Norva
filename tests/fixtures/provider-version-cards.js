@@ -77,8 +77,13 @@ window.ProviderVersionCardsQA = (() => {
         if (versions.filter(item => MediaUtils.versionDescriptor(item,{providerLanguageHints:true}).languageStatus).length !== 8) throw Error('internal provenance lost');
         const pendingVersion = versions.find(v=>v.stream_id==='12');
         const pendingView = MediaUtils.versionDescriptor(pendingVersion,{providerLanguageHints:true});
-        if (pendingView.headline !== NorvaI18n.t('ui_web_38fc9a457587',{p0:MediaUtils.languageDisplayFull('en')})
-            || pendingView.audioSource !== 'provider-label') throw Error('pending tag hides or overstates catalogue declaration');
+        if (pendingView.headline !== MediaUtils.languageDisplayFull('en')
+            || pendingView.audioSource !== 'provider-label') throw Error('pending tag hides language or loses internal provenance');
+        const somaliView = MediaUtils.versionDescriptor(versions.find(v=>v.stream_id==='11'),{providerLanguageHints:true});
+        if (somaliView.headline !== MediaUtils.languageDisplayFull('so') || !somaliView.languageConfirmationStatus) throw Error('Somali confirmation status lost or exposed');
+        const providerMention = NorvaI18n.t('ui_web_38fc9a457587',{p0:'QA'}).replace('QA','').replace(/^[\s·]+/,'');
+        const confirmMention = NorvaI18n.t('ui_web_provider_language_to_confirm',{language:'QA'}).replace('QA','').replace(/^[\s·]+/,'');
+        if ([providerMention,confirmMention].some(text => document.getElementById('qa-versions').outerHTML.includes(text))) throw Error('internal qualification exposed');
         if (pendingVersion.codec_profile.audioTracks[0].language !== 'her') throw Error('raw file tag changed');
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('horizontal overflow');
         for (const button of buttons) {

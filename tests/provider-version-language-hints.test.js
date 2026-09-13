@@ -29,10 +29,10 @@ const seven = [
     ['HU ▎ Example Film', 'NORDIC FILM NEW RELEASE', 'Nordic languages'],
     ['IN ▎ Example Film', 'ASIA| HINDI', 'Hindi'],
     ['NL ▎ Example Film', 'NL | DISNEY+', 'Dutch'],
-    ['SO ▎ Example Film', '', 'Somali · to confirm']
+    ['SO ▎ Example Film', '', 'Somali']
 ];
 
-test('the seven approved interpretations are qualified display hints, not audio evidence', () => {
+test('the seven approved interpretations retain internal provenance without creating audio evidence', () => {
     for (const [raw, category, expected] of seven) {
         const item = make(raw, category);
         const before = JSON.stringify(item);
@@ -57,7 +57,7 @@ test('all supported separators and camel/snake category fields work without sour
     // Actual source categories, including older localized media responses that
     // did not yet preserve the raw-title prefix.
     assert.equal(hinted(make('Example Film', 'SCANDINAVIA')).headline, 'Nordic languages');
-    assert.equal(hinted(make('Example Film', 'SOMALIA')).headline, 'Somali · to confirm');
+    assert.equal(hinted(make('Example Film', 'SOMALIA')).headline, 'Somali');
 });
 
 test('the AR-labelled file stays French once its actual French track is available', () => {
@@ -92,7 +92,7 @@ test('a known-empty audio map is not resurrected as supplier audio', () => {
     assert.equal(result.languageStatus, '');
 });
 
-test('unaccepted tags retain a qualified catalogue declaration without upgrading evidence', () => {
+test('unaccepted tags retain the catalogue language and internal provenance without upgrading evidence', () => {
     for (const status of ['pending', 'not_analyzed', 'failed', 'rejected']) {
         for (const fields of [
             {audio_tracks_scope:'file', audio_tracks:[{index:1,lang:'fre'}]},
@@ -105,7 +105,8 @@ test('unaccepted tags retain a qualified catalogue declaration without upgrading
             const before = JSON.stringify(item);
             const scoring = JSON.stringify(M.analyzeLanguageCompatibility(item,{preferredAudioLanguage:'en'}));
             const result = hinted(item);
-            assert.equal(result.headline, 'English · Provider label');
+            assert.equal(result.headline, 'English');
+            assert.equal(result.internalProviderLabel, 'EN · Provider label');
             assert.equal(result.accessibleHeadline, result.headline);
             assert.equal(result.languageStatus, 'Provider · Unverified');
             assert.equal(result.audioSource, 'provider-label');
@@ -119,7 +120,7 @@ test('unaccepted tags retain a qualified catalogue declaration without upgrading
     }
 });
 
-test('qualified fallback still refuses subtitle tags, contradictions and title prose', () => {
+test('supplier fallback still refuses subtitle tags, contradictions and title prose', () => {
     for (const [raw,category] of [['EN SUBS ▎ Example','EN SUBTITLES'],['EN ▎ Example','FR'],
         ['Johnny English',''],['EN ▎ Example','EN / FR'],['EXYU ▎ Example','']]) {
         const result = hinted(make(raw,category,{audio_language_validation_status:'pending',
@@ -173,7 +174,7 @@ test('conflicting and multi-language provider categories do not invent track cou
     }
 });
 
-test('active analysis remains visible alongside the unverified qualifier', () => {
+test('active analysis remains in internal status alongside the unverified qualifier', () => {
     for (const [job, suffix] of [['running', 'Identifying audio'], ['queued', 'Audio pending'], ['retry_wait', 'Audio pending']]) {
         const result = hinted(make('FR ▎ Example', '', { audio_language_validation_job_status: job }));
         assert.equal(result.headline, 'French');
@@ -199,7 +200,7 @@ test('the approved fallback does not change compatibility scoring, source IDs or
     }
 });
 
-test('qualifier, regional group and Somali uncertainty are localized for all ten UI languages', () => {
+test('provider qualifications and Somali uncertainty are internal in all ten UI languages', () => {
     for (const { code } of locales) {
         const utility = load(code);
         assert.equal(hinted(make('FR ▎ Example', ''), utility).languageStatus,
@@ -207,12 +208,24 @@ test('qualifier, regional group and Somali uncertainty are localized for all ten
         assert.equal(hinted(make('HU ▎ Example', 'Nordic'), utility).headline,
             translations.ui_web_provider_nordic_languages[code]);
         const somali = utility.languageDisplayFull('so');
-        assert.equal(hinted(make('SO ▎ Example', ''), utility).headline,
+        const somaliView = hinted(make('SO ▎ Example', ''), utility);
+        assert.equal(somaliView.headline, somali);
+        assert.equal(somaliView.languageConfirmationStatus,
             translations.ui_web_provider_language_to_confirm[code].replace('{{language}}', somali));
         const pending = make('EN ▎ In Her Place','EN ▎CINEMA MOVIES', {
             audio_language_validation_status:'pending',codec_profile:{audioTracks:[{index:1,language:'her'}]}});
-        assert.equal(hinted(pending,utility).headline,
-            translations.ui_web_38fc9a457587[code].replace('{{p0}}',utility.languageDisplayFull('en')));
+        const pendingView = hinted(pending,utility);
+        assert.equal(pendingView.headline, utility.languageDisplayFull('en'));
+        assert.equal(pendingView.internalProviderLabel,
+            translations.ui_web_38fc9a457587[code].replace('{{p0}}','EN'));
+        for (const item of [pending, make('SO ▎ Example','')]) {
+            const view = hinted(item,utility);
+            const publicText = [view.headline,view.accessibleHeadline,view.meta,
+                utility.languageBadgeHtml(utility.catalogLanguageInfo(item),'test')].join(' ');
+            for (const internal of [view.languageStatus,view.languageConfirmationStatus,view.internalProviderLabel]) {
+                if (internal) assert.ok(!publicText.includes(internal), `${code}: internal mention leaked`);
+            }
+        }
     }
 });
 
