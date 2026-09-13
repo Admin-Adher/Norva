@@ -3,8 +3,9 @@
 One fresh header probe per exact file, using the existing production admission
 and drain checks. No reset, quarantine change, forced language or new model.
 The old map and operation intents stay private; an uncertain call is not retried.
-An unchanged suspicious tag can enter the ordinary strict validator only with
-a fresh, bound profile and no existing job, through its guarded production RPC.
+Only an untagged track can enter the ordinary strict validator with a fresh,
+bound profile and no existing job, through its guarded production RPC. A rare
+but freshly observed tag remains metadata; the cohort is not a blacklist.
 """
 import collections,fcntl,hashlib,importlib.util,json,os,pathlib,re,sys,time
 
@@ -103,8 +104,9 @@ def step(sample):
         changed=after.get('tracks')!=row['original_tracks']
         result_name='fresh_metadata'
         # Fresh declared languages are useful, not speech certificates. Preserve
-        # them. Only still-suspicious/unknown maps need the strict existing method.
-        if is_suspect(after.get('tracks')) or any(pilot.track_unknown(t) for t in after.get('tracks') or []):
+        # them. The ordinary automatic RPC requires an actually untagged track;
+        # a cohort selector is not proof that a fresh rare language is wrong.
+        if any(pilot.track_unknown(t) for t in after.get('tracks') or []):
             reason=decision(after)
             if reason:result_name=reason
             elif not pilot.profile_ready(after):result_name='profile_incomplete'

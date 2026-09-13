@@ -3068,7 +3068,9 @@ class MoviesPage {
             version.quality,
             MediaUtils.catalogLanguageInfo(movie, this.getPreferences()).text,
             ordered.length > 1 ? (globalThis.NorvaI18n?.t('ui_version_count', { count: Number(ordered.length), defaultValue: `${ordered.length} versions` }) ?? `${ordered.length} versions`) : '',
-            this.getCategoryName(displayMovie)
+            // Supplier categories describe the selected file, not the title's
+            // editorial representative (which may be a different language).
+            this.getCategoryName(movie)
         ].filter(Boolean);
 
         const metaEl = document.getElementById('movie-detail-meta');

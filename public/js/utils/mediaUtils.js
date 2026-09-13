@@ -819,7 +819,7 @@ const MediaUtils = (() => {
 
     function languageDisplayFull(code) {
         const normalized = normalizeLanguagePreference(code);
-        const locale = globalThis.NorvaI18n?.language || 'en';
+        const locale = globalThis.NorvaI18n?.language || documentLanguage();
         try {
             if (normalized && normalized !== 'und') {
                 const label = new Intl.DisplayNames([locale], { type: 'language', fallback: 'none' }).of(normalized);
@@ -1135,10 +1135,7 @@ const MediaUtils = (() => {
     function providerAudioBadge(item) {
         const codes = providerAudioLanguages(item);
         if (!codes.length) return '';
-        const locale = documentLanguage();
-        const names = new Intl.DisplayNames([locale], { type: 'language' });
-        const language = codes.map(code => names.of(code) || code.toUpperCase()).join(' / ');
-        return language;
+        return codes.map(languageDisplayFull).join(' / ');
     }
 
     function documentLanguage() {
@@ -2151,19 +2148,12 @@ const MediaUtils = (() => {
         const count = tracks.length;
         if (!count) return (globalThis.NorvaI18n?.t("ui_web_e39189e8bd71", { defaultValue: "Audio unavailable" }) ?? 'Audio unavailable');
         if (!langs.length) return '';
-        if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : (globalThis.NorvaI18n?.t("ui_web_bc1b88907d3b", { defaultValue: "Audio" }) ?? 'Audio');
-        if ((count <= 4 && langs.length === count) || langs.length === 4) return langs.map(languageDisplay).join(' / ');
-        // Large multi-audio files can expose dozens of tracks. Describe the
-        // available language choice instead of implying the first track is primary.
-        if (langs.length > 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
-        const first = normalizeLanguagePreference(
-            tracks[0] && (tracks[0].lang || tracks[0].language || tracks[0].iso_639_1 || tracks[0].iso639 || tracks[0].code || '')
-        );
-        if (first && first !== 'und' && first !== 'unknown') {
-            return `${languageDisplayFull(first)} +${count - 1}`;
-        }
-        if (langs.length === 1) return `${languageDisplayFull(langs[0])} +${Math.max(1, count - 1)}`;
-        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_0302c460b29a", {defaultValue: "{{p0}} audios", p0:(count)}) : `${count} audios`);
+        // A track count is not a language count. Duplicate codecs and unnamed
+        // tracks must not hide the languages already known for this exact file.
+        // The ordered track map (including unknowns) remains unchanged for playback.
+        if (langs.length === 1) return languageDisplayFull(langs[0]);
+        if (langs.length <= 4) return langs.map(languageDisplay).join(' / ');
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
     }
 
     function versionAudioLanguageHeadline(state) {

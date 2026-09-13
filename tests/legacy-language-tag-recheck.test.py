@@ -38,9 +38,14 @@ class LegacyTagTests(unittest.TestCase):
             run,ops,files=self.run_step(pathlib.Path(tmp),{'tracks':[{'index':1,'lang':'hi'}]})
             run();self.assertEqual(ops,['probe']);self.assertEqual(files['01-closed.private.json']['result'],'fresh_metadata')
             self.assertEqual(files['01-before.private.json']['tracks'][0]['lang'],'ki')
-    def test_unchanged_suspect_uses_existing_strict_rpc(self):
+    def test_fresh_rare_tag_is_preserved_without_invalid_automatic_enqueue(self):
         with tempfile.TemporaryDirectory() as tmp:
             run,ops,files=self.run_step(pathlib.Path(tmp),{'tracks':[{'index':1,'lang':'ki'}]})
+            run();self.assertEqual(ops,['probe']);self.assertNotIn('01-enqueue-intent.private.json',files)
+            self.assertEqual(files['01-closed.private.json']['result'],'fresh_metadata')
+    def test_fresh_untagged_track_uses_existing_strict_rpc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run,ops,files=self.run_step(pathlib.Path(tmp),{'tracks':[{'index':1,'lang':None}]})
             run();self.assertEqual(ops,['probe','enqueue']);self.assertIn('01-enqueue-intent.private.json',files)
     def test_uncertain_transport_gets_a_terminal_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:

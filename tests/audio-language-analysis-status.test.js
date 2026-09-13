@@ -146,7 +146,8 @@ test('existing reviewed provider declarations precede every job state without be
                 provider_audio_languages: ['hi'], provider_audio_language_status: 'provider_declared',
                 audio_language_validation_status: 'not_analyzed', audio_language_validation_job_status: job,
             };
-            const expected = new Intl.DisplayNames([code], { type: 'language' }).of('hi');
+            const name = new Intl.DisplayNames([code], { type: 'language' }).of('hi');
+            const expected = name.charAt(0).toLocaleUpperCase(code) + name.slice(1);
             assert.equal(r.MediaUtils.versionLanguageBadge(item), expected, `${code}/${job}`);
             assert.equal(r.MediaUtils.versionDescriptor(item).headline, expected, `${code}/${job}`);
             assert.equal(r.MediaUtils.analyzeLanguageCompatibility(item, { preferredAudioLanguage: 'hi' }).audio.state, 'unknown');

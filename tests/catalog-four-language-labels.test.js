@@ -50,3 +50,29 @@ test('provider dubbing hints never replace a known contradictory track or an emp
     assert.equal(M.catalogLanguageInfo(unknown).audioSource,'provider-label');
     assert.equal(M.versionDescriptor(unknown).headline,'Langue non identifiée','strict evidence remains unchanged');
 });
+
+test('partially named and repeated audio tracks retain the known language choices', () => {
+    const M=load();
+    for (const [tracks,expected] of [
+        [[null,'en','te',null],'EN / TE'],
+        [['en','en','te','te'],'EN / TE'],
+        [['fr','fr',null,null],'Français']
+    ]) {
+        const item={...metadata('Bring Her Back'),audio_tracks_scope:'file',
+            audio_tracks:tracks.map((lang,index)=>({index:index+1,lang}))};
+        const before=JSON.stringify(item);
+        assert.equal(M.versionDescriptor(item,{providerLanguageHints:true}).headline,expected);
+        assert.equal(M.catalogLanguageInfo(item).headline,expected);
+        assert.equal(JSON.stringify(item),before,'track count and unknown tracks stay intact');
+    }
+});
+
+test('curated provider declarations use the same capitalized names as observed tracks', () => {
+    const M=load();
+    for (const [code,expected] of [['te','Télougou'],['en','Anglais'],['hi','Hindi']]) {
+        const item={providerAudioLanguages:[code],providerAudioLanguageStatus:'provider_declared',
+            audioLanguageValidationStatus:'not_analyzed'};
+        assert.equal(M.providerAudioBadge(item),expected);
+        assert.equal(M.catalogLanguageInfo(item).headline,expected);
+    }
+});

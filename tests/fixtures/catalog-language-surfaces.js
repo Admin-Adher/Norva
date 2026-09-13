@@ -8,7 +8,9 @@ window.CatalogLanguageQA = (() => {
         ['Example Nordic', 'SCANDINAVIA', 'nordic'],
         ['Example Unlabelled', '', null],
         ['IN ▎ The Blind', 'ASIA ▎ENGLISH HINDI DUBBED', 'hi'],
-        ['IN ▎ Blink Twice', 'ASIA ▎HINDI', ['en','hi','ta','te']]
+        ['IN ▎ Blink Twice', 'ASIA ▎HINDI', ['en','hi','ta','te']],
+        ['TL ▎ Bring Her Back', 'ASIA ▎TELUGU', ['en','te']],
+        ['Example Selection', '', 'te']
     ];
     let surface, items, chosen, controller, appMarkup;
     const noop = () => {};
@@ -18,9 +20,11 @@ window.CatalogLanguageQA = (() => {
             item_type: kind, name, title: name, raw_title: name, category_name: category,
             metadata: {categoryName:category}, cover:poster, stream_icon:poster, poster_url:poster,
             expected, audio_language_validation_status:index === 2 || Array.isArray(expected) ? 'probed' : 'not_analyzed',
-            audio_tracks_scope:'file', audio_tracks:index === 2 ? [{index:1,lang:'fr'}]
+            audio_tracks_scope:'file', audio_tracks:index === 7 ? [null,'en','te',null].map((lang,n)=>({index:n+1,lang}))
+                : index === 2 ? [{index:1,lang:'fr'}]
                 : Array.isArray(expected) ? expected.map((lang,n)=>({index:n+1,lang})) : [],
-            audio_probed_at:index === 2 || Array.isArray(expected) ? '2026-09-10T10:00:00Z' : null
+            audio_probed_at:index === 2 || Array.isArray(expected) ? '2026-09-10T10:00:00Z' : null,
+            ...(index === 8 ? {providerAudioLanguages:['te'],providerAudioLanguageStatus:'provider_declared'} : {})
         }));
     }
     function page(kind, host) {
@@ -70,7 +74,10 @@ window.CatalogLanguageQA = (() => {
             controller.detailsPanel = panel;
             controller.versionsList = panel.querySelector(`.${kind}-versions-list`);
             controller.versionSummary = panel.querySelector(`.${kind}-versions-toolbar .hint`);
-            const item = items[detailIndex], group = {representative:item,items:[item]};
+            // Editorial artwork may belong to the group representative. Its
+            // provider category must never label the selected file instead.
+            const item = items[detailIndex], group = {representative:kind === 'movie'
+                ? {...item, category_name:'TR | QA OTHER VERSION'} : item,items:[item]};
             chosen = item;
             if (kind === 'movie') controller.showMovieDetails(group,item);
             else {
@@ -88,6 +95,10 @@ window.CatalogLanguageQA = (() => {
             const meta = host.querySelector(surface === 'movie-detail' ? '#movie-detail-meta' : '#series-meta');
             const expected = MediaUtils.catalogLanguageInfo(chosen).text;
             if (!meta.textContent.includes(expected)) throw Error('single detail lacks language');
+            if (surface === 'movie-detail') {
+                if (meta.textContent.includes('TR | QA OTHER VERSION')) throw Error('sibling provider category leaked');
+                if (chosen.category_name && !meta.textContent.includes(chosen.category_name)) throw Error('selected provider category missing');
+            }
             if (host.querySelector('.version-language-status')) throw Error('single detail needs no version switcher');
             for (const pill of meta.children) {
                 if (pill.scrollWidth > pill.clientWidth + 1 || pill.scrollHeight > pill.clientHeight + 1) throw Error('clipped detail language');
@@ -96,7 +107,7 @@ window.CatalogLanguageQA = (() => {
             const badges = [...host.querySelectorAll('.catalog-language-badge')];
             if (badges.length !== items.length) throw Error('catalogue badge count');
             if (host.querySelector('.language-badge-status')) throw Error('internal provenance leaked');
-            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 4) throw Error('internal provenance lost');
+            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 5) throw Error('internal provenance lost');
             badges.forEach((badge,index) => {
                 const expected = MediaUtils.catalogLanguageInfo(items[index]);
                 if (badge.getAttribute('aria-label') !== expected.accessibleHeadline) throw Error('accessible language wrong');
