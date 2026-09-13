@@ -12,10 +12,11 @@ import sys
 import tarfile
 import time
 
-ROOT = pathlib.Path('/home/adrien/.norva/enrichment-admission-20260913')
+ROOT = pathlib.Path('/home/adrien/.norva/enrichment-admission-20260913-retry1')
+PREVIOUS_ATTEMPT = ROOT.parent/'enrichment-admission-20260913'
 CURRENT = ROOT.parent/'initial-playback-topology-20260912'
 NATIVE = ROOT.parent/'enrichment-admission-native-20260913-r2/native-proof.json'
-IMAGE = 'norva-media-gateway:enrichment-admission-20260913'
+IMAGE = 'norva-media-gateway:enrichment-admission-20260913-retry1'
 FILES = ('index.js',)
 
 
@@ -30,7 +31,7 @@ def load(name, path):
 live = load('enrichment_admission_current', CURRENT/'deploy-initial-playback-topology-20260912.py')
 op = load('enrichment_admission_supervisor', ROOT.parent/'scoped-passive-dormant-20260912/deploy-scoped-passive-dormant-20260912.py')
 op.ROOT, op.NATIVE, op.FILES, op.IMAGE = ROOT, NATIVE, FILES, IMAGE
-op.PREFIX, op.__file__ = op.SERVICE+'-enrichment-admission-20260913', __file__
+op.PREFIX, op.__file__ = op.SERVICE+'-'+ROOT.name, __file__
 gw, require = op.gw, op.require
 
 
@@ -91,7 +92,13 @@ def stage():
     before = live.source_snapshot()
     after = {**before, 'index.js':gw.sha(data)}
     (context/'Dockerfile').write_text('ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nCOPY --chmod=0644 index.js /app/src/index.js\n')
-    base_tag = 'norva-enrichment-admission-base:20260913'
+    # A terminal observation window is not retried in place. Preserve the
+    # previous attempt and ensure its controller/guard really exited.
+    closed = json.loads(gw.safe_file(PREVIOUS_ATTEMPT, 'closed.private.json').read_text())
+    require(closed.get('productionUpdated') is False and closed.get('cronsRestored') is True
+        and not previous_process_alive('run') and not previous_process_alive('watch'),
+        'previous_attempt_not_safely_closed')
+    base_tag = 'norva-enrichment-admission-base:20260913-retry1'
     gw.run(['docker', 'tag', current['Image'], base_tag])
     require(gw.image_identity(base_tag)['index'] == current['Image'], 'build_base_drift')
     gw.run(['docker', 'build', '--network', 'none', '--build-arg', 'BASE_IMAGE='+base_tag, '-t', IMAGE, str(context)])
@@ -103,6 +110,9 @@ def stage():
     paths += [CURRENT/name for name in ('plan.private.json', 'receipt.private.json', 'closed.private.json',
         'deploy-initial-playback-topology-20260912.py')]
     paths += [NATIVE, pathlib.Path(__file__), ROOT/'source.tar']
+    paths += [PREVIOUS_ATTEMPT/name for name in ('plan.private.json', 'closed.private.json',
+        'begin.private.json', 'run.private.json', 'watch.private.json',
+        'deploy-enrichment-admission-20260913.py', 'source.tar')]
     others = (*op.base.r.SERVICES, op.base.previous.d.SERVICES[3])
     plan = {'commit':commit, 'original':current, 'before':before, 'after':after,
         'originalImageIdentity':gw.image_identity(current['Image']), 'imageIdentity':gw.image_identity(IMAGE),
@@ -124,13 +134,29 @@ def verify():
         'cronsRestored':True, 'flagsAndQuarantinesPreserved':True, 'newProviderRequests':0}))
 
 
+def previous_process_alive(phase):
+    require(phase in ('run', 'watch'), 'previous_process_phase_invalid')
+    marker = json.loads(gw.safe_file(PREVIOUS_ATTEMPT, phase+'.private.json').read_text())
+    require(type(marker.get('pid')) is int and marker['pid'] > 0
+        and str(marker.get('startTicks', '')).isdigit(), 'previous_process_marker_invalid')
+    proc = pathlib.Path('/proc')/str(marker['pid'])
+    try:
+        args = (proc/'cmdline').read_bytes().split(b'\0')
+        return str(PREVIOUS_ATTEMPT/'deploy-enrichment-admission-20260913.py').encode() in args \
+            and phase.encode() in args \
+            and (proc/'stat').read_text().rsplit(')', 1)[1].split()[19] == str(marker['startTicks'])
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+
+
 op.invariant, op.verify_gateway = invariant, verify_gateway
 if __name__ == '__main__':
     os.umask(0o077)
     try:
         phase = sys.argv[1]
         require(phase in ('stage', 'launch', 'run', 'watch', 'recover', 'verify'), 'invalid_phase')
-        stage() if phase == 'stage' else verify() if phase == 'verify' else getattr(op, phase)()
+        own = {'stage':stage, 'verify':verify}
+        own[phase]() if phase in own else getattr(op, phase)()
     except Exception as error:
         message = str(error)
         print(json.dumps({'ok':False, 'code':message if re.fullmatch('[a-zA-Z0-9_:.-]{1,120}', message)
