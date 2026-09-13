@@ -14538,6 +14538,45 @@ async function finishMkvH264FullFileAnalyzer(analyzer) {
     };
 }
 
+function createVodInputProgress(now = () => typeof performance === 'object'
+    ? performance.now() : Date.now()) {
+    const phases = ['local', 'provider-open', 'provider-read', 'downstream-write', 'provider-close', 'retry-wait', 'flush', 'cleanup'];
+    const elapsed = Object.fromEntries(phases.map(name => [name, 0]));
+    const counters = { receivedBytes: 0, preloadedBytes: 0, forwardedBytes: 0, openedRanges: 0, reopens: 0 };
+    let initial; try { initial = Number(now()); } catch { initial = 0; }
+    let tick = Number.isFinite(initial) ? initial : 0;
+    const started = tick; let phase = 'local'; let outcome = 'active';
+    const time = () => {
+        let value; try { value = Number(now()); } catch { value = tick; }
+        return Number.isFinite(value) ? Math.max(tick, value) : tick;
+    };
+    const advance = () => { const end = time(); elapsed[phase] += end - tick; tick = end; };
+    return Object.freeze({
+        phase(name) {
+            if (outcome !== 'active' || !Object.hasOwn(elapsed, name)) return;
+            advance(); phase = name;
+        },
+        add(name, count) {
+            if (outcome !== 'active' || !Object.hasOwn(counters, name)
+                || !Number.isSafeInteger(count) || count < 0) return;
+            counters[name] = Math.min(Number.MAX_SAFE_INTEGER, counters[name] + count);
+        },
+        finish(value) {
+            if (outcome !== 'active' || !['completed', 'aborted', 'failed'].includes(value)) return;
+            advance(); outcome = value;
+        },
+        snapshot() {
+            const end = outcome === 'active' ? time() : tick;
+            const waits = { ...elapsed };
+            if (outcome === 'active') waits[phase] += end - tick;
+            return { protocol: 1, outcome, phase: outcome === 'active' ? phase : null,
+                elapsedMs: Math.round((end - started) * 1000) / 1000,
+                phaseMs: Object.fromEntries(Object.entries(waits).map(([name, value]) => [name, Math.round(value * 1000) / 1000])),
+                ...counters };
+        },
+    });
+}
+
 async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     let fileSizeBytes = fileSizeBytesForSession(session);
     const unknownLengthFullBody = Boolean(
@@ -14563,6 +14602,11 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     const contentDigest = crypto.createHash('sha256');
     const fullFileAnalyzer = createMkvH264FullFilePacketAnalyzer(session);
     let fullFileAnalyzerSettled = false;
+    // Internal timings of this existing stream only, not extra probes or wire
+    // throughput claims. Provider wait and FFmpeg backpressure are distinct.
+    const progress = createVodInputProgress();
+    session.vodInputProgress = progress;
+    let completed = false;
     try {
     while (unknownLengthFullBody ? !unknownLengthFullBodyEof : offset < fileSizeBytes) {
         if (signal.aborted) throw abortedVodInputPumpError();
@@ -14571,6 +14615,9 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         let range = null;
         let failure = null;
         try {
+            const adoptingPreopen = offset === 0 && session.preopenedVodInputAttempt;
+            progress.phase(adoptingPreopen ? 'local' : 'provider-open');
+            if (!adoptingPreopen) progress.add('openedRanges', 1);
             const opened = offset === 0 && session.preopenedVodInputAttempt
                 ? (() => {
                     const preopened = session.preopenedVodInputAttempt;
@@ -14584,10 +14631,13 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     activeDispatcher,
                     offset === 0 && forwardedBytes === 0 ? { allowFullBodyAtZero: true } : {},
                 );
+            progress.phase('local');
             attempt = opened.attempt;
             range = opened.range;
             while (offset <= range.end) {
-                const next = Array.isArray(attempt.preloadedChunks) && attempt.preloadedChunks.length
+                const preloaded = Array.isArray(attempt.preloadedChunks) && attempt.preloadedChunks.length;
+                progress.phase(preloaded ? 'local' : 'provider-read');
+                const next = preloaded
                     ? {
                         value: attempt.preloadedChunks.shift(),
                         done: false,
@@ -14595,6 +14645,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                         aborted: false,
                     }
                     : await readRawPrefixChunk(attempt.reader, signal, VOD_INPUT_IDLE_TIMEOUT_MS);
+                progress.phase('local');
                 if (next.aborted || signal.aborted) throw abortedVodInputPumpError();
                 if (next.timedOut) {
                     try { attempt.controller.abort(); } catch (_) {}
@@ -14607,6 +14658,8 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                 }
                 let chunk = Buffer.from(next.value || []);
                 if (!chunk.length) continue;
+                progress.add('receivedBytes', chunk.length);
+                if (preloaded) progress.add('preloadedBytes', chunk.length);
                 if (
                     offset + chunk.length > range.end + 1 ||
                     (fileSizeBytes && offset + chunk.length > fileSizeBytes)
@@ -14629,20 +14682,26 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     ) {
                         throw vodInputPumpError('INVALID_MKV_INPUT', 'Provider response is not a Matroska file.', { status: 502 });
                     }
+                    progress.phase('downstream-write');
                     await writeVodInputChunk(writable, prefixBuffer, signal);
+                    progress.phase('local');
                     contentDigest.update(prefixBuffer);
                     writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, prefixBuffer);
                     forwardedBytes += prefixBuffer.length;
+                    progress.add('forwardedBytes', prefixBuffer.length);
                     vodInputPumpStats.bytesForwarded += prefixBuffer.length;
                     prefixBuffer = Buffer.alloc(0);
                     prefixValidated = true;
                 }
                 if (chunk.length) {
+                    progress.phase('downstream-write');
                     await writeVodInputChunk(writable, chunk, signal);
+                    progress.phase('local');
                     contentDigest.update(chunk);
                     writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, chunk);
                     offset += chunk.length;
                     forwardedBytes += chunk.length;
+                    progress.add('forwardedBytes', chunk.length);
                     vodInputPumpStats.bytesForwarded += chunk.length;
                 }
             }
@@ -14678,12 +14737,16 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     { status: 502, networkCause: 'premature_eof', retryable: true },
                 );
             } else if (range.fullBodyRequiresExactEof === true) {
+                progress.phase('provider-read');
                 await requireFullBodyExactEof(attempt, signal);
+                progress.phase('local');
             }
         } catch (error) {
             failure = error;
         } finally {
+            progress.phase('provider-close');
             await closeVodInputAttempt(attempt);
+            progress.phase('local');
         }
 
         if (signal.aborted || failure?.code === 'VOD_INPUT_ABORTED') throw abortedVodInputPumpError();
@@ -14729,6 +14792,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
             );
         }
         reconnects += 1;
+        progress.add('reopens', 1);
         if (reconnects > VOD_INPUT_MAX_RECONNECTS) {
             throw vodInputPumpError(
                 'PROVIDER_RECONNECT_EXHAUSTED',
@@ -14743,11 +14807,14 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         const delayMs = requiresProviderReleaseWait
             ? Math.max(retryDelayMs, PROVIDER_SLOT_RELEASE_DELAY_MS)
             : retryDelayMs;
+        progress.phase('retry-wait');
         if (!await waitForVodInputRetry(delayMs, signal)) throw abortedVodInputPumpError();
+        progress.phase('local');
     }
     if (!prefixValidated || !fileSizeBytes || forwardedBytes !== fileSizeBytes) {
         throw vodInputPumpError('INVALID_MKV_INPUT', 'The bounded provider response did not contain one complete Matroska file.', { status: 502 });
     }
+    progress.phase('flush');
     await finishVodInput(writable, signal);
     const fullFilePacketMetrics = await finishMkvH264FullFileAnalyzer(fullFileAnalyzer);
     fullFileAnalyzerSettled = true;
@@ -14755,6 +14822,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     maybeFinalizeMkvH264FastStartProof(session);
     const contentSha256 = contentDigest.digest('hex');
     session.vodInputContentSha256 = contentSha256;
+    completed = true;
     return {
         bytesForwarded: forwardedBytes,
         reconnects,
@@ -14762,11 +14830,17 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         fullFilePacketProof: Boolean(session.mkvH264FastStartProofFinalized),
     };
     } finally {
+        progress.phase('cleanup');
         if (!fullFileAnalyzerSettled) {
             // Never replace the provider/primary/abort error with optional proof
             // cleanup. stopMkv... is bounded and deliberately non-throwing.
             await stopMkvH264FullFileAnalyzer(fullFileAnalyzer, 'pump-incomplete').catch(() => {});
         }
+        progress.finish(completed ? 'completed' : signal.aborted ? 'aborted' : 'failed');
+        // Retained container logs allow a post-test comparison after teardown.
+        // No account, URL, credential, title, audio or request content is logged.
+        try { console.info(JSON.stringify({ event: 'vod_input_progress',
+            sessionKey: sha256Hex(String(session.id || '')), ...progress.snapshot() })); } catch (_) {}
     }
 }
 
@@ -20251,6 +20325,7 @@ function debugSession(session) {
         codecProfileSource: session.codecProfileSource || null,
         startupPolicy: session.startupPolicy || startupPolicyForSession(session),
         startupTimings: session.startupTimings || null,
+        vodInputProgress: session.vodInputProgress?.snapshot() || null,
         finiteMkvSeekBroker: session.finiteMkvSeekBroker
             ? {
                 providerFetches: Number(session.finiteMkvSeekBroker.providerFetches || 0),

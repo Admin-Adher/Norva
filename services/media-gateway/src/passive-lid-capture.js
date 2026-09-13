@@ -204,8 +204,9 @@ function extractPassiveWav({ bin, input, output, plan, signal, alive, spawnImpl 
 
 function createPassiveLidCapture({ store, resolveSource, resourcesAvailable, bin, extract = extractPassiveWav }) {
     let active = false; let blocked = false; const stats = { prepared:0, misses:0, snapshotBytes:0 };
+    const missesByReason = {};
     return Object.freeze({
-        snapshot:()=>({ protocol:1, active, blocked, ...stats }),
+        snapshot:()=>({ protocol:1, active, blocked, ...stats, missesByReason:{ ...missesByReason } }),
         async adopt(input) {
             // Only an already-authorized real user/job can adopt its own
             // precollected file window. No profile/window/model substitution.
@@ -223,42 +224,55 @@ function createPassiveLidCapture({ store, resolveSource, resourcesAvailable, bin
             finally { await reservation?.release(); }
         },
         async capture(input, context, signal) {
-            const binding=captureBinding(input); const miss=()=>{ stats.misses++; return { passiveProtocol:1,captured:false,...drain }; };
+            const binding=captureBinding(input);
+            // Internal fixed codes only: never source names, paths, URLs or
+            // extracted speech. An unavailable future window is not an ASR miss.
+            const miss=reason=>{ stats.misses++; missesByReason[reason]=(missesByReason[reason]||0)+1;
+                return { passiveProtocol:1,captured:false,...drain }; };
             const capacity=store.snapshot();
             // Reserve most of the shared buffer for active jobs. Restart cannot
             // evade this bound because it counts ALL restored records, not an
             // in-memory-only set of passive keys.
-            if(active || blocked || signal?.aborted || !resourcesAvailable()
-                || capacity.entries+capacity.reservations>=8 || capacity.bytes>=16*1024*1024) return miss();
+            if(active) return miss('already-active');
+            if(blocked) return miss('extractor-not-closed');
+            if(signal?.aborted) return miss('cancelled');
+            if(!resourcesAvailable()) return miss('resource-pressure');
+            if(capacity.entries+capacity.reservations>=8 || capacity.bytes>=16*1024*1024) return miss('capacity');
             active=true; let reservation;
             try {
                 reservation=await store.reserve(binding);
                 if(reservation.cached) {
                     const cached=await store.get(binding);
-                    return cached ? { passiveProtocol:1,captured:true,sha256:cached.sha256,expiresAt:cached.expiresAt,...drain } : miss();
+                    return cached ? { passiveProtocol:1,captured:true,sha256:cached.sha256,expiresAt:cached.expiresAt,...drain } : miss('cached-record-missing');
                 }
                 const source=resolveSource(binding,context);
-                if(!source) return miss();
+                if(!source) return miss('source-not-current');
                 const alive=()=>!signal?.aborted && resourcesAvailable() && source.isCurrent();
                 const window=planStrictSpeechWindow(binding.durationSeconds,binding.windowOrdinal);
+                const playlist=await readPlaylist(source.root,source.playlistName);
+                const plan=passiveWindowPlan(playlist,{ startSeconds:window.searchStartSeconds,
+                    durationSeconds:window.searchDurationSeconds,prefix:source.segmentPrefix });
+                if(!plan) return miss('window-not-ready');
+                if(!alive()) return miss('admission-changed');
+                // Do not create/remove a private workspace on each timer tick
+                // while the existing player has not received this window yet.
                 return await store.withWorkspace(async output=>{
-                    const playlist=await readPlaylist(source.root,source.playlistName);
-                    const plan=passiveWindowPlan(playlist,{ startSeconds:window.searchStartSeconds,
-                        durationSeconds:window.searchDurationSeconds,prefix:source.segmentPrefix });
-                    if(!plan || !alive()) return miss();
+                    if(!alive()) return miss('admission-changed');
                     const inputPath=path.join(path.dirname(output),'passive.ts');
                     const bytes=await snapshotSegments(source,plan,inputPath,alive);
                     const destination=await fsp.open(output,'wx',0o600); await destination.close();
                     const result=await extract({ bin,input:inputPath,output,plan,signal,alive });
                     if(result.processClosed !== true) blocked=true;
-                    if(!result.ok || !alive() || blocked) return miss();
+                    if(blocked) return miss('extractor-not-closed');
+                    if(!result.ok) return miss('extraction-failed');
+                    if(!alive()) return miss('admission-changed');
                     const stat=await fsp.stat(output);
-                    if(!stat.isFile() || stat.size<=0 || stat.size>3*1024*1024) return miss();
+                    if(!stat.isFile() || stat.size<=0 || stat.size>3*1024*1024) return miss('audio-size-invalid');
                     const saved=await store.put(binding,await fsp.readFile(output),drain,reservation.token);
                     stats.prepared++; stats.snapshotBytes+=bytes;
                     return { passiveProtocol:1,captured:true,...saved,...drain };
                 });
-            } catch { return miss(); }
+            } catch { return miss('input-or-store-rejected'); }
             finally { await reservation?.release(); active=false; }
         },
     });

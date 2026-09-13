@@ -197,6 +197,35 @@ test('actual Gateway adapter accepts only exact ready origin playback and never 
     }
 });
 
+test('future passive windows do not allocate a scratch workspace or start extraction and report a fixed internal reason',async t=>{
+    const f=await fixture(t);const b=passiveCaptureBinding(normalBinding(),hash(normalBinding().userId));
+    await fs.writeFile(path.join(f.media,'playlist.m3u8'),list(1));
+    let workspaces=0,extractions=0;
+    const original=f.store.withWorkspace.bind(f.store);
+    f.store.withWorkspace=(...args)=>{workspaces++;return original(...args);};
+    const adapter=createPassiveLidCapture({store:f.store,resolveSource:()=>f.source,resourcesAvailable:()=>true,
+        extract:async({output})=>{extractions++;await fs.writeFile(output,wav());return{ok:true,processClosed:true};}});
+    assert.equal((await adapter.capture(b,{})).captured,false);
+    assert.equal(workspaces,0);assert.equal(extractions,0);
+    assert.equal(f.store.snapshot().reservations,0);assert.equal(f.store.snapshot().computations,0);
+    assert.deepEqual(adapter.snapshot().missesByReason,{'window-not-ready':1});
+    const copy=adapter.snapshot();copy.missesByReason['window-not-ready']=99;
+    assert.equal(adapter.snapshot().missesByReason['window-not-ready'],1,'snapshot does not mutate internal counters');
+    await fs.writeFile(path.join(f.media,'playlist.m3u8'),list());
+    assert.equal((await adapter.capture(b,{})).captured,true);
+    assert.equal(workspaces,1);assert.equal(extractions,1);assert.equal(adapter.snapshot().prepared,1);
+});
+
+test('passive resource deferral is distinct from an unavailable source or an extractor failure',async t=>{
+    const f=await fixture(t);const b=passiveCaptureBinding(normalBinding(),hash(normalBinding().userId));
+    let resources=false,source=null;
+    const adapter=createPassiveLidCapture({store:f.store,resolveSource:()=>source,resourcesAvailable:()=>resources,
+        extract:async()=>({ok:false,processClosed:true})});
+    await adapter.capture(b,{});resources=true;await adapter.capture(b,{});source=f.source;await adapter.capture(b,{});
+    assert.deepEqual(adapter.snapshot().missesByReason,{'resource-pressure':1,'source-not-current':1,'extraction-failed':1});
+    assert.equal(f.store.snapshot().entries,0);assert.equal(f.store.snapshot().reservations,0);
+});
+
 test('closed local segments become private audio, survive restart, and are adopted without extending expiry or opening a provider',async t=>{
     const f=await fixture(t);const target=normalBinding();const passive=passiveCaptureBinding(target,hash(target.userId));
     let extractions=0;

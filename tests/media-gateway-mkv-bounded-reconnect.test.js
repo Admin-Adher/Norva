@@ -203,6 +203,7 @@ function pumpHarness(overrides = {}) {
             writeVodInputChunk,
             finishVodInput,
             captureBoundedMkvHeaderBytes,
+            createVodInputProgress,
             runBoundedMkvInputPump,
             startBoundedMkvInputPump,
             stopBoundedMkvInputPump,
@@ -537,12 +538,56 @@ function analyzerChildPair(options = {}) {
     ];
 }
 
+test('input progress separates pending provider reads from downstream backpressure and freezes at completion', () => {
+    const h = pumpHarness(); let clock = 100;
+    const progress = h.createVodInputProgress(() => clock);
+    clock = 105; progress.phase('provider-open');
+    clock = 115; progress.phase('provider-read');
+    clock = 135;
+    assert.equal(progress.snapshot().phaseMs['provider-read'], 20, 'pending await is visible before completion');
+    assert.equal(progress.snapshot().phaseMs['provider-read'], 20, 'reading telemetry does not double count');
+    progress.phase('downstream-write'); clock = 143; progress.phase('local');
+    progress.add('receivedBytes', 12); progress.add('preloadedBytes', 4); progress.add('forwardedBytes', 12);
+    progress.add('openedRanges', 1); progress.add('reopens', 1);
+    clock = 150; progress.finish('completed');
+    const state = JSON.parse(JSON.stringify(progress.snapshot()));
+    assert.deepEqual(state.phaseMs, {local:12,'provider-open':10,'provider-read':20,'downstream-write':8,
+        'provider-close':0,'retry-wait':0,flush:0,cleanup:0});
+    assert.equal(state.elapsedMs, 50); assert.equal(state.outcome, 'completed'); assert.equal(state.phase, null);
+    assert.equal(Object.values(state.phaseMs).reduce((a,b)=>a+b,0), state.elapsedMs);
+    clock = 200; progress.add('receivedBytes', 100); progress.phase('provider-read'); progress.finish('failed');
+    assert.deepEqual(JSON.parse(JSON.stringify(progress.snapshot())), state);
+});
+
+test('input progress rejects arbitrary diagnostic fields, nonfinite increments and clock regressions', () => {
+    const h = pumpHarness(); let clock = 10;
+    const progress = h.createVodInputProgress(() => clock);
+    progress.phase('https://private.invalid/account/secret');
+    progress.add('secret', 100); progress.add('receivedBytes', Infinity); progress.add('receivedBytes', -1);
+    progress.add('receivedBytes', 0.5); clock = 5;
+    assert.equal(progress.snapshot().elapsedMs, 0);
+    clock = NaN; assert.equal(progress.snapshot().elapsedMs, 0);
+    clock = 20; progress.finish('aborted');
+    const state = progress.snapshot(); assert.equal(state.elapsedMs, 10); assert.equal(state.receivedBytes, 0);
+    assert.equal(state.outcome, 'aborted'); assert.equal(JSON.stringify(state).includes('secret'), false);
+    assert.equal(h.createVodInputProgress(() => { throw Error('clock failure'); }).snapshot().elapsedMs, 0);
+});
+
+test('input progress is exposed only by the existing protected debug serializer', () => {
+    const source = readGateway();
+    assert.equal(sourceBetween(source, 'function serializeSession(', '\nfunction debugSession(').includes('vodInputProgress'), false);
+    assert.match(sourceBetween(source, 'function debugSession(', '\nfunction '), /vodInputProgress: session\.vodInputProgress\?\.snapshot\(\) \|\| null/);
+    assert.ok(source.includes("app.get('/debug/sessions', requireGatewayAuth,"));
+});
+
 test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and never overlaps upstream sockets', async () => {
     const fixture = mkvFixture();
     const tracker = makeTracker();
     const dispatcher = { id: 'sticky-provider-dispatcher' };
     const cut = 19;
+    const diagnostics = [];
     const h = pumpHarness({
+        console: {info: value => diagnostics.push(JSON.parse(value)),warn:()=>{},log:()=>{},error:()=>{}},
         pickProxyAgent: () => dispatcher,
         fetch: async (_url, options) => {
             tracker.calls.push(options.headers);
@@ -589,6 +634,13 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     assert.equal(writable.endCount, 1, 'exact EOF closes FFmpeg stdin once');
     assert.equal(tracker.maxActive, 1, 'a mono-account must never have two active upstream bodies');
     assert.equal(tracker.active, 0);
+    const observed = session.vodInputProgress.snapshot();
+    assert.equal(observed.outcome, 'completed');
+    assert.equal(observed.receivedBytes, fixture.length); assert.equal(observed.forwardedBytes, fixture.length);
+    assert.equal(observed.openedRanges, 2); assert.equal(observed.reopens, 1);
+    assert.equal(diagnostics.length, 1); assert.equal(diagnostics[0].event, 'vod_input_progress');
+    assert.equal(diagnostics[0].sessionKey, crypto.createHash('sha256').update(String(session.id || '')).digest('hex'));
+    assert.equal(JSON.stringify(diagnostics).includes(session.sourceUrl), false);
     assert.deepEqual(tracker.calls.map((headers) => headers.Range), [
         `bytes=0-${fixture.length - 1}`,
         `bytes=${cut}-${fixture.length - 1}`,
@@ -3363,7 +3415,10 @@ test('native local early probe preserves every real MKV track and the byte-exact
     try {
         const input = path.join(dir, 'source.mkv'), subtitle = path.join(dir, 'source.srt');
         fs.writeFileSync(subtitle, '1\n00:00:00,000 --> 00:00:08,000\nSynthetic test\n');
-        run('ffmpeg', ['-v','error','-y','-f','lavfi','-i','testsrc2=size=640x360:rate=30',
+        // This synthetic generator must also fit the native test's PID/CPU
+        // sandbox: each lavfi graph otherwise creates a host-sized thread pool.
+        run('ffmpeg', ['-v','error','-y','-cpucount','1','-filter_threads','1','-filter_complex_threads','1',
+            '-f','lavfi','-i','testsrc2=size=640x360:rate=30',
             '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-f','lavfi','-i',
             'sine=frequency=660:sample_rate=48000','-i',subtitle,'-t','8','-map','0:v','-map','1:a',
             '-map','2:a','-map','3:s','-c:v','libx264','-threads','1','-preset','ultrafast','-crf','18',
