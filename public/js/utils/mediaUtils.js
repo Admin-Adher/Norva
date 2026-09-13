@@ -62,6 +62,7 @@ const MediaUtils = (() => {
         original: 'Original'
     };
 
+    // Cache revision 2026-09-13b: supersedes stale CDN copies of the language-audit fixes.
     // Embedded WebViews can ship a reduced ICU language-name table. These are
     // ISO-code display names only, never a translation/inference of provider text.
     const LANGUAGE_NAME_FALLBACKS = {
