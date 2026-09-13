@@ -3,6 +3,37 @@
 Base: `d86db0e13871f8d5b43d9faf67516b6b2cd0a969`. Isolated worktree;
 the user's original checkout is not part of this release.
 
+## 13 September — deferred storyboard admission correction
+
+The real NL playback triggered a normal full-film storyboard pass. The process
+was followed to completion, not killed. The first passive-job attempt never
+activated and restored its owned cron pause without interrupting that pass.
+Afterwards, ordinary intake created an ASR job for the same file before the
+next pilot could stage. The new pilot refused it; no prior job was reset.
+
+Inspection and an executable reproduction identified another admission gap:
+automatic storyboards use explicit service priority 1. Even after the queue
+had checked and deferred them, they still blocked passive local processing.
+Only a `storyboard` in the transcription queue, with explicit integer service
+priority and the internal confirmed-deferral marker, now yields that capacity.
+Uninspected jobs, viewer requests, other services, malformed priorities, OCR,
+translation, admission checks and all executing operations remain blocking.
+Real viewer presence still prevents new enrichment provider connections.
+
+The correction changes one Gateway module. Its release preserves every flag,
+model, route, SQL definition, job, quarantine and retained file; the existing
+idle-only deployment/recovery supervisor is reused. It does not activate fleet
+capture or claim to complete the passive-to-ASR production acceptance.
+
+Validation: 4,671 application tests, 4,650 passed, 21 skipped, zero failures
+(103.517 seconds). A first Windows run retained two CRLF-only fixture failures;
+normalizing those two physical input files to LF produced no tracked semantic
+change. Native exact-image validation: 45/45, zero skipped, network disabled,
+synthetic audio only, 0.5 CPU, 512 MiB RAM and a 64 MiB temporary filesystem.
+Six new release-guard tests and ten inherited recovery tests also pass.
+Native receipt: `/home/adrien/.norva/deferred-storyboard-native-20260913/native-proof.json`.
+Publication and live deployment remain separate acceptance steps.
+
 ## 13 September — precise foreground admission, validated before deployment
 
 The 00:48–01:04 UTC read-only checks distinguish actual production state from

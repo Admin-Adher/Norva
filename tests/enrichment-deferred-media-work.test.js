@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { decideLanguageMetadataCapacity } = require('../services/media-gateway/src/language-background-capacity');
+const { passiveResourcesAvailable } = require('../services/media-gateway/src/passive-lid-capture');
 const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8').replace(/\r\n/g, '\n');
 function section(start, end) {
     const a = source.indexOf(start), b = source.indexOf(end, a + start.length);
@@ -80,6 +81,48 @@ for (const prio of [0,1,undefined,3,-1]) test(`pending priority ${prio} cannot b
     const h=harness(); h.queues.transcribe.push({prio,_languageAdmissionDeferred:true});
     assert.equal(h.languageForegroundWorkSnapshot().busy,true);
     assert.equal(h.languageForegroundWorkSnapshot().pendingPriorityJobs,1);
+});
+
+test('only an inspected, deferred automatic storyboard yields during an existing viewer playback', async () => {
+    const h=harness();h.queues.transcribe.push({jobId:'storyboard',kind:'storyboard',prio:1,viewerBlocked:true});
+    assert.equal(h.languageForegroundWorkSnapshot().busy,true,'an uninspected storyboard still blocks');
+    const draining=h.drainTranscribeQueue();await until(()=>h.waiting.has('transcribe'));
+    const snapshot=h.languageForegroundWorkSnapshot();
+    assert.equal(snapshot.busy,false);assert.equal(snapshot.activeOperations,0);
+    assert.equal(snapshot.admissionChecks,0);assert.equal(snapshot.deferredBackgroundJobs,1);
+    assert.equal(h.runs.length,0,'no storyboard process or provider read has started');
+    const now=Date.now(),sample={at:now,cpuRatio:.1,memoryRatio:.1,hostLoadRatio:.1};
+    assert.equal(passiveResourcesAvailable(sample,{viewer:true,foreground:snapshot.busy},now),true,
+        'already received viewer segments may be processed locally');
+    assert.equal(decideLanguageMetadataCapacity(sample,{viewer:true,foregroundInference:snapshot.busy},
+        {maximum:2,active:0},true,now).maxWorkers,0,'viewer priority still forbids new enrichment streams');
+    h.queues.transcribe[0].viewerBlocked=false;h.wake('transcribe');await until(()=>h.runs.length===1);
+    assert.equal(h.languageForegroundWorkSnapshot().busy,true);
+    assert.equal(h.languageForegroundWorkSnapshot().activeOperations,1);
+    assert.equal(h.runs[0].job._languageAdmissionDeferred,false);
+    h.runs[0].resolve();await draining;assert.equal(h.languageForegroundWorkSnapshot().busy,false);
+});
+
+test('queued storyboard exceptions cannot cover viewer jobs, other services, malformed priority or OCR', () => {
+    for(const change of [{prio:0},{prio:undefined},{prio:null},{prio:'1'},{prio:3},{prio:-1},{kind:'transcribe'},{kind:'ocr'},
+        {kind:undefined},{_languageAdmissionDeferred:false}]) {
+        const h=harness();h.queues.transcribe.push({kind:'storyboard',prio:1,_languageAdmissionDeferred:true,...change});
+        assert.equal(h.languageForegroundWorkSnapshot().busy,true,JSON.stringify(change));
+    }
+    const h=harness();h.queues.ocr.push({kind:'storyboard',prio:1,_languageAdmissionDeferred:true});
+    assert.equal(h.languageForegroundWorkSnapshot().busy,true);
+});
+
+test('a deferred service storyboard reserves the entire asynchronous admission check', async () => {
+    const h=harness();let releaseGate;
+    h.queues.transcribe.push({kind:'storyboard',prio:1,_languageAdmissionDeferred:true});
+    h.state.gate=()=>new Promise(resolve=>{releaseGate=resolve;});
+    const draining=h.drainTranscribeQueue();await until(()=>!!releaseGate);
+    assert.equal(h.languageForegroundWorkSnapshot().admissionChecks,1);
+    assert.equal(h.languageForegroundWorkSnapshot().busy,true);
+    releaseGate(false);await until(()=>h.runs.length===1);
+    assert.equal(h.languageForegroundWorkSnapshot().activeOperations,1);
+    h.runs[0].resolve();await draining;
 });
 
 for (const lane of ['transcribe','ocr']) test(`${lane}: admission checks and execution errors release only their own activity marker`, async () => {

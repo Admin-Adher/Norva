@@ -9755,12 +9755,17 @@ const languageMediaQueueWork = {
 };
 function languageForegroundWorkSnapshot() {
     // A drain loop stays "busy" while sleeping on provider/viewer admission.
-    // Only an explicitly pregen job already checked and deferred may yield the
-    // enrichment lane. Uninspected, interactive, service and unknown priorities
-    // remain blocking. Selecting/executing jobs remain blocking after shift().
+    // Only inspected, deferred background work may yield the enrichment lane.
+    // Automatic storyboard requests use service priority but have no provider
+    // or CPU operation while deferred (including while their viewer is playing).
+    // Other service/interactive/unknown work remains blocking. Selecting and
+    // executing jobs remain blocking after shift(), before any provider read.
     let pendingPriorityJobs = translateQueue.length, deferredBackgroundJobs = 0;
     for (const queue of [transcribeQueue, ocrQueue]) for (const job of queue) {
-        if (jobPrio(job) === JOB_PRIORITY.pregen && job?._languageAdmissionDeferred === true) deferredBackgroundJobs++;
+        const deferredStoryboard = queue === transcribeQueue && job?.kind === 'storyboard'
+            && job.prio === JOB_PRIORITY.service;
+        if (job?._languageAdmissionDeferred === true
+            && (jobPrio(job) === JOB_PRIORITY.pregen || deferredStoryboard)) deferredBackgroundJobs++;
         else pendingPriorityJobs++;
     }
     const activeOperations = Number(languageMediaQueueWork.transcribeRunning)
