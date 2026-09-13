@@ -25,7 +25,10 @@ function edgeFixture(options = {}) {
     const db = { rpc: async (name, args = {}) => {
         events.push('rpc:' + name);
         if (name === 'claim_catalog_file_audio_validation_job') return { data: claim };
-        if (name === 'catalog_language_capture_pipeline_enabled') return { data: options.enabled !== false };
+        if (name === 'catalog_language_capture_pipeline_enabled_for_job') {
+            assert.equal(args.p_job_id, uuid, 'capture approval must be resolved for the claimed job');
+            return options.captureFlagError ? { data: null, error: true } : { data: options.enabled !== false };
+        }
         if (name === 'catalog_language_exact_file_admission_enabled') return { data: options.exactFlagUnavailable ? null : options.exact === true };
         if (name === 'claim_provider_account_language_validation') { account = true; return { data: true }; }
         if (name === 'claim_provider_file_probe') { identity = true; return { data: true }; }
@@ -89,6 +92,9 @@ function edgeFixture(options = {}) {
                     : { ok: true, status: 200, payload: { windowOrdinal: 1, windowCount: 6, receipt: 'opaque', ...drain } };
             }
             if (action === 'ack') { if (options.ackFails) throw Error('lost ACK'); return { ok: true, payload: { acknowledged: true, ...drain } }; }
+            if (action === 'legacy' && (options.enabled === false || options.captureFlagError)) {
+                return { ok: false, status: 503, payload: { code: 'fixture-legacy-boundary', ...drain } };
+            }
             throw Error('unexpected fixture fetch');
         },
         readLanguageValidationGatewayResponse: async response => ({ ok: true, payload: response.payload }),
@@ -121,6 +127,15 @@ test('actual Edge retry uses local capture without idle checks, provider claims 
     for (const event of ['provider-idle', 'provider-circuit', 'fetch:capture', 'rpc:claim_provider_file_probe',
         'rpc:claim_provider_account_language_validation', 'rpc:begin_catalog_file_audio_validation_provider_attempt']) {
         assert.equal(f.events.includes(event), false, event);
+    }
+});
+
+test('actual Edge missing or denied job approval never uses the new capture path', async () => {
+    for (const options of [{ enabled:false }, { captureFlagError:true }]) {
+        const f=edgeFixture(options); await f.run();
+        assert.ok(f.events.includes('rpc:catalog_language_capture_pipeline_enabled_for_job'));
+        for (const action of ['status','capture','infer','ack']) assert.equal(f.events.includes('fetch:'+action),false);
+        assert.ok(f.events.includes('provider-idle'), 'existing non-capture admission remains authoritative');
     }
 });
 

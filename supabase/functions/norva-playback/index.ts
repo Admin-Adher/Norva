@@ -4090,7 +4090,9 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       return;
     }
     const captureOptions = { db, jobId, leaseOwner, claim, current, targetUrl, trackIndex, windowState, taskDeadlineAt };
-    const { data: captureEnabled, error: captureFlagError } = await db.rpc("catalog_language_capture_pipeline_enabled");
+    const { data: captureEnabled, error: captureFlagError } = await db.rpc(
+      "catalog_language_capture_pipeline_enabled_for_job", { p_job_id: jobId },
+    );
     const useCapturePipeline = !captureFlagError && captureEnabled === true;
     if (useCapturePipeline) {
       // Look up exact local audio before ANY provider circuit/idle check. A
