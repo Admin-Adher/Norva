@@ -47,7 +47,7 @@ function harness(overrides = {}) {
     rpc:async (name,args) => {assert.equal(name,'observe_catalog_file_profile');shares.push(args);return {data:{accepted:true},error:null};}};
   const api = vm.runInNewContext(snippet + '; ({shareObservedGatewayProfileTracks,shareObservedGatewayFile});', context);
   return {run:options => api.shareObservedGatewayProfileTracks(db,options),
-    commit:options => api.shareObservedGatewayFile(db,options),db,shares, filters, query};
+    commit:options => api.shareObservedGatewayFile(db,options),db,shares, filters, query,context};
 }
 const options = () => ({userId:'owner',sourceId:'source',itemId:'exact-file',codecProfileSource:'request+gateway_probe',
   codecProfile:{probeSource:'gateway_probe',probedAt:'2026-09-10T10:00:00Z',metadataComplete:false,
@@ -230,4 +230,77 @@ test('final observation sharing requires successful media CAS and exactly one cu
       assert.equal(shares[0].itemId,'file');
     }
   }
+});
+
+test('internal sharing diagnostics identify the actual stop without changing acceptance', async () => {
+  const cases = [
+    {reason:'shared'},
+    {reason:'origin-untrusted',change:{codecProfileSource:'request'}},
+    {reason:'profile-incomplete',change:{codecProfile:{...options().codecProfile,subtitles:null}}},
+    {reason:'variant-read-failed',query:{data:null,error:{code:'57014'}}},
+    {reason:'variant-profile-changed',query:{data:[{codec_profile:{probedAt:'older'}}],error:null}},
+    {reason:'identity-unverified',identity:{key:'source:tenant-only'}},
+    {reason:'profile-lookup-exception',generationError:true},
+    {reason:'observation-rpc-failed',rpc:{data:null,error:{code:'PGRST202'}}},
+    {reason:'observation-refused',rpc:{data:{accepted:false,reason:'untrusted response text'},error:null}},
+  ];
+  for(const sample of cases) {
+    const h=harness(sample.identity ? {resolveSourceIdentity:async()=>sample.identity} :
+      sample.generationError ? {readActiveCatalogGenerationSnapshot:async()=>{throw {code:'40001'};}} : {});
+    if(sample.query)h.query.limit=async()=>sample.query;
+    if(sample.rpc)h.db.rpc=async()=>sample.rpc;
+    const seen=[];
+    assert.equal(await h.run({...options(),...sample.change,onDiagnostic:(reason,error)=>seen.push({reason,code:error?.code})}),sample.reason==='shared');
+    assert.equal(seen.at(-1)?.reason,sample.reason);
+    assert.equal(await h.run({...options(),...sample.change,onDiagnostic:()=>{throw Error('logging unavailable');}}),sample.reason==='shared');
+  }
+});
+
+test('final diagnostic records only fixed reasons and bounded database codes', () => {
+  const start=edge.indexOf('function recordFinalGatewayProfileShareDiagnostic('),end=edge.indexOf('\nfunction observedGatewayFileProfile(',start);
+  const logs=[];
+  const run=vm.runInNewContext(stripTypeScriptTypes(edge.slice(start,end))+';recordFinalGatewayProfileShareDiagnostic;',
+    {recordOrEmpty:record,console:{info:s=>logs.push(JSON.parse(s))}});
+  const secret='https://provider.invalid/private-credential';
+  run('observation-rpc-failed',{code:'PGRST202',message:secret,details:secret,userId:secret});
+  run('shared',{code:secret});run(secret,{code:'40001'});
+  assert.deepEqual(logs,[{event:'final_gateway_profile_share',reason:'observation-rpc-failed',databaseCode:'PGRST202'},
+    {event:'final_gateway_profile_share',reason:'shared'}]);
+  assert.equal(JSON.stringify(logs).includes(secret),false);
+  assert.doesNotThrow(()=>run('observation-exception',{get code(){throw Error('hostile error property');}}));
+});
+
+test('real final persistence and sharing compose for a complete untagged in-band profile', async () => {
+  const extract=(start,end)=>{
+    const a=edge.indexOf(start),b=edge.indexOf(end,a);assert.ok(a>=0&&b>a);return edge.slice(a,b);
+  };
+  const code=stripTypeScriptTypes(extract('async function persistObservedCodecProfile(','\nfunction observedGatewayFileProfile(')+
+    extract('function normalizeCodecProfile(','\nfunction normalizeGatewayAudioRenditions(')+
+    extract('function normalizeCodecProfileTracks(','\nfunction hasUsefulCodecProfile('));
+  const h=harness(),events=[],background=[],logs=[];
+  const profile={...options().codecProfile,probeSource:'gateway_inband',metadataComplete:true,container:'matroska,webm',
+    audioTracks:[{index:1,order:0,codec:'aac',channels:2,default:true,title:'Audio 1'}],subtitles:[]};
+  const item={id:'owned-media',updated_at:'original',metadata:{},playback_hint:{}};
+  const media={select:()=>media,eq:()=>media,maybeSingle:async()=>({data:item,error:null})};
+  const from=h.db.from;h.db.from=table=>table==='cloud_catalog_visible_media_items'?media:from(table);
+  const api=vm.runInNewContext(snippet+'\n'+code+';persistObservedCodecProfile;',{
+    ...h.context,console:{info:s=>logs.push(JSON.parse(s)),warn:()=>{}},
+    normalizeMkvH264FastStartProof:()=>null,exactPositiveSafeInteger:v=>Number(v),boundedNullableNumber:v=>v==null?null:Number(v),
+    hasUsefulCodecProfile:()=>true,stripMkvH264FastStartProof:v=>({...v}),firstUsefulCodecProfile:()=>({}),
+    mergeCodecProfileAnnotations:(_old,v)=>v,mergePlaybackHints:(old,v)=>({...old,...v}),
+    patchActiveCatalogMediaItems:async()=>{events.push('media');return {data:[{id:item.id}],error:null,superseded:false};},
+    patchActiveCatalogTitleVariants:async()=>{events.push('variant');return {data:[{id:'owned-variant'}],error:null,superseded:false};},
+    compatibilityTierForCodecProfile:()=> 'gateway',playbackCostScoreForObservation:()=>1,isProjectionMissing:()=>false,
+    runBackground:task=>background.push(task),
+  });
+  assert.equal(await api(h.db,{userId:'owner',sourceId:'source',itemType:'movie',itemId:'exact-file',codecProfile:profile,
+    startupMs:null,audioMode:null,requireItemCas:true,expectedItemCas:{id:item.id,updatedAt:'original',targetUrlHash:'hash'},
+    shareFinalGatewayObservation:true}),true);
+  await Promise.all(background);
+  assert.deepEqual(events,['media','variant']);assert.equal(h.shares.length,1);
+  assert.deepEqual(logs.map(r=>r.reason),['share-started','shared']);
+  assert.equal(h.shares[0].p_audio_tracks[0].lang,undefined);
+  assert.equal(h.shares[0].p_audio_tracks[0].index,1);
+  assert.equal(h.shares[0].p_profile.probeSource,'gateway_inband');
+  assert.deepEqual(Array.from(h.shares[0].p_subtitle_tracks),[]);
 });

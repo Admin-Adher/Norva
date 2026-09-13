@@ -8544,12 +8544,15 @@ async function persistObservedCodecProfile(
     shareFinalGatewayObservation?: boolean;
   },
 ) {
+  const diagnose = options.shareFinalGatewayObservation === true
+    ? recordFinalGatewayProfileShareDiagnostic : () => {};
   const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
   const normalizedObservedCodecProfile = normalizeCodecProfile(options.codecProfile);
   const observedCodecProfile = options.allowProofReplacement
     ? normalizedObservedCodecProfile
     : stripMkvH264FastStartProof(normalizedObservedCodecProfile);
   if (!itemType || !options.itemId || !hasUsefulCodecProfile(observedCodecProfile)) {
+    diagnose("profile-unusable");
     if (options.strict) throw new HttpError(422, "A useful codec profile is required");
     return false;
   }
@@ -8558,6 +8561,7 @@ async function persistObservedCodecProfile(
   try {
     generation = await readActiveCatalogGenerationSnapshot(db, options.sourceId, options.userId);
   } catch (snapshotError) {
+    diagnose(isCatalogGenerationSuperseded(snapshotError) ? "generation-superseded" : "generation-unavailable", snapshotError);
     if (isCatalogGenerationSuperseded(snapshotError)) return true;
     if (options.strict) throw snapshotError;
     return false;
@@ -8565,6 +8569,7 @@ async function persistObservedCodecProfile(
 
   const observedAt = new Date().toISOString();
   if (options.requireItemCas && !options.expectedItemCas) {
+    diagnose("media-cas-missing");
     if (options.strict) throw new HttpError(409, "Exact media item CAS snapshot is unavailable");
     return false;
   }
@@ -8577,6 +8582,7 @@ async function persistObservedCodecProfile(
     .eq("external_id", options.itemId)
     .maybeSingle();
   if (error) {
+    diagnose("media-read-failed", error);
     if (options.strict) throwDb(error, "Unable to load media item for codec profile");
     console.warn("[norva-playback] unable to load media item for codec profile", error.message);
     return false;
@@ -8599,6 +8605,7 @@ async function persistObservedCodecProfile(
       String(item.updated_at) !== options.expectedItemCas?.updatedAt
     )
   ) {
+    diagnose("media-cas-changed");
     if (options.strict) throw new HttpError(409, "Exact media item CAS state is unavailable");
     return false;
   }
@@ -8618,10 +8625,11 @@ async function persistObservedCodecProfile(
         playback_hint: mergedPlaybackHint,
       },
     });
-    if (itemUpdateResult.superseded) return true;
+    if (itemUpdateResult.superseded) { diagnose("generation-superseded"); return true; }
     const updatedItems = itemUpdateResult.data;
     const itemUpdateError = itemUpdateResult.error;
     if (itemUpdateError) {
+      diagnose("media-write-failed", itemUpdateError);
       if (options.strict) {
         throwDb(itemUpdateError as { message?: string; details?: string; hint?: string }, "Unable to persist media codec profile");
       }
@@ -8631,6 +8639,7 @@ async function persistObservedCodecProfile(
       );
     }
     if (options.requireItemCas && (!Array.isArray(updatedItems) || updatedItems.length !== 1)) {
+      diagnose("media-cas-write-lost");
       if (options.strict) throw new HttpError(409, "Media codec profile changed before CAS persistence");
       return false;
     }
@@ -8662,8 +8671,9 @@ async function persistObservedCodecProfile(
     itemType,
     externalId: options.itemId,
   });
-  if (variantSuperseded) return true;
+  if (variantSuperseded) { diagnose("generation-superseded"); return true; }
   if (variantError && !isProjectionMissing(variantError)) {
+    diagnose("variant-write-failed", variantError);
     if (options.strict) {
       throwDb(variantError as { message?: string; details?: string; hint?: string }, "Unable to persist exact variant codec profile");
     }
@@ -8682,13 +8692,34 @@ async function persistObservedCodecProfile(
     // The exact media CAS and visible variant write both succeeded. Share only
     // the public stream observation, never a private fast-start/cache capability.
     // This performs DB work only and does not delay close/next-playback response.
+    diagnose("share-started");
     runBackground(shareObservedGatewayProfileTracks(db, {
       userId: options.userId, sourceId: options.sourceId, itemId: options.itemId,
       codecProfile: variantCodecProfile,
       codecProfileSource: stringOrNull(observedCodecProfile.probeSource),
+      onDiagnostic: diagnose,
     }));
+  } else if (options.shareFinalGatewayObservation === true) {
+    diagnose("final-share-precondition-missing");
   }
   return !variantError;
+}
+
+function recordFinalGatewayProfileShareDiagnostic(reason: string, error?: unknown) {
+  // Fixed internal vocabulary only. Never serialize an error/message, provider
+  // response, URL, user/source/file identifier, profile, token or language tag.
+  const known = ["profile-unusable", "generation-superseded", "generation-unavailable", "media-cas-missing",
+    "media-read-failed", "media-cas-changed", "media-write-failed", "media-cas-write-lost", "variant-write-failed",
+    "final-share-precondition-missing", "share-started", "origin-untrusted", "profile-incomplete", "variant-read-failed",
+    "variant-profile-changed", "identity-unverified", "shared", "observation-refused", "observation-rpc-failed",
+    "observation-exception", "profile-lookup-exception"];
+  if (!known.includes(reason)) return;
+  try {
+    const rawCode = recordOrEmpty(error).code;
+    const databaseCode = typeof rawCode === "string" && /^(?:[0-9]{2}[0-9A-Z]{3}|PGRST[0-9]{3})$/.test(rawCode) ? rawCode : undefined;
+    console.info(JSON.stringify({ event: "final_gateway_profile_share", reason, databaseCode }));
+  }
+  catch (_) { /* diagnostics cannot change playback or evidence */ }
 }
 
 function observedGatewayFileProfile(value: unknown, onInvalid?: (reason: string) => void) {
@@ -8736,15 +8767,21 @@ async function shareObservedGatewayFile(
     userId: string; sourceId: string; variantId: string; itemId: string;
     itemType: "movie" | "episode"; profile: unknown;
     audioProbeComplete: boolean; subtitleProbeComplete: boolean;
+    onDiagnostic?: (reason: string, error?: unknown) => void;
   },
 ) {
   // Caller must attest a fresh server-origin observation, never a client hint.
   // Facets remain independent. A failed facet sends no track claims; SQL either
   // keeps that facet on the same version or clears it on a newly observed file.
+  const diagnose = (reason: string, error?: unknown) => {
+    try { options.onDiagnostic?.(reason, error); } catch (_) { /* non-authoritative */ }
+  };
   if (typeof options.audioProbeComplete !== "boolean" || typeof options.subtitleProbeComplete !== "boolean") return false;
   try {
     const exact = observedGatewayFileProfile(options.profile);
-    if (!exact || (options.audioProbeComplete && !exact.audioTracks.length)) return false;
+    if (!exact || (options.audioProbeComplete && !exact.audioTracks.length)) {
+      diagnose("profile-incomplete"); return false;
+    }
     const audio = (options.audioProbeComplete ? exact.audioTracks : []).map((track) => compactRecord({
       index: track.index, lang: normalizeIsoLang(stringOrNull(track.language ?? track.lang)),
       codec: stringOrNull(track.codec), channels: boundedNullableInt(track.channels, 0, 16),
@@ -8765,8 +8802,11 @@ async function shareObservedGatewayFile(
       p_audio_probe_complete: options.audioProbeComplete, p_subtitle_probe_complete: options.subtitleProbeComplete,
     });
     // No fallback to an unversioned write after a stale/error response.
-    return !error && recordOrEmpty(data).accepted === true;
-  } catch (_) {
+    const accepted = !error && recordOrEmpty(data).accepted === true;
+    diagnose(accepted ? "shared" : error ? "observation-rpc-failed" : "observation-refused", error);
+    return accepted;
+  } catch (error) {
+    diagnose("observation-exception", error);
     return false;
   }
 }
@@ -8774,13 +8814,20 @@ async function shareObservedGatewayFile(
 async function shareObservedGatewayProfileTracks(
   db: SupabaseClient,
   options: { userId: string; sourceId: string; itemId: string; codecProfile: unknown; codecProfileSource: unknown;
-    audioProbeComplete?: boolean; subtitleProbeComplete?: boolean },
+    audioProbeComplete?: boolean; subtitleProbeComplete?: boolean; onDiagnostic?: (reason: string, error?: unknown) => void },
 ) {
+  const diagnose = (reason: string, error?: unknown) => {
+    try { options.onDiagnostic?.(reason, error); } catch (_) { /* non-authoritative */ }
+  };
   const origin = stringOr(options.codecProfileSource, "").split("+");
-  if (!origin.some((part) => part === "gateway_probe" || part === "gateway_inband")) return false;
+  if (!origin.some((part) => part === "gateway_probe" || part === "gateway_inband")) {
+    diagnose("origin-untrusted"); return false;
+  }
   const raw = recordOrEmpty(options.codecProfile);
   const probeSource = normalizeCodecToken(raw.probeSource ?? raw.probe_source);
-  if (probeSource !== "gatewayprobe" && !(probeSource === "gatewayinband" && raw.metadataComplete === true)) return false;
+  if (probeSource !== "gatewayprobe" && !(probeSource === "gatewayinband" && raw.metadataComplete === true)) {
+    diagnose("profile-incomplete"); return false;
+  }
   const audio = raw.audioTracks ?? raw.audio_tracks;
   const subtitles = raw.subtitles ?? raw.subtitleTracks ?? raw.subtitle_tracks;
   const validMap = (value: unknown): value is JsonRecord[] => {
@@ -8789,8 +8836,9 @@ async function shareObservedGatewayProfileTracks(
     return indices.every((index) => typeof index === "number" && Number.isInteger(index) && index >= 0 && index <= 128) &&
       new Set(indices).size === indices.length;
   };
-  if (!validMap(audio) || !validMap(subtitles)) return false;
-  if (!Number.isFinite(Date.parse(stringOr(raw.probedAt, "")))) return false;
+  if (!validMap(audio) || !validMap(subtitles) || !Number.isFinite(Date.parse(stringOr(raw.probedAt, "")))) {
+    diagnose("profile-incomplete"); return false;
+  }
   try {
     const generation = await readActiveCatalogGenerationSnapshot(db, options.sourceId, options.userId);
     const { data: variants, error } = await db.from("cloud_catalog_visible_title_variants")
@@ -8798,19 +8846,25 @@ async function shareObservedGatewayProfileTracks(
       .eq("user_id", options.userId).eq("source_id", options.sourceId)
       .eq("generation_id", generation.generationId).eq("item_type", "movie")
       .eq("external_id", options.itemId).limit(2);
-    if (error || !Array.isArray(variants) || variants.length !== 1 ||
-      recordOrEmpty(variants[0].codec_profile).probedAt !== raw.probedAt) return false;
+    if (error || !Array.isArray(variants) || variants.length !== 1) {
+      diagnose("variant-read-failed", error); return false;
+    }
+    if (recordOrEmpty(variants[0].codec_profile).probedAt !== raw.probedAt) {
+      diagnose("variant-profile-changed"); return false;
+    }
     const { key } = await resolveSourceIdentity(options.sourceId, options.userId, db);
     // Selection/M3U URL replacement has a separate provenance-aware pipeline.
     // Never infer a shared provider identity from an owner-editable URL or hint.
-    if (!key || key.startsWith("source:")) return false;
+    if (!key || key.startsWith("source:")) { diagnose("identity-unverified"); return false; }
     return await shareObservedGatewayFile(db, {
       userId: options.userId, sourceId: options.sourceId,
       variantId: stringOr(variants[0].id, ""), itemType: "movie", itemId: options.itemId,
       profile: raw, audioProbeComplete: options.audioProbeComplete ?? audio.length > 0,
       subtitleProbeComplete: options.subtitleProbeComplete ?? true,
+      onDiagnostic: diagnose,
     });
-  } catch (_) {
+  } catch (error) {
+    diagnose("profile-lookup-exception", error);
     // A failed enrichment must never interrupt playback. The regular fenced
     // file crawler remains the retry path; no client or title-language fallback.
     return false;
