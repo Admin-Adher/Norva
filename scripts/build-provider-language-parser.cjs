@@ -24,6 +24,18 @@ if ((sql.match(/-- BEGIN GENERATED ALIASES/g) || []).length !== 1
   || (sql.match(/-- END GENERATED ALIASES/g) || []).length !== 1) throw Error('Missing or ambiguous generated alias boundary: ' + sqlFile);
 const generatedSql = sql.replace(/-- BEGIN GENERATED ALIASES[\s\S]*?-- END GENERATED ALIASES/, aliasesSql);
 if (generatedSql.replace(/\r\n/g, '\n') !== sql.replace(/\r\n/g, '\n')) throw Error('Alias changes require a new forward migration: ' + sqlFile);
+// The forward migration mirrors only the seven complete audited labels.
+// Verify its block rather than rewrite migration history. Later label changes
+// must introduce a new forward migration, just like audio alias changes.
+const auditedSqlFile = 'supabase/migrations/20260913210125_provider_residual_language_declarations.sql';
+const auditedCategories = vm.runInNewContext(table + '\nVERSION_PROVIDER_AUDITED_CATEGORIES');
+const auditedSql = fs.readFileSync(path.join(root, auditedSqlFile), 'utf8').replace(/\r\n/g, '\n');
+const auditedBlock = '-- BEGIN GENERATED AUDITED CATEGORY LABELS\n  category := coalesce('
+  + "'" + JSON.stringify(auditedCategories).replaceAll("'", "''") + "'::jsonb ->> btrim(regexp_replace(category,'\\s+',' ','g')),category);\n-- END GENERATED AUDITED CATEGORY LABELS";
+if ((auditedSql.match(/-- BEGIN GENERATED AUDITED CATEGORY LABELS/g) || []).length !== 1
+  || (auditedSql.match(/-- END GENERATED AUDITED CATEGORY LABELS/g) || []).length !== 1) throw Error('Missing or ambiguous audited category boundary: ' + auditedSqlFile);
+const mirroredAuditedSql = auditedSql.replace(/-- BEGIN GENERATED AUDITED CATEGORY LABELS[\s\S]*?-- END GENERATED AUDITED CATEGORY LABELS/, auditedBlock);
+if (mirroredAuditedSql !== auditedSql) throw Error('Audited category changes require a new forward migration: ' + auditedSqlFile);
 for (const [file, text] of [['supabase/functions/_shared/provider-catalog-language.mjs', moduleText]]) {
   if (process.argv.includes('--check')) {
     if (!fs.existsSync(path.join(root, file)) || fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n') !== text.replace(/\r\n/g, '\n')) throw Error('Generated parser drift: ' + file);

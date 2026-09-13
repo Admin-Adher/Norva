@@ -13,6 +13,8 @@ test('published alias migration stays immutable and matches the browser without 
     // parser-only repair. An alias change needs a separate forward migration.
     assert.equal(createHash('sha256').update(sql).digest('hex'),
         '7823c610a7dbe2fb16acc136f80b9258d7b4b7ccde3438f7fdd3e58f2804ec89');
+    assert.equal(createHash('sha256').update(read('supabase/migrations/20260913182256_provider_release_annotation_language_completion.sql')).digest('hex'),
+        '345615cfc9a69f604bf329024723fe0f06d30a03783f1c8ca4d2352082e17212');
     const table = source.slice(source.indexOf('    const VERSION_PROVIDER_LANGUAGE_TAGS = {'), source.indexOf('\n\n    function versionProviderLanguageHint'));
     const aliases = JSON.parse(JSON.stringify(vm.runInNewContext(table + '\nVERSION_PROVIDER_LANGUAGE_TAGS')));
     const actual = JSON.parse(sql.match(/-- BEGIN GENERATED ALIASES\s+select '([^']+)'::jsonb/)[1]);
@@ -31,6 +33,14 @@ test('published alias migration stays immutable and matches the browser without 
         },
     });
     assert.deepEqual(written, ['supabase/functions/_shared/provider-catalog-language.mjs']);
+    // New exact category spellings are checked against a forward migration,
+    // never generated back into a published SQL file on a normal build.
+    const categories = JSON.parse(JSON.stringify(vm.runInNewContext(table + '\nVERSION_PROVIDER_AUDITED_CATEGORIES')));
+    const sqlCategories = JSON.parse(read(migrated).match(/-- BEGIN GENERATED AUDITED CATEGORY LABELS\s+category := coalesce\('([^']+)'::jsonb/)[1]);
+    assert.deepEqual(sqlCategories, categories);
+    assert.equal(Object.keys(categories).length, 7);
+    assert.doesNotMatch(JSON.stringify(categories), /IRAN|PAKISTAN|AR \| FRENCH|NL \| HINDI/);
+    assert.match(builder, /Audited category changes require a new forward migration/);
     assert.doesNotMatch(read(migrated), /GENERATED ALIASES|create or replace function public\.catalog_provider_language_alias/i);
     const historical = read('supabase/migrations/20260910152938_catalog_provider_language_facets.sql');
     assert.doesNotMatch(historical, /"ku":"ku"|"mt":"mt"/);
@@ -64,7 +74,9 @@ test('parser-only SQL repair preserves audio evidence, helpers, constraints and 
     assert.match(sql, /array\['da','sv','no'\]/);
     assert.ok(sql.includes("nl_hindi_category := category ~* '^\\s*NL\\s*\\|\\s*HINDI\\s*$'"));
     assert.match(sql, /nl_hindi_category and provider_prefix and prefix='NL'/);
-    assert.match(sql, /when 2 then case when nl_hindi_category then 'HINDI' else category end/);
+    assert.match(sql, /when 2 then case when nl_hindi_category then 'HINDI' when en_nl_ufc_category then 'UFC' else category end/);
+    assert.ok(sql.includes("en_nl_ufc_category := provider_prefix and prefix='EN' and category ~* '^\\s*NL\\s*\\|\\s*UFC\\s*$'"));
+    assert.match(sql, /regexp_replace\(part,'\^EX-YU\$','EXYU','i'\)/);
 });
 
 test('standalone SQL parity fixture is temporary, rollback-only and covers old/new/Selection cases', async () => {
@@ -72,6 +84,7 @@ test('standalone SQL parity fixture is temporary, rollback-only and covers old/n
     assert.equal(rows.filter(row => row.case_group === 'existing').length, 65);
     assert.ok(rows.filter(row => row.case_group === 'audit').length >= 62);
     assert.equal(rows.filter(row => row.case_group === 'crossProvider').length, 95);
+    assert.equal(rows.filter(row => row.case_group === 'residualAudit').length, 77);
     assert.equal(rows.filter(row => row.case_group === 'selection').length, 4);
     assert.doesNotMatch(sql, /create(?: or replace)? function public\./i);
     assert.equal((sql.match(/create(?: or replace)? function pg_temp\./gi) || []).length, 4);

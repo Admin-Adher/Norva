@@ -5,7 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const { pathToFileURL } = require('node:url');
 const root = path.join(__dirname, '../..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
-const migrated = 'supabase/migrations/20260913182256_provider_release_annotation_language_completion.sql';
+const migrated = 'supabase/migrations/20260913210125_provider_residual_language_declarations.sql';
 const knownCases = name => {
     const match = read(name).match(/const cases\s*=\s*(\[[\s\S]*?\n\]);/);
     if (!match) throw Error('Fixture cases missing: ' + name);
@@ -25,6 +25,10 @@ async function build(evidenceFile, includeReconciliation = false) {
         ['crossProvider', 'tests/provider-language-cross-provider-completion.test.js'],
     ]) for (const [raw, category, expected] of knownCases(file)) rows.push({
         case_id: rows.length, case_group: group, metadata: { categoryName: category },
+        external_id: 'fixture', raw_title: raw, expected,
+    });
+    for (const [raw, category, expected] of require('./provider-language-audit-remediation.js')) rows.push({
+        case_id: rows.length, case_group: 'residualAudit', metadata: { categoryName: category },
         external_id: 'fixture', raw_title: raw, expected,
     });
     const fixtureId = 'norva-selection:movie:' + 'a'.repeat(64);
@@ -98,6 +102,7 @@ $test$;
 select jsonb_build_object('passed',true,'cases',count(*),'mismatches',count(*) filter(where actual is distinct from expected),
   'existingCases',count(*) filter(where case_group='existing'),'auditCases',count(*) filter(where case_group='audit'),
   'selectionCases',count(*) filter(where case_group='selection'),'crossProviderCases',count(*) filter(where case_group='crossProvider'),
+  'residualAuditCases',count(*) filter(where case_group='residualAudit'),
   'cohortRows',count(*) filter(where case_group='cohort'),
   'scope','pg_temp only; transaction rolled back') from pg_temp.provider_language_parity_results;
 ${reconciliation}

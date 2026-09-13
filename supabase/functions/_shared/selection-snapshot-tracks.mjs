@@ -1,6 +1,6 @@
 import { isDiscoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_TESTED_VOD_FEEDS, testedSelectionVodEntries } from './selection-tested-vod.mjs';
-import { selectionVodIdentity, selectionVodExternalId } from './selection-vod.mjs';
+import { selectionVodIdentity, selectionVodExternalId, SELECTION_VOD_REVISION } from './selection-vod.mjs';
 
 let snapshotPromise;
 function snapshot() {
@@ -16,10 +16,11 @@ function snapshot() {
         const hasSubtitle = Array.isArray(profile.subtitleTracks);
         const subtitleTracks = hasSubtitle ? profile.subtitleTracks.map(t => ({ index:t.index, lang:t.language || null,
           codec:t.codec || null, extractable:['subrip','srt','ass','ssa','webvtt','mov_text','text'].includes(t.codec) })) : [];
-        result.set(id, { url:entry.url, audioTracks, subtitleTracks, hasSubtitle, quality:entry.quality,
+        result.set(id, { url:entry.url, feedId:entry.feedId, audioTracks, subtitleTracks, hasSubtitle, quality:entry.quality,
           audioLanguages:[...new Set(audioTracks.map(t=>t.lang).filter(Boolean))],
           subtitleLanguages:[...new Set(subtitleTracks.map(t=>t.lang).filter(Boolean))],
-          duration:entry.duration, probedAt:entry.validation?.containerMetadataCheckedAt, codecProfile:profile });
+          duration:entry.duration, probedAt:entry.validation?.containerMetadataCheckedAt
+            || (entry.validation?.containerAudioTags ? entry.validation.checkedAt : null), codecProfile:profile });
       }));
     }
     return result;
@@ -32,10 +33,10 @@ function snapshot() {
 export async function selectionSnapshotFileTags(externalId) {
   const entry = (await snapshot()).get(externalId);
   if (!entry) return {};
-  return { audioTracks:entry.audioTracks, audioTracksScope:'file', audioLanguages:entry.audioLanguages,
+  return { audioTracks:entry.audioTracks.map(t=>({...t})), audioTracksScope:'file', audioLanguages:[...entry.audioLanguages],
     audioLanguagesScope:'file', audioLanguageValidationStatus:entry.audioLanguages.length ? 'probed' : 'pending',
-    ...(entry.hasSubtitle ? { subtitleTracks:entry.subtitleTracks, subtitleTracksScope:'file',
-      subtitleLanguages:entry.subtitleLanguages, subtitleLanguagesScope:'file' } : {}),
+    ...(entry.hasSubtitle ? { subtitleTracks:entry.subtitleTracks.map(t=>({...t})), subtitleTracksScope:'file',
+      subtitleLanguages:[...entry.subtitleLanguages], subtitleLanguagesScope:'file' } : {}),
     ...(entry.quality ? {quality:entry.quality} : {}),
     ...(entry.duration ? {duration:entry.duration} : {}), codecProfile:{...entry.codecProfile, ...(entry.probedAt ? {probeSource:'selection-container-audit',probedAt:entry.probedAt} : {})} };
 }
@@ -73,62 +74,51 @@ export async function selectionSnapshotPlaybackTags({userId,sourceId,itemId,targ
   return tags;
 }
 
-// Reuses the normal exact-file cache/fanout RPCs. No identity is invented for a
-// public M3U source: each account retains its source-scoped key. Existing probes
-// and speech verification win over this preparation snapshot on later imports.
+// Only the checked-in, individually measured snapshot can construct this input.
+// Editable row metadata (including codecProfile/audioLanguages) is never read.
+// The digest avoids passing physical URLs to repair manifests and RPC receipts.
+export async function selectionSnapshotMovieManifests(rows) {
+  const files = await snapshot(), result = new Map();
+  for (const row of rows) {
+    const file = files.get(row.external_id);
+    if (row.item_type !== 'movie' || !file || file.url !== row.playback_hint?.targetUrl
+      || !file.probedAt || !Number.isFinite(Date.parse(file.probedAt))) continue;
+    const tracks = file.audioTracks;
+    if (!tracks.length || tracks.some(t => !Number.isInteger(t.index) || t.index < 0
+      || !t.lang || ['und', 'unknown', 'mul', 'zxx'].includes(t.lang))
+      || new Set(tracks.map(t => t.index)).size !== tracks.length) continue;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(file.url));
+    result.set(row.external_id, {
+      externalId:row.external_id, urlSha256:Array.from(new Uint8Array(digest), b=>b.toString(16).padStart(2,'0')).join(''),
+      revision:SELECTION_VOD_REVISION, feedId:file.feedId, probedAt:file.probedAt,
+      audioTracks:tracks.map(t=>({...t})), subtitleTracks:file.subtitleTracks.map(t=>({...t})),
+      hasSubtitle:file.hasSubtitle,
+    });
+  }
+  return [...result.values()];
+}
+
+// One atomic, generation-fenced RPC seeds only absent cache/observation data.
+// Read-then-upsert used to race a newer probe and mistake another file's
+// observation for this movie. The database now performs exact-file checks and
+// preserves even an explicitly unidentified later observation.
 export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
   if (!await isDiscoverySourceId(sourceId, userId)) return {seeded:0};
-  const files = await snapshot();
-  const selected = rows.filter(r => r.item_type === 'movie' && files.get(r.external_id)?.url === r.playback_hint?.targetUrl);
+  const selected = await selectionSnapshotMovieManifests(rows);
   if (!selected.length) return {seeded:0};
   if (!generationFence?.p_generation_id) throw new Error('Selection track hydration requires a catalogue generation');
-  const key = `source:${sourceId}`, cached = new Set(), observed = new Set();
-  // Selection IDs are long hashes: 50 keep PostgREST request URIs below 8 KiB.
+  let seeded=0;
+  // Bodies stay bounded and the RPC does not enumerate unrelated source files.
   for (let offset=0;offset<selected.length;offset+=50) {
     await assertSourceCurrent();
-    const {data,error}=await db.from('catalog_file_tracks').select('external_id,audio_probed_at,subtitle_probed_at')
-      .eq('server_host',key).eq('item_type','movie').in('external_id',selected.slice(offset,offset+50).map(r=>r.external_id));
-    if(error)throw error;
-    for(const row of data||[])if(row.audio_probed_at)cached.add(row.external_id);
-    const variants=await db.from('cloud_catalog_visible_title_variants').select('id,external_id')
-      .eq('user_id',userId).eq('source_id',sourceId).eq('item_type','movie').in('external_id',selected.slice(offset,offset+50).map(r=>r.external_id));
-    if(variants.error)throw variants.error;
-    if(variants.data?.length){
-      const observations=await db.from('cloud_title_file_language_observations').select('variant_id,audio_observed')
-        .eq('user_id',userId).in('variant_id',variants.data.map(r=>r.id));
-      if(observations.error)throw observations.error;
-      const done=new Set((observations.data||[]).filter(r=>r.audio_observed).map(r=>r.variant_id));
-      for(const row of variants.data)if(done.has(row.id))observed.add(row.external_id);
-    }
-  }
-  let seeded=0;
-  const pending=selected.filter(row=>!cached.has(row.external_id)||!observed.has(row.external_id));
-  for(let offset=0;offset<pending.length;offset+=50) {
-    const batch=pending.slice(offset,offset+50);
-    for(let index=0;index<batch.length;index+=4) {
-      await assertSourceCurrent();
-      await Promise.all(batch.slice(index,index+4).map(async row=>{
-        if(cached.has(row.external_id))return;
-        const tags=files.get(row.external_id);
-        const {error}=await db.rpc('upsert_catalog_file_tracks',{
-          p_server_host:key,p_item_type:'movie',p_external_id:row.external_id,p_audio_tracks:tags.audioTracks,
-          p_subtitle_tracks:tags.subtitleTracks,p_has_audio:true,p_has_subtitle:tags.hasSubtitle,
-        });
-        if(error)throw error;
-      }));
-      await assertSourceCurrent();
-    }
-    // Use the normal generation-fenced bulk join: one ownership proof and one
-    // language-union recomputation per title, rather than per-file fanout calls.
-    const hydrated=await db.rpc('hydrate_cloud_title_file_languages',{
+    const {data,error}=await db.rpc('hydrate_selection_snapshot_movie_languages',{
       p_user_id:userId,p_source_id:sourceId,...generationFence,
-      p_server_key:key,p_item_type:'movie',p_external_ids:batch.map(row=>row.external_id),
+      p_files:selected.slice(offset,offset+50),
     });
-    if(hydrated.error)throw hydrated.error;
-    seeded+=batch.length;
+    if(error)throw error;
+    seeded+=Number(data)||0;
     await assertSourceCurrent();
   }
-  await assertSourceCurrent();
   return {seeded};
 }
 

@@ -71,11 +71,34 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
                     ? `${boundary} ${dubbed} ${marker}` : match;
             });
     }
+
+    // Exact supplier category labels from the September residual-language audit.
+    // These are declarations, not observed tracks or country-to-language aliases.
+    // Keep the full labels: arbitrary prose, subtitle suffixes and market bundles
+    // must not acquire an audio language by matching a word inside a category.
+    const VERSION_PROVIDER_AUDITED_CATEGORIES = {
+        'FR I BOX OFFICE & ULTRA 4K': 'FR | BOX OFFICE & ULTRA 4K',
+        'أفلام فرنسية': 'FRENCH MOVIES',
+        'Séries ARABES': 'ARABIC SERIES',
+        'مسلسلات عربية | SERIES ARABES': 'ARABIC SERIES',
+        'افلام عربية | FILMS ARABES': 'ARABIC MOVIES',
+        'أفلام عربية قديمة | ANCIENS FILMS ARABES': 'ARABIC MOVIES',
+        'مسلسلات تركية مدبلجة عربي | Turkish Series Arabic Dub': 'ARABIC DUB'
+    };
+
+    function normalizeProviderAuditedCategory(value) {
+        const key = value.trim().replace(/\s+/g, ' ');
+        if (Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_AUDITED_CATEGORIES, key)) {
+            return VERSION_PROVIDER_AUDITED_CATEGORIES[key];
+        }
+        // EX-YU is the spelling of the already supported regional label only.
+        return /^\s*EX-YU\s*[|:]?\s*$/i.test(value) ? 'EXYU' : value;
+    }
     export function providerCatalogLanguage(item = {}) {
-        const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000)
+        const category = normalizeProviderAuditedCategory(String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000)
             // A complete category label can delimit a leading tag with a space.
             // Do not extend this to prose such as "NO ADS" or "FILMES DE AÇÃO".
-            .replace(/^\s*([A-Z]{2,3})\s+(MOVIES|FILMS|SERIES)\s*$/, '$1 | $2');
+            .replace(/^\s*([A-Z]{2,3})\s+(MOVIES|FILMS|SERIES)\s*$/, '$1 | $2'));
         // In this audited supplier category NL denotes the market, while HINDI
         // is the language declaration. Do not generalize to other code/name pairs.
         const nlHindiCategory = /^\s*NL\s*\|\s*HINDI\s*$/i.test(category);
@@ -91,6 +114,11 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         const prefixMatch = providerPrefixMatch
             || raw.match(/^\s*[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*/u);
         const prefix = prefixMatch?.[1] || '';
+        // Audited EN-prefixed UFC releases are English declarations in the NL
+        // market section. Suppress only this exact category's market token;
+        // [EN], NL prefixes, other sports sections and suffix conflicts remain.
+        const enNlUfcCategory = Boolean(providerPrefixMatch) && prefix === 'EN'
+            && /^\s*NL\s*\|\s*UFC\s*$/i.test(category);
         // Explicit release suffixes / "Malayalam Dubbed" are annotations. Plain
         // title words ("Hindi Medium", "Johnny English", "It") are never scanned.
         // The supplier separator cannot also introduce a suffix: in "EN | Dutch"
@@ -112,6 +140,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
                 // or country aliases. The whole annotation must match.
                 .replace(/^true\s+fr$/i, 'FR')
                 .replace(/^nl-be$/i, 'NL')
+                .replace(/^EX-YU$/i, 'EXYU')
                 .replace(/^([\p{L}\p{M}]{2,30})\s+blu-ray$/iu, '$1');
             const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
             const tokens = originalTokens.map(t => t.toLowerCase());
@@ -143,7 +172,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         // language prefix and explicit suffixes keep their conflict semantics.
         const leading = inspect(nlHindiCategory && providerPrefixMatch && prefix === 'NL' ? '' : prefix,
             true, Boolean(providerPrefixMatch));
-        const categorized = inspect(nlHindiCategory ? 'HINDI' : category);
+        const categorized = inspect(nlHindiCategory ? 'HINDI' : enNlUfcCategory ? 'UFC' : category);
         const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.
         const audioBlocked = leading.subOnly || categorized.subOnly || trailing.subOnly
