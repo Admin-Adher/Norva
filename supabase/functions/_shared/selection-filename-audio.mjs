@@ -16,6 +16,7 @@ const aliases = Object.freeze({
 const normalize = value => value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
 const hex = /^[a-f0-9]{64}$/;
 const feeds = new Set(['herbert-tested-vod', 'klysmgt-tested-vod', 'sandro-tested-vod']);
+const mediaExtension = /\.(?:mp4|mkv|avi|mov|webm|m4v|ts)$/;
 
 export function filenameAudioLanguage(rawUrl) {
   if (typeof rawUrl !== 'string' || rawUrl.length > 12000) return null;
@@ -26,9 +27,24 @@ export function filenameAudioLanguage(rawUrl) {
     // Object-storage keys may encode path separators as well as accented tags.
     filename = normalize(decodeURIComponent(url.pathname).split('/').pop());
   } catch { return null; }
-  if (!filename || !/\.(?:mp4|mkv|avi|mov|webm|m4v|ts)$/i.test(filename)) return null;
+  if (!filename || !mediaExtension.test(filename)) return null;
   if (/(?:^|[^a-z])(?:subs?|subbed|subtitles?|subtit\w*|sous[ ._-]*tit\w*|legendad\w*|vost\w*|multi|dual)(?:[^a-z]|$)/.test(filename)) return null;
-  const stem = filename.replace(/\.(?:mp4|mkv|avi|mov|webm|m4v|ts)$/, '').replace(/(?:_\d{1,2}|\(\d{1,2}\))$/, '').trim();
+  if (/(?:castellano|espanol)[ ._-]*latino[ ._-]*subtit/.test(filename)) return null;
+  let stem = filename.replace(mediaExtension, '');
+  // One audited rehosting wrapper appends this literal text after the original
+  // media filename. Do not strip arbitrary page titles, hosts or release words.
+  if (/\.(?:mp4|mkv|avi|mov|webm|m4v|ts) at streamtape\.com$/.test(stem)) {
+    stem = stem.replace(/ at streamtape\.com$/, '');
+  }
+  // Unrecognised or non-terminal hosting text is not a release declaration.
+  if (/\bat [a-z\d.-]+\.[a-z]{2,}(?:$|[^a-z])/.test(stem)) return null;
+  // Repackaging can preserve the old container suffix (e.g. .mkv.mp4).
+  // Only a bounded terminal extension chain is ignored, never internal words.
+  for (let count = 1; count < 3 && mediaExtension.test(stem); count++) {
+    stem = stem.replace(mediaExtension, '');
+  }
+  if (mediaExtension.test(stem)) return null;
+  stem = stem.replace(/(?:_\d{1,2}|\(\d{1,2}\))$/, '').trim();
   // Bracketed markers and release suffixes are explicit. Short codes never
   // match ordinary words (e.g. "It", "Us", or "Johnny English").
   const bracketed = stem.match(/^(.*\S)[ ._-]*[\[(]([a-z-]+)[\])]$/);
@@ -39,6 +55,8 @@ export function filenameAudioLanguage(rawUrl) {
   // Mixed language declarations require per-track evidence; avoid choosing
   // an arbitrary final marker from "Film.[EN].[FR]" or "Film.English.French".
   if (/[\[(](?:[a-z-]+)[\])]|(?:[._]|\s-\s)(?:english|french|spanish|portuguese|en|fr|es|pt)$/i.test(match[1])) return null;
+  const priorMarker = match[1].match(/(?:[._]|\s-\s)\s*([a-z-]+)$/)?.[1];
+  if (priorMarker && Object.hasOwn(aliases, priorMarker)) return null;
   const marker = match[2] === 'espanol latino' ? 'espanol' : match[2];
   return Object.hasOwn(aliases, marker) ? aliases[marker] : null;
 }

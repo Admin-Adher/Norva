@@ -24,10 +24,12 @@ export function catalogVariantMatchesAudio(variant, facet, canonicalize = value 
     // Do not infer audio from a title-wide union or from subtitle languages.
     const observed = variant?.__file_audio_observed === true && Array.isArray(variant.__file_audio_languages)
       ? variant.__file_audio_languages : [];
-    if (observed.length) return !observed.some(value => {
+    if (observed.some(value => {
       const code = value === 'yue' ? value : canonicalize(value);
       return code && !['un', 'und', 'unknown'].includes(code) && /^(?:[a-z]{2}|yue)$/.test(code);
-    });
+    })) return false;
+    // A placeholder such as `und` is not an identified audio language and must
+    // not mask a usable provider declaration (same rule as the SQL facet).
     return catalogProviderAudioLanguages(variant).length === 0;
   }
   const language = providerAudioFacet(facet);

@@ -34,7 +34,8 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         vi: 'vi', vie: 'vi', vietnamese: 'vi', id: 'id', indonesian: 'id', indonesia: 'id',
         ms: 'ms', msa: 'ms', malay: 'ms', melayu: 'ms', fil: 'fil', filipino: 'fil', tagalog: 'fil',
         fa: 'fa', fas: 'fa', per: 'fa', persian: 'fa', farsi: 'fa', فارسی: 'fa',
-        he: 'he', heb: 'he', hebrew: 'he', עברית: 'he', kurdish: 'ku',
+        he: 'he', heb: 'he', hebrew: 'he', עברית: 'he', ku: 'ku', kur: 'ku', kurdish: 'ku',
+        mt: 'mt', mlt: 'mt', maltese: 'mt',
         sv: 'sv', swe: 'sv', swedish: 'sv', svenska: 'sv', se: 'sv',
         da: 'da', dan: 'da', danish: 'da', dansk: 'da', dk: 'da',
         no: 'no', nor: 'no', norwegian: 'no', norsk: 'no',
@@ -71,17 +72,24 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             });
     }
     export function providerCatalogLanguage(item = {}) {
-        const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000);
+        const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000)
+            // A complete category label can delimit a leading tag with a space.
+            // Do not extend this to prose such as "NO ADS" or "FILMES DE AÇÃO".
+            .replace(/^\s*([A-Z]{2,3})\s+(MOVIES|FILMS|SERIES)\s*$/, '$1 | $2');
         // Local M3U/Xtream inventories may retain the raw label only as `name`.
         // A source/category context is required before treating it as a supplier label.
         const providerContext = category || item.sourceId || item.source_id;
         const raw = String(item.raw_title || item.rawTitle || (providerContext ? item.name || item.title : '') || '')
             .replace(BAR_SEPARATORS, ' | ').slice(0, 2000);
-        const prefix = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})\s*[-–—|:]\s*/)?.[1]
-            || raw.match(/^\s*[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*/u)?.[1] || '';
+        const prefixMatch = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})\s*[-–—|:]\s*/)
+            || raw.match(/^\s*[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*/u);
+        const prefix = prefixMatch?.[1] || '';
         // Explicit release suffixes / "Malayalam Dubbed" are annotations. Plain
         // title words ("Hindi Medium", "Johnny English", "It") are never scanned.
-        const withoutYear = raw.replace(/\s*[[(]?(?:19|20)\d{2}[\])]?\s*$/, '').trim();
+        // The supplier separator cannot also introduce a suffix: in "EN | Dutch"
+        // or "SW | Dual", the entire remainder is a title, not a language tag.
+        const title = prefixMatch ? raw.slice(prefixMatch[0].length) : raw;
+        const withoutYear = title.replace(/\s*[[(]?(?:19|20)\d{2}[\])]?\s*$/, '').trim();
         const suffix = withoutYear.match(/[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*$/u)?.[1]
             || withoutYear.match(/\s[-–—|]\s*([A-Z]{2,3}|[\p{L}\p{M}]{4,30})\s*$/u)?.[1]
             || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
@@ -93,6 +101,12 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
                 || /sous[\s-]+titres/i.test(value) || RTL_SUB_RE.test(value))
                 && !tokens.some(t => DUB_MARKERS.has(t));
+            // Brackets alone are not proof of an annotation. For example, the
+            // title warning "(NE CONVIENT PAS AUX ENFANTS)" is not Nepali audio.
+            const annotationOnly = tokens.every(t => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
+                || SUB_MARKERS.has(t) || DUB_MARKERS.has(t)
+                || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi)|multi|dual|bilingual|multiaudio|audio|in|4k|8k|sd|hd|fhd|uhd|\d{3,4}p)$/.test(t));
+            if (annotated && !annotationOnly) return { subOnly, tags: [], multi: false };
             const codeIsBounded = token => new RegExp(`(?:^|[|:/\\[(])\\s*${token}(?:\\s*[-–—|:/\\])]|\\s*$)`, 'i').test(value);
             const tags = [...new Set(tokens.map((t, i) => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
                 && (t.length > 3 || tokens.length === 1 || (originalTokens[i] === originalTokens[i].toUpperCase() && (annotated || codeIsBounded(t))))
@@ -106,7 +120,12 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         if (leading.subOnly || categorized.subOnly || trailing.subOnly
             || leading.multi || categorized.multi || trailing.multi
             || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw)) return null;
-        const tags = [...new Set([...leading.tags, ...categorized.tags, ...trailing.tags])];
+        let tags = [...new Set([...leading.tags, ...categorized.tags, ...trailing.tags])];
+        // A single Danish/Swedish/Norwegian tag refines the broader Nordic
+        // category. Two specific languages, or a non-Nordic tag, still conflict.
+        if (tags.length === 2 && tags.includes('nordic') && tags.some(tag => ['da', 'sv', 'no'].includes(tag))) {
+            tags = tags.filter(tag => tag !== 'nordic');
+        }
         // Conflicting or multi-language provider labels do not prove a track list.
         if (tags.length !== 1) return null;
         const tag = tags[0];
