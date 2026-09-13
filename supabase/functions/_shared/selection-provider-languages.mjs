@@ -18,6 +18,18 @@ export function catalogProviderAudioLanguages(item = {}) {
 }
 
 export function catalogVariantMatchesAudio(variant, facet, canonicalize = value => value) {
+  if (facet === 'unidentified') {
+    // Same complement as cloud_catalog_unidentified_audio_variants: an exact
+    // accepted observation or a scoped provider declaration identifies audio.
+    // Do not infer audio from a title-wide union or from subtitle languages.
+    const observed = variant?.__file_audio_observed === true && Array.isArray(variant.__file_audio_languages)
+      ? variant.__file_audio_languages : [];
+    if (observed.length) return !observed.some(value => {
+      const code = value === 'yue' ? value : canonicalize(value);
+      return code && !['un', 'und', 'unknown'].includes(code) && /^(?:[a-z]{2}|yue)$/.test(code);
+    });
+    return catalogProviderAudioLanguages(variant).length === 0;
+  }
   const language = providerAudioFacet(facet);
   if (!language) return false;
   const tracks = Array.isArray(variant.__file_audio_tracks) ? variant.__file_audio_tracks : [];

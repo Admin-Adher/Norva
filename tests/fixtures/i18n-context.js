@@ -47,6 +47,7 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
             const audio = document.getElementById(kind + '-audio');
             page.applyFacetOptions(audio, NorvaI18n.t('ui_web_54186a20c3e8', {defaultValue:'Any language'}), [
                 {value:'es',label:'Spanish · 1 movies',count:1}, {value:'catalog-pt',label:'Portuguese · 1,201 movies',count:1201},
+                {value:'unidentified',label:'Language unidentified',count:12},
             ], '', kind);
             const source = document.getElementById(kind+'-source-select');
             source.append(new Option('Fixture source','fixture-source'));
@@ -131,8 +132,9 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
                 this.categories.setSelected(['comedie']); this.source.value='fixture-source';
                 this.categories.setSelected([]); this.source.value='';
                 assert(this.source.value===''&&this.categories.getSelected().size===0,'categories/source reset');
-                this.audio.value='catalog-pt'; this.audio.dispatchEvent(new Event('change'));
-                assert(this.audio.value==='catalog-pt','language query changed');
+                this.audio.value='unidentified'; this.audio.dispatchEvent(new Event('change'));
+                assert(this.audio.value==='unidentified','unidentified language query changed');
+                assert(this.audio.selectedOptions[0].text===NorvaI18n.t('ui_web_audio_language_unidentified')+' · '+new Intl.NumberFormat(locale).format(12),'unidentified option untranslated');
                 sheet.querySelector('.mobile-filter-close').click(); await tick();
                 assert(open.getAttribute('aria-expanded')==='false','filter sheet did not close');
             }
@@ -140,7 +142,7 @@ addEventListener('unhandledrejection', e => fixtureErrors.push(String(e.reason))
             assert(document.getElementById('fixture-season-count').textContent===NorvaI18n.t('ui_season_count',{count:1}),'DOM plural count untranslated');
             assert(GenreTaxonomy.displayGenre('Crime')===NorvaI18n.t('ui_web_22611ceccd0b'),'untranslated detail genre');
             if(locale==='fr')assert(NorvaI18n.t('ui_video_count',{count:1})==='1 vidéo','singular video');
-            if(locale==='fr') {assert(NorvaI18n.t('ui_season_count',{count:1})==='1 saison','singular season');assert(this.audio.options[1].text==='Espagnol · 1','English language leaked');}
+            if(locale==='fr') {assert(NorvaI18n.t('ui_season_count',{count:1})==='1 saison','singular season');assert([...this.audio.options].find(option=>option.value==='es').text==='Espagnol · 1','English language leaked');}
             await this.verifyRails(kind);
             assert(document.documentElement.scrollWidth<=innerWidth+1,'horizontal page overflow');
             assert(!fixtureErrors.length,fixtureErrors.join('; '));

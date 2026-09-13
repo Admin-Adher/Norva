@@ -832,6 +832,7 @@ const MediaUtils = (() => {
     // Only language codes determine display names. Never display an English server
     // sentence (e.g. "Spanish · 1 movies") or translate a facet's stable query value.
     function languageFacetName(value, fallback = '') {
+        if (value === 'unidentified') return audioLanguageAnalysisLabel();
         const code = String(value || '').replace(/^(?:provider|catalog)-/, '');
         if (code === 'nordic') return globalThis.NorvaI18n?.t('ui_web_provider_nordic_languages', { defaultValue: 'Nordic languages' }) ?? 'Nordic languages';
         if (/^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/i.test(code)) return languageDisplayFull(code);

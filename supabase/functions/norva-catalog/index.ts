@@ -1876,7 +1876,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 
 function normalizeFacet(value: string | null): string | null {
   const v = (value || "").toLowerCase().trim();
-  return /^[a-z]{2,10}$/.test(v) || providerAudioFacet(v) ? v : null;
+  return v === 'unidentified' || /^[a-z]{2,10}$/.test(v) || providerAudioFacet(v) ? v : null;
 }
 // Filter-bar decade value -> inclusive release_year range. Mirrors the client's
 // Year dropdown: a decade start ("2020", "2010", …) or "old" (before 1990).
@@ -1947,6 +1947,7 @@ function publicFileTrackLanguages(value: unknown): string[] {
 // owned by this user (file_audio_languages / file_subtitle_languages). Legacy or
 // global title hints never drive strict filters.
 function audioFacetIso(facet: string | null): string | null {
+  if (facet === 'unidentified') return facet;
   if (providerAudioFacet(facet)) return facet;
   return canonicalFileLanguage(facet);
 }
@@ -2112,11 +2113,11 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // sort. All additive: absent → the query and result are identical to before.
   const audioFacet = normalizeFacet(url.searchParams.get("audio"));
   const audioIso = audioFacetIso(audioFacet);
-  const subIso = audioFacetIso(normalizeFacet(url.searchParams.get("subs")));
+  const subIso = canonicalFileLanguage(normalizeFacet(url.searchParams.get("subs")));
   const sort = (url.searchParams.get("sort") || "default").trim() || "default";
   const langSort = sort === "lang-match";
-  const prefAudioIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefAudio"))) : null;
-  const prefSubIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefSubs"))) : null;
+  const prefAudioIso = langSort ? canonicalFileLanguage(normalizeFacet(url.searchParams.get("prefAudio"))) : null;
+  const prefSubIso = langSort ? canonicalFileLanguage(normalizeFacet(url.searchParams.get("prefSubs"))) : null;
   // Decade / minimum-rating filters so the whole filter bar works inside a genre
   // ("See all") or language grid — before, Year/Rating were silently ignored there.
   const yearRange = decadeRange(url.searchParams.get("year"));
@@ -2130,6 +2131,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
   const hasStrictLanguageFilter = Boolean(audioIso || subIso);
   const needsLanguagePage = Boolean(
+    audioIso === 'unidentified' ||
     (requestedBuckets.length > 0 && !langSort) ||
     providerAudioFacet(audioIso) ||
     (sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso)) ||
@@ -2395,6 +2397,13 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     return code && count > 0 ? [{ value: `catalog-${code}`, language: code, count,
       label: code === 'nordic' ? 'Nordic languages' : languageFacetLabel(code, count, itemType) }] : [];
   });
+  // Keep the audit choice available even at zero; counts and grid membership
+  // share the exact same visible, account/source-scoped variant relation.
+  const { data: unidentifiedCount, error: unidentifiedError } = await db.rpc('cloud_catalog_unidentified_audio_count', {
+    p_user_id: userId, p_item_type: itemType, p_source_id: sourceId,
+  });
+  if (unidentifiedError) throwDb(unidentifiedError, 'Unable to load unidentified audio facet');
+  value.audio.push({ value: 'unidentified', count: Math.max(0, Number(unidentifiedCount) || 0), label: 'Language unidentified' });
 
   if (cacheKey) {
     FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
@@ -3749,7 +3758,7 @@ async function listVariantsByTitleIds(
       variants.sort((left, right) => {
         const matches = (variant: JsonRecord) => {
           const declaredIso = providerAudioFacet(requiredAudioIso);
-          if (declaredIso) return catalogVariantMatchesAudio(variant, requiredAudioIso, canonicalFileLanguage);
+          if (declaredIso || requiredAudioIso === 'unidentified') return catalogVariantMatchesAudio(variant, requiredAudioIso, canonicalFileLanguage);
           if (!requiredCanonicalIso) return false;
           const orderedTrackMatch = Array.isArray(variant.__file_audio_tracks) &&
             (variant.__file_audio_tracks as JsonRecord[]).some((track) =>
