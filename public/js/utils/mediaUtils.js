@@ -1986,7 +1986,11 @@ const MediaUtils = (() => {
         const providerContext = category || item.sourceId || item.source_id;
         const raw = String(item.raw_title || item.rawTitle || (providerContext ? item.name || item.title : '') || '')
             .replace(BAR_SEPARATORS, ' | ').slice(0, 2000);
-        const prefixMatch = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})\s*[-–—|:]\s*/)
+        const providerPrefixMatch = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})(?:\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:]\s*)/)
+            // Some suppliers separate a composite tag from its title with two
+            // spaces. A plain title word followed by spaces is never a prefix.
+            || raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){1,4})[ \t]{2,}/);
+        const prefixMatch = providerPrefixMatch
             || raw.match(/^\s*[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*/u);
         const prefix = prefixMatch?.[1] || '';
         // Explicit release suffixes / "Malayalam Dubbed" are annotations. Plain
@@ -1999,8 +2003,9 @@ const MediaUtils = (() => {
             || withoutYear.match(/\s[-–—|]\s*([A-Z]{2,3}|[\p{L}\p{M}]{4,30})\s*$/u)?.[1]
             || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
             || withoutYear.match(/\b(?:dubbed|audio)\s+(?:in\s+)?([\p{L}\p{M}]{4,30})\s*$/iu)?.[1] || '';
-        const inspect = (value, annotated = false) => {
+        const inspect = (value, annotated = false, supplierPrefix = false) => {
             value = normalizeProviderDubbedCategory(value);
+            if (annotated) value = value.replace(/^([\p{L}\p{M}]{4,30})[- ]language\s+version$/iu, '$1');
             const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
             const tokens = originalTokens.map(t => t.toLowerCase());
             const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
@@ -2010,6 +2015,7 @@ const MediaUtils = (() => {
             // title warning "(NE CONVIENT PAS AUX ENFANTS)" is not Nepali audio.
             const annotationOnly = tokens.every(t => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
                 || SUB_MARKERS.has(t) || DUB_MARKERS.has(t)
+                || (supplierPrefix && /^(?:af|vp|eg|ye|s|shr|as|sbus|sham|ma|alg|kh|doc|d|tn|xmas|pod|sh|anm|hara|li|ly|dz|ptv|do|ch|chr|irq|isl|bdy|kid|kids|hdr|dv|jo|jor|cam|dsc|pse|sus|geo)$/.test(t))
                 || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi)|multi|dual|bilingual|multiaudio|audio|in|4k|8k|sd|hd|fhd|uhd|\d{3,4}p)$/.test(t));
             if (annotated && !annotationOnly) return { subOnly, tags: [], multi: false };
             const codeIsBounded = token => new RegExp(`(?:^|[|:/\\[(])\\s*${token}(?:\\s*[-–—|:/\\])]|\\s*$)`, 'i').test(value);
@@ -2018,7 +2024,10 @@ const MediaUtils = (() => {
                 ? VERSION_PROVIDER_LANGUAGE_TAGS[t] : null).filter(Boolean))];
             return { subOnly, tags, multi: tokens.some(t => /^(?:multi|dual|bilingual|multiaudio)$/.test(t)) };
         };
-        const leading = inspect(prefix, true);
+        // An explicit supplier prefix may also carry non-language qualifiers
+        // (AR-EG, AR-DOC-D, AF-EN). Only audited qualifiers are permitted here;
+        // arbitrary title prose and the same qualifiers in brackets are not.
+        const leading = inspect(prefix, true, Boolean(providerPrefixMatch));
         const categorized = inspect(category);
         const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.

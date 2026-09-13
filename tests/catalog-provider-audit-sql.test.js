@@ -14,7 +14,7 @@ test('forward migration mirrors the audited alias table without modifying histor
     assert.equal(actual.ku, 'ku'); assert.equal(actual.mt, 'mt');
     for (const country of ['ir', 'iran', 'malta', 'af', 'pk', 'exyu']) assert.equal(actual[country], undefined);
     assert.equal(actual.hu, null);
-    assert.match(read('scripts/build-provider-language-parser.cjs'), /20260913145623_audited_provider_language_resolution\.sql/);
+    assert.match(read('scripts/build-provider-language-parser.cjs'), /20260913154722_provider_language_composite_prefix_preservation\.sql/);
     assert.doesNotMatch(read('scripts/build-provider-language-parser.cjs'), /20260910152938_catalog_provider_language_facets\.sql/);
     const historical = read('supabase/migrations/20260910152938_catalog_provider_language_facets.sql');
     assert.doesNotMatch(historical, /"ku":"ku"|"mt":"mt"/);
