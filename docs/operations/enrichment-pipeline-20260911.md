@@ -3,7 +3,51 @@
 Base: `d86db0e13871f8d5b43d9faf67516b6b2cd0a969`. Isolated worktree;
 the user's original checkout is not part of this release.
 
-## Current state — 12 September, authorized post-pilot follow-ups
+## 13 September — precise foreground admission, validated before deployment
+
+The 00:48–01:04 UTC read-only checks distinguish actual production state from
+the older pilot ledger: no pilot/release operator process is alive, the two
+permanent enrichment crons remain active, and metadata/capture/passive/adaptive
+host lanes remain disabled. The current Gateway is the separately attested
+`initial-playback-topology-20260912` release (`119b0270`), not the older dormant
+image below. A real subtitle FFmpeg process was followed by a new extraction
+and Whisper process with advancing subtitle rows. It must drain normally;
+an old row timestamp or a momentarily zero inference counter is not idle proof.
+
+Code-level defect reproduced: `transcribeBusy`/`ocrBusy` cover the queue's drain
+loop, including its admission sleep. Enrichment previously counted those
+sleeping schedulers and all deferred jobs as executing foreground work.
+The new diagnostic distinguishes executing operations, asynchronous admission
+checks, pending priority jobs and confirmed deferred background jobs. Only an
+explicit priority-2 automatic job already inspected and deferred may yield the
+enrichment lane. Uninspected jobs, unknown priorities, viewer/service requests,
+translation backlog and actual operations remain blocking. The benchmark's
+stricter idle guard is unchanged. Health reports counts only, no job or source
+identifiers. All four enrichment admission callers use the same diagnostic.
+
+Validation before publication: 4,625 application tests passed, 21 skipped,
+zero failures; 32 Gateway queue/QoS/latency tests passed in the exact production
+image with networking disabled, no skips and no media/provider operations.
+The first native attempt preserved two failures because its unchanged Edge
+test harness requires Node 24's `stripTypeScriptTypes`; these Edge tests pass
+in the full application suite, while the revised native run explicitly scopes
+the unchanged Node 20 image to Gateway tests. Neither runtime was replaced and
+no test was silently disabled. Nine release-specific verification tests and ten
+existing recovery/ownership tests also pass. The scoped operator installs only
+`index.js`, retains the previous container, waits for real idle and restores
+the recorded cron state; staging is not evidence of deployment.
+
+Private audit evidence (no credentials or provider URLs):
+`C:/Users/AdrienHernandez/.codex/tmp/norva-enrichment-audit-20260913/`.
+The 01:04 snapshot's 71 verified voice job rows are a table-state count, not a
+measured VOD-language success rate. Full five-lane completion still requires
+live passive playback/QoS acceptance, fresh authorized Selection acceptance,
+real multiple-unknown-track batch evidence and controlled wider activation.
+The approved two acquisitions / one per mono account, 64 MiB working audio,
+thirty-minute TTL, viewer priority, certification thresholds and terminal-job
+protections are unchanged. No old failed Selection job is reopened for a test.
+
+## Historical state — 12 September, authorized post-pilot follow-ups
 
 The user explicitly authorized publication and deployment of the current and
 future in-scope enrichment corrections. This does not widen the approved two

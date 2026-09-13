@@ -2969,8 +2969,7 @@ app.get('/health', (req, res) => {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
             foregroundInference: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
-                || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0
-                || translateQueue.length > 0 || ocrQueue.length > 0,
+                || languageForegroundWorkSnapshot().busy,
             backgroundProcesses: backgroundCpuProcesses.size,
             brokers: strictLidBrokers.size,
             benchmark: lidBenchmarkBusy,
@@ -2980,12 +2979,12 @@ app.get('/health', (req, res) => {
         languagePassiveCapture: passiveLidCapture?.snapshot() || { protocol: 1, enabled: false },
         languageSelectionAdmission: enrichmentNetworkAdmission.policySnapshot(),
         languageEnrichmentPilot: enrichmentPilot.snapshot(),
+        languageForegroundWork: languageForegroundWorkSnapshot(),
         languageMetadataCapacity: decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
             viewer: viewerPlaybackActiveLocally(),
             starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
             foregroundInference: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
-                || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0
-                || translateQueue.length > 0 || ocrQueue.length > 0,
+                || languageForegroundWorkSnapshot().busy,
             benchmark: lidBenchmarkBusy,
         }, enrichmentNetworkAdmission.snapshot(), LANGUAGE_METADATA_LANE_ENABLED),
         rawStreamHealth: {
@@ -7727,7 +7726,7 @@ function passiveLidResourcesAvailable() {
     return enrichmentPilot.allowsPassive() && LANGUAGE_PASSIVE_CAPTURE_ENABLED && passiveResourcesAvailable(languageResourceSampler.snapshot(), {
         starting: viewerStartupReservations.size > 0 || viewerSessionStartupAdmissions.size > 0,
         foreground: whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
-            || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0 || translateQueue.length > 0 || ocrQueue.length > 0,
+            || languageForegroundWorkSnapshot().busy,
         benchmark: lidBenchmarkBusy,
     });
 }
@@ -7811,7 +7810,7 @@ function initializeStrictLidCapturePipeline(store) {
             if (context.selectionCapability && !decideLanguageMetadataCapacity(languageResourceSampler.snapshot(), {
                 viewer:false,starting:viewerSessionStartupAdmissions.size > 0,
                 foregroundInference:whisperInferenceActive > backgroundWhisperCount() || argosInferenceActive > 0
-                    || transcribeBusy || translateBusy || ocrBusy || transcribeQueue.length > 0 || translateQueue.length > 0 || ocrQueue.length > 0,
+                    || languageForegroundWorkSnapshot().busy,
                 benchmark:lidBenchmarkBusy,
             }, enrichmentNetworkAdmission.snapshot(), LANGUAGE_METADATA_LANE_ENABLED).maxWorkers) {
                 throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
@@ -9711,6 +9710,27 @@ async function shouldDeferJob(job) {
 // WITHIN a class (append after the last same-class job), so same-priority jobs stay FIFO.
 const JOB_PRIORITY = { viewer: 0, service: 1, pregen: 2 };
 function jobPrio(job) { return Number.isInteger(job?.prio) ? job.prio : 1; }
+const languageMediaQueueWork = {
+    transcribeSelecting: false, transcribeRunning: false,
+    ocrSelecting: false, ocrRunning: false,
+};
+function languageForegroundWorkSnapshot() {
+    // A drain loop stays "busy" while sleeping on provider/viewer admission.
+    // Only an explicitly pregen job already checked and deferred may yield the
+    // enrichment lane. Uninspected, interactive, service and unknown priorities
+    // remain blocking. Selecting/executing jobs remain blocking after shift().
+    let pendingPriorityJobs = translateQueue.length, deferredBackgroundJobs = 0;
+    for (const queue of [transcribeQueue, ocrQueue]) for (const job of queue) {
+        if (jobPrio(job) === JOB_PRIORITY.pregen && job?._languageAdmissionDeferred === true) deferredBackgroundJobs++;
+        else pendingPriorityJobs++;
+    }
+    const activeOperations = Number(languageMediaQueueWork.transcribeRunning)
+        + Number(languageMediaQueueWork.ocrRunning) + Number(translateBusy);
+    const admissionChecks = Number(languageMediaQueueWork.transcribeSelecting)
+        + Number(languageMediaQueueWork.ocrSelecting);
+    return { protocol: 1, busy: activeOperations + admissionChecks + pendingPriorityJobs > 0,
+        activeOperations, admissionChecks, pendingPriorityJobs, deferredBackgroundJobs };
+}
 function backgroundJobBlockedByViewer(job) {
     return jobPrio(job) !== JOB_PRIORITY.viewer && viewerPlaybackActiveLocally();
 }
@@ -9801,6 +9821,7 @@ async function nextRunnableJob(queue, kind) {
     let picked = null;
     while (queue.length) {
         const job = queue.shift();
+        job._languageAdmissionDeferred = false;
         const localTranscriptionSource = localViewerTranscriptionSource(job);
         if (localTranscriptionSource) job.localTranscriptionSource = localTranscriptionSource;
         else delete job.localTranscriptionSource;
@@ -9856,7 +9877,10 @@ async function nextRunnableJob(queue, kind) {
         postJobHeartbeat(job, 'deferred'); // keeps the row alive (reaper/claim) + honest UI state
         deferred.push(job);
     }
-    for (const j of deferred) insertByPriority(queue, j);
+    for (const j of deferred) {
+        j._languageAdmissionDeferred = true;
+        insertByPriority(queue, j);
+    }
     return picked;
 }
 
@@ -9914,7 +9938,10 @@ async function drainTranscribeQueue() {
     try {
         while (transcribeQueue.length) {
             const wakeVersion = transcribeWakeState.version;
-            const job = await nextRunnableJob(transcribeQueue, 'transcribe');
+            let job;
+            languageMediaQueueWork.transcribeSelecting = true;
+            try { job = await nextRunnableJob(transcribeQueue, 'transcribe'); }
+            finally { languageMediaQueueWork.transcribeSelecting = false; }
             if (!job) {
                 await waitForQueueWake(
                     transcribeWakeState,
@@ -9923,7 +9950,10 @@ async function drainTranscribeQueue() {
                 );
                 continue;
             }
-            await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
+            languageMediaQueueWork.transcribeRunning = true;
+            try {
+                await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
+            } finally { languageMediaQueueWork.transcribeRunning = false; }
         }
     } finally { transcribeBusy = false; }
 }
@@ -10422,7 +10452,10 @@ async function drainOcrQueue() {
     try {
         while (ocrQueue.length) {
             const wakeVersion = ocrWakeState.version;
-            const job = await nextRunnableJob(ocrQueue, 'ocr');
+            let job;
+            languageMediaQueueWork.ocrSelecting = true;
+            try { job = await nextRunnableJob(ocrQueue, 'ocr'); }
+            finally { languageMediaQueueWork.ocrSelecting = false; }
             if (!job) {
                 await waitForQueueWake(
                     ocrWakeState,
@@ -10431,7 +10464,10 @@ async function drainOcrQueue() {
                 );
                 continue;
             }
-            await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
+            languageMediaQueueWork.ocrRunning = true;
+            try {
+                await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
+            } finally { languageMediaQueueWork.ocrRunning = false; }
         }
     } finally { ocrBusy = false; }
 }
