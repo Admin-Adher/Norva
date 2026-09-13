@@ -96,14 +96,23 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         // The supplier separator cannot also introduce a suffix: in "EN | Dutch"
         // or "SW | Dual", the entire remainder is a title, not a language tag.
         const title = prefixMatch ? raw.slice(prefixMatch[0].length) : raw;
-        const withoutYear = title.replace(/\s*[[(]?(?:19|20)\d{2}[\])]?\s*$/, '').trim();
+        const withoutYear = title.replace(/\s*[[(]?(?:19|20)\d{2}[\])]?\s*$/, '').trim()
+            // A technical release tail may follow a bracketed declaration.
+            // Require that bracket boundary; never strip ordinary title prose.
+            .replace(/([\])])(?:\s+(?:4K|8K|SD|HD|FHD|UHD|\d{3,4}p))+\s*$/i, '$1');
         const suffix = withoutYear.match(/[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*$/u)?.[1]
             || withoutYear.match(/\s[-–—|]\s*([A-Z]{2,3}|[\p{L}\p{M}]{4,30})\s*$/u)?.[1]
             || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
             || withoutYear.match(/\b(?:dubbed|audio)\s+(?:in\s+)?([\p{L}\p{M}]{4,30})\s*$/iu)?.[1] || '';
         const inspect = (value, annotated = false, supplierPrefix = false) => {
             value = normalizeProviderDubbedCategory(value);
-            if (annotated) value = value.replace(/^([\p{L}\p{M}]{4,30})[- ]language\s+version$/iu, '$1');
+            if (annotated) value = value
+                .replace(/^([\p{L}\p{M}]{4,30})(?:[- ]language)?\s+version$/iu, '$1')
+                // Audited release annotations, not general title/category words
+                // or country aliases. The whole annotation must match.
+                .replace(/^true\s+fr$/i, 'FR')
+                .replace(/^nl-be$/i, 'NL')
+                .replace(/^([\p{L}\p{M}]{2,30})\s+blu-ray$/iu, '$1');
             const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
             const tokens = originalTokens.map(t => t.toLowerCase());
             const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
@@ -113,7 +122,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             // title warning "(NE CONVIENT PAS AUX ENFANTS)" is not Nepali audio.
             const annotationOnly = tokens.every(t => t === 'exyu' || Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
                 || SUB_MARKERS.has(t) || DUB_MARKERS.has(t)
-                || (supplierPrefix && /^(?:af|vp|eg|ye|s|shr|as|sbus|sham|ma|alg|kh|doc|d|tn|xmas|pod|sh|anm|hara|li|ly|dz|ptv|do|ch|chr|irq|isl|bdy|kid|kids|hdr|dv|jo|jor|cam|dsc|pse|sus|geo)$/.test(t))
+                || (supplierPrefix && /^(?:af|vp|eg|ye|s|shr|as|sbus|sham|ma|alg|kh|doc|d|tn|xmas|pod|sh|anm|hara|li|ly|dz|ptv|do|ch|chr|irq|isl|bdy|kid|kids|hdr|dv|jo|jor|cam|dsc|pse|sus|geo|kd)$/.test(t))
                 || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi)|multi|dual|bilingual|multiaudio|audio|in|4k|8k|sd|hd|fhd|uhd|\d{3,4}p)$/.test(t));
             if (annotated && !annotationOnly) return { subOnly, tags: [], multi: false, region: false };
             const codeIsBounded = token => new RegExp(`(?:^|[|:/\\[(])\\s*${token}(?:\\s*[-–—|:/\\])]|\\s*$)`, 'i').test(value);

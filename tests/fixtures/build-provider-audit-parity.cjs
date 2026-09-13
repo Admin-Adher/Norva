@@ -5,7 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const { pathToFileURL } = require('node:url');
 const root = path.join(__dirname, '../..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
-const migrated = 'supabase/migrations/20260913172750_provider_ex_yugoslav_catalog_region.sql';
+const migrated = 'supabase/migrations/20260913182256_provider_release_annotation_language_completion.sql';
 const knownCases = name => {
     const match = read(name).match(/const cases\s*=\s*(\[[\s\S]*?\n\]);/);
     if (!match) throw Error('Fixture cases missing: ' + name);
@@ -22,6 +22,7 @@ async function build(evidenceFile, includeReconciliation = false) {
     for (const [group, file] of [
         ['existing', 'tests/catalog-provider-language-filters.test.js'],
         ['audit', 'tests/catalog-provider-language-audit-regressions.test.js'],
+        ['crossProvider', 'tests/provider-language-cross-provider-completion.test.js'],
     ]) for (const [raw, category, expected] of knownCases(file)) rows.push({
         case_id: rows.length, case_group: group, metadata: { categoryName: category },
         external_id: 'fixture', raw_title: raw, expected,
@@ -48,7 +49,7 @@ async function build(evidenceFile, includeReconciliation = false) {
     }
     const functions = [
         definition('supabase/migrations/20260909203657_selection_filename_audio_declarations.sql', 'selection_provider_audio_language'),
-        definition(migrated, 'catalog_provider_language_alias'),
+        definition('supabase/migrations/20260913172750_provider_ex_yugoslav_catalog_region.sql', 'catalog_provider_language_alias'),
         definition('supabase/migrations/20260913102000_provider_dubbed_language_target.sql', 'catalog_provider_dubbed_category'),
         definition(migrated, 'catalog_provider_language'),
     ].join('\n').replace(/public\.(selection_provider_audio_language|catalog_provider_language_alias|catalog_provider_dubbed_category|catalog_provider_language)\b/g, 'pg_temp.$1');
@@ -96,7 +97,8 @@ end
 $test$;
 select jsonb_build_object('passed',true,'cases',count(*),'mismatches',count(*) filter(where actual is distinct from expected),
   'existingCases',count(*) filter(where case_group='existing'),'auditCases',count(*) filter(where case_group='audit'),
-  'selectionCases',count(*) filter(where case_group='selection'),'cohortRows',count(*) filter(where case_group='cohort'),
+  'selectionCases',count(*) filter(where case_group='selection'),'crossProviderCases',count(*) filter(where case_group='crossProvider'),
+  'cohortRows',count(*) filter(where case_group='cohort'),
   'scope','pg_temp only; transaction rolled back') from pg_temp.provider_language_parity_results;
 ${reconciliation}
 rollback;
