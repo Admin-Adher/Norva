@@ -1981,6 +1981,9 @@ const MediaUtils = (() => {
             // A complete category label can delimit a leading tag with a space.
             // Do not extend this to prose such as "NO ADS" or "FILMES DE AÇÃO".
             .replace(/^\s*([A-Z]{2,3})\s+(MOVIES|FILMS|SERIES)\s*$/, '$1 | $2');
+        // In this audited supplier category NL denotes the market, while HINDI
+        // is the language declaration. Do not generalize to other code/name pairs.
+        const nlHindiCategory = /^\s*NL\s*\|\s*HINDI\s*$/i.test(category);
         // Local M3U/Xtream inventories may retain the raw label only as `name`.
         // A source/category context is required before treating it as a supplier label.
         const providerContext = category || item.sourceId || item.source_id;
@@ -2027,8 +2030,11 @@ const MediaUtils = (() => {
         // An explicit supplier prefix may also carry non-language qualifiers
         // (AR-EG, AR-DOC-D, AF-EN). Only audited qualifiers are permitted here;
         // arbitrary title prose and the same qualifiers in brackets are not.
-        const leading = inspect(prefix, true, Boolean(providerPrefixMatch));
-        const categorized = inspect(category);
+        // Only the matching bare market prefix is suppressed. [NL], another
+        // language prefix and explicit suffixes keep their conflict semantics.
+        const leading = inspect(nlHindiCategory && providerPrefixMatch && prefix === 'NL' ? '' : prefix,
+            true, Boolean(providerPrefixMatch));
+        const categorized = inspect(nlHindiCategory ? 'HINDI' : category);
         const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.
         if (leading.subOnly || categorized.subOnly || trailing.subOnly

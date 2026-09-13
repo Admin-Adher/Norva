@@ -156,6 +156,41 @@ const cases = [
     ['NO-COUNTRY-FOR-OLD-MEN  Making of', '', null],
     ['[AR-AS]  Example', '', null],
     ['Example AR-AS  Extra', '', null],
+    // Audited market/category convention, never a two-track declaration.
+    ['NL ▎ Daadi Ki Shaadi', 'NL ▎HINDI', 'hi'],
+    ['NL ▎ Goliyon Ki Raasleela Ram-Leela', 'NL ▎HINDI', 'hi'],
+    ['NL | Example', ' NL | HINDI ', 'hi'],
+    ['NL - Example', 'nl | hindi', 'hi'],
+    ['NL ▎ Example', 'NL │ HINDI', 'hi'],
+    ['Example', 'NL ▎HINDI', 'hi'],
+    ['HI ▎ Example', 'NL ▎HINDI', 'hi'],
+    ['IN ▎ Example', 'NL ▎HINDI', 'hi'],
+    ['NL ▎ Example [HI]', 'NL ▎HINDI', 'hi'],
+    ['NL ▎ Example [NL]', 'NL ▎HINDI', null],
+    ['NL ▎ Example [FR]', 'NL ▎HINDI', null],
+    ['[NL] Example', 'NL ▎HINDI', null],
+    ['(NL) Example', 'NL ▎HINDI', null],
+    ['FR ▎ Example', 'NL ▎HINDI', null],
+    ['EN ▎ Example', 'NL ▎HINDI', null],
+    ['4K-NL - Example', 'NL ▎HINDI', null],
+    ['NL-SUBS ▎ Example', 'NL ▎HINDI', null],
+    ['NL ▎ Example [VOSTFR]', 'NL ▎HINDI', null],
+    ['NL ▎ Example [MULTI]', 'NL ▎HINDI', null],
+    ['NL ▎ Example', 'NL ▎HINDI SUBTITLES', null],
+    ['NL ▎ Example', 'NL ▎HINDI / ENGLISH', null],
+    ['NL ▎ Example', 'NL ▎HINDI MOVIES', null],
+    ['NL ▎ Example', 'NL / HINDI', null],
+    ['NL ▎ Example', 'NL: HINDI', null],
+    ['NL ▎ Example', 'ASIA ▎HINDI', null],
+    ['NL ▎ Example', 'NL ▎NETFLIX', 'nl'],
+    ['NL ▎ Example', 'NL ▎TAMIL', null],
+    ['FR ▎ Example', 'FR ▎HINDI', null],
+    ['EXYU ▎ Svadba', 'EXYU', null],
+    ['EXYU ▎ Example', 'EXYU ▎SERBIAN', 'sr'],
+    ['EXYU ▎ Example', 'EXYU ▎CROATIAN', 'hr'],
+    ['SR ▎ Example', 'EXYU', 'sr'],
+    ['HR ▎ Example', 'EXYU', 'hr'],
+    ['EXYU ▎ Example', 'EXYU SUBTITLES', null],
 ];
 module.exports = { cases };
 
@@ -204,5 +239,24 @@ test('new hints remain internal declarations and never override exact file audio
         assert.equal(M.versionDescriptor(observed, { providerLanguageHints: true }).headline, M.languageDisplayFull(observedLanguage));
         assert.equal(catalogVariantMatchesAudio(observed, `catalog-${tag}`), false);
         assert.equal(catalogVariantMatchesAudio(observed, `catalog-${observedLanguage}`), true);
+    }
+});
+
+test('NL Hindi market declaration never overrides exact Dutch, Tamil or multilingual observations', async () => {
+    const { catalogProviderAudioLanguages, catalogVariantMatchesAudio } = await import(pathToFileURL(path.join(root, 'supabase/functions/_shared/selection-provider-languages.mjs')));
+    const M = browser();
+    for (const languages of [['nl'], ['ta'], ['hi'], ['en', 'fr'], ['kn', 'ml', 'ta', 'te']]) {
+        const item = { ...make('NL ▎ Example', 'NL ▎HINDI'), audio_language_validation_status: 'verified',
+            audio_tracks_scope: 'file', audio_tracks: languages.map((lang, index) => ({ lang, index })),
+            __file_audio_observed: true, __file_audio_languages: languages };
+        const before = JSON.stringify(item);
+        assert.deepEqual(catalogProviderAudioLanguages(item), ['hi']);
+        assert.equal(catalogVariantMatchesAudio(item, 'unidentified'), false);
+        assert.equal(catalogVariantMatchesAudio(item, 'catalog-hi'), languages.includes('hi'));
+        for (const lang of languages) assert.equal(catalogVariantMatchesAudio(item, `catalog-${lang}`), true);
+        const descriptor = M.versionDescriptor(item, { providerLanguageHints: true });
+        assert.notEqual(descriptor.audioSource, 'provider-label');
+        if (languages.length === 1) assert.equal(descriptor.headline, M.languageDisplayFull(languages[0]));
+        assert.equal(JSON.stringify(item), before);
     }
 });

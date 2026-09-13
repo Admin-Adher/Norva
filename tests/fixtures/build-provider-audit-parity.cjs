@@ -5,7 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const { pathToFileURL } = require('node:url');
 const root = path.join(__dirname, '../..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
-const migrated = 'supabase/migrations/20260913154722_provider_language_composite_prefix_preservation.sql';
+const migrated = 'supabase/migrations/20260913165456_provider_nl_hindi_category_language.sql';
 const knownCases = name => {
     const match = read(name).match(/const cases\s*=\s*(\[[\s\S]*?\n\]);/);
     if (!match) throw Error('Fixture cases missing: ' + name);

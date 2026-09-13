@@ -14,7 +14,7 @@ test('forward migration mirrors the audited alias table without modifying histor
     assert.equal(actual.ku, 'ku'); assert.equal(actual.mt, 'mt');
     for (const country of ['ir', 'iran', 'malta', 'af', 'pk', 'exyu']) assert.equal(actual[country], undefined);
     assert.equal(actual.hu, null);
-    assert.match(read('scripts/build-provider-language-parser.cjs'), /20260913154722_provider_language_composite_prefix_preservation\.sql/);
+    assert.ok(read('scripts/build-provider-language-parser.cjs').includes(migrated));
     assert.doesNotMatch(read('scripts/build-provider-language-parser.cjs'), /20260910152938_catalog_provider_language_facets\.sql/);
     const historical = read('supabase/migrations/20260910152938_catalog_provider_language_facets.sql');
     assert.doesNotMatch(historical, /"ku":"ku"|"mt":"mt"/);
@@ -32,6 +32,9 @@ test('SQL repair is parser-only, preserves Selection/dubbed helpers and service-
     assert.doesNotMatch(sql, /security definer|cloud_catalog_effective_audio_languages|backfill|\b(?:insert into|update|delete from|create table|alter table)\b/i);
     assert.match(sql, /annotation_only/);
     assert.match(sql, /array\['da','sv','no'\]/);
+    assert.ok(sql.includes("nl_hindi_category := category ~* '^\\s*NL\\s*\\|\\s*HINDI\\s*$'"));
+    assert.match(sql, /nl_hindi_category and provider_prefix and prefix='NL'/);
+    assert.match(sql, /when 2 then case when nl_hindi_category then 'HINDI' else category end/);
 });
 
 test('standalone SQL parity fixture is temporary, rollback-only and covers old/new/Selection cases', async () => {
