@@ -3184,6 +3184,18 @@ app.get('/debug/sessions', requireGatewayAuth, (req, res) => {
     });
 });
 
+// One-shot canary admission only. The immutable pilot still pins the exact
+// account, URL and file. No network, seek, session restart or inference occurs
+// here; the ordinary passive timer/resources/closed-segment checks remain.
+app.post('/language-enrichment/passive-canary', requireGatewayAuth, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+        return res.json(authorizePassiveCanarySession(req.body));
+    } catch (_) {
+        return res.status(409).json({ error:'Passive canary session is not admissible', code:'PASSIVE_CANARY_NOT_ADMISSIBLE' });
+    }
+});
+
 // Service-only import/playback hook. The signed provider capability stays in the
 // authenticated request body and is retained only in the bounded in-memory queue;
 // responses, diagnostics and route-control telemetry contain HMAC identities only.
@@ -7729,6 +7741,33 @@ function passiveLidResourcesAvailable() {
             || languageForegroundWorkSnapshot().busy,
         benchmark: lidBenchmarkBusy,
     });
+}
+
+function authorizePassiveCanarySession(body) {
+    const invalid=()=>capturePipelineError('PASSIVE_CANARY_NOT_ADMISSIBLE');
+    if(enrichmentPilot.mode!=='pilot'||!LANGUAGE_PASSIVE_CAPTURE_ENABLED||!LANGUAGE_CAPTURE_PIPELINE_ENABLED
+        ||!strictLidCaptureStore||!passiveLidCapture||!body||Array.isArray(body)
+        ||Object.keys(body).length!==5||!['fileKey','ownerHash','sourceUrlHash','profileFingerprint']
+            .every(key=>typeof body[key]==='string'&&/^[a-f0-9]{64}$/.test(body[key]))
+        ||typeof body.sessionId!=='string'||!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(body.sessionId))throw invalid();
+    const session=sessions.get(body.sessionId);
+    if(!session||session.status!=='ready'||isLiveSession(session)||Number(session.seekOffset)!==0
+        ||session.actualStartOffset!==0||session.sourceTimestamps!==false
+        ||session.ownerKey!==body.ownerHash||!session.sourceUrl||sha256Hex(session.sourceUrl)!==body.sourceUrlHash
+        ||!session.outputDir||!isWithin(OUTPUT_DIR,session.outputDir)
+        ||path.resolve(session.outputDir)===path.resolve(OUTPUT_DIR)
+        ||!passiveProfileEvidenceEligible(session.codecProfile)
+        ||passiveProfileFingerprint(session.codecProfile)!==body.profileFingerprint)throw invalid();
+    const targets=hlsMediaPlaylistTargetsForSession(session).filter(target=>{
+        if(!['single','audio'].includes(target.kind)||!Number.isInteger(target.streamIndex)
+            ||!controlledLocalPlaylistName(target.playlistName))return false;
+        if(target.kind==='single'&&session.actualMappedAudioStreamIndex!==target.streamIndex)return false;
+        const track=session.codecProfile.audioTracks.find(track=>Number(track.index)===target.streamIndex);
+        return Boolean(track)&&passiveTrackLanguageUnknown(track.lang||track.language);
+    });
+    if(!targets.length)throw invalid();
+    return enrichmentPilot.authorizeObservedPassiveSource({fileKey:body.fileKey,ownerHash:body.ownerHash,
+        sourceUrlHash:body.sourceUrlHash,profileFingerprint:body.profileFingerprint});
 }
 
 // Only origin-started, already-ready Gateway HLS with an exact structural

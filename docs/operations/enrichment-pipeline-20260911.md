@@ -1012,3 +1012,51 @@ The 523 failed Selection queue rows are not revived. Passive capture covers
 only exact eligible Gateway HLS playback, not native/direct/raw/live flows.
 No estimate for finishing the fleet, guaranteed speedup, or zero-ban guarantee
 is warranted before the authorized live trial and sustained measurements.
+
+## Live passive canary preparation — 13 September
+
+The preceding goal turn made production progress: the two explicitly approved
+subtitle jobs were stopped through an identity-bound maintenance guard; 276
+partial segments were preserved. Commit `9af661b6` deployed the queue-admission
+fix, with both permanent cron bits restored and no quarantine reset. Its Build,
+Pages and Relay CI checks succeeded. This did not activate the new pipeline.
+
+An authorized real browser baseline then played the previously selected exact
+Atlas HU file. First browser frame was 7,830 ms after the click; 203.16 seconds
+of media played, with 204 one-second samples, no post-first-frame waiting,
+stalled/error/pause events, and zero dropped frames out of 5,082 counted.
+The corresponding Gateway session reached readiness in 2,859 ms. The passive
+collector was disabled. This is a baseline, NOT a measured collector speedup
+or proof of no QoS impact. Test playback was closed normally and its temporary
+browser measurement hooks removed.
+
+The actual origin-started session was eligible, with one unknown mapped track
+and an observed in-band profile. Its first existing stratified search window is
+570.453–630.453 s into the two-hour file: a short opening playback cannot supply
+this window unless those bytes have already been received naturally.
+
+A real resume reused the profile, but a fresh origin start renewed its
+`probedAt`. Comparing the two private session receipts confirmed that this was
+the ONLY changed protocol-2 fingerprint input. A pre-restart static profile
+grant would therefore silently miss the canary. Removing the timestamp would
+weaken evidence identity, so the correction keeps the full fingerprint intact:
+
+- Optional immutable `passiveTargets` pins at most 20 exact owner/URL/file-key
+  triples from the existing pilot file allowlist. It grants no collection.
+- A service-bearer-only POST can bind the current ready origin session's
+  observed full profile after verifying owner, URL, local output, mapping and
+  unknown audio. A stale profile or different source is rejected.
+- The resulting exact-profile grant cannot extend the pilot deadline, add a
+  file, overwrite a conflicting mapping or exceed 20 grants. Disabled and fleet
+  modes reject this canary endpoint. Response/error data contains no identity.
+- Granting opens no provider request, causes no seek/restart/inference and does
+  not weaken the existing timer, closed-segment, resource or retention gates.
+
+Validation: 4,655 application tests, 4,634 passed, 21 skipped, zero failed;
+40/40 native-image cases including real synthetic FFmpeg, no skipped tests,
+network disabled, 0.5 CPU, 512 MiB RAM and a 64 MiB temporary filesystem. Five
+dormant-release guard tests and ten recovery tests also passed. Native receipt:
+`/home/adrien/.norva/passive-live-canary-native-20260913/native-proof.json`.
+Browser and private-session summaries are in the local `norva-enrichment-audit-20260913`
+directory. The actual live with-collector comparison and adoption proof remain
+pending; neither fixture success nor the dormant release closes those gates.
