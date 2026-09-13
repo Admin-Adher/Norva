@@ -73,7 +73,7 @@ public class ProviderVersionCardsInstrumentedTest {
                     for (String kind : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
                         String fixture = catalogue ? "CatalogLanguageQA" : "ProviderVersionCardsQA";
                         evaluate(instrumentation, holder.get(), "window.versionResult='pending';(async()=>{try{"
-                            + "await NorvaI18n.setPreference('"+locale+"');await "+fixture+".mount('"+kind+"'"+(catalogue ? ",6" : "")+");"
+                            + "await NorvaI18n.setPreference('"+locale+"');await "+fixture+".mount('"+kind+"'"+(catalogue ? ",9" : "")+");"
                             + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();"
                             + "if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);"
                             + "window.versionResult='ok';}catch(e){window.versionResult=String(e);}})();");

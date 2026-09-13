@@ -2045,11 +2045,24 @@ const MediaUtils = (() => {
             ? versionLanguageBadge(item, prefs) : '';
         const aggregateKnown = aggregate && aggregate !== audioLanguageAnalysisLabel(item);
         const declared = !displayable ? providerAudioBadge(item) : '';
-        const interpreted = providerHints && !observed && !aggregateKnown && !declared
+        // A pending/unaccepted file tag is not a confirmed soundtrack. Keep an
+        // explicit catalogue declaration visible, qualified as supplier data,
+        // instead of letting that unaccepted tag suppress it altogether. The
+        // raw profile, strict badges, scoring and accepted observations do not
+        // change. A known-empty audio inventory still cannot create audio.
+        const unacceptedTrackTag = !displayable && (
+            (state.known && state.tracks.length > 0 && Boolean(observed))
+            // Some rail adapters carry an empty, never-probed placeholder map
+            // alongside the raw profile. It is not a known-empty inventory.
+            || (!state.known && versionTrackLanguages(tracksFromCodecProfile(item, 'audio')).length > 0)
+        );
+        const interpreted = providerHints && (!observed || unacceptedTrackTag) && !aggregateKnown && !declared
             ? versionProviderLanguageHint(item) : null;
+        const interpretedLabel = interpreted && unacceptedTrackTag
+            ? providerHintLabel(interpreted.label) : interpreted?.label;
         const headline = !displayable
-            ? declared || interpreted?.label || audioLanguageAnalysisLabel(item)
-            : observed || (aggregateKnown ? aggregate : '') || interpreted?.label || audioLanguageAnalysisLabel(item);
+            ? declared || interpretedLabel || audioLanguageAnalysisLabel(item)
+            : observed || (aggregateKnown ? aggregate : '') || interpretedLabel || audioLanguageAnalysisLabel(item);
         const languageStatus = providerHints && (interpreted || declared) ? versionProviderLanguageStatus(item) : '';
         const codes = displayable ? (state.known && state.tracks.length ? versionTrackLanguages(state.tracks)
             : languages.known ? languages.languages : []) : [];

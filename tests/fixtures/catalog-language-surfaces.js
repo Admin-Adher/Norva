@@ -10,7 +10,8 @@ window.CatalogLanguageQA = (() => {
         ['IN ▎ The Blind', 'ASIA ▎ENGLISH HINDI DUBBED', 'hi'],
         ['IN ▎ Blink Twice', 'ASIA ▎HINDI', ['en','hi','ta','te']],
         ['TL ▎ Bring Her Back', 'ASIA ▎TELUGU', ['en','te']],
-        ['Example Selection', '', 'te']
+        ['Example Selection', '', 'te'],
+        ['EN ▎ In Her Place', 'EN ▎CINEMA MOVIES', 'en']
     ];
     let surface, items, chosen, controller, appMarkup;
     const noop = () => {};
@@ -24,7 +25,9 @@ window.CatalogLanguageQA = (() => {
                 : index === 2 ? [{index:1,lang:'fr'}]
                 : Array.isArray(expected) ? expected.map((lang,n)=>({index:n+1,lang})) : [],
             audio_probed_at:index === 2 || Array.isArray(expected) ? '2026-09-10T10:00:00Z' : null,
-            ...(index === 8 ? {providerAudioLanguages:['te'],providerAudioLanguageStatus:'provider_declared'} : {})
+            ...(index === 8 ? {providerAudioLanguages:['te'],providerAudioLanguageStatus:'provider_declared'} : {}),
+            ...(index === 9 ? {audio_language_validation_status:'pending',audio_tracks:undefined,
+                codec_profile:{audioTracks:[{index:1,language:'her',title:'Audio 1',codec:'aac'}]}} : {})
         }));
     }
     function page(kind, host) {
@@ -90,6 +93,9 @@ window.CatalogLanguageQA = (() => {
     }
     function verify() {
         const host = document.getElementById('qa-host');
+        const pendingView = MediaUtils.catalogLanguageInfo(items[9]);
+        const qualifiedEnglish = NorvaI18n.t('ui_web_38fc9a457587',{p0:MediaUtils.languageDisplayFull('en')});
+        if (pendingView.headline !== qualifiedEnglish || pendingView.audioSource !== 'provider-label') throw Error('unaccepted tag hides or overstates supplier language');
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('page horizontal overflow: '+surface);
         if (surface.endsWith('-detail')) {
             const meta = host.querySelector(surface === 'movie-detail' ? '#movie-detail-meta' : '#series-meta');
@@ -107,7 +113,7 @@ window.CatalogLanguageQA = (() => {
             const badges = [...host.querySelectorAll('.catalog-language-badge')];
             if (badges.length !== items.length) throw Error('catalogue badge count');
             if (host.querySelector('.language-badge-status')) throw Error('internal provenance leaked');
-            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 5) throw Error('internal provenance lost');
+            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 6) throw Error('internal provenance lost');
             badges.forEach((badge,index) => {
                 const expected = MediaUtils.catalogLanguageInfo(items[index]);
                 if (badge.getAttribute('aria-label') !== expected.accessibleHeadline) throw Error('accessible language wrong');

@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'public/js/utils/mediaUtils.js'), 'utf8');
-const translations = require('../i18n/web-extra.json');
+const translations = {...require('../i18n/web-dynamic.json'), ...require('../i18n/web-extra.json')};
 const locales = require('../i18n/locales.json');
 function load(language = 'en') {
     const ctx = { window: {}, Intl, document: { documentElement: { lang: language } },
@@ -92,11 +92,59 @@ test('a known-empty audio map is not resurrected as supplier audio', () => {
     assert.equal(result.languageStatus, '');
 });
 
-test('unvalidated existing tracks cannot be replaced by a conflicting hint', () => {
-    const result = hinted(make('AR ▎ Example', 'AR', { audio_language_validation_status: 'pending',
-        audio_tracks_scope: 'file', audio_tracks: [{ index: 1, lang: 'fre' }] }));
-    assert.equal(result.headline, 'Language unidentified');
-    assert.equal(result.languageStatus, '');
+test('unaccepted tags retain a qualified catalogue declaration without upgrading evidence', () => {
+    for (const status of ['pending', 'not_analyzed', 'failed', 'rejected']) {
+        for (const fields of [
+            {audio_tracks_scope:'file', audio_tracks:[{index:1,lang:'fre'}]},
+            {codec_profile:{audioTracks:[{index:1,language:'her',title:'Audio 1',codec:'aac',channels:6}]}},
+            {audio_tracks_scope:'file',audio_tracks:[],audio_probed_at:null,
+                codec_profile:{audioTracks:[{index:1,language:'her'}]}}
+        ]) {
+            const item = make('EN ▎ In Her Place', 'EN ▎CINEMA MOVIES', {
+                audio_language_validation_status:status, ...fields});
+            const before = JSON.stringify(item);
+            const scoring = JSON.stringify(M.analyzeLanguageCompatibility(item,{preferredAudioLanguage:'en'}));
+            const result = hinted(item);
+            assert.equal(result.headline, 'English · Provider label');
+            assert.equal(result.accessibleHeadline, result.headline);
+            assert.equal(result.languageStatus, 'Provider · Unverified');
+            assert.equal(result.audioSource, 'provider-label');
+            assert.equal(M.catalogLanguageInfo(item).text, result.headline);
+            assert.equal(M.versionDescriptor(item).headline, 'Language unidentified');
+            assert.equal(M.versionLanguageBadge(item), 'Language unidentified');
+            assert.equal(JSON.stringify(item), before);
+            assert.equal(JSON.stringify(M.analyzeLanguageCompatibility(item,{preferredAudioLanguage:'en'})), scoring);
+            assert.equal(M.providerAudioLanguages(item).length, 0);
+        }
+    }
+});
+
+test('qualified fallback still refuses subtitle tags, contradictions and title prose', () => {
+    for (const [raw,category] of [['EN SUBS ▎ Example','EN SUBTITLES'],['EN ▎ Example','FR'],
+        ['Johnny English',''],['EN ▎ Example','EN / FR'],['EXYU ▎ Example','']]) {
+        const result = hinted(make(raw,category,{audio_language_validation_status:'pending',
+            codec_profile:{audioTracks:[{index:1,language:'her'}]}}));
+        assert.equal(result.headline, 'Language unidentified');
+        assert.equal(result.languageStatus, '');
+    }
+    const empty = hinted(make('EN ▎ Example','EN',{audio_language_validation_status:'pending',
+        audio_tracks_scope:'file',audio_tracks:[],audio_probed_at:'2026-09-13T00:00:00Z',
+        codec_profile:{audioTracks:[{index:1,language:'her'}]}}));
+    assert.equal(empty.headline, 'Language unidentified');
+    assert.equal(empty.languageStatus, '');
+});
+
+test('an accepted file language, including a rare ISO language, stays ahead of a supplier tag', () => {
+    for (const status of ['probed','verified']) {
+        for (const lang of ['fr','hz','or','rn','ab','ch','na']) {
+            const item = make('EN ▎ Example','EN',{audio_language_validation_status:status,
+                audio_tracks_scope:'file', audio_tracks:[{index:1,lang}]});
+            const result = hinted(item);
+            assert.equal(result.headline, M.languageDisplayFull(lang));
+            assert.equal(result.audioSource, 'file');
+            assert.equal(result.languageStatus, '');
+        }
+    }
 });
 
 test('subtitle-only declarations, including translated labels, never name the soundtrack', () => {
@@ -161,6 +209,10 @@ test('qualifier, regional group and Somali uncertainty are localized for all ten
         const somali = utility.languageDisplayFull('so');
         assert.equal(hinted(make('SO ▎ Example', ''), utility).headline,
             translations.ui_web_provider_language_to_confirm[code].replace('{{language}}', somali));
+        const pending = make('EN ▎ In Her Place','EN ▎CINEMA MOVIES', {
+            audio_language_validation_status:'pending',codec_profile:{audioTracks:[{index:1,language:'her'}]}});
+        assert.equal(hinted(pending,utility).headline,
+            translations.ui_web_38fc9a457587[code].replace('{{p0}}',utility.languageDisplayFull('en')));
     }
 });
 

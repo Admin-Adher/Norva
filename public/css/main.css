@@ -14491,10 +14491,13 @@ html.tv-mode .multi-select-item:focus {
   bottom: 34px;
 }
 
-/* The language is public; evidence provenance remains internal. */
+/* Reuse one badge for languages and explicit supplier qualifications. */
 .catalog-language-badge {
   font-size: 0.75rem;
   line-height: 1.25;
+  /* A qualified supplier label may need more than two lines at 130% text
+     size. Keep its distinction from confirmed audio readable on phone cards. */
+  -webkit-line-clamp: unset;
 }
 .language-badge-label {
   display: block;

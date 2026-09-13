@@ -6,7 +6,8 @@ window.ProviderVersionCardsQA = (() => {
         ['FR', 'FR | DISNEY+', null], ['GR', 'GREECE', null],
         ['HU', 'SCANDINAVIA', null], ['IN', 'ASIA| HINDI', null],
         ['NL', 'NL | DISNEY+', null], ['PL', 'POLAND', ['fr']],
-        ['RU', 'RUSSIA', ['fr', 'ru']], ['SO', 'SOMALIA', null]
+        ['RU', 'RUSSIA', ['fr', 'ru']], ['SO', 'SOMALIA', null],
+        ['EN', 'EN ▎CINEMA MOVIES', null]
     ];
     let controller, selected, lastChoice, currentKind;
     const entries = kind => definitions.map(([prefix, category, audio], index) => ({
@@ -18,7 +19,9 @@ window.ProviderVersionCardsQA = (() => {
         audio_tracks_scope: 'file', audio_tracks: audio ? audio.map((lang, n) => ({index:n + 1,lang})) : [],
         audio_probed_at: audio ? '2026-09-10T10:00:00Z' : null,
         subtitle_tracks_scope: 'file', subtitle_tracks: prefix === 'PL' ? [{index:2,lang:'pl'}]
-            : prefix === 'RU' ? ['en', 'fr', 'ru'].map((lang,n) => ({index:n + 3,lang})) : []
+            : prefix === 'RU' ? ['en', 'fr', 'ru'].map((lang,n) => ({index:n + 3,lang})) : [],
+        ...(index === 12 ? {audio_language_validation_status:'pending',audio_tracks:undefined,
+            codec_profile:{audioTracks:[{index:1,language:'her',title:'Audio 1',codec:'aac'}]}} : {})
     }));
     function mount(kind = 'movie') {
         currentKind = kind;
@@ -65,13 +68,18 @@ window.ProviderVersionCardsQA = (() => {
     }
     function verify() {
         const buttons = [...document.querySelectorAll('#qa-versions button')];
-        if (buttons.length !== 12) throw Error('version count');
+        if (buttons.length !== 13) throw Error('version count');
         if (document.querySelector('.version-language-status')) throw Error('internal provenance exposed');
         const versions = currentKind === 'movie' ? controller.currentMovieVersions : controller._orderedVersions;
         const exactTs = versions.find(v=>v.stream_id==='1');
         if (!MediaUtils.versionDescriptor(exactTs).meta.includes('MPEG-TS')) throw Error('exact TS format hidden');
         if (exactTs.container_extension !== 'mkv') throw Error('provider identity changed');
-        if (versions.filter(item => MediaUtils.versionDescriptor(item,{providerLanguageHints:true}).languageStatus).length !== 7) throw Error('internal provenance lost');
+        if (versions.filter(item => MediaUtils.versionDescriptor(item,{providerLanguageHints:true}).languageStatus).length !== 8) throw Error('internal provenance lost');
+        const pendingVersion = versions.find(v=>v.stream_id==='12');
+        const pendingView = MediaUtils.versionDescriptor(pendingVersion,{providerLanguageHints:true});
+        if (pendingView.headline !== NorvaI18n.t('ui_web_38fc9a457587',{p0:MediaUtils.languageDisplayFull('en')})
+            || pendingView.audioSource !== 'provider-label') throw Error('pending tag hides or overstates catalogue declaration');
+        if (pendingVersion.codec_profile.audioTracks[0].language !== 'her') throw Error('raw file tag changed');
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('horizontal overflow');
         for (const button of buttons) {
             const rect = button.getBoundingClientRect();
@@ -97,7 +105,7 @@ window.ProviderVersionCardsQA = (() => {
         if (lastChoice !== expected) throw Error('wrong version selected');
         const active = document.querySelector('#qa-versions button.active');
         if (!active || Number(active.dataset.index) !== versions.indexOf(expected)) throw Error('selection not reflected');
-        return { kind:currentKind, buttons:12, internalHints:7, selected:lastChoice.stream_id,
+        return { kind:currentKind, buttons:13, internalHints:8, selected:lastChoice.stream_id,
             locale:NorvaI18n.language, width:innerWidth };
     }
     return { mount, verify, get lastChoice() { return lastChoice?.stream_id ?? null; } };
