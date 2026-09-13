@@ -5,6 +5,8 @@ const LANGUAGES = Object.freeze({ Telugu: 'te', Tamil: 'ta', Malayalam: 'ml', Hi
 const CODES = new Set([...Object.values(LANGUAGES), ...FILENAME_AUDIO_CODES, ...PROVIDER_CATALOG_LANGUAGES]);
 
 export function providerAudioFacet(value) {
+  // Regional catalogue fallback, never a member of the audio language codes.
+  if (/^(?:provider|catalog)-exyu$/.test(String(value || '').trim().toLowerCase())) return 'exyu';
   const match = /^(?:provider|catalog)-([a-z]{2,3}|nordic)$/.exec(String(value || '').trim().toLowerCase());
   return match && (CODES.has(match[1]) || (/^[a-z]{2}$/.test(match[1]) && match[1] !== 'un')) ? (match[1] === 'fil' ? 'tl' : match[1]) : null;
 }

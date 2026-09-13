@@ -44,7 +44,7 @@ begin
   if report->>'scanned'<>'1' or report->>'changed'<>'1' then raise exception 'first bounded batch failed: %',report; end if;
   after_id:=(report->>'after')::uuid;
   report:=pg_temp.cloud_catalog_reconcile_provider_language_hints(owner_id,after_id,1000);
-  if report->>'scanned'<>'2' or report->>'changed'<>'1' or report->>'removed'<>'1' then
+  if report->>'scanned'<>'2' or report->>'changed'<>'2' or report->>'removed'<>'0' then
     raise exception 'continued batch failed: %',report;
   end if;
   report:=pg_temp.cloud_catalog_reconcile_provider_language_hints(owner_id,(report->>'after')::uuid,1000);
@@ -59,8 +59,17 @@ begin
   if original_metadata is distinct from (select jsonb_agg(to_jsonb(v) order by id) from pg_temp.cloud_title_variants v) then
     raise exception 'raw catalogue was rewritten';
   end if;
-  if (select array_agg(language order by language) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,null))<>array['da','sv'] then
+  if (select array_agg(language order by language) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,null))<>array['da','exyu','sv'] then
     raise exception 'effective language union incorrect';
+  end if;
+  if pg_temp.catalog_provider_language_alias('exyu') is not null
+    or public.norva_canonical_language_code('exyu') is not null then
+    raise exception 'EXYU was promoted to a canonical audio language';
+  end if;
+  if (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,'exyu'))<>1
+    or (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie','30000000-0000-0000-0000-000000000002','exyu'))<>0
+    or exists(select 1 from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,null) where language in ('hr','sr','bs')) then
+    raise exception 'regional catalogue facet invented audio or leaked across sources';
   end if;
   if (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'series',null,null))<>0 then
     raise exception 'item type leaked';
@@ -91,8 +100,25 @@ begin
   if (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,'da'))<>1 then
     raise exception 'foreign-owner observation blocked hint';
   end if;
+  -- A regional token cannot become an observed language, but still supplies the
+  -- catalogue fallback. A real English observation must replace that fallback.
+  insert into pg_temp.cloud_title_file_language_observations
+    select user_id,title_id,id,external_id,true,array['exyu'] from pg_temp.cloud_title_variants where id='20000000-0000-0000-0000-000000000002';
+  if (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,'exyu'))<>1 then
+    raise exception 'noncanonical regional observation hid catalogue fallback';
+  end if;
+  update pg_temp.cloud_title_file_language_observations set audio_languages=array['en']
+    where variant_id='20000000-0000-0000-0000-000000000002' and user_id=owner_id;
+  if (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,'exyu'))<>0
+    or (select count(*) from pg_temp.cloud_catalog_effective_audio_languages(owner_id,'movie',null,'en'))<>1 then
+    raise exception 'observed English did not override regional EXYU fallback';
+  end if;
+  if (select language from pg_temp.cloud_catalog_provider_language_hints where variant_id='20000000-0000-0000-0000-000000000002')<>'exyu' then
+    raise exception 'observation comparison mutated regional hint storage';
+  end if;
 end
 $test$;
 select jsonb_build_object('reconciliation','passed','owner_scope','passed','idempotence','passed',
   'raw_evidence_unchanged','passed','placeholder_fallback','passed','observed_priority','passed',
-  'exact_file_identity','passed','rare_languages','passed');
+  'exact_file_identity','passed','rare_languages','passed','regional_catalogue_facet','passed',
+  'regional_noncanonical','passed','observed_english_over_region','passed');

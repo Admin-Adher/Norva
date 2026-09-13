@@ -69,6 +69,20 @@
     "id": "Penyedia · Belum diverifikasi",
     "fil": "Provider · Hindi pa beripikado"
   },
+  "ui_web_provider_ex_yugoslav": {
+    "source": "Ex-Yugoslav",
+    "refs": ["public/js/utils/mediaUtils.js"],
+    "en": "Ex-Yugoslav",
+    "fr": "Ex-yougoslave",
+    "pt-BR": "Ex-iugoslavo",
+    "es": "Exyugoslavo",
+    "hi": "पूर्व यूगोस्लाव",
+    "tr": "Eski Yugoslav",
+    "bn": "সাবেক যুগোস্লাভ",
+    "ar": "يوغوسلافي سابق",
+    "id": "Eks-Yugoslavia",
+    "fil": "Dating Yugoslav"
+  },
   "ui_web_provider_nordic_languages": {
     "source": "Nordic languages",
     "refs": ["public/js/utils/mediaUtils.js"],

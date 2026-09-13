@@ -111,16 +111,21 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
                 && !tokens.some(t => DUB_MARKERS.has(t));
             // Brackets alone are not proof of an annotation. For example, the
             // title warning "(NE CONVIENT PAS AUX ENFANTS)" is not Nepali audio.
-            const annotationOnly = tokens.every(t => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
+            const annotationOnly = tokens.every(t => t === 'exyu' || Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
                 || SUB_MARKERS.has(t) || DUB_MARKERS.has(t)
                 || (supplierPrefix && /^(?:af|vp|eg|ye|s|shr|as|sbus|sham|ma|alg|kh|doc|d|tn|xmas|pod|sh|anm|hara|li|ly|dz|ptv|do|ch|chr|irq|isl|bdy|kid|kids|hdr|dv|jo|jor|cam|dsc|pse|sus|geo)$/.test(t))
                 || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi)|multi|dual|bilingual|multiaudio|audio|in|4k|8k|sd|hd|fhd|uhd|\d{3,4}p)$/.test(t));
-            if (annotated && !annotationOnly) return { subOnly, tags: [], multi: false };
+            if (annotated && !annotationOnly) return { subOnly, tags: [], multi: false, region: false };
             const codeIsBounded = token => new RegExp(`(?:^|[|:/\\[(])\\s*${token}(?:\\s*[-–—|:/\\])]|\\s*$)`, 'i').test(value);
+            // EXYU is a regional catalogue marker, deliberately not a language
+            // alias. Accept explicit annotations or a bounded category section,
+            // never an ordinary title/category sentence containing the word.
+            const region = tokens.includes('exyu') && (annotated || codeIsBounded('exyu')
+                || /^\s*EXYU(?:\s+(?:MOVIES|FILMS|SERIES|SUBS?|SUBTITLES?|MULTI|4K|8K|SD|HD|FHD|UHD))*\s*$/i.test(value));
             const tags = [...new Set(tokens.map((t, i) => Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
                 && (t.length > 3 || tokens.length === 1 || (originalTokens[i] === originalTokens[i].toUpperCase() && (annotated || codeIsBounded(t))))
                 ? VERSION_PROVIDER_LANGUAGE_TAGS[t] : null).filter(Boolean))];
-            return { subOnly, tags, multi: tokens.some(t => /^(?:multi|dual|bilingual|multiaudio)$/.test(t)) };
+            return { subOnly, tags, multi: tokens.some(t => /^(?:multi|dual|bilingual|multiaudio)$/.test(t)), region };
         };
         // An explicit supplier prefix may also carry non-language qualifiers
         // (AR-EG, AR-DOC-D, AF-EN). Only audited qualifiers are permitted here;
@@ -132,18 +137,20 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         const categorized = inspect(nlHindiCategory ? 'HINDI' : category);
         const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.
-        if (leading.subOnly || categorized.subOnly || trailing.subOnly
+        const audioBlocked = leading.subOnly || categorized.subOnly || trailing.subOnly
             || leading.multi || categorized.multi || trailing.multi
-            || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw)) return null;
+            || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw);
         let tags = [...new Set([...leading.tags, ...categorized.tags, ...trailing.tags])];
         // A single Danish/Swedish/Norwegian tag refines the broader Nordic
         // category. Two specific languages, or a non-Nordic tag, still conflict.
         if (tags.length === 2 && tags.includes('nordic') && tags.some(tag => ['da', 'sv', 'no'].includes(tag))) {
             tags = tags.filter(tag => tag !== 'nordic');
         }
-        // Conflicting or multi-language provider labels do not prove a track list.
-        if (tags.length !== 1) return null;
-        const tag = tags[0];
+        // Conflicts/subtitle markers still prohibit an audio-language claim.
+        // A regional marker can remain visible without making that claim.
+        const region = leading.region || categorized.region || trailing.region || item.provider_label_language === 'exyu';
+        const tag = !audioBlocked && tags.length === 1 ? tags[0] : region ? 'exyu' : null;
+        if (!tag) return null;
         return tag;
     }
 

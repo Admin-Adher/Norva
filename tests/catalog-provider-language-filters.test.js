@@ -63,6 +63,24 @@ test('the chosen filter selects its matching file without overriding observed co
   assert.equal(providerAudioFacet('catalog-yi'),'yi');
   assert.equal(providerAudioFacet('catalog-und'),null);
 });
+test('EXYU is a catalogue region facet and never a public audio language', async () => {
+  const { catalogVariantMatchesAudio: matches, providerAudioFacet, publicProviderAudioLanguages } = await load();
+  const row = { raw_title: 'EXYU | Svadba', metadata: { categoryName: 'EXYU' } };
+  assert.equal(providerAudioFacet('catalog-exyu'), 'exyu');
+  assert.equal(providerAudioFacet('provider-exyu'), 'exyu');
+  assert.equal(providerAudioFacet('exyu'), null);
+  assert.equal(providerAudioFacet('catalog-exyuz'), null);
+  assert.equal(matches(row, 'catalog-exyu'), true);
+  assert.equal(matches(row, 'unidentified'), false);
+  assert.equal(matches({ ...row, raw_title: 'EXYU | Film (MULTISUB)' }, 'catalog-exyu'), true);
+  for (const lang of ['en', 'hr', 'sr', 'nl']) {
+    const observed = { ...row, __file_audio_observed: true, __file_audio_languages: [lang] };
+    assert.equal(matches(observed, 'catalog-exyu'), false);
+    assert.equal(matches(observed, `catalog-${lang}`), true);
+  }
+  assert.deepEqual(publicProviderAudioLanguages({ provider_audio_language_status: 'provider_declared', provider_audio_languages: ['exyu'] }), []);
+});
+
 test('SQL counters and bounded page filtering share the exact visible per-variant union',()=>{
   const sql=read('supabase/migrations/20260910152938_catalog_provider_language_facets.sql');
   assert.match(sql,/enable row level security/);

@@ -28,7 +28,7 @@ const cases = [
     ['SW ▎ Dual', 'SCANDINAVIA', 'nordic'],
     ['IT ▎ Dual', 'IT ▎HBO', 'it'],
     ['EN ▎ Dutch', 'EN ▎HBO', 'en'],
-    ['EXYU ▎ Dutch', 'EXYU', null],
+    ['EXYU ▎ Dutch', 'EXYU', 'exyu'],
     ['DE ▎ Zulu', 'DE ▎PRIME VIDEO', 'de'],
     ['EN ▎ Zulu', 'EN ▎HBO', 'en'],
     ['FR ▎ South Park (NE CONVIENT PAS AUX ENFANTS)', 'FR ▎KIDS', 'fr'],
@@ -63,7 +63,7 @@ const cases = [
     ['IR ▎ House of Paper', 'IRAN', null],
     ['AF ▎ Example', 'AFRICAN MOVIES', null],
     ['PK ▎ Example', 'PAKISTAN', null],
-    ['EXYU ▎ Example', 'EXYU', null],
+    ['EXYU ▎ Example', 'EXYU', 'exyu'],
     ['KU SUBS ▎ Example', 'KURDISH SUBTITLES', null],
     ['MT ▎ Example', 'EN', null],
     ['KU KU', '', null], ['Mt - Example', '', null],
@@ -109,7 +109,7 @@ const cases = [
     ['AF - Example', '', null],
     ['IR-EG - Example', '', null],
     ['PK-DOC - Example', '', null],
-    ['EXYU-DOC - Example', '', null],
+    ['EXYU-DOC - Example', '', 'exyu'],
     ['Game of Death II', '', null],
     ['Kisi Ka Bhai Kisi Ki Jaan', '', null],
     ['Satyaprem Ki Katha', '', null],
@@ -185,12 +185,40 @@ const cases = [
     ['NL ▎ Example', 'NL ▎NETFLIX', 'nl'],
     ['NL ▎ Example', 'NL ▎TAMIL', null],
     ['FR ▎ Example', 'FR ▎HINDI', null],
-    ['EXYU ▎ Svadba', 'EXYU', null],
+    ['EXYU ▎ Svadba', 'EXYU', 'exyu'],
     ['EXYU ▎ Example', 'EXYU ▎SERBIAN', 'sr'],
     ['EXYU ▎ Example', 'EXYU ▎CROATIAN', 'hr'],
     ['SR ▎ Example', 'EXYU', 'sr'],
     ['HR ▎ Example', 'EXYU', 'hr'],
-    ['EXYU ▎ Example', 'EXYU SUBTITLES', null],
+    ['EXYU ▎ Example', 'EXYU SUBTITLES', 'exyu'],
+    // Region fallback is not an assertion of a Balkan language or audio tracks.
+    ['EXYU ▎ Example', 'EN', 'en'],
+    ['EXYU ▎ Example', 'Hindi', 'hi'],
+    ['EN ▎ Example', 'EXYU', 'en'],
+    ['EXYU-EN - Example', '', 'en'],
+    ['EXYU ▎ Example [FR]', '', 'fr'],
+    ['EXYU ▎ Example [EN / FR]', '', 'exyu'],
+    ['EXYU ▎ Example [MULTI]', '', 'exyu'],
+    ['EXYU-SUBS ▎ Example', '', 'exyu'],
+    ['EXYU ▎ Example [VOSTFR]', '', 'exyu'],
+    ['[EXYU] Example', '', 'exyu'],
+    ['Example [EXYU]', '', 'exyu'],
+    ['Example', 'EXYU', 'exyu'],
+    ['Example', 'EXYU MOVIES', 'exyu'],
+    ['Example', 'EXYU MULTI', 'exyu'],
+    ['Example', 'EXYU SUBTITLES', 'exyu'],
+    ['Example', 'EXYU | NETFLIX', 'exyu'],
+    ['Example', 'NETFLIX | EXYU', 'exyu'],
+    ['EXYU', '', null],
+    ['Life in EXYU', '', null],
+    ['EXYU Memories', '', null],
+    ['Example', 'Life in EXYU', null],
+    ['Example', 'EXYU Memories', null],
+    ['Example', 'MY EXYU | MOVIES', null],
+    ['THE-EXYU-MOVIE: Example', '', null],
+    ['[EXYU Memories] Example', '', null],
+    ['Example [EXYU Memories]', '', null],
+    ['EXYUPLUS ▎ Example', 'EXYUPLUS', null],
 ];
 module.exports = { cases };
 
@@ -211,9 +239,13 @@ test('audited provider annotations agree in browser, catalogue and exact-variant
         assert.equal(providerCatalogLanguage(item), expected, context);
         assert.deepEqual(catalogProviderAudioLanguages(item), expected ? [expected] : [], context);
         const result = M.versionDescriptor(item, { providerLanguageHints: true });
-        assert.equal(result.headline, expected === 'nordic' ? 'Nordic languages'
+        assert.equal(result.headline, expected === 'exyu' ? 'Ex-Yugoslav' : expected === 'nordic' ? 'Nordic languages'
             : expected ? M.languageDisplayFull(expected) : 'Language unidentified', context);
-        assert.equal(result.audioSource === 'provider-label', Boolean(expected), context);
+        assert.equal(result.audioSource === 'provider-label', Boolean(expected && expected !== 'exyu'), context);
+        if (expected === 'exyu') {
+            assert.equal(result.audioSource, 'provider-region', context);
+            assert.equal(result.kind, 'region', context);
+        }
         assert.equal(catalogVariantMatchesAudio(item, 'unidentified'), !expected, context);
     }
 });
@@ -230,7 +262,7 @@ test('new hints remain internal declarations and never override exact file audio
         assert.equal(M.providerAudioLanguages(item).length, 0);
         assert.equal(JSON.stringify(item), before);
         assert.equal(JSON.stringify(M.analyzeLanguageCompatibility(item, { preferredAudioLanguage: tag })), scoring);
-        assert.equal(result.languageStatus, 'Provider · Unverified');
+        assert.equal(result.languageStatus, tag === 'exyu' ? '' : 'Provider · Unverified');
         assert.doesNotMatch([result.headline, result.accessibleHeadline, result.meta,
             M.languageBadgeHtml(M.catalogLanguageInfo(item), 'test')].join(' '), /Provider label|Unverified|to confirm/);
         const observedLanguage = tag === 'ja' ? 'en' : 'ja';

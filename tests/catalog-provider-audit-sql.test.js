@@ -20,7 +20,7 @@ test('forward migration mirrors the audited alias table without modifying histor
     assert.doesNotMatch(historical, /"ku":"ku"|"mt":"mt"/);
 });
 
-test('SQL repair is parser-only, preserves Selection/dubbed helpers and service-only invoker execution', () => {
+test('SQL repair preserves audio evidence, Selection/dubbed helpers and service-only invoker execution', () => {
     const sql = read(migrated);
     assert.equal((sql.match(/create or replace function/g) || []).length, 2);
     assert.equal((sql.match(/immutable security invoker set search_path = ''/g) || []).length, 2);
@@ -29,7 +29,12 @@ test('SQL repair is parser-only, preserves Selection/dubbed helpers and service-
     assert.match(sql, /part := public\.catalog_provider_dubbed_category\(part\)/);
     assert.match(sql, /from public,anon,authenticated/);
     assert.match(sql, /to service_role/);
-    assert.doesNotMatch(sql, /security definer|cloud_catalog_effective_audio_languages|backfill|\b(?:insert into|update|delete from|create table|alter table)\b/i);
+    assert.doesNotMatch(sql, /security definer|cloud_catalog_effective_audio_languages|backfill|\b(?:insert into|update|delete from|create table)\b/i);
+    assert.equal((sql.match(/alter table/g) || []).length, 1);
+    assert.match(sql, /alter table public\.cloud_catalog_provider_language_hints/);
+    assert.ok(sql.includes("check (language ~ '^([a-z]{2,3}|nordic|exyu)$')"));
+    assert.match(sql, /when region_hint then 'exyu'/);
+    assert.match(sql, /not audio_blocked and cardinality\(tags\)=1/);
     assert.match(sql, /annotation_only/);
     assert.match(sql, /array\['da','sv','no'\]/);
     assert.ok(sql.includes("nl_hindi_category := category ~* '^\\s*NL\\s*\\|\\s*HINDI\\s*$'"));

@@ -122,7 +122,7 @@ test('unaccepted tags retain the catalogue language and internal provenance with
 
 test('supplier fallback still refuses subtitle tags, contradictions and title prose', () => {
     for (const [raw,category] of [['EN SUBS ▎ Example','EN SUBTITLES'],['EN ▎ Example','FR'],
-        ['Johnny English',''],['EN ▎ Example','EN / FR'],['EXYU ▎ Example','']]) {
+        ['Johnny English',''],['EN ▎ Example','EN / FR']]) {
         const result = hinted(make(raw,category,{audio_language_validation_status:'pending',
             codec_profile:{audioTracks:[{index:1,language:'her'}]}}));
         assert.equal(result.headline, 'Language unidentified');
