@@ -19,7 +19,21 @@ const cases=[
   ['IN | Example','INDIA',null],['AF | Example','AFRICAN MOVIES',null],['HU | Example','',null],
   ['Example [VOSTFR]','',null],['AR-SUBS | Example','',null],['Example','HINDI SUBTITLES',null],
   ['FR | Example','AR',null],['Example [EN/FR]','',null],['MULTI | Example','ENGLISH MULTI',null],
-  ['Example','constructor __proto__ toString',null],['Example','CANTONESE','yue']
+  ['Example','constructor __proto__ toString',null],['Example','CANTONESE','yue'],
+  ['IN ▎ The Blind','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ In the Blood','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ Blame the Game','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ The Banquet','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ The Black Phone','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ The Cage','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ The Deep','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['IN ▎ The Myth','ASIA ▎ENGLISH HINDI DUBBED','hi'],
+  ['Example','English Tamil Dubbed','ta'],['Example','ASIA: English Telugu Dub','te'],
+  ['Example','Français Hindi Dubbed','hi'],['Example','English हिन्दी Dubbed','hi'],
+  ['Example','English / Hindi Dubbed',null],['Example','English Hindi',null],
+  ['Example','English Hindi Dubbed / French',null],['Example','English Hindi Dubbed MULTI',null],
+  ['Example','Nordic Hindi Dubbed',null],['FR | Example','English Hindi Dubbed',null],
+  ['Example [VOSTFR]','English Hindi Dubbed',null]
 ];
 module.exports={cases};
 test('browser and server interpret exactly the same provider catalogue grammar',async()=>{

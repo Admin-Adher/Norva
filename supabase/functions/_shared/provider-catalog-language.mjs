@@ -51,6 +51,25 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         so: 'so', som: 'so', somali: 'so', somalia: 'so',
         nordic: 'nordic', scandinavian: 'nordic', scandinavia: 'nordic'
     };
+
+    // In a supplier category/annotation, "English Hindi Dubbed" identifies the
+    // Hindi dub of an English catalogue. It is not a two-track declaration.
+    // Only an adjacent pair of known language words followed by an explicit
+    // dub marker is collapsed. Lists ("English / Hindi"), title prose, regional
+    // bundles and contradictions with another field keep their usual guards.
+    function normalizeProviderDubbedCategory(value) {
+        return value.replace(/(^|[|:])\s*([\p{L}\p{M}]{4,30})\s+([\p{L}\p{M}]{4,30})\s+(dubbed|dub)\s*$/iu,
+            (match, boundary, original, dubbed, marker) => {
+                const alias = token => {
+                    const key = stripDiacritics(token).normalize('NFC').toLowerCase();
+                    return Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, key)
+                        ? VERSION_PROVIDER_LANGUAGE_TAGS[key] : null;
+                };
+                const from = alias(original), to = alias(dubbed);
+                return from && to && from !== 'nordic' && to !== 'nordic'
+                    ? `${boundary} ${dubbed} ${marker}` : match;
+            });
+    }
     export function providerCatalogLanguage(item = {}) {
         const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000);
         // Local M3U/Xtream inventories may retain the raw label only as `name`.
@@ -68,6 +87,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
             || withoutYear.match(/\b(?:dubbed|audio)\s+(?:in\s+)?([\p{L}\p{M}]{4,30})\s*$/iu)?.[1] || '';
         const inspect = (value, annotated = false) => {
+            value = normalizeProviderDubbedCategory(value);
             const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
             const tokens = originalTokens.map(t => t.toLowerCase());
             const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))

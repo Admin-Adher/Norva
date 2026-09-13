@@ -1946,6 +1946,25 @@ const MediaUtils = (() => {
         nordic: 'nordic', scandinavian: 'nordic', scandinavia: 'nordic'
     };
 
+    // In a supplier category/annotation, "English Hindi Dubbed" identifies the
+    // Hindi dub of an English catalogue. It is not a two-track declaration.
+    // Only an adjacent pair of known language words followed by an explicit
+    // dub marker is collapsed. Lists ("English / Hindi"), title prose, regional
+    // bundles and contradictions with another field keep their usual guards.
+    function normalizeProviderDubbedCategory(value) {
+        return value.replace(/(^|[|:])\s*([\p{L}\p{M}]{4,30})\s+([\p{L}\p{M}]{4,30})\s+(dubbed|dub)\s*$/iu,
+            (match, boundary, original, dubbed, marker) => {
+                const alias = token => {
+                    const key = stripDiacritics(token).normalize('NFC').toLowerCase();
+                    return Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, key)
+                        ? VERSION_PROVIDER_LANGUAGE_TAGS[key] : null;
+                };
+                const from = alias(original), to = alias(dubbed);
+                return from && to && from !== 'nordic' && to !== 'nordic'
+                    ? `${boundary} ${dubbed} ${marker}` : match;
+            });
+    }
+
     function versionProviderLanguageHint(item = {}) {
         const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000);
         // Local M3U/Xtream inventories may retain the raw label only as `name`.
@@ -1963,6 +1982,7 @@ const MediaUtils = (() => {
             || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
             || withoutYear.match(/\b(?:dubbed|audio)\s+(?:in\s+)?([\p{L}\p{M}]{4,30})\s*$/iu)?.[1] || '';
         const inspect = (value, annotated = false) => {
+            value = normalizeProviderDubbedCategory(value);
             const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
             const tokens = originalTokens.map(t => t.toLowerCase());
             const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
@@ -2034,7 +2054,10 @@ const MediaUtils = (() => {
             ? declared || interpreted?.label || audioLanguageAnalysisLabel(item)
             : observed || (aggregateKnown ? aggregate : '') || interpreted?.label || audioLanguageAnalysisLabel(item);
         const languageStatus = providerHints && (interpreted || declared) ? versionProviderLanguageStatus(item) : '';
-        return { headline, languageStatus,
+        const codes = displayable ? (state.known && state.tracks.length ? versionTrackLanguages(state.tracks)
+            : languages.known ? languages.languages : []) : [];
+        const accessibleHeadline = codes.length > 1 ? codes.map(languageDisplayFull).join(' / ') : headline;
+        return { headline, accessibleHeadline, languageStatus,
             audioSource: interpreted ? 'provider-label' : declared && providerHints ? 'provider-declared' : source };
     }
 
@@ -2056,7 +2079,8 @@ const MediaUtils = (() => {
     function languageBadgeHtml(info, className) {
         if (!info?.headline) return '';
         const text = info.headline;
-        return `<span class="${escapeHtml(className || '')} catalog-language-badge" title="${escapeHtml(text)}" aria-label="${escapeHtml(text)}"><span class="language-badge-label">${escapeHtml(text)}</span></span>`;
+        const fullText = info.accessibleHeadline || text;
+        return `<span class="${escapeHtml(className || '')} catalog-language-badge" title="${escapeHtml(fullText)}" aria-label="${escapeHtml(fullText)}"><span class="language-badge-label">${escapeHtml(text)}</span></span>`;
     }
 
     function versionTrackState(item = {}, kind = 'audio') {
@@ -2128,7 +2152,7 @@ const MediaUtils = (() => {
         if (!count) return (globalThis.NorvaI18n?.t("ui_web_e39189e8bd71", { defaultValue: "Audio unavailable" }) ?? 'Audio unavailable');
         if (!langs.length) return '';
         if (count === 1) return langs[0] ? languageDisplayFull(langs[0]) : (globalThis.NorvaI18n?.t("ui_web_bc1b88907d3b", { defaultValue: "Audio" }) ?? 'Audio');
-        if (count <= 3 && langs.length === count) return langs.map(languageDisplay).join(' / ');
+        if ((count <= 4 && langs.length === count) || langs.length === 4) return langs.map(languageDisplay).join(' / ');
         // Large multi-audio files can expose dozens of tracks. Describe the
         // available language choice instead of implying the first track is primary.
         if (langs.length > 3) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
@@ -2147,7 +2171,7 @@ const MediaUtils = (() => {
         const langs = state.languages || [];
         if (!langs.length) return '';
         if (langs.length === 1) return languageDisplayFull(langs[0]);
-        if (langs.length <= 3) return langs.map(languageDisplay).join(' / ');
+        if (langs.length <= 4) return langs.map(languageDisplay).join(' / ');
         return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
     }
 
@@ -2207,7 +2231,7 @@ const MediaUtils = (() => {
         const subtitleState = versionTrackState(item, 'subtitle');
         const subtitleLanguageState = versionFileLanguageState(item, 'subtitle');
         const subtitleLabel = versionSubtitleLabel(item, subtitleState, subtitleLanguageState);
-        const { headline, languageStatus, audioSource } = languagePresentation(item, {}, opts.providerLanguageHints === true);
+        const { headline, accessibleHeadline, languageStatus, audioSource } = languagePresentation(item, {}, opts.providerLanguageHints === true);
         const metaParts = [subtitleLabel, languageStatus ? providerHint : providerHintLabel(providerHint), provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
         // Keep provider labels secondary, without repeating the audio headline.
@@ -2245,6 +2269,7 @@ const MediaUtils = (() => {
 
         return {
             headline,
+            accessibleHeadline,
             languageStatus,
             meta,
             badge,

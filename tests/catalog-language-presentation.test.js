@@ -166,3 +166,53 @@ test('every requested surface uses the common display helper, including early se
     assert.match(series, /const earlyMeta = \[[\s\S]*?MediaUtils\.catalogLanguageInfo\(series/);
     assert.doesNotMatch(read('public/css/main.css'), /\.provider-language-badge|\.version-language-status/);
 });
+
+test('opening a rail version never inherits another file category, default variant or audio proof', () => {
+    const context=load('fr'); context.MediaUtils=context.window.MediaUtils;
+    const home=Object.create(context.window.HomePage.prototype), utility=context.MediaUtils;
+    const parent={sourceId:'source',item_type:'movie',title:'An Unexpected Valentine',category_name:'SCANDINAVIA',
+        audio_tracks_scope:'file',audio_tracks:[{index:1,lang:'an'}],
+        audio_languages:['an'],audio_languages_scope:'file',audio_languages_observed:true,
+        audio_language_validation_status:'probed',audio_language_verified_at:'2026-07-18',
+        audio_language_verification:{privateFixture:true},audio_language_validation_job_status:'running',
+        audio_probed_at:'2026-07-18',metadata:{categoryName:'SCANDINAVIA'},
+        codec_profile:{audioTracks:[{index:1,language:'an'}]},
+        defaultVariant:{raw_title:'SCAN ▎ An Unexpected Valentine',audio_languages:['an'],
+            audio_languages_scope:'file',audio_language_validation_status:'probed',metadata:{categoryName:'SCANDINAVIA'}}};
+    parent.default_variant=parent.defaultVariant; parent.data={...parent};
+    for (const [tag,category,expected] of [['EN','EN ▎CINEMA MOVIES','en'],['DE','DE ▎PRIME VIDEO','de'],
+        ['IT','IT ▎CINEMA','it'],['PL','POLAND','pl'],['ALB','AL ▎PRIME VIDEO','sq'],['AR','AR ▎FOREIGN','ar']]) {
+        const variant={sourceId:'source',item_id:tag,raw_title:`${tag} ▎ Example`,
+            metadata:{categoryName:category},audio_tracks_scope:'file',audio_tracks:[{index:1,lang:null}],
+            audio_language_validation_status:'pending'};
+        const before=JSON.stringify({parent,variant});
+        const item=home.homeVariantToMediaItem(variant,parent,'movie');
+        assert.equal(item.category_name,category);
+        assert.equal(utility.versionDescriptor(item,{providerLanguageHints:true}).headline,utility.languageDisplayFull(expected));
+        assert.equal(utility.catalogLanguageInfo(item).headline,utility.languageDisplayFull(expected));
+        assert.equal(item.audio_language_verified_at,null);
+        assert.equal(item.audio_language_validation_job_status,null);
+        assert.equal(item.defaultVariant,null); assert.equal(item.default_variant,null);
+        assert.deepEqual(JSON.parse(JSON.stringify(item.codec_profile)),{});
+        assert.equal(JSON.stringify({parent,variant}),before);
+    }
+    const sparse={sourceId:'source',item_id:'none',name:'Example'};
+    const isolated=home.homeVariantToMediaItem(sparse,parent,'movie');
+    assert.equal(utility.catalogLanguageInfo(isolated).headline,'Langue non identifiée');
+    assert.equal(isolated.audio_language_validation_status,'not_analyzed');
+    assert.equal(isolated.audio_language_verified_at,null);
+});
+
+test('rail conversion preserves a real four-language list when ordered tracks are unavailable', () => {
+    const context=load('fr'); context.MediaUtils=context.window.MediaUtils;
+    const home=Object.create(context.window.HomePage.prototype),utility=context.MediaUtils;
+    const variant={sourceId:'source',item_id:'four',raw_title:'IN ▎ Blink Twice',metadata:{categoryName:'ASIA ▎HINDI'},
+        audio_languages:['en','hi','ta','te'],audio_languages_scope:'file',audio_languages_observed:true,
+        audio_language_validation_status:'probed'};
+    const item=home.homeVariantToMediaItem(variant,{title:'Blink Twice',audio_languages:['fr'],
+        audio_language_validation_status:'verified',metadata:{categoryName:'FR ▎CINEMA'}},'movie');
+    assert.equal(utility.catalogLanguageInfo(item).headline,'EN / HI / TA / TE');
+    assert.equal(utility.versionDescriptor(item,{providerLanguageHints:true}).headline,'EN / HI / TA / TE');
+    assert.equal(item.audio_language_validation_status,'probed');
+    assert.equal(item.audio_language_verified_at,null);
+});

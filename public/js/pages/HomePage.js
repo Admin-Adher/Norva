@@ -3224,15 +3224,57 @@ class HomePage {
         const fileSubtitleTracks = variant.subtitle_tracks_scope === 'file' || variant.subtitleTracksScope === 'file'
             ? (variant.subtitle_tracks || variant.subtitleTracks || [])
             : null;
-        const fileAudioLanguages = fileAudioTracks
+        const languageScope = variant.audio_languages_scope || variant.audioLanguagesScope;
+        const hasOwnLanguages = languageScope === 'file' || (type === 'series' && languageScope === 'series');
+        const fileAudioLanguages = hasOwnLanguages
+            ? (variant.audio_languages || variant.audioLanguages || [])
+            : fileAudioTracks
             ? [...new Set(fileAudioTracks
                 .map(track => MediaUtils.normalizeLanguagePreference(track?.lang || track?.language || ''))
                 .filter(code => code && code !== 'und' && code !== 'unknown'))]
             : null;
+        const categoryName = variant.category_name || variant.categoryName
+            || variant.metadata?.categoryName || variant.metadata?.category_name || '';
+        // The parent is editorial context, not evidence about this provider file.
+        // Reset both aliases and nested copies: the presentation helper also reads
+        // data/defaultVariant, so clearing only audio_tracks still leaks a sibling.
+        const fileEvidence = { defaultVariant:null, default_variant:null, variant:null,
+            variants:[], exposedVariants:[],
+            codec_profile:variant.codec_profile || variant.codecProfile || {},
+            codecProfile:variant.codecProfile || variant.codec_profile || {} };
+        for (const [snake, camel, fallback] of [
+            ['audio_language_validation_status','audioLanguageValidationStatus','not_analyzed'],
+            ['audio_language_validation_job_status','audioLanguageValidationJobStatus',null],
+            ['audio_language_verified_at','audioLanguageVerifiedAt',null],
+            ['audio_language_verification','audioLanguageVerification',{}],
+            ['audio_probed_at','audioProbedAt',null],
+            ['subtitle_probed_at','subtitleProbedAt',null],
+            ['audio_languages_observed','audioLanguagesObserved',false],
+            ['subtitle_languages_observed','subtitleLanguagesObserved',false],
+            ['subtitle_languages','subtitleLanguages',null],
+            ['subtitle_languages_scope','subtitleLanguagesScope',null],
+            ['provider_audio_languages','providerAudioLanguages',null],
+            ['provider_audio_language_status','providerAudioLanguageStatus',null]
+        ]) {
+            fileEvidence[snake] = fileEvidence[camel] = variant[snake] ?? variant[camel] ?? fallback;
+        }
+        Object.assign(fileEvidence, {
+            audio_tracks:fileAudioTracks, audioTracks:fileAudioTracks,
+            audio_tracks_scope:fileAudioTracks !== null ? 'file' : null,
+            audioTracksScope:fileAudioTracks !== null ? 'file' : null,
+            audio_languages:fileAudioLanguages, audioLanguages:fileAudioLanguages,
+            audio_languages_scope:hasOwnLanguages ? languageScope : fileAudioTracks !== null ? 'file' : null,
+            audioLanguagesScope:hasOwnLanguages ? languageScope : fileAudioTracks !== null ? 'file' : null,
+            subtitle_tracks:fileSubtitleTracks, subtitleTracks:fileSubtitleTracks,
+            subtitle_tracks_scope:fileSubtitleTracks !== null ? 'file' : null,
+            subtitleTracksScope:fileSubtitleTracks !== null ? 'file' : null,
+            category_name:categoryName, categoryName, subtitle:categoryName
+        });
 
         return {
             ...parent,
             ...variant,
+            ...fileEvidence,
             sourceId,
             source_id: sourceId,
             stream_id: itemId,
@@ -3266,28 +3308,18 @@ class HomePage {
             tmdb_id: providerTmdbId,
             title_id: titleId,
             titleId,
-            // Never inherit a grouped title's absolute stream indices into a
-            // sibling provider file. Only explicitly file-scoped tracks survive.
-            audio_tracks: fileAudioTracks,
-            audioTracks: fileAudioTracks,
-            audio_tracks_scope: fileAudioTracks !== null ? 'file' : null,
-            audioTracksScope: fileAudioTracks !== null ? 'file' : null,
-            audio_languages: fileAudioLanguages,
-            audioLanguages: fileAudioLanguages,
-            subtitle_tracks: fileSubtitleTracks,
-            subtitleTracks: fileSubtitleTracks,
-            subtitle_tracks_scope: fileSubtitleTracks !== null ? 'file' : null,
-            subtitleTracksScope: fileSubtitleTracks !== null ? 'file' : null,
             tmdb,
             metadata: {
                 ...metadata,
                 ...(variant.metadata || {}),
+                ...fileEvidence,
                 tmdb
             },
             data: {
                 ...metadata,
                 ...data,
                 ...(variant.data || {}),
+                ...fileEvidence,
                 title,
                 poster,
                 sourceId,

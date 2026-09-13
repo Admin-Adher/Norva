@@ -6,7 +6,9 @@ window.CatalogLanguageQA = (() => {
         ['Japan Malayalam Dubbed 2023', 'ASIA ▎MALAYALAM DUBBED', 'ml'],
         ['AR ▎ Example Film', 'AR ▎FOREIGN', 'fr'],
         ['Example Nordic', 'SCANDINAVIA', 'nordic'],
-        ['Example Unlabelled', '', null]
+        ['Example Unlabelled', '', null],
+        ['IN ▎ The Blind', 'ASIA ▎ENGLISH HINDI DUBBED', 'hi'],
+        ['IN ▎ Blink Twice', 'ASIA ▎HINDI', ['en','hi','ta','te']]
     ];
     let surface, items, chosen, controller, appMarkup;
     const noop = () => {};
@@ -15,9 +17,10 @@ window.CatalogLanguageQA = (() => {
             id: `surface-${index}`, stream_id: String(index), series_id: String(index), sourceId: 'qa-source',
             item_type: kind, name, title: name, raw_title: name, category_name: category,
             metadata: {categoryName:category}, cover:poster, stream_icon:poster, poster_url:poster,
-            expected, audio_language_validation_status:index === 2 ? 'probed' : 'not_analyzed',
-            audio_tracks_scope:'file', audio_tracks:index === 2 ? [{index:1,lang:'fr'}] : [],
-            audio_probed_at:index === 2 ? '2026-09-10T10:00:00Z' : null
+            expected, audio_language_validation_status:index === 2 || Array.isArray(expected) ? 'probed' : 'not_analyzed',
+            audio_tracks_scope:'file', audio_tracks:index === 2 ? [{index:1,lang:'fr'}]
+                : Array.isArray(expected) ? expected.map((lang,n)=>({index:n+1,lang})) : [],
+            audio_probed_at:index === 2 || Array.isArray(expected) ? '2026-09-10T10:00:00Z' : null
         }));
     }
     function page(kind, host) {
@@ -41,7 +44,7 @@ window.CatalogLanguageQA = (() => {
         });
         return page;
     }
-    async function mount(next = 'movies') {
+    async function mount(next = 'movies', detailIndex = 1) {
         surface = next; chosen = null;
         const host = document.getElementById('qa-host');
         host.innerHTML = '<div id="qa-grid"></div>';
@@ -67,7 +70,8 @@ window.CatalogLanguageQA = (() => {
             controller.detailsPanel = panel;
             controller.versionsList = panel.querySelector(`.${kind}-versions-list`);
             controller.versionSummary = panel.querySelector(`.${kind}-versions-toolbar .hint`);
-            const item = items[1], group = {representative:item,items:[item]};
+            const item = items[detailIndex], group = {representative:item,items:[item]};
+            chosen = item;
             if (kind === 'movie') controller.showMovieDetails(group,item);
             else {
                 controller.seasonsContainer = panel.querySelector('#series-seasons');
@@ -82,7 +86,7 @@ window.CatalogLanguageQA = (() => {
         if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('page horizontal overflow: '+surface);
         if (surface.endsWith('-detail')) {
             const meta = host.querySelector(surface === 'movie-detail' ? '#movie-detail-meta' : '#series-meta');
-            const expected = MediaUtils.catalogLanguageInfo(items[1]).text;
+            const expected = MediaUtils.catalogLanguageInfo(chosen).text;
             if (!meta.textContent.includes(expected)) throw Error('single detail lacks language');
             if (host.querySelector('.version-language-status')) throw Error('single detail needs no version switcher');
             for (const pill of meta.children) {
@@ -90,12 +94,12 @@ window.CatalogLanguageQA = (() => {
             }
         } else {
             const badges = [...host.querySelectorAll('.catalog-language-badge')];
-            if (badges.length !== 5) throw Error('five catalogue badges');
+            if (badges.length !== items.length) throw Error('catalogue badge count');
             if (host.querySelector('.language-badge-status')) throw Error('internal provenance leaked');
-            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 3) throw Error('internal provenance lost');
+            if (items.filter(item => MediaUtils.catalogLanguageInfo(item).languageStatus).length !== 4) throw Error('internal provenance lost');
             badges.forEach((badge,index) => {
                 const expected = MediaUtils.catalogLanguageInfo(items[index]);
-                if (badge.getAttribute('aria-label') !== expected.headline) throw Error('accessible language wrong');
+                if (badge.getAttribute('aria-label') !== expected.accessibleHeadline) throw Error('accessible language wrong');
                 if (expected.languageStatus && badge.outerHTML.includes(expected.languageStatus)) throw Error('internal provenance exposed');
                 if (index === 2 && (badge.querySelector('.language-badge-status') || !badge.textContent.includes(MediaUtils.languageDisplayFull('fr')))) throw Error('AR file must stay observed French');
                 const box = badge.closest('.movie-poster,.series-poster,.card-image').getBoundingClientRect();
@@ -110,7 +114,7 @@ window.CatalogLanguageQA = (() => {
                 if (chosen !== items[0]) throw Error('wrong card opened');
             }
         }
-        return {surface,locale:NorvaI18n.language,width:innerWidth,badges:surface.endsWith('-detail') ? 1 : 5};
+        return {surface,locale:NorvaI18n.language,width:innerWidth,badges:surface.endsWith('-detail') ? 1 : items.length};
     }
     return {mount,verify};
 })();

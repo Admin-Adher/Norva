@@ -27,7 +27,17 @@ window.ProviderVersionCardsQA = (() => {
         host.innerHTML = `<section id="${kind === 'movie' ? 'movie' : 'series'}-versions-section" class="${kind}-versions-section">
             <div class="movie-versions-toolbar"><h3>Versions</h3><p class="hint" id="qa-summary"></p></div>
             <div id="qa-versions" class="${kind}-versions-list"></div></section>`;
-        const items = entries(kind);
+        // Exercise the actual rail -> group -> version conversion, with a
+        // deliberately contradictory parent. No sibling may inherit its proof.
+        const rawItems = entries(kind);
+        const home = Object.create(HomePage.prototype);
+        home.displayTitle = () => 'Example Film';
+        const parent = {title:'Example Film', sourceId:'qa-source', category_name:'SCANDINAVIA',
+            metadata:{categoryName:'SCANDINAVIA'}, audio_tracks_scope:'file',
+            audio_tracks:[{index:1,lang:'an'}], audio_language_validation_status:'probed',
+            defaultVariant:{audio_languages:['an'],audio_languages_scope:'file',audio_language_validation_status:'probed'},
+            variants:rawItems};
+        const items = home.buildHomeMediaGroup(parent, kind).items;
         selected = items[0];
         controller = Object.create(kind === 'movie' ? MoviesPage.prototype : SeriesPage.prototype);
         Object.assign(controller, {

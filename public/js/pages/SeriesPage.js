@@ -2381,7 +2381,8 @@ class SeriesPage {
             tmdb: variant.tmdb || title?.tmdb,
             rating: variant.rating || title?.rating,
             year: variant.year || title?.year,
-            category_name: variant.category_name || title?.category_name,
+            category_name: variant.category_name || variant.categoryName
+                || variant.metadata?.categoryName || variant.metadata?.category_name || '',
             category_id: variant.category_id ?? title?.category_id,
             added: variant.added || title?.added,
             added_at: variant.added_at || title?.added_at,
@@ -2734,8 +2735,8 @@ class SeriesPage {
             const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
             const headline = this.displayLanguageStatus(desc.headline) || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_048d5af4b9c0", {defaultValue: "Version {{p0}}", p0:(index + 1)}) : `Version ${index + 1}`);
             return `
-                <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
-                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
+                <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}" aria-label="${MediaUtils.escapeHtml([desc.accessibleHeadline || headline, desc.meta, broken ? (globalThis.NorvaI18n?.t('ui_web_ca1844969742', {defaultValue:'Unavailable'}) ?? 'Unavailable') : ''].filter(Boolean).join(' · '))}">
+                    <span class="version-head">${dot}<span class="version-headline" title="${MediaUtils.escapeHtml(desc.accessibleHeadline || headline)}">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
                     ${meta}
                     ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan" data-i18n-title="ui_web_6168604ed2ae" data-i18n="ui_web_ca1844969742">Unavailable</span>' : ''}
                 </button>`;
