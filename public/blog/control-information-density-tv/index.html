@@ -137,7 +137,7 @@
 <p>Layout movement makes remote navigation harder because the visual target changes after focus has moved. Reserve dimensions for artwork, card titles, result counts, and detail metadata. When content is missing, keep the region stable and provide an honest fallback rather than collapsing neighbouring focus targets.</p>
 <p>Update a detail panel in place when focus moves through a grid. Do not let the panel’s synopsis length push filters or card rows vertically.</p>
 <h2 id="make-filters-and-navigation-earn-space">Make filters and navigation earn space</h2>
-<p>A compact sidebar should retain icon, full label, active state, and focus without expanding. Use the sidebar width method to size from real labels.</p>
+<p>A compact sidebar should retain icon, full label, active state, and focus without expanding. Use <a href="/blog/choose-compact-tv-sidebar/">the sidebar width method</a> to size from real labels.</p>
 <p>Filters should show full current meaning, group related controls, and expose Reset. The compact-filter layout explains how to reduce rows while preserving D-pad paths and values.</p>
 <h2 id="handle-text-variability-explicitly">Handle text variability explicitly</h2>
 <p>Create test strings for short, typical, long, unbroken, missing, and translated values. Define line counts and fallback behavior for every role. A card title may wrap to two lines; a filter value may need a wider control; a detail heading can take more space.</p>
@@ -165,7 +165,17 @@
       <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
 <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html" target="_blank" rel="noopener">W3C: Understanding Focus Visible</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html" target="_blank" rel="noopener">W3C: Understanding Non-text Contrast</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
 </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/choose-compact-tv-sidebar/">
+          <span class="tag">TV Interface Ergonomics</span>
+          <div class="card-title">How Wide Should a TV Navigation Sidebar Be?</div>
 
+          <p>A content-led sizing method for a permanently compact icon-and-label TV sidebar whose focus never shifts the main page.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
