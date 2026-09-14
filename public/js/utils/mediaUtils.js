@@ -2039,6 +2039,16 @@ const MediaUtils = (() => {
             raw = raw.replace(/\s+مترجم\s*$/u, '');
         }
         const barePrefix = code => new RegExp(`^\\s*${code}(?=\\s*[-–—]\\s+|\\s+[-–—]\\s*|\\s*[|:])`);
+        // Exact audited shelves declare Turkish audio and Arabic subtitles.
+        // Change only local parser inputs; keep all independent audio conflicts
+        // and exact-file observations intact. This is not an AR/TR alias.
+        if (categoryKey === 'مسلسلات تركية مترجمة' && barePrefix('AR-TR-S').test(raw)) {
+            raw = raw.replace(barePrefix('AR-TR-S'), 'TR'); category = 'TURKISH SERIES';
+        } else if (['Séries TURQUES SUB-AR', 'مسلسلات تركية مترجمة عربي | Turkish Series Arabic Sub'].includes(categoryKey)) {
+            category = 'TURKISH SERIES';
+            // Only a redundant terminal marker; a preceding [FR]/[MULTI] stays.
+            raw = raw.replace(/\s+\[SUB\]\s*$/, '');
+        }
         if (['افلام تركية مدبلجة', 'مسلسلات تركية مدبلجة', 'يعرض الآن تركي مدبلج'].includes(categoryKey)
             && barePrefix('AR-TR-D').test(raw)) {
             raw = raw.replace(barePrefix('AR-TR-D'), 'AR-D'); category = 'ARABIC DUB';

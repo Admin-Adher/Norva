@@ -5,7 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const { pathToFileURL } = require('node:url');
 const root = path.join(__dirname, '../..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
-const migrated = 'supabase/migrations/20260914001734_provider_language_structured_declarations.sql';
+const migrated = 'supabase/migrations/20260914045000_turkish_audio_arabic_subtitle_roles.sql';
 const knownCases = name => {
     const match = read(name).match(/const cases\s*=\s*(\[[\s\S]*?\n\]);/);
     if (!match) throw Error('Fixture cases missing: ' + name);
@@ -29,6 +29,10 @@ async function build(evidenceFile, includeReconciliation = false) {
     });
     for (const [raw, category, expected] of require('./provider-language-audit-remediation.js')) rows.push({
         case_id: rows.length, case_group: 'residualAudit', metadata: { categoryName: category },
+        external_id: 'fixture', raw_title: raw, expected,
+    });
+    for (const [raw, category, expected] of require('./provider-turkish-subtitle-roles.js')) rows.push({
+        case_id: rows.length, case_group: 'turkishSubtitleRole', metadata: { categoryName: category },
         external_id: 'fixture', raw_title: raw, expected,
     });
     const fixtureId = 'norva-selection:movie:' + 'a'.repeat(64);

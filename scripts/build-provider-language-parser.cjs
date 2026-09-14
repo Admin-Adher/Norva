@@ -27,7 +27,7 @@ if (generatedSql.replace(/\r\n/g, '\n') !== sql.replace(/\r\n/g, '\n')) throw Er
 // The latest forward migration mirrors the complete audited category labels.
 // Verify its block rather than rewrite migration history. Later label changes
 // must introduce a new forward migration, just like audio alias changes.
-const auditedSqlFile = 'supabase/migrations/20260914001734_provider_language_structured_declarations.sql';
+const auditedSqlFile = 'supabase/migrations/20260914045000_turkish_audio_arabic_subtitle_roles.sql';
 const auditedCategories = vm.runInNewContext(table + '\nVERSION_PROVIDER_AUDITED_CATEGORIES');
 const auditedSql = fs.readFileSync(path.join(root, auditedSqlFile), 'utf8').replace(/\r\n/g, '\n');
 const auditedBlock = '-- BEGIN GENERATED AUDITED CATEGORY LABELS\n  category := coalesce('

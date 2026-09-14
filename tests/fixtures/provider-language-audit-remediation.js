@@ -46,7 +46,7 @@ module.exports = [
     ['Example [TR]', 'مسلسلات تركية مدبلجة عربي | Turkish Series Arabic Dub', null],
     ['Example [MULTI]', 'مسلسلات تركية مدبلجة عربي | Turkish Series Arabic Dub', null],
     ['Example [SUBS]', 'مسلسلات تركية مدبلجة عربي | Turkish Series Arabic Dub', null],
-    ['Example', 'مسلسلات تركية مترجمة عربي | Turkish Series Arabic Sub', null],
+    ['Example', 'مسلسلات تركية مترجمة عربي | Turkish Series Arabic Sub', 'tr'],
     ['Example', 'Turkish Series Arabic Dub', null],
     ['EN | Example', 'NL | UFC', 'en'],
     ['EN ▎ Example', 'NL ▎ UFC', 'en'],
