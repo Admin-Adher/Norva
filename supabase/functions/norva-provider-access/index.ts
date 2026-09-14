@@ -10,6 +10,7 @@ import {
   PROVIDER_ACCESS_DETECTION_VERSION,
 } from "../_shared/provider-access-state.mjs";
 import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
+import { xtreamLanguageDeclarations } from "../_shared/xtream-language-declarations.mjs";
 
 // Provider Access v1 is intentionally a service-mediated API.  Browser/user
 // requests are authenticated with a Supabase user JWT, while the durable job
@@ -2899,7 +2900,8 @@ function activeMediaRows(job, items, itemType) {
       item_type: itemType, external_id: externalId, parent_external_id: categoryId,
       title, subtitle: categoryName, poster_url: nullableString(item.stream_icon ?? item.cover), backdrop_url: null,
       metadata: compactActiveRecord({ categoryId, categoryName, rating: item.rating, added: item.added,
-        overview: nullableString(item.plot ?? item.description ?? item.overview ?? item.desc), providerTmdbId, providerImdbId }),
+        overview: nullableString(item.plot ?? item.description ?? item.overview ?? item.desc), providerTmdbId, providerImdbId,
+        providerLanguageDeclarations: itemType === "live" ? null : xtreamLanguageDeclarations(item) }),
       playback_hint: compactActiveRecord({ sourceType: "xtream", streamId: externalId, streamType: itemType,
         container, containerExplicit: Boolean(nullableString(item.container_extension)), providerTmdbId, providerImdbId }),
       available: true,

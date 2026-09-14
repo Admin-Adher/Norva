@@ -48,6 +48,7 @@ import {
   BoundedProviderResponseError,
   fetchBoundedProviderJson,
 } from "./bounded-provider-response.mjs";
+import { xtreamLanguageDeclarations } from "./xtream-language-declarations.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
@@ -1477,6 +1478,8 @@ function xtreamRows(
         rating: item.rating,
         added: item.added,
         overview: providerOverview,
+        // Raw provider declarations are not observed tracks or effective audio.
+        providerLanguageDeclarations: itemType === "live" ? null : xtreamLanguageDeclarations(item),
         providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
         providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),

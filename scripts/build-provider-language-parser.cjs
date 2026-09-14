@@ -24,10 +24,10 @@ if ((sql.match(/-- BEGIN GENERATED ALIASES/g) || []).length !== 1
   || (sql.match(/-- END GENERATED ALIASES/g) || []).length !== 1) throw Error('Missing or ambiguous generated alias boundary: ' + sqlFile);
 const generatedSql = sql.replace(/-- BEGIN GENERATED ALIASES[\s\S]*?-- END GENERATED ALIASES/, aliasesSql);
 if (generatedSql.replace(/\r\n/g, '\n') !== sql.replace(/\r\n/g, '\n')) throw Error('Alias changes require a new forward migration: ' + sqlFile);
-// The forward migration mirrors only the seven complete audited labels.
+// The latest forward migration mirrors the complete audited category labels.
 // Verify its block rather than rewrite migration history. Later label changes
 // must introduce a new forward migration, just like audio alias changes.
-const auditedSqlFile = 'supabase/migrations/20260913210125_provider_residual_language_declarations.sql';
+const auditedSqlFile = 'supabase/migrations/20260914001734_provider_language_structured_declarations.sql';
 const auditedCategories = vm.runInNewContext(table + '\nVERSION_PROVIDER_AUDITED_CATEGORIES');
 const auditedSql = fs.readFileSync(path.join(root, auditedSqlFile), 'utf8').replace(/\r\n/g, '\n');
 const auditedBlock = '-- BEGIN GENERATED AUDITED CATEGORY LABELS\n  category := coalesce('

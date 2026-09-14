@@ -38,7 +38,17 @@ test('published alias migration stays immutable and matches the browser without 
     const categories = JSON.parse(JSON.stringify(vm.runInNewContext(table + '\nVERSION_PROVIDER_AUDITED_CATEGORIES')));
     const sqlCategories = JSON.parse(read(migrated).match(/-- BEGIN GENERATED AUDITED CATEGORY LABELS\s+category := coalesce\('([^']+)'::jsonb/)[1]);
     assert.deepEqual(sqlCategories, categories);
-    assert.equal(Object.keys(categories).length, 7);
+    const priorCategoryMigration = read('supabase/migrations/20260913210125_provider_residual_language_declarations.sql');
+    assert.equal(createHash('sha256').update(priorCategoryMigration).digest('hex'),
+        '64e2b70e4c089f19ddb9391a0cc270604bf6a52360a47ab49e6cdb3bd09d3ffe');
+    const priorCategories = JSON.parse(priorCategoryMigration.match(/-- BEGIN GENERATED AUDITED CATEGORY LABELS\s+category := coalesce\('([^']+)'::jsonb/)[1]);
+    assert.equal(Object.keys(priorCategories).length, 7);
+    for (const [key, value] of Object.entries(priorCategories)) assert.equal(categories[key], value);
+    assert.deepEqual(Object.fromEntries(Object.entries(categories).filter(([key]) => !(key in priorCategories))), {
+        'Séries DUB-AR': 'ARABIC DUB', '4K | أفلام عربية': 'ARABIC MOVIES',
+        'يعرض الآن عربي': 'ARABIC SERIES', 'SÉRIES TURK': 'TURKISH SERIES',
+    });
+    assert.equal(Object.keys(categories).length, 11);
     assert.doesNotMatch(JSON.stringify(categories), /IRAN|PAKISTAN|AR \| FRENCH|NL \| HINDI/);
     assert.match(builder, /Audited category changes require a new forward migration/);
     assert.doesNotMatch(read(migrated), /GENERATED ALIASES|create or replace function public\.catalog_provider_language_alias/i);
@@ -84,12 +94,31 @@ test('standalone SQL parity fixture is temporary, rollback-only and covers old/n
     assert.equal(rows.filter(row => row.case_group === 'existing').length, 65);
     assert.ok(rows.filter(row => row.case_group === 'audit').length >= 62);
     assert.equal(rows.filter(row => row.case_group === 'crossProvider').length, 95);
-    assert.equal(rows.filter(row => row.case_group === 'residualAudit').length, 77);
+    assert.equal(rows.filter(row => row.case_group === 'residualAudit').length, 166);
     assert.equal(rows.filter(row => row.case_group === 'selection').length, 4);
     assert.doesNotMatch(sql, /create(?: or replace)? function public\./i);
     assert.equal((sql.match(/create(?: or replace)? function pg_temp\./gi) || []).length, 4);
     assert.match(sql, /\nrollback;\n$/);
     assert.match(sql, /prosecdef or provolatile/);
+});
+
+test('only five audited English shelves can separate a final Arabic subtitle marker from audio', () => {
+    const source = read('public/js/utils/mediaUtils.js'), sql = read(migrated);
+    const expected = ['MOVIES - ENGLISH 2024',
+        'مسلسلات إنجليزية 2022 | English Series 2022',
+        'مسلسلات إنجليزية 2023 | English Series 2023',
+        'مسلسلات إنجليزية 2024 | English Series 2024',
+        'مسلسلات إنجليزية 2025 | English Series 2025'];
+    const jsBlock = source.match(/if \(\[('MOVIES - ENGLISH 2024'[\s\S]+?)\]\.includes\(categoryKey\)\) \{\s*raw = raw\.replace\(([^\n]+)\);\s*\}/);
+    assert.ok(jsBlock);
+    assert.deepEqual(JSON.parse(JSON.stringify(vm.runInNewContext('[' + jsBlock[1] + ']'))), expected);
+    assert.equal(jsBlock[2], "/\\s+مترجم\\s*$/u, ''");
+    const sqlBlock = sql.match(/if category_key in \(('MOVIES - ENGLISH 2024'[\s\S]+?)\) then\s*raw := regexp_replace\(([^\n]+)\);\s*end if;/);
+    assert.ok(sqlBlock);
+    assert.deepEqual([...sqlBlock[1].matchAll(/'([^']+)'/g)].map(m => m[1]), expected);
+    assert.equal(sqlBlock[2], "raw,'\\s+مترجم\\s*$',''");
+    assert.ok(source.indexOf(jsBlock[0]) < source.indexOf('const providerPrefixMatch = raw.match'));
+    assert.ok(sql.indexOf(sqlBlock[0]) < sql.indexOf('prefix_match := regexp_match'));
 });
 
 test('optional reconciliation fixture copies only temporary functions and writable objects', async () => {

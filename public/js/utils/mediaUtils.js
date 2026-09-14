@@ -1988,7 +1988,11 @@ const MediaUtils = (() => {
         'مسلسلات عربية | SERIES ARABES': 'ARABIC SERIES',
         'افلام عربية | FILMS ARABES': 'ARABIC MOVIES',
         'أفلام عربية قديمة | ANCIENS FILMS ARABES': 'ARABIC MOVIES',
-        'مسلسلات تركية مدبلجة عربي | Turkish Series Arabic Dub': 'ARABIC DUB'
+        'مسلسلات تركية مدبلجة عربي | Turkish Series Arabic Dub': 'ARABIC DUB',
+        'Séries DUB-AR': 'ARABIC DUB',
+        '4K | أفلام عربية': 'ARABIC MOVIES',
+        'يعرض الآن عربي': 'ARABIC SERIES',
+        'SÉRIES TURK': 'TURKISH SERIES'
     };
 
     function normalizeProviderAuditedCategory(value) {
@@ -1996,12 +2000,18 @@ const MediaUtils = (() => {
         if (Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_AUDITED_CATEGORIES, key)) {
             return VERSION_PROVIDER_AUDITED_CATEGORIES[key];
         }
-        // EX-YU is the spelling of the already supported regional label only.
-        return /^\s*EX-YU\s*[|:]?\s*$/i.test(value) ? 'EXYU' : value;
+        // A category delimiter is not title prose. Only known uppercase codes
+        // can introduce CODE I SECTION; keep the remainder for conflict guards.
+        value = value.replace(/^\s*([A-Z]{2,3})\s+I\s+(.+)$/, (match, code, section) =>
+            VERSION_PROVIDER_LANGUAGE_TAGS[code.toLowerCase()] ? `${code} | ${section}` : match);
+        value = value.replace(/^\s*MOVIES\s+([A-Z]{2,3})(\s+(?:\d{4}(?:-\d{4})?|CLASSICS\s*&\s*RARITIES))?\s*$/,
+            (match, code, tail = '') => VERSION_PROVIDER_LANGUAGE_TAGS[code.toLowerCase()] ? `${code} | MOVIES${tail}` : match);
+        // Preserve a regional label, never invent a particular Balkan language.
+        return value.replace(/^\s*EX-YU(?=\s*[|:]|\s*$)/i, 'EXYU');
     }
 
     function versionProviderLanguageHint(item = {}) {
-        const category = normalizeProviderAuditedCategory(String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000)
+        let category = normalizeProviderAuditedCategory(String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000)
             // A complete category label can delimit a leading tag with a space.
             // Do not extend this to prose such as "NO ADS" or "FILMES DE AÇÃO".
             .replace(/^\s*([A-Z]{2,3})\s+(MOVIES|FILMS|SERIES)\s*$/, '$1 | $2'));
@@ -2011,8 +2021,48 @@ const MediaUtils = (() => {
         // Local M3U/Xtream inventories may retain the raw label only as `name`.
         // A source/category context is required before treating it as a supplier label.
         const providerContext = category || item.sourceId || item.source_id;
-        const raw = String(item.raw_title || item.rawTitle || (providerContext ? item.name || item.title : '') || '')
+        let raw = String(item.raw_title || item.rawTitle || (providerContext ? item.name || item.title : '') || '')
             .replace(BAR_SEPARATORS, ' | ').slice(0, 2000);
+        // Role-aware supplier grammars from the residual audit. These do not
+        // weaken generic subtitle/conflict guards: only the complete category
+        // and its matching bare prefix may assign the destination of a dub.
+        const categoryKey = category.trim().replace(/\s+/g, ' ');
+        // On these exact English shelves, a final Arabic "subtitled" marker
+        // does not erase the separately declared English audio. Strip it only
+        // in this local parsing copy, before suffix inspection so conflicting
+        // annotations such as (French) remain visible to every existing guard.
+        if (['MOVIES - ENGLISH 2024',
+            'مسلسلات إنجليزية 2022 | English Series 2022',
+            'مسلسلات إنجليزية 2023 | English Series 2023',
+            'مسلسلات إنجليزية 2024 | English Series 2024',
+            'مسلسلات إنجليزية 2025 | English Series 2025'].includes(categoryKey)) {
+            raw = raw.replace(/\s+مترجم\s*$/u, '');
+        }
+        const barePrefix = code => new RegExp(`^\\s*${code}(?=\\s*[-–—]\\s+|\\s+[-–—]\\s*|\\s*[|:])`);
+        if (['افلام تركية مدبلجة', 'مسلسلات تركية مدبلجة', 'يعرض الآن تركي مدبلج'].includes(categoryKey)
+            && barePrefix('AR-TR-D').test(raw)) {
+            raw = raw.replace(barePrefix('AR-TR-D'), 'AR-D'); category = 'ARABIC DUB';
+        } else if (categoryKey === 'مسلسلات اجنبية قصيرة مدبلجة' && barePrefix('AR-EN-S-D').test(raw)) {
+            raw = raw.replace(barePrefix('AR-EN-S-D'), 'AR-D'); category = 'ARABIC DUB';
+        } else if (categoryKey === 'HINDI DUBBED (KOREAN)' && barePrefix('IN(?:-?KD)?').test(raw)) {
+            category = 'HINDI DUB';
+        } else if (categoryKey === 'INDIA EN DUBBED' && barePrefix('IN').test(raw)) {
+            category = 'EN | DUB';
+        } else if (['TURKSIH SERIES (SUB EN)', 'EN - ITALIAN SUB ENG'].includes(categoryKey) && barePrefix('EN').test(raw)
+            && !/^\s*EN\s*[-–—|:]\s*EN\s*[-–—|:]/.test(raw)) {
+            // Here EN belongs to SUB EN/ENG, not to the audio. Independent
+            // release suffixes and other subtitle markers remain authoritative.
+            raw = raw.replace(barePrefix('EN'), categoryKey.startsWith('TURKSIH') ? 'TR' : 'IT');
+            category = categoryKey.startsWith('TURKSIH') ? 'TURKISH SERIES' : 'ITALIAN SERIES';
+        } else if (categoryKey === 'ASIA MOVIES (MULTI-SUBS)' && /\(Cantonese ver\.\)\s*(?:(?:19|20)\d{2})?\s*$/i.test(raw)) {
+            category = ''; raw = raw.replace(/\(Cantonese ver\.\)/i, '(Cantonese version)');
+        } else if (categoryKey === 'AR★ أفلام كرتون للأطفال' && /مدبلج/.test(raw) && !RTL_SUB_RE.test(raw)) {
+            category = 'ARABIC DUB';
+        }
+        // An explicit French declaration remains useful on these bounded
+        // French MULTI shelves; it does not assert a second language or count.
+        const declaredFrenchMulti = /^FR:\s*(?:FILMS\s*-\s*[^|:]+|Documentaires)\s*$/i.test(categoryKey)
+            || categoryKey === 'FRANÇAIS';
         const providerPrefixMatch = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})(?:\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:]\s*)/)
             // Some suppliers separate a composite tag from its title with two
             // spaces. A plain title word followed by spaces is never a prefix.
@@ -2034,7 +2084,8 @@ const MediaUtils = (() => {
             // A technical release tail may follow a bracketed declaration.
             // Require that bracket boundary; never strip ordinary title prose.
             .replace(/([\])])(?:\s+(?:4K|8K|SD|HD|FHD|UHD|\d{3,4}p))+\s*$/i, '$1');
-        const suffix = withoutYear.match(/[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*$/u)?.[1]
+        const suffix = withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+\((?:Dubbed|Dub)\)\s*$/iu)?.[1]
+            || withoutYear.match(/[[(]([\p{L}\p{M}\d ./+-]{2,40})[\])]\s*$/u)?.[1]
             || withoutYear.match(/\s[-–—|]\s*([A-Z]{2,3}|[\p{L}\p{M}]{4,30})\s*$/u)?.[1]
             || withoutYear.match(/(?:^|\s)([\p{L}\p{M}]{4,30})\s+(?:dubbed|dub|audio)\s*$/iu)?.[1]
             || withoutYear.match(/\b(?:dubbed|audio)\s+(?:in\s+)?([\p{L}\p{M}]{4,30})\s*$/iu)?.[1] || '';
@@ -2042,6 +2093,7 @@ const MediaUtils = (() => {
             value = normalizeProviderDubbedCategory(value);
             if (annotated) value = value
                 .replace(/^([\p{L}\p{M}]{4,30})(?:[- ]language)?\s+version$/iu, '$1')
+                .replace(/^(?:19|20)\d{2}[-.]([\p{L}\p{M}]{4,30})$/u, '$1')
                 // Audited release annotations, not general title/category words
                 // or country aliases. The whole annotation must match.
                 .replace(/^true\s+fr$/i, 'FR')
@@ -2082,8 +2134,11 @@ const MediaUtils = (() => {
         const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.
         const audioBlocked = leading.subOnly || categorized.subOnly || trailing.subOnly
-            || leading.multi || categorized.multi || trailing.multi
-            || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw);
+            || (!declaredFrenchMulti && (leading.multi || categorized.multi || trailing.multi))
+            || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw)
+            // Standalone supplier markers only: المترجم can be the actual
+            // movie title (The Translator), not a subtitle declaration.
+            || /(?:^|[^\p{L}\p{M}])(?:مترجم|ترجمة|زیرنویس|زیرنویس‌دار)(?=$|[^\p{L}\p{M}])/u.test(raw);
         let tags = [...new Set([...leading.tags, ...categorized.tags, ...trailing.tags])];
         // A single Danish/Swedish/Norwegian tag refines the broader Nordic
         // category. Two specific languages, or a non-Nordic tag, still conflict.
