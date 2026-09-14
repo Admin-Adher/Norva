@@ -1,6 +1,6 @@
 import { connect } from "cloudflare:sockets";
 import { preserveRelayResponseLength } from "./relayResponseLength.mjs";
-import { boundedProgressiveRange, createResumableProgressiveBody } from "./relayProgressiveStream.mjs";
+import { boundedProgressiveRange, createRelayBodyReader, createResumableProgressiveBody } from "./relayProgressiveStream.mjs";
 import {
   classifyRelayPlaybackGeneration,
   classifyRelaySessionClaims,
@@ -1270,13 +1270,19 @@ async function fetchNodeViaSocket(node, method, clientRange, ua) {
     return { status: head.status, statusText: head.statusText, headers: head.headers, body: null, isChunked };
   }
 
+  // The header must arrive immediately, but forwarding each small TCP packet
+  // through the JS body + revocation wrappers exhausted the Worker's CPU budget.
+  // Switch the same native socket to bounded BYOB reads after header parsing;
+  // keep its leftover bytes, cancellation and provider connection unchanged.
+  reader.releaseLock();
+  const bodyReader = createRelayBodyReader(socket.readable);
   const body = new ReadableStream({
     start(controller) {
       if (leftover.length) controller.enqueue(leftover);
     },
     async pull(controller) {
       try {
-        const { value, done } = await reader.read();
+        const { value, done } = await bodyReader.read();
         if (done) {
           controller.close();
           try { socket.close(); } catch (_) { /* noop */ }
@@ -1289,7 +1295,7 @@ async function fetchNodeViaSocket(node, method, clientRange, ua) {
       }
     },
     cancel() {
-      try { reader.cancel(); } catch (_) { /* noop */ }
+      try { void bodyReader.cancel().catch(() => {}); } catch (_) { /* noop */ }
       try { socket.close(); } catch (_) { /* noop */ }
     },
   });
