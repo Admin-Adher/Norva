@@ -75,7 +75,7 @@ async function main() {
     '--config', 'services/norva-relay/wrangler.jsonc'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const summary = { events: 0, outcomes: {}, exceptions: {}, signals: {}, timedOut: false, authIssue: false, configurationError: false };
   const inspectSetup = chunk => {
-    if (/authentication|not authenticated|unauthorized|permission|CLOUDFLARE_API_TOKEN|10000|9109/i.test(chunk)) summary.authIssue = true;
+    if (/authentication error|not authenticated|unauthorized|necessary to set a CLOUDFLARE_API_TOKEN|code:\s*(?:10000|9109)/i.test(chunk)) summary.authIssue = true;
     if (/sampling rate must|unknown argument|cannot find module|MODULE_NOT_FOUND/i.test(chunk)) summary.configurationError = true;
   };
   const write = value => process.stdout.write(JSON.stringify(value) + '\n');
