@@ -88,6 +88,9 @@ export function xtreamLanguageDeclarations(item) {
           const fieldPath = prefix + field + (Array.isArray(value) ? `[${index}]` : '');
           for (const key of TRACK_LANGUAGE_FIELDS) append(`${fieldPath}.${key}`, role, own(track, key));
           append(`${fieldPath}.tags.language`, role, own(own(track, 'tags'), 'language'));
+          for (const key of ['LANGUAGE', 'lang', 'LANG']) {
+            append(`${fieldPath}.tags.${key}`, role, own(own(track, 'tags'), key));
+          }
         }
       }
     }

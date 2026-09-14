@@ -6,7 +6,8 @@ import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_sh
 // checkout and run ops/hetzner/scripts/04-deploy-edge-functions.sh.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceIds, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
-import { providerAudioFacet, selectionProviderAudioLanguages, catalogVariantMatchesAudio } from "../_shared/selection-provider-languages.mjs";
+import { providerAudioFacet, selectionProviderAudioLanguages, catalogProviderAudioLanguages, catalogVariantMatchesAudio } from "../_shared/selection-provider-languages.mjs";
+import { attachOwnedProviderLanguageDeclarations, useCachedAudioLanguageEvidence } from "../_shared/owned-provider-language-declarations.mjs";
 import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
@@ -1128,6 +1129,7 @@ async function attachMediaLanguages(
   // unmatched provider title, and must remain attached to that one raw row.
   await attachFlatMediaFileLanguages(items, userId, itemType);
   await attachFlatSelectionSeriesLanguages(items, userId, itemType);
+  await attachFlatOwnedProviderLanguages(items, userId, itemType);
   await attachOwnedMediaEditorialMetadata(items, userId, itemType, lang);
   // Preserve provider-supplied summaries even when the title has no TMDB identity
   // and has never been probed. Promote the compact metadata field to the response
@@ -3461,6 +3463,9 @@ function attachFileLanguageObservation(variant: JsonRecord, observation: JsonRec
 // (provider identity, item type, external id) granularity.
 async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>, userId: string) {
   try {
+    await attachOwnedProviderLanguageDeclarations(db, [...variantsByTitle.values()].flat(), userId);
+  } catch (_) { /* DB-first/Edge-first rolling deployment: declarations are optional. */ }
+  try {
     await attachSelectionSeriesLanguages(db, [...variantsByTitle.values()].flat(), userId);
   } catch (_) { /* Missing episode summaries must not block catalogue browsing. */ }
   // A series variant is the parent series id, not an episode file id. Legacy
@@ -3533,7 +3538,7 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
         }
         continue;
       }
-      if (row.audio_probed_at) {
+      if (row.audio_probed_at && useCachedAudioLanguageEvidence(variant, row)) {
         const cachedLanguages = canonicalFileLanguages(publicFileTrackLanguages(row.audio_tracks));
         const alreadyVerified = Boolean(variant.__file_audio_verified_at);
         variant.__file_audio_tracks = Array.isArray(row.audio_tracks) ? row.audio_tracks : [];
@@ -3608,6 +3613,30 @@ async function attachFlatSelectionSeriesLanguages(items: JsonRecord[], userId: s
       }
     }
   } catch (_) { /* A failed language lookup must not hide the series catalogue. */ }
+}
+
+// Match the flat movie/series grid to the same private owner-fenced projection
+// as grouped title cards. Only declaration fields, never tracks, are copied.
+async function attachFlatOwnedProviderLanguages(items: JsonRecord[], userId: string, itemType: string | null) {
+  if (!['movie', 'series'].includes(itemType || '') || !items.length) return;
+  try {
+    for (let start = 0; start < items.length; start += 200) {
+      const batch = items.slice(start, start + 200);
+      const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+        .select("id,user_id,source_id,media_item_id,item_type,external_id")
+        .eq("user_id", userId).eq("item_type", itemType).in("media_item_id", batch.map(item => item.id));
+      if (error) throw error;
+      const variants = (data ?? []) as JsonRecord[];
+      await attachOwnedProviderLanguageDeclarations(db, variants, userId);
+      const byFile = new Map(variants.map(variant => [flatMediaVariantKey(variant), variant]));
+      for (const item of batch) {
+        const variant = byFile.get(flatMediaVariantKey(item));
+        if (!variant?.__owned_provider_audio_languages?.length) continue;
+        item.provider_audio_languages = variant.__owned_provider_audio_languages;
+        item.provider_audio_language_status = 'provider_declared';
+      }
+    }
+  } catch (_) { /* A failed optional declaration lookup never hides the grid. */ }
 }
 
 async function attachFlatMediaFileLanguages(
@@ -4123,7 +4152,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     // audio language instead of guessing from the title. Already on the cloud_titles row.
     audio_languages: observedAudioLanguages,
     audioLanguages: observedAudioLanguages,
-    providerAudioLanguages: selectionProviderAudioLanguages(defaultVariant),
+    providerAudioLanguages: Array.isArray(defaultVariant.__owned_provider_audio_languages)
+      ? catalogProviderAudioLanguages(defaultVariant) : selectionProviderAudioLanguages(defaultVariant),
     providerAudioLanguageStatus: 'provider_declared',
     audio_verified_languages: verifiedAudioLanguages,
     audioVerifiedLanguages: verifiedAudioLanguages,
@@ -4274,6 +4304,8 @@ function titleVariantItem(variant: JsonRecord) {
     itemId: variant.external_id,
     raw_title: variant.raw_title,
     rawTitle: variant.raw_title,
+    provider_audio_languages: variant.__owned_provider_audio_languages,
+    provider_audio_language_status: 'provider_declared',
     label: variant.label,
     language: variant.language,
     quality: variant.quality,

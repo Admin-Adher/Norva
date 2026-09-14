@@ -11412,11 +11412,22 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
     await requireAutomaticLanguageEnrichmentAccess(userId, db);
     const actualKey = await loadLanguageValidationIdentity(db, userId, sourceId, true);
     if (actualKey !== identityKey) return { current: false };
-    const { data: raw, error: readError } = await db.from("cloud_catalog_visible_title_variants")
+    let readQuery = db.from("cloud_catalog_visible_title_variants")
       .select("id,external_id,codec_profile").eq("user_id", userId).eq("source_id", sourceId)
-      .eq("id", variantId).eq("item_type", "movie").maybeSingle();
+      .eq("id", variantId).eq("item_type", "movie");
+    if (claim.generationId) readQuery = readQuery.eq("generation_id", claim.generationId);
+    const { data: raw, error: readError } = await readQuery.maybeSingle();
     if (readError) throwDb(readError, "Unable to read automatic language file");
     if (!raw || raw.external_id !== itemId) return { current: false };
+    // SQL projection checks exact owner/generation/config and observation
+    // precedence. It is a provider declaration, never a fabricated codec map.
+    if (claim.lane === "unknown") {
+      const { data: declaration, error: declarationError } = await db.from("cloud_catalog_owned_audio_declarations")
+        .select("language").eq("user_id", userId).eq("source_id", sourceId).eq("variant_id", variantId).limit(1);
+      if (!declarationError && Array.isArray(declaration) && declaration.length) {
+        return { current: true, ready: false, verified: false, identified: true, needsProbe: false };
+      }
+    }
     const cache = await loadLanguageValidationCache(db, identityKey, "movie", itemId);
     let ready = false;
     let exactBound = false;
@@ -11435,12 +11446,23 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
     const tracks = Array.isArray(cache?.audio_tracks) ? cache.audio_tracks as JsonRecord[] : [];
     const identified = exactBound && tracks.length > 0
       && tracks.every((track) => !!normalizeIsoLang(stringOrNull(track.lang ?? track.language)));
+    if (identified && claim.lane === "unknown") {
+      const hydrated = await shareObservedGatewayFile(db, {
+        userId, sourceId, variantId, itemType: "movie", itemId,
+        profile: raw.codec_profile, audioProbeComplete: true, subtitleProbeComplete: false,
+      });
+      if (!hydrated) throw new HttpError(503, "Exact audio hydration deferred", { code: "audio-hydration-retry" });
+    }
     return { current: true, ready, verified, identified, needsProbe: !exactBound, profile: raw.codec_profile };
   };
   return await processAutomaticVodLanguageFile({
     claim, inspect,
     probe: async () => {
       await requireAutomaticLanguageEnrichmentAccess(userId, db);
+      if (claim.lane === "unknown") {
+        const metadata = await runOwnedMovieLanguageMetadata(db, userId, sourceId, variantId, itemId, identityKey);
+        if (metadata) return metadata;
+      }
       const token = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
       return await runCodecProfileBackfill(new Request("http://internal/codec-profile-backfill", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -11459,6 +11481,81 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
       if (acknowledged !== true) throw new HttpError(409, "Automatic language intake lease changed");
     },
   });
+}
+
+// One cheap metadata operation BEFORE downloading media. It has the same
+// source/account/circuit/idle guards as exact probes. The next tick may perform
+// a full probe if metadata was inconclusive; never open both in one claim.
+async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string, sourceId: string,
+  variantId: string, itemId: string, identityKey: string): Promise<JsonRecord | null> {
+  const { data: enabled, error: flagError } = await db.rpc("feature_flag", { p_key: "owned_provider_language_metadata_enabled" });
+  if (flagError || enabled !== true || !PLAYBACK_SESSION_UUID_PATTERN.test(identityKey) || !/^\d+$/.test(itemId)) return null;
+  const snapshot = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+  const { data: prior, error: priorError } = await db.from("catalog_owned_language_declarations")
+    .select("variant_id").eq("user_id", userId).eq("source_id", sourceId).eq("variant_id", variantId)
+    .eq("file_external_id", itemId).eq("generation_id", snapshot.generationId)
+    .eq("provider_identity_id", identityKey).eq("config_revision", snapshot.configRevision)
+    .eq("source_visibility_epoch", snapshot.sourceVisibilityEpoch).maybeSingle();
+  if (priorError) throw new HttpError(503, "Metadata state unavailable", { code: "metadata-state-retry" });
+  if (prior) return null; // An empty declaration is still a completed metadata attempt.
+  const config = await loadSourceConfig(sourceId, userId, db);
+  const serverUrl = stringOr(config.serverUrl, "");
+  const username = stringOr(config.username, "");
+  const password = stringOr(config.password, "");
+  if (!serverUrl || !username || !password) return null;
+  const runtime = await getRuntimeConfig(db);
+  if (!runtime.mediaGatewayUrl || !runtime.mediaGatewayToken) return null;
+  const target = await resolvePlaybackTarget(sourceId, "movie", itemId, userId, db);
+  const targetUrl = stringOrNull(target?.targetUrl);
+  if (!targetUrl) return { stopped: "provider-target-unavailable", attempted: 0 };
+  const accountHash = await providerAccountHashFromUrl(targetUrl);
+  const blocked = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
+  if (blocked) return { stopped: blocked, attempted: 0 };
+  await assertProviderCircuitClosed(accountHash, db);
+  await assertProviderProbeCircuitClosedStrict(db, identityKey);
+  const owner = `owned-metadata:${crypto.randomUUID()}`;
+  if (!await claimProviderFileProbeStrict(db, identityKey, owner, 180)) return { stopped: "provider-lease-busy", attempted: 0 };
+  let transportStarted = false;
+  let transportCompleted = false;
+  try {
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, snapshot);
+    await requireAutomaticLanguageEnrichmentAccess(userId, db);
+    if (await loadLanguageValidationIdentity(db, userId, sourceId, true) !== identityKey) return { stopped: "source-changed", attempted: 0 };
+    const race = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
+    if (race) return { stopped: race, attempted: 0 };
+    await assertProviderCircuitClosed(accountHash, db);
+    await assertProviderProbeCircuitClosedStrict(db, identityKey);
+    transportStarted = true;
+    const { response, value } = await fetchBoundedProviderJson(`${runtime.mediaGatewayUrl}/xtream/metadata`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.mediaGatewayToken}` },
+      body: JSON.stringify({ serverUrl, username, password, action: "get_vod_info", params: { vod_id: itemId } }),
+      timeoutMs: 55_000, maxBytes: 1024 * 1024, redirect: "error",
+    });
+    const payload = recordOrEmpty(value);
+    if (!response.ok) {
+      const code = sanitizedProviderErrorCode(payload.code);
+      if (providerProbeTerminalCode({ status: response.status, code: code || undefined }) === "provider_busy") {
+        await openProviderPlaybackCircuit(accountHash, db, true);
+      }
+      return { stopped: code || "provider-metadata-retry", attempted: 1 };
+    }
+    // A complete 200 from this uncached route follows fetchProviderJson's
+    // complete-body read/cleanup. Errors/timeouts do NOT release exclusion.
+    transportCompleted = true;
+    if (!isRecord(payload.info) && !isRecord(payload.movie_data)) return { stopped: "provider-metadata-invalid", attempted: 1 };
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, snapshot);
+    await requireAutomaticLanguageEnrichmentAccess(userId, db);
+    const { data: count, error } = await db.rpc("record_owned_movie_language_declaration", {
+      p_user_id: userId, p_source_id: sourceId, ...catalogGenerationRpcFence(snapshot),
+      p_variant_id: variantId, p_external_id: itemId, p_identity_id: identityKey, p_payload: payload,
+    });
+    if (error) throw new HttpError(409, "Metadata ownership changed", { code: "metadata-persistence-retry" });
+    return Number(count) > 0 ? { persisted: 1, attempted: 1 }
+      : { stopped: "metadata-no-language", attempted: 1 };
+  } finally {
+    if (!transportStarted || transportCompleted) await releaseProviderFileProbe(db, identityKey, owner);
+    // Uncertain transport: keep this owner's 180s lease until expiry.
+  }
 }
 
 async function exactFileProbeAdmissionEnabled(db: SupabaseClient): Promise<boolean> {

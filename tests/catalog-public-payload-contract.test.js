@@ -415,6 +415,7 @@ test('flat media grid and search keep P display data isolated from global A unde
     catalogReadEnabled: () => catalogFlag,
     attachFlatMediaFileLanguages: async () => {},
     attachFlatSelectionSeriesLanguages: async () => {},
+    attachFlatOwnedProviderLanguages: async () => {},
     requiredCatalogTitleVisibilityEpoch: () => '7',
     hydrateVisibleCatalogTitlesByIds: async () => {
       if (hydrationFails) throw new Error('visibility epoch moved');

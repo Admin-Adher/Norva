@@ -3,6 +3,8 @@ import { providerCatalogLanguage, PROVIDER_CATALOG_LANGUAGES } from './provider-
 // Supplier catalogue declarations are hints, never observed tracks or speech proof.
 const LANGUAGES = Object.freeze({ Telugu: 'te', Tamil: 'ta', Malayalam: 'ml', Hindi: 'hi', Kannada: 'kn', English: 'en' });
 const CODES = new Set([...Object.values(LANGUAGES), ...FILENAME_AUDIO_CODES, ...PROVIDER_CATALOG_LANGUAGES]);
+const canonicalDeclarationCode = code => typeof code === 'string' && /^(?:[a-z]{2}|yue)$/.test(code)
+  && !['un', 'xx', 'zz'].includes(code);
 
 export function providerAudioFacet(value) {
   // Regional catalogue fallback, never a member of the audio language codes.
@@ -13,6 +15,11 @@ export function providerAudioFacet(value) {
 
 // Query/display declarations only. Exact observed tracks remain independent.
 export function catalogProviderAudioLanguages(item = {}) {
+  // Added only by the owner-fenced server projection, never copied from metadata.
+  if (Array.isArray(item.__owned_provider_audio_languages)) {
+    const codes = item.__owned_provider_audio_languages.filter(canonicalDeclarationCode);
+    if (codes.length) return [...new Set(codes)];
+  }
   const selection = selectionProviderAudioLanguages(item);
   if (selection.length) return selection;
   const hint = providerCatalogLanguage(item);
@@ -59,10 +66,13 @@ export function selectionProviderAudioLanguages(item = {}) {
 }
 
 export function publicProviderAudioLanguages(item = {}) {
+  if (Array.isArray(item.__owned_provider_audio_languages)) {
+    return [...new Set(item.__owned_provider_audio_languages.filter(canonicalDeclarationCode))];
+  }
   const derived = selectionProviderAudioLanguages(item);
   if (derived.length) return derived;
   // Preserve this explicit public field through repeated catalog sanitization.
   if ((item.provider_audio_language_status || item.providerAudioLanguageStatus) !== 'provider_declared') return [];
   const values = item.provider_audio_languages || item.providerAudioLanguages;
-  return Array.isArray(values) ? [...new Set(values.filter(value => CODES.has(value)))] : [];
+  return Array.isArray(values) ? [...new Set(values.filter(value => CODES.has(value) || canonicalDeclarationCode(value)))] : [];
 }

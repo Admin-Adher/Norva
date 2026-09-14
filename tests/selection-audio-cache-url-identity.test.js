@@ -19,6 +19,7 @@ const oldUrl = 'https://example.com/old-audio-file.mp4';
 const newUrl = 'https://example.com/replaced-audio-file.mp4';
 
 async function fixture({ observationHash, cacheHash, sourceKind = 'selection', observationLanguage = 'es', cacheLanguage = 'es' } = {}) {
+    const { attachOwnedProviderLanguageDeclarations, useCachedAudioLanguageEvidence } = await import('../supabase/functions/_shared/owned-provider-language-declarations.mjs');
     const { isDiscoverySourceId, discoverySourceId } = await import('../supabase/functions/_shared/discovery-catalog.mjs');
     const sourceId = sourceKind === 'selection' ? await discoverySourceId(owner, 4) : '22222222-2222-4222-a222-222222222222';
     const variant = { id: 'variant-1', user_id: owner, source_id: sourceId, media_item_id: 'media-1', item_type: 'movie',
@@ -40,6 +41,7 @@ async function fixture({ observationHash, cacheHash, sourceKind = 'selection', o
         return query;
     } };
     const context = {
+        attachOwnedProviderLanguageDeclarations, useCachedAudioLanguageEvidence,
         db, console, isDiscoverySourceId, sha256Hex: async value => digest(value),
         stringOrNull: value => typeof value === 'string' && value.trim() ? value : null,
         recordOrEmpty: value => value && typeof value === 'object' ? value : {},
