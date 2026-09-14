@@ -77,10 +77,12 @@ test('prototype A copy, hierarchy and real Norva assets remain exact', () => {
   ];
   for (const copy of strings) assert.ok(page.includes(copy), `missing approved copy: ${copy}`);
 
-  assert.match(page, /\/img\/norva-app-icon-96\.png\?v=1/);
-  assert.match(page, /\/img\/icons\/norva-check-circle-simple\.svg\?v=1/);
-  assert.match(page, /\/img\/icons\/norva-refresh-simple\.svg\?v=1/);
-  assert.match(page, /\/img\/icons\/norva-account\.svg\?v=1/);
+  // Deployment replaces the development v=1 marker with a ten-digit asset
+  // digest. Keep the approved paths exact while accepting either cache key.
+  assert.match(page, /\/img\/norva-app-icon-96\.png\?v=(?:1|[a-f0-9]{10})(?=["'])/);
+  assert.match(page, /\/img\/icons\/norva-check-circle-simple\.svg\?v=(?:1|[a-f0-9]{10})(?=["'])/);
+  assert.match(page, /\/img\/icons\/norva-refresh-simple\.svg\?v=(?:1|[a-f0-9]{10})(?=["'])/);
+  assert.match(page, /\/img\/icons\/norva-account\.svg\?v=(?:1|[a-f0-9]{10})(?=["'])/);
   assert.ok(fs.existsSync(path.join(root, 'public/img/icons/norva-refresh-simple.svg')));
   assert.doesNotMatch(page, /iconify|cdn\.tailwindcss|fonts\.googleapis/);
 });

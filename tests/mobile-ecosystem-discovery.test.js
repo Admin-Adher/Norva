@@ -84,7 +84,7 @@ test('devices and pairing are permanent cloud-account destinations, not an Advan
   const devicesModule = read('public/js/components/DevicesScreensModule.js');
   const devicesIcon = read('public/img/icons/norva-devices.svg');
   assert.match(appHtml, /class="tab" data-tab="screens" id="screens-tab"[^>]*>[\s\S]*?<span data-i18n="ui_devices">Devices<\/span>[\s\S]*?<\/button>/);
-  assert.match(appHtml, /data-tab="screens"[\s\S]*?src="\/img\/icons\/norva-devices\.svg\?v=sharp-core-1"/);
+  assert.match(appHtml, /data-tab="screens"[\s\S]*?src="\/img\/icons\/norva-devices\.svg\?v=(?:sharp-core-1|[a-f0-9]{10})"/);
   assert.match(devicesIcon, /linearGradient id="norva-devices-g"/);
   assert.match(devicesIcon, /stop-color="#6ff3ff"/);
   assert.match(devicesIcon, /stop-color="#d65bff"/);
@@ -119,7 +119,7 @@ test('Android notification permission is requested only from the contextual Home
 test('transaction and win-back surfaces show the multi-device proof and name tablets', () => {
   for (const [file, proofAsset] of [
     ['public/paywall.html', /\/assets\/landing\/norva-multi-device\.svg/],
-    ['public/subscribe.html', /\/assets\/landing\/norva-every-screen-premium\.webp\?v=1/],
+    ['public/subscribe.html', /\/assets\/landing\/norva-every-screen-premium\.webp\?v=(?:1|[a-f0-9]{10})(?=["'])/],
     ['public/checkout-revolut.html', /\/assets\/landing\/norva-multi-device\.svg/],
   ]) {
     const source = read(file);
