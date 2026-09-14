@@ -133,6 +133,20 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             raw = raw.replace(/\s+مترجم\s*$/u, '');
         }
         const barePrefix = code => new RegExp(`^\\s*${code}(?=\\s*[-–—]\\s+|\\s+[-–—]\\s*|\\s*[|:])`);
+        // Full, audited supplier shelves disambiguate market prefixes. LA is
+        // not a global Spanish/Latin alias, and IN is never a Hindi alias.
+        // Hindi is explicitly declared by these shelves; no second soundtrack
+        // is invented from EN/KOREAN. Exact-file observations still take priority.
+        if (['LA - PELÍCULAS', 'LA - INFANTILES', 'LA - ANIME'].includes(categoryKey)
+            && barePrefix('LA').test(raw)) {
+            raw = raw.replace(barePrefix('LA'), 'ES'); category = 'SPANISH MOVIES';
+        } else if (categoryKey === 'IN - EN HINDI' && barePrefix('IN-EN').test(raw)) {
+            raw = raw.replace(barePrefix('IN-EN'), 'HI'); category = 'HINDI MOVIES';
+        } else if (categoryKey === 'IN - KOREAN HINDI DABBLING' && barePrefix('IN-(?:EN|KD)').test(raw)) {
+            raw = raw.replace(barePrefix('IN-(?:EN|KD)'), 'HI'); category = 'HINDI DUB';
+        } else if (categoryKey === 'افلام فرنسية مترجمة' && barePrefix('FR-AR').test(raw)) {
+            raw = raw.replace(barePrefix('FR-AR'), 'FR'); category = 'FRENCH MOVIES';
+        }
         // Exact audited shelves declare Turkish audio and Arabic subtitles.
         // Change only local parser inputs; keep all independent audio conflicts
         // and exact-file observations intact. This is not an AR/TR alias.

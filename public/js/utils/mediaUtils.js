@@ -2039,6 +2039,20 @@ const MediaUtils = (() => {
             raw = raw.replace(/\s+مترجم\s*$/u, '');
         }
         const barePrefix = code => new RegExp(`^\\s*${code}(?=\\s*[-–—]\\s+|\\s+[-–—]\\s*|\\s*[|:])`);
+        // Full, audited supplier shelves disambiguate market prefixes. LA is
+        // not a global Spanish/Latin alias, and IN is never a Hindi alias.
+        // Hindi is explicitly declared by these shelves; no second soundtrack
+        // is invented from EN/KOREAN. Exact-file observations still take priority.
+        if (['LA - PELÍCULAS', 'LA - INFANTILES', 'LA - ANIME'].includes(categoryKey)
+            && barePrefix('LA').test(raw)) {
+            raw = raw.replace(barePrefix('LA'), 'ES'); category = 'SPANISH MOVIES';
+        } else if (categoryKey === 'IN - EN HINDI' && barePrefix('IN-EN').test(raw)) {
+            raw = raw.replace(barePrefix('IN-EN'), 'HI'); category = 'HINDI MOVIES';
+        } else if (categoryKey === 'IN - KOREAN HINDI DABBLING' && barePrefix('IN-(?:EN|KD)').test(raw)) {
+            raw = raw.replace(barePrefix('IN-(?:EN|KD)'), 'HI'); category = 'HINDI DUB';
+        } else if (categoryKey === 'افلام فرنسية مترجمة' && barePrefix('FR-AR').test(raw)) {
+            raw = raw.replace(barePrefix('FR-AR'), 'FR'); category = 'FRENCH MOVIES';
+        }
         // Exact audited shelves declare Turkish audio and Arabic subtitles.
         // Change only local parser inputs; keep all independent audio conflicts
         // and exact-file observations intact. This is not an AR/TR alias.
@@ -2225,6 +2239,29 @@ const MediaUtils = (() => {
         const codes = displayable ? (state.known && state.tracks.length ? versionTrackLanguages(state.tracks)
             : languages.known ? languages.languages : []) : [];
         const accessibleHeadline = codes.length > 1 ? codes.map(languageDisplayFull).join(' / ') : headline;
+        // A container language tag is not a speech verification. When an
+        // explicitly probed exact file contradicts a supplier declaration,
+        // surface the disagreement instead of silently certifying either side.
+        // This is presentation only: keep track indices, filters and evidence.
+        const probedAt = item.audioProbedAt || item.audio_probed_at || codecProfileFromItem(item)?.probedAt;
+        const verifiedAt = item.audioLanguageVerifiedAt || item.audio_language_verified_at;
+        const supplier = providerHints && validation === 'probed' && codes.length && observed
+            && ['file', 'codec', 'file-languages'].includes(source)
+            && scope !== 'series'
+            && Number.isFinite(Date.parse(String(probedAt || ''))) && !verifiedAt
+            ? versionProviderLanguageHint(item) : null;
+        if (supplier && !supplier.kind && supplier.tag !== 'nordic' && !codes.includes(supplier.tag)) {
+            const conflictHeadline = globalThis.NorvaI18n?.t('ui_web_audio_language_conflict', {
+                defaultValue: 'Audio needs verification'
+            }) ?? 'Audio needs verification';
+            const conflictDescription = globalThis.NorvaI18n?.t('ui_web_audio_language_conflict_detail', {
+                defaultValue: 'Provider: {{provider}}. File metadata: {{file}}. Audio not verified.',
+                provider: supplier.label, file: codes.map(languageDisplayFull).join(' / ')
+            }) ?? `Provider: ${supplier.label}. File metadata: ${codes.map(languageDisplayFull).join(' / ')}. Audio not verified.`;
+            return { headline: conflictHeadline, accessibleHeadline: conflictDescription,
+                languageStatus: '', languageConfirmationStatus: conflictHeadline,
+                audioSource: source, languageConflict: true, conflictDescription };
+        }
         return { headline, accessibleHeadline, languageStatus,
             ...(regional ? { kind: 'region' } : {}),
             languageConfirmationStatus: interpreted?.confirmationStatus || '',
@@ -2325,8 +2362,7 @@ const MediaUtils = (() => {
         // tracks must not hide the languages already known for this exact file.
         // The ordered track map (including unknowns) remains unchanged for playback.
         if (langs.length === 1) return languageDisplayFull(langs[0]);
-        if (langs.length <= 4) return langs.map(languageDisplay).join(' / ');
-        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
+        return langs.map(languageDisplay).join(' / ');
     }
 
     function versionAudioLanguageHeadline(state) {
@@ -2334,8 +2370,7 @@ const MediaUtils = (() => {
         const langs = state.languages || [];
         if (!langs.length) return '';
         if (langs.length === 1) return languageDisplayFull(langs[0]);
-        if (langs.length <= 4) return langs.map(languageDisplay).join(' / ');
-        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_de499c6bb887", {defaultValue: "{{p0}} audio languages", p0:(langs.length)}) : `${langs.length} audio languages`);
+        return langs.map(languageDisplay).join(' / ');
     }
 
     function versionSubtitleLabel(item, state, languageState) {
@@ -2354,7 +2389,9 @@ const MediaUtils = (() => {
         }
         const tag = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
         if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
-            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_02fea12001f8", {defaultValue: "ST {{p0}} · burned-in", p0:(languageDisplay(tag.subLang))}) : `ST ${languageDisplay(tag.subLang)} · burned-in`);
+            // A provider prefix does not prove that subtitles are burned into
+            // the picture. Keep the declared subtitle language separate from audio.
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_02fea12001f8", {defaultValue: "Subtitles: {{p0}} · provider", p0:(languageDisplayFull(tag.subLang))}) : `Subtitles: ${languageDisplayFull(tag.subLang)} · provider`);
         }
         return '';
     }

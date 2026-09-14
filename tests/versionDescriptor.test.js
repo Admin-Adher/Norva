@@ -30,7 +30,7 @@ const desc = (item, siblings) => M.versionDescriptor(item, {
 test('AR-SUBS means Arabic subtitles, never Arabic audio without a file probe', () => {
     const d = desc(mk('AR-SUBS - Something'));
     assert.strictEqual(d.headline, 'Language unidentified');
-    assert.match(d.meta, /ST AR · burned-in/);
+    assert.match(d.meta, /Subtitles: Arabic · provider/);
     assert.doesNotMatch(d.headline, /Arabic/);
 });
 
@@ -41,7 +41,7 @@ test('AR-SUBS with an exact English track leads with English', () => {
         audio_tracks: [{ index: 1, lang: 'eng' }]
     }));
     assert.strictEqual(d.headline, 'English');
-    assert.match(d.meta, /ST AR · burned-in/);
+    assert.match(d.meta, /Subtitles: Arabic · provider/);
     assert.strictEqual(d.audioSource, 'file');
 });
 
@@ -56,7 +56,7 @@ test('tenant exact-file language evidence labels AR-SUBS without inventing a str
         subtitle_languages: []
     }));
     assert.strictEqual(d.headline, 'English');
-    assert.match(d.meta, /ST AR · burned-in/);
+    assert.match(d.meta, /Subtitles: Arabic · provider/);
     assert.strictEqual(d.audioSource, 'file-languages');
 });
 
@@ -70,7 +70,7 @@ test('many exact-file language observations stay compact and keep platform secon
         subtitle_languages_observed: true,
         subtitle_languages: ['ara', 'cze', 'dan', 'deu', 'eng', 'fre']
     }));
-    assert.strictEqual(d.headline, '5 audio languages');
+    assert.strictEqual(d.headline, 'AR / CS / DE / EN / FR');
     assert.match(d.meta, /^6 ST · NF ·/);
     assert.equal(d.internalProviderLabel, 'NF · Provider label');
 });
@@ -114,7 +114,7 @@ test('large multi-audio Netflix file stays compact and Netflix is metadata', () 
         subtitle_tracks_scope: 'file',
         subtitle_tracks: subtitleTracks
     }));
-    assert.strictEqual(d.headline, '5 audio languages');
+    assert.strictEqual(d.headline, 'EN / ES / DE / IT / FR');
     assert.match(d.meta, /^32 ST · NF ·/);
     assert.equal(d.internalProviderLabel, 'NF · Provider label');
 });

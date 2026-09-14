@@ -30,7 +30,8 @@ module.exports = [
     ['PK - Aashiq Colony', 'PK - PAKISTANI MOVIES', null],
     ['PH - Call Me Mother', 'PH - PHILIPPINES FILM', null],
     ['PH - The Woman In The Hole', 'PH - RATED R', null],
-    ['IN-EN - Wind Walkers', 'IN - EN HINDI', null],
+    // Separately audited 14 September; this exact shelf declares Hindi.
+    ['IN-EN - Wind Walkers', 'IN - EN HINDI', 'hi'],
     ['IN-CAM - Mirzapur: The Movie', 'IN - CAM & NEW RELEASE', null],
     ['AR-SUBS - Just Play Dead', 'أفلام أجنبية 2026', null],
     ['AR ▎ ملحمة الشجرة السوداء', 'AR ▎TURKISH | تركي', null],

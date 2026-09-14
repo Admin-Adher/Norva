@@ -71,7 +71,8 @@ module.exports = [
     ['NL | Example [EN]', 'NL | HINDI', null],
     ['NL | Example', 'NL | FILMS', 'nl'],
     ['AR | Example', 'AR | FRENCH', null],
-    ['IN-EN | Example', 'IN - EN HINDI', null],
+    // Full shelf audited on 14 September: Hindi declaration, not two tracks.
+    ['IN-EN | Example', 'IN - EN HINDI', 'hi'],
     ['IR | Example', 'IRAN', null],
     ['Example', 'IRAN', null],
     ['PK | Example', 'ASIA | PAKISTAN', null],

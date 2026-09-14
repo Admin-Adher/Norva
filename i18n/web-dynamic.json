@@ -21470,20 +21470,20 @@
     "fil": "ST {{p0}}"
   },
   "ui_web_02fea12001f8": {
-    "source": "ST {{p0}} · burned-in",
+    "source": "Subtitles: {{p0}} · provider",
     "refs": [
       "public/js/utils/mediaUtils.js"
     ],
-    "en": "ST {{p0}} · burned-in",
-    "fr": "ST {{p0}} · brûlé",
-    "pt-BR": "ST {{p0}} · queimado",
-    "es": "ST {{p0}} · quemado",
-    "hi": "ST {{p0}} · जल गया",
-    "tr": "ST {{p0}} · yanmış",
-    "bn": "ST {{p0}} · বার্ন-ইন",
-    "ar": "ST {{p0}} · محترق",
-    "id": "ST {{p0}} · terbakar",
-    "fil": "ST {{p0}} · nasunog"
+    "en": "Subtitles: {{p0}} · provider",
+    "fr": "Sous-titres : {{p0}} · fournisseur",
+    "pt-BR": "Legendas: {{p0}} · provedor",
+    "es": "Subtítulos: {{p0}} · proveedor",
+    "hi": "उपशीर्षक: {{p0}} · प्रदाता",
+    "tr": "Altyazı: {{p0}} · sağlayıcı",
+    "bn": "সাবটাইটেল: {{p0}} · সরবরাহকারী",
+    "ar": "ترجمة: {{p0}} · المزوّد",
+    "id": "Subtitel: {{p0}} · penyedia",
+    "fil": "Mga subtitle: {{p0}} · provider"
   },
   "ui_web_59f7a3dd09de": {
     "source": "recently",

@@ -23,7 +23,7 @@ test('audited Turkish shelves separate Arabic subtitles across browser and serve
         assert.equal(catalogVariantMatchesAudio(value,'unidentified'),!expected,label);
         assert.equal(catalogVariantMatchesAudio(value,'catalog-tr'),expected==='tr',label);
         assert.equal(catalogVariantMatchesAudio(value,'catalog-ar'),false,label);
-        assert.equal(M.versionDescriptor(value,{providerLanguageHints:true}).headline,expected?'Turkish':'Language unidentified',label);
+        assert.equal(M.versionDescriptor(value,{providerLanguageHints:true}).headline,expected?M.languageDisplayFull(expected):'Language unidentified',label);
         assert.equal(JSON.stringify(value),original,label);
     }
 });
