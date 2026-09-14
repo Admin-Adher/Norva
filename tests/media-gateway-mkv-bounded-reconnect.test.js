@@ -3958,6 +3958,8 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
         releaseVideoEncoderAdmission: () => {},
         videoEncoderInputArgs: () => [],
         videoEncoderOutputArgs: () => ['-c:v', 'h264'],
+        videoEncoderTimestampArgs: require('../services/media-gateway/src/video-encoder').videoEncoderTimestampArgs,
+        isLiveSession: () => false,
         VIDEO_ENCODER_CONFIG: { backend: 'software' },
         vaapiHardwareDecodeCodecForSession: () => null,
         isFiniteMkvVodSession,
@@ -4001,6 +4003,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
     startFfmpeg(session);
     const inputAt = capturedArgs.indexOf('-i');
     const seekAt = capturedArgs.indexOf('-ss');
+    assert.equal(capturedArgs[capturedArgs.indexOf('-enc_time_base:v') + 1], '1:90000');
     assert.ok(seekAt >= 0 && seekAt < inputAt, 'the temporal seek must be an input seek before -i');
     assert.equal(capturedArgs[seekAt + 1], '2062');
     assert.equal(capturedArgs[inputAt + 1], session.finiteMkvSeekBroker.inputUrl);

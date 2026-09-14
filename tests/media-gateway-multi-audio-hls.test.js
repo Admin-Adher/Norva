@@ -263,6 +263,8 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
             videoModeForSession: (value) => value.videoMode,
             videoEncoderInputArgs,
             videoEncoderOutputArgs,
+            videoEncoderTimestampArgs: require('../services/media-gateway/src/video-encoder').videoEncoderTimestampArgs,
+            isLiveSession: () => false,
             VIDEO_ENCODER_CONFIG: { backend: 'software' },
             vaapiHardwareDecodeCodecForSession: () => null,
             reserveVideoEncoderAdmission: () => true,
@@ -311,6 +313,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
     assert.equal(capturedArgs[capturedArgs.indexOf('-ac') + 1], '2');
     assert.equal(capturedArgs[capturedArgs.indexOf('-profile:a') + 1], 'aac_low');
     assert.equal(capturedArgs[capturedArgs.indexOf('-c:v') + 1], 'libx264');
+    assert.equal(capturedArgs[capturedArgs.indexOf('-enc_time_base:v') + 1], '1:90000');
     assert.equal(capturedArgs[capturedArgs.indexOf('-force_key_frames') + 1], 'expr:gte(t,n_forced*2)');
     assert.equal(capturedArgs[capturedArgs.indexOf('-hls_time') + 1], '2');
     assert.match(capturedArgs[capturedArgs.indexOf('-hls_segment_filename') + 1], /%v-%05d\.ts$/);
