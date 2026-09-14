@@ -56,6 +56,16 @@ Do not replace the complete production runtime with a repository snapshot.
 The existing idle/drain gate must pass; queued/running transcription work is not
 authorization to kill jobs, change admission switches or bypass that gate.
 
+The scoped operator is `ops/hetzner/scripts/deploy-unknown-first-language-edge.py`.
+Its binder takes a read-only copy of the five explicitly hashed live baseline
+files and creates Git-bound archives for six paths, including the new helper.
+Run `bind-sql`, `stage <commit>`, then
+`launch activate-only-owned-language-edge-six-files` in its fresh private root.
+The operator pins the existing idle/drain/retained-container recovery helper,
+checks both the installed owned-language SQL and prior supplier-parser proof,
+and performs no SQL writes or switch activation. `status` must confirm both
+replicas and restored cron state. Never reuse a closed or failed attempt.
+
 Only after both replicas, owner-isolation checks and catalogue label/filter
 parity are verified may the new metadata/projection switch be enabled. Keep the
 independent `language_metadata_lane_enabled` and exact-file admission settings
