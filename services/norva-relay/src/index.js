@@ -1635,13 +1635,28 @@ function normalizeRelayLang(value) {
   // etc. The old `.slice(0, 3)` turned "fr-FR" into "fr-" (length 3, not in the
   // map) → null, dropping the language for every track in such files. Split on
   // the subtag separator first so "fr-FR" → "fr".
-  const primary = String(value || "").toLowerCase().trim().split(/[-_]/)[0];
-  const v = primary.slice(0, 3);
-  if (!v || v === "und" || v === "mis" || v === "zxx" || v === "mul") return null;
+  const v = String(value || "").toLowerCase().trim().split(/[-_]/)[0];
+  if (!v || ["un", "und", "mis", "mul", "zxx", "nar"].includes(v)) return null;
+  // These are stream-language aliases, not provider country/category codes.
+  // Keep the ISO-639-2 mappings aligned with norva-playback's normalizeIsoLang:
+  // dropping fil/tgl, per/fas, tam/tel etc. here permanently loses their tags
+  // before the exact-file cache or the Edge normalizer can consume them.
   const map = {
-    fre: "fr", fra: "fr", eng: "en", ger: "de", deu: "de", spa: "es", ita: "it",
-    por: "pt", dut: "nl", nld: "nl", ara: "ar", rus: "ru", tur: "tr", pol: "pl",
-    hin: "hi", jpn: "ja", kor: "ko", zho: "zh", chi: "zh",
+    afr: "af", aze: "az", glg: "gl", guj: "gu", kan: "kn", kaz: "kk",
+    khm: "km", kir: "ky", lat: "la", mal: "ml", mar: "mr", nep: "ne",
+    oci: "oc", ori: "or", pan: "pa", scr: "hr", tgl: "tl", yor: "yo", zul: "zu",
+    alb: "sq", sqi: "sq", ara: "ar", arm: "hy", hye: "hy", baq: "eu", eus: "eu",
+    ben: "bn", bos: "bs", bul: "bg", bur: "my", mya: "my", cat: "ca",
+    chi: "zh", zho: "zh", cze: "cs", ces: "cs", dan: "da", dut: "nl", nld: "nl",
+    eng: "en", est: "et", fil: "tl", fin: "fi", fre: "fr", fra: "fr",
+    geo: "ka", kat: "ka", ger: "de", deu: "de", gre: "el", ell: "el",
+    heb: "he", hin: "hi", hrv: "hr", hun: "hu", ice: "is", isl: "is",
+    ind: "id", ita: "it", jpn: "ja", kor: "ko", lav: "lv", lit: "lt",
+    mac: "mk", mkd: "mk", may: "ms", msa: "ms", nob: "no", nor: "no",
+    per: "fa", fas: "fa", pol: "pl", por: "pt", rum: "ro", ron: "ro",
+    rus: "ru", slo: "sk", slk: "sk", slv: "sl", spa: "es", srp: "sr",
+    swe: "sv", tam: "ta", tel: "te", tha: "th", tur: "tr", ukr: "uk",
+    urd: "ur", vie: "vi",
   };
   const code = map[v] || (v.length === 2 ? v : null);
   return code && /^[a-z]{2}$/.test(code) ? code : null;

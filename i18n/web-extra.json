@@ -1,30 +1,4 @@
 {
-  "ui_web_audio_language_conflict": {
-    "source": "Audio needs verification",
-    "en": "Audio needs verification",
-    "fr": "Audio à vérifier",
-    "pt-BR": "Áudio a verificar",
-    "es": "Audio por verificar",
-    "hi": "ऑडियो की जाँच आवश्यक है",
-    "tr": "Ses doğrulanmalı",
-    "bn": "অডিও যাচাই প্রয়োজন",
-    "ar": "الصوت يحتاج إلى تحقق",
-    "id": "Audio perlu diverifikasi",
-    "fil": "Kailangang suriin ang audio"
-  },
-  "ui_web_audio_language_conflict_detail": {
-    "source": "Provider: {{provider}}. File metadata: {{file}}. Audio not verified.",
-    "en": "Provider: {{provider}}. File metadata: {{file}}. Audio not verified.",
-    "fr": "Fournisseur : {{provider}}. Métadonnées du fichier : {{file}}. Audio non vérifié.",
-    "pt-BR": "Provedor: {{provider}}. Metadados do arquivo: {{file}}. Áudio não verificado.",
-    "es": "Proveedor: {{provider}}. Metadatos del archivo: {{file}}. Audio no verificado.",
-    "hi": "प्रदाता: {{provider}}। फ़ाइल मेटाडेटा: {{file}}। ऑडियो सत्यापित नहीं है।",
-    "tr": "Sağlayıcı: {{provider}}. Dosya meta verisi: {{file}}. Ses doğrulanmadı.",
-    "bn": "সরবরাহকারী: {{provider}}। ফাইল মেটাডেটা: {{file}}। অডিও যাচাই করা হয়নি।",
-    "ar": "المزوّد: {{provider}}. بيانات الملف: {{file}}. الصوت غير متحقق منه.",
-    "id": "Penyedia: {{provider}}. Metadata berkas: {{file}}. Audio belum diverifikasi.",
-    "fil": "Provider: {{provider}}. Metadata ng file: {{file}}. Hindi pa nasusuri ang audio."
-  },
   "ui_web_audio_language_unidentified": {
     "source": "Language unidentified",
     "refs": ["public/js/utils/mediaUtils.js"],

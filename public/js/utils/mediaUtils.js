@@ -2239,10 +2239,10 @@ const MediaUtils = (() => {
         const codes = displayable ? (state.known && state.tracks.length ? versionTrackLanguages(state.tracks)
             : languages.known ? languages.languages : []) : [];
         const accessibleHeadline = codes.length > 1 ? codes.map(languageDisplayFull).join(' / ') : headline;
-        // A container language tag is not a speech verification. When an
-        // explicitly probed exact file contradicts a supplier declaration,
-        // surface the disagreement instead of silently certifying either side.
-        // This is presentation only: keep track indices, filters and evidence.
+        // A container language tag is not a speech verification. Keep supplier
+        // disagreements as structured internal diagnostics, never user-facing
+        // text, tooltips or accessibility labels. An internal warning alone
+        // cannot rewrite exact-file evidence or its playback track indices.
         const probedAt = item.audioProbedAt || item.audio_probed_at || codecProfileFromItem(item)?.probedAt;
         const verifiedAt = item.audioLanguageVerifiedAt || item.audio_language_verified_at;
         const supplier = providerHints && validation === 'probed' && codes.length && observed
@@ -2251,16 +2251,10 @@ const MediaUtils = (() => {
             && Number.isFinite(Date.parse(String(probedAt || ''))) && !verifiedAt
             ? versionProviderLanguageHint(item) : null;
         if (supplier && !supplier.kind && supplier.tag !== 'nordic' && !codes.includes(supplier.tag)) {
-            const conflictHeadline = globalThis.NorvaI18n?.t('ui_web_audio_language_conflict', {
-                defaultValue: 'Audio needs verification'
-            }) ?? 'Audio needs verification';
-            const conflictDescription = globalThis.NorvaI18n?.t('ui_web_audio_language_conflict_detail', {
-                defaultValue: 'Provider: {{provider}}. File metadata: {{file}}. Audio not verified.',
-                provider: supplier.label, file: codes.map(languageDisplayFull).join(' / ')
-            }) ?? `Provider: ${supplier.label}. File metadata: ${codes.map(languageDisplayFull).join(' / ')}. Audio not verified.`;
-            return { headline: conflictHeadline, accessibleHeadline: conflictDescription,
-                languageStatus: '', languageConfirmationStatus: conflictHeadline,
-                audioSource: source, languageConflict: true, conflictDescription };
+            return { headline, accessibleHeadline, languageStatus: '', languageConfirmationStatus: '',
+                audioSource: source, languageConflict: true,
+                internalAudioDiagnostic: { code: 'provider_file_language_conflict',
+                    providerLanguage: supplier.tag, fileLanguages: [...codes], verificationRequired: true } };
         }
         return { headline, accessibleHeadline, languageStatus,
             ...(regional ? { kind: 'region' } : {}),
@@ -2387,11 +2381,19 @@ const MediaUtils = (() => {
             if (langs.length === 1) return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_eeb31fc3ce6f", {defaultValue: "ST {{p0}}", p0:(languageDisplay(langs[0]))}) : `ST ${languageDisplay(langs[0])}`);
             return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_eeb31fc3ce6f", {defaultValue: "ST {{p0}}", p0:(langs.map(languageDisplay).join('/'))}) : `ST ${langs.map(languageDisplay).join('/')}`);
         }
-        const tag = parseLeadingRegionTag(versionRawTitle(item).replace(BAR_SEPARATORS, ' - '));
-        if (tag && tag.hasSub && !tag.hasDub && tag.subLang) {
+        const raw = versionRawTitle(item).replace(BAR_SEPARATORS, ' - ');
+        const tag = parseLeadingRegionTag(raw);
+        const category = String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').trim().replace(/\s+/g, ' ');
+        // PH is a market prefix, not an audio or subtitle language. Only this
+        // complete audited shelf explicitly declares Tagalog subtitles. The
+        // neighbouring TAGALOG DUB shelf must never acquire this subtitle label.
+        const categorySubtitle = category === 'PH - TAGALOG SUB MOVIES'
+            && /^\s*PH(?=\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:])/.test(raw) ? 'fil' : '';
+        const subtitle = tag && tag.hasSub && !tag.hasDub && tag.subLang ? tag.subLang : categorySubtitle;
+        if (subtitle) {
             // A provider prefix does not prove that subtitles are burned into
             // the picture. Keep the declared subtitle language separate from audio.
-            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_02fea12001f8", {defaultValue: "Subtitles: {{p0}} · provider", p0:(languageDisplayFull(tag.subLang))}) : `Subtitles: ${languageDisplayFull(tag.subLang)} · provider`);
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_02fea12001f8", {defaultValue: "Subtitles: {{p0}} · provider", p0:(languageDisplayFull(subtitle))}) : `Subtitles: ${languageDisplayFull(subtitle)} · provider`);
         }
         return '';
     }
