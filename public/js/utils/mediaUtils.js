@@ -1139,7 +1139,12 @@ const MediaUtils = (() => {
         if (hasDisplayableAudioLanguage(item)) return [];
         if ((item.providerAudioLanguageStatus || item.provider_audio_language_status) !== 'provider_declared') return [];
         const raw = item.providerAudioLanguages || item.provider_audio_languages;
-        return Array.isArray(raw) ? [...new Set(raw.filter(code => ['te', 'ta', 'ml', 'hi', 'kn', 'en', 'es', 'pt', 'fr', 'de', 'it', 'nl', 'ja', 'ko', 'zh', 'ar', 'ru', 'tr', 'bn', 'fil', 'id'].includes(code)))] : [];
+        // The server already canonicalizes owned stream declarations. Do not
+        // restrict them to the former Selection-only language list (which hid
+        // Persian, Urdu, Tagalog and other valid catalogue languages).
+        return Array.isArray(raw) ? [...new Set(raw.slice(0, 32).filter(code =>
+            typeof code === 'string' && /^(?:[a-z]{2}|fil|yue)$/.test(code)
+            && !['un', 'xx', 'zz'].includes(code)))] : [];
     }
 
     function providerAudioStatusLabel() {

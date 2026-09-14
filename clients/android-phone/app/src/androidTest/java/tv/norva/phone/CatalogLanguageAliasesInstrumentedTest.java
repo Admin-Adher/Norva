@@ -26,17 +26,24 @@ public class CatalogLanguageAliasesInstrumentedTest {
             WebView view = new WebView(instrumentation.getTargetContext()); holder.set(view);
             view.getSettings().setJavaScriptEnabled(true);
             view.getSettings().setTextZoom(zoom);
+            view.getSettings().setUseWideViewPort(true);
             view.setWebViewClient(new WebViewClient() {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
                     try {
-                        return new WebResourceResponse("text/javascript", "UTF-8", instrumentation.getContext().getAssets().open(request.getUrl().getPath().substring(1)));
+                        String path = request.getUrl().getPath();
+                        String mime = path.endsWith(".css") ? "text/css" : path.endsWith(".js") ? "text/javascript" : "application/octet-stream";
+                        return new WebResourceResponse(mime, "UTF-8", instrumentation.getContext().getAssets().open(path.substring(1)));
                     } catch (Exception ignored) {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
                     }
                 }
                 @Override public void onPageFinished(WebView v, String url) { loaded.countDown(); }
             });
-            view.loadDataWithBaseURL("https://norva-languages.test/", "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width, initial-scale=1'><body><script src='/js/utils/mediaUtils.js'></script></body></html>", "text/html", "UTF-8", null);
+            float density = instrumentation.getTargetContext().getResources().getDisplayMetrics().density;
+            int width = Math.round(360 * density), height = Math.round(800 * density);
+            view.measure(android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(height, android.view.View.MeasureSpec.EXACTLY));
+            view.layout(0, 0, width, height);
+            view.loadDataWithBaseURL("https://norva-languages.test/", "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width, initial-scale=1'><link rel='stylesheet' href='/css/main.css'><body><script src='/js/utils/mediaUtils.js'></script></body></html>", "text/html", "UTF-8", null);
         });
         try {
             assertTrue("Production utility loaded", loaded.await(30, TimeUnit.SECONDS));
@@ -48,12 +55,24 @@ public class CatalogLanguageAliasesInstrumentedTest {
                 + "if(MediaUtils.versionDescriptor(item).headline==='Language unidentified')throw Error('missing badge '+raw);"
                 + "if(!new Intl.DisplayNames(['fr'],{type:'language'}).of(code))throw Error('language label '+code);"
                 + "}"
+                + "for(const locale of ['fr','en','ar']) for(const code of ['fa','ur','tl','gu','or','yue','sq','bs','hr','sr','sl','mk','sw']){"
+                + "document.documentElement.lang=locale;document.documentElement.dir=locale==='ar'?'rtl':'ltr';"
+                + "const owned={item_type:'movie',provider_audio_languages:[code],provider_audio_language_status:'provider_declared'};"
+                + "const presentation=MediaUtils.catalogLanguageInfo(owned);"
+                + "if(presentation.text!==MediaUtils.languageDisplayFull(code))throw Error('owned declaration hidden '+code);"
+                + "document.body.innerHTML='<div class=movie-card style=\"width:240px;height:320px;margin:24px\"><div class=movie-poster style=\"height:100%\">'+MediaUtils.languageBadgeHtml(presentation)+'</div></div>';"
+                + "const badge=document.querySelector('.catalog-language-badge'),label=badge.querySelector('.language-badge-label'),poster=badge.closest('.movie-poster');"
+                + "if(badge.getAttribute('aria-label')!==presentation.accessibleHeadline)throw Error('owned accessible label '+code);"
+                + "if(label.scrollWidth>label.clientWidth+1||label.scrollHeight>label.clientHeight+1)throw Error('owned clipped label '+code);"
+                + "const r=label.getBoundingClientRect(),p=poster.getBoundingClientRect();if(r.left<p.left-1||r.right>p.right+1||r.bottom>p.bottom+1)throw Error('owned badge overflow '+code);"
+                + "if(/vérifier|verify|unverified|provider_declared/.test(badge.outerHTML))throw Error('internal diagnostic leaked');"
+                + "}"
                 + "const unprobed={item_type:'movie',raw_title:'FR | Film',audio_language_validation_status:'not_analyzed'};"
                 + "if(MediaUtils.versionDescriptor(unprobed).headline!=='Language unidentified')throw Error('title guessed as audio');"
                 + "return 'ok';}catch(e){return String(e);}})()", value -> {result.set(value); evaluated.countDown();}));
             assertTrue("WebView utility responded", evaluated.await(20, TimeUnit.SECONDS));
             assertEquals("textZoom="+zoom, "\"ok\"", result.get());
-            System.out.println("CATALOG_LANGUAGE_ALIASES_WEBVIEW_OK aliases=19 textZoom="+zoom);
+            System.out.println("CATALOG_LANGUAGE_ALIASES_WEBVIEW_OK aliases=19 ownedLanguageCases=39 textZoom="+zoom);
         } finally { instrumentation.runOnMainSync(() -> holder.get().destroy()); }
     }
 }
