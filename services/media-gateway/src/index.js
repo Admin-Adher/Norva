@@ -117,6 +117,7 @@ const {
     resolveVideoEncoderConfig,
     videoEncoderInputArgs,
     videoEncoderOutputArgs,
+    videoEncoderTimestampArgs,
 } = require('./video-encoder');
 const {
     finiteMkvLinearSeekBridgeArgs,
@@ -15230,6 +15231,7 @@ function startFfmpeg(session) {
 
     const hlsOutputArgs = [
         '-fps_mode', 'passthrough',
+        ...videoEncoderTimestampArgs(encodeVideo, isLiveSession(session)),
         ...(preserveCopySeekTimestamps
             ? ['-avoid_negative_ts', 'disabled', '-mpegts_copyts', '1', '-muxpreload', '0', '-muxdelay', '0']
             : []),
@@ -16178,7 +16180,10 @@ function sharedMediaCachePipelineBuildForSession(session, staticContext = null) 
     if (!['copy', 'encode'].includes(videoMode)) return null;
     if (!multiAudio && !['copy', 'transcode'].includes(audioMode)) return null;
     if (!Number.isInteger(targetSeconds) || targetSeconds < 1 || targetSeconds > 30) return null;
-    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:subtitles-webvtt-${subtitleCount}:target-${targetSeconds}`;
+    // Encoded graphs produced with the old frame-rate clock can contain
+    // duplicate PTS. Keep copy caches reusable, but never replay that encoding.
+    const encoderClock = videoMode === 'encode' ? ':clock-90khz-v1' : '';
+    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}${encoderClock}:audio-${audioMode}:subtitles-webvtt-${subtitleCount}:target-${targetSeconds}`;
 }
 
 function cloneMkvCompleteHlsCacheProfile(profile) {
@@ -16219,7 +16224,8 @@ function mkvCompleteHlsCachePipelineBuildForSession(session, staticContext = nul
     if (!['copy', 'encode'].includes(videoMode)) return null;
     if (!multiAudio && !['copy', 'transcode'].includes(audioMode)) return null;
     if (!Number.isInteger(targetSeconds) || targetSeconds < 1 || targetSeconds > 30) return null;
-    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}:audio-${audioMode}:subtitles-webvtt-${subtitleCount}:target-${targetSeconds}`;
+    const encoderClock = videoMode === 'encode' ? ':clock-90khz-v1' : '';
+    return `${MKV_COMPLETE_HLS_CACHE_PIPELINE_BUILD}:video-${videoMode}${encoderClock}:audio-${audioMode}:subtitles-webvtt-${subtitleCount}:target-${targetSeconds}`;
 }
 
 function buildMkvCompleteHlsCacheLocator(session, nowMs = Date.now()) {

@@ -185,6 +185,7 @@ function loadFastStartHarness(overrides = {}) {
       applyVaapiReadiness: applyVaapiVodStartupReadiness,
       analyzerGate: shouldCreateMkvH264FullFilePacketAnalyzer,
       buildCompleteCacheLocator: buildMkvCompleteHlsCacheLocator,
+      sealCompleteCacheProof: sealMkvCompleteHlsCacheProof,
       verifyGenericCompleteCache: verifiedGenericMkvCompleteCacheBinding,
       openCompleteCacheProof: openMkvCompleteHlsCacheProof,
     }; })()`,
@@ -1023,7 +1024,7 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   assert.equal(locator.payload.scope, 'complete-hls');
   assert.equal(
     locator.payload.pipelineBuild,
-    'mkv-complete-hls-mpegts-v6:video-encode:audio-transcode:subtitles-webvtt-0:target-4',
+    'mkv-complete-hls-mpegts-v6:video-encode:clock-90khz-v1:audio-transcode:subtitles-webvtt-0:target-4',
   );
   assert.equal(h.openCompleteCacheProof(locator.envelope)?.profileFingerprint, locator.payload.profileFingerprint);
 
@@ -1038,6 +1039,16 @@ test('generic complete-cache locator admits a prepared HEVC graph without provid
   const accepted = h.verifyGenericCompleteCache(replay, issuedAtMs + 1_000);
   assert.equal(accepted.eligible, true);
   assert.equal(accepted.binding.pipelineBuild, locator.payload.pipelineBuild);
+
+  const legacyEncodedProof = h.sealCompleteCacheProof({
+    ...locator.payload,
+    pipelineBuild: locator.payload.pipelineBuild.replace(':clock-90khz-v1', ''),
+  });
+  assert.equal(h.verifyGenericCompleteCache({
+    ...replay,
+    codecProfile: { ...replay.codecProfile, mkvCompleteHlsCacheProof: legacyEncodedProof },
+  }, issuedAtMs + 1_000).reason, 'stale-or-unsupported-cache-proof',
+  'even an authentic old encoded graph must be regenerated with the precise clock');
 
   const requestShapedReplay = { ...replay };
   delete requestShapedReplay.audioStreamIndex;
@@ -1102,7 +1113,7 @@ test('generic complete-cache lookup authenticates the signed segmentation target
   const locator = h.buildCompleteCacheLocator(trained, issuedAtMs);
   assert.equal(
     locator?.payload?.pipelineBuild,
-    'mkv-complete-hls-mpegts-v6:video-encode:audio-transcode:subtitles-webvtt-0:target-2',
+    'mkv-complete-hls-mpegts-v6:video-encode:clock-90khz-v1:audio-transcode:subtitles-webvtt-0:target-2',
   );
 
   const requestShapedReplay = {
@@ -1152,7 +1163,7 @@ test('generic complete-cache locator binds the exact multi-audio HLS topology', 
   assert.ok(locator?.envelope);
   assert.equal(
     locator.payload.pipelineBuild,
-    'mkv-complete-hls-mpegts-v6:video-encode:audio-multi-aac-2:subtitles-webvtt-0:target-2',
+    'mkv-complete-hls-mpegts-v6:video-encode:clock-90khz-v1:audio-multi-aac-2:subtitles-webvtt-0:target-2',
   );
 
   const replay = {
@@ -1829,6 +1840,8 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
     vaapiHardwareDecodeCodecForSession: () => null,
     videoEncoderInputArgs,
     videoEncoderOutputArgs,
+    videoEncoderTimestampArgs: require('../services/media-gateway/src/video-encoder').videoEncoderTimestampArgs,
+    isLiveSession: () => false,
     VIDEO_ENCODER_CONFIG: { backend: 'software' },
     reserveVideoEncoderAdmission: () => true,
     releaseVideoEncoderAdmission: () => {},
@@ -1865,6 +1878,7 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
   assert.equal(session.startupTimings.ffmpegSpawnCount, 1);
   assert.equal(capturedArgs[capturedArgs.indexOf('-map') + 1], '0:V:0?', 'replay must map the same uppercase-V stream that was attested');
   assert.equal(capturedArgs[capturedArgs.indexOf('-c:v') + 1], 'copy');
+  assert.equal(capturedArgs.includes('-enc_time_base:v'), false, 'copy replay retains its attested source timestamps');
   assert.equal(capturedArgs[capturedArgs.indexOf('-c:a') + 1], 'copy');
   assert.equal(capturedArgs.includes('-profile:a'), false);
   assert.equal(capturedArgs[capturedArgs.indexOf('-hls_time') + 1], '2');

@@ -162,6 +162,16 @@ function videoEncoderOutputArgs(config, options = {}) {
     ];
 }
 
+function videoEncoderTimestampArgs(encodeVideo, live) {
+    if (encodeVideo !== true || live !== false) return [];
+    // Passthrough must retain source presentation intervals, including VFR.
+    // The default inverse-frame-rate encoder clock can quantize Matroska's
+    // millisecond PTS into duplicate ticks at 24000/1001 fps. The TS muxer
+    // then bumps those to adjacent 90 kHz ticks, causing visible frame drops.
+    // Use the output transport clock, not a forced CFR or synthetic frame PTS.
+    return ['-enc_time_base:v', '1:90000'];
+}
+
 function publicVideoEncoderStatus(config, preflight) {
     return {
         protocol: VIDEO_ENCODER_PROTOCOL,
@@ -187,4 +197,5 @@ module.exports = {
     resolveVideoEncoderConfig,
     videoEncoderInputArgs,
     videoEncoderOutputArgs,
+    videoEncoderTimestampArgs,
 };
