@@ -2061,7 +2061,14 @@ const MediaUtils = (() => {
         } else if (['Séries TURQUES SUB-AR', 'مسلسلات تركية مترجمة عربي | Turkish Series Arabic Sub'].includes(categoryKey)) {
             category = 'TURKISH SERIES';
             // Only a redundant terminal marker; a preceding [FR]/[MULTI] stays.
-            raw = raw.replace(/\s+\[SUB\]\s*$/, '');
+            raw = raw.replace(/\s+\[SUB\]\s*$/i, '');
+        }
+        // Same role separation on the complete movie/current-series shelves.
+        // The bare prefix must match; AR-SUBS alone never identifies audio.
+        if (categoryKey === 'افلام تركية مترجمة' && barePrefix('AR-TR(?:-S)?').test(raw)) {
+            raw = raw.replace(barePrefix('AR-TR(?:-S)?'), 'TR'); category = 'TURKISH MOVIES';
+        } else if (categoryKey === 'يعرض الآن تركي مترجم' && barePrefix('AR-(?:TR-S|SUBS)').test(raw)) {
+            raw = raw.replace(barePrefix('AR-(?:TR-S|SUBS)'), 'TR'); category = 'TURKISH SERIES';
         }
         if (['افلام تركية مدبلجة', 'مسلسلات تركية مدبلجة', 'يعرض الآن تركي مدبلج'].includes(categoryKey)
             && barePrefix('AR-TR-D').test(raw)) {
