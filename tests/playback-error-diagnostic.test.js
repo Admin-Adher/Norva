@@ -40,3 +40,19 @@ test('diagnostics traverse bounded causes, filter unknown codes, and handle malf
   assert.equal(diagnostic({ message: 'relation SECRET does not exist' }, req).category, 'database-schema');
   assert.equal(diagnostic({ message: 'Could not resolve title', details: { message: 'canceling statement due to statement timeout' } }, req).category, 'database-statement-timeout');
 });
+
+test('database wrappers retain the error code and expose only an exact approved operation', () => {
+  const start = source.indexOf('function throwDb(');
+  const wrapper = transformSync(source.slice(start), {loader:'ts', target:'es2022'}).code;
+  class HttpError extends Error { constructor(status,message,details) { super(message); this.status=status; this.details=details; } }
+  const throwDb = vm.runInNewContext(`${wrapper}; throwDb`, {HttpError});
+  let wrapped;
+  try { throwDb({code:'57014',message:'canceling statement due to statement timeout SECRET',details:'SELECT SECRET'},'Unable to resolve playback item'); }
+  catch (error) { wrapped=error; }
+  const result = diagnostic(wrapped,req);
+  assert.equal(result.category,'database-statement-timeout');
+  assert.equal(result.operation,'resolve-item');
+  assert.deepEqual(Array.from(result.codes),['57014']);
+  assert.equal(JSON.stringify(result).includes('SECRET'),false);
+  assert.equal(diagnostic({message:'Unable to resolve playback item SECRET'},req).operation,'unclassified');
+});
