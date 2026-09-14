@@ -1,5 +1,5 @@
 """Offline validation of the six-file adapter; private runtime is never loaded."""
-import ast, copy, importlib.util, pathlib, types, unittest
+import ast, copy, importlib.util, pathlib, tempfile, types, unittest
 from unittest import mock
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 PATH=ROOT/'ops/hetzner/scripts/deploy-unknown-first-language-edge.py'
@@ -60,8 +60,22 @@ class EdgeBindingTests(unittest.TestCase):
     def test_adapter_has_no_mutating_transport_or_idle_override(self):
         source=PATH.read_text();tree=ast.parse(source)
         attrs=[node.attr for node in ast.walk(tree) if isinstance(node,ast.Attribute) and isinstance(node.ctx,ast.Store)]
-        for name in ['idle','activate','run','watch','recover','launch','controls','alter_crons']:self.assertNotIn(name,attrs)
+        for name in ['idle','activate','run','watch','launch','controls','alter_crons']:self.assertNotIn(name,attrs)
         self.assertNotIn('write=True',source);self.assertNotIn('docker_api(',source)
         self.assertIn("method='OPTIONS'",source)
+    def test_failed_unactivated_drain_uses_pinned_no_container_closer(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(op,'ROOT',pathlib.Path(temp)):
+            upstream=mock.Mock();closer=types.SimpleNamespace(close=mock.Mock())
+            module=types.SimpleNamespace(initialize=mock.Mock(),import_health=mock.Mock(),recover=upstream,
+                base=types.SimpleNamespace(SERVICES=('edge-a','edge-b')))
+            op.adapt(module,self.cfg,object(),closer)
+            plan={'commit':self.cfg['commit']}
+            # A normal recovery still uses the original idle/retained guard.
+            module.recover(plan);upstream.assert_called_once_with(plan);closer.close.assert_not_called()
+            (op.ROOT/'failed.private.json').touch();module.recover(plan)
+            closer.close.assert_called_once_with(module)
+            # Any activation receipt forces the complete original recovery.
+            (op.ROOT/'edge-a-receipt.private.json').touch();module.recover(plan)
+            self.assertEqual(upstream.call_count,2);self.assertEqual(closer.close.call_count,1)
 
 if __name__=='__main__':unittest.main()

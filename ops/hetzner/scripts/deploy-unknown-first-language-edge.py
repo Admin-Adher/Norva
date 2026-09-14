@@ -14,6 +14,7 @@ LEGACY_COMMIT = 'e99e32c0be872bff6bcc66f525cfa3fdd5e3127a'
 HELPERS = {
     UPSTREAM/'deploy-vod-language-audit-20260913.py': '4637d735583017f01cb2dff028ee9c2452cc00a28aab35669875d7d0536fbf2d',
     UPSTREAM/'release_binding.py': '80de48d156863ad2da8922f331955c837f791568464164800d365e879879a1fa',
+    UPSTREAM/'close-unactivated-edge-release.py': '3d2b933ebcad1521f8b841582c43aa2bc2f1001f4e9fc93ae465257d72ee7539',
     SQL_ROOT/'deploy-unknown-first-language-pipeline.py': 'be293c9b1ccdf4cf06a0e49e308eff45eea39a898383031e67403d3080865a6d',
 }
 BASE_HASHES = {
@@ -101,7 +102,7 @@ def sql_snapshot(sql):
         and surface['viewOptions']==['security_invoker=true'], 'private_projection_scope')
     return {'functions':functions,'extra':extra,'surface':surface}
 
-def adapt(controller, cfg, sql):
+def adapt(controller, cfg, sql, closer=None):
     """Retain the upstream implementation; change only binding and import checks."""
     validate(cfg)
     controller.ROOT=ROOT; controller.__file__=str(pathlib.Path(__file__).resolve())
@@ -138,6 +139,18 @@ def adapt(controller, cfg, sql):
         with controller.urllib.request.urlopen(request,timeout=5) as response:
             require(response.status in (200,204),'playback_module_import_failed')
     controller.import_health=import_health
+    if closer is not None:
+        original_recover=controller.recover
+        def recover(plan):
+            # No restart/idle bypass: the pinned closer proves both original
+            # replicas, absence of candidate containers and a dead failed runner.
+            # It restores only the cron bits when the drain never activated Edge.
+            if (controller.ROOT/'failed.private.json').is_file() and all(
+                not (controller.ROOT/(name+'-receipt.private.json')).exists() for name in controller.base.SERVICES):
+                require(plan.get('commit')==cfg['commit'],'recovery_commit_drift')
+                return closer.close(controller)
+            return original_recover(plan)
+        controller.recover=recover
     return controller
 
 def main():
@@ -156,7 +169,8 @@ def main():
         print(json.dumps({'sqlBound':True,'productionWrites':0,'providerRequests':0}));return
     sys.path.insert(0,str(UPSTREAM))
     controller=load('owned_language_retained_edge',UPSTREAM/'deploy-vod-language-audit-20260913.py')
-    adapt(controller,cfg,sql).main()
+    closer=load('owned_language_unactivated_closer',UPSTREAM/'close-unactivated-edge-release.py')
+    adapt(controller,cfg,sql,closer).main()
 
 if __name__=='__main__':
     try: main()

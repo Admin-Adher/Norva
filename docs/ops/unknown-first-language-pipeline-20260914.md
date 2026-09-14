@@ -65,6 +65,10 @@ The operator pins the existing idle/drain/retained-container recovery helper,
 checks both the installed owned-language SQL and prior supplier-parser proof,
 and performs no SQL writes or switch activation. `status` must confirm both
 replicas and restored cron state. Never reuse a closed or failed attempt.
+If the bounded drain expires before any activation, the pinned no-activation
+closer first proves both original replicas, no candidate/retained containers and
+a dead failed runner, then restores only the original cron bits. It cannot stop
+transcriptions or bypass the idle requirement for an actual Edge replacement.
 
 Only after both replicas, owner-isolation checks and catalogue label/filter
 parity are verified may the new metadata/projection switch be enabled. Keep the
