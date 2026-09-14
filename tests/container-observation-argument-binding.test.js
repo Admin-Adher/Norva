@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20260912121500_container_observation_argument_binding.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20260912121500_container_observation_argument_binding.sql'), 'utf8').replace(/\r\n/g,'\n');
 const previous = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20260823173000_catalog_generation_legacy_routine_fences.sql'), 'utf8').replace(/\r\n/g,'\n');
 function wrapper(sql) {
   const start = sql.indexOf('create or replace function public.record_catalog_file_container_observation(');

@@ -12180,8 +12180,15 @@ function vaapiHardwareDecodeCodecForSession(session, encodeVideo = true) {
         VIDEO_ENCODER_CONFIG.hardwareDecode !== true ||
         VIDEO_ENCODER_PREFLIGHT.ready !== true ||
         session?.forceSoftwareVideoDecode === true ||
-        !hasCompleteMkvPlaybackProfile(session?.codecProfile)
+        (!hasCompleteMkvPlaybackProfile(session?.codecProfile)
+            && !(session?.finiteTsFastInput === true
+                && session?.finiteTsResumeAligned === true
+                && finiteTsProfileEligible(session)))
     ) return null;
+    // Finite TS has its own dated, file-exact probe contract. Requiring the
+    // Matroska-only in-band contract here forced accurate TS resumes through
+    // software decoding and a CPU-to-GPU upload. Keep the existing admission
+    // and one-shot software fallback; never accept provider labels as proof.
     const codec = normalizeCodecToken(
         session?.codecProfile?.videoCodec ??
         session?.codecProfile?.video_codec ??

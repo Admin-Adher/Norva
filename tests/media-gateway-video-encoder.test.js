@@ -121,6 +121,57 @@ test('Gateway admits hardware decode only from exact H264 or HEVC metadata and f
     assert.match(retry, /const maxTotalAttempts = 3/);
 });
 
+test('verified finite TS resumes can use the configured decoder without promoting MKV metadata', () => {
+    const { finiteTsProfileEligible, applyFiniteTsAccurateResume } = require('../services/media-gateway/src/finite-ts-startup');
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('function vaapiHardwareDecodeCodecForSession(');
+    const end = source.indexOf('\nfunction isVaapiHardwareDecodeFailure(', start);
+    const config = { backend: 'vaapi', hardwareDecode: true };
+    const policy = vm.runInNewContext('(' + source.slice(start, end).trim() + ')', {
+        VIDEO_ENCODER_CONFIG: config,
+        VIDEO_ENCODER_PREFLIGHT: { ready: true },
+        finiteTsProfileEligible,
+        hasCompleteMkvPlaybackProfile: () => false,
+        normalizeCodecToken: value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ''),
+    });
+    const fixture = () => {
+        const session = {
+            codecProfileSource: 'request', playbackIdentity: { itemType: 'movie' },
+            playbackHint: { container: 'mpegts' }, seekOffset: 548, audioStreamIndex: 1,
+            codecProfile: {
+                container: 'mpegts', probeSource: 'gateway_probe', probedAt: new Date().toISOString(),
+                durationSeconds: 5745, fileSizeBytes: 1406104640, videoCodec: 'h264',
+                videoWidth: 1920, videoHeight: 1080, audioTracks: [{ index: 1, codec: 'aac' }],
+            },
+            finiteTsFastInput: true,
+        };
+        assert.equal(applyFiniteTsAccurateResume(session, { backend: 'vaapi', ready: true }), true);
+        return session;
+    };
+    const session = fixture();
+    const before = JSON.stringify(session);
+    assert.equal(policy(session), 'h264');
+    assert.equal(JSON.stringify(session), before);
+    assert.equal(policy(session, false), null);
+    for (const change of [
+        s => { s.forceSoftwareVideoDecode = true; },
+        s => { s.forceFullInputProbe = true; },
+        s => { s.finiteTsFastInput = false; },
+        s => { s.finiteTsResumeAligned = false; },
+        s => { s.playbackIdentity.itemType = 'live'; },
+        s => { s.codecProfile.probeSource = 'provider'; },
+        s => { s.codecProfile.videoCodec = 'hevc'; },
+        s => { s.codecProfile.probedAt = ''; },
+        s => { s.codecProfile.audioTracks = []; },
+        s => { s.audioStreamIndex = 9; },
+    ]) {
+        const rejected = fixture(); change(rejected);
+        assert.equal(policy(rejected), null);
+    }
+    config.hardwareDecode = false;
+    assert.equal(policy(fixture()), null);
+});
+
 test('invalid or unavailable VAAPI configuration fails closed without software fallback', () => {
     assert.throws(
         () => resolveVideoEncoderConfig({ MEDIA_GATEWAY_VIDEO_ENCODER: 'cuda' }),

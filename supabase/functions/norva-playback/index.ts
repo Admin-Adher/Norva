@@ -666,15 +666,37 @@ function playbackErrorDiagnostic(error: unknown, req: Request) {
     "42703", "42883", "42P01", "42501", "23505", "23503", "PGRST002", "PGRST003",
     "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "UND_ERR_CONNECT_TIMEOUT",
     "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "ABORT_ERR"]);
+  // Stable operation names survive runtime-transpiled stack line offsets. The
+  // map is exact: never emit arbitrary DB messages or caller-provided labels.
+  const operations = new Map([
+    ["Unable to resolve playback item", "resolve-item"],
+    ["Unable to verify source ownership", "verify-source"],
+    ["Unable to verify source catalog visibility", "verify-source-visibility"],
+    ["Unable to load source config", "load-source-config"],
+    ["Unable to load exact movie variants", "load-exact-variant"],
+    ["Unable to claim provider playback session", "claim-session"],
+    ["Unable to load claimed playback session", "load-session"],
+    ["Unable to verify Norva access limits", "verify-entitlement"],
+    ["Unable to verify provider playback availability", "verify-provider-circuit"],
+    ["Unable to preempt background media cache work", "preempt-cache"],
+    ["Unable to verify background media cache drain", "verify-cache-drain"],
+    ["Unable to coordinate shared media cache producer", "coordinate-cache"],
+    ["Unable to resolve shared media cache work", "resolve-cache"],
+    ["Unable to claim shared media cache playback", "claim-cache"],
+    ["Unable to create pending gateway session", "create-gateway-row"],
+    ["Unable to record gateway session", "record-gateway-row"],
+  ]);
   const codes: string[] = [], locations: Array<{ module: string; line: number; column: number }> = [];
   const seen = new Set<unknown>();
-  let current = error, category = "unclassified";
+  let current = error, category = "unclassified", operation = "unclassified";
   for (let depth = 0; depth < 4 && current && typeof current === "object" && !seen.has(current); depth++) {
     seen.add(current);
     const value = current as Record<string, unknown>;
     const code = String(value.code || "");
     if (allowedCodes.has(code) && !codes.includes(code)) codes.push(code);
-    const message = String(value.message || "").slice(0, 2048).toLowerCase();
+    const rawMessage = String(value.message || "").slice(0, 2048);
+    if (operation === "unclassified") operation = operations.get(rawMessage) || operation;
+    const message = rawMessage.toLowerCase();
     if (/statement timeout|canceling statement/.test(message)) category = "database-statement-timeout";
     else if (/connection pool|remaining connection slots|too many clients/.test(message)) category = "database-capacity";
     else if (/(?:column|relation|function) .*does not exist|schema cache/.test(message)) category = "database-schema";
@@ -689,7 +711,7 @@ function playbackErrorDiagnostic(error: unknown, req: Request) {
     }
     current = value.cause ?? (value.details && typeof value.details === "object" ? value.details : null);
   }
-    return { protocol: 1, route, category, codes, locations };
+    return { protocol: 1, route, category, operation, codes, locations };
     } catch {
       return { protocol: 1, route: "other", category: "unclassified", codes: [], locations: [] };
     }
@@ -2238,6 +2260,11 @@ async function createPlaybackSessionCore(
     resolved.playbackHint,
     resolvedContainerObservation,
     itemType === "movie",
+  );
+  requestedPlaybackHint = bindServerFiniteTsPlaybackHint(
+    requestedPlaybackHint,
+    itemType === "movie" ? resolved.playbackHint : {},
+    authoritativeVodContainer,
   );
   const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
     authoritativeVodContainer === "mp4";
@@ -9552,6 +9579,31 @@ function resolvedVodContainerAuthority(
     }
   }
   return canonicalVodContainer(playbackHint.container);
+}
+
+function bindServerFiniteTsPlaybackHint(
+  mergedValue: unknown,
+  ownedValue: unknown,
+  authoritativeContainer: string | null,
+) {
+  const merged = recordOrEmpty(mergedValue);
+  const owned = recordOrEmpty(ownedValue);
+  const profile = firstUsefulCodecProfile(owned.codecProfile, owned.codec_profile);
+  // Catalogue extensions are not byte evidence. A resolved, server-owned
+  // Gateway probe can identify TS behind an MP4/MKV URL. Forward that exact
+  // profile consistently without rewriting the provider URL or relaxing the
+  // Gateway's independent finite-file, codec, track and freshness checks.
+  // Do not use echoed episode/client hints, in-band partial metadata, or a
+  // profile contradicted by a newer persisted container observation.
+  if (authoritativeContainer !== "ts"
+      || canonicalVodContainer(profile.container) !== "ts"
+      || normalizeCodecToken(profile.probeSource ?? profile.probe_source) !== "gatewayprobe"
+      || !hasReliableVodCodecProfile(profile)) return merged;
+  return playbackHintForObservedContainer({
+    ...merged,
+    codec_profile: undefined,
+    codecProfile: profile,
+  }, "ts");
 }
 
 function playbackCostScoreForObservation(tier: string, startupMs: number | null) {
@@ -19422,8 +19474,9 @@ async function sha256BytesHex(value: Uint8Array) {
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function throwDb(error: { message?: string; details?: string; hint?: string }, message: string): never {
+function throwDb(error: { message?: string; details?: string; hint?: string; code?: string }, message: string): never {
   throw new HttpError(500, message, {
+    code: error.code,
     message: error.message,
     details: error.details,
     hint: error.hint,
