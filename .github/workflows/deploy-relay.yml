@@ -17,6 +17,7 @@ on:
         options:
           - relay
           - media-cache-canary
+          - relay-diagnostic
   push:
     branches: [main]
 
@@ -54,6 +55,30 @@ jobs:
           wranglerVersion: '4.102.0'
           workingDirectory: services/norva-relay
           command: deploy
+
+  relay-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'relay-diagnostic'
+    name: Read-only bounded relay diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    environment: Cloudflare
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22.22.3'
+      - run: npm ci --ignore-scripts
+      - run: node --test tests/relay-diagnostic-redaction.test.js
+      - name: Observe relay for 90 seconds, without changing deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: node ops/cloudflare/tail-relay-diagnostic.mjs
 
   media-cache-canary:
     if: github.event_name == 'workflow_dispatch' && inputs.target == 'media-cache-canary'
