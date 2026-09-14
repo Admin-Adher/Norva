@@ -11859,6 +11859,28 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   .watch-loading-art.is-animated .watch-loading-still { visibility: visible; }
 }
 
+/* Mid-playback stalls must not cover the last frame or intercept transport. */
+.watch-loading.watch-loading-cover.is-rebuffering {
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  max-width: calc(100% - var(--space-xl));
+  pointer-events: none;
+}
+
+.watch-loading.is-rebuffering .watch-loading-art,
+.watch-loading.is-rebuffering .watch-loading-help {
+  display: none;
+}
+
+.watch-loading.is-rebuffering .watch-loading-label {
+  font-size: 1rem;
+  font-weight: 500;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

@@ -1,5 +1,6 @@
 import { connect } from "cloudflare:sockets";
 import { preserveRelayResponseLength } from "./relayResponseLength.mjs";
+import { boundedProgressiveRange, createResumableProgressiveBody } from "./relayProgressiveStream.mjs";
 import {
   classifyRelayPlaybackGeneration,
   classifyRelaySessionClaims,
@@ -626,14 +627,14 @@ async function proxyPlayback(request, env, claims, ctx) {
   // gateway uses successfully); never forward the caller's browser UA. Fall
   // back to a VLC UA when the token has none.
   headers.set("user-agent", String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20"));
+  // Media byte ranges and strong validators refer to the identity bytes, not
+  // a proxy-negotiated compressed representation of a mislabeled text/plain file.
+  headers.set("accept-encoding", "identity");
 
-  // Resume seeks: the IPTV provider ignores OPEN-ENDED Range requests
-  // (`bytes=N-` is answered from byte 0), so a player seek re-reads the file
-  // from the start — the ~20s Resume stall. It DOES honor BOUNDED ranges
-  // (`bytes=N-M`). Map an open-ended seek (N>0) to a bounded range using the
-  // file's total size so the player jumps straight to the resume point.
-  // `bytes=0-` is left untouched (answering from byte 0 is already correct),
-  // which keeps cold startup fast.
+  // Finite Xtream VOD uses modest bounded ranges, including cold startup. An
+  // open request for the remaining 7 GB was repeatedly cut with a 206/QUIC
+  // length error. RFC 9110 15.3.7 allows a self-described subset; the browser
+  // requests the next range normally. No extra probe or whole-file buffer.
   const requestedRange = request.headers.get("range");
   const streamKey = claims.url;
 
@@ -645,7 +646,7 @@ async function proxyPlayback(request, env, claims, ctx) {
   // path (which also re-learns if the load-balancer moved the title to a node
   // fetch() can reach).
   if (request.method !== "HEAD" && socketHintFresh(streamKey)) {
-    if (requestedRange) headers.set("range", requestedRange);
+    if (requestedRange) headers.set("range", finiteVodRange(requestedRange, targetUrl, request.headers) || requestedRange);
     try {
       const sock = await trySocketPath(targetUrl, request, headers, env);
       if (sock) return withRelayPlaybackLiveness(sock, request, env, claims);
@@ -655,7 +656,7 @@ async function proxyPlayback(request, env, claims, ctx) {
   }
 
   // Normal path: map open-ended seeks to bounded ranges, then fetch().
-  const upstreamRange = await boundedUpstreamRange(requestedRange, targetUrl, headers);
+  const upstreamRange = await boundedUpstreamRange(requestedRange, targetUrl, headers, request.headers);
   if (upstreamRange) headers.set("range", upstreamRange);
   else if (requestedRange) headers.set("range", requestedRange);
 
@@ -680,6 +681,8 @@ async function proxyPlayback(request, env, claims, ctx) {
     try {
       const sock = await trySocketPath(targetUrl, request, headers, env);
       if (sock) {
+        try { upstreamAbort.abort(); } catch (_) {}
+        try { void upstream.body?.cancel().catch(() => {}); } catch (_) {}
         markNeedsSocket(streamKey);
         return withRelayPlaybackLiveness(sock, request, env, claims);
       }
@@ -747,7 +750,19 @@ async function proxyPlayback(request, env, claims, ctx) {
   if (request.method === "HEAD" || !isHlsPlaylist(targetUrl, upstream.headers)) {
     // Advertise range support so the player enables client-side seeking.
     if (!responseHeaders.has("Accept-Ranges")) responseHeaders.set("Accept-Ranges", "bytes");
-    return new Response(preserveRelayResponseLength(abortOnCancel(upstream.body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), upstream.headers), {
+    const body = request.method === "HEAD" ? null : createResumableProgressiveBody(upstream, {
+      abort: () => upstreamAbort.abort(),
+      isActive: () => relayPlaybackSessionActive(env, claims),
+      async fetchRange({ start, end, etag, signal }) {
+        const retryHeaders = new Headers(headers);
+        retryHeaders.set("range", `bytes=${start}-${end}`);
+        retryHeaders.set("if-range", etag);
+        const response = await fetch(targetUrl, { headers: retryHeaders, redirect: "follow", signal });
+        return { response };
+      },
+      onResume: ({ attempt, reason }) => console.warn(JSON.stringify({ tag: "norva-relay-range-resumed", attempt, reason })),
+    });
+    return new Response(preserveRelayResponseLength(abortOnCancel(body, upstreamAbort, () => relayPlaybackSessionActive(env, claims)), upstream.headers), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -863,8 +878,10 @@ function abortOnCancel(body, controller, livenessProbe = null) {
   }
 }
 
-async function boundedUpstreamRange(rangeHeader, targetUrl, baseHeaders) {
+async function boundedUpstreamRange(rangeHeader, targetUrl, baseHeaders, clientHeaders) {
   if (!rangeHeader) return null;
+  const finite = finiteVodRange(rangeHeader, targetUrl, clientHeaders);
+  if (finite) return finite;
   const match = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader.trim());
   if (!match) return null;                 // suffix or multi-range: leave to upstream
   if (match[2]) return null;               // already bounded
@@ -873,6 +890,18 @@ async function boundedUpstreamRange(rangeHeader, targetUrl, baseHeaders) {
   const total = await resolveContentLength(targetUrl, baseHeaders);
   if (!Number.isFinite(total) || start >= total) return null;
   return `bytes=${start}-${total - 1}`;
+}
+
+function finiteVodRange(rangeHeader, targetUrl, clientHeaders) {
+  // Do not cap live TS, HLS playlists/segments or opaque provider URLs: their
+  // streaming semantics cannot be established from the extension alone.
+  if (!/\/(?:movie|series)\//i.test(targetUrl.pathname) || /\.m3u8?$/i.test(targetUrl.pathname)) return null;
+  const cached = CONTENT_LENGTH_CACHE.get(targetUrl.href);
+  const total = cached && Date.now() - cached.at < CONTENT_LENGTH_TTL_MS ? cached.total : NaN;
+  // Chromium starts with bytes=0- then supplies an explicit EOF in later
+  // requests. Only <video> requests may shrink these explicit ranges; engine
+  // fetches and native clients retain the exact byte windows they asked for.
+  return boundedProgressiveRange(rangeHeader, total, clientHeaders?.get("sec-fetch-dest") === "video");
 }
 
 async function proxyImage(request, env, ctx, url) {
@@ -1918,11 +1947,17 @@ function maybeAlertUpstreamError(env, ctx, info) {
 async function trySocketPath(targetUrl, request, headers, env) {
   const resolved = await fetch(targetUrl, { method: "GET", headers, redirect: "manual" });
   const loc = resolved.status >= 300 && resolved.status < 400 ? resolved.headers.get("location") : null;
+  // A redirect miss may actually be a multi-GB 200 body. It is not used by this
+  // fallback and must not retain a second provider connection.
+  try { void resolved.body?.cancel().catch(() => {}); } catch (_) {}
   if (!loc) return null;
   const node = new URL(loc, targetUrl);
   const ua = headers.get("user-agent") || "VLC/3.0.20 LibVLC/3.0.20";
   const nodeResp = await fetchNodeViaSocket(node, request.method, headers.get("range"), ua);
-  if (!(nodeResp.status >= 200 && nodeResp.status < 400) || nodeResp.isChunked) return null;
+  if (!(nodeResp.status >= 200 && nodeResp.status < 400) || nodeResp.isChunked) {
+    try { void nodeResp.body?.cancel().catch(() => {}); } catch (_) {}
+    return null;
+  }
   const sockHeaders = new Headers();
   for (const [k, v] of nodeResp.headers) {
     const lk = k.toLowerCase();

@@ -24202,6 +24202,20 @@
     "id": "Audiens tidak tersedia. Muat ulang halaman sebelum mengirim.",
     "fil": "Hindi available ang audience. I-refresh ang pahina bago magpadala."
   },
+  "ui_watch_buffering": {
+    "source": "Buffering…",
+    "refs": ["public/js/pages/WatchPage.js"],
+    "en": "Buffering…",
+    "fr": "Chargement de la vidéo…",
+    "pt-BR": "Carregando vídeo…",
+    "es": "Cargando vídeo…",
+    "hi": "वीडियो लोड हो रहा है…",
+    "tr": "Video yükleniyor…",
+    "bn": "ভিডিও লোড হচ্ছে…",
+    "ar": "جارٍ تحميل الفيديو…",
+    "id": "Memuat video…",
+    "fil": "Nilo-load ang video…"
+  },
   "ui_watch_preparing_video": {
     "source": "Preparing your video",
     "refs": ["public/app.html", "public/js/pages/WatchPage.js"],

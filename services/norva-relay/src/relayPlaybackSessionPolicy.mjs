@@ -101,9 +101,11 @@ export function createRevocableRelayStream(body, options = {}) {
     if (closed) return;
     closed = true;
     stop();
-    try { await reader.cancel("PLAYBACK_SUPERSEDED"); } catch (_) { /* already closed */ }
-    try { abort(); } catch (_) { /* already aborted */ }
     try { controllerRef?.error(new Error("PLAYBACK_SUPERSEDED")); } catch (_) { /* already closed */ }
+    // Abort before awaiting any socket cancellation: a dead upstream can leave
+    // cancel() pending forever and otherwise retain the provider's only slot.
+    try { abort(); } catch (_) { /* already aborted */ }
+    try { void reader.cancel("PLAYBACK_SUPERSEDED").catch(() => {}); } catch (_) { /* already closed */ }
   };
   const verify = async () => {
     if (closed || checking) return;
@@ -126,22 +128,30 @@ export function createRevocableRelayStream(body, options = {}) {
     },
     async pull(controller) {
       if (closed) return;
-      const { done, value } = await reader.read();
-      if (closed) return;
-      if (done) {
+      try {
+        const { done, value } = await reader.read();
+        if (closed) return;
+        if (done) {
+          closed = true;
+          stop();
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        if (closed) return;
         closed = true;
         stop();
-        controller.close();
-        return;
+        try { abort(); } catch (_) { /* already aborted */ }
+        controller.error(error);
       }
-      controller.enqueue(value);
     },
     async cancel(reason) {
       if (closed) return;
       closed = true;
       stop();
-      try { await reader.cancel(reason); } catch (_) { /* already closed */ }
       try { abort(); } catch (_) { /* already aborted */ }
+      try { void reader.cancel(reason).catch(() => {}); } catch (_) { /* already closed */ }
     },
   });
 }

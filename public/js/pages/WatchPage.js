@@ -452,6 +452,7 @@ class WatchPage {
         this.setupCastIntegration();
         this.video?.addEventListener('error', (e) => this.onError(e));
         this.video?.addEventListener('waiting', () => {
+            if (this._firstFrameReported && this.video.paused && !this._gatewayAutomaticRebuffering) return;
             // A queued media event after Back must not restart artwork off-route.
             if (this.video.currentSrc && document.getElementById('page-watch')?.classList.contains('active')) this.showLoading();
         });
@@ -7716,6 +7717,7 @@ class WatchPage {
             this.showLoading();
             return;
         }
+        if (this._rebufferPresentationActive) this.hideLoading();
         this.centerPlayBtn?.classList.add('show');
         try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; } catch (_) { }
         this.trackPlaybackPosition({ force: true });
@@ -8544,6 +8546,14 @@ class WatchPage {
         // presentation. Keep loading/error state until rVFC, the strict playing
         // fallback, or two advancing timeupdates confirm active presentation.
         if (!this._firstFrameReported) return;
+        if (this._rebufferPresentationActive) {
+            // Metadata/canplay and a final queued timeupdate also arrive while
+            // starved. Only playing or real forward progress ends rebuffering.
+            const progressing = allowPlaybackProgressFallback && !this.video.seeking
+                && Number(this.video.currentTime) - this._rebufferMediaTime >= 0.05;
+            const playing = allowFirstFrameFallback && this.video.readyState >= 3;
+            if (this.video.paused || (!progressing && !playing)) return;
+        }
         this.hideLoading();
         this.hidePlaybackError();
         if (!this._playbackStatusOkReported) {
@@ -8795,6 +8805,23 @@ class WatchPage {
     // === Loading Spinner ===
 
     showLoading() {
+        // The opaque preparation scene belongs to cold startup only. Keeping
+        // the last frame and transport available is essential during a stall,
+        // seek or same-title recovery; never move focus back to the Back button.
+        if (this._firstFrameReported) {
+            if (this._loadingPresentationActive) this.hideLoading({ restoreFocus: false });
+            if (this._rebufferPresentationActive) return;
+            this._rebufferPresentationActive = true;
+            this._rebufferMediaTime = Number(this.video?.currentTime) || 0;
+            this.loadingSpinner?.classList.add('is-rebuffering');
+            this.loadingSpinner?.classList.add('show');
+            this.loadingSpinner?.setAttribute('aria-hidden', 'false');
+            this._loadingArtworkRefresh = () => this.refreshLoadingArtwork();
+            window.addEventListener('online', this._loadingArtworkRefresh);
+            window.addEventListener('offline', this._loadingArtworkRefresh);
+            this.refreshLoadingArtwork();
+            return;
+        }
         this.loadingSpinner?.classList.add('show');
         this.centerPlayBtn?.classList.remove('show');
         const section = this.loadingSpinner?.closest?.('.watch-video-section');
@@ -8832,7 +8859,9 @@ class WatchPage {
 
     refreshLoadingArtwork() {
         const offline = navigator.onLine === false;
-        const copy = offline ? [
+        const copy = this._rebufferPresentationActive ? [
+            ['.watch-loading-label', offline ? 'ui_web_4d5c943931a4' : 'ui_watch_buffering', offline ? 'You are offline' : 'Buffering…'],
+        ] : offline ? [
             ['.watch-loading-label', 'ui_web_4d5c943931a4', 'You are offline'],
             ['.watch-loading-help', 'ui_watch_preparing_video_offline', 'Check your internet connection to continue preparing your video.'],
         ] : [
@@ -8846,6 +8875,7 @@ class WatchPage {
                 element.textContent = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
             }
         }
+        if (this._rebufferPresentationActive) return;
         const still = this.loadingSpinner?.querySelector?.('.watch-loading-still');
         const animation = this.loadingSpinner?.querySelector?.('.watch-loading-animation');
         const art = this.loadingSpinner?.querySelector?.('.watch-loading-art');
@@ -8879,6 +8909,15 @@ class WatchPage {
 
     hideLoading({ restoreFocus = true } = {}) {
         this.loadingSpinner?.classList.remove('show');
+        this.loadingSpinner?.classList.remove('is-rebuffering');
+        this.loadingSpinner?.setAttribute('aria-hidden', 'true');
+        if (this._rebufferPresentationActive) {
+            this._rebufferPresentationActive = false;
+            this._rebufferMediaTime = null;
+            window.removeEventListener('online', this._loadingArtworkRefresh);
+            window.removeEventListener('offline', this._loadingArtworkRefresh);
+            this._loadingArtworkRefresh = null;
+        }
         if (!this._loadingPresentationActive) return;
         this._loadingPresentationActive = false;
         this.loadingSpinner?.setAttribute('aria-hidden', 'true');

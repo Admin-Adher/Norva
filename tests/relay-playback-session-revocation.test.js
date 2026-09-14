@@ -148,6 +148,39 @@ test('takeover interrupts a progressive relay response that is already open', as
   assert.equal(upstreamAborted, true);
 });
 
+test('upstream read errors release the connection and stop revocation polling', async () => {
+  const { createRevocableRelayStream } = await import('../services/norva-relay/src/relayPlaybackSessionPolicy.mjs');
+  let sourceController, checks = 0, stops = 0, aborts = 0, verify;
+  const source = new ReadableStream({ start(c) { sourceController = c; } });
+  const reader = createRevocableRelayStream(source, {
+    isActive: async () => { checks++; return true; },
+    schedule(fn) { verify = fn; return 1; }, unschedule() { stops++; },
+    abort() { aborts++; },
+  }).getReader();
+  const pending = reader.read();
+  sourceController.error(new Error('UPSTREAM_RESET'));
+  await assert.rejects(pending, /UPSTREAM_RESET/);
+  await verify();
+  assert.equal(stops, 1);
+  assert.equal(aborts, 1);
+  assert.equal(checks, 0, 'a failed body must not keep a provider slot alive');
+});
+
+test('revocation aborts immediately even if upstream cancellation never settles', async () => {
+  const { createRevocableRelayStream } = await import('../services/norva-relay/src/relayPlaybackSessionPolicy.mjs');
+  let verify, aborted = false;
+  const source = new ReadableStream({ cancel() { return new Promise(() => {}); } });
+  const reader = createRevocableRelayStream(source, {
+    isActive: async () => false, schedule(fn) { verify = fn; return 1; }, unschedule() {},
+    abort() { aborted = true; },
+  }).getReader();
+  const pending = assert.rejects(reader.read(), /PLAYBACK_SUPERSEDED/);
+  void verify();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(aborted, true, 'do not wait for a hung socket cancel before aborting');
+  await pending;
+});
+
 test('relay requests prove liveness and HLS descendants preserve the revocable identity', () => {
   const relay = read('services/norva-relay/src/index.js');
   const playback = read('supabase/functions/norva-playback/index.ts');

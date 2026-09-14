@@ -98,6 +98,65 @@ test('repeat waiting is idempotent; ready restores prior aria/inert state and fo
     clearTimeout(f.page.overlayTimeout);
 });
 
+test('waiting after a rendered frame keeps video, transport and keyboard focus accessible', () => {
+    const f = fixture();
+    f.page._firstFrameReported = true;
+    f.video.currentTime = 61;
+    f.page.showLoading(); f.page.showLoading();
+    assert.equal(f.loader.classList.contains('is-rebuffering'), true);
+    assert.equal(f.section.classList.contains('has-playback-loading'), false);
+    assert.notEqual(f.page._loadingPresentationActive, true);
+    assert.equal(f.page._rebufferPresentationActive, true);
+    assert.equal(f.controls.inert, false);
+    assert.equal(f.video.getAttribute('aria-hidden'), null);
+    assert.equal(f.document.activeElement, f.play);
+    assert.equal(f.animation.src, undefined);
+    assert.equal(f.still.src, undefined, 'rebuffering never requests preparation artwork');
+    assert.equal(f.label.dataset.i18n, 'ui_watch_buffering');
+    f.navigator.onLine = false; f.window.dispatch('offline');
+    assert.equal(f.label.dataset.i18n, 'ui_web_4d5c943931a4');
+    f.page.hideLoading();
+    assert.equal(f.loader.classList.contains('is-rebuffering'), false);
+    assert.equal(f.loader.getAttribute('aria-hidden'), 'true');
+    for (const emitter of [f.document, f.window, f.motion, f.connection]) assert.equal(emitter.listeners.size, 0);
+});
+
+test('metadata and stalled timeupdates cannot prematurely dismiss rebuffer feedback', () => {
+    const f = fixture();
+    Object.assign(f.video, { src: '/movie.mp4', currentTime: 61, readyState: 2, paused: false });
+    Object.assign(f.page, {
+        _firstFrameReported: true,
+        _playbackStatusOkReported: true,
+        hidePlaybackError() {}, reportObservedAudioLanguages() {},
+    });
+    f.page.showLoading();
+    f.page.markPlaybackUsable();
+    f.page.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+    assert.equal(f.loader.classList.contains('show'), true);
+    f.video.currentTime = 61.25;
+    f.page.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+    assert.equal(f.loader.classList.contains('show'), false);
+    f.page.showLoading(); f.video.readyState = 3;
+    f.page.markPlaybackUsable({ allowFirstFrameFallback: true });
+    assert.equal(f.loader.classList.contains('show'), false, 'playing dismisses the feedback');
+});
+
+test('rebuffer feedback does not leak into a new title or keep artwork running', () => {
+    const f = fixture();
+    f.page.showLoading(); f.animation.onload();
+    f.page._firstFrameReported = true;
+    f.page.showLoading();
+    assert.equal(f.controls.inert, false);
+    assert.equal(f.animation.src, undefined);
+    f.page.hideLoading({ restoreFocus: false });
+    f.page._firstFrameReported = false;
+    f.page.showLoading();
+    assert.equal(f.loader.classList.contains('is-rebuffering'), false);
+    assert.equal(f.section.classList.contains('has-playback-loading'), true);
+    assert.equal(f.label.dataset.i18n, 'ui_watch_preparing_video');
+    f.page.hideLoading({ restoreFocus: false });
+});
+
 test('reduced motion, data saving and hidden tabs stop the animation and react to changes', () => {
     for (const mode of ['motion', 'data', 'hidden']) {
         const f = fixture();

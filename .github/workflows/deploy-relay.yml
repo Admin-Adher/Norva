@@ -38,6 +38,14 @@ jobs:
         with:
           node-version: '22.22.3'
 
+      # This Worker deploys independently of Pages/Build. Streaming and session
+      # safety regressions must block this job, not only the frontend release.
+      - name: Install relay test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify relay continuity and session safety
+        run: node --test tests/relay-*.test.js
+
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         with:
