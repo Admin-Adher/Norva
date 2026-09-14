@@ -189,3 +189,75 @@ test('Workers sends exact 206 bytes and Content-Length after an interrupted upst
     assert.equal(await result.text(), 'abcdefghijklmnop');
   } finally { await mf.dispose(); }
 });
+
+test('native Workers reads batch tiny fragments with bounded memory and preserve an incomplete final batch', async () => {
+  const { Miniflare } = require('miniflare');
+  const script = fs.readFileSync(path.join(__dirname, '../services/norva-relay/src/relayProgressiveStream.mjs'), 'utf8');
+  const mf = new Miniflare({ modules: true, compatibilityDate: '2026-06-18', host: '127.0.0.1', port: 0,
+    script: script + `\nexport default {async fetch(request) {
+      const total = 1024 * 1024 + 79, truncated = new URL(request.url).pathname === '/truncated';
+      const originalLength = truncated ? 12345 : total;
+      const native = new IdentityTransformStream(), writer = native.writable.getWriter();
+      let producerWrites = 0, batches = [], retryAt = null;
+      const producer = (async()=>{
+        for(let offset=0;offset<originalLength;offset+=512){
+          const bytes = new Uint8Array(Math.min(512,originalLength-offset));
+          for(let i=0;i<bytes.length;i++)bytes[i]=(offset+i)%251;
+          producerWrites++; await writer.write(bytes);
+        }
+        await writer.close();
+      })().catch(error => {
+        // Reaching the declared length intentionally cancels the keep-alive
+        // socket; the producer need not finish a separate EOF handshake.
+        if((error?.message || String(error)) !== 'range-complete')throw error;
+      });
+      const observedBody = {getReader(options) {
+        const reader = native.readable.getReader(options);
+        if(!options || typeof reader.readAtLeast !== 'function')throw new Error('native BYOB required in this fixture');
+        return {readAtLeast(size,view){batches.push(size);return reader.readAtLeast(size,view);},
+          cancel(reason){return reader.cancel(reason);},releaseLock(){reader.releaseLock();}};
+      }};
+      const headers = new Headers({'content-length':String(total),'content-range':'bytes 0-'+(total-1)+'/'+total,'etag':'"v1"'});
+      const stream = createResumableProgressiveBody({status:206,headers,body:observedBody},{isActive:async()=>true,
+        fetchRange:async({start,end,etag})=>{
+          if(!truncated || start!==originalLength || end!==total-1 || etag!=='"v1"')throw new Error('incorrect resume');
+          retryAt=start;
+          const bytes=new Uint8Array(total-start);
+          for(let i=0;i<bytes.length;i++)bytes[i]=(start+i)%251;
+          return {response:new Response(bytes,{status:206,headers:{'content-length':String(bytes.length),
+            'content-range':'bytes '+start+'-'+(total-1)+'/'+total,'etag':'"v1"'}})};
+        }});
+      const result = new Uint8Array(await new Response(stream).arrayBuffer());
+      await producer;
+      let exact=result.length===total;
+      for(let i=0;i<result.length;i++)if(result[i]!==i%251){exact=false;break;}
+      return Response.json({exact,length:result.length,producerWrites,batches,retryAt});
+    }};` });
+  try {
+    const url = await mf.ready;
+    const fullResponse = await fetch(url);
+    const fullText = await fullResponse.text();
+    assert.equal(fullResponse.status, 200, fullText);
+    const full = JSON.parse(fullText);
+    assert.equal(full.exact, true);
+    assert.equal(full.producerWrites, 2049);
+    assert.deepEqual(full.batches, [16384, 262144, 262144, 262144, 245839]);
+    assert.equal(full.retryAt, null);
+    const short = await (await fetch(new URL('/truncated', url))).json();
+    assert.equal(short.exact, true, 'a partial BYOB read is forwarded before the exact-offset retry');
+    assert.equal(short.retryAt, 12345);
+    assert.ok(short.batches.every(size => size > 0 && size <= 262144));
+  } finally { await mf.dispose(); }
+});
+
+test('a standard byte stream without readAtLeast keeps its default-reader behavior', async () => {
+  const { createResumableProgressiveBody } = await api();
+  const bytes = new TextEncoder().encode('abcdefghijklmnop');
+  const source = new ReadableStream({ type: 'bytes', start(c) { c.enqueue(bytes); c.close(); } });
+  const original = response();
+  const body = createResumableProgressiveBody({ status: 206, headers: original.headers, body: source }, {
+    fetchRange() { assert.fail('no retry required'); },
+  });
+  assert.equal(await new Response(body).text(), 'abcdefghijklmnop');
+  await original.body.cancel();
+});

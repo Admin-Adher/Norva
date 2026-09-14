@@ -59,7 +59,7 @@ test('the multi-screen proof fills its intended 8:5 slot without clipping', () =
   const css = read('public/css/commerce.css');
   const asset = path.join(root, 'public/assets/landing/norva-every-screen-premium.webp');
 
-  assert.match(html, /norva-every-screen-premium\.webp\?v=1/);
+  assert.match(html, /norva-every-screen-premium\.webp\?v=(?:1|[a-f0-9]{10})(?=["'])/);
   assert.match(html, /width="1586" height="992"/);
   assert.match(css, /\.commerce-subscribe \.product-proof img\s*\{[\s\S]{0,260}max-height:\s*none;[\s\S]{0,160}aspect-ratio:\s*8\s*\/\s*5;[\s\S]{0,220}padding:\s*0;[\s\S]{0,220}object-fit:\s*cover;/);
   assert.ok(fs.existsSync(asset), 'the project-bound WebP asset is present');
