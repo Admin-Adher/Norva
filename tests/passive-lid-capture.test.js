@@ -25,14 +25,14 @@ function wav(seconds=20) {
     b.writeUInt16LE(1,20);b.writeUInt16LE(1,22);b.writeUInt32LE(16000,24);b.writeUInt32LE(32000,28);
     b.writeUInt16LE(2,32);b.writeUInt16LE(16,34);b.write('data',36);b.writeUInt32LE(b.length-44,40);return b;
 }
-async function fixture(t) {
+async function fixture(t, options = {}) {
     const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'norva-passive-proof-')));
     const media=path.join(root,'viewer');await fs.mkdir(media);
     await fs.writeFile(path.join(media,'playlist.m3u8'),list());
     for(let i=0;i<30;i++) await fs.writeFile(path.join(media,`segment-${String(i).padStart(5,'0')}.ts`),Buffer.alloc(188,0x47));
     let now=Date.now();
     const config={root:path.join(root,'buffer'),secret:'private-synthetic-passive-fixture',now:()=>now,
-        ...(process.platform==='linux'?{}:{acquireOwnership:async()=>({isHeld:()=>true,close:async()=>{}})})};
+        ...(process.platform==='linux'?{}:{acquireOwnership:async()=>({isHeld:()=>true,close:async()=>{}})}), ...options};
     let store=new StrictLidCaptureStore(config);await store.open();
     t.after(async()=>{
         await store.close();assert.equal(path.dirname(root),await fs.realpath(os.tmpdir()));assert.ok(path.basename(root).startsWith('norva-passive-proof-'));
@@ -224,6 +224,26 @@ test('passive resource deferral is distinct from an unavailable source or an ext
     await adapter.capture(b,{});resources=true;await adapter.capture(b,{});source=f.source;await adapter.capture(b,{});
     assert.deepEqual(adapter.snapshot().missesByReason,{'resource-pressure':1,'source-not-current':1,'extraction-failed':1});
     assert.equal(f.store.snapshot().entries,0);assert.equal(f.store.snapshot().reservations,0);
+});
+
+test('passive collection leaves primary headroom without reading playback files or allocating an extractor',async t=>{
+    const f=await fixture(t,{maxEntries:3,maxBytes:12*1024*1024});
+    const current=normalBinding(), passive=passiveCaptureBinding(current,hash(current.userId));
+    const drain={providerDrained:true,providerDrainProtocol:1};
+    await f.store.put(current,wav(),drain);
+    const before=await f.store.get(current);
+    let sources=0,extractions=0;
+    const adapter=createPassiveLidCapture({store:f.store,resourcesAvailable:()=>true,
+        resolveSource:()=>{sources++;return f.source;},
+        extract:async()=>{extractions++;return {ok:false,processClosed:true};}});
+    assert.equal((await adapter.capture(passive,{})).captured,false);
+    assert.equal(sources,0);assert.equal(extractions,0);
+    assert.deepEqual(await f.store.get(current),before);
+    const reservations=await Promise.all([2,3].map(trackIndex=>f.store.reserve({...current,trackIndex})));
+    assert.equal(reservations.length,2);
+    for(const reservation of reservations)await reservation.release();
+    assert.equal(f.store.snapshot().reservations,0);assert.equal(f.store.snapshot().computations,0);
+    assert.deepEqual((await fs.readdir(f.store.root)).filter(name=>name.startsWith('compute-')),[]);
 });
 
 test('closed local segments become private audio, survive restart, and are adopted without extending expiry or opening a provider',async t=>{

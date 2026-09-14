@@ -240,7 +240,7 @@ function createPassiveLidCapture({ store, resolveSource, resourcesAvailable, bin
             if(capacity.entries+capacity.reservations>=8 || capacity.bytes>=16*1024*1024) return miss('capacity');
             active=true; let reservation;
             try {
-                reservation=await store.reserve(binding);
+                reservation=await store.reserve(binding, { opportunistic:true });
                 if(reservation.cached) {
                     const cached=await store.get(binding);
                     return cached ? { passiveProtocol:1,captured:true,sha256:cached.sha256,expiresAt:cached.expiresAt,...drain } : miss('cached-record-missing');

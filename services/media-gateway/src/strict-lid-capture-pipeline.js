@@ -87,7 +87,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             // a companion already retained by this or another owned attempt.
             for (const companion of group.slice(1)) {
                 try {
-                    const reserved = await store.reserve(companion);
+                    const reserved = await store.reserve(companion, { opportunistic: true });
                     reservations.push({ binding: companion, reservation: reserved });
                 } catch (error) {
                     if (!['LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_ALREADY_RUNNING'].includes(error?.code)) throw error;

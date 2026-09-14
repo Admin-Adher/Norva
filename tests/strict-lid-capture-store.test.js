@@ -379,3 +379,101 @@ test('optional prefetch cannot starve the current track or combine another file,
     await assert.rejects(p.pipeline.capture(binding(), {}, undefined, [binding()]), { code: 'LID_CAPTURE_GROUP_INVALID' });
     assert.equal(p.reads(), 1);
 });
+
+test('two track-major jobs finish every window without speculative captures filling the primary buffer', async t => {
+    const f = await fixture(t, { maxBytes: 32 * 1024 * 1024, maxEntries: 16 });
+    const audio = wav();
+    let reads = 0; let active = 0; let peak = 0; let completed = 0; let peakBytes = 0;
+    const pipeline = createStrictLidCapturePipeline({ store: f.store, diagnostic: () => {},
+        claimNetwork: () => {
+            active++; peak = Math.max(peak, active); assert.ok(active <= 2);
+            return { release(attestation) { assert.deepEqual(attestation, drain); active--; } };
+        },
+        openBroker: async () => ({ close: async () => {} }),
+        extract: async (_broker, group) => {
+            reads++;
+            // Both current captures reserve before either returns its audio.
+            await new Promise(resolve => setImmediate(resolve));
+            return Array.isArray(group) ? group.map(() => audio) : audio;
+        },
+        infer: async () => { assert.equal(active, 0); completed++; return { receipt: 'synthetic' }; },
+    });
+    const at = (job, trackIndex, windowOrdinal) => binding({
+        jobId: `${job + 1}2345678-1234-4234-8234-123456789012`,
+        sourceUrlHash: String(job + 1).repeat(64), trackIndex, windowOrdinal,
+        offsetMilliseconds: planStrictSpeechWindow(3600, windowOrdinal).anchorOffsetMilliseconds,
+    });
+    // The production cursor finishes all six windows of one track before the
+    // next track can consume its prefetched audio. No TTL advancement/eviction
+    // is allowed to hide starvation in this realistic two-job interleaving.
+    for (let track = 1; track <= 4; track++) {
+        for (let window = 1; window <= 6; window++) {
+            const current = [0, 1].map(job => at(job, track, window));
+            const capture = (b, job) => pipeline.capture(b, {}, undefined,
+                Array.from({ length: 4 - track }, (_, index) => at(job, track + index + 1, window)));
+            // Unequal provider/inference latency naturally staggers the two
+            // cursors. Warm up serially, then let both request their next window.
+            if (track === 1 && window <= 2) {
+                for (const [job, b] of current.entries()) {
+                    await capture(b, job);
+                    peakBytes = Math.max(peakBytes, f.store.snapshot().bytes);
+                    await pipeline.compute(b, {}); await pipeline.acknowledge(b);
+                }
+                continue;
+            }
+            const results = await Promise.allSettled(current.map(capture));
+            const rejected = results.filter(result => result.status === 'rejected');
+            assert.equal(rejected.length, 0, `track ${track}, window ${window}: ${rejected.map(r => r.reason.code)}`);
+            peakBytes = Math.max(peakBytes, f.store.snapshot().bytes);
+            for (const b of current) {
+                await pipeline.compute(b, {});
+                await pipeline.acknowledge(b);
+            }
+        }
+    }
+    assert.equal(completed, 48); assert.equal(active, 0); assert.equal(peak, 2);
+    assert.ok(reads < completed, 'companion reuse must still avoid some acquisitions');
+    assert.ok(peakBytes <= 32 * 1024 * 1024);
+    assert.equal(f.store.snapshot().entries, 0); assert.equal(f.store.snapshot().reservations, 0);
+    t.diagnostic(JSON.stringify({ syntheticWindows: completed, syntheticAcquisitions: reads, peakBytes, providerRequests: 0 }));
+});
+
+test('opportunistic byte and entry reservations preserve two current slots, including across restart', async t => {
+    for (const limits of [{ maxBytes: 12 * 1024 * 1024, maxEntries: 16 },
+        { maxBytes: 64 * 1024 * 1024, maxEntries: 4 }]) {
+        const f = await fixture(t, limits); const speculative = [1, 2].map(trackIndex => binding({ trackIndex }));
+        for (const b of speculative) {
+            const reservation = await f.store.reserve(b, { opportunistic: true });
+            await f.store.put(b, wav(), drain, reservation.token); await reservation.release();
+        }
+        const prior = await f.store.get(speculative[0]);
+        await f.restart();
+        await assert.rejects(f.store.reserve(binding({ trackIndex: 3 }), { opportunistic: true }),
+            { code: 'LID_CAPTURE_STORE_FULL' });
+        assert.equal(f.store.snapshot().reservations, 0);
+        const cached = await f.store.reserve(speculative[0], { opportunistic: true });
+        assert.equal(cached.cached, true); await cached.release();
+        const current = await Promise.all([3, 4].map(trackIndex => f.store.reserve(binding({ trackIndex }))));
+        assert.equal(current.length, 2); assert.equal(f.store.snapshot().reservations, 2);
+        for (const reservation of current) await reservation.release();
+        assert.deepEqual(await f.store.get(speculative[0]), prior, 'no eviction, rewritten evidence or renewed TTL');
+        assert.equal(f.store.snapshot().maxBytes, limits.maxBytes);
+        assert.equal(f.store.snapshot().maxEntries, limits.maxEntries);
+    }
+});
+
+test('concurrent opportunistic reservations account for worst-case bytes before any media or network work', async t => {
+    const f = await fixture(t, { maxBytes: 32 * 1024 * 1024, maxEntries: 16 });
+    const results = await Promise.allSettled(Array.from({ length: 20 }, (_, trackIndex) =>
+        f.store.reserve(binding({ trackIndex }), { opportunistic: true })));
+    const allowed = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+    assert.equal(allowed.length, 8);
+    assert.ok(results.filter(r => r.status === 'rejected').every(r => r.reason.code === 'LID_CAPTURE_STORE_FULL'));
+    const primary = await Promise.all([50, 51].map(trackIndex => f.store.reserve(binding({ trackIndex }))));
+    assert.equal(f.store.snapshot().reservations, 10);
+    for (const reservation of [...allowed, ...primary]) await reservation.release();
+    for (const opportunistic of ['true', 1, null]) {
+        await assert.rejects(f.store.reserve(binding(), { opportunistic }), { code: 'LID_CAPTURE_RESERVATION_INVALID' });
+    }
+    assert.equal(f.store.snapshot().reservations, 0); assert.equal(f.store.snapshot().entries, 0);
+});
