@@ -53,7 +53,8 @@ test('Observed episode languages require complete concordant cache and current s
     "else '{}'::text[] end as languages"
   ]) assert.ok(xtream.includes(proof), `missing audio guard: ${proof}`);
   assert.doesNotMatch(sql, /(?:insert into|update|delete from)\s+public\./i);
-  assert.ok(xtream.includes('select distinct file.audio_tracks::text collate "C" as track_map_text'));
+  assert.ok(xtream.includes('cache.audio_tracks::text collate "C" as track_map_text'));
+  assert.ok(xtream.includes('select distinct file.track_map_text from owned_files file'));
   assert.ok(xtream.includes('file.observation_complete'));
 });
 

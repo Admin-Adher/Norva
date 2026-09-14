@@ -21,6 +21,8 @@ language sql stable security invoker set search_path='' as $f$
       and (p_source_id is null or membership.source_id=p_source_id)
   ), owned_files as materialized (
     select variant.title_id,variant.id as variant_id,observation.audio_languages,
+      cache.audio_tracks::text collate "C" as track_map_text,
+      observation.audio_languages::text collate "C" as observation_map_text,
       membership.provider_identity_id,membership.episode_id,membership.parent_series_id,
       cache.audio_tracks,cache.audio_probed_at,cache.audio_lang_verified_at,
       cache.observed_profile_fingerprint,cache.observed_profile_probed_at,
@@ -69,16 +71,16 @@ language sql stable security invoker set search_path='' as $f$
     select raw.track_map_text,
       coalesce(public.selection_audio_tracks_complete(raw.track_map_text::jsonb),false) as complete,
       public.cloud_file_track_languages(raw.track_map_text::jsonb) as codes
-    from (select distinct file.audio_tracks::text collate "C" as track_map_text from owned_files file) raw
+    from (select distinct file.track_map_text from owned_files file) raw
   ), observation_maps as materialized (
-    select raw.audio_languages,
+    select raw.observation_map_text,
       array(select distinct code from (
         select case value when 'yue' then 'yue' else public.norva_canonical_language_code(value) end as code
-        from unnest(raw.audio_languages) language(value)
+        from unnest(raw.observation_map_text::text[]) language(value)
       ) canonical where code is not null order by code) as codes,
-      not exists(select 1 from unnest(raw.audio_languages) language(value)
+      not exists(select 1 from unnest(raw.observation_map_text::text[]) language(value)
         where value is distinct from 'yue' and public.norva_canonical_language_code(value) is null) as complete
-    from (select distinct file.audio_languages collate "C" as audio_languages from owned_files file) raw
+    from (select distinct file.observation_map_text from owned_files file) raw
   ), checked_files as materialized (
     select file.*,observation_map.codes as observation_codes,
       observation_map.complete as observation_complete,track_map.codes as cache_codes,
@@ -102,8 +104,8 @@ language sql stable security invoker set search_path='' as $f$
           file.audio_verification->>'profileFingerprint'=file.observed_profile_fingerprint
         ))) as profile_matches
     from owned_files file
-    join track_maps track_map on track_map.track_map_text=file.audio_tracks::text collate "C" and track_map.complete
-    join observation_maps observation_map on observation_map.audio_languages=file.audio_languages collate "C"
+    join track_maps track_map on track_map.track_map_text=file.track_map_text and track_map.complete
+    join observation_maps observation_map on observation_map.observation_map_text=file.observation_map_text
   ), evaluated as materialized (
     select file.title_id,file.variant_id,file.provider_identity_id,file.episode_id,file.parent_series_id,
       case when cardinality(file.observation_codes)>0 and file.observation_codes=file.cache_codes
@@ -258,7 +260,7 @@ language sql stable security invoker set search_path='' as $f$
       variant.generation_id,variant.external_id,variant.item_type
     from public.cloud_catalog_visible_title_variants variant
     where variant.user_id=p_user_id and variant.item_type=p_item_type
-      and p_item_type in ('movie','series')
+      and p_item_type='series'
       and (p_source_id is null or variant.source_id=p_source_id)
   ), direct_observed as materialized (
     -- Evaluate exact-file ownership and numeric episode collisions once. Keep
@@ -323,6 +325,33 @@ language sql stable security invoker set search_path='' as $f$
       -- Deliberately unfiltered by requested language: a conflicting hint must
       -- not reappear when querying a language absent from observed episodes.
       and direct.variant_id is null and observed.variant_id is null
+    union all
+    -- Preserve the deployed movie access path without materializing its whole
+    -- catalogue. Episode projection and its memoization apply only to series.
+    select variant.title_id,variant.id,codes.code
+    from public.cloud_title_file_language_observations observation
+    join public.cloud_catalog_visible_title_variants variant
+      on variant.user_id=observation.user_id and variant.title_id=observation.title_id and variant.id=observation.variant_id
+        and variant.external_id=observation.file_external_id
+    cross join lateral unnest(observation.audio_languages) language(value)
+    join codes on codes.raw_code=language.value
+    where p_item_type='movie' and observation.user_id=p_user_id and observation.audio_observed
+      and codes.code is not null and (p_language is null or codes.code=p_language)
+      and variant.item_type=p_item_type
+      and (p_source_id is null or variant.source_id=p_source_id)
+    union all
+    select variant.title_id,variant.id,case hint.language when 'fil' then 'tl' else hint.language end
+    from public.cloud_catalog_provider_language_hints hint
+    join public.cloud_catalog_visible_title_variants variant
+      on variant.id=hint.variant_id and variant.user_id=hint.user_id and variant.title_id=hint.title_id and variant.source_id=hint.source_id
+    where p_item_type='movie' and hint.user_id=p_user_id and hint.item_type=p_item_type and variant.item_type=p_item_type
+      and (p_source_id is null or hint.source_id=p_source_id)
+      and (p_language is null or hint.language=p_language or (p_language='tl' and hint.language='fil'))
+      and not exists(select 1 from public.cloud_title_file_language_observations observation
+        cross join lateral unnest(observation.audio_languages) language(value)
+        join codes on codes.raw_code=language.value and codes.code is not null
+        where observation.user_id=hint.user_id and observation.title_id=hint.title_id and observation.variant_id=hint.variant_id
+          and observation.file_external_id=variant.external_id and observation.audio_observed)
   ) effective(title_id,variant_id,language)
   join public.cloud_titles title on title.id=effective.title_id and title.user_id=p_user_id and title.item_type=p_item_type
 $f$;
