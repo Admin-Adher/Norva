@@ -70,6 +70,21 @@ export function jsonObjectReader(consume) {
 }
 
 async function main() {
+  // Read only: identify the existing execution model/limit without changing
+  // billing, limits or the deployed Worker. Never print the settings payload.
+  try {
+    const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+    if (!/^[a-f0-9]{32}$/i.test(account || '')) throw new Error('unavailable');
+    const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/norva-relay/settings`, {
+      headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await response.json(), settings = data?.result;
+    const out = { diagnostic: 'runtime-settings', available: response.ok && data?.success === true };
+    if (['standard', 'bundled', 'unbound'].includes(settings?.usage_model)) out.usageModel = settings.usage_model;
+    if (Number.isFinite(settings?.limits?.cpu_ms)) out.cpuLimitMs = settings.limits.cpu_ms;
+    process.stdout.write(JSON.stringify(out) + '\n');
+  } catch { process.stdout.write(JSON.stringify({ diagnostic: 'runtime-settings', available: false }) + '\n'); }
   const child = spawn(process.execPath, [resolve('node_modules/wrangler/bin/wrangler.js'),
     'tail', 'norva-relay', '--format', 'json',
     '--config', 'services/norva-relay/wrangler.jsonc'], { stdio: ['ignore', 'pipe', 'pipe'] });
