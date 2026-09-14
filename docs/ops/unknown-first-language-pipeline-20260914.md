@@ -70,6 +70,25 @@ closer first proves both original replicas, no candidate/retained containers and
 a dead failed runner, then restores only the original cron bits. It cannot stop
 transcriptions or bypass the idle requirement for an actual Edge replacement.
 
+### Explicitly approved 60-minute retry (14 September)
+
+The user separately approved a pause of the planned drivers for up to 60 minutes,
+without cancelling current work. `deploy-owned-language-maintenance-60m-20260914.py`
+uses a fresh, fixed private root and pins the safely closed six-file release at
+`d7dacab268c7ad1b10f349811dadb6a38b766efa`. New unrelated playback changes on main
+are not part of that payload. Its Git-bound operator is published separately.
+The only timing change is an immutable 3,600-second launch deadline. The existing
+run loop reserves the last 120 seconds for activation or recovery. Idle, watchdog,
+SQL, ownership, exact-file, retained-container and no-activation closure checks
+are unchanged; no transcription, storyboard or playback is cancelled.
+
+Use `bind-owned-language-maintenance-60m.cjs` to create the operator artifacts.
+In the new private root run `prepare`, `bind-sql`, `stage <sourceCommit>`, then
+`launch pause-planned-jobs-at-most-60m-no-cancellation`. Recheck `status` through
+completion and verify original cron bits are restored. Never extend its saved
+deadline or reuse the failed or closed attempt. A remaining queue does not grant
+permission to interrupt jobs or relax admission conditions.
+
 Only after both replicas, owner-isolation checks and catalogue label/filter
 parity are verified may the new metadata/projection switch be enabled. Keep the
 independent `language_metadata_lane_enabled` and exact-file admission settings
