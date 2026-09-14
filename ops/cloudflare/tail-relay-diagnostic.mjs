@@ -71,9 +71,13 @@ export function jsonObjectReader(consume) {
 
 async function main() {
   const child = spawn(process.execPath, [resolve('node_modules/wrangler/bin/wrangler.js'),
-    'tail', 'norva-relay', '--format', 'json', '--sampling-rate', '1',
+    'tail', 'norva-relay', '--format', 'json',
     '--config', 'services/norva-relay/wrangler.jsonc'], { stdio: ['ignore', 'pipe', 'pipe'] });
-  const summary = { events: 0, outcomes: {}, exceptions: {}, signals: {}, timedOut: false, authIssue: false };
+  const summary = { events: 0, outcomes: {}, exceptions: {}, signals: {}, timedOut: false, authIssue: false, configurationError: false };
+  const inspectSetup = chunk => {
+    if (/authentication|not authenticated|unauthorized|permission|CLOUDFLARE_API_TOKEN|10000|9109/i.test(chunk)) summary.authIssue = true;
+    if (/sampling rate must|unknown argument|cannot find module|MODULE_NOT_FOUND/i.test(chunk)) summary.configurationError = true;
+  };
   const write = value => process.stdout.write(JSON.stringify(value) + '\n');
   const consume = jsonObjectReader(raw => {
     if (!raw || !('outcome' in raw)) return;
@@ -86,10 +90,11 @@ async function main() {
   });
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', chunk => {
+    inspectSetup(chunk);
     try { consume(chunk); } catch { child.kill('SIGTERM'); }
   });
   child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => { if (/authentication|not authenticated|unauthorized|permission|10000|9109/i.test(chunk)) summary.authIssue = true; });
+  child.stderr.on('data', inspectSetup);
   child.on('error', () => { write({ diagnostic: 'spawn-failed' }); process.exitCode = 1; });
   write({ diagnostic: 'starting', seconds: 90, productionConfigurationChanged: false });
   let hardStop;
