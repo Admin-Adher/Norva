@@ -89,6 +89,26 @@ completion and verify original cron bits are restored. Never extend its saved
 deadline or reuse the failed or closed attempt. A remaining queue does not grant
 permission to interrupt jobs or relax admission conditions.
 
+### Post-VOD baseline (coordinated final runtime)
+
+The prior attempt was closed without activation for the user's VOD priority.
+After the VOD task confirmed completion and nine storyboard requeues, read-only
+checks matched its final Gateway image and both 160-file Edge trees. The shared
+language helpers and catalog entrypoint are unchanged; the live playback entry
+is now `c4d9d9a046ecf15f5ba9fbfd331c8bab092df143814503f235906364977cd589`.
+Its difference from the new candidate is only the already reviewed language
+intake/metadata code. VOD timing, finite-TS, diagnostics and storyboard behavior
+are preserved. Gateway files are read/hash-checked and are not deployed here.
+
+Use the binder's explicit `post-vod` profile and the fresh fixed operator
+`deploy-post-vod-language-edge-20260914.py`. It pins the six candidate hashes,
+the prior reviewed adapter and the approved 60-minute timing helper. Stage
+requires the coordinated Gateway image/file hashes and both whole-tree hashes.
+Idle/recovery gates and the no-cancellation boundary remain unchanged. Do not
+reuse the coordination-closed directory, cancel the nine requeued storyboards,
+or deploy main's complete runtime tree. The metadata flag still requires its
+separate post-rollout verification and activation.
+
 Only after both replicas, owner-isolation checks and catalogue label/filter
 parity are verified may the new metadata/projection switch be enabled. Keep the
 independent `language_metadata_lane_enabled` and exact-file admission settings

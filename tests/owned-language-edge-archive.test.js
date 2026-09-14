@@ -23,3 +23,13 @@ test('language binder uses byte-stable Git export and checks both archive payloa
   assert.match(source,/for\(const kind of \['base','candidate'\]\)/);
   assert.match(source,/if\(sha\(extracted\)!==expected\)throw Error/);
 });
+
+test('post-VOD archive requires an explicit bounded profile and its reviewed operator',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../ops/hetzner/scripts/bind-unknown-first-language-edge.cjs'),'utf8');
+  assert.match(source,/!\['','post-vod'\]\.includes\(profile\)\|\|process\.argv\.length>5/);
+  assert.match(source,/if\(profile==='post-vod'\)before\['norva-playback\/index\.ts'\]='c4d9d9a046ecf15f5ba9fbfd331c8bab092df143814503f235906364977cd589'/);
+  assert.match(source,/profile==='post-vod'\?'ops\/hetzner\/scripts\/deploy-post-vod-language-edge-20260914\.py'/);
+  assert.match(source,/profile,maxPauseSeconds:3600,authorization:'pause-planned-jobs-at-most-60m-no-cancellation'/);
+  const run=execFileSync.bind(null,process.execPath);
+  assert.throws(()=>run([path.join(__dirname,'../ops/hetzner/scripts/bind-unknown-first-language-edge.cjs'),'.','.','unsafe'],{stdio:'pipe'}),/Unsupported release profile/);
+});

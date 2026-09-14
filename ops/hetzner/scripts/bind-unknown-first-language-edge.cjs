@@ -3,6 +3,8 @@ const fs=require('node:fs'), path=require('node:path'), {execFileSync}=require('
 const {createHash}=require('node:crypto');
 const git=process.env.NORVA_RELEASE_GIT||'git';
 const baseline=path.resolve(process.argv[2]||''), output=path.resolve(process.argv[3]||'');
+const profile=process.argv[4]||'';
+if(!['','post-vod'].includes(profile)||process.argv.length>5)throw Error('Unsupported release profile');
 if(!process.argv[2]||!process.argv[3]||!fs.statSync(baseline).isDirectory()||!fs.statSync(output).isDirectory())throw Error('Existing baseline and artifact directories required');
 const before={
   '_shared/provider-catalog-language.mjs':'a1decb43db87f9dec85db770eab0b47096d838d8535d91a16ebbbf6b8825d39e',
@@ -13,11 +15,13 @@ const before={
   'norva-playback/index.ts':'2d661fdb6a71f85bf1e654e74d61ac1c128efb2801a5339883abed62254f3b46',
 };
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+if(profile==='post-vod')before['norva-playback/index.ts']='c4d9d9a046ecf15f5ba9fbfd331c8bab092df143814503f235906364977cd589';
 const commit=execFileSync(git,['rev-parse','HEAD'],{encoding:'utf8'}).trim();
-const operator='ops/hetzner/scripts/deploy-unknown-first-language-edge.py';
+const operator=profile==='post-vod'?'ops/hetzner/scripts/deploy-post-vod-language-edge-20260914.py':'ops/hetzner/scripts/deploy-unknown-first-language-edge.py';
 const files=Object.keys(before).map(name=>'supabase/functions/'+name);
 execFileSync(git,['diff','--exit-code','HEAD','--',operator,...files]);
 const cfg={schema:1,commit,sqlCommit:'ff8a25ead75088ff83eea216c94c54c3efab1e18',edgeFiles:{}};
+if(profile==='post-vod')Object.assign(cfg,{profile,maxPauseSeconds:3600,authorization:'pause-planned-jobs-at-most-60m-no-cancellation'});
 for(const [name,digest]of Object.entries(before)){
   const file='supabase/functions/'+name, local=path.join(baseline,file);
   if(digest===null){if(fs.existsSync(local))throw Error('New helper already exists in baseline');}
