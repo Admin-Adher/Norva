@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
 
-const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/android-notification-proof.yml'), 'utf8');
+const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/android-notification-proof.yml'), 'utf8').replace(/\r\n/g, '\n');
 const verificationStep = workflow.split('      - name: Verify complete evidence outside the emulator shell\n')[1];
 assert(verificationStep, 'independent evidence step is required');
 const verifier = verificationStep.split("          node <<'NODE'\n")[1].split('\n          NODE')[0]
