@@ -36,6 +36,22 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'migration_hash_drift'):
             release.bind()
 
+    def test_roles_match_existing_production_function_ownership(self):
+        self.assertEqual(release.OWNERS['claim_catalog_vod_language_file(uuid,uuid)'], 'supabase_admin')
+        self.assertEqual(release.OWNERS['cloud_catalog_effective_audio_languages(uuid,text,uuid,text)'], 'postgres')
+        calls = []
+        class Result:
+            returncode = 0
+            stdout = '1'
+        def fake(args, **kwargs):
+            calls.append(args)
+            return Result()
+        with patch.object(release.subprocess, 'run', side_effect=fake):
+            release.query('select 1;', write=False)
+            release.query('BEGIN; ROLLBACK;', write=True)
+        self.assertEqual(calls[0][calls[0].index('-U')+1], 'postgres')
+        self.assertEqual(calls[1][calls[1].index('-U')+1], 'supabase_admin')
+
     def test_scope_cannot_be_expanded(self):
         self.manifest['migrations']['other.sql'] = 'b'*64
         (self.root/'release-manifest.private.json').write_text(json.dumps(self.manifest))

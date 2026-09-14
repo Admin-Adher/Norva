@@ -11,6 +11,7 @@ ROOT=pathlib.Path('/home/adrien/.norva/unknown-first-language-pipeline-20260914'
 MIGRATIONS=['20260914133000_unknown_first_language_intake.sql','20260914134000_owned_provider_stream_languages.sql','20260914135000_unknown_series_metadata_refresh.sql']
 SIGNATURES=['claim_catalog_vod_language_file(uuid,uuid)','cloud_catalog_effective_audio_languages(uuid,text,uuid,text)',
   'register_catalog_series_episodes(uuid,uuid,uuid,bigint,bigint,bigint,bigint,text,jsonb)','catalog_series_inventory_candidates(uuid,uuid,integer)']
+OWNERS={name:('postgres' if name.startswith('cloud_catalog_effective_audio_languages(') else 'supabase_admin') for name in SIGNATURES}
 
 def require(ok,code):
     if not ok:raise RuntimeError(code)
@@ -21,7 +22,7 @@ def save(name,value):
 def query(sql,write=False):
     args=['docker','exec']
     if not write:args+=['-e','PGOPTIONS=-c default_transaction_read_only=on']
-    args+=['-i','norva-db','psql','-X','-qAt','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1']
+    args+=['-i','norva-db','psql','-X','-qAt','-U','supabase_admin' if write else 'postgres','-d','postgres','-v','ON_ERROR_STOP=1']
     if not write:sql="BEGIN READ ONLY; SET LOCAL statement_timeout='30s'; "+sql+' ROLLBACK;'
     p=subprocess.run(args,input=sql,text=True,capture_output=True,timeout=90)
     if p.returncode:
@@ -62,7 +63,7 @@ def main():
     cfg=bind();mode=sys.argv[1] if len(sys.argv)>1 else ''
     if mode=='inspect':
         current=state();require(not current['priorityInstalled'] and not current['declarationTable'],'already_installed')
-        rows=definitions();require(len(rows)==4 and all(r['owner']=='postgres' for r in rows),'definition_scope')
+        rows=definitions();require({r['signature']:r['owner'] for r in rows}==OWNERS,'definition_scope')
         save('sql-before.private.json',{'commit':cfg['commit'],'state':current,'functions':rows})
         print(json.dumps({'preflight':True,'metadataEnabled':False,'functions':4}))
     elif mode=='rehearse':

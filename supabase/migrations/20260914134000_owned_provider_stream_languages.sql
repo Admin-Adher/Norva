@@ -220,6 +220,9 @@ language sql stable security invoker set search_path='' as $f$
   union
   select d.* from declared d where p_language is null or d.language=p_language
 $f$;
+-- The replaced invoker function is owned by postgres in production. Preserve
+-- that ownership even when the migration operator uses supabase_admin for DDL.
+alter function public.cloud_catalog_effective_audio_languages(uuid,text,uuid,text) owner to postgres;
 revoke all on function public.cloud_catalog_effective_audio_languages(uuid,text,uuid,text) from public,anon,authenticated;
 grant execute on function public.cloud_catalog_effective_audio_languages(uuid,text,uuid,text) to service_role;
 
