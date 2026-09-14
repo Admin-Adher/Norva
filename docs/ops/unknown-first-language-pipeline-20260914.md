@@ -100,7 +100,7 @@ Its difference from the new candidate is only the already reviewed language
 intake/metadata code. VOD timing, finite-TS, diagnostics and storyboard behavior
 are preserved. Gateway files are read/hash-checked and are not deployed here.
 
-Use the binder's explicit `post-vod` profile and the fresh fixed operator
+Use the binder's explicit `post-vod` profile and the fresh scoped operator
 `deploy-post-vod-language-edge-20260914.py`. It pins the six candidate hashes,
 the prior reviewed adapter and the approved 60-minute timing helper. Stage
 requires the coordinated Gateway image/file hashes and both whole-tree hashes.
@@ -108,6 +108,43 @@ Idle/recovery gates and the no-cancellation boundary remain unchanged. Do not
 reuse the coordination-closed directory, cancel the nine requeued storyboards,
 or deploy main's complete runtime tree. The metadata flag still requires its
 separate post-rollout verification and activation.
+
+Each artifact now binds its own `attemptDirectory`, a timestamped child of
+`/home/adrien/.norva` matching `post-vod-language-edge-20260914-[0-9]{14}`.
+The operator rejects a different parent/name or mismatched directory binding.
+A closed attempt remains immutable; a later coordinated maintenance requires
+new artifacts, fresh `bind-sql`/`stage`, the same explicit launch acknowledgement,
+and an entirely new bounded deadline. It does not restart a closed runner or
+grant permission for overlapping VOD work. The six candidate hashes and the
+coordinated VOD baseline remain pinned independently of the attempt name.
+
+### Owned metadata activation
+
+`activate-owned-language-metadata-20260914.py` requires a successful, fully
+closed post-VOD release: both healthy candidate replicas, restored original
+cron bits, unchanged private SQL/permissions, and the exact published UI asset.
+Use `bind-owned-language-activation.cjs <output> <edge-commit> <edge-attempt>`
+to export the committed operator into a newly named private activation folder.
+The generated `activationDirectory` and `edgeAttemptDirectory` are checked at
+runtime; arbitrary paths and closed unsuccessful releases fail before a flag write.
+
+Run `preflight`, `rehearse`, then
+`enable enable-only-owned-provider-language-metadata` within five minutes of the
+preflight proof. Rehearsal executes the same locked compare-and-swap transaction
+and rolls it back. Activation changes only `owned_provider_language_metadata_enabled`;
+all flag values, the original row xmin, schema, ACLs, constraints and view must
+still match. The production operator sends no provider request itself. Enabling
+the flag permits the existing bounded, viewer-prioritized workers to collect.
+Do not enable during the coordinated KING365 media comparison.
+
+After a lost response, use `status` and the unique owned marker; never blindly
+repeat a write. `rollback-owned disable-only-our-owned-provider-language-metadata`
+can disable only the activation still carrying our marker and row version. It
+cannot reset queues, modify another flag, interrupt jobs or rewrite declarations.
+Rollback records a distinct audit marker and preserves the original deployment
+plan. `prove-owned-language-activation.py` exercises rehearsal, stale-row/schema/
+flag rejection, commit and owned rollback only in the labeled networkless schema
+clone; its proof includes the exact tested operator hash.
 
 Only after both replicas, owner-isolation checks and catalogue label/filter
 parity are verified may the new metadata/projection switch be enabled. Keep the

@@ -5,11 +5,12 @@ No Gateway modification, media-job interruption, flag activation or SQL write.
 """
 import hashlib, importlib.util, json, os, pathlib, re, subprocess, sys
 
-ROOT=pathlib.Path('/home/adrien/.norva/post-vod-language-edge-20260914')
-PREVIOUS=ROOT.parent/'unknown-first-language-edge-20260914'
+BASE=pathlib.Path('/home/adrien/.norva')
+ROOT=pathlib.Path(__file__).resolve().parent
+PREVIOUS=BASE/'unknown-first-language-edge-20260914'
 ADAPTER=PREVIOUS/'deploy-unknown-first-language-edge.py'
 ADAPTER_SHA='0b6c11ae7b8b32832450045040800e5df183c62ead6d9d565718a9de137eaef9'
-TIMING=ROOT.parent/'owned-language-maintenance-60m-20260914/deploy-owned-language-maintenance-60m-20260914.py'
+TIMING=BASE/'owned-language-maintenance-60m-20260914/deploy-owned-language-maintenance-60m-20260914.py'
 TIMING_SHA='998ceb807f5f79be63a333e4101e335b64942c0b31eb4bb6141d09b1c81c9ea2'
 ACK='pause-planned-jobs-at-most-60m-no-cancellation'
 LIVE_PLAYBACK_SHA='c4d9d9a046ecf15f5ba9fbfd331c8bab092df143814503f235906364977cd589'
@@ -37,6 +38,7 @@ def load(name,path):
 def validate_profile(cfg,adapter):
     require(cfg.get('profile')=='post-vod' and cfg.get('maxPauseSeconds')==3600
         and cfg.get('authorization')==ACK,'post_vod_authorization_binding')
+    require(cfg.get('attemptDirectory')==ROOT.name,'attempt_directory_binding')
     adapter.validate(cfg)
     require({name:pair[1] for name,pair in cfg['edgeFiles'].items()}==CANDIDATE,'reviewed_post_vod_payload_drift')
 
@@ -82,6 +84,8 @@ def configure(adapter,timing):
 
 def main():
     os.umask(0o077);sys.dont_write_bytecode=True
+    require(ROOT.parent==BASE and re.fullmatch('post-vod-language-edge-20260914-[0-9]{14}',ROOT.name),
+        'scoped_fresh_attempt_directory_required')
     require(ROOT.is_dir() and not ROOT.is_symlink() and ROOT.stat().st_mode&0o077==0,'private_root_required')
     require(pathlib.Path(__file__).resolve().parent==ROOT.resolve(),'operator_location_mismatch')
     for path,digest in ((ADAPTER,ADAPTER_SHA),(TIMING,TIMING_SHA)):

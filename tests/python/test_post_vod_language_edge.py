@@ -7,12 +7,12 @@ spec=importlib.util.spec_from_file_location('post_vod_under_test',PATH)
 op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 
 class PostVodTests(unittest.TestCase):
-    def cfg(self):return {'profile':'post-vod','maxPauseSeconds':3600,'authorization':op.ACK,
+    def cfg(self):return {'profile':'post-vod','maxPauseSeconds':3600,'authorization':op.ACK,'attemptDirectory':op.ROOT.name,
         'edgeFiles':{name:['baseline',digest] for name,digest in op.CANDIDATE.items()}}
     def test_exact_payload_and_approved_window(self):
         adapter=types.SimpleNamespace(validate=mock.Mock());cfg=self.cfg()
         op.validate_profile(cfg,adapter);adapter.validate.assert_called_once_with(cfg)
-        for change in ({'maxPauseSeconds':3601},{'profile':'old'},{'authorization':'cancel-storyboards'}):
+        for change in ({'maxPauseSeconds':3601},{'profile':'old'},{'authorization':'cancel-storyboards'},{'attemptDirectory':'../foreign'}):
             with self.assertRaises(RuntimeError):op.validate_profile({**cfg,**change},adapter)
         cfg['edgeFiles']['norva-playback/index.ts'][1]='0'*64
         with self.assertRaisesRegex(RuntimeError,'payload_drift'):op.validate_profile(cfg,adapter)
@@ -51,5 +51,7 @@ class PostVodTests(unittest.TestCase):
             self.assertNotIn(name,attrs)
         for forbidden in ('write=True','docker_api(','SIGTERM','kill(','UPDATE ','DELETE '):self.assertNotIn(forbidden,source)
         self.assertIn("'sha256sum'",source)
+        self.assertIn("ROOT.parent==BASE",source)
+        self.assertIn("'post-vod-language-edge-20260914-[0-9]{14}'",source)
 
 if __name__=='__main__':unittest.main()

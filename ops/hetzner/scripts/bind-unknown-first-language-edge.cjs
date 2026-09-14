@@ -21,7 +21,8 @@ const operator=profile==='post-vod'?'ops/hetzner/scripts/deploy-post-vod-languag
 const files=Object.keys(before).map(name=>'supabase/functions/'+name);
 execFileSync(git,['diff','--exit-code','HEAD','--',operator,...files]);
 const cfg={schema:1,commit,sqlCommit:'ff8a25ead75088ff83eea216c94c54c3efab1e18',edgeFiles:{}};
-if(profile==='post-vod')Object.assign(cfg,{profile,maxPauseSeconds:3600,authorization:'pause-planned-jobs-at-most-60m-no-cancellation'});
+if(profile==='post-vod')Object.assign(cfg,{profile,maxPauseSeconds:3600,authorization:'pause-planned-jobs-at-most-60m-no-cancellation',
+  attemptDirectory:'post-vod-language-edge-20260914-'+new Date().toISOString().replace(/\D/g,'').slice(0,14)});
 for(const [name,digest]of Object.entries(before)){
   const file='supabase/functions/'+name, local=path.join(baseline,file);
   if(digest===null){if(fs.existsSync(local))throw Error('New helper already exists in baseline');}
@@ -44,4 +45,4 @@ for(const kind of ['base','candidate'])for(const [name,pair]of Object.entries(cf
 const bytes=execFileSync(git,['show',commit+':'+operator]);cfg.operatorSha256=sha(bytes);
 fs.writeFileSync(path.join(directory,path.basename(operator)),bytes,{flag:'wx',mode:0o600});
 fs.writeFileSync(path.join(directory,'release-config.private.json'),JSON.stringify(cfg,null,2),{flag:'wx',mode:0o600});
-console.log(JSON.stringify({directory,commit,edgeFiles:files.length,productionWrites:0}));
+console.log(JSON.stringify({directory,commit,edgeFiles:files.length,attemptDirectory:cfg.attemptDirectory,productionWrites:0}));
