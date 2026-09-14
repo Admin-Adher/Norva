@@ -26,9 +26,17 @@ for(const [name,digest]of Object.entries(before)){
   cfg.edgeFiles[name]=[digest,sha(candidate)];
 }
 const directory=fs.mkdtempSync(path.join(output,'unknown-first-edge-release-'));
-execFileSync(git,['archive','--format=tar','--output='+path.join(directory,'candidate.tar'),commit,'--',...files]);
-execFileSync(process.platform==='win32'?'C:/Windows/System32/tar.exe':'tar',[
+// git archive otherwise applies Windows core.autocrlf to tracked text, while
+// the binding deliberately hashes Git blobs. Preserve those exact LF bytes.
+execFileSync(git,['-c','core.autocrlf=false','archive','--format=tar','--output='+path.join(directory,'candidate.tar'),commit,'--',...files]);
+const tar=process.platform==='win32'?'C:/Windows/System32/tar.exe':'tar';
+execFileSync(tar,[
   '-cf',path.join(directory,'base.tar'),'-C',baseline,...Object.keys(before).filter(name=>before[name]!==null).map(name=>'supabase/functions/'+name)]);
+for(const kind of ['base','candidate'])for(const [name,pair]of Object.entries(cfg.edgeFiles)){
+  const expected=pair[kind==='base'?0:1];if(expected===null)continue;
+  const extracted=execFileSync(tar,['-xOf',path.join(directory,kind+'.tar'),'supabase/functions/'+name],{maxBuffer:2*1024*1024});
+  if(sha(extracted)!==expected)throw Error('Archive byte mismatch: '+kind+'/'+name);
+}
 const bytes=execFileSync(git,['show',commit+':'+operator]);cfg.operatorSha256=sha(bytes);
 fs.writeFileSync(path.join(directory,path.basename(operator)),bytes,{flag:'wx',mode:0o600});
 fs.writeFileSync(path.join(directory,'release-config.private.json'),JSON.stringify(cfg,null,2),{flag:'wx',mode:0o600});
