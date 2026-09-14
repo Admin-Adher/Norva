@@ -33,20 +33,20 @@ export function progressiveRangeIdentity(response) {
   return { start, end, total, etag };
 }
 
-// fetch() can deliver only a few hundred bytes per default read. Running the
-// retry timer and both JS stream wrappers for every network fragment exhausted
+// fetch() and raw sockets can deliver only a few hundred bytes per default read.
+// Running the retry timer and JS stream wrappers for every fragment exhausted
 // the Worker's CPU allowance during real VOD playback (exceededCpu). Let the
 // native Workers stream aggregate bytes, without buffering a complete range.
 // A small first read preserves startup; subsequent reads retain <= 256 KiB.
 // Non-Workers/default streams keep their existing behavior.
-function progressiveBodyReader(body) {
+export function createRelayBodyReader(body) {
   let byob;
   try {
     byob = body.getReader({ mode: 'byob' });
     if (typeof byob.readAtLeast === 'function') {
       let first = true;
       return {
-        read(remaining) {
+        read(remaining = Infinity) {
           const size = Math.min(remaining, first ? 16 * 1024 : 256 * 1024);
           first = false;
           return byob.readAtLeast(size, new Uint8Array(size));
@@ -64,7 +64,7 @@ export function createResumableProgressiveBody(response, options) {
   if (!identity || !response.body || typeof options?.fetchRange !== 'function') return response.body;
   const maxRetries = Math.max(0, Math.min(2, options.maxRetries ?? 2));
   const readTimeoutMs = Math.max(1, options.readTimeoutMs ?? 15_000);
-  let reader = progressiveBodyReader(response.body);
+  let reader = createRelayBodyReader(response.body);
   let abort = options.abort || (() => {});
   let offset = identity.start;
   let retries = 0;
@@ -143,7 +143,7 @@ export function createResumableProgressiveBody(response, options) {
               try { void next.response.body?.cancel().catch(() => {}); } catch (_) {}
               throw new Error('RELAY_UNSAFE_RANGE_RESUME');
             }
-            reader = progressiveBodyReader(next.response.body);
+            reader = createRelayBodyReader(next.response.body);
             options.onResume?.({ attempt: retries, reason: error?.message === 'RELAY_UPSTREAM_TIMEOUT' ? 'timeout' : 'interrupted' });
           } catch (resumeError) {
             if (closed) return;
