@@ -9,6 +9,8 @@ const discovery = sql.slice(sql.indexOf('create function public.norva_queue_vali
   sql.indexOf('create function public.norva_process_one'));
 const worker = sql.slice(sql.indexOf('create function public.norva_process_one'),
   sql.indexOf('-- pg_cron'));
+const ownerSafe = fs.readFileSync(path.join(__dirname,
+  '../supabase/migrations/20260915003500_catalog_merge_cron_owner_safe.sql'), 'utf8');
 
 test('discovery queues only validated same-year visible title groups without source locks', () => {
   assert.match(discovery, /cloud_catalog_visible_title_variants/);
@@ -46,4 +48,12 @@ test('queue and maintenance entry points stay admin-only and security invoker', 
     assert.match(sql, new RegExp(`revoke all on function public\\.${name}[^;]*from public,anon,authenticated,service_role`));
     assert.match(sql, new RegExp(`grant execute on function public\\.${name}[^;]*to postgres,supabase_admin`));
   }
+});
+
+test('cron replacement targets job IDs across owners and deactivates duplicates without deletion', () => {
+  assert.match(ownerSafe, /select min\(jobid\).*where jobname='norva-catalog-tmdb-merge'/);
+  assert.match(ownerSafe, /cron.alter_job\(v_job.jobid/);
+  assert.match(ownerSafe, /active=>\(v_job.jobid=v_keep\)/);
+  assert.match(ownerSafe, /count\(\*\).*jobname='norva-catalog-tmdb-merge' and active\)<>1/);
+  assert.doesNotMatch(ownerSafe.replace(/--[^\n]*/g, ''), /delete from|cron.unschedule|cron.schedule\(/i);
 });
