@@ -3962,14 +3962,26 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // Historical name: the finite broker is container-independent.
                 pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 1024 * 1024,
                 finiteSequentialWindowBytes: 8 * 1024 * 1024,
-                finiteWarmupWindowBytes: 64 * 1024, finiteWarmupCueGraceMs: 0,
+                // Browser MP4 needs its initialization boxes before decoding.
+                // A separate 64 KiB warmup adds a full upstream round trip before
+                // the rest of the first MiB. The broker already streams that MiB
+                // incrementally and still serializes every provider request.
+                finiteWarmupWindowBytes: 0, finiteWarmupCueGraceMs: 0,
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                 finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 300,
             });
             return { inputUrl: broker.inputUrl, close: async reason => {
                 try { await broker.close(reason); }
-                finally { entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump); }
+                finally {
+                    // Internal bounded transport timings only; no URL, token,
+                    // account, owner or session identifier.
+                    console.info(JSON.stringify({ event: 'native_mp4_transport_closed',
+                        providerFetches: broker.providerFetches, providerBytes: broker.providerBytes,
+                        interruptedProviderFetches: broker.interruptedProviderFetches,
+                        windowTrace: broker.windowTrace.slice(0, 12) }));
+                    entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump);
+                }
             } };
         } catch (error) {
             try { await broker?.close('native_open_failed'); }

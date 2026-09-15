@@ -3,6 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 const { once } = require('node:events');
 const { createNativeMp4Sessions, pipeNativeMp4 } = require('../services/media-gateway/src/native-mp4-sessions');
 const brokerHarness = require('./fixtures/finite-ts-index-broker');
@@ -11,6 +13,28 @@ const uid = '21111111-2222-3333-4444-555555555555';
 const owner = crypto.createHash('sha256').update(uid).digest('hex');
 const claims = (now, extra = {}) => ({ v:1, sid, uid, url:'http://provider.invalid/movie/user/password/1.mp4',
   exp:Math.floor(now/1000)+3600, scope:'native-browser-mp4', fileSizeBytes:8*1024, ...extra });
+
+test('native MP4 initialization streams in one range instead of a separate 64 KiB warmup', async t => {
+  const code=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+  const lane=code.slice(code.indexOf('const nativeMp4Sessions ='),code.indexOf("app.post('/native-sessions'"));
+  assert.match(lane,/finiteWarmupWindowBytes: 0,/);
+  const bytes=Buffer.alloc(256*1024,37), ranges=[];
+  const origin=http.createServer((req,res)=>{
+    const m=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range||'');
+    assert.ok(m); const start=Number(m[1]),end=Number(m[2]); ranges.push([start,end]);
+    res.writeHead(206,{'content-range':`bytes ${start}-${end}/${bytes.length}`,'content-length':end-start+1});
+    res.end(bytes.subarray(start,end+1));
+  }).listen(0,'127.0.0.1'); await once(origin,'listening');
+  const broker=await brokerHarness().createStrictLidBroker({
+    sourceUrl:`http://127.0.0.1:${origin.address().port}/fixture.mp4`,fileSizeBytes:bytes.length,
+    dispatcher:null,pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,
+    finiteWarmupWindowBytes:0,releaseDelayMs:0,
+  });
+  t.after(async()=>{await broker.close();await new Promise(r=>origin.close(r));});
+  const response=await fetch(broker.inputUrl,{headers:{range:'bytes=0-'}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
+  assert.deepEqual(ranges,[[0,bytes.length-1]]);
+});
 
 test('opaque grants are exact, idempotent, bounded, and never perform provider I/O', async () => {
   let opens=0, now=100000;

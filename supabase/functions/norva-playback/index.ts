@@ -2620,6 +2620,8 @@ async function createPlaybackSessionCore(
       }
       try {
         if (nativeCoordination.waitMs) await sleep(nativeCoordination.waitMs);
+        markStartup("nativeCoordinatorMs");
+        startupTrace.nativeCoordinatorWaitMs = nativeCoordination.waitMs || 0;
         const capability = await createBytePipeCapability(session.id, userId, targetUrl,
           transportExpiresAt, db, userAgent, "native-browser-mp4", nativeMp4Proof.fileSizeBytes,
           nativeMp4Proof.durationSeconds, null, true);
@@ -2639,6 +2641,9 @@ async function createPlaybackSessionCore(
           itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
         });
         if (!committed?.ok) throw new HttpError(503, "Playback session coordinator did not accept the native session");
+        markStartup("nativeGrantAndCommitMs");
+        console.info(JSON.stringify({ event: "playback_native_mp4_startup_phases",
+          startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
         return { session: publicPlaybackSession(session), playback: { mode, transport: "native-mp4-session",
           url: access.toString(), tokenExpiresAt: transportExpiresAt } };
       } catch (error) {
