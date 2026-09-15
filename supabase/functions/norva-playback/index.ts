@@ -43,6 +43,7 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
+import { useNativeMp4Gateway } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
 import {
@@ -2590,10 +2591,14 @@ async function createPlaybackSessionCore(
   }
 
   if (mode === "relay") {
+    const nativeMp4Gateway = useNativeMp4Gateway({
+      sourceId, itemType, container: authoritativeVodContainer,
+      allowlist: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS") || "",
+    });
     // In-browser engine: relay the RAW bytes through the media gateway (an IP
     // the provider accepts), not the Cloudflare relay (which the provider's WAF
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
-    if (body.enginePipe === true || body.engine_pipe === true) {
+    if (body.enginePipe === true || body.engine_pipe === true || nativeMp4Gateway) {
       // The cloud session remains short-lived so a vanished client cannot hold
       // an entitlement slot for hours. The stateless /raw token is different:
       // every Range request is authenticated again, so a 15-minute token cuts a
@@ -2638,6 +2643,17 @@ async function createPlaybackSessionCore(
         itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds,
         expiresAt: rawTokenExpiresAt,
       });
+      // Native playback needs only the original bytes. Do not run engine track
+      // enrichment/probes before the first image or open a second provider lane.
+      if (nativeMp4Gateway && body.enginePipe !== true && body.engine_pipe !== true) {
+        return {
+          session: publicPlaybackSession(session),
+          playback: {
+            mode: "relay", transport: "gateway-raw", url: pipe.url,
+            tokenExpiresAt: rawTokenExpiresAt, sessionExpiresAt: expiresAt,
+          },
+        };
+      }
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
       // returns both (the container header carries both → zero extra provider round-trips).

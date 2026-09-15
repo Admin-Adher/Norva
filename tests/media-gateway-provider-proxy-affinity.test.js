@@ -295,7 +295,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   assert.doesNotMatch(gateway, /proxyEnvFor\(proxyKey\s*\|\|/);
   assert.doesNotMatch(gateway, /proxyEnvFor\(session\.userId\s*\|\|/);
 
-  assert.match(gateway, /const rawProxyAgent = pickProxyAgent\(pumpProxyKey\);/);
+  assert.match(gateway, /const rawProxyAgent = pickProxyAgent\(pumpProxyKey, claims\.url\);/);
   assert.match(gateway, /dispatcher: rawProxyAgent \|\| undefined/);
   assert.match(
     gateway,
@@ -344,7 +344,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /function pickProxyAgent\(key\) \{[\s\S]{0,160}providerRouteForKey\(key\)/,
+    /function pickProxyAgent\(key, sourceUrl = ''\) \{[\s\S]{0,160}providerRouteForKey\(key\)/,
     'HTTP lanes must resolve their operator override through the shared sticky slot selector',
   );
   assert.match(

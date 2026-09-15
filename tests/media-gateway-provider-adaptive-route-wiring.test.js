@@ -25,10 +25,10 @@ test('Gateway v166 keeps adaptive routing behind dedicated route and benchmark g
 });
 
 test('Node can choose HTTP or SOCKS5 while child processes retain the same HTTP slot', () => {
-  assert.match(gateway, /let providerHttpProxyAgents = \[\];[\s\S]{0,80}let providerSocksProxyAgents = \[\];/);
+  assert.match(gateway, /let providerHttpProxyAgents = \[\];[\s\S]{0,300}let providerSocksProxyAgents = \[\];/);
   assert.match(
     gateway,
-    /function pickProxyAgent\(key\)[\s\S]{0,260}route\.nodeTransport === 'socks5'[\s\S]{0,160}agents\[route\.slot - 1\]/,
+    /function pickProxyAgent\(key, sourceUrl = ''\)[\s\S]{0,500}route\.nodeTransport === 'socks5'[\s\S]{0,160}agents\[route\.slot - 1\]/,
   );
   assert.match(
     gateway,
@@ -62,7 +62,7 @@ test('raw playback preempts route benchmarking before freezing its one dispatche
   );
   const localPreemption = rawRoute.indexOf('preemptBackgroundWorkGlobally(');
   const routeResolution = rawRoute.indexOf('providerAdaptiveRouteControl.resolveForPlayback');
-  const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey)');
+  const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url)');
   assert.ok(localPreemption >= 0 && routeResolution > localPreemption && dispatcherFreeze > routeResolution);
   assert.match(rawRoute, /if \(ac\.signal\.aborted \|\| res\.destroyed \|\| res\.writableEnded\) return;/);
   assert.ok(rawRoute.indexOf('scheduleProviderRouteBenchmark(', routeResolution) < dispatcherFreeze);

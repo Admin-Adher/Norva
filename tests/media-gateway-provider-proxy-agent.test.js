@@ -224,3 +224,40 @@ test('real Undici SOCKS5 exchange authenticates special-character credentials', 
   assert.equal(await response.body.text(), 'SOCKS5_OK');
   assert.deepEqual(socks.observed, [credentials]);
 });
+
+test('explicit forward HTTP avoids CONNECT refusal, preserves ranges, and still tunnels HTTPS', {
+  skip: !undici && 'media-gateway dependencies are not installed',
+}, async (t) => {
+  const requests = [], tunnels = [], agents = [];
+  const body = Buffer.alloc(65_536, 0x42);
+  const proxy = http.createServer((req, res) => {
+    requests.push({ url: req.url, range: req.headers.range, auth: req.headers['proxy-authorization'] });
+    res.writeHead(206, { 'content-length': body.length, 'content-range': 'bytes 0-65535/1000000' });
+    res.end(body);
+  });
+  proxy.on('connect', (req, socket) => {
+    tunnels.push(req.url);
+    socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+  });
+  const address = await listen(proxy);
+  t.after(async () => {
+    for (const agent of agents) await agent.destroy();
+    await closeServer(proxy);
+  });
+  const proxyUrl = `http://test-user:test-password@127.0.0.1:${address.port}`;
+  const forward = createProviderProxyAgent(proxyUrl, { proxyTunnel: false, connections: 1 }, undici);
+  const connect = createProviderProxyAgent(proxyUrl, { proxyTunnel: true, connections: 1 }, undici);
+  agents.push(forward, connect);
+  const response = await undici.request('http://media.example/movie/one.mp4', {
+    dispatcher: forward, headers: { range: 'bytes=0-65535' }, headersTimeout: 2000, bodyTimeout: 2000,
+  });
+  assert.equal(response.statusCode, 206);
+  assert.equal(response.headers['content-range'], 'bytes 0-65535/1000000');
+  assert.deepEqual(Buffer.from(await response.body.arrayBuffer()), body);
+  assert.deepEqual(requests, [{ url: 'http://media.example/movie/one.mp4', range: 'bytes=0-65535',
+    auth: 'Basic ' + Buffer.from('test-user:test-password').toString('base64') }]);
+  assert.equal(tunnels.length, 0);
+  await assert.rejects(undici.request('http://media.example/movie/one.mp4', { dispatcher: connect }), /403/);
+  await assert.rejects(undici.request('https://media.example/movie/one.mp4', { dispatcher: forward }), /403/);
+  assert.deepEqual(tunnels, ['media.example:80', 'media.example:443']);
+});

@@ -12,6 +12,7 @@ const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
+const { parseHttpForwardAccounts, useProviderHttpForward } = require('./provider-http-forward-policy');
 const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
     FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
     applyFiniteTsAccurateResume } = require('./finite-ts-startup');
@@ -189,11 +190,18 @@ const providerProxySlotOverrides = parseProviderProxySlotOverrides(
     providerProxyUrls.length,
 );
 let providerHttpProxyAgents = [];
+const providerHttpForwardAccounts = parseHttpForwardAccounts(process.env.PROVIDER_HTTP_FORWARD_ACCOUNT_HASHES || '');
+let providerHttpForwardAgents = [];
 let providerSocksProxyAgents = [];
 let providerProxyAgents = [];
 if (providerProxyUrls.length) {
     try {
         providerHttpProxyAgents = providerHttpProxyUrls.map((u) => createProviderProxyAgent(u));
+        // Explicit opt-in: ordinary HTTP requests, same proxy credentials/slot.
+        // Undici 7 defaults to CONNECT even for plaintext HTTP origins.
+        providerHttpForwardAgents = providerHttpForwardAccounts.size
+            ? providerHttpProxyUrls.map((u) => createProviderProxyAgent(u, { proxyTunnel: false }))
+            : [];
         providerSocksProxyAgents = providerSocksProxyUrls.map((u) => createProviderProxyAgent(u));
         providerProxyAgents = providerProxyTransport === 'socks5'
             ? providerSocksProxyAgents
@@ -900,9 +908,12 @@ function viewerPlaybackActiveLocally() {
         || Array.from(sessions.values()).some((session) => isSessionBlockingProviderSlot(session));
 }
 
-function pickProxyAgent(key) {
+function pickProxyAgent(key, sourceUrl = '') {
     if (!providerProxyAgents.length) return null;
     const route = providerRouteForKey(key);
+    if (useProviderHttpForward(key, sourceUrl, providerHttpForwardAccounts)) {
+        return providerHttpForwardAgents[route.slot - 1] || null;
+    }
     const agents = route.nodeTransport === 'socks5'
         ? providerSocksProxyAgents
         : providerHttpProxyAgents;
@@ -2602,6 +2613,11 @@ function scheduleProviderRouteBenchmark(sourceUrl, affinityKey, userAgent, media
     if (!providerRouteBenchmarkEnabled || !isHttpUrl(sourceUrl) || !affinityKey) {
         return { queued: false, reason: 'benchmark-disabled' };
     }
+    // The existing learner measures CONNECT/SOCKS, not this scoped forward-HTTP
+    // policy. Do not let those measurements change the working MKV route.
+    if (useProviderHttpForward(affinityKey, sourceUrl, providerHttpForwardAccounts)) {
+        return { queued: false, reason: 'operator-http-forward' };
+    }
     const fingerprints = providerAdaptiveRouteControl.fingerprintsForSource(sourceUrl, affinityKey);
     if (!fingerprints) return { queued: false, reason: 'fingerprint-unavailable' };
     const lastCompletedAt = providerRouteBenchmarkCooldowns.get(fingerprints.accountFingerprint) || 0;
@@ -3968,7 +3984,7 @@ app.get('/raw/:token', async (req, res) => {
     const startupDeadlineAt = Date.now() + RAW_STARTUP_DEADLINE_MS;
     // Resolve once for the whole byte-pipe request. Retries keep the same static
     // egress and can never rotate this provider account to another IP.
-    const rawProxyAgent = pickProxyAgent(pumpProxyKey);
+    const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url);
 
     // Retry only transient network/server failures and empty responses. Every 4xx,
     // especially the provider's single-account 458, is terminal on its first response
@@ -12953,6 +12969,10 @@ function providerNodeRouteForSession(session) {
     }
     const affinityKey = proxyKeyFromUrl(session?.sourceUrl || '');
     const route = affinityKey ? providerRouteForKey(affinityKey) : null;
+    if (providerNodeRouteIsAvailable(route)
+        && useProviderHttpForward(affinityKey, session?.sourceUrl, providerHttpForwardAccounts)) {
+        return { ...route, nodeTransport: 'http', httpProxyMode: 'forward' };
+    }
     return providerNodeRouteIsAvailable(route) ? route : null;
 }
 
@@ -12960,7 +12980,7 @@ function providerProxyAgentForRoute(route) {
     if (!providerNodeRouteIsAvailable(route)) return null;
     const agents = route.nodeTransport === 'socks5'
         ? providerSocksProxyAgents
-        : providerHttpProxyAgents;
+        : (route.httpProxyMode === 'forward' ? providerHttpForwardAgents : providerHttpProxyAgents);
     return agents[route.slot - 1] || null;
 }
 
@@ -12970,6 +12990,7 @@ function pinProviderNodeRouteForSession(session, route) {
         slot: Number(route.slot),
         ffmpegSlot: Number(route.ffmpegSlot || route.slot),
         nodeTransport: route.nodeTransport,
+        ...(route.httpProxyMode === 'forward' ? { httpProxyMode: 'forward' } : {}),
         ffmpegTransport: 'http',
         selectionReason: String(route.selectionReason || 'session-pinned').slice(0, 64),
         controlStatus: String(route.controlStatus || 'session-pinned').slice(0, 64),
@@ -13020,7 +13041,8 @@ function pinnedProxyAgentFactoryForRoute(route) {
         : providerHttpProxyUrls;
     const proxyUrl = urls[route.slot - 1];
     if (!proxyUrl) return null;
-    return () => createProviderProxyAgent(proxyUrl);
+    return () => createProviderProxyAgent(proxyUrl,
+        route.nodeTransport === 'http' && route.httpProxyMode === 'forward' ? { proxyTunnel: false } : {});
 }
 
 function waitForVodInputRetry(delayMs, signal) {

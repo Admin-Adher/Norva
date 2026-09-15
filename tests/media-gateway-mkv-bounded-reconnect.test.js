@@ -138,6 +138,9 @@ function pumpHarness(overrides = {}) {
         providerHttpProxyUrls: [],
         providerSocksProxyUrls: [],
         providerHttpProxyAgents: [],
+        providerHttpForwardAgents: [],
+        providerHttpForwardAccounts: new Set(),
+        useProviderHttpForward: require('../services/media-gateway/src/provider-http-forward-policy').useProviderHttpForward,
         providerSocksProxyAgents: [],
         providerProxyAgents: [],
         vodInputPumpStats: {
