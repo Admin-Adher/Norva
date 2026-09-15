@@ -89,3 +89,29 @@ test('scoped MP4 uses existing HLS sessions with copy/remux, not public raw', ()
   assert.ok(src.indexOf('const serverPromotedProviderMp4 =') < src.indexOf('"claim_cloud_playback_session"'));
   assert.doesNotMatch(src, /transport: "gateway-raw"|NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL|nativeMp4PublicBytePipeUrl/);
 });
+
+test('actual Edge mode decision preserves defaults, direct, engine and MKV while scoped MP4 remuxes', async () => {
+  const { useNativeMp4Gateway } = await import(pathToFileURL(path.join(__dirname, '../supabase/functions/_shared/native-mp4-gateway-policy.mjs')));
+  const src = fs.readFileSync(path.join(__dirname, '../supabase/functions/norva-playback/index.ts'), 'utf8');
+  const start = src.indexOf('  const browserNativeMp4 =');
+  const decision = src.slice(start, src.indexOf('  const ttlSeconds', start));
+  const selected = '11111111-2222-3333-4444-555555555555';
+  function choose(extra = {}) {
+    const context = { sourceId:selected, itemType:'movie', authoritativeVodContainer:'mp4', authoritativeVodTier:'remux',
+      clientMode:'relay', body:{}, serverDirectPublicHls:false, serverSelectionVodRelay:false, requestedPlaybackHint:{},
+      useNativeMp4Gateway, Deno:{env:{get:()=>selected}}, mergePlaybackHints:(a,b)=>({...a,...b}), ...extra };
+    vm.createContext(context);
+    return vm.runInContext(decision+';({mode,force:gatewayVideoTranscodeExplicit,hint:requestedPlaybackHint.gatewayMode})',context);
+  }
+  let got=choose(); assert.equal(got.mode,'transcode'); assert.equal(got.hint,'remux'); assert.equal(got.force,false);
+  got=choose({sourceId:'21111111-2222-3333-4444-555555555555'}); assert.equal(got.mode,'relay');
+  got=choose({Deno:{env:{get:()=>''}}}); assert.equal(got.mode,'relay');
+  got=choose({clientMode:'direct'}); assert.equal(got.mode,'direct');
+  got=choose({body:{enginePipe:true}}); assert.equal(got.mode,'relay');
+  got=choose({clientMode:'transcode',body:{gatewayAutoMode:true}}); assert.equal(got.mode,'transcode'); assert.equal(got.force,false);
+  got=choose({clientMode:'transcode',body:{gatewayAutoMode:true},Deno:{env:{get:()=>''}}}); assert.equal(got.mode,'relay');
+  got=choose({clientMode:'transcode',body:{}}); assert.equal(got.mode,'transcode'); assert.equal(got.force,true);
+  got=choose({authoritativeVodContainer:'mkv',authoritativeVodTier:'video_transcode'}); assert.equal(got.mode,'transcode'); assert.equal(got.force,true);
+  got=choose({authoritativeVodContainer:'ts'}); assert.equal(got.mode,'transcode'); assert.equal(got.force,false);
+  got=choose({serverDirectPublicHls:true,itemType:'live'}); assert.equal(got.mode,'direct');
+});
