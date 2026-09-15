@@ -165,7 +165,7 @@ test('native heartbeat derives the source from an owned active session and never
   assert.match(heartbeat, /\.from\("cloud_playback_sessions"\)/);
   assert.match(
     heartbeat,
-    /\.select\("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at"\)/,
+    /\.select\("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at,native_mp4_session:playback_hint->__norvaNativeMp4SessionV1"\)/,
   );
   assert.doesNotMatch(heartbeat, /superseded_by/);
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
@@ -189,7 +189,12 @@ test('native heartbeat derives the source from an owned active session and never
 
   assert.doesNotMatch(heartbeat, /cloud_playback_events/);
   assert.doesNotMatch(heartbeat, /updated_at/);
-  assert.doesNotMatch(heartbeat, /target_url|playback_hint|config_hint|credential|password/i);
+  // Read only the server-bound boolean, never the potentially large hint or a
+  // provider credential. Neither is needed to renew the opaque Gateway lease.
+  assert.doesNotMatch(heartbeat.replace('native_mp4_session:playback_hint->__norvaNativeMp4SessionV1',''),
+    /target_url|playback_hint|config_hint|credential|password/i);
+  assert.ok(heartbeat.indexOf('!sourceId || !policy.accepted') < heartbeat.indexOf('/native-sessions/'));
+  assert.ok(heartbeat.indexOf('session.superseded_at') < heartbeat.indexOf('/native-sessions/'));
   assert.doesNotMatch(heartbeat, /console\.(?:log|warn|error)/);
 });
 

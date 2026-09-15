@@ -230,7 +230,7 @@ test('the direct public decision runs within existing authorization and session 
     '"claim_cloud_playback_session"', 'await releaseSupersededPlaybackSessions(']) {
     assert.ok(create.indexOf(guard) > routing && create.indexOf(guard) < direct, guard);
   }
-  assert.match(create, /const mode = serverDirectPublicHls\s*\? "direct"\s*: serverPromotedProviderMp4\s*\? "transcode"\s*: serverDemotedAutomaticMp4/);
+  assert.match(create, /const mode = serverDirectPublicHls\s*\? "direct"\s*: serverNativeProviderMp4\s*\? "relay"\s*: serverPromotedProviderMp4\s*\? "transcode"\s*: serverDemotedAutomaticMp4/);
   assert.match(create.slice(direct), /serverDirectPublicHls \? \{ transport: "public-hls-direct" \} : \{\}/);
   assert.match(create.slice(direct), /session: publicPlaybackSession\(session\)[\s\S]*url: targetUrl,[\s\S]*fallbackUrl: null,[\s\S]*expiresAt,/);
 });

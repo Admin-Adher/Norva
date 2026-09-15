@@ -1,0 +1,116 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const http = require('node:http');
+const { once } = require('node:events');
+const { createNativeMp4Sessions, pipeNativeMp4 } = require('../services/media-gateway/src/native-mp4-sessions');
+const brokerHarness = require('./fixtures/finite-ts-index-broker');
+const sid = '11111111-2222-3333-4444-555555555555';
+const uid = '21111111-2222-3333-4444-555555555555';
+const owner = crypto.createHash('sha256').update(uid).digest('hex');
+const claims = (now, extra = {}) => ({ v:1, sid, uid, url:'http://provider.invalid/movie/user/password/1.mp4',
+  exp:Math.floor(now/1000)+3600, scope:'native-browser-mp4', fileSizeBytes:8*1024, ...extra });
+
+test('opaque grants are exact, idempotent, bounded, and never perform provider I/O', async () => {
+  let opens=0, now=100000;
+  const store=createNativeMp4Sessions({allows:c=>c.url.endsWith('.mp4'),open:()=>{opens++;},now:()=>now,maxEntries:2,maxActive:1});
+  const c=claims(now), entry=store.grant(c);
+  assert.match(entry.token,/^[A-Za-z0-9_-]{43}$/);
+  assert.equal(store.grant(c),entry); assert.equal(opens,0);
+  for(const mutation of [{scope:'audio'}, {sid:'job-id'}, {uid:'x'}, {fileSizeBytes:0},
+    {exp:99}, {exp:now/1000+86401}, {url:'http://p/x.ts'}]) assert.throws(()=>store.grant({...c,...mutation}));
+  assert.throws(()=>store.grant({...c,url:'http://provider.invalid/other.mp4'}),/CONFLICT/);
+  assert.throws(()=>store.grant({...c,sid:uid}),/CAPACITY/);
+  for(const [id,token] of [[uid,entry.token],[sid,'x'],[sid,'A'.repeat(43)],[sid,[entry.token]]])
+    assert.throws(()=>store.authorize(id,token),/DENIED/);
+  assert.equal(store.authorize(sid,entry.token),entry); assert.equal(opens,0);
+});
+
+test('heartbeat and expiry cannot resurrect revoked, abandoned, or hard-expired grants', async () => {
+  let now=100000, closed=0, opens=0;
+  const store=createNativeMp4Sessions({allows:()=>true,now:()=>now,leaseMs:1000,
+    open:async()=>{opens++;return{close:async()=>{closed++;}};}});
+  const c=claims(now),e=store.grant(c);
+  const [a,b]=await Promise.all([store.resource(e),store.resource(e)]);
+  assert.equal(a,b); assert.equal(opens,1);
+  assert.throws(()=>store.heartbeat(sid,'bad'),/UNAVAILABLE/);
+  now+=900;store.heartbeat(sid,owner);now+=900;store.authorize(sid,e.token);
+  await store.revoke(owner,sid); assert.equal(closed,1);
+  assert.throws(()=>store.authorize(sid,e.token),/EXPIRED/);
+  assert.throws(()=>store.heartbeat(sid,owner),/EXPIRED/);
+  assert.throws(()=>store.grant(c),/EXPIRED/);
+  await store.revoke(owner,sid); assert.equal(closed,1);
+  const e2=store.grant({...c,sid:uid}); now+=1001;await store.sweep();
+  assert.throws(()=>store.authorize(uid,e2.token),/EXPIRED/);
+  assert.throws(()=>store.heartbeat(uid,owner),/EXPIRED/);
+});
+
+test('revoke waits for a racing broker open and closes it once', async () => {
+  let release,closed=0;
+  const store=createNativeMp4Sessions({allows:()=>true,open:()=>new Promise(resolve=>{
+    release=()=>resolve({close:async()=>{closed++;}});
+  })});
+  const e=store.grant(claims(Date.now()));
+  const opening=store.resource(e); await Promise.resolve();
+  const closing=store.revoke(owner,sid);release();
+  await assert.rejects(opening,/EXPIRED/);await closing;assert.equal(closed,1);
+});
+
+test('native HTTP serves exact ranges through one serialized provider broker, then denies replay', async t => {
+  const data=Buffer.alloc(8192); for(let i=0;i<data.length;i++)data[i]=i%251;
+  let current=0,max=0,requests=0;
+  const origin=http.createServer((req,res)=>{
+    requests++;current++;max=Math.max(max,current);
+    const m=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range||'');assert.ok(m);
+    const start=Number(m[1]),end=Number(m[2]);
+    res.writeHead(206,{'content-range':`bytes ${start}-${end}/${data.length}`,'content-length':end-start+1,'etag':'"fixture"'});
+    setTimeout(()=>{current--;res.end(data.subarray(start,end+1));},10);
+  }).listen(0,'127.0.0.1'); await once(origin,'listening');
+  t.after(()=>new Promise(resolve=>origin.close(resolve)));
+  const source=`http://127.0.0.1:${origin.address().port}/movie/u/p/1.mp4`;
+  const store=createNativeMp4Sessions({allows:()=>true,open:async e=>{
+    const broker=await brokerHarness().createStrictLidBroker({sourceUrl:source,fileSizeBytes:data.length,
+      dispatcher:null,pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024,finiteCacheBytes:4096,
+      releaseDelayMs:0,abortSignal:e.ac.signal});
+    return {inputUrl:broker.inputUrl,close:reason=>broker.close(reason)};
+  }});
+  const e=store.grant(claims(Date.now(),{url:source}));
+  const web=http.createServer(async(req,res)=>{
+    try {
+      const url=new URL(req.url,'http://local');
+      const ent=store.authorize(url.pathname.slice(1),url.searchParams.get('token'));
+      await pipeNativeMp4(req,res,ent,await store.resource(ent));
+    }catch(error){res.writeHead(error.status||500);res.end();}
+  }).listen(0,'127.0.0.1');await once(web,'listening');
+  t.after(async()=>{await store.revoke(owner,sid);await new Promise(resolve=>web.close(resolve));});
+  const base=`http://127.0.0.1:${web.address().port}/${sid}`;
+  assert.equal((await fetch(base+'?token=bad')).status,401);assert.equal(requests,0);
+  const access=base+'?token='+e.token;
+  const head=await fetch(access,{method:'HEAD'});assert.equal(head.status,200);assert.equal(requests,0);
+  assert.equal(Number(head.headers.get('content-length')),data.length);
+  await Promise.all([[0,1023],[7168,8191],[2048,3071]].map(async([start,end])=>{
+    const res=await fetch(access,{headers:{range:`bytes=${start}-${end}`}});
+    assert.equal(res.status,206);assert.equal(res.headers.get('content-type'),'video/mp4');
+    assert.equal(res.headers.get('cache-control'),'private, no-store');
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()),data.subarray(start,end+1));
+  }));
+  assert.equal(max,1);
+  await store.revoke(owner,sid);const before=requests;
+  assert.equal((await fetch(access)).status,410);assert.equal(requests,before);
+});
+
+test('native proof uses a current owned H264/AAC profile, not a client codec claim', async () => {
+  const {browserNativeMp4Proof:proof}=await import('../supabase/functions/_shared/native-mp4-gateway-policy.mjs');
+  const now=Date.now(),profile={probeSource:'gateway_probe',probedAt:new Date(now-1000).toISOString(),
+    container:'mov,mp4,m4a,3gp,3g2,mj2',videoCodec:'h264',videoPixelFormat:'yuv420p',fileSizeBytes:8192,
+    audioTracks:[{index:1,codec:'aac',profile:'LC',channels:2,default:true}],subtitles:[],metadataComplete:false};
+  assert.equal(proof({codecProfile:profile},{},now).fileSizeBytes,8192);
+  assert.equal(proof({}, {codecProfile:profile},now),null);
+  for(const mutation of [{videoCodec:'hevc'}, {probeSource:'client'}, {fileSizeBytes:0}, {subtitles:null},
+    {probedAt:new Date(now-15*86400_000).toISOString()}, {audioTracks:[{index:1,codec:'ac3',default:true}]},
+    {audioTracks:[...profile.audioTracks,{index:2,codec:'aac',profile:'LC',channels:2,default:true}]}])
+    assert.equal(proof({codecProfile:{...profile,...mutation}},{},now),null);
+  assert.equal(proof({codecProfile:profile},{audioStreamIndex:2},now),null);
+  assert.equal(proof({codecProfile:profile},{audioStreamIndex:1},now).fileSizeBytes,8192);
+});

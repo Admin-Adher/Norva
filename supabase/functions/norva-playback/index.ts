@@ -43,7 +43,7 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
-import { useNativeMp4Gateway } from "../_shared/native-mp4-gateway-policy.mjs";
+import { useNativeMp4Gateway, browserNativeMp4Proof } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
 import {
@@ -932,7 +932,7 @@ function stripMkvH264FastStartProofDeep(value: unknown, depth = 0): unknown {
     if (
       key === "mkvH264FastStartProof" || key === "mkv_h264_fast_start_proof" ||
       key === "mkvCompleteHlsCacheProof" || key === "mkv_complete_hls_cache_proof" ||
-      key === "__norvaMkvH264FastStartItemCasV2"
+      key === "__norvaMkvH264FastStartItemCasV2" || key === "__norvaNativeMp4SessionV1"
     ) continue;
     clean[key] = stripMkvH264FastStartProofDeep(entry, depth + 1);
   }
@@ -2269,15 +2269,18 @@ async function createPlaybackSessionCore(
   );
   const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
     authoritativeVodContainer === "mp4";
-  // An explicit provider transport exception uses the existing signed HLS
-  // session surface. /raw remains private; compatible video stays copy/remux.
-  // Direct/native clients and explicit browser-engine requests keep their lane.
+  // The authorized provider exception preserves native H.264/AAC playback.
+  // Incompatible/unknown audio still uses HLS adaptation. /raw stays private.
   const serverPromotedProviderMp4 = body.enginePipe !== true && body.engine_pipe !== true &&
     (clientMode === "relay" || (clientMode === "transcode" && body.gatewayAutoMode === true)) &&
     useNativeMp4Gateway({
       sourceId, itemType, container: authoritativeVodContainer,
       allowlist: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS") || "",
     });
+  const nativeMp4Proof = serverPromotedProviderMp4 && !serverSelectionVodRelay && !serverDirectPublicHls
+    ? browserNativeMp4Proof(resolved.playbackHint, requestedPlaybackHint)
+    : null;
+  const serverNativeProviderMp4 = Boolean(nativeMp4Proof);
   // Old cached web bundles may still ask for an automatic Gateway lane when a
   // reliable codec probe reports HEVC/AC-3. The real MP4 container remains
   // browser-native: demote only that automatic request to the byte-preserving
@@ -2295,6 +2298,8 @@ async function createPlaybackSessionCore(
       || authoritativeVodContainer === "ts");
   const mode = serverDirectPublicHls
     ? "direct"
+    : serverNativeProviderMp4
+    ? "relay"
     : serverPromotedProviderMp4
     ? "transcode"
     : serverDemotedAutomaticMp4
@@ -2336,6 +2341,8 @@ async function createPlaybackSessionCore(
   const itemCasUpdatedAt = stringOrNull(resolvedItemCas.updatedAt ?? resolvedItemCas.updated_at);
   requestedPlaybackHint = compactRecord({
     ...stripMkvH264FastStartInternalHints(requestedPlaybackHint),
+    // Override caller input; this internal marker controls the liveness lease.
+    __norvaNativeMp4SessionV1: serverNativeProviderMp4 ? true : undefined,
     ...(itemType === "movie" && itemCasId && itemCasUpdatedAt
       ? {
         __norvaMkvH264FastStartItemCasV2: {
@@ -2602,6 +2609,44 @@ async function createPlaybackSessionCore(
   }
 
   if (mode === "relay") {
+    if (serverNativeProviderMp4 && nativeMp4Proof) {
+      const nativeCoordination = await prepareEdgeSessionCoordinator({
+        userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
+        playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
+      }, db);
+      if (!nativeCoordination?.lockId) {
+        await expirePlaybackSession(session.id, userId, db).catch(() => {});
+        throw new HttpError(503, "Playback session coordinator is unavailable");
+      }
+      try {
+        if (nativeCoordination.waitMs) await sleep(nativeCoordination.waitMs);
+        const capability = await createBytePipeCapability(session.id, userId, targetUrl,
+          transportExpiresAt, db, userAgent, "native-browser-mp4", nativeMp4Proof.fileSizeBytes,
+          nativeMp4Proof.durationSeconds, null, true);
+        const response = await fetch(`${capability.gatewayUrl}/native-sessions`, {
+          method: "POST", headers: { Authorization: `Bearer ${capability.serviceToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ capability: capability.capability }), signal: AbortSignal.timeout(8_000),
+        });
+        if (!response.ok) throw new HttpError(502, "Native media session could not be prepared");
+        const grant = await response.json();
+        const access = new URL(String(grant.url || ""));
+        if (grant.protocol !== 1 || access.protocol !== "https:" || access.username || access.password
+            || access.pathname !== `/sessions/${session.id}/native.mp4`
+            || !/^[A-Za-z0-9_-]{43}$/.test(access.searchParams.get("token") || ""))
+          throw new HttpError(502, "Native media session response is invalid");
+        const committed = await commitEdgeSessionCoordinator(nativeCoordination, {
+          playbackSessionId: session.id, gatewaySessionId: null, lane: "raw",
+          itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
+        });
+        if (!committed?.ok) throw new HttpError(503, "Playback session coordinator did not accept the native session");
+        return { session: publicPlaybackSession(session), playback: { mode, transport: "native-mp4-session",
+          url: access.toString(), tokenExpiresAt: transportExpiresAt } };
+      } catch (error) {
+        await expirePlaybackSession(session.id, userId, db).catch(() => {});
+        await abortEdgeSessionCoordinator(nativeCoordination);
+        throw error;
+      }
+    }
     // In-browser engine: relay the RAW bytes through the media gateway (an IP
     // the provider accepts), not the Cloudflare relay (which the provider's WAF
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
@@ -5943,7 +5988,7 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
   const nowIso = new Date(nowMs).toISOString();
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
-    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at")
+    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at,native_mp4_session:playback_hint->__norvaNativeMp4SessionV1")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -5966,6 +6011,17 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
     expiresAt: session.expires_at,
   });
   if (!sourceId || !policy.accepted) throw new HttpError(410, "Playback session is not active");
+
+  if (session.native_mp4_session === true) {
+    const route = await mediaGatewayRouteForPlaybackUser(await getRuntimeConfig(db), userId);
+    if (!route) throw new HttpError(503, "Native media session route unavailable");
+    const renewal = await fetch(`${route.url}/native-sessions/${id}/heartbeat`, {
+      method: "POST", headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ownerKey: await sha256Hex(userId) }), signal: AbortSignal.timeout(5_000),
+    });
+    if (!renewal.ok) throw new HttpError(renewal.status === 410 || renewal.status === 404 ? 410 : 503,
+      "Native media session is not active");
+  }
 
   // Once the first call establishes the native liveness chain, duplicate or
   // over-eager callbacks are acknowledged without another session/activity write.

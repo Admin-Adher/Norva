@@ -13,6 +13,7 @@ const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
 const { parseHttpForwardAccounts, useProviderHttpForward } = require('./provider-http-forward-policy');
+const { createNativeMp4Sessions, pipeNativeMp4 } = require('./native-mp4-sessions');
 const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
     FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
     applyFiniteTsAccurateResume } = require('./finite-ts-startup');
@@ -3916,6 +3917,106 @@ function attachRawIdleWatchdog(nodeStream, res, ac) {
     res.on('close', clear);
     arm();
 }
+
+// Native browser MP4 access is a separate, opaque session capability. The
+// private /raw surface and its signed provider-URL payload are never exposed.
+const nativeMp4Sessions = createNativeMp4Sessions({
+    allows: (claims) => {
+        try {
+            const url = new URL(claims.url);
+            return /^https:\/\//.test(PUBLIC_BASE_URL) && /\.mp4$/i.test(url.pathname)
+                && useProviderHttpForward(proxyKeyFromUrl(claims.url), claims.url, providerHttpForwardAccounts);
+        } catch (_) { return false; }
+    },
+    open: async (entry) => {
+        const claims = entry.claims;
+        const proxyKey = proxyKeyFromUrl(claims.url);
+        const providerSlotKey = providerSlotKeyFromUrl(claims.url, entry.ownerHash);
+        if (providerSessionBlocksRawOpening(providerSlotKey)) {
+            throw Object.assign(new Error('PLAYBACK_SUPERSEDED'), { status: 409 });
+        }
+        // Reserve before any await. One session owns one broker/pump, even
+        // when the browser asks for the header and moov tail concurrently.
+        const pump = registerRawPump({ ac: entry.ac, sid: entry.sid, proxyKey,
+            providerSlotKey, ownerHash: entry.ownerHash });
+        const abortEntry = () => { void nativeMp4Sessions.close(entry).catch(() => {}); };
+        entry.ac.signal.addEventListener('abort', abortEntry, { once: true });
+        let broker;
+        try {
+            const reason = `native MP4 ${entry.sid.slice(0, 8)}`;
+            let handoff = abortRawPumps(p => p !== pump && p.providerSlotKey === providerSlotKey, entry.sid, reason);
+            handoff += preemptAccountExtractions(proxyKey, reason);
+            preemptAccountBackgroundWhispers(proxyKey, reason);
+            preemptBackgroundWorkGlobally(proxyKey, reason);
+            if (handoff && !await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, entry.ac.signal))
+                throw new Error('NATIVE_MP4_ABORTED');
+            await providerAdaptiveRouteControl.resolveForPlayback(claims.url, proxyKey, { signal: entry.ac.signal });
+            if (entry.ac.signal.aborted) throw new Error('NATIVE_MP4_ABORTED');
+            const route = providerNodeRouteForSession({ sourceUrl: claims.url });
+            const dispatcherFactory = pinnedProxyAgentFactoryForRoute(route);
+            if (!dispatcherFactory) throw new Error('NATIVE_MP4_PINNED_ROUTE_UNAVAILABLE');
+            observeProviderProxySelection(proxyKey);
+            broker = await createStrictLidBroker({
+                sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
+                dispatcherFactory, abortSignal: entry.ac.signal,
+                // Historical name: the finite broker is container-independent.
+                pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 1024 * 1024,
+                finiteSequentialWindowBytes: 8 * 1024 * 1024,
+                finiteWarmupWindowBytes: 64 * 1024, finiteWarmupCueGraceMs: 0,
+                finiteCacheBytes: 32 * 1024 * 1024,
+                completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
+                finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 300,
+            });
+            return { inputUrl: broker.inputUrl, close: async reason => {
+                try { await broker.close(reason); }
+                finally { entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump); }
+            } };
+        } catch (error) {
+            try { await broker?.close('native_open_failed'); }
+            finally { entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump); }
+            throw error;
+        }
+    },
+});
+setInterval(() => { void nativeMp4Sessions.sweep().catch(() => {}); }, 5_000).unref();
+
+app.post('/native-sessions', requireGatewayAuth, (req, res) => {
+    try {
+        const capability = typeof req.body?.capability === 'string' ? req.body.capability : '';
+        if (capability.length > 16_384) return res.status(400).json({ error: 'Invalid capability' });
+        const entry = nativeMp4Sessions.grant(verifyRawToken(capability, GATEWAY_TOKEN));
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ url: `${PUBLIC_BASE_URL}/sessions/${entry.sid}/native.mp4?token=${entry.token}`,
+            expiresAt: new Date(entry.expiresAt).toISOString(), protocol: 1 });
+    } catch (error) { res.status(error.status || 503).json({ error: 'Native media session unavailable' }); }
+});
+
+app.post('/native-sessions/:id/heartbeat', requireGatewayAuth, (req, res) => {
+    try {
+        nativeMp4Sessions.heartbeat(req.params.id, req.body?.ownerKey);
+        res.json({ ok: true });
+    } catch (error) { res.status(error.status || 503).json({ error: 'Native media session unavailable' }); }
+});
+
+// This exact route precedes the HLS /sessions/:id/:file catch-all. Caddy
+// already permits GET/HEAD /sessions/*; no generic proxy ingress is opened.
+app.get('/sessions/:id/native.mp4', async (req, res) => {
+    let entry;
+    try {
+        entry = nativeMp4Sessions.authorize(req.params.id, req.query.token);
+        if ((entry.readers || 0) >= 8 || String(req.headers.range || '').length > 128)
+            return res.status(429).end();
+        entry.readers = (entry.readers || 0) + 1;
+        try {
+            const resource = await nativeMp4Sessions.resource(entry);
+            if (!res.destroyed) await pipeNativeMp4(req, res, entry, resource);
+        } finally { entry.readers -= 1; }
+    } catch (error) {
+        if (entry) await nativeMp4Sessions.close(entry, 'native_request_failed').catch(() => {});
+        if (!res.headersSent) res.status(error.status || 502).end();
+        else res.destroy();
+    }
+});
 
 app.get('/raw/:token', async (req, res) => {
     rawStreamStats.requests += 1;
@@ -11695,7 +11796,7 @@ function gatewayCreatedSessionPayload(req, session) {
 // Cross-device kill-switch used by the relay's ProviderSessionCoordinator: abort
 // every live raw byte-pipe registered for an owner (keyed by sha256(userId) — the
 // coordinator only ever stores hashes, never credentials or raw ids).
-app.delete('/raw-pumps', requireGatewayAuth, (req, res) => {
+app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
     const ownerKey = String(req.query.ownerKey || req.body?.ownerKey || '').trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(ownerKey)) return res.status(400).json({ error: 'ownerKey (sha256 hex) required' });
     const sid = String(req.query.sid || req.body?.sid || '').trim();
@@ -11708,7 +11809,12 @@ app.delete('/raw-pumps', requireGatewayAuth, (req, res) => {
         null,
         globalCleanup ? 'explicit owner eviction' : `coordinator eviction ${sid.slice(0, 8)}`
     );
-    res.json({ ok: true, aborted });
+    // Revoke even a grant whose browser has not opened its first Range yet.
+    // Await socket drain before the coordinator admits a replacement viewer.
+    try {
+        const nativeRevoked = await nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup);
+        res.json({ ok: true, aborted, nativeRevoked });
+    } catch (_) { res.status(503).json({ error: 'Native media transport could not be drained' }); }
 });
 
 app.get('/sessions/:id', requireGatewayAuth, (req, res) => {

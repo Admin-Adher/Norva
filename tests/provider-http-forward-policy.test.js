@@ -75,7 +75,7 @@ test('native MP4 Gateway policy is exact-source, server-owned, off by default', 
   }
 });
 
-test('scoped MP4 uses existing HLS sessions with copy/remux, not public raw', () => {
+test('scoped MP4 preserves HLS adaptation and uses native relay only with server proof, never public raw', () => {
   const src = fs.readFileSync(path.join(__dirname, '../supabase/functions/norva-playback/index.ts'), 'utf8');
   const start = src.indexOf('const serverPromotedProviderMp4 =');
   const block = src.slice(start, src.indexOf('const ttlSeconds', start));
@@ -84,6 +84,8 @@ test('scoped MP4 uses existing HLS sessions with copy/remux, not public raw', ()
   assert.match(block, /clientMode === "relay" \|\| \(clientMode === "transcode" && body.gatewayAutoMode === true\)/);
   assert.match(block, /body.enginePipe !== true && body.engine_pipe !== true/);
   assert.match(block, /serverPromotedProviderMp4\s*\? "transcode"/);
+  assert.match(block, /serverNativeProviderMp4\s*\? "relay"/);
+  assert.match(block, /browserNativeMp4Proof\(resolved.playbackHint, requestedPlaybackHint\)/);
   assert.match(block, /gatewayMode: authoritativeVodTier === "video_transcode" \? "transcode" : "remux"/);
   assert.match(block, /!serverPromotedRelay && !serverPromotedProviderMp4 && body.gatewayAutoMode !== true/);
   assert.ok(src.indexOf('const serverPromotedProviderMp4 =') < src.indexOf('"claim_cloud_playback_session"'));
@@ -99,7 +101,8 @@ test('actual Edge mode decision preserves defaults, direct, engine and MKV while
   function choose(extra = {}) {
     const context = { sourceId:selected, itemType:'movie', authoritativeVodContainer:'mp4', authoritativeVodTier:'remux',
       clientMode:'relay', body:{}, serverDirectPublicHls:false, serverSelectionVodRelay:false, requestedPlaybackHint:{},
-      useNativeMp4Gateway, Deno:{env:{get:()=>selected}}, mergePlaybackHints:(a,b)=>({...a,...b}), ...extra };
+      useNativeMp4Gateway, browserNativeMp4Proof:()=>null, resolved:{playbackHint:{}},
+      Deno:{env:{get:()=>selected}}, mergePlaybackHints:(a,b)=>({...a,...b}), ...extra };
     vm.createContext(context);
     return vm.runInContext(decision+';({mode,force:gatewayVideoTranscodeExplicit,hint:requestedPlaybackHint.gatewayMode})',context);
   }
@@ -114,4 +117,7 @@ test('actual Edge mode decision preserves defaults, direct, engine and MKV while
   got=choose({authoritativeVodContainer:'mkv',authoritativeVodTier:'video_transcode'}); assert.equal(got.mode,'transcode'); assert.equal(got.force,true);
   got=choose({authoritativeVodContainer:'ts'}); assert.equal(got.mode,'transcode'); assert.equal(got.force,false);
   got=choose({serverDirectPublicHls:true,itemType:'live'}); assert.equal(got.mode,'direct');
+  got=choose({browserNativeMp4Proof:()=>({fileSizeBytes:8192})}); assert.equal(got.mode,'relay');
+  got=choose({browserNativeMp4Proof:()=>({fileSizeBytes:8192}),body:{enginePipe:true}}); assert.equal(got.mode,'relay');
+  got=choose({browserNativeMp4Proof:()=>({fileSizeBytes:8192}),clientMode:'transcode',body:{}}); assert.equal(got.mode,'transcode');
 });
