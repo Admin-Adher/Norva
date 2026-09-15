@@ -10,6 +10,7 @@ import copy, hashlib, importlib.util, json, os, pathlib, re, sys, time, urllib.r
 BASE=pathlib.Path('/home/adrien/.norva')
 ROOT=pathlib.Path(__file__).resolve().parent
 WRAPPER_SHA='41b1e69ffb9fc126ce4bdecf51aaf05c3aedd148d32f59b515c8954b71ffdc4b'
+WRAPPER_3H_SHA='2ef0410daf9938d5f278dd063f13b5844c62fef6ad0dcd8b4de0b3acd941fdd6'
 FLAG='owned_provider_language_metadata_enabled'
 ACK='enable-only-owned-provider-language-metadata'
 ROLLBACK_ACK='disable-only-our-owned-provider-language-metadata'
@@ -31,13 +32,23 @@ def load(name,path):
     module=importlib.util.module_from_spec(spec);sys.modules[name]=module;spec.loader.exec_module(module)
     return module
 
+def release_wrapper(binding):
+    profile=binding.get('edgeProfile','post-vod')
+    allowed={
+        'post-vod':('post-vod-language-edge-20260914-[0-9]{14}','deploy-post-vod-language-edge-20260914.py',WRAPPER_SHA),
+        'post-vod-3h':('post-vod-language-edge-3h-20260915-[0-9]{14}','deploy-owned-language-maintenance-3h-20260915.py',WRAPPER_3H_SHA),
+    }
+    require(profile in allowed,'scoped_edge_profile_required')
+    pattern,filename,digest=allowed[profile]
+    require(re.fullmatch(pattern,str(binding.get('edgeAttemptDirectory',''))),'scoped_edge_attempt_required')
+    return filename,digest
+
 def initialize(binding):
-    require(re.fullmatch('post-vod-language-edge-20260914-[0-9]{14}',str(binding.get('edgeAttemptDirectory',''))),
-        'scoped_edge_attempt_required')
+    filename,wrapper_sha=release_wrapper(binding)
     retry=BASE/binding['edgeAttemptDirectory']
-    wrapper_file=retry/'deploy-post-vod-language-edge-20260914.py'
+    wrapper_file=retry/filename
     require(retry.is_dir() and not retry.is_symlink() and retry.stat().st_mode&0o077==0,'private_edge_attempt_required')
-    require(wrapper_file.is_file() and not wrapper_file.is_symlink() and sha(wrapper_file.read_bytes())==WRAPPER_SHA,'retry_operator_drift')
+    require(wrapper_file.is_file() and not wrapper_file.is_symlink() and sha(wrapper_file.read_bytes())==wrapper_sha,'retry_operator_drift')
     wrapper=load('owned_activation_retry',wrapper_file)
     for path,digest in ((wrapper.ADAPTER,wrapper.ADAPTER_SHA),(wrapper.TIMING,wrapper.TIMING_SHA)):
         require(path.is_file() and not path.is_symlink() and sha(path.read_bytes())==digest,'pinned_post_vod_helper_drift')
@@ -47,7 +58,8 @@ def initialize(binding):
     cfg=adapter.validate(adapter.read(retry,'release-config.private.json'))
     wrapper.validate_profile(cfg,adapter)
     require(re.fullmatch('[a-f0-9]{40}',str(binding.get('edgeCommit','')))
-        and cfg['commit']==binding['edgeCommit'] and cfg.get('operatorSha256')==WRAPPER_SHA,'edge_binding_drift')
+        and cfg['commit']==binding['edgeCommit'] and cfg.get('operatorSha256')==wrapper_sha
+        and cfg.get('profile')==binding.get('edgeProfile','post-vod'),'edge_binding_drift')
     for path,digest in adapter.HELPERS.items():
         require(path.is_file() and not path.is_symlink() and sha(path.read_bytes())==digest,'pinned_helper_drift')
     sql=adapter.load('owned_activation_sql',adapter.SQL_ROOT/'deploy-unknown-first-language-pipeline.py')
@@ -98,7 +110,7 @@ def verified_plan(controller,enabled):
     closed=base.saved('closed.private.json')
     require(closed.get('commit')==controller.COMMIT and closed.get('updated') is True
         and closed.get('cronsRestored') is True and closed.get('sqlVerified') is True,'successful_edge_rollout_required')
-    require(not base.process_alive('run') and not base.process_alive('watch'),'rollout_still_active')
+    require(not any(base.process_alive(phase) for phase in ('run','watch','pause-watch')),'rollout_still_active')
     plan=base.saved('plan.private.json')
     require(plan['commit']==controller.COMMIT and plan['controls']['flags'].get(FLAG) is False,'original_flag_binding_invalid')
     expected=copy.deepcopy(plan)

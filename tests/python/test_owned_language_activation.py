@@ -8,6 +8,15 @@ spec=importlib.util.spec_from_file_location('activation_under_test',PATH)
 op=importlib.util.module_from_spec(spec);spec.loader.exec_module(op)
 
 class ActivationTests(unittest.TestCase):
+    def test_three_hour_profile_cannot_masquerade_as_legacy_or_other_attempt(self):
+        legacy={'edgeAttemptDirectory':'post-vod-language-edge-20260914-20260914200000'}
+        current={'edgeProfile':'post-vod-3h','edgeAttemptDirectory':'post-vod-language-edge-3h-20260915-20260915020000'}
+        self.assertEqual(op.release_wrapper(legacy),('deploy-post-vod-language-edge-20260914.py',op.WRAPPER_SHA))
+        self.assertEqual(op.release_wrapper(current),('deploy-owned-language-maintenance-3h-20260915.py',op.WRAPPER_3H_SHA))
+        for bad in ({**current,'edgeProfile':'post-vod'},{**legacy,'edgeProfile':'post-vod-3h'},
+                    {**current,'edgeAttemptDirectory':'../foreign'},{**current,'edgeProfile':'unbounded'}):
+            with self.assertRaises(RuntimeError):op.release_wrapper(bad)
+
     def proof(self):
         return {'sourceCommit':'a'*40,'operatorSha256':'b'*64,'marker':'owned-language:'+'c'*32,
             'schemaSha256':'d'*64,'flag':{'enabled':False,'xmin':'123','updatedAt':'old','updatedBy':None},
@@ -92,6 +101,12 @@ class ActivationTests(unittest.TestCase):
         controller.base.core.base.r.crons.return_value=[]
         with self.assertRaisesRegex(RuntimeError,'crons_not_restored'):op.verified_plan(controller,False)
         controller.base.verify_edge.assert_not_called()
+
+    def test_pause_guard_must_also_finish_before_flag_activation(self):
+        controller,_,_=self.controller()
+        controller.base.process_alive.side_effect=lambda phase:phase=='pause-watch'
+        with self.assertRaisesRegex(RuntimeError,'rollout_still_active'):op.verified_plan(controller,False)
+        controller.base.invariant.assert_not_called()
 
     def test_second_replica_failure_is_not_silently_ignored(self):
         controller,_,_=self.controller()
