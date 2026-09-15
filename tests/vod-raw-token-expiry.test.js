@@ -145,7 +145,7 @@ test('edge keeps session expiry short while signing VOD engine raw URL with its 
     path.join(root, 'supabase', 'functions', 'norva-playback', 'index.ts'),
     'utf8',
   );
-  const engineStart = source.indexOf('if (body.enginePipe === true || body.engine_pipe === true || nativeMp4Gateway)');
+  const engineStart = source.indexOf('if (body.enginePipe === true || body.engine_pipe === true)');
   const engineEnd = source.indexOf('\n    const relayTransportExpiresAt = transportExpiresAt;', engineStart);
   assert.notEqual(engineStart, -1);
   assert.notEqual(engineEnd, -1);

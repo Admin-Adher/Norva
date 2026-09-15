@@ -43,7 +43,7 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
-import { nativeMp4PublicBytePipeUrl, useNativeMp4Gateway } from "../_shared/native-mp4-gateway-policy.mjs";
+import { useNativeMp4Gateway } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
 import {
@@ -2269,6 +2269,15 @@ async function createPlaybackSessionCore(
   );
   const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
     authoritativeVodContainer === "mp4";
+  // An explicit provider transport exception uses the existing signed HLS
+  // session surface. /raw remains private; compatible video stays copy/remux.
+  // Direct/native clients and explicit browser-engine requests keep their lane.
+  const serverPromotedProviderMp4 = body.enginePipe !== true && body.engine_pipe !== true &&
+    (clientMode === "relay" || (clientMode === "transcode" && body.gatewayAutoMode === true)) &&
+    useNativeMp4Gateway({
+      sourceId, itemType, container: authoritativeVodContainer,
+      allowlist: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS") || "",
+    });
   // Old cached web bundles may still ask for an automatic Gateway lane when a
   // reliable codec probe reports HEVC/AC-3. The real MP4 container remains
   // browser-native: demote only that automatic request to the byte-preserving
@@ -2286,6 +2295,8 @@ async function createPlaybackSessionCore(
       || authoritativeVodContainer === "ts");
   const mode = serverDirectPublicHls
     ? "direct"
+    : serverPromotedProviderMp4
+    ? "transcode"
     : serverDemotedAutomaticMp4
     ? "relay"
     : serverSelectionVodRelay
@@ -2293,7 +2304,7 @@ async function createPlaybackSessionCore(
     : serverPromotedRelay
     ? "transcode"
     : clientMode;
-  if (serverPromotedRelay) {
+  if (serverPromotedRelay || serverPromotedProviderMp4) {
     // The browser may still be holding a catalogue extension (for example MP4)
     // while a server-owned probe has already identified an AVI/MPEG-4/AC-3
     // file. Never ask it to fail once through the raw relay first. Preserve the
@@ -2303,8 +2314,8 @@ async function createPlaybackSessionCore(
     });
   }
   const gatewayVideoTranscodeExplicit = mode === "transcode" && (
-    (serverPromotedRelay && authoritativeVodTier === "video_transcode") ||
-    (!serverPromotedRelay && body.gatewayAutoMode !== true)
+    ((serverPromotedRelay || serverPromotedProviderMp4) && authoritativeVodTier === "video_transcode") ||
+    (!serverPromotedRelay && !serverPromotedProviderMp4 && body.gatewayAutoMode !== true)
   );
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
@@ -2591,14 +2602,10 @@ async function createPlaybackSessionCore(
   }
 
   if (mode === "relay") {
-    const nativeMp4Gateway = useNativeMp4Gateway({
-      sourceId, itemType, container: authoritativeVodContainer,
-      allowlist: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS") || "",
-    });
     // In-browser engine: relay the RAW bytes through the media gateway (an IP
     // the provider accepts), not the Cloudflare relay (which the provider's WAF
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
-    if (body.enginePipe === true || body.engine_pipe === true || nativeMp4Gateway) {
+    if (body.enginePipe === true || body.engine_pipe === true) {
       // The cloud session remains short-lived so a vanished client cannot hold
       // an entitlement slot for hours. The stateless /raw token is different:
       // every Range request is authenticated again, so a 15-minute token cuts a
@@ -2634,7 +2641,7 @@ async function createPlaybackSessionCore(
         userAgent,
         null,
         null,
-        !nativeMp4Gateway || body.enginePipe === true || body.engine_pipe === true,
+        true,
       );
       await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
@@ -2643,21 +2650,6 @@ async function createPlaybackSessionCore(
         itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds,
         expiresAt: rawTokenExpiresAt,
       });
-      // Native playback needs only the original bytes. Do not run engine track
-      // enrichment/probes before the first image or open a second provider lane.
-      if (nativeMp4Gateway && body.enginePipe !== true && body.engine_pipe !== true) {
-        const publicPipeUrl = nativeMp4PublicBytePipeUrl(
-          pipe.url, Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL") || "",
-        );
-        if (!publicPipeUrl) throw new HttpError(503, "Native MP4 gateway route is unavailable");
-        return {
-          session: publicPlaybackSession(session),
-          playback: {
-            mode: "relay", transport: "gateway-raw", url: publicPipeUrl,
-            tokenExpiresAt: rawTokenExpiresAt, sessionExpiresAt: expiresAt,
-          },
-        };
-      }
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
       // returns both (the container header carries both → zero extra provider round-trips).

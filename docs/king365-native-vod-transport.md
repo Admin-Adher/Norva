@@ -12,16 +12,22 @@ This is an opt-in deployment, not a change to the default provider pool:
   production host; never put provider credentials in a release artifact.
 - Edge `NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS`: comma-separated owned source UUIDs.
   The server resolves the source and actual container before applying the rule.
-- Edge `NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL`: the production Gateway's existing
-  HTTPS ingress (`PUBLIC_BASE_URL`), not its internal Docker service URL. The
-  native opt-in uses the production signer, not an unrelated playback canary.
 
 Only HTTP `.mp4`/`.ts` files of selected Gateway accounts use forward HTTP, on
 the account's existing slot. MKV, live, metadata, HTTPS and other accounts retain
 their routes. The scoped files do not train the legacy CONNECT/SOCKS learner.
-For selected sources, native movie MP4 goes through the existing signed Gateway
-byte pipe, with the normal entitlement, coordinator, expiry and single-account
-guards; it does not create an engine, transcode or track-enrichment request.
+For selected sources, browser movie MP4 goes through the existing signed Gateway
+HLS session, with normal entitlement, coordinator, expiry and single-account
+guards. Compatible H.264 is copied/remuxed rather than re-encoded. Direct/native
+clients, explicit conversion and browser-engine requests keep their lanes.
+
+The public ingress deliberately publishes only GET/HEAD/OPTIONS /sessions/*.
+Do not expose /raw, administrative endpoints or an internal Docker hostname to
+make native byte-pipe playback work. An intermediate native-raw rollout was
+rejected during browser verification (internal DNS, then the public 404 gate);
+the final policy uses the already-authorized HLS surface without any Caddy change.
+Remove the obsolete NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL if that intermediate
+release was staged; it is not used by the final implementation.
 
 Deploy both halves together after a fresh idle gate. Preserve live runtime files
 outside the four-file overlay, all proxy credentials/slots, models and cron
