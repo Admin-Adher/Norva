@@ -4806,7 +4806,8 @@
             expireSession: (id, options = {}) => playbackSessionRequest(
                 'POST',
                 `/playback/sessions/${encodeURIComponent(id)}/expire`,
-                null,
+                Number.isFinite(options.resumePosition) && options.resumePosition > 0 && options.resumePosition < 86400
+                    ? { resumePosition: options.resumePosition } : undefined,
                 options
             ),
             reportProviderFailure: (id, failure) => playbackSessionRequest(
@@ -4900,7 +4901,8 @@
                 expireSession: (id, options = {}) => playbackSessionRequest(
                     'POST',
                     `/playback/sessions/${encodeURIComponent(id)}/expire`,
-                    null,
+                    Number.isFinite(options.resumePosition) && options.resumePosition > 0 && options.resumePosition < 86400
+                        ? { resumePosition: options.resumePosition } : undefined,
                     { ...options, token: getDeviceToken() }
                 ),
                 reportProviderFailure: (id, failure) => playbackSessionRequest(

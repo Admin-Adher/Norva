@@ -371,7 +371,7 @@ test('deferred queue heartbeats are rate-limited and viewer release wakes long p
 test('ready HLS sessions never re-stat their historical segment list', () => {
   const playlistRoute = section("app.get('/sessions/:id/playlist.m3u8'", "app.get('/sessions/:id/:file'");
   const waitSource = section('async function waitForPlaylist', 'async function stopSession');
-  assert.match(playlistRoute, /if \(session\.status === 'starting'\)\s*\{\s*await waitForPlaylist/);
+  assert.match(playlistRoute, /if \(session\.status === 'starting' && !session\.privateResumeLease\)\s*\{\s*await waitForPlaylist/);
   assert.match(waitSource, /if \(session\.status === 'ready'\) return/);
 });
 

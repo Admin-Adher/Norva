@@ -3801,6 +3801,9 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
                 },
             },
             finiteTsSeekIndex: { begin: async () => null },
+            canUsePrivateResumeCache: () => false,
+            sharedPlaybackRanges: { begin: () => null },
+            hybridPlaybackRanges: privateRanges => privateRanges,
             providerNodeRouteForSession: () => ({ slot: 3, nodeTransport: 'http' }),
             alternateProviderNodeTransportRoute: () => ({ slot: 3, nodeTransport: 'socks5' }),
             pinnedProxyAgentFactoryForRoute: (route) => () => ({

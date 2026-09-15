@@ -50,7 +50,8 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
                 || claims.exp * 1000 > now() + 24 * 3600_000
                 || !allows?.(claims)) throw failure(403, 'NATIVE_MP4_CAPABILITY_REJECTED');
             const ownerHash = hash(claims.uid);
-            const identity = hash(JSON.stringify([ownerHash, claims.url, claims.fileSizeBytes, claims.exp, claims.ua || '']));
+            const identity = hash(JSON.stringify([ownerHash, claims.url, claims.fileSizeBytes, claims.exp, claims.ua || '',
+                claims.resumeSourceId || '', claims.resumeSourceRevision || '', claims.sharedFragmentGrant || null]));
             const prior = entries.get(claims.sid);
             if (prior) {
                 if (prior.identity !== identity) throw failure(409, 'NATIVE_MP4_SESSION_CONFLICT');

@@ -18,7 +18,7 @@ class StrictLidRangeReuse {
             || maxFiles < 1 || maxFiles > 128 || maxFragments < 1 || maxFragments > 256
             || ttlMs < 1 || ttlMs > 30 * 60_000) throw new Error('LID_RANGE_CACHE_CONFIG_INVALID');
         Object.assign(this, { maxBytes, perFileBytes, maxFiles, maxFragments, ttlMs, now });
-        this.entries = new Map(); this.bytes = 0;
+        this.entries = new Map(); this.bytes = 0; this.revocationEpoch = 0;
         this.stats = { reusedBytes: 0, hits: 0, invalidations: 0, evictions: 0 };
     }
     drop(key, entry) {
@@ -37,15 +37,26 @@ class StrictLidRangeReuse {
         this.prune();
         return { protocol: 1, files: this.entries.size, bytes: this.bytes, ...this.stats };
     }
+    revokeOwner(userHash) {
+        if (!hex(userHash)) return 0;
+        // Also fence handles opened before revocation but not yet confirmed.
+        this.revocationEpoch++;
+        let count = 0;
+        for (const [key, entry] of this.entries) if (entry.userHash === userHash) {
+            this.drop(key, entry); count++;
+        }
+        return count;
+    }
     begin({ userHash, sourceUrlHash, profileHash, fileSizeBytes } = {}) {
         if (![userHash, sourceUrlHash, profileHash].every(hex) || !Number.isSafeInteger(fileSizeBytes)
             || fileSizeBytes < 1) throw new Error('LID_RANGE_CACHE_BINDING_INVALID');
         this.prune();
         const key = crypto.createHash('sha256').update(JSON.stringify([userHash, sourceUrlHash, profileHash, fileSizeBytes])).digest('hex');
         let entry = this.entries.get(key); let confirmed = false; let disabled = false;
+        const revocationEpoch = this.revocationEpoch;
         const prior = entry ? { validator: { kind: 'etag', header: 'If-Range', value: entry.etag },
             effectiveUrlIdentitySha256: entry.identity } : null;
-        const live = () => !disabled && entry?.live && entry.expiresAt > this.now()
+        const live = () => !disabled && revocationEpoch === this.revocationEpoch && entry?.live && entry.expiresAt > this.now()
             && this.entries.get(key) === entry;
         const touch = () => { this.entries.delete(key); this.entries.set(key, entry); };
         const invalidate = () => {
@@ -80,7 +91,7 @@ class StrictLidRangeReuse {
             hasCandidate: (start, end) => Boolean(find(start, end)),
             get confirmed() { return confirmed && live(); },
             confirm: observed => {
-                if (disabled) return false;
+                if (disabled || revocationEpoch !== this.revocationEpoch) return false;
                 if (!matches(observed)) {
                     if (prior || live()) { invalidate(); throw changed(); }
                     disabled = true; return false;
@@ -92,7 +103,7 @@ class StrictLidRangeReuse {
                 }
                 if (entry && !live()) { disabled = true; return false; }
                 if (!entry) {
-                    entry = current || { etag: observed.validator.value, identity: observed.effectiveUrlIdentitySha256,
+                    entry = current || { userHash, etag: observed.validator.value, identity: observed.effectiveUrlIdentitySha256,
                         fragments: [], bytes: 0, live: true, expiresAt: this.now() + this.ttlMs };
                     this.entries.set(key, entry); trim();
                 }

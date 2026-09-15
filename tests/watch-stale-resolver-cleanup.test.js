@@ -305,8 +305,8 @@ test('bulk session stop keeps the JWT playback API when a user token is present'
     const cloud = {
         token: 'user-jwt',
         deviceToken: 'device-token',
-        playback: { expireSession: async (id, value) => calls.push(['jwt', id, value]) },
-        device: { playback: { expireSession: async (id, value) => calls.push(['device', id, value]) } },
+        playback: { expireSession: async (id, value) => calls.push(['jwt', id, { ...value }]) },
+        device: { playback: { expireSession: async (id, value) => calls.push(['device', id, { ...value }]) } },
     };
     const WatchPage = loadWatchPage(cloud);
     const page = makeSessionPage(WatchPage, ['session-jwt']);
@@ -322,8 +322,8 @@ test('bulk session stop uses device playback when only a device token is present
     const cloud = {
         token: null,
         deviceToken: 'device-token',
-        playback: { expireSession: async (id, value) => calls.push(['jwt', id, value]) },
-        device: { playback: { expireSession: async (id, value) => calls.push(['device', id, value]) } },
+        playback: { expireSession: async (id, value) => calls.push(['jwt', id, { ...value }]) },
+        device: { playback: { expireSession: async (id, value) => calls.push(['device', id, { ...value }]) } },
     };
     const WatchPage = loadWatchPage(cloud);
     const page = makeSessionPage(WatchPage, ['session-device']);
@@ -331,6 +331,22 @@ test('bulk session stop uses device playback when only a device token is present
     await page.stopCloudPlaybackSessions(options);
 
     assert.deepStrictEqual(calls, [['device', 'session-device', options]]);
+});
+
+test('only the current session receives a bounded resume position; old sessions never inherit it', async () => {
+    const calls = [];
+    const WatchPage = loadWatchPage({ token: 'jwt',
+        playback: { expireSession: async (id, options) => calls.push([id, { ...options }]) } });
+    for (const position of [12.375, undefined, NaN, -1, 86400, '12']) {
+        calls.length = 0;
+        const page = makeSessionPage(WatchPage, ['old', 'current']);
+        page.currentCloudPlaybackSessionId = 'current';
+        await page.stopCloudPlaybackSessions({ keepalive: true, resumePosition: position });
+        const result = Object.fromEntries(calls);
+        assert.deepStrictEqual(result.old, { keepalive: true });
+        assert.deepStrictEqual(result.current, position === 12.375
+            ? { keepalive: true, resumePosition: position } : { keepalive: true });
+    }
 });
 
 test('session expiry fails closed without an authenticated matching API', async () => {

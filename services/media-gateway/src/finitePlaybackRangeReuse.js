@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { StrictLidRangeReuse } = require('./strict-lid-range-reuse');
+const { privateResumeBinding } = require('./private-resume-binding');
 
 // Reuse the already bounded/TTL-aware fragment store, not its strict-LID
 // admission policy. A stale PLAYBACK cache is a miss, not a playback failure.
@@ -11,19 +12,24 @@ class FinitePlaybackRangeReuse {
         this.store = new StrictLidRangeReuse({ maxBytes: 64 * 1024 * 1024,
             perFileBytes: 8 * 1024 * 1024, maxFiles: 32, maxFragments: 64,
             ttlMs: 30 * 60_000, ...options });
-        this.maxRetainedWindowBytes = 1280 * 1024;
+        this.maxRetainedWindowBytes = options.maxRetainedWindowBytes || 1280 * 1024;
         this.skippedSequentialWindows = 0;
     }
 
-    begin({ ownerKey, sourceUrl, fileSizeBytes } = {}) {
+    begin({ ownerKey, sourceUrl, fileSizeBytes, sourceId, sourceRevision } = {}) {
         if (!/^[a-f0-9]{64}$/.test(String(ownerKey || '')) || !sourceUrl
             || !Number.isSafeInteger(fileSizeBytes) || fileSizeBytes < 1) return null;
         const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+        const binding = sourceId || sourceRevision ? privateResumeBinding({ ownerKey, sourceUrl,
+            sourceId, sourceRevision, fileSizeBytes, profile: 'finite-ranges' }) : null;
+        if ((sourceId || sourceRevision) && !binding) return null;
         const fragments = this.store.begin({ userHash: ownerKey,
-            sourceUrlHash: hash(String(sourceUrl)), profileHash: hash('finite-ts-resume-v1'), fileSizeBytes });
+            sourceUrlHash: binding?.sourceUrlHash || hash(String(sourceUrl)),
+            profileHash: binding?.profileHash || hash('finite-ts-resume-v1'), fileSizeBytes });
         let checked = false;
         let reusedBytes = 0;
         return Object.freeze({
+            hasPriorRanges: fragments.priorRanges.length > 0,
             // Called only AFTER a current, complete, validated provider range
             // has drained. No cached bytes or old validator are exposed first.
             confirm(observed) {
@@ -65,6 +71,7 @@ class FinitePlaybackRangeReuse {
     }
 
     prune() { this.store.prune(); }
+    revokeOwner(ownerKey) { return this.store.revokeOwner(ownerKey); }
 
     publicStatus() {
         return { ...this.store.snapshot(), scope: 'process-private-owner-exact-source',

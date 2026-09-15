@@ -726,6 +726,12 @@ test('paired-device playback expiry uses its device credential and keepalive tra
   assert.equal(requests[0].options.headers.Authorization, `Bearer ${deviceToken}`);
   assert.equal(requests[0].options.keepalive, true);
   assert.equal(requests[0].options.body, undefined);
+  await window.NorvaCloud.device.playback.expireSession(sessionId, { keepalive: true, resumePosition: 12.375 });
+  assert.equal(requests[1].options.headers.Authorization, `Bearer ${deviceToken}`);
+  assert.equal(requests[1].options.keepalive, true);
+  assert.deepEqual(JSON.parse(requests[1].options.body), { resumePosition: 12.375 });
+  await window.NorvaCloud.device.playback.expireSession(sessionId, { resumePosition: Infinity });
+  assert.equal(requests[2].options.body, undefined);
 });
 
 test('playback expiry aborts while a 401 token refresh remains unresolved', async () => {

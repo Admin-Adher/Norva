@@ -8,6 +8,7 @@ const path = require('node:path');
 const { once } = require('node:events');
 const { createNativeMp4Sessions, pipeNativeMp4 } = require('../services/media-gateway/src/native-mp4-sessions');
 const brokerHarness = require('./fixtures/finite-ts-index-broker');
+const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
 const sid = '11111111-2222-3333-4444-555555555555';
 const uid = '21111111-2222-3333-4444-555555555555';
 const owner = crypto.createHash('sha256').update(uid).digest('hex');
@@ -17,7 +18,7 @@ const claims = (now, extra = {}) => ({ v:1, sid, uid, url:'http://provider.inval
 test('native MP4 initialization spans a large moov in one provider range without warmup', async t => {
   const code=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
   const lane=code.slice(code.indexOf('const nativeMp4Sessions ='),code.indexOf("app.post('/native-sessions'"));
-  assert.match(lane,/finiteWarmupWindowBytes: 0,/);
+  assert.match(lane,/finiteWarmupWindowBytes: \(resumeRanges\?\.hasPriorRanges \|\| resumeRanges\?\.requiresValidation\) \? 64 \* 1024 : 0,/);
   assert.match(lane,/finiteWindowBytes: 8 \* 1024 \* 1024,/);
   const moovEnd=6_334_288, bytes=Buffer.alloc(9*1024*1024,37), ranges=[];
   const origin=http.createServer((req,res)=>{
@@ -50,6 +51,34 @@ test('opaque grants are exact, idempotent, bounded, and never perform provider I
   for(const [id,token] of [[uid,entry.token],[sid,'x'],[sid,'A'.repeat(43)],[sid,[entry.token]]])
     assert.throws(()=>store.authorize(id,token),/DENIED/);
   assert.equal(store.authorize(sid,entry.token),entry); assert.equal(opens,0);
+});
+
+test('repeat MP4 initialization reuses a 6.3 MB index after only a current 64 KiB provider proof', async t => {
+  const moovEnd = 6_334_288, bytes = Buffer.alloc(9 * 1024 * 1024, 37), requests = [];
+  const origin = http.createServer((req, res) => {
+    const m = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
+    const start = Number(m[1]), end = Number(m[2]); requests.push([start, end]);
+    res.writeHead(206, { 'content-range': `bytes ${start}-${end}/${bytes.length}`, 'content-length': end - start + 1,
+      etag: '"unchanged-large-index"' });
+    res.end(bytes.subarray(start, end + 1));
+  }).listen(0, '127.0.0.1');
+  await once(origin, 'listening'); t.after(() => new Promise(resolve => origin.close(resolve)));
+  const cache = new FinitePlaybackRangeReuse({ perFileBytes: 32 * 1024 * 1024, maxRetainedWindowBytes: 8 * 1024 * 1024 });
+  const sourceUrl = `http://127.0.0.1:${origin.address().port}/fixture.mp4`;
+  for (const visit of [0, 1]) {
+    const ranges = cache.begin({ ownerKey: owner, sourceUrl, fileSizeBytes: bytes.length,
+      sourceId: 'current-owned-source', sourceRevision: '7' });
+    const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: bytes.length,
+      dispatcher: null, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8 * 1024 * 1024,
+      finiteWarmupWindowBytes: ranges.hasPriorRanges ? 65536 : 0, finiteResumeRanges: ranges, releaseDelayMs: 0 });
+    t.after(() => broker.close()); const before = requests.length;
+    const response = await fetch(broker.inputUrl, { headers: { range: `bytes=0-${moovEnd}` } });
+    assert.equal(response.status, 206);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(0, moovEnd + 1));
+    await broker.close();
+    assert.deepEqual(requests.slice(before), visit === 0 ? [[0, moovEnd]] : [[0, 65535]]);
+    if (visit === 1) assert.equal(ranges.reusedBytes, moovEnd + 1 - 65536);
+  }
 });
 
 test('heartbeat and expiry cannot resurrect revoked, abandoned, or hard-expired grants', async () => {

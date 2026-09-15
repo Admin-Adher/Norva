@@ -553,7 +553,11 @@ async function handleRequest(req: Request): Promise<Response> {
       segments[3] === "expire"
     ) {
       const identity = await requireIdentity(req, supabase);
-      return json(req, await expirePlaybackSession(segments[2], identity.userId, supabase));
+      const body = recordOrEmpty(await req.json().catch(() => ({})));
+      const resumePosition = typeof body.resumePosition === "number"
+        && Number.isFinite(body.resumePosition) && body.resumePosition > 0 && body.resumePosition < 86_400
+        ? body.resumePosition : null;
+      return json(req, await expirePlaybackSession(segments[2], identity.userId, supabase, resumePosition));
     }
     if (req.method === "POST" && segments[0] === "audio-backfill") {
       return json(req, await runAudioBackfill(req, supabase));
@@ -2624,7 +2628,9 @@ async function createPlaybackSessionCore(
         startupTrace.nativeCoordinatorWaitMs = nativeCoordination.waitMs || 0;
         const capability = await createBytePipeCapability(session.id, userId, targetUrl,
           transportExpiresAt, db, userAgent, "native-browser-mp4", nativeMp4Proof.fileSizeBytes,
-          nativeMp4Proof.durationSeconds, null, true);
+          nativeMp4Proof.durationSeconds, null, true,
+          { sourceId, sourceRevision: await loadSourceConfigRevision(sourceId, userId, db),
+            sharedFragmentGrant: await createSharedFragmentGrant(sourceId, userId, itemType, itemId, transportExpiresAt, db) });
         const response = await fetch(`${capability.gatewayUrl}/native-sessions`, {
           method: "POST", headers: { Authorization: `Bearer ${capability.serviceToken}`, "Content-Type": "application/json" },
           body: JSON.stringify({ capability: capability.capability }), signal: AbortSignal.timeout(8_000),
@@ -6146,7 +6152,7 @@ async function requestDemandDrivenMediaCacheContinuationForLiveAttachment(
   return data === true;
 }
 
-async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
+async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient, resumePosition: number | null = null) {
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
     .select("*, cloud_gateway_sessions(*)")
@@ -6252,6 +6258,10 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
         );
       if (liveAttachmentId) cleanupUrl.searchParams.set("playbackSessionId", id);
       if (continueMediaCache) cleanupUrl.searchParams.set("completeCache", "continue");
+      if (!liveAttachmentId && typeof resumePosition === "number" && Number.isFinite(resumePosition)
+          && resumePosition > 0 && resumePosition < 86_400) {
+        cleanupUrl.searchParams.set("resumePosition", String(resumePosition));
+      }
       const response = await fetch(cleanupUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
@@ -7103,6 +7113,27 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
   else sourceIdentityCache.delete(cacheKey);
   return identity;
 }
+
+// Explicit provider-by-provider opt-in. This authorizes only a sharing scope;
+// the Gateway still needs THIS consumer's fresh exact Range response, strong
+// ETag, identical complete effective URL and upstream public cache permission.
+// Client-supplied hints, titles, TMDB ids and editable source hosts never grant
+// a cross-user byte read. Off by default, without extra startup DB requests.
+async function createSharedFragmentGrant(sourceId: string, userId: string, itemType: string,
+  itemId: string, expiresAt: string, db: SupabaseClient): Promise<JsonRecord | null> {
+  const allowed = new Set((Deno.env.get("NORVA_SHARED_FRAGMENT_PROVIDER_IDENTITIES") || "")
+    .split(/[,\s]+/).filter(Boolean));
+  if (!allowed.size || !["movie", "series", "episode"].includes(itemType) || !itemId) return null;
+  try {
+    const identity = await resolveSourceIdentity(sourceId, userId, db);
+    if (!identity.key || identity.key.startsWith("source:") || !allowed.has(identity.key)) return null;
+    const expiresAtMs = new Date(expiresAt).getTime();
+    if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= Date.now()) return null;
+    return { protocol: 1, ownerKey: await sha256Hex(userId),
+      providerIdentitySha256: await sha256Hex(identity.key),
+      catalogueItemSha256: await sha256Hex(JSON.stringify([itemType, itemId])), expiresAtMs };
+  } catch (_) { return null; } // Cache discovery never makes playback unavailable.
+}
 // catalog_media_items keying stays on the hostname (its writer writes the hostname;
 // re-keying it on providerKey is a scoped follow-up — see the dedup doc).
 async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
@@ -7695,6 +7726,7 @@ async function createBytePipeCapability(
   durationSeconds: number | null = null,
   strictLidWindowClaims: StrictLidWindowCapabilityClaims | null = null,
   usePlaybackCanary = false,
+  resumeBinding: { sourceId: string; sourceRevision: string; sharedFragmentGrant?: JsonRecord | null } | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   const gatewayRoute = usePlaybackCanary
@@ -7744,6 +7776,11 @@ async function createBytePipeCapability(
     url: targetUrl,
     ...(userAgent ? { ua: userAgent } : {}),
     ...(scope ? { scope } : {}),
+    ...(scope === "native-browser-mp4" && resumeBinding ? {
+      resumeSourceId: resumeBinding.sourceId,
+      resumeSourceRevision: resumeBinding.sourceRevision,
+      ...(resumeBinding.sharedFragmentGrant ? { sharedFragmentGrant: resumeBinding.sharedFragmentGrant } : {}),
+    } : {}),
     ...(Number.isSafeInteger(fileSizeBytes) && Number(fileSizeBytes) > 0
       ? { fileSizeBytes }
       : {}),
@@ -8158,7 +8195,10 @@ async function createGatewaySession(
     mode: gatewayMode,
     expiresAt,
     playbackHint: compactRecord(stripMkvH264FastStartInternalHints(playbackHint)),
-    playbackIdentity: compactRecord(playbackIdentity),
+    playbackIdentity: compactRecord({ ...playbackIdentity,
+      sourceRevision: await loadSourceConfigRevision(playbackIdentity.sourceId, userId, db),
+      sharedFragmentGrant: await createSharedFragmentGrant(playbackIdentity.sourceId, userId,
+        playbackIdentity.itemType, playbackIdentity.itemId, expiresAt, db) }),
     seekOffset: gatewayHints.seekOffset,
     startOffset: gatewayHints.startOffset,
     ...gatewayHints,
@@ -9145,6 +9185,14 @@ function mkvH264FastStartItemCasFromPlaybackSession(value: unknown) {
 
 function normalizeGatewayStartupPolicy(value: unknown) {
   const raw = recordOrEmpty(value);
+  if (raw.protocol === 3) {
+    return raw.eligible === true && raw.reason === "private-resume-window-ready"
+      && raw.pipeline === "video-transcode" && raw.targetBufferSeconds === 6
+      && raw.fileIdentityRevalidated === true && typeof raw.cachedAheadSeconds === "number"
+      && Number.isFinite(raw.cachedAheadSeconds) && raw.cachedAheadSeconds >= 24 && raw.cachedAheadSeconds <= 150
+      ? { protocol: 3, eligible: true, reason: "private-resume-window-ready", pipeline: "video-transcode",
+        targetBufferSeconds: 6, cachedAheadSeconds: raw.cachedAheadSeconds, fileIdentityRevalidated: true } : null;
+  }
   const protocol = Number(raw.protocol);
   const pipeline = stringOr(raw.pipeline, "");
   const targetBufferSeconds = boundedNullableNumber(

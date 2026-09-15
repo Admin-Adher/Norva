@@ -1317,7 +1317,14 @@ class WatchPage {
         // A full navigation/tab close aborts media bytes in the browser, but the
         // cloud coordinator otherwise keeps the logical provider slot until TTL.
         // keepalive lets the tiny expiry POST outlive page teardown.
-        this.stopCloudPlaybackSessions({ keepalive: true }).catch(() => {});
+        const options = { keepalive: true };
+        if (!this._suspendResumeSnapshotSave && this.video && !this.video.error
+            && this.video.readyState >= 2 && this.video.videoWidth > 0 && this.video.videoHeight > 0
+            && this.video.currentTime > 0 && (this.video.currentSrc || this.video.src)) {
+            const position = this.getResumeSnapshotPosition();
+            if (Number.isFinite(position) && position > 0 && position < 86400) options.resumePosition = position;
+        }
+        this.stopCloudPlaybackSessions(options).catch(() => {});
     }
 
     getResumeRestorePosition(position, duration = 0) {
@@ -4021,6 +4028,7 @@ class WatchPage {
 
     async stopCloudPlaybackSessions(options = {}) {
         this.stopCloudPlaybackHeartbeat();
+        const currentSessionId = this.currentCloudPlaybackSessionId;
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         if (this.currentCloudPlaybackSessionId) {
             sessionIds.add(this.currentCloudPlaybackSessionId);
@@ -4039,7 +4047,13 @@ class WatchPage {
 
         await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
             console.log('[WatchPage] Expiring cloud playback session:', sessionId);
-            await playbackApi.expireSession(sessionId, options);
+            // A retry/old session cannot inherit the new film's stop position.
+            const sessionOptions = { ...options };
+            if (sessionId !== currentSessionId || !Number.isFinite(sessionOptions.resumePosition)
+                || sessionOptions.resumePosition <= 0 || sessionOptions.resumePosition >= 86400) {
+                delete sessionOptions.resumePosition;
+            }
+            await playbackApi.expireSession(sessionId, sessionOptions);
         })).then(results => {
             results.forEach(result => {
                 if (result.status === 'rejected') {
@@ -5890,6 +5904,13 @@ class WatchPage {
 
     normalizeGatewayStartupPolicy(value = null) {
         const policy = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        if (policy?.protocol === 3) {
+            return policy.eligible === true && policy.reason === 'private-resume-window-ready'
+                && policy.pipeline === 'video-transcode' && policy.targetBufferSeconds === 6
+                && policy.fileIdentityRevalidated === true
+                && Number.isFinite(policy.cachedAheadSeconds) && policy.cachedAheadSeconds >= 24
+                && policy.cachedAheadSeconds <= 150 ? { ...policy } : null;
+        }
         if (!policy || Number(policy.protocol) !== 2 || policy.eligible !== true) return null;
 
         const pipeline = String(policy.pipeline || '').trim().toLowerCase();
@@ -6616,6 +6637,8 @@ class WatchPage {
             && Number(this.video.currentTime) > 0
             && Boolean(this.video.currentSrc || this.video.src)
         );
+        const privateResumePosition = watchedMediaObserved && !this._suspendResumeSnapshotSave
+            ? this.getResumeSnapshotPosition() : undefined;
         if (watchedMediaObserved && !this._watchedLanguageValidationIntent) {
             this.rememberWatchedLanguageValidationIntent(this._playbackAttemptId);
         }
@@ -6673,7 +6696,7 @@ class WatchPage {
         // requested while the old Gateway session is being expired.
         const sessionTeardown = Promise.allSettled([
             this.stopTranscodeSession(),
-            this.stopCloudPlaybackSessions()
+            this.stopCloudPlaybackSessions({ resumePosition: privateResumePosition })
         ]);
         this.baseStreamUrl = null;
         this.currentPlaybackMode = null;

@@ -49,6 +49,17 @@ test('Gateway buffered-ahead measurement uses only the range containing currentT
     assert.equal(gatewayBufferedAheadSeconds.call(page), 24.5);
 });
 
+test('private resume startup requires a revalidated playable reserve; no client-derived encoder speed', () => {
+    const normalize = loadMethod('normalizeGatewayStartupPolicy', 'gatewayStartupBufferOptions');
+    const proof = { protocol: 3, eligible: true, pipeline: 'video-transcode', reason: 'private-resume-window-ready',
+        targetBufferSeconds: 6, cachedAheadSeconds: 40, fileIdentityRevalidated: true };
+    assert.equal(normalize(proof).targetBufferSeconds, 6);
+    for (const change of [{ fileIdentityRevalidated: false }, { cachedAheadSeconds: 23.9 },
+        { cachedAheadSeconds: 151 }, { pipeline: 'copy' }, { targetBufferSeconds: 1 }, { eligible: false }]) {
+        assert.equal(normalize({ ...proof, ...change }), null);
+    }
+});
+
 test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutates', () => {
     const gatewayBufferedAheadSeconds = loadMethod(
         'gatewayBufferedAheadSeconds',

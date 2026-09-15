@@ -81,7 +81,16 @@ test('page teardown persists progress and expires cloud sessions with keepalive'
     ['progress'],
     ['expire', { keepalive: true }],
   ]);
-  assert.ok(source.includes('expireSession(sessionId, options)'));
+  assert.ok(source.includes('expireSession(sessionId, sessionOptions)'));
+  calls.length = 0;
+  page.video = { readyState: 2, videoWidth: 320, videoHeight: 180, currentTime: 12.375, currentSrc: 'https://media.invalid/session' };
+  page.getResumeSnapshotPosition = () => 62.375;
+  run.call(page);
+  assert.deepEqual(calls, [['progress'], ['expire', { keepalive: true, resumePosition: 62.375 }]]);
+  calls.length = 0;
+  page._suspendResumeSnapshotSave = true;
+  run.call(page);
+  assert.deepEqual(calls, [['progress'], ['expire', { keepalive: true }]]);
 });
 
 test('same-route episode handoff saves the outgoing identity without hiding Watch', () => {
