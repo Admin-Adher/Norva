@@ -4,11 +4,20 @@ create schema auth;
 create table auth.users(id uuid primary key);
 insert into auth.users values ('00000000-0000-0000-0000-000000000001');
 create schema cron;
-create table cron.job(jobid serial primary key,jobname text unique,schedule text,command text);
+create table cron.job(jobid serial primary key,jobname text,schedule text,command text,
+  username text not null default current_user,active boolean not null default true,unique(jobname,username));
 create function cron.schedule(text,text,text) returns bigint language sql as $$
   insert into cron.job(jobname,schedule,command) values($1,$2,$3)
-  on conflict(jobname) do update set schedule=$2,command=$3 returning jobid;
+  on conflict(jobname,username) do update set schedule=$2,command=$3 returning jobid;
 $$;
+create function cron.alter_job(job_id bigint,schedule text default null,command text default null,
+  database text default null,username text default null,active boolean default null)
+returns void language sql as $$
+  update cron.job set schedule=coalesce($2,cron.job.schedule),command=coalesce($3,cron.job.command),
+    username=coalesce($5,cron.job.username),active=coalesce($6,cron.job.active) where jobid=$1;
+$$;
+insert into cron.job(jobname,schedule,command,username) values
+ ('norva-catalog-tmdb-merge','7-59/10 * * * *','legacy canonicalization','supabase_admin');
 create table public.cloud_sources(id integer primary key,value integer not null default 0);
 insert into public.cloud_sources(id) values(1);
 create table public.cloud_titles(id uuid primary key,user_id uuid,item_type text,
