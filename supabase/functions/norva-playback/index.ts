@@ -43,7 +43,7 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
-import { useNativeMp4Gateway } from "../_shared/native-mp4-gateway-policy.mjs";
+import { nativeMp4PublicBytePipeUrl, useNativeMp4Gateway } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
 import {
@@ -2634,7 +2634,7 @@ async function createPlaybackSessionCore(
         userAgent,
         null,
         null,
-        true,
+        !nativeMp4Gateway || body.enginePipe === true || body.engine_pipe === true,
       );
       await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
@@ -2646,10 +2646,14 @@ async function createPlaybackSessionCore(
       // Native playback needs only the original bytes. Do not run engine track
       // enrichment/probes before the first image or open a second provider lane.
       if (nativeMp4Gateway && body.enginePipe !== true && body.engine_pipe !== true) {
+        const publicPipeUrl = nativeMp4PublicBytePipeUrl(
+          pipe.url, Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL") || "",
+        );
+        if (!publicPipeUrl) throw new HttpError(503, "Native MP4 gateway route is unavailable");
         return {
           session: publicPlaybackSession(session),
           playback: {
-            mode: "relay", transport: "gateway-raw", url: pipe.url,
+            mode: "relay", transport: "gateway-raw", url: publicPipeUrl,
             tokenExpiresAt: rawTokenExpiresAt, sessionExpiresAt: expiresAt,
           },
         };

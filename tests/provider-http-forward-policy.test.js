@@ -84,5 +84,24 @@ test('native byte-pipe returns after the normal coordinator and before track pro
   assert.ok(block.indexOf('createBytePipeAccess(') < block.indexOf('commitEdgeSessionCoordinator('));
   assert.ok(block.indexOf('commitEdgeSessionCoordinator(') < block.indexOf('if (nativeMp4Gateway &&'));
   assert.match(block, /mode: "relay", transport: "gateway-raw"/);
+  assert.match(block, /url: publicPipeUrl/);
+  assert.match(block, /nativeMp4PublicBytePipeUrl\(/);
+  assert.match(block, /NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL/);
+  assert.match(block, /!nativeMp4Gateway \|\| body.enginePipe === true \|\| body.engine_pipe === true/);
   assert.doesNotMatch(block, /probeCodec|probe-audio|mode: "transcode"|mode: "engine"/);
+});
+
+test('native MP4 exposes the configured HTTPS ingress, never Docker DNS', async () => {
+  const { nativeMp4PublicBytePipeUrl: url } = await import(pathToFileURL(path.join(__dirname, '../supabase/functions/_shared/native-mp4-gateway-policy.mjs')));
+  const internal = 'http://gateway-internal:8080/raw/signed_claim.signature';
+  assert.equal(url(internal, 'https://media.example/'), 'https://media.example/raw/signed_claim.signature');
+  assert.equal(url(internal, 'https://media.example/gateway/'), 'https://media.example/gateway/raw/signed_claim.signature');
+  for (const bad of ['', 'http://media.example', 'https://gateway-internal', 'https://127.0.0.1',
+    'https://localhost.localdomain', 'https://user:pass@media.example', 'https://media.example/?secret=x', 'https://media.example/#x']) {
+    assert.equal(url(internal, bad), null);
+  }
+  for (const bad of ['not a URL', 'http://gateway-internal/raw/unsigned', 'http://gateway-internal/raw/a.b?x=y',
+    'http://gateway-internal/debug/a.b', 'http://gateway-internal/raw/a.b/extra']) {
+    assert.equal(url(bad, 'https://media.example'), null);
+  }
 });

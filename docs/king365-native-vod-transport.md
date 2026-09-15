@@ -12,6 +12,9 @@ This is an opt-in deployment, not a change to the default provider pool:
   production host; never put provider credentials in a release artifact.
 - Edge `NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS`: comma-separated owned source UUIDs.
   The server resolves the source and actual container before applying the rule.
+- Edge `NORVA_NATIVE_MP4_GATEWAY_PUBLIC_URL`: the production Gateway's existing
+  HTTPS ingress (`PUBLIC_BASE_URL`), not its internal Docker service URL. The
+  native opt-in uses the production signer, not an unrelated playback canary.
 
 Only HTTP `.mp4`/`.ts` files of selected Gateway accounts use forward HTTP, on
 the account's existing slot. MKV, live, metadata, HTTPS and other accounts retain
