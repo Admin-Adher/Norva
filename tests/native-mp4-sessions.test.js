@@ -14,11 +14,12 @@ const owner = crypto.createHash('sha256').update(uid).digest('hex');
 const claims = (now, extra = {}) => ({ v:1, sid, uid, url:'http://provider.invalid/movie/user/password/1.mp4',
   exp:Math.floor(now/1000)+3600, scope:'native-browser-mp4', fileSizeBytes:8*1024, ...extra });
 
-test('native MP4 initialization streams in one range instead of a separate 64 KiB warmup', async t => {
+test('native MP4 initialization spans a large moov in one provider range without warmup', async t => {
   const code=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
   const lane=code.slice(code.indexOf('const nativeMp4Sessions ='),code.indexOf("app.post('/native-sessions'"));
   assert.match(lane,/finiteWarmupWindowBytes: 0,/);
-  const bytes=Buffer.alloc(256*1024,37), ranges=[];
+  assert.match(lane,/finiteWindowBytes: 8 \* 1024 \* 1024,/);
+  const moovEnd=6_334_288, bytes=Buffer.alloc(9*1024*1024,37), ranges=[];
   const origin=http.createServer((req,res)=>{
     const m=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range||'');
     assert.ok(m); const start=Number(m[1]),end=Number(m[2]); ranges.push([start,end]);
@@ -27,13 +28,13 @@ test('native MP4 initialization streams in one range instead of a separate 64 Ki
   }).listen(0,'127.0.0.1'); await once(origin,'listening');
   const broker=await brokerHarness().createStrictLidBroker({
     sourceUrl:`http://127.0.0.1:${origin.address().port}/fixture.mp4`,fileSizeBytes:bytes.length,
-    dispatcher:null,pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,
+    dispatcher:null,pathPrefix:'finite-mkv-seek',finiteWindowBytes:8*1024*1024,
     finiteWarmupWindowBytes:0,releaseDelayMs:0,
   });
   t.after(async()=>{await broker.close();await new Promise(r=>origin.close(r));});
-  const response=await fetch(broker.inputUrl,{headers:{range:'bytes=0-'}});
-  assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
-  assert.deepEqual(ranges,[[0,bytes.length-1]]);
+  const response=await fetch(broker.inputUrl,{headers:{range:`bytes=0-${moovEnd}`}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes.subarray(0,moovEnd+1));
+  assert.deepEqual(ranges,[[0,moovEnd]]);
 });
 
 test('opaque grants are exact, idempotent, bounded, and never perform provider I/O', async () => {

@@ -3960,12 +3960,13 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
                 dispatcherFactory, abortSignal: entry.ac.signal,
                 // Historical name: the finite broker is container-independent.
-                pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 1024 * 1024,
+                pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8 * 1024 * 1024,
                 finiteSequentialWindowBytes: 8 * 1024 * 1024,
                 // Browser MP4 needs its initialization boxes before decoding.
-                // A separate 64 KiB warmup adds a full upstream round trip before
-                // the rest of the first MiB. The broker already streams that MiB
-                // incrementally and still serializes every provider request.
+                // The measured 6.33 MiB moov index of a KING365 H264/AAC MP4
+                // spans the old first-MiB boundary. Start with one bounded 8 MiB
+                // provider window, streamed incrementally and serialized with
+                // every later seek; a smaller browser range is still respected.
                 finiteWarmupWindowBytes: 0, finiteWarmupCueGraceMs: 0,
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
