@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=68c3ed7e5c"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Diagnose a Focus Trap in a TV Interface | Norva Blog</title>
+  <meta name="description" content="Diagnose TV focus traps by capturing the exact state and key path, mapping focus edges, checking geometry and mutations, then verifying escape and restoration.">
+  <link rel="canonical" href="https://norva.tv/blog/diagnose-tv-focus-trap/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Diagnose a Focus Trap in a TV Interface | Norva Blog">
+  <meta property="og:description" content="Diagnose TV focus traps by capturing the exact state and key path, mapping focus edges, checking geometry and mutations, then verifying escape and restoration.">
+  <meta property="og:url" content="https://norva.tv/blog/diagnose-tv-focus-trap/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Diagnose a Focus Trap in a TV Interface | Norva Blog">
+  <meta name="twitter:description" content="Diagnose TV focus traps by capturing the exact state and key path, mapping focus edges, checking geometry and mutations, then verifying escape and restoration.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How to Diagnose a Focus Trap in a TV Interface",
+  "description": "Diagnose TV focus traps by capturing the exact state and key path, mapping focus edges, checking geometry and mutations, then verifying escape and restoration.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-15T06:00:00+02:00",
+  "dateModified": "2026-09-15T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/diagnose-tv-focus-trap/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How to Diagnose a Focus Trap in a TV Interface",
+      "item": "https://norva.tv/blog/diagnose-tv-focus-trap/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">How to Diagnose a Focus Trap in a TV Interface</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="diagnose-tv-focus-trap" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">Remote &amp; D-pad Navigation</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-15T06:00:00+02:00">15 September 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>How to Diagnose a Focus Trap in a TV Interface</h1>
+      <p class="lede">A reproducible debugging workflow for focus traps caused by missing edges, stale geometry, hidden targets, async changes, overlays, and broken Back behavior.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#confirm-that-the-state-is-actually-trapped">Confirm that the state is actually trapped</a></li><li><a href="#capture-the-smallest-reproducible-route">Capture the smallest reproducible route</a></li><li><a href="#draw-the-local-focus-graph">Draw the local focus graph</a></li><li><a href="#inspect-common-causes-in-order">Inspect common causes in order</a></li><li><a href="#test-async-mutations-deliberately">Test async mutations deliberately</a></li><li><a href="#repair-the-navigation-contract-not-one-coordinate">Repair the navigation contract, not one coordinate</a></li><li><a href="#verify-escape-reverse-and-back">Verify escape, reverse, and Back</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Reproduce the trap from a named target and state, press one direction at a time, and map the missing or incorrect focus edge. Then inspect visibility, geometry, explicit neighbours, scroll containers, overlays, disabled targets, and async mutations. A fix is complete only when escape, reverse movement, Back, and focus restoration all pass.</blockquote>
+<p>“The remote freezes” is a symptom, not a diagnosis. The application may still receive input while its spatial resolver finds no valid target, sends focus to an invisible element, or repeatedly returns the current node.</p>
+<h2 id="confirm-that-the-state-is-actually-trapped">Confirm that the state is actually trapped</h2>
+<p>A focus trap exists when the viewer cannot leave a region or complete or cancel its task through the expected controls. Intentional modal containment is different: a dialog keeps focus inside while providing clear actions and Back cancellation. The <a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/" target="_blank" rel="noopener">WAI-ARIA modal dialog pattern</a> offers a useful model for that contained interaction.</p>
+<p>Also distinguish a trap from invisible focus. If activation works but the cue disappeared, diagnose focus styling or obstruction. If input is not received at all, investigate the event path before changing neighbour rules.</p>
+<h2 id="capture-the-smallest-reproducible-route">Capture the smallest reproducible route</h2>
+<p>Record device and build, page, data and loading state, focused target identifier, previous input, failing input, expected destination, and actual outcome. Reduce the route to one transition, for example:</p>
+<p><code>Movies &gt; Audio filter &gt; select French &gt; Right &gt; no visible movement</code></p>
+<p>Repeat slowly, then after fresh entry, then after the data finishes loading. A failure that appears only after a filter or dialog closes strongly suggests stale state or geometry.</p>
+<h2 id="draw-the-local-focus-graph">Draw the local focus graph</h2>
+<p>Map the trapped target and every visually plausible neighbour. For each direction, note whether routing is explicit or computed. The grid-edge guide helps separate a legitimate boundary from a missing route.</p>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Check</th><th scope="col">Question</th><th scope="col">Evidence</th></tr></thead>
+<tbody><tr><td>Candidate</td><td>Is a destination enabled and focusable?</td><td>Element state</td></tr><tr><td>Visibility</td><td>Is it rendered and inside the active layer?</td><td>Screenshot</td></tr><tr><td>Geometry</td><td>Do its bounds match the visible card?</td><td>Focus overlay</td></tr><tr><td>Rule</td><td>Does an explicit neighbour point elsewhere?</td><td>Route map</td></tr><tr><td>Scroll</td><td>Can the container reveal it?</td><td>Scroll trace</td></tr></tbody>
+</table></div>
+<p>If there is no candidate, define the intended boundary behavior. If several candidates exist, identify why the wrong one wins.</p>
+<h2 id="inspect-common-causes-in-order">Inspect common causes in order</h2>
+<p>First, check whether the intended destination is hidden, disabled, detached, zero-sized, or behind another layer. Next, inspect stale bounding rectangles after filters, header compaction, image loading, or row virtualization. Then verify explicit neighbour references and region-entry anchors.</p>
+<p>Also look for event handlers that stop propagation, key-repeat locks that never clear, focus guards that reject a region, and overlays whose “open” state survives after they disappear. A menu or dialog may remain the active focus scope even though the viewer sees the page beneath it.</p>
+<h2 id="test-async-mutations-deliberately">Test async mutations deliberately</h2>
+<p>Reproduce with delayed loading, empty results, errors, and rapid filter changes. Remove the currently focused item and observe the fallback. Add enough cards to create another row. Toggle availability and favorites. These changes expose cached indices and target references that a static screen hides.</p>
+<p>The fallback should remain within the same task: valid sibling, stable region anchor, or safe recovery. Resetting to the first sidebar item may technically restore focus while still breaking the journey.</p>
+<h2 id="repair-the-navigation-contract-not-one-coordinate">Repair the navigation contract, not one coordinate</h2>
+<p>Choose the smallest rule that expresses intent. That may be an explicit filter-to-results anchor, a recalculation after layout mutation, a valid edge stop, or a region-memory fallback. The sidebar-to-content guide is useful when geometry crosses two distinct regions.</p>
+<p>Avoid adding arbitrary key-specific jumps to one item. Such patches often fail with different card counts, localization, or screen dimensions.</p>
+<h2 id="verify-escape-reverse-and-back">Verify escape, reverse, and Back</h2>
+<p>After the fix, run the original route and its reverse. Test the adjacent targets, first and last items, incomplete rows, and fast repeated input. Press Back from the repaired region and confirm that it closes the correct layer or returns to the correct origin.</p>
+<p>Use the focus restoration method when the trap occurs after closing a detail view or variant picker. Finally, add the route to the <a href="/blog/remote-dpad-navigation-qa/">complete remote QA ledger</a> so future layout changes rerun it.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Reporting a freeze without the focused start target.</li><li>Testing only with a mouse or touch input.</li><li>Fixing visible styling when the route itself is absent.</li><li>Adding a hard-coded jump for one card.</li><li>Ignoring layout changes after loading or filtering.</li><li>Verifying escape but not the reverse path.</li><li>Treating intentional dialog containment as a defect.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="should-focus-wrap-to-escape-a-trap">Should focus wrap to escape a trap?</h3>
+<p>Only when wrapping is the documented and visually understandable edge behavior. It should not conceal a missing region route.</p>
+<h3 id="can-a-hidden-element-cause-visible-focus-to-freeze">Can a hidden element cause visible focus to freeze?</h3>
+<p>Yes. The focus system may move to a rendered-but-invisible target, leaving the previous cue on screen or showing no cue at all.</p>
+<h3 id="what-evidence-is-most-useful-to-engineering">What evidence is most useful to engineering?</h3>
+<p>Provide the exact start state, one-key transition, expected and actual targets, device and build, plus a recording or focus overlay when available.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="diagnose-tv-focus-trap">Preview Norva's TV Navigation</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/" target="_blank" rel="noopener">WAI-ARIA APG: Modal Dialog Pattern</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
+
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
