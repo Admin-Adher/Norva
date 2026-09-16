@@ -33,6 +33,32 @@ test('real TS evidence reaches Edge and browser without the old 96-second fallba
     }
 });
 
+test('owner-admitted finite MP4 requests observation, never a forged immediate fast-start policy',()=>{
+    const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('function startupPolicyForSession(');
+    const end=source.indexOf('\nconst mkvH264HlsCacheStats',start);
+    const policyFor=vm.runInNewContext('('+source.slice(start,end).trim()+')',{
+        videoModeForSession:s=>s.mode||'copy',audioModeForSession:()=> 'transcode',
+        isLiveSession:s=>s.live===true,observedMediaProductionRateX:()=>2.7,
+        asRecord:v=>v||{},stringOrNull:v=>v||null,
+        MKV_H264_FAST_START_PROTOCOL:2,MKV_H264_FAST_START_MIN_ENCODE_RATE_X:1.15,
+        MKV_H264_FAST_START_BUFFER_SECONDS:6,
+        VIDEO_ENCODER_CONFIG:{backend:'software'},VIDEO_ENCODER_PREFLIGHT:{ready:false},
+    });
+    const {edge,watch}=clients();
+    const s={finiteMp4SeekBroker:true,finiteMp4BufferObservation:true};
+    const policy=policyFor(s);
+    assert.equal(policy.eligible,false);assert.equal(policy.targetBufferSeconds,null);
+    assert.equal(policy.reason,'finite-mp4-buffer-observation');
+    assert.equal(watch.gatewayStartupBufferOptions(edge(policy)).adaptive,true);
+    assert.equal(watch.gatewayStartupBufferOptions(edge(policy)).minimumSeconds,96);
+    for(const change of [{finiteMp4BufferObservation:false},{finiteMp4SeekBroker:false},
+        {live:true},{mode:'encode'}]) {
+        assert.notEqual(policyFor({...s,...change}).reason,'finite-mp4-buffer-observation');
+    }
+    assert.equal(edge({...policy,eligible:true,targetBufferSeconds:12}),null);
+});
+
 test('a ready playback response does not wait for catalogue persistence, but sharing still waits for its success', {timeout:2000}, async()=>{
     const source=fs.readFileSync(path.join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
     const start=source.indexOf('  if (sourceId && gateway.codecProfile && !deferGatewayProfilePersistenceForMkvFastStart)');

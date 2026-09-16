@@ -11703,6 +11703,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         });
         if ((windowedMp4Transport || privateResumeHlsBindingForSession(session)) && privateResumeFormat(session) === 'mp4') {
             session.finiteMp4SeekBroker = true;
+            session.finiteMp4BufferObservation = windowedMp4Transport;
             await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
         }
         applyVaapiVodStartupReadiness(session);
@@ -17881,6 +17882,15 @@ function startupPolicyForSession(session) {
     const pipeline = videoMode === 'encode'
         ? 'video-transcode'
         : (audioMode === 'copy' ? 'copy' : 'audio-transcode');
+    if (session?.finiteMp4SeekBroker === true && session?.finiteMp4BufferObservation === true
+        && videoMode === 'copy' && !isLiveSession(session)) {
+        // This is not a fast-start certificate. The owner-scoped finite MP4
+        // graph may earn a smaller reserve only from new browser buffer growth
+        // and decoded media. Old clients keep the 96-second fallback unchanged.
+        return { protocol: 2, eligible: false, pipeline, targetBufferSeconds: null,
+            minimumEncodeRateX: 1.5, observedEncodeRateX: observedMediaProductionRateX(session),
+            reason: 'finite-mp4-buffer-observation' };
+    }
     if (session?.finiteTsFastInput === true && FINITE_TS_FAST_START_ENABLED) {
         const finiteTsPolicy = finiteTsStartupPolicy(session, pipeline);
         if (finiteTsPolicy) return finiteTsPolicy;

@@ -64,6 +64,22 @@ test('only an exact selected graph with a rate-only rejection enables later obse
         assert.notEqual(page.gatewayStartupBufferOptions(value).adaptive, true);
     }
 });
+test('finite MP4 observation is not an immediate fast-start certificate', () => {
+    const page = watch();
+    const mp4 = { ...pendingPolicy, reason: 'finite-mp4-buffer-observation',
+        pipeline: 'audio-transcode', minimumEncodeRateX: 1.5 };
+    for (const pipeline of ['copy', 'audio-transcode']) {
+        const result = page.gatewayStartupBufferOptions({ ...mp4, pipeline });
+        assert.equal(result.adaptive, true);
+        assert.equal(result.minimumSeconds, 96);
+        assert.equal(result.policy, null);
+    }
+    for (const value of [{ ...mp4, pipeline: 'video-transcode' },
+        { ...mp4, eligible: true }, { ...mp4, targetBufferSeconds: 12 },
+        { ...mp4, minimumEncodeRateX: 1.15 }, { ...mp4, observedEncodeRateX: 0 }]) {
+        assert.notEqual(page.gatewayStartupBufferOptions(value).adaptive, true);
+    }
+});
 async function gate(buffer, change = () => {}, options = {}) {
     let now = 0;
     const page = watch({ Date: { now: () => now }, setTimeout: (fn, ms) => { now += ms; fn(); } });
@@ -81,6 +97,18 @@ test('a sustained later buffer growth releases the gate without waiting for 96 s
     assert.equal(result.result, true); assert.equal(result.now, 2000);
     assert.ok(result.evidence.appends >= 3); assert.ok(result.evidence.bufferedSeconds >= 12);
     assert.ok(result.evidence.rateX >= 2);
+});
+
+test('MP4 observation retains the same slow-source, cached-burst and cancellation protections', async () => {
+    const options=watch().gatewayStartupBufferOptions({...pendingPolicy,
+        reason:'finite-mp4-buffer-observation',pipeline:'audio-transcode',minimumEncodeRateX:1.5});
+    assert.equal((await gate(t=>6+4*Math.floor(t/400),()=>{},{...options,timeoutMs:6000})).result,true);
+    for(const buffer of [t=>t===0?6:40,t=>6+t/1000]) {
+        assert.equal((await gate(buffer,()=>{},{...options,timeoutMs:6000})).result,false);
+    }
+    assert.equal((await gate(t=>6+4*Math.floor(t/400),(page,t)=>{
+        if(t>=1000)page.isStalePlaybackAttempt=()=>true;
+    },{...options,timeoutMs:6000})).result,false);
 });
 test('a cached burst, slow feed, gaps, missing frames or unbounded segments do not earn adaptive startup', async () => {
     for (const [buffer, change] of [
