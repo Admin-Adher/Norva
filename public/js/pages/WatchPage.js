@@ -6640,7 +6640,11 @@ class WatchPage {
             && Number(this.video.currentTime) > 0
             && Boolean(this.video.currentSrc || this.video.src)
         );
-        const privateResumePosition = watchedMediaObserved && !this._suspendResumeSnapshotSave
+        // goBack(), hide() and episode handoff suspend duplicate HISTORY saves
+        // before calling stop(). That guard must not suppress the outgoing
+        // session's cache position. Internal load/retry teardown is excluded by
+        // watchedMediaObserved (enqueueStoryboard=false), before clocks reset.
+        const privateResumePosition = watchedMediaObserved
             ? this.getResumeSnapshotPosition() : undefined;
         if (watchedMediaObserved && !this._watchedLanguageValidationIntent) {
             this.rememberWatchedLanguageValidationIntent(this._playbackAttemptId);

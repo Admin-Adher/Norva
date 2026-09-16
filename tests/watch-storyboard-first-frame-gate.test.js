@@ -39,6 +39,7 @@ function makeStoppingPage({ firstFrameReported, video = null }) {
     qualityBadgeEl: null,
     hls: null,
     video,
+    getResumeSnapshotPosition() { return this.video?.currentTime || 0; },
     cancelFirstFrameTelemetryObserver() {},
     cancelDeferredEngineTrackEnrichment() {},
     enqueueStoryboardForCache() { storyboardCalls += 1; },
@@ -132,6 +133,51 @@ test('internal source replacement never infers watched-file language validation'
 
   assert.equal(languageIntentCalls(), 0);
   assert.equal(languageQueueCalls(), 0);
+});
+
+for (const exit of ['goBack', 'hide']) {
+  test(`${exit} sends outgoing cache position despite suspended history saves`, async () => {
+    const video = {
+      error: null, readyState: 4, videoWidth: 1280, videoHeight: 720,
+      currentTime: 17.5, currentSrc: 'blob:https://norva.tv/test', src: '',
+      pause() {}, load() { this.currentTime = 0; this.readyState = 0; },
+    };
+    const { page } = makeStoppingPage({ firstFrameReported: false, video });
+    const calls = [];
+    Object.assign(page, {
+      _suspendResumeSnapshotSave: false,
+      app: { navigateTo() {} },
+      beginPlaybackAttempt() {},
+      persistPlaybackStateForExit() {},
+      deactivateHistoryPersistence() {},
+      clearResumeSnapshot() {},
+      cancelNextEpisode() {},
+      getResumeSnapshotPosition() { return 120 + this.video.currentTime; },
+      stopCloudPlaybackSessions(options) {
+        calls.push({ ...options });
+        assert.equal(this._suspendResumeSnapshotSave, true);
+        assert.equal(this.video.currentTime, 0, 'snapshot must precede media reset');
+        return Promise.resolve();
+      },
+    });
+    page[exit]();
+    await page._stopPromise;
+    assert.deepEqual(calls, [{ resumePosition: 137.5 }]);
+    assert.equal(page._suspendResumeSnapshotSave, false);
+  });
+}
+
+test('internal teardown never sends a resume cache position from outgoing media', async () => {
+  const video = {
+    readyState: 4, videoWidth: 1280, videoHeight: 720, currentTime: 17.5,
+    currentSrc: 'blob:https://norva.tv/test', pause() {}, load() {},
+  };
+  const { page } = makeStoppingPage({ firstFrameReported: false, video });
+  let options;
+  page.getResumeSnapshotPosition = () => { throw new Error('must not capture internal teardown'); };
+  page.stopCloudPlaybackSessions = async (value) => { options = value; };
+  await page.stop({ enqueueStoryboard: false });
+  assert.equal(options.resumePosition, undefined);
 });
 
 test('loadVideo teardown explicitly disables storyboard generation for incoming media', async () => {
