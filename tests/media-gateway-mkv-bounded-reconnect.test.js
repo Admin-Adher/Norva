@@ -4144,7 +4144,7 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?4 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);
-    assert.match(source, /const sequentialWindowBytes = playbackStartupWindowPolicy\.bytes\(session\.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES\)/);
+    assert.match(source, /const sequentialWindowBytes = finiteMp4 \? FINITE_MKV_SEEK_WINDOW_BYTES\s*: playbackStartupWindowPolicy\.bytes\(session\.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES\)/);
     assert.match(source, /finiteSequentialWindowBytes:\s*sequentialWindowBytes/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?sequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);

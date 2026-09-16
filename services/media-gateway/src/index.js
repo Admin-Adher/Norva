@@ -3991,14 +3991,14 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 dispatcherFactory, abortSignal: entry.ac.signal,
                 // Historical name: the finite broker is container-independent.
                 pathPrefix: 'finite-mkv-seek',
-                finiteWindowBytes: playbackStartupWindowPolicy.bytes(entry.ownerHash, 8 * 1024 * 1024),
-                finiteSequentialWindowBytes: playbackStartupWindowPolicy.bytes(entry.ownerHash, 8 * 1024 * 1024),
+                finiteWindowBytes: 8 * 1024 * 1024,
+                finiteSequentialWindowBytes: 8 * 1024 * 1024,
                 // Browser MP4 needs its initialization boxes before decoding.
                 // The measured 6.33 MiB moov index of a KING365 H264/AAC MP4
                 // spans the old first-MiB boundary. The default is one bounded
-                // 8 MiB window; the owner-scoped small-window experiment streams
-                // it in consecutive 2 MiB responses without waiting for the
-                // entire index or opening simultaneous provider connections.
+                // 8 MiB streamed window. The 2 MiB canary did not improve real
+                // native MP4 startup or continuity, so retain this path's
+                // previous transport independently of the finite HLS canary.
                 // A repeat visit validates a small fresh range before releasing
                 // the retained index/seek bytes. Cold startup keeps its 8 MiB
                 // streamed window and incurs no extra validation request.
@@ -11694,7 +11694,14 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
         // Browser-incompatible MP4 also uses the same serialized finite input
         // as MKV/TS. Native compatible MP4 keeps its separate direct lane.
-        if (privateResumeHlsBindingForSession(session) && privateResumeFormat(session) === 'mp4') {
+        // Transport admission is independent of playable-cache admission:
+        // multiple audio/subtitle tracks forbid a partial cached HLS graph,
+        // but still need the same sequential provider input as simple MP4.
+        const windowedMp4Transport = playbackStartupWindowPolicy.mp4Session(session.ownerKey, {
+            finite: !isLiveSession(session), knownProfile: knownVodInputProbeEligible(session),
+            fileSizeBytes: fileSizeBytesForSession(session),
+        });
+        if ((windowedMp4Transport || privateResumeHlsBindingForSession(session)) && privateResumeFormat(session) === 'mp4') {
             session.finiteMp4SeekBroker = true;
             await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
         }
@@ -14187,11 +14194,12 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     }).catch(() => null) : null;
     session.finiteTsIndexObserver = tsObserver;
     const coldFiniteTs = finiteTs && Number(session?.seekOffset || 0) === 0;
-    const effectiveWindowBytes = playbackStartupWindowPolicy.bytes(session.ownerKey, coldFiniteTs ? FINITE_MKV_SEEK_WINDOW_BYTES
+    const effectiveWindowBytes = finiteMp4 ? FINITE_MKV_SEEK_WINDOW_BYTES : playbackStartupWindowPolicy.bytes(session.ownerKey, coldFiniteTs ? FINITE_MKV_SEEK_WINDOW_BYTES
         : finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
         ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
         : FINITE_MKV_SEEK_WINDOW_BYTES);
-    const sequentialWindowBytes = playbackStartupWindowPolicy.bytes(session.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES);
+    const sequentialWindowBytes = finiteMp4 ? FINITE_MKV_SEEK_WINDOW_BYTES
+        : playbackStartupWindowPolicy.bytes(session.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES);
     const finiteResumePrefixCandidate = !finiteMkv ? null : finiteMkvResumePrefixCache.get({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,

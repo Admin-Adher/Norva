@@ -46,3 +46,16 @@ test('large MP4 index and continuous TS/MKV-sized payload stream exactly through
     assert.equal(peak,1);
     assert.equal(broker.interruptedProviderFetches,0);
 });
+
+test('finite MP4 transport does not depend on cacheable audio/subtitle topology', () => {
+    const p = createPlaybackStartupWindowPolicy({ enabled: true, ownerHashes: owner });
+    const finite = { finite: true, knownProfile: true, fileSizeBytes: 50 * mib };
+    assert.equal(p.mp4Session(owner, { ...finite, multiAudioHls: true, exactSubtitleHls: true }), true);
+    for (const patch of [{ finite: false }, { knownProfile: false }, { fileSizeBytes: 0 }, { fileSizeBytes: NaN }])
+        assert.equal(p.mp4Session(owner, { ...finite, ...patch }), false);
+    assert.equal(p.mp4Session('b'.repeat(64), finite), false);
+    assert.equal(createPlaybackStartupWindowPolicy().mp4Session(owner, finite), false);
+    const source = require('node:fs').readFileSync(require('node:path').join(__dirname,
+        '../services/media-gateway/src/index.js'), 'utf8');
+    assert.match(source, /\(windowedMp4Transport \|\| privateResumeHlsBindingForSession\(session\)\).*privateResumeFormat\(session\) === 'mp4'/);
+});
