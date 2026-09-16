@@ -196,7 +196,7 @@ test('normal exact-size preflight freezes a reachable gateway-inband multi graph
     });
     h.freezeMultiAudioHlsTopology(resumed);
     assert.equal(resumed.minHlsStartupBufferSeconds, 4);
-    assert.equal(resumed.minHlsStartupSegments, 2);
+    assert.equal(resumed.minHlsStartupSegments, 3, 'post-first production rate needs three finalized segments');
 
     const route = sourceBetween("app.post('/sessions'", "\n// Cross-device kill-switch");
     const boundedPumpIndex = route.indexOf('await ensureBoundedMkvInputPump(');
@@ -604,7 +604,7 @@ test('serialization, health and cleanup retain the bounded single-provider contr
     );
     assert.match(
         gatewaySource,
-        /session\.minHlsStartupSegments\s*=\s*MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS/,
+        /session\.minHlsStartupSegments\s*=\s*Math\.max\(3, MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS\)/,
     );
     assert.match(gatewaySource, /multiAudioHls:\s*\{\s*protocol:\s*MULTI_AUDIO_HLS_PROTOCOL[\s\S]*maxAudioRenditions:\s*MAX_MULTI_AUDIO_RENDITIONS/);
     assert.ok((gatewaySource.match(/audioRenditions:\s*audioRenditionsForSession\(session\)/g) || []).length >= 3);

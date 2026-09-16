@@ -94,6 +94,7 @@ function pumpHarness(overrides = {}) {
         VOD_INPUT_DISCOVERY_RANGE_END: Number.MAX_SAFE_INTEGER - 1,
         VOD_INPUT_FULL_BODY_MAX_BYTES: 1024 * 1024,
         VOD_INPUT_RETRY_DELAYS_MS: [0, 0, 0, 0],
+        playbackStartupWindowPolicy: require('../services/media-gateway/src/playback-startup-window').createPlaybackStartupWindowPolicy(),
         VOD_INPUT_MIN_PROGRESS_RESET_BYTES: 8,
         INBAND_HEADER_PARSE: false,
         BOUNDED_MKV_HEADER_PARSE: false,
@@ -650,6 +651,38 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     ]);
     assert.equal(tracker.calls[1]['If-Range'], '"mkv-v1"');
     assert.deepEqual(tracker.dispatchers, [dispatcher, dispatcher], 'every reconnect stays on one sticky proxy');
+});
+
+test('planned 2 MiB MKV windows never consume the failure budget or overlap provider bodies', async () => {
+    const owner = 'a'.repeat(64);
+    const fixture = mkvFixture(7 * 1024 * 1024);
+    const tracker = makeTracker();
+    const h = pumpHarness({
+        playbackStartupWindowPolicy: require('../services/media-gateway/src/playback-startup-window')
+            .createPlaybackStartupWindowPolicy({ enabled: true, ownerHashes: owner }),
+        VOD_INPUT_MAX_RECONNECTS: 1,
+        fetch: async (_url, options) => {
+            assert.equal(tracker.active, 0, 'the previous provider body must be released');
+            const [, startText, endText] = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+            const start = Number(startText), end = Number(endText);
+            tracker.calls.push([start, end]);
+            return trackedResponse(tracker, {
+                chunks: [fixture.subarray(start, end + 1)],
+                headers: { 'Content-Range': `bytes ${start}-${end}/${fixture.length}`,
+                    'Content-Length': String(end - start + 1), ETag: '"windowed-v1"' },
+            });
+        },
+    });
+    const session = { ...mkvSession(fixture.length), ownerKey: owner };
+    const writable = new CapturingWritable({ backpressureFirstWrite: true });
+    const result = await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
+    assert.deepEqual(writable.bytes(), fixture);
+    assert.equal(result.reconnects, 0);
+    assert.equal(tracker.calls.length, 4, 'all four windows complete despite an error budget of one');
+    assert.equal(tracker.maxActive, 1);
+    assert.equal(tracker.active, 0);
+    assert.equal(session.vodInputProgress.snapshot().plannedWindowContinuations, 3);
+    for (let i = 1; i < tracker.calls.length; i++) assert.equal(tracker.calls[i][0], tracker.calls[i - 1][1] + 1);
 });
 
 test('bounded MKV pump can rescue an interrupted body by changing protocol without changing proxy slot', async () => {
@@ -3781,6 +3814,7 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
             Number,
             FFMPEG_USER_AGENT: 'Norva-Test/1',
             PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
+            playbackStartupWindowPolicy: { bytes: (_owner, bytes) => bytes },
             FINITE_MKV_SEEK_WINDOW_BYTES: 2 * 1024 * 1024,
             FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES: 1 * 1024 * 1024,
             FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES: 256 * 1024,
@@ -4110,7 +4144,8 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?4 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);
-    assert.match(source, /finiteSequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
+    assert.match(source, /const sequentialWindowBytes = playbackStartupWindowPolicy\.bytes\(session\.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES\)/);
+    assert.match(source, /finiteSequentialWindowBytes:\s*sequentialWindowBytes/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?sequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);

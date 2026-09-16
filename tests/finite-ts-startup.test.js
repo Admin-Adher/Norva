@@ -76,7 +76,7 @@ test('finite TS rejects live TV, provider hints, incomplete or conflicting maps 
     }
 });
 
-test('TS reduced probing suppresses only redundant tail duration discovery and resets on full fallback', () => {
+test('TS full discovery fallback retains exact duration and avoids a second tail scan', () => {
     const h = probeHarness(); const session = exact();
     assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), [
         '-analyzeduration', '500000', '-probesize', '524288', '-skip_estimate_duration_from_pts', '1',
@@ -85,12 +85,17 @@ test('TS reduced probing suppresses only redundant tail duration discovery and r
     assert.equal(session.minHlsStartupSegments, 2);
     assert.equal(session.minHlsStartupBufferSeconds, 12);
     session.forceFullInputProbe = true;
-    assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), ['-analyzeduration', '8000000', '-probesize', '8000000']);
+    assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), ['-analyzeduration', '8000000', '-probesize', '8000000',
+        '-skip_estimate_duration_from_pts', '1']);
+    assert.equal(session.startupTimings.finiteTsDurationScanSkipped, true);
     assert.equal(session.finiteTsFastInput, false);
     assert.equal(session.minHlsStartupSegments, 3);
     assert.equal(session.minHlsStartupBufferSeconds, 10);
     assert.equal(session.startupTimings.finiteTsFastInput, false);
     assert.equal(probeHarness(false).knownVodInputProbeEligible(exact()), false);
+    delete session.codecProfile.durationSeconds;
+    assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), ['-analyzeduration', '8000000', '-probesize', '8000000']);
+    assert.equal(session.startupTimings.finiteTsDurationScanSkipped, false);
 });
 
 test('live probe, existing MKV budgets, audio choice and full retry maps remain intact', () => {

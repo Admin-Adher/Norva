@@ -19,7 +19,7 @@ test('native MP4 initialization spans a large moov in one provider range without
   const code=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
   const lane=code.slice(code.indexOf('const nativeMp4Sessions ='),code.indexOf("app.post('/native-sessions'"));
   assert.match(lane,/finiteWarmupWindowBytes: \(resumeRanges\?\.hasPriorRanges \|\| resumeRanges\?\.requiresValidation\) \? 64 \* 1024 : 0,/);
-  assert.match(lane,/finiteWindowBytes: 8 \* 1024 \* 1024,/);
+  assert.match(lane,/finiteWindowBytes: playbackStartupWindowPolicy.bytes\(entry.ownerHash, 8 \* 1024 \* 1024\),/);
   const moovEnd=6_334_288, bytes=Buffer.alloc(9*1024*1024,37), ranges=[];
   const origin=http.createServer((req,res)=>{
     const m=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range||'');

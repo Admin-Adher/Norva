@@ -46,6 +46,8 @@ let passiveLidCandidatePosition = 0;
 let strictLidCaptureStore = null;
 let strictLidCapturePipeline = null;
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
+const { startupFailureDiagnostics } = require('./startup-diagnostics');
+const { createPlaybackStartupWindowPolicy } = require('./playback-startup-window');
 const languageResourceSampler = createLanguageResourceSampler({ readFile: fsp.readFile, os });
 const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
 const { prepareStrictLidSpeechSample } = require('./strict-lid-speech-sampler');
@@ -2689,6 +2691,10 @@ const codecProfileCache = new Map();
 const headerByteCache = new Map();
 const finitePlaybackRangeReuse = new FinitePlaybackRangeReuse();
 const PRIVATE_RESUME_CACHE_ENABLED = process.env.PRIVATE_RESUME_CACHE_ENABLED === 'true';
+const playbackStartupWindowPolicy = createPlaybackStartupWindowPolicy({
+    enabled: process.env.VOD_STARTUP_SMALL_WINDOWS_ENABLED === 'true',
+    ownerHashes: process.env.VOD_STARTUP_SMALL_WINDOWS_OWNER_HASHES,
+});
 const canUsePrivateResumeCache = createPrivateResumeOwnerGate({ enabled: PRIVATE_RESUME_CACHE_ENABLED,
     ownerHashes: process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES });
 const privateResumeByteRanges = new FinitePlaybackRangeReuse({ maxBytes: 128 * 1024 * 1024,
@@ -2961,6 +2967,7 @@ app.get('/health', (req, res) => {
         },
         finiteMkvResumePrefixCache: finiteMkvResumePrefixCache.publicStatus(),
         finitePlaybackRangeReuse: finitePlaybackRangeReuse.publicStatus(),
+        playbackStartupWindows: playbackStartupWindowPolicy.status(),
         privateResumeByteRanges: { enabled: PRIVATE_RESUME_CACHE_ENABLED,
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeByteRanges.publicStatus() },
         privateResumeHlsCache: { enabled: PRIVATE_RESUME_CACHE_ENABLED,
@@ -3983,13 +3990,15 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
                 dispatcherFactory, abortSignal: entry.ac.signal,
                 // Historical name: the finite broker is container-independent.
-                pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8 * 1024 * 1024,
-                finiteSequentialWindowBytes: 8 * 1024 * 1024,
+                pathPrefix: 'finite-mkv-seek',
+                finiteWindowBytes: playbackStartupWindowPolicy.bytes(entry.ownerHash, 8 * 1024 * 1024),
+                finiteSequentialWindowBytes: playbackStartupWindowPolicy.bytes(entry.ownerHash, 8 * 1024 * 1024),
                 // Browser MP4 needs its initialization boxes before decoding.
                 // The measured 6.33 MiB moov index of a KING365 H264/AAC MP4
-                // spans the old first-MiB boundary. Start with one bounded 8 MiB
-                // provider window, streamed incrementally and serialized with
-                // every later seek; a smaller browser range is still respected.
+                // spans the old first-MiB boundary. The default is one bounded
+                // 8 MiB window; the owner-scoped small-window experiment streams
+                // it in consecutive 2 MiB responses without waiting for the
+                // entire index or opening simultaneous provider connections.
                 // A repeat visit validates a small fresh range before releasing
                 // the retained index/seek bytes. Cold startup keeps its 8 MiB
                 // streamed window and incurs no extra validation request.
@@ -12462,10 +12471,13 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
         session.ffmpeg = startFfmpeg(session);
         try {
             await waitForPlaylist(session, STARTUP_TIMEOUT_MS, abortSignal);
+            session.startupFailureCode = null;
             if (session.status === 'starting') session.status = 'ready';
             return true;
         } catch (err) {
             if (abortSignal?.aborted) throw abortedVodInputPumpError();
+            session.startupFailureCode = err?.message === 'Playlist timeout'
+                ? 'PLAYLIST_TIMEOUT' : session.inputFailure ? 'INPUT_FAILED' : 'FFMPEG_FAILED';
             const finiteMkvSeekBrokerFailed = applyFiniteMkvSeekBrokerFailure(session);
             const finiteMkvSeekFailureCode = String(session.inputFailure?.code || '').trim();
             if (
@@ -13454,15 +13466,20 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
         throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV input size is unavailable', { status: 502 });
     }
     const requestedEndOverride = Number(options.requestEnd);
-    const requestEnd = Number.isSafeInteger(requestedEndOverride) && requestedEndOverride >= offset
+    const ordinaryRequestEnd = Number.isSafeInteger(requestedEndOverride) && requestedEndOverride >= offset
         ? Math.min(requestedEndOverride, fileSizeBytes ? fileSizeBytes - 1 : requestedEndOverride)
         : (fileSizeBytes ? fileSizeBytes - 1 : VOD_INPUT_DISCOVERY_RANGE_END);
+    // Only ordinary continuous playback is chunked. Exact identity/header
+    // preflights retain their declared boundary and full drain semantics.
+    const requestEnd = Number.isSafeInteger(requestedEndOverride) && requestedEndOverride >= offset
+        ? ordinaryRequestEnd : playbackStartupWindowPolicy.requestEnd(session.ownerKey, offset, ordinaryRequestEnd);
     const controller = new AbortController();
     const attempt = {
         controller,
         response: null,
         reader: null,
         preloadedChunks: [],
+        plannedWindowEnd: requestEnd < ordinaryRequestEnd ? requestEnd : null,
         openTimer: null,
         signal: parentSignal,
         onParentAbort: null,
@@ -14169,9 +14186,12 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
     }).catch(() => null) : null;
     session.finiteTsIndexObserver = tsObserver;
-    const effectiveWindowBytes = finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
+    const coldFiniteTs = finiteTs && Number(session?.seekOffset || 0) === 0;
+    const effectiveWindowBytes = playbackStartupWindowPolicy.bytes(session.ownerKey, coldFiniteTs ? FINITE_MKV_SEEK_WINDOW_BYTES
+        : finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
         ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
-        : FINITE_MKV_SEEK_WINDOW_BYTES;
+        : FINITE_MKV_SEEK_WINDOW_BYTES);
+    const sequentialWindowBytes = playbackStartupWindowPolicy.bytes(session.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES);
     const finiteResumePrefixCandidate = !finiteMkv ? null : finiteMkvResumePrefixCache.get({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
@@ -14187,6 +14207,12 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     const resumeRanges = hybridPlaybackRanges(privateRanges, sharedPlaybackRanges.begin({
         grant: identity.sharedFragmentGrant, ownerKey: session.ownerKey, fileSizeBytes, signal: parentSignal,
     }));
+    // At time zero there is no timestamp/cue search. Stream the first ordinary
+    // sequential window immediately instead of opening 256 KiB, then 1 MiB,
+    // then 8 MiB responses before the first segment can complete. Revalidation
+    // of retained bytes still owns its small complete current response.
+    const warmupWindowBytes = coldFiniteTs && !resumeRanges?.hasPriorRanges && !resumeRanges?.requiresValidation
+        ? 0 : FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
     const broker = await createStrictLidBroker({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
@@ -14212,8 +14238,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteSeekContinuationGraceMs: finiteTs ? 50 : 0,
         finiteAbandonedDrainMs: finiteTs ? 1500 : 0,
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
-        finiteWarmupWindowBytes: FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES,
-        finiteSequentialWindowBytes: FINITE_MKV_SEEK_WINDOW_BYTES,
+        finiteWarmupWindowBytes: warmupWindowBytes,
+        finiteSequentialWindowBytes: sequentialWindowBytes,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
         finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
@@ -14243,9 +14269,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteTsSeekContinuationGraceMs = finiteTs ? 50 : 0;
     session.startupTimings.finiteTsAbandonedDrainMs = finiteTs ? 1500 : 0;
     session.startupTimings.finiteMkvSeekWarmupCueGraceMs = finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS;
-    session.startupTimings.finiteMkvSeekWarmupWindowBytes = FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
+    session.startupTimings.finiteMkvSeekWarmupWindowBytes = warmupWindowBytes;
     session.startupTimings.finiteMkvResumePrefixWeakValidationBytes = FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES;
-    session.startupTimings.finiteMkvSeekSequentialWindowBytes = FINITE_MKV_SEEK_WINDOW_BYTES;
+    session.startupTimings.finiteMkvSeekSequentialWindowBytes = sequentialWindowBytes;
     session.startupTimings.finiteMkvSeekMultiAudioWindow = exactAudioTrackCount > 1;
     session.startupTimings.finiteMkvSeekCacheLimitBytes = FINITE_MKV_SEEK_CACHE_BYTES;
     // A persisted point is just a candidate until a fresh complete HTTP 206
@@ -14905,7 +14931,7 @@ function createVodInputProgress(now = () => typeof performance === 'object'
     ? performance.now() : Date.now()) {
     const phases = ['local', 'provider-open', 'provider-read', 'downstream-write', 'provider-close', 'retry-wait', 'flush', 'cleanup'];
     const elapsed = Object.fromEntries(phases.map(name => [name, 0]));
-    const counters = { receivedBytes: 0, preloadedBytes: 0, forwardedBytes: 0, openedRanges: 0, reopens: 0 };
+    const counters = { receivedBytes: 0, preloadedBytes: 0, forwardedBytes: 0, openedRanges: 0, reopens: 0, plannedWindowContinuations: 0 };
     let initial; try { initial = Number(now()); } catch { initial = 0; }
     let tick = Number.isFinite(initial) ? initial : 0;
     const started = tick; let phase = 'local'; let outcome = 'active';
@@ -15122,6 +15148,18 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         }
         if (fileSizeBytes && offset >= fileSizeBytes) break;
         if (failure && failure.retryable !== true) throw failure;
+
+        // Deliberately completed 2 MiB playback windows are not broken
+        // connections. Do not spend the bounded error retry budget (or sleep)
+        // for each of hundreds of normal windows in a long film. Unexpected
+        // short responses and every transport failure retain the old budget.
+        if (!failure && Number.isSafeInteger(attempt?.plannedWindowEnd)
+            && range?.fullBody !== true && range?.end === attempt.plannedWindowEnd
+            && offset === range.end + 1) {
+            consecutiveNoProgressFailures = 0;
+            progress.add('plannedWindowContinuations', 1);
+            continue;
+        }
 
         const alternateRoute = failure && !transportFallbackAttempted
             && shouldFallbackProviderNodeTransport(failure)
@@ -15945,10 +15983,17 @@ async function observeSessionStartOffset(session) {
 function inputProbeArgsForSession(session) {
     const live = isLiveSession(session);
     const knownFast = !live && knownVodInputProbeEligible(session);
+    // Falling back to full stream discovery does not invalidate the dated,
+    // exact finite-file duration. Keep suppressing FFmpeg's independent tail
+    // duration scan: it otherwise reopens distant ranges on the mono-slot
+    // provider precisely when the small discovery budget needed a retry.
+    const finiteTsKnownDuration = !live && FINITE_TS_FAST_START_ENABLED &&
+        finiteTsProfileEligible(session, Date.now(), { allowFullProbe: true });
     session.fastInputProbe = knownFast;
     session.finiteTsFastInput = knownFast && finiteTsProfileEligible(session);
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.finiteTsFastInput = session.finiteTsFastInput;
+    session.startupTimings.finiteTsDurationScanSkipped = finiteTsKnownDuration;
     session.startupTimings.finiteTsResumeAligned = session.finiteTsResumeAligned === true;
     if (session.finiteTsFastInput) {
         // Two long (e.g. 12-second) segments already cover this reserve.
@@ -15979,7 +16024,7 @@ function inputProbeArgsForSession(session) {
                     ? KNOWN_VOD_INPUT_PROBE_SIZE_BYTES
                     : VOD_INPUT_PROBE_SIZE_BYTES
         ),
-        ...(session.finiteTsFastInput ? finiteTsDemuxArgs() : []),
+        ...(finiteTsKnownDuration ? finiteTsDemuxArgs() : []),
     ];
 }
 
@@ -18863,7 +18908,11 @@ function freezeMultiAudioHlsTopology(session) {
             ? MULTI_AUDIO_HLS_RESUME_STARTUP_PROOF_SECONDS
             : MULTI_AUDIO_HLS_STARTUP_PROOF_SECONDS;
         if (resumed) {
-            session.minHlsStartupSegments = MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS;
+            // Three completed segments also provide a post-first-segment
+            // production rate. Two exposed only setup latency / 4 s of media,
+            // falsely classifying a fast encoder as slower than playback and
+            // sending the browser down its 96-second conservative buffer path.
+            session.minHlsStartupSegments = Math.max(3, MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS);
         }
     }
     session.startupTimings = asRecord(session.startupTimings);
@@ -22054,6 +22103,7 @@ function rememberFailure(session, detail) {
         status: session.status,
         detail: String(detail || '').slice(0, 1000),
         logTail: String(session.logTail || '').slice(-2000),
+        startup: startupFailureDiagnostics(session),
         time: new Date().toISOString()
     });
     while (lastFailures.length > 10) lastFailures.shift();

@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const { StrictLidRangeReuse } = require('./strict-lid-range-reuse');
-const { privateResumeBinding } = require('./private-resume-binding');
+const { privateResumeBinding, strongResumeIdentity } = require('./private-resume-binding');
 
 // Reuse the already bounded/TTL-aware fragment store, not its strict-LID
 // admission policy. A stale PLAYBACK cache is a miss, not a playback failure.
@@ -14,6 +14,8 @@ class FinitePlaybackRangeReuse {
             ttlMs: 30 * 60_000, ...options });
         this.maxRetainedWindowBytes = options.maxRetainedWindowBytes || 1280 * 1024;
         this.skippedSequentialWindows = 0;
+        this.validationStats = { confirmed: 0, rejectedIdentity: 0, changed: 0,
+            rejectedLifecycle: 0, storedWindows: 0 };
     }
 
     begin({ ownerKey, sourceUrl, fileSizeBytes, sourceId, sourceRevision } = {}) {
@@ -28,6 +30,7 @@ class FinitePlaybackRangeReuse {
             profileHash: binding?.profileHash || hash('finite-ts-resume-v1'), fileSizeBytes });
         let checked = false;
         let reusedBytes = 0;
+        const validationStats = this.validationStats;
         return Object.freeze({
             hasPriorRanges: fragments.priorRanges.length > 0,
             // Called only AFTER a current, complete, validated provider range
@@ -35,9 +38,15 @@ class FinitePlaybackRangeReuse {
             confirm(observed) {
                 if (checked) return fragments.confirmed;
                 checked = true;
-                try { return fragments.confirm(observed); }
+                const exactIdentity = Boolean(strongResumeIdentity(observed, fileSizeBytes));
+                try {
+                    const confirmed = fragments.confirm(observed);
+                    validationStats[confirmed ? 'confirmed' : exactIdentity ? 'rejectedLifecycle' : 'rejectedIdentity']++;
+                    return confirmed;
+                }
                 catch (error) {
                     if (error?.code !== 'VOD_CHANGED') throw error;
+                    validationStats[exactIdentity ? 'changed' : 'rejectedIdentity']++;
                     fragments.invalidate();
                     return false;
                 }
@@ -63,7 +72,9 @@ class FinitePlaybackRangeReuse {
                     this.skippedSequentialWindows++;
                     return false;
                 }
-                return fragments.remember(start, payload, { providerDrained: true });
+                const stored = fragments.remember(start, payload, { providerDrained: true });
+                if (stored) validationStats.storedWindows++;
+                return stored;
             },
             get reusedBytes() { return reusedBytes; },
             invalidate: fragments.invalidate,
@@ -79,7 +90,8 @@ class FinitePlaybackRangeReuse {
             maxBytes: this.store.maxBytes, perFileBytes: this.store.perFileBytes,
             maxFiles: this.store.maxFiles, maxFragments: this.store.maxFragments, ttlMs: this.store.ttlMs,
             maxRetainedWindowBytes: this.maxRetainedWindowBytes,
-            skippedSequentialWindows: this.skippedSequentialWindows };
+            skippedSequentialWindows: this.skippedSequentialWindows,
+            validation: { ...this.validationStats } };
     }
 }
 

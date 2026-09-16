@@ -110,6 +110,7 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
             .map(key => [key, 262144]));
         const prepare = vm.runInNewContext(`(${block})`, {
             ...constants, Number,
+            playbackStartupWindowPolicy: { bytes: (_owner, bytes) => bytes },
             isFiniteMkvVodSession: () => false,
             finiteTsProfileEligible: () => true,
             fileSizeBytesForSession: () => 1000000,

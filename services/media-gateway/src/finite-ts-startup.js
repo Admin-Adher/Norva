@@ -16,8 +16,8 @@ const index = (value) => value !== null && value !== undefined && value !== ''
 // A .ts suffix alone also describes live TV. This optimization needs a finite,
 // dated server probe and its actual stream map, not a provider label. It does
 // not promote metadataComplete: that field has different in-band semantics.
-function finiteTsProfileEligible(session, now = Date.now()) {
-    if (!session || session.forceFullInputProbe === true) return false;
+function finiteTsProfileEligible(session, now = Date.now(), { allowFullProbe = false } = {}) {
+    if (!session || (session.forceFullInputProbe === true && !allowFullProbe)) return false;
     const hint = record(session.playbackHint);
     const identity = record(session.playbackIdentity);
     const kind = token(identity.itemType || hint.streamType || hint.stream_type || hint.itemType || hint.item_type);
