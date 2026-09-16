@@ -64,13 +64,13 @@ test('only an exact selected graph with a rate-only rejection enables later obse
         assert.notEqual(page.gatewayStartupBufferOptions(value).adaptive, true);
     }
 });
-test('finite MP4 observation is not an immediate fast-start certificate', () => {
+test('finite MP4 observation keeps the deep reserve after the failed production pilot', () => {
     const page = watch();
     const mp4 = { ...pendingPolicy, reason: 'finite-mp4-buffer-observation',
         pipeline: 'audio-transcode', minimumEncodeRateX: 1.5 };
     for (const pipeline of ['copy', 'audio-transcode']) {
         const result = page.gatewayStartupBufferOptions({ ...mp4, pipeline });
-        assert.equal(result.adaptive, true);
+        assert.notEqual(result.adaptive, true);
         assert.equal(result.minimumSeconds, 96);
         assert.equal(result.policy, null);
     }
@@ -99,10 +99,13 @@ test('a sustained later buffer growth releases the gate without waiting for 96 s
     assert.ok(result.evidence.rateX >= 2);
 });
 
-test('MP4 observation retains the same slow-source, cached-burst and cancellation protections', async () => {
+test('MP4 opening bursts and slow feeds cannot bypass the reserve', async () => {
     const options=watch().gatewayStartupBufferOptions({...pendingPolicy,
         reason:'finite-mp4-buffer-observation',pipeline:'audio-transcode',minimumEncodeRateX:1.5});
-    assert.equal((await gate(t=>6+4*Math.floor(t/400),()=>{},{...options,timeoutMs:6000})).result,true);
+    // Override the generic helper's rate-rejection defaults with the actual
+    // manifest callback's boolean, not a missing optional property.
+    options.adaptive = options.adaptive === true;
+    assert.equal((await gate(t=>6+4*Math.floor(t/400),()=>{},{...options,timeoutMs:6000})).result,false);
     for(const buffer of [t=>t===0?6:40,t=>6+t/1000]) {
         assert.equal((await gate(buffer,()=>{},{...options,timeoutMs:6000})).result,false);
     }

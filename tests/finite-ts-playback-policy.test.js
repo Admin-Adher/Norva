@@ -33,7 +33,7 @@ test('real TS evidence reaches Edge and browser without the old 96-second fallba
     }
 });
 
-test('owner-admitted finite MP4 requests observation, never a forged immediate fast-start policy',()=>{
+test('owner-admitted finite MP4 diagnostics cannot bypass the production reserve',()=>{
     const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
     const start=source.indexOf('function startupPolicyForSession(');
     const end=source.indexOf('\nconst mkvH264HlsCacheStats',start);
@@ -50,7 +50,7 @@ test('owner-admitted finite MP4 requests observation, never a forged immediate f
     const policy=policyFor(s);
     assert.equal(policy.eligible,false);assert.equal(policy.targetBufferSeconds,null);
     assert.equal(policy.reason,'finite-mp4-buffer-observation');
-    assert.equal(watch.gatewayStartupBufferOptions(edge(policy)).adaptive,true);
+    assert.notEqual(watch.gatewayStartupBufferOptions(edge(policy)).adaptive,true);
     assert.equal(watch.gatewayStartupBufferOptions(edge(policy)).minimumSeconds,96);
     for(const change of [{finiteMp4BufferObservation:false},{finiteMp4SeekBroker:false},
         {live:true},{mode:'encode'}]) {

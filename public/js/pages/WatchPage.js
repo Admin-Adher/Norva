@@ -5960,12 +5960,11 @@ class WatchPage {
             // early segments. Preserve the fallback, but allow new, sustained
             // browser evidence to supersede that estimate, never a timer alone.
             const raw = startupPolicy || {};
-            const measuredGraph = raw.reason === 'encode-rate-below-minimum'
-                || (raw.reason === 'finite-mp4-buffer-observation'
-                    && ['copy', 'audio-transcode'].includes(raw.pipeline)
-                    && Number(raw.minimumEncodeRateX) >= 1.5);
+            // The MP4 pilot produced a fast opening burst followed by sustained
+            // starvation (51s waiting in a 120s test). That graph must retain
+            // the deep reserve; short-term browser growth was not durable proof.
             const adaptive = Number(raw.protocol) === 2 && raw.eligible === false
-                && measuredGraph
+                && raw.reason === 'encode-rate-below-minimum'
                 && ['copy', 'audio-transcode', 'video-transcode'].includes(raw.pipeline)
                 && raw.targetBufferSeconds === null
                 && Number(raw.minimumEncodeRateX) >= (raw.pipeline === 'video-transcode' ? 2 : 1.15)
