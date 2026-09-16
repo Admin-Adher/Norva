@@ -13476,10 +13476,11 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
     const ordinaryRequestEnd = Number.isSafeInteger(requestedEndOverride) && requestedEndOverride >= offset
         ? Math.min(requestedEndOverride, fileSizeBytes ? fileSizeBytes - 1 : requestedEndOverride)
         : (fileSizeBytes ? fileSizeBytes - 1 : VOD_INPUT_DISCOVERY_RANGE_END);
-    // Only ordinary continuous playback is chunked. Exact identity/header
-    // preflights retain their declared boundary and full drain semantics.
-    const requestEnd = Number.isSafeInteger(requestedEndOverride) && requestedEndOverride >= offset
-        ? ordinaryRequestEnd : playbackStartupWindowPolicy.requestEnd(session.ownerKey, offset, ordinaryRequestEnd);
+    // Keep the cold Matroska pipe on one continuous provider body. Unlike the
+    // seek broker it cannot reuse a resolved CDN target, and reopening small
+    // ranges rotates signed URLs on some providers (or lacks a stable validator).
+    // Deliberate header preflights and genuine reconnects retain exact bounds.
+    const requestEnd = ordinaryRequestEnd;
     const controller = new AbortController();
     const attempt = {
         controller,

@@ -653,7 +653,7 @@ test('bounded MKV pump forwards exact bytes, resumes at the exact offset, and ne
     assert.deepEqual(tracker.dispatchers, [dispatcher, dispatcher], 'every reconnect stays on one sticky proxy');
 });
 
-test('planned 2 MiB MKV windows never consume the failure budget or overlap provider bodies', async () => {
+test('cold MKV retains a continuous body even for the small-window canary', async () => {
     const owner = 'a'.repeat(64);
     const fixture = mkvFixture(7 * 1024 * 1024);
     const tracker = makeTracker();
@@ -678,10 +678,11 @@ test('planned 2 MiB MKV windows never consume the failure budget or overlap prov
     const result = await h.runBoundedMkvInputPump(session, writable, new AbortController().signal, null);
     assert.deepEqual(writable.bytes(), fixture);
     assert.equal(result.reconnects, 0);
-    assert.equal(tracker.calls.length, 4, 'all four windows complete despite an error budget of one');
+    assert.equal(tracker.calls.length, 1, 'do not force new signed CDN redirects mid-film');
+    assert.deepEqual(tracker.calls[0], [0, fixture.length - 1]);
     assert.equal(tracker.maxActive, 1);
     assert.equal(tracker.active, 0);
-    assert.equal(session.vodInputProgress.snapshot().plannedWindowContinuations, 3);
+    assert.equal(session.vodInputProgress.snapshot().plannedWindowContinuations, 0);
     for (let i = 1; i < tracker.calls.length; i++) assert.equal(tracker.calls[i][0], tracker.calls[i - 1][1] + 1);
 });
 
