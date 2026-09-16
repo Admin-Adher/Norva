@@ -5976,8 +5976,6 @@ class WatchPage {
                 timeoutMs: 360000,
                 policy: null,
                 ...(adaptive ? { adaptive: true } : {}),
-                ...(adaptive && raw.reason === 'finite-mp4-buffer-observation'
-                    ? { adaptiveMaximumSegmentSeconds: 20 } : {}),
             };
         }
         // A growing multi-audio EVENT manifest publishes one video playlist
@@ -6071,14 +6069,8 @@ class WatchPage {
                 const now = Date.now();
                 const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
                     .slice(-8).map(fragment => Number(fragment.duration));
-                // Copying MP4 video preserves its original keyframe spacing.
-                // A measured 12.5s first GOP must not disable observation for
-                // the entire opening. Longer bounded GOPs require twice their
-                // actual duration in reserve and still need sustained 2x growth.
-                const maximumSegmentSeconds = Math.min(20,
-                    Math.max(12.25, Number(options.adaptiveMaximumSegmentSeconds) || 12.25));
                 const boundedSegments = durations.length >= 3
-                    && durations.every(duration => Number.isFinite(duration) && duration > 0 && duration <= maximumSegmentSeconds);
+                    && durations.every(duration => Number.isFinite(duration) && duration > 0 && duration <= 12.25);
                 const longestSegment = boundedSegments ? Math.max(...durations) : 0;
                 // A twelve-second segment produced at 2x arrives every six
                 // seconds. A fixed 2.5s gap discarded that valid evidence. The
@@ -6389,7 +6381,6 @@ class WatchPage {
                             minimumSeconds: gatewayStartupBuffer.minimumSeconds,
                             timeoutMs: gatewayStartupBuffer.timeoutMs,
                             adaptive: gatewayStartupBuffer.adaptive === true,
-                            adaptiveMaximumSegmentSeconds: gatewayStartupBuffer.adaptiveMaximumSegmentSeconds,
                         },
                     );
                 } catch (error) {

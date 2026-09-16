@@ -73,7 +73,6 @@ test('finite MP4 observation is not an immediate fast-start certificate', () => 
         assert.equal(result.adaptive, true);
         assert.equal(result.minimumSeconds, 96);
         assert.equal(result.policy, null);
-        assert.equal(result.adaptiveMaximumSegmentSeconds, 20);
     }
     for (const value of [{ ...mp4, pipeline: 'video-transcode' },
         { ...mp4, eligible: true }, { ...mp4, targetBufferSeconds: 12 },
@@ -138,8 +137,7 @@ test('the actual manifest callback passes later-rate observation to the startup 
     const page = watch();
     page.hls = activeHls; page.isStalePlaybackAttempt = () => false;
     page.waitForGatewayStartupBuffer = async (_id, _hls, options) => { received = options; return true; };
-    const options = page.gatewayStartupBufferOptions({ ...pendingPolicy,
-        reason: 'finite-mp4-buffer-observation', pipeline: 'audio-transcode', minimumEncodeRateX: 1.5 });
+    const options = page.gatewayStartupBufferOptions(pendingPolicy);
     const snippet = source.slice(start, end);
     // Execute the event wiring, not a regex and not a direct gate invocation.
     vm.runInNewContext(`(function(){${snippet}}).call(page)`, {
@@ -149,7 +147,6 @@ test('the actual manifest callback passes later-rate observation to the startup 
     });
     await callback('manifest', {});
     assert.equal(received.adaptive, true); assert.equal(received.minimumSeconds, 96);
-    assert.equal(received.adaptiveMaximumSegmentSeconds, 20);
 });
 
 test('an accelerating source can earn a new reserve but a late slowdown or disjoint buffer cannot', async () => {
@@ -167,24 +164,4 @@ test('twelve-second segments produced at 2x retain evidence across their six-sec
     assert.equal(fast.result, true); assert.equal(fast.now, 18000); assert.equal(fast.evidence.rateX, 2);
     const slow = await gate(t => 12 + 12 * Math.floor(t / 12000), longSegments, { timeoutMs: 25000 });
     assert.equal(slow.result, false); assert.equal(slow.evidence, null);
-});
-
-test('copied MP4 long GOPs need a proportional reserve and sustained growth, not a timer', async () => {
-    const options = watch().gatewayStartupBufferOptions({ ...pendingPolicy,
-        reason: 'finite-mp4-buffer-observation', pipeline: 'audio-transcode', minimumEncodeRateX: 1.5 });
-    const segment = seconds => page => {
-        page.hls.levels[0].details.fragments.forEach(f => { f.duration = seconds; });
-    };
-    const fast = await gate(t => 12.5 + 12.5 * Math.floor(t / 6000), segment(12.5),
-        { ...options, timeoutMs: 25000 });
-    assert.equal(fast.result, true);
-    assert.ok(fast.evidence.bufferedSeconds >= 25);
-    assert.ok(fast.evidence.rateX >= 2);
-    for (const buffer of [t => 12.5 + 12.5 * Math.floor(t / 12000), t => t === 0 ? 12.5 : 50]) {
-        assert.equal((await gate(buffer, segment(12.5), { ...options, timeoutMs: 25000 })).result, false);
-    }
-    assert.equal((await gate(t => 12.5 + 12.5 * Math.floor(t / 6000), segment(12.5),
-        { timeoutMs: 25000 })).result, false);
-    assert.equal((await gate(t => 20 + 8 * Math.floor(t / 1000), segment(21),
-        { ...options, timeoutMs: 6000 })).result, false);
 });
