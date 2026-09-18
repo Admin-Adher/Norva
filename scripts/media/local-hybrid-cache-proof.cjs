@@ -169,7 +169,7 @@ if(require.main===module)(async () => {
             }
             if (url.pathname === '/hls.js' || url.pathname === '/watch.js') {
                 res.setHeader('Content-Type', 'application/javascript');
-                return res.end(await fs.readFile(path.join(root, url.pathname === '/hls.js' ? 'public/js/vendor/hls-1.5.7.min.js' : 'public/js/pages/WatchPage.js')));
+                return res.end(await fs.readFile(path.join(root, url.pathname === '/hls.js' ? 'public/js/vendor/hls-1.7.3.min.js' : 'public/js/pages/WatchPage.js')));
             }
             const parts = url.pathname.split('/'); const fixture = fixtures.get(parts[2]);
             if (!fixture) { res.statusCode = 404; return res.end(); }

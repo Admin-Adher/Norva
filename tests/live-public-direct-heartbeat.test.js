@@ -286,10 +286,10 @@ test('only the exact public HLS session changes latency policy and the next gate
 });
 
 test('vendored HLS preserves ready public content across the observed TV5 threshold but still recovers an empty expired window', () => {
-    const bundle = fs.readFileSync(path.join(__dirname, '../public/js/vendor/hls-1.5.7.min.js'), 'utf8');
-    const match = bundle.match(/r\.synchronizeToLiveEdge=(function\(t\)\{.*?\}),r\.alignPlaylists=/s);
-    assert.ok(match, 'exercise the actual bundled synchronization algorithm');
-    const synchronize = vm.runInNewContext(`(${match[1]})`);
+    const Hls = require('../public/js/vendor/hls-1.7.3.min.js');
+    const runtime = new Hls({ enableWorker: false });
+    const synchronize = runtime.streamController.synchronizeToLiveEdge;
+    runtime.destroy();
     const h = harness(), url = 'https://publisher.example/live.m3u8';
     const marked = payload('a'); marked.playback.url = url;
     for (const scenario of [
@@ -299,8 +299,8 @@ test('vendored HLS preserves ready public content across the observed TV5 thresh
     ]) {
         const media = { currentTime: 33.364598, duration: 90, readyState: scenario.ready };
         const controller = { config: { ...h.player.getPlaybackHlsConfig(scenario.public ? marked : null, url), maxFragLookUpTolerance: .25 },
-            media, hls: { liveSyncPosition: 68.000399 }, loadedmetadata: true, warn() {} };
-        synchronize.call(controller, { type: 'EVENT', live: true, fragments: [{ start: 36 }], edge: 90, targetduration: 7 });
+            media, playhead: media.currentTime, hls: { liveSyncPosition: 68.000399 }, _hasEnoughToStart: true, warn() {} };
+        synchronize.call(controller, { type: 'EVENT', live: true, fragmentStart: 36, fragments: [{ start: 36 }], edge: 90, targetduration: 7 });
         assert.equal(media.currentTime, scenario.expected, JSON.stringify(scenario));
     }
 });
