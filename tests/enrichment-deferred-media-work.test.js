@@ -24,6 +24,7 @@ function harness() {
     const insertByPriority = (queue, job) => { queue.push(job); queue.sort((a,b) => jobPrio(a)-jobPrio(b)); };
     const state = { gate: job => job.blocked === true, heartbeats: [], failed: [] };
     const context = {
+        gatewayMaintenanceFence: null,
         JOB_PRIORITY, jobPrio, insertByPriority, JOB_GATE_MAX_DEFERRALS: 20, JOB_GATE_POLL_MS: 5,
         transcribeQueue: queues.transcribe, ocrQueue: queues.ocr, translateQueue: queues.translate,
         transcribeBusy: false, ocrBusy: false, translateBusy: false,

@@ -12,6 +12,8 @@ class FinitePlaybackRangeReuse {
         this.store = new StrictLidRangeReuse({ maxBytes: 64 * 1024 * 1024,
             perFileBytes: 8 * 1024 * 1024, maxFiles: 32, maxFragments: 64,
             ttlMs: 30 * 60_000, ...options });
+        this.retainBehindBytes = this.store.retainBehindBytes;
+        this.retainAheadBytes = this.store.retainAheadBytes;
         this.maxRetainedWindowBytes = options.maxRetainedWindowBytes || 1280 * 1024;
         this.skippedSequentialWindows = 0;
         this.validationStats = { confirmed: 0, rejectedIdentity: 0, changed: 0,
@@ -76,12 +78,23 @@ class FinitePlaybackRangeReuse {
                 if (stored) validationStats.storedWindows++;
                 return stored;
             },
+            // Pass-through: the viewer position only steers eviction.
+            anchorAt: fragments.anchorAt,
             get reusedBytes() { return reusedBytes; },
             invalidate: fragments.invalidate,
         });
     }
 
     prune() { this.store.prune(); }
+
+    // Same guarantees as the store: coordinates and counters, no secrets.
+    describe() {
+        return { ...this.store.describe(),
+            scope: 'process-private-owner-exact-source',
+            maxRetainedWindowBytes: this.maxRetainedWindowBytes,
+            skippedSequentialWindows: this.skippedSequentialWindows,
+            validation: { ...this.validationStats } };
+    }
     revokeOwner(ownerKey) { return this.store.revokeOwner(ownerKey); }
 
     publicStatus() {

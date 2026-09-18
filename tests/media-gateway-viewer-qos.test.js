@@ -146,6 +146,7 @@ test('global viewer gate defers background without consuming its failure budget'
     {
       JOB_PRIORITY,
       JOB_GATE_MAX_DEFERRALS: 2,
+      gatewayMaintenanceFence: null,
       jobPrio,
       localViewerTranscriptionSource: () => null,
       backgroundJobBlockedByViewer: (job) => jobPrio(job) !== 0 && viewerBusy,
@@ -276,6 +277,7 @@ test('viewer AI subtitles borrow only the exact local title and audio rendition'
     {
       JOB_PRIORITY,
       JOB_GATE_MAX_DEFERRALS: 2,
+      gatewayMaintenanceFence: null,
       jobPrio: (job) => Number.isInteger(job?.prio) ? job.prio : 1,
       localViewerTranscriptionSource: (job) => job.exactLocal ? exactSingle : null,
       backgroundJobBlockedByViewer: () => false,

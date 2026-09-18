@@ -852,8 +852,8 @@ test('codec profile binds the exact first uppercase-V stream and excludes cover/
 });
 
 test('cold full EOF mints a signed full-file proof; only the next request may copy video', () => {
-  const h = loadFastStartHarness();
   const now = Date.parse('2026-08-17T12:00:00Z');
+  const h = loadFastStartHarness({ Date: class extends Date { static now() { return now + 1; } } });
   const cold = proofSession(h);
   assert.equal(h.assess(cold, now).reason, 'missing-proof');
   cold.videoMode = 'encode';
@@ -1701,8 +1701,8 @@ test('real closed-GOP fixture matches every IDR and open-GOP segments are reject
 });
 
 test('startup policy protocol 2 shortens the buffer for measured copy video and never exposes proof', () => {
-  const h = loadFastStartHarness();
   const now = Date.parse('2026-08-17T12:00:00Z');
+  const h = loadFastStartHarness({ Date: class extends Date { static now() { return now + 1; } } });
   const cold = proofSession(h);
   const envelope = h.finalize(cold, now);
   const replay = proofSession(h, { codecProfile: { mkvH264FastStartProof: envelope } });

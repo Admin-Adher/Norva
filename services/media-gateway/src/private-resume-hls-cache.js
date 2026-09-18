@@ -1,6 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
 const { strongResumeIdentity } = require('./private-resume-binding');
+const { captureSubtitleWindow } = require('./private-resume-subtitles');
 const keyFor = binding => crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex');
 const namePattern = /^[a-z0-9][a-z0-9._-]{0,127}\.ts$/i;
 
@@ -45,6 +46,18 @@ function mergedResumePlaylist(window, continuationText = '') {
         for (const s of continuation.segments) lines.push(`#EXTINF:${s.duration.toFixed(6)},`, s.name);
     }
     if (window.ended || continuation?.ended) lines.push('#EXT-X-ENDLIST');
+    return lines.join('\n') + '\n';
+}
+
+function mergedSubtitlePlaylist(prefix, continuation = [], ended = false) {
+    if (!prefix?.length || [...prefix, ...continuation].some(s => !/^(resume|continuation)-subtitle_\d+-\d+\.vtt$/.test(s.name)
+        || !(s.duration > 0 && s.duration <= 30))) throw new Error('RESUME_SUBTITLE_GRAPH_INVALID');
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:30',
+        '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:EVENT'];
+    const append = list => { for (const s of list) lines.push(`#EXTINF:${s.duration.toFixed(6)},`, s.name); };
+    append(prefix);
+    if (continuation.length) { lines.push('#EXT-X-DISCONTINUITY'); append(continuation); }
+    if (ended) lines.push('#EXT-X-ENDLIST');
     return lines.join('\n') + '\n';
 }
 
@@ -94,12 +107,18 @@ class PrivateResumeHlsCache {
         const ensure = () => { if (!valid()) throw new Error('RESUME_CACHE_REVOKED'); };
         return Object.freeze({
             start: entry.start, end: entry.end, ended: entry.ended, aheadSeconds: entry.end - position,
+            subtitlePlaylist: (name, continuation = [], ended = false) => {
+                ensure(); const prefix = entry.subtitlePlaylists.get(name);
+                return prefix ? mergedSubtitlePlaylist(prefix, continuation, entry.ended || ended) : null;
+            },
+              bandwidth: entry.bandwidth,
+              assertValid: ensure,
             playlist: continuation => { ensure(); return mergedResumePlaylist(entry, continuation); },
             asset: name => { ensure(); const bytes = entry.assets.get(name); return bytes ? Buffer.from(bytes) : null; },
             release: () => { if (!released) { released = true; entry.leases--; this.prune(); } },
         });
     }
-    async capture({ binding, observed, position, actualStartOffset, playlist, readAsset } = {}) {
+    async capture({ binding, observed, position, actualStartOffset, playlist, readAsset, subtitleRenditions = [] } = {}) {
         if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)
             || actualStartOffset < 0 || typeof readAsset !== 'function') return false;
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
@@ -115,17 +134,16 @@ class PrivateResumeHlsCache {
         if (!ended && end - position < this.minimumAheadSeconds) return false;
         this.prune(); const key = keyFor(binding), prior = this.entries.get(key);
         if (prior?.leases) return false;
-        if (prior) this.drop(key, prior);
         // Reserve the entire per-file budget before asynchronous reads. Pending
         // captures and leased windows count towards the same hard memory bound.
         const reservation = 2 * this.perFileBytes; // read buffer + immutable copy
-        while (this.entries.size >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
-            const victim = [...this.entries].find(([, entry]) => !entry.leases);
+        while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
+            const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior);
             if (!victim) return false;
             this.drop(...victim); this.stats.evictions++;
         }
         this.reservedBytes += reservation;
-        const epoch = this.epoch; let bytes = 0; const assets = new Map(), segments = [];
+        const epoch = this.epoch; let bytes = 0, bandwidth = 0; const assets = new Map(), segments = [];
         try {
             for (const [i, segment] of selected.entries()) {
                 const payload = await readAsset(segment.name, this.perFileBytes - bytes);
@@ -135,10 +153,18 @@ class PrivateResumeHlsCache {
                 // Detached immutable snapshot. A new FFmpeg process may delete
                 // or replace its temporary files without changing this cache.
                 assets.set(name, Buffer.from(payload)); bytes += payload.length;
+                bandwidth = Math.max(bandwidth, Math.ceil(payload.length * 8 / segment.duration * 1.25));
                 segments.push({ name, duration: segment.duration });
             }
-            if (this.entries.has(key) || this.entries.size >= this.maxEntries) return false;
-            this.entries.set(key, { binding, identity, start, end, ended, segments, assets, bytes,
+            const subtitles = await captureSubtitleWindow({ renditions: subtitleRenditions,
+                videoSegments: selected, readAsset, maxBytes: Math.min(4 * 1024 * 1024, this.perFileBytes - bytes) });
+            if (!subtitles || epoch !== this.epoch) return false;
+            for (const [name, payload] of subtitles.assets) assets.set(name, payload);
+            bytes += subtitles.bytes;
+            if (this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return false;
+            if (prior) this.drop(key, prior);
+            this.entries.set(key, { binding, identity, start, end, ended, segments, assets, bytes, bandwidth,
+                subtitlePlaylists: subtitles.playlists,
                 expiresAt: this.now() + this.ttlMs, leases: 0, live: true });
             this.bytes += bytes; this.stats.stores++; return true;
         } catch (_) { return false; }
@@ -149,4 +175,4 @@ class PrivateResumeHlsCache {
         perFileBytes: this.perFileBytes, ttlMs: this.ttlMs, windowSeconds: this.windowSeconds,
         scope: 'private-owner-source-revision', revalidation: 'current-strong-etag-size-target' }; }
 }
-module.exports = { PrivateResumeHlsCache, parseResumeMediaPlaylist, mergedResumePlaylist };
+module.exports = { PrivateResumeHlsCache, parseResumeMediaPlaylist, mergedResumePlaylist, mergedSubtitlePlaylist };

@@ -172,7 +172,7 @@ test('a plain 404 stays terminal (not mistaken for slot-busy)', () => {
 
 // ── 4) hls.js vendored runtime + robust loaders ────────────────────────────────
 test('hls.js is vendored locally and parses', () => {
-  const p = path.join(ROOT, 'public/js/vendor/hls-1.5.7.min.js');
+  const p = path.join(ROOT, 'public/js/vendor/hls-1.7.3.min.js');
   assert.ok(fs.existsSync(p), 'vendored hls.js missing');
   const src = fs.readFileSync(p, 'utf8');
   assert.ok(src.length > 300_000, 'vendored hls.js suspiciously small');
@@ -185,8 +185,8 @@ test('the app entry defines the promise-based ensureHls loader (local first)', (
   for (const entry of ['public/app.html']) {
     const src = read(entry);
     assert.ok(src.includes('window.ensureHls = function'), `${entry}: ensureHls missing`);
-    assert.ok(src.includes('/js/vendor/hls-1.5.7.min.js'), `${entry}: local-first load missing`);
-    const localIdx = src.indexOf('/js/vendor/hls-1.5.7.min.js');
+    assert.ok(src.includes('/js/vendor/hls-1.7.3.min.js'), `${entry}: local-first load missing`);
+    const localIdx = src.indexOf('/js/vendor/hls-1.7.3.min.js');
     const cdnIdx = src.indexOf('cdn.jsdelivr.net/npm/hls.js');
     assert.ok(localIdx < cdnIdx, `${entry}: CDN must be the FALLBACK, not first`);
     assert.ok(!/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/hls\.js[^>]*><\/script>/.test(src),

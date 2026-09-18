@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const { once } = require('node:events');
 const { createNativeMp4Sessions, pipeNativeMp4 } = require('../services/media-gateway/src/native-mp4-sessions');
 const brokerHarness = require('./fixtures/finite-ts-index-broker');
@@ -14,6 +15,21 @@ const uid = '21111111-2222-3333-4444-555555555555';
 const owner = crypto.createHash('sha256').update(uid).digest('hex');
 const claims = (now, extra = {}) => ({ v:1, sid, uid, url:'http://provider.invalid/movie/user/password/1.mp4',
   exp:Math.floor(now/1000)+3600, scope:'native-browser-mp4', fileSizeBytes:8*1024, ...extra });
+
+test('Gateway native admission extends only to explicitly configured pilot owners', () => {
+  const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8').replace(/\r\n/g,'\n');
+  const start=source.indexOf('    allows: (claims) => {',source.indexOf('const nativeMp4Sessions ='));
+  const expression=source.slice(start+'    allows: '.length,source.indexOf(',\n    open:',start));
+  const permit=(owners,provider=false)=>vm.runInNewContext('('+expression+')',{
+    URL,crypto,process:{env:{NATIVE_MP4_PILOT_OWNER_HASHES:owners}},PUBLIC_BASE_URL:'https://media.example.test/pilot',
+    proxyKeyFromUrl:()=>'',providerHttpForwardAccounts:[],useProviderHttpForward:()=>provider,
+  })(claims(Date.now()));
+  assert.equal(permit(owner),true);
+  assert.equal(permit(''),false);
+  assert.equal(permit('b'.repeat(64)),false);
+  assert.equal(permit(owner+',bad'),false);
+  assert.equal(permit('',true),true);
+});
 
 test('native MP4 initialization spans a large moov in one provider range without warmup', async t => {
   const code=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
@@ -167,4 +183,19 @@ test('native proof uses a current owned H264/AAC profile, not a client codec cla
     assert.equal(proof({codecProfile:{...profile,...mutation}},{},now),null);
   assert.equal(proof({codecProfile:profile},{audioStreamIndex:2},now),null);
   assert.equal(proof({codecProfile:profile},{audioStreamIndex:1},now).fileSizeBytes,8192);
+});
+
+test('native grant accepts the configured pilot prefix and rejects other routes', async () => {
+  const { validNativeMp4Grant: valid } = await import('../supabase/functions/_shared/native-mp4-gateway-policy.mjs');
+  const base = 'https://media.example.test/pilot';
+  const url = `${base}/sessions/${sid}/native.mp4?token=${'a'.repeat(43)}`;
+  assert.equal(valid({protocol:1,url},sid,base),true);
+  assert.equal(valid({protocol:1,url},sid),false);
+  assert.equal(valid({protocol:1,url:url.replace('/pilot','')},sid),true);
+  for (const bad of [url.replace('/pilot','/other'),url.replace('media.example.test','evil.example'),
+    url.replace(sid,uid),url.replace('https:','http:'),url+'&token='+ 'b'.repeat(43),url+'#fragment']) {
+    assert.equal(valid({protocol:1,url:bad},sid,base),false);
+  }
+  assert.equal(valid({protocol:1,url},sid,base+'?unexpected=1'),false);
+  assert.equal(valid({protocol:1,url:'invalid'},sid,base),false);
 });

@@ -123,7 +123,7 @@ async function waitHealth() {
                 if(url.pathname==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(page);return;}
                 if(url.pathname==='/hls.js'||url.pathname==='/watch.js'){
                     res.setHeader('Content-Type','application/javascript');res.end(await fs.readFile(path.join(root,
-                        url.pathname==='/hls.js'?'public/js/vendor/hls-1.5.7.min.js':'public/js/pages/WatchPage.js')));return;
+                        url.pathname==='/hls.js'?'public/js/vendor/hls-1.7.3.min.js':'public/js/pages/WatchPage.js')));return;
                 }
                 if(parts[1]==='info'&&formats.includes(parts[2])){
                     const info=liveInfo.get(parts[2]);res.statusCode=info?200:202;res.setHeader('Content-Type','application/json');

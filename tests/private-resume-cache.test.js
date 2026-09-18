@@ -92,7 +92,8 @@ test('Gateway does not publish replaceable continuation artifacts before startup
         const session = { privateResumeContinuationReady: ready, playlistPath: 'fixture',
             privateResumeLease: { playlist: continuation => 'cached-prefix' + continuation } };
         const getPlaylist = vm.runInNewContext('(async () => { let playlist; ' + source.slice(start, end) + '} return playlist; })', {
-            session, fsp: { readFile: async () => { reads++; return '+validated-continuation'; } },
+            session, exactSubtitleHlsEnabled: () => false,
+            fsp: { readFile: async () => { reads++; return '+validated-continuation'; } },
         });
         assert.equal(await getPlaylist(), ready ? 'cached-prefix+validated-continuation' : 'cached-prefix');
         assert.equal(reads, ready ? 1 : 0);

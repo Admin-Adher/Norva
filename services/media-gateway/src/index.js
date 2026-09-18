@@ -92,7 +92,10 @@ const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl
 const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate } = require('./private-resume-binding');
-const { PrivateResumeHlsCache } = require('./private-resume-hls-cache');
+const { privateResumeProfile } = require('./private-resume-profile');
+const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
+const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
+const { registerMaintenance } = require('./maintenance-http');
 const { SharedPlaybackRanges, hybridPlaybackRanges } = require('./shared-playback-ranges');
 const { FiniteTsSeekIndex, indexedTsInputUrl } = require('./finite-ts-seek-index');
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
@@ -2556,6 +2559,12 @@ function deferProviderRouteBenchmarkWithoutConsumingAttempt(
 }
 
 async function drainProviderRouteBenchmarkQueue() {
+    const release = gatewayMaintenanceFence?.enter();
+    if (gatewayMaintenanceFence && !release) return;
+    try { return await drainProviderRouteBenchmarkQueueUnfenced(); }
+    finally { release?.(); }
+}
+async function drainProviderRouteBenchmarkQueueUnfenced() {
     if (!providerRouteBenchmarkEnabled || providerRouteBenchmarkActive) return;
     const now = Date.now();
     const job = [...providerRouteBenchmarkPending.values()]
@@ -2768,6 +2777,45 @@ const mkvH264FullFileAnalyzers = new Set();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(cors);
+
+let gatewayHttpServer = null;
+const gatewayMaintenanceFence = registerMaintenance({ app,
+    enabled: process.env.GATEWAY_MAINTENANCE_ENABLED === 'true', authenticate: requireGatewayAuth,
+    viewerRequest: req => (req.method === 'POST' && ['/sessions', '/native-sessions'].includes(req.path))
+        || (req.method === 'GET' && (req.path.startsWith('/raw/') || /^\/sessions\/[^/]+\/native\.mp4$/.test(req.path))),
+    snapshot: gatewayMaintenanceSnapshot,
+    persisted: async () => typeof storyboardStore !== 'undefined' && storyboardStore
+        ? (await storyboardStore.load()).map(storyboardMaintenanceRecord) : [],
+    closeAdmissions: () => {
+        if (!gatewayHttpServer?.listening) throw new Error('MAINTENANCE_LISTENER_UNAVAILABLE');
+        gatewayHttpServer.close();
+    },
+    wake: () => { wakeQueueDrain(transcribeWakeState); wakeQueueDrain(ocrWakeState); queueMicrotask(drainTranslateQueue); },
+});
+
+function storyboardMaintenanceRecord(job) {
+    const p = job.storyboardProgress || job.progress;
+    const body = { jobId: job.jobId, uid: job.uid, callbackUrl: job.callbackUrl, duration: job.duration,
+        storyboardNotBefore: job.storyboardNotBefore || 0, terminal: job.terminal || null,
+        progress: p ? { plan: p.plan, next: p.next, failures: p.failures,
+            sourceBinding: p.sourceBinding, activeMs: p.activeMs || 0 } : null };
+    return { id: job.jobId, kind: job.kind, durable: job.durable === true,
+        checkpointDigest: crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex') };
+}
+
+function gatewayMaintenanceSnapshot() {
+    const work = languageForegroundWorkSnapshot();
+    return {
+        activeOperations: work.activeOperations + work.admissionChecks + accountJobLocks.size
+            + backgroundCpuProcesses.size + whisperInferenceActive + argosInferenceActive
+            + strictLidBrokers.size + lidLanguageWavActive + Number(lidBenchmarkBusy)
+            + finiteMkvLinearSeekBridges.size + mkvH264FullFileAnalyzers.size
+            + activeViewerSubtitleOperations.size + Number(providerRouteBenchmarkPublicStatus().active === true),
+        viewerSessions: activeSessionCount() + rawPumps.size + viewerStartupReservations.size
+            + viewerSessionStartupAdmissions.size + Number(viewerPlaybackActiveLocally()),
+        jobs: [...transcribeQueue, ...ocrQueue, ...translateQueue].map(storyboardMaintenanceRecord),
+    };
+}
 
 app.options('*', (req, res) => res.status(204).end());
 
@@ -3203,6 +3251,31 @@ app.get('/health', (req, res) => {
         lastFailureCount: lastFailures.length,
         time: new Date().toISOString()
     });
+});
+
+app.get('/debug/resume-ranges', requireGatewayAuth, (req, res) => {
+    // Operator introspection of retained resume fragments. Authenticated like the
+    // other debug routes and never published by the public Caddy prefix, which
+    // only exposes GET/HEAD/OPTIONS on /sessions/*.
+    res.json({
+        ok: true,
+        service: 'norva-media-gateway',
+        version: GATEWAY_VERSION,
+        privateResumeByteRanges: privateResumeByteRanges.describe(),
+        finitePlaybackRangeReuse: finitePlaybackRangeReuse.describe()
+    });
+});
+
+// Narrow, lease-held gate over BACKGROUND provider admission. It refuses no
+// HTTP request and interrupts nothing in flight: a background job meeting a
+// closed gate is deferred exactly as it is for an active viewer. With no lease
+// held it is inert, so mounting it changes no behaviour. It expires on its own,
+// so a dead client reopens admission without any operator action.
+const { registerProviderQuiesce } = require('./provider-quiesce');
+const providerQuiesce = registerProviderQuiesce({
+    app,
+    authenticate: requireGatewayAuth,
+    wake: () => { wakeQueueDrain(transcribeWakeState); wakeQueueDrain(ocrWakeState); },
 });
 
 app.get('/debug/failures', requireGatewayAuth, (req, res) => {
@@ -3946,8 +4019,12 @@ const nativeMp4Sessions = createNativeMp4Sessions({
     allows: (claims) => {
         try {
             const url = new URL(claims.url);
+            const pilotOwners = String(process.env.NATIVE_MP4_PILOT_OWNER_HASHES || '').trim().split(/[\s,]+/).filter(Boolean);
+            const pilotOwnerAllowed = pilotOwners.length > 0 && pilotOwners.length <= 64
+                && pilotOwners.every(value => /^[a-f0-9]{64}$/.test(value))
+                && pilotOwners.includes(crypto.createHash('sha256').update(claims.uid).digest('hex'));
             return /^https:\/\//.test(PUBLIC_BASE_URL) && /\.mp4$/i.test(url.pathname)
-                && useProviderHttpForward(proxyKeyFromUrl(claims.url), claims.url, providerHttpForwardAccounts);
+                && (pilotOwnerAllowed || useProviderHttpForward(proxyKeyFromUrl(claims.url), claims.url, providerHttpForwardAccounts));
         } catch (_) { return false; }
     },
     open: async (entry) => {
@@ -7992,6 +8069,12 @@ function resolvePassiveLidSource(binding, context) {
 }
 
 async function collectPassiveLidWindow() {
+    const release = gatewayMaintenanceFence?.enter();
+    if (gatewayMaintenanceFence && !release) return;
+    try { return await collectPassiveLidWindowUnfenced(); }
+    finally { release?.(); }
+}
+async function collectPassiveLidWindowUnfenced() {
     if (passiveLidTickActive || !passiveLidCapture || !passiveLidResourcesAvailable()) return;
     passiveLidTickActive = true;
     try {
@@ -9958,7 +10041,12 @@ function languageForegroundWorkSnapshot() {
         activeOperations, admissionChecks, pendingPriorityJobs, deferredBackgroundJobs };
 }
 function backgroundJobBlockedByViewer(job) {
-    return jobPrio(job) !== JOB_PRIORITY.viewer && viewerPlaybackActiveLocally();
+    // Viewer-priority jobs are never gated. Otherwise an active viewer blocks
+    // background work as before, and a held quiesce lease blocks it too. The
+    // lease never gates a viewer, so viewer playback keeps absolute priority.
+    if (jobPrio(job) === JOB_PRIORITY.viewer) return false;
+    if (viewerPlaybackActiveLocally()) return true;
+    return Boolean(providerQuiesce && providerQuiesce.blocked());
 }
 function whisperOptionsForJob(job) {
     if (jobPrio(job) === JOB_PRIORITY.viewer) return {};
@@ -10043,6 +10131,12 @@ async function postDeferFailCallback(kind, job) {
 // deferral budget n× faster and starving lower classes). Returns null when every queued job is
 // deferred (the caller sleeps and rescans).
 async function nextRunnableJob(queue, kind) {
+    const release = gatewayMaintenanceFence?.enter();
+    if (gatewayMaintenanceFence && !release) return null;
+    try { return await nextRunnableJobUnfenced(queue, kind); }
+    finally { release?.(); }
+}
+async function nextRunnableJobUnfenced(queue, kind) {
     const deferred = [];
     let picked = null;
     while (queue.length) {
@@ -10083,7 +10177,8 @@ async function nextRunnableJob(queue, kind) {
             : await shouldDeferJob(job);
         // shouldDeferJob may wait up to 10 s. Re-check the global reservation
         // after that await before granting the job a provider/CPU slot.
-        const viewerWonGateRace = !localTranscriptionSource && backgroundJobBlockedByViewer(job);
+        const viewerWonGateRace = Boolean(gatewayMaintenanceFence?.state)
+            || (!localTranscriptionSource && backgroundJobBlockedByViewer(job));
         if (!locallyDeferred && !edgeDeferred && !viewerWonGateRace) {
             job.gateDeferrals = 0;
             picked = job;
@@ -10596,8 +10691,11 @@ async function drainTranslateQueue() {
     translateBusy = true;
     try {
         while (translateQueue.length) {
+            const release = gatewayMaintenanceFence?.enter();
+            if (gatewayMaintenanceFence && !release) break;
             const job = translateQueue.shift();
-            await runTranslateJob(job).catch((e) => console.warn('[media-gateway] translate job error', String((e && e.message) || e)));
+            try { await runTranslateJob(job).catch((e) => console.warn('[media-gateway] translate job error', String((e && e.message) || e))); }
+            finally { release?.(); }
         }
     } finally { translateBusy = false; }
 }
@@ -11596,7 +11694,17 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             if (err?.code === 'SOURCE_CONTAINER_MISMATCH' && err?.details?.protocol === 1) {
                 return res.status(409).json(err.details);
             }
-            console.warn('[media-gateway] unable to bound finite MKV input:', sanitizeLog(err?.message || String(err), sourceUrl));
+            console.warn('[media-gateway] unable to bound finite MKV input:', sanitizeLog(err?.message || String(err), sourceUrl), {
+                upstreamStatus: Number.isInteger(err?.upstreamStatus) && err.upstreamStatus >= 100 && err.upstreamStatus <= 599
+                    ? err.upstreamStatus : null,
+                retryable: err?.retryable === true,
+            });
+            if (err?.upstreamStatus === 404 && err?.code === 'PROVIDER_REQUEST_FAILED') {
+                return res.status(404).json({
+                    error: 'Media file not found on the provider (404).',
+                    code: 'PROVIDER_HTTP_ERROR',
+                });
+            }
             return res.status(502).json({
                 error: 'Unable to prepare this media file for reliable playback.',
                 code: err?.code || 'VOD_SIZE_UNAVAILABLE',
@@ -12177,9 +12285,13 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
             // A local probe/decode fallback can still replace the encoder's
             // early files. Never append those provisional segments to the
             // immutable EVENT prefix before startup validation has succeeded.
-            const continuation = session.privateResumeContinuationReady === true
-                ? await fsp.readFile(session.playlistPath, 'utf8').catch(() => '') : '';
-            playlist = session.privateResumeLease.playlist(continuation);
+            if (exactSubtitleHlsEnabled(session)) {
+                playlist = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=${session.privateResumeLease.bandwidth}\nvideo.m3u8\n`;
+            } else {
+                const continuation = session.privateResumeContinuationReady === true
+                    ? await fsp.readFile(session.playlistPath, 'utf8').catch(() => '') : '';
+                playlist = session.privateResumeLease.playlist(continuation);
+            }
         } else if (session.completeHlsCacheLease) {
             const handle = await session.completeHlsCacheLease.openAsset(
                 session.completeHlsCacheRootPlaylist || 'playlist.m3u8',
@@ -12217,6 +12329,39 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
     }
     try {
         res.setHeader('Content-Type', segmentContentType(requested));
+        if (session.privateResumeLease && exactSubtitleHlsEnabled(session)) {
+            if (requested === 'video.m3u8') {
+                const continuation = session.privateResumeContinuationReady === true
+                    ? await fsp.readFile(session.videoPlaylistPath, 'utf8').catch(() => '') : '';
+                res.setHeader('Cache-Control', 'no-store');
+                return res.send(rewritePlaylistSegments(session.privateResumeLease.playlist(continuation), req.playbackToken, session));
+            }
+            if (isExactSubtitleSessionPlaylistName(session, requested)) {
+                const graph = await privateResumeSubtitleContinuation(session);
+                const playlist = session.privateResumeLease.subtitlePlaylist(requested, graph?.playlists.get(requested) || [], graph?.ended === true);
+                if (!playlist) return res.status(404).send('Subtitle playlist not found');
+                res.setHeader('Cache-Control', 'no-store');
+                return res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
+            }
+            if (requested.startsWith('continuation-subtitle_')) {
+                session.privateResumeLease.assertValid();
+                const graph = session.privateResumeSubtitleGraph;
+                const match = /^continuation-(subtitle_\d+)-(\d+)\.vtt$/.exec(requested);
+                const index = match ? Number(match[2]) : -1;
+                const rendition = match && graph?.renditions.find(track => track.playlistName === `${match[1]}.m3u8`);
+                if (!rendition || !graph.segments[index]) return res.status(404).send('Subtitle segment not found');
+                // Render only the requested fragment, not every subtitle in a
+                // growing movie. Long playback must not exhaust the cache budget.
+                const fragment = await captureSubtitleWindow({ renditions: [rendition],
+                    videoSegments: [graph.segments[index]], prefix: 'continuation', startIndex: index,
+                    readAsset: (name, limit) => readPrivateResumeAsset(session, name, limit) });
+                session.privateResumeLease.assertValid();
+                const bytes = fragment?.assets.get(requested);
+                if (!bytes) return res.status(404).send('Subtitle segment not found');
+                res.setHeader('Cache-Control', 'private, no-store');
+                return res.send(bytes);
+            }
+        }
         if (session.privateResumeLease && requested.startsWith('resume-')) {
             const bytes = session.privateResumeLease.asset(requested);
             if (!bytes) return res.status(404).send('Segment not found');
@@ -12366,7 +12511,7 @@ async function bootstrap() {
             console.warn('[media-gateway] private capture sweep failed');
         }), 30000).unref();
     }
-    app.listen(PORT, () => {
+    gatewayHttpServer = app.listen(PORT, () => {
         console.log(`Norva Media Gateway listening on ${PORT}`);
         console.log(`Output directory: ${OUTPUT_DIR}`);
     });
@@ -14016,24 +14161,23 @@ function privateResumeHlsBindingForSession(session) {
     if (!canUsePrivateResumeCache(session?.ownerKey)) return null;
     const format = privateResumeFormat(session);
     if (!format || session.mediaCacheProducer || session.completeHlsCacheLease
-        || session.multiAudioHls?.enabled === true || session.exactSubtitleHls?.enabled === true
-        || Number.isInteger(session.subtitleStreamIndex)) return null;
+        || session.multiAudioHls?.enabled === true
+        || (Number.isInteger(session.subtitleStreamIndex) && !exactSubtitleHlsEnabled(session))) return null;
     const identity = asRecord(session.playbackIdentity), profile = asRecord(session.codecProfile);
     const audio = selectedAudioTrackForSession(session);
     // Do not reuse an unknown/default audio map across enrichment or track
     // changes. Keep the normal lane if the exact selected stream is unknown.
     if (!audio || !Number.isInteger(audio.index) || !profile.videoCodec || !audio.codec) return null;
+    const resumeProfile = privateResumeProfile({ format, audio, audioMode: session.audioMode,
+        clientAudioPassthrough: session.clientAudioPassthrough, encoder: VIDEO_ENCODER_CONFIG.backend,
+        subtitles: exactSubtitleRenditionsForSession(session).map(r => ({
+            streamIndex: r.streamIndex, language: r.language, sourceCodec: r.sourceCodec,
+            default: r.default, forced: r.forced, hearingImpaired: r.hearingImpaired,
+        })) });
+    if (!resumeProfile) return null;
     return privateResumeBinding({ ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
         sourceId: identity.sourceId, sourceRevision: identity.sourceRevision,
-        fileSizeBytes: fileSizeBytesForSession(session), profile: JSON.stringify({
-            protocol: 'hls-av-window-1', format, videoCodec: profile.videoCodec,
-            videoStreamIndex: profile.videoStreamIndex, videoPixelFormat: profile.videoPixelFormat,
-            width: profile.videoWidth ?? profile.width, height: profile.videoHeight ?? profile.height,
-            audioIndex: audio.index, audioCodec: audio.codec, audioChannels: audio.channels,
-            audioSampleRate: audio.sampleRate,
-            clientAudioPassthrough: session.clientAudioPassthrough,
-            audioMode: session.audioMode || '', encoder: VIDEO_ENCODER_CONFIG.backend,
-        }) });
+        fileSizeBytes: fileSizeBytesForSession(session), profile: resumeProfile });
 }
 
 function privateResumeObservedIdentity(session) {
@@ -14049,19 +14193,63 @@ async function capturePrivateResumeWindow(session) {
     const actualStartOffset = session.privateResumeContinuationOffset ?? session.actualStartOffset;
     const binding = privateResumeHlsBindingForSession(session);
     if (!binding || !Number.isFinite(actualStartOffset)) return false;
-    const playlist = await fsp.readFile(session.playlistPath, 'utf8').catch(() => '');
+    const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
+        ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
     return privateResumeHlsCache.capture({ binding, observed: privateResumeObservedIdentity(session),
-        position, actualStartOffset,
+        position, actualStartOffset, subtitleRenditions: exactSubtitleRenditionsForSession(session),
         // SIGTERM can write ENDLIST on an incomplete movie. A stopped encoder
         // must never turn that marker into evidence of the provider's EOF.
         playlist: playlist.replace(/^#EXT-X-ENDLIST\s*$/gm, ''),
-        readAsset: async (name, remainingBytes) => {
-            const file = path.join(session.outputDir, name);
-            if (!isWithin(session.outputDir, file)) return null;
-            const stat = await fsp.lstat(file);
-            if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > remainingBytes) return null;
-            return fsp.readFile(file);
-        } });
+        readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) });
+}
+
+async function readPrivateResumeAsset(session, name, remainingBytes) {
+    if (!safeSessionArtifactName(name)) return null;
+    const file = path.join(session.outputDir, name);
+    if (!isWithin(session.outputDir, file)) return null;
+    const stat = await fsp.lstat(file).catch(() => null);
+    if (!stat?.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > remainingBytes) return null;
+    return fsp.readFile(file);
+}
+
+async function privateResumeSubtitleContinuation(session) {
+    if (session.privateResumeSubtitlePending) return session.privateResumeSubtitlePending;
+    const pending = buildPrivateResumeSubtitleContinuation(session);
+    session.privateResumeSubtitlePending = pending;
+    try { return await pending; }
+    finally { if (session.privateResumeSubtitlePending === pending) session.privateResumeSubtitlePending = null; }
+}
+
+async function buildPrivateResumeSubtitleContinuation(session) {
+    if (!session.privateResumeContinuationReady) return session.privateResumeSubtitleGraph || null;
+    const text = await fsp.readFile(session.videoPlaylistPath, 'utf8').catch(() => '');
+    if (text === session.privateResumeSubtitleVideoPlaylist) return session.privateResumeSubtitleGraph || null;
+    const parsed = parseResumeMediaPlaylist(text);
+    if (!parsed) return session.privateResumeSubtitleGraph || null;
+    const renditions = exactSubtitleRenditionsForSession(session);
+    let coverage = Infinity;
+    for (const rendition of renditions) {
+        const bytes = await readPrivateResumeAsset(session, rendition.playlistName, 2 * 1024 * 1024);
+        const subtitle = bytes && parseSubtitlePlaylist(bytes.toString('utf8'));
+        if (!subtitle || subtitle.bootstrap) return session.privateResumeSubtitleGraph || null;
+        if (!subtitle.ended) coverage = Math.min(coverage, subtitle.segments.at(-1).end);
+    }
+    const covered = parsed.segments.filter(segment => segment.end <= coverage);
+    if (!covered.length) return session.privateResumeSubtitleGraph || null;
+    // Publish only when every advertised subtitle rendition covers the same
+    // finalized video window. Missing/late sidecars never become empty cues.
+    // Retain the small index only; WebVTT bodies are generated on demand from
+    // finalized local sidecars and remain subject to the active lease.
+    const graph = { segments: covered, renditions, playlists: new Map(renditions.map(track => [track.playlistName,
+        covered.map((segment, index) => ({ name: `continuation-${track.playlistName.slice(0, -5)}-${index}.vtt`,
+            duration: segment.duration }))])) };
+    if (graph) {
+        graph.ended = parsed.ended && covered.length === parsed.segments.length;
+        session.privateResumeSubtitleGraph = graph;
+        // A late subtitle worker must be retried even if video has not advanced.
+        if (covered.length === parsed.segments.length) session.privateResumeSubtitleVideoPlaylist = text;
+    }
+    return session.privateResumeSubtitleGraph || null;
 }
 
 async function tryStartPrivateResumeWindow(session, requestSignal) {
@@ -14217,6 +14405,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     const resumeRanges = hybridPlaybackRanges(privateRanges, sharedPlaybackRanges.begin({
         grant: identity.sharedFragmentGrant, ownerKey: session.ownerKey, fileSizeBytes, signal: parentSignal,
     }));
+    session.privateResumeRangeHandle = resumeRanges;
     // At time zero there is no timestamp/cue search. Stream the first ordinary
     // sequential window immediately instead of opening 256 KiB, then 1 MiB,
     // then 8 MiB responses before the first segment can complete. Revalidation
@@ -14361,6 +14550,16 @@ async function closeFiniteMkvSeekBroker(session) {
     void session.finiteTsIndexObserver?.close().catch(() => {});
     session.finiteTsIndexObserver = null;
     session.finiteTsIndexPlan = null;
+}
+
+function anchorFiniteResumeRangeAtStop(session) {
+    const position = Number(session?.privateResumeStopPosition);
+    const observer = session?.finiteTsIndexObserver;
+    const handle = session?.privateResumeRangeHandle;
+    if (!(position > 0) || !observer || typeof observer.candidate !== 'function'
+        || !handle || typeof handle.anchorAt !== 'function') return false;
+    const point = observer.candidate(position);
+    return point ? handle.anchorAt(point.byteOffset) : false;
 }
 
 function strictMkvAnalyzerInteger(value) {
@@ -15586,7 +15785,9 @@ function startFfmpeg(session) {
         }),
         ...providerHttpInputArgs,
         '-fflags', '+genpts',
-        ...(preserveCopySeekTimestamps || session.finiteTsIndexPlan ? ['-copyts'] : []),
+        ...(preserveCopySeekTimestamps || session.finiteTsIndexPlan
+            || (session.privateResumeLease && exactSubtitleHlsEnabled(session)
+                && (isFiniteMkvVodSession(session) || session.finiteMp4SeekBroker === true)) ? ['-copyts'] : []),
         ...(session.finiteTsIndexPlan ? ['-protocol_whitelist', 'subfile,http,tcp'] : []),
         ...inputProbeArgs,
         ...preInputSeek,
@@ -15905,6 +16106,13 @@ function seekArgsForSession(session, encodeVideo, linearSeekBridgePlan = null) {
     // encode so the exact requested output boundary stays frame-accurate.
     if (isFiniteMkvVodSession(session) || session.finiteMp4SeekBroker === true) {
         if (usesFiniteMkvSeekBroker(session)) {
+            if (session.privateResumeLease && exactSubtitleHlsEnabled(session)) {
+                // Preserve the source clock through indexed input seeking, then
+                // trim every A/V/subtitle output on the same absolute boundary.
+                // Plain input -ss can rebase an earlier subtitle cue to zero.
+                return { preInputSeek: ['-ss', String(Math.max(0, seekOffset - 15))],
+                    postInputSeek: ['-ss', String(seekOffset)] };
+            }
             return { preInputSeek: ['-ss', String(seekOffset)], postInputSeek: [] };
         }
         if (linearSeekBridgePlan) {
@@ -20435,6 +20643,7 @@ async function stopSession(session, options = {}) {
         await closePreopenedBoundedMkvInput(session);
         await stopBoundedMkvInputPump(session);
         await stopFiniteMkvLinearSeekBridge(session);
+        anchorFiniteResumeRangeAtStop(session);
         await closeFiniteMkvSeekBroker(session);
         await stopChildProcess(child);
         await session.privateResumeContinuationPromise?.catch(() => null);

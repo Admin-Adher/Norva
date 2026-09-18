@@ -43,7 +43,7 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
-import { useNativeMp4Gateway, browserNativeMp4Proof } from "../_shared/native-mp4-gateway-policy.mjs";
+import { useNativeMp4Gateway, browserNativeMp4Proof, validNativeMp4Grant } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
 import {
@@ -2271,6 +2271,8 @@ async function createPlaybackSessionCore(
     itemType === "movie" ? resolved.playbackHint : {},
     authoritativeVodContainer,
   );
+  const nativeMp4OwnerAllowlist = Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_OWNER_HASHES") || "";
+  const nativeMp4OwnerHash = nativeMp4OwnerAllowlist ? await sha256Hex(userId) : "";
   const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
     authoritativeVodContainer === "mp4";
   // The authorized provider exception preserves native H.264/AAC playback.
@@ -2280,6 +2282,8 @@ async function createPlaybackSessionCore(
     useNativeMp4Gateway({
       sourceId, itemType, container: authoritativeVodContainer,
       allowlist: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_SOURCE_IDS") || "",
+      ownerHash: nativeMp4OwnerHash,
+      ownerAllowlist: nativeMp4OwnerAllowlist,
     });
   const nativeMp4Proof = serverPromotedProviderMp4 && !serverSelectionVodRelay && !serverDirectPublicHls
     ? browserNativeMp4Proof(resolved.playbackHint, requestedPlaybackHint)
@@ -2638,9 +2642,9 @@ async function createPlaybackSessionCore(
         if (!response.ok) throw new HttpError(502, "Native media session could not be prepared");
         const grant = await response.json();
         const access = new URL(String(grant.url || ""));
-        if (grant.protocol !== 1 || access.protocol !== "https:" || access.username || access.password
-            || access.pathname !== `/sessions/${session.id}/native.mp4`
-            || !/^[A-Za-z0-9_-]{43}$/.test(access.searchParams.get("token") || ""))
+        if (!validNativeMp4Grant(grant, session.id,
+            nativeMp4OwnerHash && nativeMp4OwnerAllowlist.split(/[\s,]+/).includes(nativeMp4OwnerHash)
+              ? Deno.env.get("NORVA_NATIVE_MP4_PILOT_PUBLIC_BASE_URL") || "" : ""))
           throw new HttpError(502, "Native media session response is invalid");
         const committed = await commitEdgeSessionCoordinator(nativeCoordination, {
           playbackSessionId: session.id, gatewaySessionId: null, lane: "raw",
@@ -8317,6 +8321,11 @@ async function createGatewaySession(
       }
     }
     if (!response.ok) {
+      if (response.status === 404 && gatewayBody.code === "PROVIDER_HTTP_ERROR") {
+        throw new HttpError(404, "Media file not found on the provider (404). Try another version or retry later.", {
+          code: "PROVIDER_HTTP_ERROR",
+        });
+      }
       throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
     }
   }

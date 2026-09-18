@@ -102,6 +102,7 @@ test('actual Edge mode decision preserves defaults, direct, engine and MKV while
     const context = { sourceId:selected, itemType:'movie', authoritativeVodContainer:'mp4', authoritativeVodTier:'remux',
       clientMode:'relay', body:{}, serverDirectPublicHls:false, serverSelectionVodRelay:false, requestedPlaybackHint:{},
       useNativeMp4Gateway, browserNativeMp4Proof:()=>null, resolved:{playbackHint:{}},
+      nativeMp4OwnerHash:'', nativeMp4OwnerAllowlist:'',
       Deno:{env:{get:()=>selected}}, mergePlaybackHints:(a,b)=>({...a,...b}), ...extra };
     vm.createContext(context);
     return vm.runInContext(decision+';({mode,force:gatewayVideoTranscodeExplicit,hint:requestedPlaybackHint.gatewayMode})',context);

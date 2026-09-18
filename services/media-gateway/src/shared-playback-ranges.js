@@ -149,6 +149,11 @@ function hybridPlaybackRanges(privateRanges, sharedRanges) {
             return privateConfirmed || sharedConfirmed;
         },
         read: (start, end) => privateRanges?.read(start, end) || sharedRanges.read(start, end),
+        anchorAt(byteOffset) {
+            const privateAnchored = privateRanges?.anchorAt?.(byteOffset) === true;
+            const sharedAnchored = sharedRanges.anchorAt?.(byteOffset) === true;
+            return privateAnchored || sharedAnchored;
+        },
         missingEnd: (start, end) => Math.min(privateRanges?.missingEnd(start, end) ?? end, sharedRanges.missingEnd(start, end)),
         remember(start, bytes) {
             const own = privateConfirmed && privateRanges.remember(start, bytes);

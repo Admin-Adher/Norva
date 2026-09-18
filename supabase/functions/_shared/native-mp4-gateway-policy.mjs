@@ -1,6 +1,31 @@
 // Optional, server-owned source rollout. Never expose the private /raw token.
-export function useNativeMp4Gateway({ sourceId, itemType, container, allowlist = '' } = {}) {
+export function validNativeMp4Grant(grant, sessionId, publicBase = '') {
+  try {
+    if (grant?.protocol !== 1 || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(sessionId)) return false;
+    const access = new URL(String(grant.url || ''));
+    if (access.protocol !== 'https:' || access.username || access.password || access.hash
+      || !/^[A-Za-z0-9_-]{43}$/.test(access.searchParams.get('token') || '')
+      || [...access.searchParams.keys()].length !== 1) return false;
+    let prefix = '';
+    if (publicBase) {
+      const base = new URL(publicBase);
+      if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash
+        || base.origin !== access.origin) return false;
+      prefix = base.pathname.replace(/\/$/, '');
+    }
+    return access.pathname === `${prefix}/sessions/${sessionId}/native.mp4`;
+  } catch { return false; }
+}
+
+export function useNativeMp4Gateway({ sourceId, itemType, container, allowlist = '', ownerHash, ownerAllowlist = '' } = {}) {
   if (itemType !== 'movie' || container !== 'mp4' || typeof sourceId !== 'string') return false;
+  // A pilot account can exercise every owned provider through the native byte
+  // cache without promoting those providers for other customers. This only
+  // selects transport; the exact-file browser codec proof remains mandatory.
+  const owners = String(ownerAllowlist).trim().split(/[\s,]+/).filter(Boolean);
+  if (owners.length > 0 && owners.length <= 64
+    && owners.every(value => /^[a-f0-9]{64}$/.test(value))
+    && typeof ownerHash === 'string' && owners.includes(ownerHash)) return true;
   const raw = String(allowlist).trim();
   if (!raw || raw.length > 4096) return false;
   const sources = raw.split(/[\s,]+/);

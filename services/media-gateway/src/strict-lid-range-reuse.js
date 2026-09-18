@@ -12,12 +12,23 @@ const changed = () => Object.assign(new Error('VOD_CHANGED'), { code: 'VOD_CHANG
 
 class StrictLidRangeReuse {
     constructor({ maxBytes = 32 * 1024 * 1024, perFileBytes = 4 * 1024 * 1024,
-        maxFiles = 16, maxFragments = 64, ttlMs = 10 * 60_000, now = Date.now } = {}) {
+        maxFiles = 16, maxFragments = 64, ttlMs = 10 * 60_000, now = Date.now,
+        // Protected viewer window. When set together with a viewer anchor, a
+        // fragment lying entirely outside [anchor - behind, anchor + ahead] is
+        // not retained at all: distant read-ahead is dropped rather than
+        // allowed to consume the budget the resume window needs. Both null
+        // (the default) preserves the previous behaviour exactly.
+        retainBehindBytes = null, retainAheadBytes = null } = {}) {
         if (![maxBytes, perFileBytes, maxFiles, maxFragments, ttlMs].every(Number.isSafeInteger)
             || maxBytes < 1 || maxBytes > 128 * 1024 * 1024 || perFileBytes < 1 || perFileBytes > maxBytes
             || maxFiles < 1 || maxFiles > 128 || maxFragments < 1 || maxFragments > 256
             || ttlMs < 1 || ttlMs > 30 * 60_000) throw new Error('LID_RANGE_CACHE_CONFIG_INVALID');
         Object.assign(this, { maxBytes, perFileBytes, maxFiles, maxFragments, ttlMs, now });
+        this.retainBehindBytes = Number.isSafeInteger(retainBehindBytes) && retainBehindBytes >= 0
+            ? retainBehindBytes : null;
+        this.retainAheadBytes = Number.isSafeInteger(retainAheadBytes) && retainAheadBytes >= 0
+            ? retainAheadBytes : null;
+        this.droppedDistantPrefetch = 0;
         this.entries = new Map(); this.bytes = 0; this.revocationEpoch = 0;
         this.stats = { reusedBytes: 0, hits: 0, invalidations: 0, evictions: 0 };
     }
@@ -36,6 +47,39 @@ class StrictLidRangeReuse {
     snapshot() {
         this.prune();
         return { protocol: 1, files: this.entries.size, bytes: this.bytes, ...this.stats };
+    }
+
+    // Read-only introspection for operators. Byte coordinates, sizes and ages
+    // only: never payload bytes, validators, effective identities or owner
+    // hashes. `ref` is a truncated digest of already-hashed binding material,
+    // enough to correlate two observations, not to reconstruct a source.
+    describe() {
+        this.prune();
+        const at = this.now();
+        return {
+            protocol: 1,
+            files: this.entries.size,
+            bytes: this.bytes,
+            limits: { maxBytes: this.maxBytes, perFileBytes: this.perFileBytes,
+                maxFiles: this.maxFiles, maxFragments: this.maxFragments, ttlMs: this.ttlMs,
+                retainBehindBytes: this.retainBehindBytes, retainAheadBytes: this.retainAheadBytes },
+            droppedDistantPrefetch: this.droppedDistantPrefetch,
+            entries: Array.from(this.entries.entries()).map(([key, entry]) => ({
+                ref: String(key).slice(0, 12),
+                live: entry.live === true,
+                bytes: entry.bytes,
+                anchor: Number.isSafeInteger(entry.anchor) ? entry.anchor : null,
+                fragments: entry.fragments.length,
+                expiresInMs: Math.max(0, entry.expiresAt - at),
+                ranges: entry.fragments.map(fragment => ({
+                    start: fragment.start,
+                    end: fragment.end,
+                    bytes: fragment.payload.length,
+                    priority: fragment.priority,
+                    idleMs: at - fragment.used,
+                })),
+            })),
+        };
     }
     revokeOwner(userHash) {
         if (!hex(userHash)) return 0;
@@ -68,9 +112,25 @@ class StrictLidRangeReuse {
         const find = (start, end) => live() ? entry.fragments.find(f => f.start <= start && f.end >= start && start <= end) : null;
         const trim = () => {
             // Preserve the initial header and terminal index preferentially;
-            // interior excerpts are optional and are evicted before those.
+            // interior excerpts are evicted before those.
+            //
+            // Among interior excerpts, evict by DISTANCE from the viewer, not by
+            // recency. Read-ahead runs far beyond the viewer (a 20x encode is
+            // thousands of seconds ahead by the time playback stops), so the most
+            // recently remembered fragment is always the frontier and the least
+            // recently remembered one is the window nearest the viewer. Plain LRU
+            // therefore retains the frontier and discards precisely the bytes a
+            // resume at the saved position needs. With a viewer anchor, drop the
+            // furthest fragment instead and keep the playable window.
             while (entry.bytes > this.perFileBytes || entry.fragments.length > this.maxFragments) {
-                const ordered = [...entry.fragments].sort((a, b) => a.priority - b.priority || a.used - b.used);
+                const anchor = Number.isSafeInteger(entry.anchor) ? entry.anchor : null;
+                const distance = (f) => (f.start <= anchor && f.end >= anchor)
+                    ? 0
+                    : (f.start > anchor ? f.start - anchor : anchor - f.end);
+                const ordered = [...entry.fragments].sort((a, b) => a.priority - b.priority
+                    || (anchor === null
+                        ? a.used - b.used
+                        : (distance(b) - distance(a)) || (a.used - b.used)));
                 const victim = ordered[0];
                 entry.fragments.splice(entry.fragments.indexOf(victim), 1);
                 entry.bytes -= victim.payload.length; this.bytes -= victim.payload.length; this.stats.evictions++;
@@ -104,7 +164,7 @@ class StrictLidRangeReuse {
                 if (entry && !live()) { disabled = true; return false; }
                 if (!entry) {
                     entry = current || { userHash, etag: observed.validator.value, identity: observed.effectiveUrlIdentitySha256,
-                        fragments: [], bytes: 0, live: true, expiresAt: this.now() + this.ttlMs };
+                        fragments: [], bytes: 0, live: true, anchor: null, expiresAt: this.now() + this.ttlMs };
                     this.entries.set(key, entry); trim();
                 }
                 confirmed = live(); if (confirmed) touch(); return confirmed;
@@ -129,6 +189,16 @@ class StrictLidRangeReuse {
                     || payload.length > this.perFileBytes || !Number.isSafeInteger(start) || start < 0
                     || start + payload.length > fileSizeBytes) return false;
                 const end = start + payload.length - 1;
+                // Drop distant read-ahead instead of letting it evict the window
+                // the viewer is actually in. Only applies once a viewer anchor
+                // and an explicit window are configured.
+                const outsideProtectedWindow = Number.isSafeInteger(entry?.anchor)
+                    && (this.retainAheadBytes !== null || this.retainBehindBytes !== null)
+                    && (
+                        (this.retainAheadBytes !== null && start > entry.anchor + this.retainAheadBytes)
+                        || (this.retainBehindBytes !== null && end < entry.anchor - this.retainBehindBytes)
+                    );
+                if (outsideProtectedWindow) { this.droppedDistantPrefetch++; return false; }
                 // Store only missing intervals; overlapping seeks do not multiply
                 // memory or replace bytes attested under the pinned representation.
                 let offset = start;
@@ -147,6 +217,16 @@ class StrictLidRangeReuse {
                 }
                 entry.fragments.sort((a, b) => a.start - b.start); touch(); trim();
                 return live();
+            },
+            // The viewer's current byte position, used only to choose eviction
+            // victims. It admits no bytes, relaxes no validation and is ignored
+            // entirely when absent.
+            anchorAt: (byteOffset) => {
+                if (!confirmed || !live() || !entry) return false;
+                if (!Number.isSafeInteger(byteOffset) || byteOffset < 0 || byteOffset >= fileSizeBytes) return false;
+                entry.anchor = byteOffset;
+                trim();
+                return true;
             },
             invalidate,
         });
