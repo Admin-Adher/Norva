@@ -853,7 +853,7 @@ test('codec profile binds the exact first uppercase-V stream and excludes cover/
 
 test('cold full EOF mints a signed full-file proof; only the next request may copy video', () => {
   const h = loadFastStartHarness();
-  const now = Date.parse('2026-08-17T12:00:00Z');
+  const now = Date.now() - 1_000;
   const cold = proofSession(h);
   assert.equal(h.assess(cold, now).reason, 'missing-proof');
   cold.videoMode = 'encode';
@@ -903,7 +903,7 @@ test('current-header capture is limited to eligible H.264 copy graphs and one au
 
 test('HMAC v2 rejects malformed/cross-key/canonical aliases and accepts the previous key grace slot', () => {
   const h = loadFastStartHarness();
-  const now = Date.parse('2026-08-17T12:00:00Z');
+  const now = Date.now() - 1_000;
   const session = proofSession(h);
   const current = h.finalize(session, now);
   const payload = decodeEnvelope(current);
@@ -935,7 +935,7 @@ test('proof signing key decoder accepts exactly 32-byte hex and fails closed oth
 
 test('proof admission is bound to URL, redirect target, validator, owner, item, file and graph build', () => {
   const h = loadFastStartHarness();
-  const now = Date.parse('2026-08-17T12:00:00Z');
+  const now = Date.now() - 1_000;
   const original = proofSession(h);
   const envelope = h.finalize(original, now);
   const makeReplay = () => proofSession(h, { codecProfile: { mkvH264FastStartProof: envelope } });
@@ -992,7 +992,7 @@ test('profile fingerprint ignores observation timestamps but rejects structural 
 
 test('expiry is inclusive at the signed deadline and stale one millisecond later', () => {
   const h = loadFastStartHarness();
-  const now = Date.parse('2026-08-17T12:00:00Z');
+  const now = Date.now() - 1_000;
   const original = proofSession(h);
   const envelope = h.finalize(original, now);
   const payload = decodeEnvelope(envelope);
@@ -1702,7 +1702,7 @@ test('real closed-GOP fixture matches every IDR and open-GOP segments are reject
 
 test('startup policy protocol 2 shortens the buffer for measured copy video and never exposes proof', () => {
   const h = loadFastStartHarness();
-  const now = Date.parse('2026-08-17T12:00:00Z');
+  const now = Date.now() - 1_000;
   const cold = proofSession(h);
   const envelope = h.finalize(cold, now);
   const replay = proofSession(h, { codecProfile: { mkvH264FastStartProof: envelope } });
