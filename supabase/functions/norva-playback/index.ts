@@ -8074,6 +8074,11 @@ async function createGatewaySession(
 
   const startupStartedAt = performance.now();
   const originalTargetUrlHash = await sha256Hex(targetUrl);
+  const identityForTarget = async (resolvedUrl: string) => await sha256Hex(JSON.stringify([
+    "norva-vod-identity-v1", playbackIdentity.sourceId, playbackIdentity.itemType,
+    playbackIdentity.itemId, playbackIdentity.variantId || null, resolvedUrl,
+  ]));
+  const vodIdentityKey = await identityForTarget(targetUrl);
   const initialSourceContainerAuthority = await sourceContainerAuthorityFromObservation(
     sourceContainerObservation,
     targetUrl,
@@ -8085,7 +8090,9 @@ async function createGatewaySession(
     mode: gatewayMode,
     expiresAt,
     playbackHint: compactRecord(stripMkvH264FastStartInternalHints(playbackHint)),
-    playbackIdentity: compactRecord(playbackIdentity),
+    playbackIdentity: compactRecord({ ...playbackIdentity,
+      vodIdentityKey,
+      sourceRevision: await loadSourceConfigRevision(playbackIdentity.sourceId, userId, db) }),
     seekOffset: gatewayHints.seekOffset,
     startOffset: gatewayHints.startOffset,
     ...gatewayHints,
@@ -8145,6 +8152,8 @@ async function createGatewaySession(
         {
           ...baseGatewayBody,
           sourceUrl: correctedTargetUrl,
+          playbackIdentity: { ...baseGatewayBody.playbackIdentity,
+            vodIdentityKey: await identityForTarget(correctedTargetUrl) },
           playbackHint: stripMkvH264FastStartInternalHints(correctedPlaybackHint),
           ...correctedGatewayHints,
           sourceContainerAuthority: {
