@@ -3038,6 +3038,66 @@ class WatchPage {
         return Number.isFinite(attemptId) && attemptId !== this._playbackAttemptId;
     }
 
+    describeEdgeTraceUrl(url) {
+        const value = String(url || '').trim();
+        if (!value) return { resourceFamily: 'unknown', lane: 'unknown' };
+        if (this.isGatewayPlaybackUrl(value)) {
+            return { resourceFamily: 'gateway-session-playlist', lane: 'edge-to-gateway' };
+        }
+        const kind = this.describePlaybackUrl(value);
+        if (kind === 'external-hls' || kind === 'external-media') {
+            return { resourceFamily: 'provider-direct', lane: 'edge-direct' };
+        }
+        if (kind.startsWith('local-') || kind === 'relay') {
+            return { resourceFamily: kind, lane: 'edge-to-gateway' };
+        }
+        return { resourceFamily: kind, lane: 'edge' };
+    }
+
+    async hashEdgeTraceValue(value) {
+        const text = String(value || '');
+        try {
+            const subtle = window.crypto?.subtle;
+            if (subtle && typeof subtle.digest === 'function') {
+                const bytes = new TextEncoder().encode(text);
+                const digest = await subtle.digest('SHA-256', bytes);
+                return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+            }
+        } catch (_) { /* tracing must never affect playback */ }
+        return `unavailable-${text.length}`;
+    }
+
+    recordEdgeTrace(phase, options = {}) {
+        const descriptor = this.describeEdgeTraceUrl(options.url || options.sourceUrl);
+        const sequence = (this._edgeTraceSequence || 0) + 1;
+        this._edgeTraceSequence = sequence;
+        const code = String(options.code || options.details || '').replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 64);
+        const event = {
+            sequence,
+            at: new Date().toISOString(),
+            phase: String(phase || 'unknown').slice(0, 48),
+            lane: descriptor.lane,
+            resourceFamily: descriptor.resourceFamily,
+            ...(code ? { code } : {}),
+            ...(typeof options.fatal === 'boolean' ? { fatal: options.fatal } : {}),
+            ...(Number.isFinite(Number(options.count)) ? { count: Number(options.count) } : {}),
+            ...(Number.isFinite(Number(options.playbackAttemptId))
+                ? { playbackAttempt: Number(options.playbackAttemptId) } : {})
+        };
+        const sessionValue = options.sessionId || options.cloudPlaybackSessionId;
+        Promise.resolve(sessionValue ? this.hashEdgeTraceValue(sessionValue) : null).then(sessionHash => {
+            if (sessionHash) event.sessionHash = sessionHash.slice(0, 16);
+            try {
+                const root = window;
+                const existing = Array.isArray(root.__norvaEdgeTrace) ? root.__norvaEdgeTrace : [];
+                existing.push(event);
+                while (existing.length > 120) existing.shift();
+                root.__norvaEdgeTrace = existing;
+                root.sessionStorage?.setItem('norva.edgeTrace.v1', JSON.stringify(existing));
+            } catch (_) { /* private mode or quota denial must not affect playback */ }
+        }).catch(() => {});
+    }
+
     playbackCoordinationRetryDelayMs(error, retryCount = 0, elapsedMs = 0) {
         const status = Number(error?.status ?? error?.httpStatus ?? 0);
         if (status !== 425 || !Number.isInteger(retryCount) || retryCount < 0 || retryCount >= 6) {
@@ -6171,6 +6231,11 @@ class WatchPage {
         this.hls = new Hls(hlsConfig);
 
         const activeHls = this.hls;
+        this.recordEdgeTrace?.('hls-created', {
+            url,
+            cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+            playbackAttemptId,
+        });
         const gatewayStartupBuffer = isGatewaySession
             ? this.gatewayStartupBufferOptions(options.startupPolicy)
             : null;
@@ -6246,6 +6311,11 @@ class WatchPage {
         // (renderTextTracksNatively:false does NOT gate _cleanTracks). MEDIA_ATTACHED fires
         // right after the wipe, for every recovery origin: repair there, always.
         this.hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            this.recordEdgeTrace?.('media-attached', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+            });
             this._reattachAiTrackIfActive();
             this._subEngine?.seenCues?.clear(); // probe engine: let its ticks re-add wiped cues
         });
@@ -6260,6 +6330,12 @@ class WatchPage {
 
         this.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            this.recordEdgeTrace?.('audio-tracks-updated', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Array.isArray(data?.audioTracks) ? data.audioTracks.length : 0,
+            });
             console.log('[WatchPage] Audio tracks updated:', data?.audioTracks);
             this._gatewayHlsAudioTracksReady = true;
             this._audioTopologyPending = false;
@@ -6297,6 +6373,12 @@ class WatchPage {
         });
 
         this.hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
+            this.recordEdgeTrace?.('audio-track-switched', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Number.isFinite(Number(data?.id)) ? 1 : 0,
+            });
             console.log('[WatchPage] Audio track switched:', data);
             const gatewayContext = this._gatewayAudioRenditionRequired
                 || this.currentPlaybackMode === 'gateway-session';
@@ -6309,6 +6391,12 @@ class WatchPage {
 
         // Listen for subtitle track updates
         this.hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (event, data) => {
+            this.recordEdgeTrace?.('subtitle-tracks-updated', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Array.isArray(data?.subtitleTracks) ? data.subtitleTracks.length : 0,
+            });
             console.log('[WatchPage] Subtitle tracks updated:', data.subtitleTracks);
             this.restorePendingSubtitlePreference();
             // Wait a moment for native text tracks to populate
@@ -6316,12 +6404,23 @@ class WatchPage {
         });
 
         this.hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (event, data) => {
+            this.recordEdgeTrace?.('subtitle-track-switched', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+            });
             console.log('[WatchPage] Subtitle track switched:', data);
         });
 
         let autoplayGateRunning = false;
         this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            this.recordEdgeTrace?.('manifest-parsed', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Array.isArray(data.audioTracks) ? data.audioTracks.length : 0,
+            });
             this.recordPlaybackStartupPhase?.('manifestParsed', playbackAttemptId);
             // hls.js does not emit AUDIO_TRACKS_UPDATED when audio is muxed into
             // the sole video playlist. MANIFEST_PARSED is the positive proof that
@@ -6401,6 +6500,13 @@ class WatchPage {
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.recordEdgeTrace?.('hls-error', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                code: data?.details || data?.type,
+                fatal: Boolean(data?.fatal),
+            });
             const SOFT_MEDIA_DETAILS = ['bufferStalledError', 'bufferNudgeOnStall', 'bufferSeekOverHole', 'fragParsingError'];
             const responseStatus = Number(
                 data?.response?.code ?? data?.response?.status ?? data?.networkDetails?.status ?? 0
