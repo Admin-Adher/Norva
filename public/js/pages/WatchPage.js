@@ -6416,7 +6416,7 @@ class WatchPage {
         this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
             this.recordEdgeTrace?.('manifest-parsed', {
-                url,
+                url: this.currentUrl || this.baseStreamUrl || this.hls?.url || '',
                 cloudPlaybackSessionId: options.cloudPlaybackSessionId,
                 playbackAttemptId,
                 count: Array.isArray(data.audioTracks) ? data.audioTracks.length : 0,
