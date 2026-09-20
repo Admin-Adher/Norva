@@ -204,6 +204,51 @@ function _catalogFacetCacheScope() {
     return '';
 }
 
+// A language-facet request can be in flight while playback reports a newer,
+// exact observation. Keep a generation per cache key so that the older
+// response cannot repopulate a cache we just invalidated.
+const _languageFacetGenerations = new Map();
+function _languageFacetGeneration(key) {
+    return _languageFacetGenerations.get(key) || 0;
+}
+function _invalidateLanguageFacetCaches({ type = 'movie', source = null } = {}) {
+    const scope = _catalogFacetCacheScope();
+    if (!scope) return 0;
+    const normalizedType = type === 'series' ? 'series' : 'movie';
+    const prefix = `norva-facets4-${scope}-${normalizedType}-`;
+    let removed = 0;
+    try {
+        const keys = [];
+        for (let index = 0; index < Number(localStorage?.length || 0); index += 1) {
+            const key = localStorage.key(index);
+            if (key != null) keys.push(String(key));
+        }
+        for (const key of keys) {
+            if (!key.startsWith(prefix)) continue;
+            _languageFacetGenerations.set(key, _languageFacetGeneration(key) + 1);
+            try {
+                if (localStorage.getItem(key) != null) removed += 1;
+                localStorage.removeItem(key);
+            } catch (_) { /* best-effort storage cleanup */ }
+        }
+    } catch (_) { /* storage unavailable */ }
+    // Bump the canonical all-provider key even when no entry exists yet. This
+    // covers an in-flight request that has not written its cache entry.
+    const allKey = `${prefix}all`;
+    _languageFacetGenerations.set(allKey, _languageFacetGeneration(allKey) + 1);
+    try {
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            const EventCtor = window.CustomEvent;
+            if (typeof EventCtor === 'function') {
+                window.dispatchEvent(new EventCtor('norva:catalog-language-facets-invalidated', {
+                    detail: { type: normalizedType, source: source || null, removed }
+                }));
+            }
+        }
+    } catch (_) { /* event delivery is best-effort */ }
+    return removed;
+}
+
 function _cloudAvailable() {
     return Boolean(window.NorvaCloud) && (_hasCloudUserSession() || _hasCloudDeviceSession());
 }
@@ -2951,6 +2996,7 @@ const API = {
             // epoch additionally prevents a pre-switch result from surviving promotion.
             const key = facetCacheKey();
             const TTL = 60000; // 60s, aligned with the server-side facet memo
+            const generation = key ? _languageFacetGeneration(key) : 0;
             const nonEmpty = (v) => v && ((Array.isArray(v.audio) && v.audio.length) || (Array.isArray(v.subtitles) && v.subtitles.length));
             try {
                 const raw = key ? localStorage.getItem(key) : null;
@@ -2967,24 +3013,40 @@ const API = {
             // scope) throws a ReferenceError that this try/catch silently swallows, which is exactly
             // why the Audio/Subtitle menus were always empty (the endpoint was never even reached).
             // Reach it through the exposed handle, like clearRailCache below.
-            try { p = CloudAdapter.cloudHomeApi().languageFacets(params); }
+            try { p = CloudAdapter.cloudHomeApi().languageFacets({ ...params, type, source, sourceId: source }); }
             catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
             return Promise.resolve(p).then((value) => {
                 try {
                     // Cache ONLY a non-empty result. An empty set is treated as "not ready" so the
                     // next call re-fetches instead of serving a stale blank menu.
                     const writeKey = facetCacheKey();
-                    if (writeKey && nonEmpty(value)) {
+                    if (writeKey && generation === _languageFacetGeneration(writeKey) && nonEmpty(value)) {
                         localStorage.setItem(writeKey, JSON.stringify({ exp: Date.now() + TTL, value }));
                     }
                 } catch (_) { /* ignore quota */ }
                 return value;
-            }).catch(() => ({ audio: [], subtitles: [] }));
+            }).catch((error) => {
+                // Preserve transport failures so the caller can retry immediately;
+                // an empty response is a valid "not indexed yet" result, while a
+                // rejected request must never be cached or mistaken for that state.
+                throw error;
+            });
         },
         // Best-effort capture of real audio-track languages observed at playback.
-        reportObservedLanguages: (body) => {
-            try { return CloudAdapter.cloudHomeApi().reportObservedLanguages(body); }
-            catch (_) { return Promise.resolve({ ok: false }); }
+        reportObservedLanguages: async (body = {}) => {
+            let result;
+            try {
+                result = await CloudAdapter.cloudHomeApi().reportObservedLanguages(body);
+            } catch (error) {
+                // Transport failures leave the current facet caches retryable.
+                throw error;
+            }
+            if (result && result.ok !== false && result.updated === true && result.exact === true) {
+                const type = body?.itemType === 'series' ? 'series' : 'movie';
+                const source = body?.cloudSourceId || body?.sourceId || body?.source || null;
+                _invalidateLanguageFacetCaches({ type, source: source ? String(source) : null });
+            }
+            return result;
         },
         // Drop the cached home/genre rails so a hidden-genre change shows on the
         // browse pages immediately instead of after the 2-min TTL.
