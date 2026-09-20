@@ -3075,6 +3075,16 @@ class WatchPage {
         return `unavailable-${text.length}`;
     }
 
+    isEdgeTraceDebugEnabled() {
+        try {
+            const params = new URLSearchParams(window.location?.search || '');
+            if (params.get('norva_edge_trace') === '1') return true;
+            return window.sessionStorage?.getItem('norva.edgeTrace.debug') === '1';
+        } catch (_) {
+            return false;
+        }
+    }
+
     recordEdgeTrace(phase, options = {}) {
         const descriptor = this.describeEdgeTraceUrl(options.url || options.sourceUrl);
         const sequence = (this._edgeTraceSequence || 0) + 1;
@@ -3102,6 +3112,9 @@ class WatchPage {
                 while (existing.length > 120) existing.shift();
                 root.__norvaEdgeTrace = existing;
                 root.sessionStorage?.setItem('norva.edgeTrace.v1', JSON.stringify(existing));
+                if (this.isEdgeTraceDebugEnabled()) {
+                    root.console?.info?.('[NorvaEdgeTrace]', event);
+                }
             } catch (_) { /* private mode or quota denial must not affect playback */ }
         }).catch(() => {});
     }
