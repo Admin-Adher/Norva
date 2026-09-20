@@ -2255,6 +2255,8 @@ const CloudAdapter = (() => {
                     itemId: streamId,
                     playbackHint,
                     gatewayAutoMode: mode === 'transcode' && !forcedMode,
+                    publicHlsDirectSessionGuard: type === 'live' && !nativePlayer
+                        && window.app?.player?.supportsPublicHlsDirectSessionGuard === true,
                     seekOffset: playbackHint.seekOffset,
                     clientMetadata: _cloudClientTelemetryMetadata(),
                     corsSafe: false,
