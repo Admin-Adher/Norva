@@ -1,10 +1,4 @@
-import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
-import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
-import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
-import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
-import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -424,12 +418,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 28,
-        behavioralLifecycleProtocol: 1,
-        sourceDesiredStateProtocol: 1,
-        legacySourceToggleBridge: 1,
-        m3uSyncLeaseProtocol: 2,
-        m3uStreamingImportProtocol: 1,
+        version: 25,
         playbackCreationProtocol: 1,
         relayTakeoverProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
@@ -747,32 +736,10 @@ async function route(
       return { status: 202, body: await recordClientSourceConnectionAttempt(req, user.id, db) };
     }
     if (req.method === "POST" && !id) {
-      const input = await readJson(req.clone());
-      const inputType = stringOr(input.sourceType ?? input.source_type ?? input.type, "");
-      let selectionId: string | null = null;
-      if (inputType === "m3u" && buildSourceConfig(inputType, input).playlistUrl === DISCOVERY_PLAYLIST_URL) {
-        if (!DISCOVERY_SELECTION_ENABLED) throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
-        await requireCloudAccess(user.id, db, "source_sync");
-        const enrollment = await selectionEnrollment(db, user.id);
-        const enrolledSourceId: string = enrollment.sourceId;
-        selectionId = enrolledSourceId;
-        if (enrollment.existing) {
-          if (enrollment.existing.enabled !== true) {
-            await requirePlanCapacity(user.id, db, "sources", "cloud_catalog_visible_sources");
-            const enableRequest = new Request(req.url, {
-              method: "POST", headers: req.headers, body: JSON.stringify({ enabled: true }),
-            });
-            const body = await setSourceEnabled(enableRequest, enrolledSourceId, user.id, db);
-            if (body.visibilityChanged) await acknowledgeCatalogVisibilityEpochMutation(req, db);
-            return { body };
-          }
-          return { body: { source: await managedSourceSnapshot(enrolledSourceId, user.id, db), syncStarted: false } };
-        }
-      }
       // A hidden Phase-4 staging source is part of the same logical provider
       // replacement and must never consume a second commercial source slot.
       await requirePlanCapacity(user.id, db, "sources", "cloud_catalog_visible_sources");
-      const body = await createSource(req, user.id, db, selectionId);
+      const body = await createSource(req, user.id, db);
       await acknowledgeCatalogVisibilityEpochMutation(req, db);
       return { status: 201, body };
     }
@@ -794,10 +761,8 @@ async function route(
       return { body: await hardSyncSource(id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "toggle") {
-      const body = await setSourceEnabled(req, id, user.id, db);
-      if (body.visibilityChanged) {
-        await acknowledgeCatalogVisibilityEpochMutation(req, db);
-      }
+      const body = await toggleSourceEnabled(id, user.id, db);
+      await acknowledgeCatalogVisibilityEpochMutation(req, db);
       return { body };
     }
     if (req.method === "POST" && id && action === "test") {
@@ -812,7 +777,7 @@ async function route(
       return {
         body: await finalizeCloudSourceWithLease(id, user.id, db, {
           country: stringOrNull(body.country ?? url.searchParams.get("country")),
-          phase: stringOr(body.phase ?? url.searchParams.get("phase"), "titles"),
+          phase: stringOr(body.phase ?? url.searchParams.get("phase"), "live"),
           offset: boundedInt(body.offset ?? url.searchParams.get("offset"), 0, 0, 1_000_000),
           limit: boundedInt(body.limit ?? url.searchParams.get("limit"), 1000, 1, 2000),
           afterId: stringOr(body.afterId ?? url.searchParams.get("afterId"), ""),
@@ -877,23 +842,6 @@ async function route(
 
   if (scope === "push-token" && req.method === "POST" && !id) {
     return { status: 201, body: await registerPushToken(req, user.id, db) };
-  }
-
-  if (scope === "lifecycle-events" && req.method === "POST" && !id) {
-    return { status: 202, body: await recordBehavioralLifecycleEvent(req, user.id, db) };
-  }
-
-  if (scope === "lifecycle-context" && req.method === "POST" && !id) {
-    const body = await readJson(req);
-    if (!body || Array.isArray(body) || Object.keys(body).some((key) => key !== "timezone")
-      || typeof body.timezone !== "string" || body.timezone.length > 64 || !body.timezone.trim()) {
-      throw new HttpError(400, "Invalid lifecycle context");
-    }
-    const { data, error } = await db.rpc("norva_record_lifecycle_timezone", {
-      p_user_id: user.id, p_timezone: body.timezone,
-    });
-    if (error) throwDb(error, "Unable to record scheduling context");
-    return { status: 202, body: data };
   }
 
   if (scope === "pairing" && req.method === "POST" && id === "approve") {
@@ -1441,15 +1389,7 @@ async function listSources(userId: string, db: SupabaseClient) {
     .is("deleted_at", null) // hide soft-deleted sources awaiting the reaper
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list sources");
-  // Withdrawn Selection stays archived server-side without an unusable Enable
-  // action in the ordinary paused-provider onboarding or source manager.
-  const retiredId = await retiredDiscoverySourceId(userId);
-  const visible = [];
-  for (const source of data ?? []) {
-    if (source.id === retiredId || (!DISCOVERY_SELECTION_ENABLED && await isDiscoverySourceId(source.id, userId))) continue;
-    visible.push(source);
-  }
-  return { sources: visible.map(sanitizeSource) };
+  return { sources: (data ?? []).map(sanitizeSource) };
 }
 
 async function listVisibleSources(userId: string, db: SupabaseClient) {
@@ -1530,7 +1470,7 @@ async function managedSourceSnapshot(id: string, userId: string, db: SupabaseCli
   return sanitizeSource(data);
 }
 
-async function createSource(req: Request, userId: string, db: SupabaseClient, enrollmentSourceId: string | null = null) {
+async function createSource(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
   const sourceType = stringOr(body.sourceType ?? body.source_type ?? body.type, "");
   const displayName = stringOr(body.displayName ?? body.display_name ?? body.name, "");
@@ -1563,10 +1503,7 @@ async function createSource(req: Request, userId: string, db: SupabaseClient, en
     };
     const syncNow = hasManagedConfig && body.syncNow !== false && body.sync_now !== false;
 
-    const selectionId = sourceType === "m3u" && rawConfig.playlistUrl === DISCOVERY_PLAYLIST_URL
-      ? enrollmentSourceId ?? await discoverySourceId(userId) : null;
     const row = {
-      ...(selectionId ? { id: selectionId } : {}),
       user_id: userId,
       source_type: sourceType,
       display_name: displayName,
@@ -1576,9 +1513,6 @@ async function createSource(req: Request, userId: string, db: SupabaseClient, en
     };
 
     const { data, error } = await db.from("cloud_sources").insert(row).select("id").single();
-    if (error?.code === "23505" && selectionId) {
-      return { source: await managedSourceSnapshot(selectionId, userId, db), syncStarted: false };
-    }
     if (error) throwDb(error, "Unable to create source");
 
     if (syncNow) {
@@ -1646,13 +1580,11 @@ async function recordClientSourceConnectionAttempt(req: Request, userId: string,
   }
   if (!admitClientSourceAttempt(userId)) return { accepted: true };
 
-  const domainNormalized = ["ip-address", "local-address"].includes(rawDomain)
-    ? rawDomain : normalizedSourceAttemptDomain(rawDomain);
   const attempt = {
     sourceType,
-    domainNormalized,
-    hostHash: domainNormalized ? hostHash || null : null,
-    pathShape: domainNormalized ? pathShape : "invalid",
+    domainNormalized: rawDomain ? normalizedSourceAttemptDomain(rawDomain) : null,
+    hostHash: hostHash || null,
+    pathShape,
   };
   const clientContext = sourceAttemptClientContext(req.headers.get("user-agent"));
   scheduleSourceConnectionAttempt(
@@ -1694,46 +1626,24 @@ function scheduleSourceConnectionAttempt(
     })
     : null;
 
-  const outcome = failure ? "failed" : "accepted";
-  const behavioralEventId = crypto.randomUUID();
-  waitUntil(Promise.allSettled([
-    Promise.resolve(db.rpc("norva_record_source_connection_attempt", {
-      p_user_id: userId,
-      p_source_type: attempt.sourceType,
-      p_domain_normalized: attempt.domainNormalized,
-      p_host_hash: attempt.hostHash,
-      p_path_shape: attempt.pathShape,
-      p_outcome: outcome,
-      p_http_status: status,
-      p_failure_family: failureFamily,
-      p_platform: clientContext.platform,
-      p_app_version: clientContext.appVersion,
-    })).then(({ error }) => {
-      if (error) throw error;
-    }),
-    Promise.resolve(db.rpc("norva_capture_behavioral_source_attempt", {
-      p_user_id: userId,
-      p_source_type: attempt.sourceType,
-      p_outcome: outcome,
-      p_failure_family: failureFamily,
-      p_platform: clientContext.platform,
-      p_app_version: clientContext.appVersion,
-      p_event_id: behavioralEventId,
-    })).then(({ error }) => {
-      if (error) throw error;
-    }),
-  ]).then((results) => {
-    results.forEach((result, index) => {
-      if (result.status !== "rejected") return;
-      const rawCode = (result.reason as { code?: unknown } | undefined)?.code;
-      const safeCode = /^[A-Z0-9_]{1,16}$/.test(String(rawCode ?? "").toUpperCase())
-        ? String(rawCode).toUpperCase()
+  waitUntil(Promise.resolve(db.rpc("norva_record_source_connection_attempt", {
+    p_user_id: userId,
+    p_source_type: attempt.sourceType,
+    p_domain_normalized: attempt.domainNormalized,
+    p_host_hash: attempt.hostHash,
+    p_path_shape: attempt.pathShape,
+    p_outcome: failure ? "failed" : "accepted",
+    p_http_status: status,
+    p_failure_family: failureFamily,
+    p_platform: clientContext.platform,
+    p_app_version: clientContext.appVersion,
+  })).then(({ error }) => {
+    if (error) {
+      const safeCode = /^[A-Z0-9_]{1,16}$/.test(String(error.code ?? "").toUpperCase())
+        ? String(error.code).toUpperCase()
         : "DATABASE_ERROR";
-      console.warn(
-        `[norva-cloud] ${index === 0 ? "source attempt telemetry" : "behavioral source projection"} failed`,
-        safeCode,
-      );
-    });
+      console.warn("[norva-cloud] source attempt telemetry failed", safeCode);
+    }
   }));
 }
 
@@ -1788,177 +1698,33 @@ function assertLegacySourcePatchAllowlisted(body: JsonRecord) {
   }
 }
 
-type LegacyM3uClaimRestore = {
-  expectedUpdatedAt: string;
-  patch: Record<"sync_status" | "sync_error", string | null> & {
-    config_hint?: JsonRecord;
-  };
-};
-
-async function restoreLegacyM3uClaimState(
-  db: SupabaseClient,
-  sourceId: string,
-  userId: string,
-  restore: LegacyM3uClaimRestore,
-) {
-  const { error } = await db
-    .from("cloud_sources")
-    .update(restore.patch)
-    .eq("id", sourceId)
-    .eq("user_id", userId)
-    .eq("source_type", "m3u")
-    .eq("sync_status", "syncing")
-    .eq("updated_at", restore.expectedUpdatedAt);
-  if (error) {
-    console.error("[norva-cloud] legacy M3U claim-state restore failed", sourceId, error.message);
-  }
-}
-
 async function syncExistingSource(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
   await assertVisibleSource(id, userId, db);
-  const { data: prior, error: priorError } = await db
-    .from("cloud_sources")
-    .select("source_type,sync_status,sync_error,updated_at")
-    .eq("id", id)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (priorError) throwDb(priorError, "Unable to read source sync state");
-  if (!prior) throw new HttpError(404, "Source not found");
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null })
     .eq("id", id)
     .eq("user_id", userId)
-    .eq("updated_at", String(prior.updated_at))
-    .select("id,updated_at")
-    .maybeSingle();
+    .select("id")
+    .single();
   if (error) throwDb(error, "Unable to start source sync");
-  if (!data) throw new HttpError(409, "Source state changed; retry synchronization");
-  const legacyRestore: LegacyM3uClaimRestore | null = prior.source_type === "m3u"
-    ? {
-      expectedUpdatedAt: String(data.updated_at),
-      patch: {
-        sync_status: stringOr(prior.sync_status, "idle"),
-        // This stored value crosses a persistence boundary again during the
-        // bounded rollback, so apply the canonical redaction and length cap.
-        sync_error: typeof prior.sync_error === "string" && prior.sync_error.trim()
-          ? formatSourceSyncError(new Error(prior.sync_error), "Source sync failed")
-          : null,
-      },
-    }
-    : null;
-  waitUntil(syncCloudSource(id, userId, db, legacyRestore));
+  waitUntil(syncCloudSource(id, userId, db));
   return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true };
 }
 
-// Set the desired source state. Disabled = paused: excluded from auto-refresh/resume and hidden from
-// the catalog UI (the client filters `sources.filter(s => s.enabled)`), but its data is kept.
-//
-// This endpoint intentionally accepts a desired state rather than an instruction to invert the
-// current value. Retries are therefore idempotent. The conditional update is the only transition
-// winner, so two simultaneous enable requests can never start two sync drivers.
-async function setSourceEnabled(req: Request, id: string, userId: string, db: SupabaseClient) {
+// Disable/Enable a source. Disabled = paused: excluded from auto-refresh/resume and hidden from the
+// catalog UI (the client filters `sources.filter(s => s.enabled)`), but its data is kept.
+async function toggleSourceEnabled(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
-  const body = await readJson(req);
-  const hasDesiredState = Object.prototype.hasOwnProperty.call(body, "enabled");
-  if (hasDesiredState && typeof body.enabled !== "boolean") {
-    throw new HttpError(400, "The desired source state is required", {
-      code: "SOURCE_ENABLED_STATE_REQUIRED",
-    });
-  }
   const { data: cur, error: readErr } = await db
-    .from("cloud_sources")
-    .select("enabled,source_type,sync_status,deleted_at")
-    .eq("id", id)
-    .eq("user_id", userId)
-    .is("deleted_at", null)
-    .maybeSingle();
+    .from("cloud_sources").select("enabled").eq("id", id).eq("user_id", userId).maybeSingle();
   if (readErr) throwDb(readErr, "Unable to read source");
-  if (!cur) throw new HttpError(404, "Source not found");
-  const current = (cur as JsonRecord).enabled === true;
-  // Rolling-deploy bridge: tabs loaded before the desired-state client shipped
-  // still send an empty body. Preserve their legacy one-shot inversion so an
-  // urgent Disable remains available. Newly loaded clients always send the
-  // explicit desired state and therefore retain retry idempotence.
-  const desired = hasDesiredState ? body.enabled === true : !current;
-  if (desired && (id === await retiredDiscoverySourceId(userId)
-    || (!DISCOVERY_SELECTION_ENABLED && await isDiscoverySourceId(id, userId)))) {
-    throw new HttpError(503, "Norva Selection is temporarily unavailable", { code: "SELECTION_UNAVAILABLE" });
-  }
-  const legacyToggle = !hasDesiredState;
-  const sourceType = stringOr((cur as JsonRecord | null)?.source_type, "");
-  const syncStatus = stringOr((cur as JsonRecord | null)?.sync_status, "idle");
-  if (current === desired) {
-    return {
-      success: true,
-      enabled: desired,
-      syncStarted: false,
-      visibilityChanged: false,
-      legacyToggle,
-      source: await managedSourceSnapshot(id, userId, db),
-    };
-  }
-
+  const next = !((cur as JsonRecord | null)?.enabled ?? true);
   const { data, error } = await db
-    .from("cloud_sources")
-    .update({ enabled: desired })
-    .eq("id", id)
-    .eq("user_id", userId)
-    .is("deleted_at", null)
-    .eq("enabled", current)
-    .select("id")
-    .maybeSingle();
-  if (error) throwDb(error, "Unable to change source state");
-
-  // A concurrent winner may already have committed the same desired state.
-  // Treat that as a successful no-op; only the actual transition winner may
-  // resume a paused import.
-  if (!data) {
-    const { data: latest, error: latestError } = await db
-      .from("cloud_sources")
-      .select("enabled")
-      .eq("id", id)
-      .eq("user_id", userId)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (latestError) throwDb(latestError, "Unable to verify source state");
-    if (!latest) throw new HttpError(404, "Source not found");
-    if ((latest as JsonRecord).enabled !== desired) {
-      throw new HttpError(409, "The source state changed concurrently", {
-        code: "SOURCE_STATE_CONFLICT",
-      });
-    }
-    return {
-      success: true,
-      enabled: desired,
-      syncStarted: false,
-      visibilityChanged: false,
-      legacyToggle,
-      source: await managedSourceSnapshot(id, userId, db),
-    };
-  }
-
-  // Disabling during a large resumable import deliberately pauses that source.
-  // Re-enabling persists a due cursor/progress marker in the BEFORE trigger;
-  // the minutely resume-stuck watchdog owns the retry.  Correctness therefore
-  // survives an Edge isolate dying immediately after this CAS commits.
-  // Re-enabling a ready M3U is also a durable recovery action: it clears the
-  // raw-only fair-refresh suspension and makes that lane immediately due while
-  // preserving the ready catalogue and its cursor-free state.
-  const syncScheduled = desired && (syncStatus !== "ready" || sourceType === "m3u");
-
-  return {
-    success: true,
-    enabled: desired,
-    // Preserve the public response field while making the durable scheduling
-    // semantics explicit for newer clients and operational evidence.
-    syncStarted: syncScheduled,
-    syncScheduled,
-    visibilityChanged: true,
-    legacyToggle,
-    source: await managedSourceSnapshot(data.id, userId, db),
-  };
+    .from("cloud_sources").update({ enabled: next }).eq("id", id).eq("user_id", userId).select("id").single();
+  if (error) throwDb(error, "Unable to toggle source");
+  return { success: true, enabled: next, source: await managedSourceSnapshot(data.id, userId, db) };
 }
 
 // Check a source's connection on demand (the "Check service" button). Reuses the same validation
@@ -1986,17 +1752,7 @@ async function testSourceConnection(id: string, userId: string, db: SupabaseClie
         assertSourceCurrent,
       }
       : null;
-    const validate = async () => validateCloudSource(
-      type,
-      loaded.config,
-      await getRuntimeConfig(db),
-      directFallback,
-    );
-    if (type === "m3u") {
-      await withM3uSourceLease(db, id, userId, validate);
-    } else {
-      await validate();
-    }
+    await validateCloudSource(type, loaded.config, await getRuntimeConfig(db), directFallback);
     await assertSourceCurrent();
     return sanitizeSourceConnectionResult({
       success: true,
@@ -2060,9 +1816,7 @@ async function estimateSource(id: string, userId: string, db: SupabaseClient) {
   const url = stringOr(config.playlistUrl, "");
   if (!url) return { count: 0, needsWarning: false };
   assertHttpUrl(url);
-  return await withM3uSourceLease(db, id, userId, async () => (
-    await estimateM3uPlaylist(url)
-  ));
+  return await estimateM3uPlaylist(url);
 }
 
 async function estimateSourceByUrl(req: Request) {
@@ -2081,40 +1835,16 @@ async function estimateSourceByUrl(req: Request) {
 async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(id, userId, db);
   await assertVisibleSource(id, userId, db);
-  const { data: cur, error: currentError } = await db
-    .from("cloud_sources")
-    .select("source_type,sync_status,sync_error,config_hint,updated_at")
-    .eq("id", id)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (currentError) throwDb(currentError, "Unable to read source rebuild state");
-  if (!cur) throw new HttpError(404, "Source not found");
-  const priorHint = recordOrEmpty((cur as JsonRecord).config_hint);
-  const hint = { ...priorHint };
+  const { data: cur } = await db
+    .from("cloud_sources").select("config_hint").eq("id", id).eq("user_id", userId).maybeSingle();
+  const hint = recordOrEmpty((cur as JsonRecord | null)?.config_hint);
   for (const k of ["contentSignature", "syncCursor", "finalizeCursor", "finalizeLease", "syncProgress"]) delete hint[k];
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null, config_hint: compactRecord(hint) })
-    .eq("id", id)
-    .eq("user_id", userId)
-    .eq("updated_at", String(cur.updated_at))
-    .select("id,updated_at")
-    .maybeSingle();
+    .eq("id", id).eq("user_id", userId).select("id").single();
   if (error) throwDb(error, "Unable to start rebuild");
-  if (!data) throw new HttpError(409, "Source state changed; retry rebuild");
-  const legacyRestore: LegacyM3uClaimRestore | null = cur.source_type === "m3u"
-    ? {
-      expectedUpdatedAt: String(data.updated_at),
-      patch: {
-        sync_status: stringOr(cur.sync_status, "idle"),
-        sync_error: typeof cur.sync_error === "string" && cur.sync_error.trim()
-          ? formatSourceSyncError(new Error(cur.sync_error), "Source sync failed")
-          : null,
-        config_hint: priorHint,
-      },
-    }
-    : null;
-  waitUntil(syncCloudSource(id, userId, db, legacyRestore));
+  waitUntil(syncCloudSource(id, userId, db));
   return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true, hard: true };
 }
 
@@ -2310,7 +2040,7 @@ function mergeSyncProgress(current: JsonRecord, patch: JsonRecord) {
       boundedProgressPercent(patch.percent),
     );
   }
-  for (const flag of ["moviesReady", "seriesReady", "liveReady", "browseReady", "usable"]) {
+  for (const flag of ["liveReady", "browseReady", "usable"]) {
     if (current[flag] === true || patch[flag] === true) merged[flag] = true;
   }
   return merged;
@@ -2349,11 +2079,6 @@ function completedSyncProgress(result: JsonRecord, startedAt: string, syncedAt: 
     status: "ready",
     stage: "ready",
     percent: 100,
-    moviesReady: true,
-    seriesReady: true,
-    liveReady: true,
-    browseReady: true,
-    usable: true,
     startedAt,
     updatedAt: syncedAt,
     counts: {
@@ -2395,208 +2120,22 @@ async function writeSourceSyncProgress(
   if (error) console.warn("[norva-cloud] Unable to update source sync progress", error.message);
 }
 
-async function sourceSyncIoAllowed(sourceId: string, userId: string, db: SupabaseClient) {
-  const { data, error } = await db
-    .from("cloud_catalog_visible_sources")
-    .select("id")
-    .eq("id", sourceId)
-    .eq("user_id", userId)
-    .eq("enabled", true)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (error) throwDb(error, "Unable to verify source sync visibility");
-  return Boolean(data);
-}
-
-type M3uSyncLeaseClaim = {
-  claimed: boolean;
-  reason: string;
-  retryAt: string;
-  attemptCount: number;
-  leaseUntil: string;
-};
-
-const M3U_SYNC_LEASE_TTL_SECONDS = 300;
-
-async function claimM3uSyncLease(
-  db: SupabaseClient,
-  sourceId: string,
-  userId: string,
-  leaseToken: string,
-): Promise<M3uSyncLeaseClaim> {
-  const { data, error } = await db.rpc("norva_claim_source_m3u_sync_lease", {
-    p_source_id: sourceId,
-    p_user_id: userId,
-    p_lease_token: leaseToken,
-    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
-  });
-  if (error) throwDb(error, "Unable to claim M3U sync lease");
-  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
-  return {
-    claimed: result.claimed === true,
-    reason: stringOr(result.reason, ""),
-    retryAt: stringOr(result.retryAt ?? result.retry_at, ""),
-    attemptCount: Math.max(0, Number(result.attemptCount ?? result.attempt_count) || 0),
-    leaseUntil: stringOr(result.leaseUntil ?? result.lease_until, ""),
-  };
-}
-
-async function claimM3uDiagnosticLease(
-  db: SupabaseClient,
-  sourceId: string,
-  userId: string,
-  leaseToken: string,
-): Promise<M3uSyncLeaseClaim> {
-  const { data, error } = await db.rpc("norva_claim_source_m3u_diagnostic_lease", {
-    p_source_id: sourceId,
-    p_user_id: userId,
-    p_lease_token: leaseToken,
-    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
-  });
-  if (error) throwDb(error, "Unable to claim M3U diagnostic lease");
-  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
-  return {
-    claimed: result.claimed === true,
-    reason: stringOr(result.reason, ""),
-    retryAt: stringOr(result.retryAt ?? result.retry_at, ""),
-    attemptCount: Math.max(0, Number(result.attemptCount ?? result.attempt_count) || 0),
-    leaseUntil: stringOr(result.leaseUntil ?? result.lease_until, ""),
-  };
-}
-
-async function assertM3uSyncLeaseCurrent(
-  db: SupabaseClient,
-  sourceId: string,
-  userId: string,
-  leaseToken: string,
-) {
-  const { data, error } = await db.rpc("norva_renew_source_m3u_sync_lease", {
-    p_source_id: sourceId,
-    p_user_id: userId,
-    p_lease_token: leaseToken,
-    p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
-  });
-  if (error) throwDb(error, "Unable to renew M3U sync lease");
-  if (data !== true) {
-    throw new HttpError(409, "M3U sync ownership changed", {
-      code: "M3U_SYNC_LEASE_LOST",
-    });
-  }
-}
-
-async function settleM3uSyncLease(
-  db: SupabaseClient,
-  sourceId: string,
-  userId: string,
-  leaseToken: string,
-  outcome: "success" | "transient_error" | "permanent_error" | "cancelled",
-  errorKind: string | null,
-) {
-  const { data, error } = await db.rpc("norva_settle_source_m3u_sync_lease", {
-    p_source_id: sourceId,
-    p_user_id: userId,
-    p_lease_token: leaseToken,
-    p_outcome: outcome,
-    p_error_kind: errorKind,
-  });
-  if (error) {
-    console.error("[norva-cloud] Unable to settle M3U sync lease", error.message);
-    return { settled: false, state: "unknown" };
-  }
-  const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
-  return { settled: result.settled === true, state: stringOr(result.state, "") };
-}
-
-function classifyM3uSyncFailure(error: unknown): {
-  outcome: "transient_error" | "permanent_error";
-  errorKind: string;
-} {
-  const status = error instanceof HttpError ? Number(error.status) : 0;
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  if ([400, 401, 403, 404, 410, 422].includes(status)) {
-    return { outcome: "permanent_error", errorKind: `HTTP_${status}` };
-  }
-  if (/managed cloud configuration|decrypt|invalid playlist|no playable catalog/i.test(message)) {
-    return { outcome: "permanent_error", errorKind: "M3U_CONFIGURATION_OR_CONTENT" };
-  }
-  if (status === 408 || status === 425 || status === 429 || status >= 500) {
-    return { outcome: "transient_error", errorKind: status ? `HTTP_${status}` : "PROVIDER_TRANSIENT" };
-  }
-  if (/timeout|timed out|network|fetch|connection|socket|econn|temporar|upstream/i.test(message)) {
-    return { outcome: "transient_error", errorKind: "PROVIDER_TRANSIENT" };
-  }
-  return { outcome: "transient_error", errorKind: "M3U_SYNC_UNKNOWN" };
-}
-
-async function withM3uSourceLease<T>(
-  db: SupabaseClient,
-  sourceId: string,
-  userId: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const leaseToken = crypto.randomUUID();
-  const claim = await claimM3uDiagnosticLease(db, sourceId, userId, leaseToken);
-  if (!claim.claimed) {
-    const quarantined = claim.reason === "quarantined";
-    throw new HttpError(409, quarantined
-      ? "This source must be disabled and enabled before another provider check"
-      : "A source operation is already in progress", {
-      code: quarantined ? "M3U_SYNC_QUARANTINED" : "M3U_SYNC_BUSY",
-      retryAt: claim.retryAt || undefined,
-    });
-  }
-
-  try {
-    const result = await operation();
-    await assertM3uSyncLeaseCurrent(db, sourceId, userId, leaseToken);
-    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "success", null);
-    return result;
-  } catch (error) {
-    // Check/estimate are foreground diagnostics, not durable import attempts.
-    // They share the exclusion lease but must not consume the import retry
-    // budget or quarantine a source after a user closes/cancels the request.
-    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "cancelled", null);
-    throw error;
-  }
-}
-
-async function syncCloudSource(
-  sourceId: string,
-  userId: string,
-  db: SupabaseClient,
-  legacyRestore: LegacyM3uClaimRestore | null = null,
-) {
+async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
   let baseHint: JsonRecord = {};
   let progress: JsonRecord = {};
   let generation: ActiveCatalogGeneration | null = null;
-  let m3uLeaseToken: string | null = null;
-  let m3uLeaseNextHeartbeatAt = 0;
-  const heartbeatM3uSyncLease = async () => {
-    if (!m3uLeaseToken || Date.now() < m3uLeaseNextHeartbeatAt) return;
-    await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
-    m3uLeaseNextHeartbeatAt = Date.now() + 60_000;
-  };
 
   try {
-    if (!await sourceSyncIoAllowed(sourceId, userId, db)) return;
     const { data: source, error } = await db
       .from("cloud_sources")
       .select("*")
       .eq("id", sourceId)
       .eq("user_id", userId)
-      .eq("enabled", true)
-      .is("deleted_at", null)
       .maybeSingle();
     if (error) throwDb(error, "Unable to load source");
-    // A disable/delete racing the durable watchdog is a normal pause, not a
-    // source error.  Stop before decrypting credentials or opening provider I/O.
-    if (!source) return;
+    if (!source) throw new HttpError(404, "Source not found");
     if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
     generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
-    const selection = await isDiscoverySourceId(sourceId, userId);
-    const assertCurrent = () => selection
-      ? adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation!)
-      : assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
 
     const startedAt = new Date().toISOString();
     baseHint = recordOrEmpty(source.config_hint);
@@ -2623,7 +2162,6 @@ async function syncCloudSource(
       const inDiscovery = cur.active === true && stringOr(cur.phase, "") === "discover";
       if (inDiscovery && String(source.sync_status) === "syncing") {
         if (Date.now() - heartbeat < 75_000) return; // a chain is alive — join it
-        if (!await sourceSyncIoAllowed(sourceId, userId, db)) return;
         await driveXtreamSyncToReady(sourceId, userId, db); // stalled → resume without wiping
         return;
       }
@@ -2635,7 +2173,7 @@ async function syncCloudSource(
       // the raw catalogue is imported; the existing finalize stepper (driven by
       // the client poll / cron) then materializes it to "ready".
       const cursor = freshSyncCursor(startedAt);
-      await assertCurrent();
+      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
       await db
         .from("cloud_sources")
         .update({
@@ -2646,41 +2184,13 @@ async function syncCloudSource(
         })
         .eq("id", sourceId)
         .eq("user_id", userId);
-      if (!await sourceSyncIoAllowed(sourceId, userId, db)) return;
       await driveXtreamSyncToReady(sourceId, userId, db);
       return;
     }
 
     // m3u / other source types stay on the single-isolate path (bounded size).
-    if (source.source_type === "m3u") {
-      const candidateToken = crypto.randomUUID();
-      const claim = await claimM3uSyncLease(db, sourceId, userId, candidateToken);
-      if (!claim.claimed) {
-        // Old app builds pre-marked a source as syncing before this durable
-        // claim existed. Restore only backoff/quarantine refusals, and only if
-        // the exact post-write updated_at fence still owns the row. A leased
-        // refusal deliberately remains syncing because another worker owns it.
-        if (legacyRestore && ["backoff", "quarantined"].includes(claim.reason)) {
-          await restoreLegacyM3uClaimState(db, sourceId, userId, legacyRestore);
-        }
-        return;
-      }
-      m3uLeaseToken = candidateToken;
-      m3uLeaseNextHeartbeatAt = Date.now() + 60_000;
-      baseHint = {
-        ...baseHint,
-        m3uSyncControl: compactRecord({
-          v: 1,
-          state: "running",
-          attemptCount: claim.attemptCount,
-          leaseUntil: claim.leaseUntil,
-          updatedAt: startedAt,
-        }),
-      };
-    }
-
-    await assertCurrent();
-    const { error: startError } = await db
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    await db
       .from("cloud_sources")
       .update({
         sync_status: "syncing",
@@ -2690,87 +2200,26 @@ async function syncCloudSource(
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
-    if (startError) throwDb(startError, "Unable to start source sync");
 
-    if (!await sourceSyncIoAllowed(sourceId, userId, db)) {
-      if (m3uLeaseToken) {
-        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
-        m3uLeaseToken = null;
-      }
-      return;
-    }
-    if (m3uLeaseToken) {
-      await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
-    }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
-    await assertCurrent();
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
-      await heartbeatM3uSyncLease();
       progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
-      await assertCurrent();
+      await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
       await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
     };
 
-    if (!await sourceSyncIoAllowed(sourceId, userId, db)) {
-      if (m3uLeaseToken) {
-        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
-        m3uLeaseToken = null;
-      }
-      return;
-    }
     const result = source.source_type === "m3u"
-      ? await syncM3uSource(
-        sourceId,
-        userId,
-        config,
-        db,
-        generation,
-        reportProgress,
-        heartbeatM3uSyncLease,
-      )
+      ? await syncM3uSource(sourceId, userId, config, db, generation, reportProgress)
       : { total: 0 };
 
     if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
-    if (m3uLeaseToken) {
-      await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
-    }
 
-    if (recordOrEmpty(result).finalizePending === true) {
-      await handoffSelectionFinalization({
-        db, sourceId, userId,
-        assertCurrent,
-        releaseTransport: async () => {
-          if (!m3uLeaseToken) return;
-          await assertM3uSyncLeaseCurrent(db, sourceId, userId, m3uLeaseToken);
-          await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
-          m3uLeaseToken = null;
-        },
-        invokeFinalizer: async () => {
-          // A fresh isolate owns the bounded continuation. Do not project the
-          // entire Selection inside this activation isolate's wall-clock limit.
-          try {
-            const response = await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
-              signal: AbortSignal.timeout(5000),
-            });
-            const payload = await response.json();
-            if (!response.ok || payload?.ok !== true) throw new Error("Selection continuation was not acknowledged");
-          } catch (_) {
-            // The cursor is durable; an invocation failure must not turn a
-            // successfully imported source into an error or lose its recovery.
-            console.warn("[norva-cloud] Selection finalization queued for watchdog", sourceId);
-          }
-        },
-      });
-      return;
-    }
-
-    await assertCurrent();
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
     const syncedAt = new Date().toISOString();
-    const { error: readyError } = await db
+    await db
       .from("cloud_sources")
       .update({
         sync_status: "ready",
@@ -2784,33 +2233,12 @@ async function syncCloudSource(
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
-    if (readyError) throwDb(readyError, "Unable to complete source sync");
-    if (m3uLeaseToken) {
-      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
-      m3uLeaseToken = null;
-    }
   } catch (error) {
-    if (error instanceof HttpError
-        && stringOr(recordOrEmpty(error.details).code, "") === "M3U_SYNC_LEASE_LOST") {
-      if (m3uLeaseToken) {
-        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
-      }
-      return;
-    }
-    if (isCatalogGenerationSuperseded(error)) {
-      console.info("[norva-cloud] source sync superseded", { sourceId, stage: progress.stage, code: recordOrEmpty(error).code });
-      if (m3uLeaseToken) {
-        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
-      }
-      return;
-    }
+    if (isCatalogGenerationSuperseded(error)) return;
     if (generation) {
       try {
         await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
       } catch (_) {
-        if (m3uLeaseToken) {
-          await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "cancelled", null);
-        }
         return;
       }
     }
@@ -2836,10 +2264,6 @@ async function syncCloudSource(
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
-    if (m3uLeaseToken) {
-      const failure = classifyM3uSyncFailure(error);
-      await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, failure.outcome, failure.errorKind);
-    }
   }
 }
 
@@ -2988,10 +2412,6 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const existingProgress = recordOrEmpty(baseHint.syncProgress);
   const startedAt = stringOr(existingProgress.startedAt ?? source.last_synced_at, new Date().toISOString());
   const phase = normalizeFinalizePhase(options.phase);
-  // Preserve an in-flight pre-rollout live-first cursor. New cinema-first runs
-  // publish moviesReady/seriesReady, so the order remains explicit without
-  // widening the persisted finalize-cursor schema during a rolling deploy.
-  const legacyLiveFirst = usesLegacyLiveFirstFinalize(phase, existingProgress);
   const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
   const batchOffset = Math.max(0, options.offset || 0);
   const batchAfterId = stringOr(options.afterId, "");
@@ -3079,11 +2499,13 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       if (counts.live <= 0) {
         await reportProgress({
           liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
         });
         return {
           sourceId, status: "syncing", phase: "live",
-          nextPhase: legacyLiveFirst && totalVod > 0 ? "titles" : "complete",
+          nextPhase: totalVod > 0 ? "titles" : "complete",
           nextOffset: 0, limit: batchLimit, totalVod, liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
           ...result,
           liveCatalog: { rawLive: 0, logicalChannels: 0, liveVariants: 0, skipped: true },
         };
@@ -3097,15 +2519,17 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       });
       if (!liveChunk.length) {
         await reportProgress({
-          stage: "finalizing",
-          percent: 99,
+          stage: "building_titles",
+          percent: 86,
           liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
           steps: { finalize: { status: "running" } },
         });
         return {
           sourceId, status: "syncing", phase: "live",
-          nextPhase: legacyLiveFirst && totalVod > 0 ? "titles" : "complete",
+          nextPhase: totalVod > 0 ? "titles" : "complete",
           nextOffset: 0, limit: batchLimit, totalVod, liveReady: true,
+          ...(totalVod <= 0 ? { browseReady: true, usable: true } : {}),
           ...result,
           liveCatalog: { rawLive: counts.live, done: true },
         };
@@ -3118,7 +2542,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
         stage: "building_live_channels",
-        percent: Math.max(91, Math.min(99, 91 + Math.round((8 * nextOffset) / Math.max(1, counts.live)))),
+        percent: Math.max(76, Math.min(85, 76 + Math.round((9 * nextOffset) / Math.max(1, counts.live)))),
         liveReady: true,
         steps: { finalize: { status: "running" } },
       });
@@ -3131,6 +2555,39 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "titles") {
       const totalVod = counts.movies + counts.series;
+      if (versionedCatalog && batchOffset >= totalVod) {
+        const prune = await pruneCatalogGenerationBeforeReady(
+          db,
+          sourceId,
+          userId,
+          generation,
+        );
+        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+        if (!prune.complete) {
+          await reportProgress({
+            stage: "finalizing",
+            percent: 100,
+            liveReady: true,
+            browseReady: true,
+            usable: true,
+            steps: { finalize: { status: "running" } },
+          });
+          return {
+            sourceId,
+            status: "syncing",
+            phase: "titles",
+            nextPhase: "titles",
+            nextOffset: batchOffset,
+            nextAfterId: batchAfterId,
+            totalVod,
+            liveReady: true,
+            browseReady: true,
+            usable: true,
+            readyPrune: prune,
+            ...result,
+          };
+        }
+      }
       const rows = await loadSourceItems(sourceId, userId, db, generation, {
         itemTypes: ["movie", "series"],
         afterId: batchAfterId,
@@ -3176,35 +2633,33 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // limit so batchLimit >= 1000 never reads a capped page as "short" and stops early.
       const pageCap = Math.min(batchLimit, 1000);
       const done = rows.length === 0 || rows.length < pageCap;
-      // Movies and Series unlock independently as soon as their first projected
-      // page is available. The finalizer still walks the complete cinema catalog
-      // before beginning Live TV, so no provider lane can starve the other.
+      // Aligné sur norva-source-sync (audit 18/07) : la barre user remplit 86→99 vers
+      // le seuil USABLE (premier bloc de titres — minutes) puis épingle 100 + usable,
+      // pas vers le catalogue VOD entier (heures). Sans ça, quand CE moteur (co-pilot
+      // client, driver en stall) prenait la main, la même progression physique
+      // affichait un autre pourcentage et la barre rampait sur des heures.
       const thresholds = titleUnlockThresholds(totalVod);
-      const moviesReady = existingProgress.moviesReady === true || counts.movies <= 0 || done || rows.some((row) => row.item_type === "movie");
-      const seriesReady = existingProgress.seriesReady === true || counts.series <= 0 || done || rows.some((row) => row.item_type === "series");
-      const browseReady = moviesReady || seriesReady;
-      const usable = moviesReady && seriesReady && nextOffset >= thresholds.usable;
+      const browseReady = nextOffset >= thresholds.browse;
+      const usable = nextOffset >= thresholds.usable;
       await reportProgress({
-        stage: done ? "building_live_channels" : "building_titles",
-        percent: done ? 90 : titleFinalizePercent(nextOffset, thresholds.usable),
-        ...(moviesReady ? { moviesReady: true } : {}),
-        ...(seriesReady ? { seriesReady: true } : {}),
+        stage: done ? "finalizing" : "building_titles",
+        percent: usable ? 100 : (done ? 99 : titleFinalizePercent(nextOffset, thresholds.usable)),
+        liveReady: true,
         ...(browseReady ? { browseReady: true } : {}),
         ...(usable ? { usable: true } : {}),
-        steps: { finalize: { status: "running" } },
+        steps: { finalize: { status: usable ? "done" : "running" } },
       });
       return {
         sourceId,
         status: "syncing",
         phase: "titles",
-        nextPhase: done ? (legacyLiveFirst ? "complete" : "live") : "titles",
-        nextOffset: done ? 0 : nextOffset,
-        nextAfterId: done ? "" : nextAfterId,
+        nextPhase: done ? "complete" : "titles",
+        nextOffset,
+        nextAfterId,
         limit: batchLimit,
         totalVod,
         done,
-        moviesReady,
-        seriesReady,
+        liveReady: true,
         browseReady,
         usable,
         ...result,
@@ -3214,8 +2669,6 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
 
-    // Prune only after the complete cinema-first → Live-last walk, immediately
-    // before READY, so the fallback engine matches norva-source-sync exactly.
     if (versionedCatalog) {
       const readyPrune = await pruneCatalogGenerationBeforeReady(
         db,
@@ -3227,9 +2680,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       if (!readyPrune.complete) {
         await reportProgress({
           stage: "finalizing",
-          percent: 99,
-          moviesReady: true,
-          seriesReady: true,
+          percent: 100,
           liveReady: true,
           browseReady: true,
           usable: true,
@@ -3242,8 +2693,6 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
           nextPhase: "complete",
           nextOffset: batchOffset,
           nextAfterId: batchAfterId,
-          moviesReady: true,
-          seriesReady: true,
           liveReady: true,
           browseReady: true,
           usable: true,
@@ -3330,14 +2779,7 @@ function normalizeFinalizePhase(value: string) {
     phase === "titles" ||
     phase === "complete"
   ) return phase;
-  return "titles";
-}
-
-function usesLegacyLiveFirstFinalize(phase: string, progress: JsonRecord) {
-  const hasCinemaFirstMarker = Object.prototype.hasOwnProperty.call(progress, "moviesReady")
-    || Object.prototype.hasOwnProperty.call(progress, "seriesReady");
-  if (hasCinemaFirstMarker) return false;
-  return phase === "live" || (phase === "titles" && progress.liveReady === true);
+  return "live";
 }
 
 function finalizePhaseStage(phase: string) {
@@ -3353,14 +2795,13 @@ function finalizePhasePercent(phase: string, offset: number, counts: { live: num
   if (phase === "live_variants") return liveFinalizePercent("live_variants", offset, counts.live);
   if (phase === "titles") return titleFinalizePercent(offset, counts.movies + counts.series);
   if (phase === "complete") return 99;
-  return liveFinalizePercent("live", offset, counts.live);
+  return 74;
 }
 
 function liveFinalizePercent(phase: string, offset: number, total: number) {
   const ratio = total ? Math.max(0, Math.min(1, offset / total)) : 1;
-  if (phase === "live_channels") return Math.max(91, Math.min(95, Math.round(91 + ratio * 4)));
-  if (phase === "live_variants") return Math.max(95, Math.min(99, Math.round(95 + ratio * 4)));
-  return Math.max(91, Math.min(99, Math.round(91 + ratio * 8)));
+  if (phase === "live_channels") return Math.max(76, Math.min(80, Math.round(76 + ratio * 4)));
+  return Math.max(80, Math.min(86, Math.round(80 + ratio * 6)));
 }
 
 function titleUnlockThresholds(totalVod: number) {
@@ -3373,11 +2814,11 @@ function titleUnlockThresholds(totalVod: number) {
 }
 
 function titleFinalizePercent(offset: number, totalVod: number) {
-  // Band aligned with norva-source-sync (74 -> 90) so the same physical progress
+  // Band aligned with norva-source-sync (86 -> 99) so the same physical progress
   // shows the same % whichever engine drives finalize.
-  if (!totalVod) return 90;
+  if (!totalVod) return 99;
   const ratio = Math.max(0, Math.min(1, offset / totalVod));
-  return Math.max(74, Math.min(90, Math.round(74 + ratio * 16)));
+  return Math.max(86, Math.min(99, Math.round(86 + ratio * 13)));
 }
 
 async function countRowsByType(
@@ -3527,7 +2968,6 @@ async function syncM3uSource(
   db: SupabaseClient,
   generation: ActiveCatalogGeneration,
   reportProgress: SyncProgressReporter = async () => {},
-  heartbeat: () => Promise<void> = async () => {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
   await reportProgress({
@@ -3536,12 +2976,10 @@ async function syncM3uSource(
     steps: { connect: { status: "running" } },
   });
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
-  const playlist = playlistUrl === DISCOVERY_PLAYLIST_URL
-    ? await fetchDiscoverySelection({ heartbeat })
-    : await fetchM3uItems(playlistUrl, 60_000, {
-      maxBytes: 128 * 1024 * 1024,
-      maxItems: 100_000,
-    });
+  const playlist = await fetchM3uItems(playlistUrl, 60_000, {
+    maxBytes: 128 * 1024 * 1024,
+    maxItems: 100_000,
+  });
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
   await reportProgress({
     stage: "discovered",
@@ -3557,7 +2995,6 @@ async function syncM3uSource(
   const items = playlist.items as M3uPlaylistItem[];
   const rows: JsonRecord[] = [];
   for (let index = 0; index < items.length; index += 500) {
-    await heartbeat();
     const chunk = await Promise.all(items.slice(index, index + 500).map(async (item) => ({
       user_id: userId,
       source_id: sourceId,
@@ -3571,79 +3008,35 @@ async function syncM3uSource(
       metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
       playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
       available: true,
-      ...discoveryCatalogFields(playlistUrl, item),
     })));
     rows.push(...chunk);
   }
 
-  const movieCount = rows.filter(row => row.item_type === "movie").length;
-  const seriesCount = rows.filter(row => row.item_type === "series").length;
-  const liveCount = rows.filter(row => row.item_type === "live").length;
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
   await reportProgress({
     stage: "importing",
     percent: 62,
-    counts: { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length },
-    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: seriesCount ? categoryCount : 0, total: categoryCount },
+    counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
+    categories: { live: categoryCount, movies: 0, series: 0, total: categoryCount },
     steps: {
-      channels: { status: "done", count: liveCount },
-      movies: { status: "done", count: movieCount },
-      series: { status: "done", count: seriesCount },
+      channels: { status: "done", count: rows.length },
       categories: { status: "done", count: categoryCount },
       import: { status: "running", count: rows.length },
     },
   });
-  const savedRows = await replaceSourceItems(
-    sourceId,
-    userId,
-    rows,
-    db,
-    generation,
-    heartbeat,
-    playlistUrl === DISCOVERY_PLAYLIST_URL,
-  );
+  const savedRows = await replaceSourceItems(sourceId, userId, rows, db, generation);
   await reportProgress({
     stage: "finalizing",
     percent: 86,
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
-  if (playlistUrl === DISCOVERY_PLAYLIST_URL && (movieCount > 0 || seriesCount > 0)) {
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
-    const starterRows = selectionStarterRows(savedRows);
-    if (starterRows.length) {
-      await refreshVodTitleProjection({
-        sourceId, userId, db, generation, rows: starterRows,
-        xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
-        assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
-      });
-      await reportProgress({
-        moviesReady: starterRows.some(row => row.item_type === "movie"),
-        seriesReady: starterRows.some(row => row.item_type === "series"),
-        browseReady: true,
-      });
-    }
-    return { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length,
-      finalizePending: true, liveCatalog: { rawLive: liveCount, pending: true },
-      discoverySources: "sources" in playlist ? playlist.sources : undefined };
-  }
   const liveCatalog = await refreshMaterializedLiveCatalog(db, {
-    sourceId, userId, rows: savedRows.filter(row => row.item_type === "live"), generation, heartbeat,
+    sourceId, userId, rows: savedRows, generation,
   });
-  if (movieCount > 0 || seriesCount > 0) {
-    await refreshVodTitleProjection({
-      sourceId, userId, db, generation,
-      rows: savedRows.filter(row => row.item_type === "movie" || row.item_type === "series"),
-      xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
-      assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
-    });
-  }
   return {
-    live: liveCount,
-    movies: movieCount,
-    series: seriesCount,
+    live: rows.length,
     total: rows.length,
     liveCatalog,
-    discoverySources: "sources" in playlist ? playlist.sources : undefined,
     importTruncated: playlist.truncated || undefined,
     importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
   };
@@ -3655,44 +3048,18 @@ async function replaceSourceItems(
   rows: JsonRecord[],
   db: SupabaseClient,
   generation: ActiveCatalogGeneration,
-  heartbeat: () => Promise<void> = async () => {},
-  preserveUntilSaved = false,
 ): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
-  const catalogVersion = preserveUntilSaved ? Date.now() : null;
-  await heartbeat();
-  if (!preserveUntilSaved) await clearCatalogGenerationMediaItems(db, sourceId, userId, generation, heartbeat);
+  await clearCatalogGenerationMediaItems(db, sourceId, userId, generation);
   for (let index = 0; index < rows.length; index += 500) {
-    await heartbeat();
-    const write = async () => {
-      const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
-        preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
-      ), generation);
-      return await db.from("cloud_media_items")
-        .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
-        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
-    };
-    const { data, error } = preserveUntilSaved
-      ? await writeSelectionBatch({ generation, write,
-        adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation) })
-      : await write();
+    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500), generation);
+    if (!chunk.length) continue;
+    const { data, error } = await db
+      .from("cloud_media_items")
+      .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
-  }
-  if (preserveUntilSaved) {
-    for (let guard = 0; guard < 600; guard += 1) {
-      await heartbeat();
-      const { data, error } = await db.rpc("norva_prune_stale_catalog_generation_items", {
-        p_source_id: sourceId, p_user_id: userId,
-        ...catalogGenerationRpcFence(generation),
-        p_catalog_version: catalogVersion, p_limit: 100,
-      });
-      if (error) throwDb(error, "Unable to prune obsolete Selection items");
-      const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
-      if (removed > 0) await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
-      if (removed < 100) break;
-      if (guard === 599) throw new Error("Selection prune exceeded its bounded batch budget");
-    }
   }
   return savedRows;
 }
@@ -3702,10 +3069,8 @@ async function clearCatalogGenerationMediaItems(
   sourceId: string,
   userId: string,
   generation: ActiveCatalogGeneration,
-  heartbeat: () => Promise<void> = async () => {},
 ) {
   for (let guard = 0; guard < 100; guard += 1) {
-    await heartbeat();
     const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
       p_source_id: sourceId,
       p_user_id: userId,
@@ -3747,13 +3112,6 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   const configRevision = sourceSnapshotConfigRevision(visibleSource);
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
-
-  if (seriesId.startsWith("norva-selection:series:") && await isDiscoverySourceId(sourceId, userId)) {
-    const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
-    const selection = await loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, generationId: generation.generationId });
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
-    return selection;
-  }
 
   const loadedSource = await loadSourceConfigEnvelope(sourceId, userId, db);
   const sourceConfig = loadedSource.config;
@@ -6678,67 +6036,16 @@ function routeSegments(pathname: string) {
 async function registerPushToken(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const body = await readJson(req);
   const token = stringOr(body.token, "");
-  if (!token || token.length > 4096) throw new HttpError(400, "Missing or invalid push token");
+  if (!token) throw new HttpError(400, "Missing push token");
   const platformRaw = String(body.platform ?? "android");
   const platform = ["android", "ios", "web"].includes(platformRaw) ? platformRaw : "android";
-  const permissionRaw = String(body.permissionState ?? body.permission_state ?? "unknown").toLowerCase();
-  const permissionState = ["unknown", "prompt", "granted", "denied"].includes(permissionRaw)
-    ? permissionRaw
-    : "unknown";
-  // Missing device metadata is unknown, not evidence that the user is in UTC.
-  // Older WebViews supplied a default UTC even when Intl failed. Only the new
-  // observation protocol may create fresh provenance; existing good evidence
-  // is retained by the RPC when this value is absent.
-  const timezone = body.timezoneObserved === true ? stringOr(body.timezone, "").slice(0, 64) : "";
-  const locale = stringOrNull(body.locale)?.slice(0, 35) ?? null;
-  const appVersion = stringOrNull(body.appVersion ?? body.app_version)?.slice(0, 40) ?? null;
-  const { data, error } = await db.rpc("norva_register_push_token", {
-    p_user_id: userId,
-    p_token: token,
-    p_platform: platform,
-    p_permission_state: permissionState,
-    p_timezone: timezone,
-    p_locale: locale,
-    p_app_version: appVersion,
-  });
+  const now = new Date().toISOString();
+  const { error } = await db.from("cloud_push_tokens").upsert(
+    [{ token, user_id: userId, platform, updated_at: now, last_seen_at: now }],
+    { onConflict: "token" },
+  );
   if (error) throwDb(error, "Unable to register push token");
-  return isRecord(data) ? data : { ok: true, permission_state: permissionState };
-}
-
-async function recordBehavioralLifecycleEvent(
-  req: Request,
-  userId: string,
-  db: SupabaseClient,
-): Promise<JsonRecord> {
-  const body = await readJson(req);
-  const allowedKeys = new Set(["deliveryId", "delivery_id", "event"]);
-  if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
-    throw new HttpError(400, "Unsupported lifecycle event field");
-  }
-  const deliveryId = stringOr(body.deliveryId ?? body.delivery_id, "").trim();
-  const event = stringOr(body.event, "").trim().toLowerCase();
-  if (event === "source_form_opened" && !deliveryId) {
-    const clientContext = sourceAttemptClientContext(req.headers.get("user-agent"));
-    const { data, error } = await db.rpc("norva_record_behavioral_product_event", {
-      p_user_id: userId,
-      p_event_name: event,
-      p_platform: clientContext.platform,
-      p_app_version: clientContext.appVersion,
-      p_event_id: crypto.randomUUID(),
-    });
-    if (error) throwDb(error, "Unable to record lifecycle product event");
-    return { accepted: data === true };
-  }
-  if (!UUID_PATTERN.test(deliveryId) || !["delivered", "opened", "deep_link_opened"].includes(event)) {
-    throw new HttpError(400, "Invalid lifecycle event");
-  }
-  const { data, error } = await db.rpc("norva_record_behavioral_delivery_event", {
-    p_user_id: userId,
-    p_delivery_id: deliveryId,
-    p_event_kind: event,
-  });
-  if (error) throwDb(error, "Unable to record lifecycle event");
-  return { accepted: data === true };
+  return { ok: true };
 }
 
 async function readJson(req: Request): Promise<JsonRecord> {
