@@ -1,0 +1,14665 @@
+/**
+ * Watch Page Controller
+ * Handles VOD (Movies/Series) playback with streaming service-style UI
+ */
+
+class WatchPage {
+    constructor(app) {
+        this.app = app;
+
+        // Video elements
+        this.video = document.getElementById('watch-video');
+        this.overlay = document.getElementById('watch-overlay');
+
+        // iOS: ensure inline playback (not fullscreen by default)
+        if (this.video) {
+            this.video.setAttribute('playsinline', '');
+            this.video.setAttribute('webkit-playsinline', '');
+        }
+
+        // Top bar
+        this.backBtn = document.getElementById('watch-back-btn');
+        this.titleEl = document.getElementById('watch-title');
+        this.subtitleEl = document.getElementById('watch-subtitle');
+
+        // Controls
+        this.centerPlayBtn = document.getElementById('watch-center-play');
+        this.playPauseBtn = document.getElementById('watch-play-pause');
+        this.skipBackBtn = document.getElementById('watch-skip-back');
+        this.skipFwdBtn = document.getElementById('watch-skip-fwd');
+        this.muteBtn = document.getElementById('watch-mute');
+        this.volumeSlider = document.getElementById('watch-volume');
+        this.fullscreenBtn = document.getElementById('watch-fullscreen');
+        this.progressSlider = document.getElementById('watch-progress');
+        this.progressContainer = document.querySelector('.watch-progress-container');
+        this.bufferStatus = document.getElementById('watch-buffer-status');
+        this.timeCurrent = document.getElementById('watch-time-current');
+        this.timeTotal = document.getElementById('watch-time-total');
+        this.scrollHint = document.getElementById('watch-scroll-hint');
+        this.loadingSpinner = document.getElementById('watch-loading');
+
+        // Next episode
+        this.nextEpisodePanel = document.getElementById('watch-next-episode');
+        this.nextEpisodeTitle = document.getElementById('next-episode-title');
+        this.nextEpisodeStill = document.getElementById('next-episode-still');
+        this.nextEpisodeSynopsis = document.getElementById('next-episode-synopsis');
+        this.nextCountdown = document.getElementById('next-countdown');
+        this.nextPlayNowBtn = document.getElementById('next-play-now');
+        this.nextCancelBtn = document.getElementById('next-cancel');
+
+        // Details section
+        this.posterEl = document.getElementById('watch-poster');
+        this.contentTitleEl = document.getElementById('watch-content-title');
+        this.yearEl = document.getElementById('watch-year');
+        this.ratingEl = document.getElementById('watch-rating');
+        this.durationEl = document.getElementById('watch-duration');
+        this.descriptionEl = document.getElementById('watch-description');
+        this.playBtn = document.getElementById('watch-play-btn');
+        this.playBtnText = document.getElementById('watch-play-btn-text');
+        this.favoriteBtn = document.getElementById('watch-favorite-btn');
+
+        // Recommended / Episodes
+        this.recommendedSection = document.getElementById('watch-recommended');
+        this.recommendedGrid = document.getElementById('watch-recommended-grid');
+        this.episodesSection = document.getElementById('watch-episodes');
+        this.seasonsContainer = document.getElementById('watch-seasons');
+
+        // Captions
+        this.audioBtn = document.getElementById('watch-audio-btn');
+        this.audioMenu = document.getElementById('watch-audio-menu');
+        this.audioStatus = document.getElementById('watch-audio-status');
+        this.audioList = document.getElementById('watch-audio-list');
+        this.captionsBtn = document.getElementById('watch-captions-btn');
+        this.captionsMenu = document.getElementById('watch-captions-menu');
+        this.captionsList = document.getElementById('watch-captions-list');
+
+        // Restart / episode navigation / speed / in-player episodes selector
+        this.restartBtn = document.getElementById('watch-restart');
+        this.prevEpBtn = document.getElementById('watch-prev-ep');
+        this.nextEpBtn = document.getElementById('watch-next-ep');
+        this.episodesNavWrapper = document.getElementById('watch-episodes-wrapper');
+        this.episodesNavBtn = document.getElementById('watch-episodes-btn');
+        this.episodesNavMenu = document.getElementById('watch-episodes-menu');
+        this.episodesNavList = document.getElementById('watch-episodes-menu-list');
+        this.speedBtn = document.getElementById('watch-speed-btn');
+        this.speedMenu = document.getElementById('watch-speed-menu');
+        this.speedList = document.getElementById('watch-speed-list');
+        this._playbackRate = 1;
+        this.speedMenuOpen = false;
+        this.episodesMenuOpen = false;
+
+        // Transcode Status
+        this.transcodeStatusEx = document.getElementById('watch-transcode-status');
+        this.qualityBadgeEl = document.getElementById('watch-quality-badge');
+        this.subtitleStatusEl = document.getElementById('watch-subtitle-status');
+
+        // State
+        this.hls = null;
+        this.content = null;
+        this.contentType = null; // 'movie' or 'series'
+        this.seriesInfo = null;
+        this.currentSeason = null;
+        this.currentEpisode = null;
+        this.isFavorite = false;
+        this.returnPage = null;
+        this.audioMenuOpen = false;
+        this.captionsMenuOpen = false;
+        this.baseStreamUrl = null;
+        this.currentPlaybackMode = null;
+        this.currentProcessingOptions = {};
+        // Playback metadata does not exist while App constructs its page
+        // controllers. The exact status is assigned in play(), once content
+        // and the resolved cloud session are available.
+        this.audioLanguageValidationStatus = 'not_analyzed';
+        this.probeDuration = null;
+        this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = false;
+        this.audioTracks = [];
+        this.subtitleTracks = [];
+        this._hlsOwnsExactSubtitles = false;
+        this._exactSubtitleHlsTopology = null;
+        // Exact subtitle evidence is kept separately from the render list. The
+        // latter can also contain native/browser/preference-derived tracks and
+        // must never be promoted to an exact provider-file observation.
+        this._observedExactSubtitleTracks = null;
+        this._observedSubtitleProbeComplete = false;
+        this._observedLangsGeneration = 0;
+        this._observedLangsSent = null;
+        this._observedLangsPending = null;
+        this._observedLangsRetryKey = null;
+        this._observedLangsRetryCount = 0;
+        this._observedLangsRetryAt = 0;
+        this.subtitleSourceUrl = null;
+        this.subtitleStartOffset = 0;
+        this.selectedSubtitleStreamIndex = null;
+        this.subtitleOffsetSeconds = 0;
+        this.selectedSubtitleTrackUserChoice = false;
+        // Phase 3 AI subtitles (self-hosted whisper transcript, served from the cross-user
+        // cache). State machine: idle → processing (background transcription) → ready | failed.
+        // The ready VTT is cached in-session so re-selecting re-attaches without a refetch.
+        this.aiSubtitleState = 'idle';
+        this.aiSubtitleVtt = null;
+        this.aiSubtitleLang = 'und';
+        this._aiSubtitleTitleId = null;
+        this._aiSubtitlePollTimer = null;
+        this._aiJobId = null;
+        this._aiRequestStartedAt = 0;
+        this._aiFirstCueVisibleReported = false;
+        this._aiServerTimings = null;
+        this._aiLastResponseWasCached = false;
+        this._aiCacheProbeKey = null;   // one-shot shared-cache probe marker (per title key)
+        this._aiUserRequested = false;  // true after a click — gates every auto-attach
+        // "Generating…" UX: a coarse ETA countdown (transcription runs at ~0.4× realtime) plus a
+        // per-title "email me when it's ready" opt-in so the viewer needn't watch the spinner.
+        this._aiNotifyOptedIn = false;
+        this._aiEtaTargetMs = 0;
+        this._aiCountdownTimer = null;
+        // Phase 3b translation: per-target state, the gateway's available targets (fetched once,
+        // global), the lang of the AI track currently showing, and a target picked before the
+        // source transcript was ready (auto-fired once it lands).
+        this._translations = new Map();        // lang -> { state: 'processing'|'ready'|'failed', vtt }
+        this._aiTranslateTargets = null;       // array of available target codes, or null until fetched
+        this._aiActiveLang = null;             // lang code of the AI <track> currently showing
+        this._pendingTranslateTarget = null;
+        this._translatePollTimers = new Map(); // lang -> interval id
+        // Phase 4 OCR: image (PGS) subtitle tracks aren't text-extractable; the viewer can OCR one to
+        // text. Per-track state machine, keyed by the subtitle STREAM index (a title can have several
+        // image tracks). Same cache/attach plumbing as AI subs (cross-user, src-less <track>).
+        this._ocr = new Map();                 // streamIndex -> { state, vtt, lang, pollTimer, titleKey }
+        this._ocrActiveStreamIndex = null;     // streamIndex of the OCR <track> currently showing
+        this.selectedAudioStreamIndex = null;
+        this.selectedAudioTrackUserChoice = false;
+        // Gateway multi-audio HLS uses hls.js-relative indexes, while every
+        // persisted/processing preference uses the source container's absolute
+        // stream index. Keep the signed Gateway map as the only bridge between
+        // those two index spaces; never infer it from labels or languages.
+        this._gatewayAudioRenditionStatus = 'absent';
+        this._gatewayAudioRenditions = [];
+        this._gatewayMultiAudioHls = null;
+        this._gatewayMuxedMonoStreamIndex = null;
+        this._gatewayAudioRenditionAttemptId = null;
+        this._gatewayAudioRenditionRequired = false;
+        this._gatewayHlsAudioTracksReady = false;
+        this._audioTopologyPending = false;
+        this._pendingHlsAudioSwitch = null;
+        this._latestHlsAudioSwitch = null;
+        this._pendingGatewayAudioStreamIndex = null;
+        this.pendingPlaybackPreferences = null;
+        this._pendingAudioPreferenceApplied = false;
+        this._pendingSubtitlePreferenceApplied = false;
+        this._videoEncodeFallbackTried = false;
+        this._playbackAttemptId = 0;
+        this._playbackResolveAbortController = null;
+        this._cloudPlaybackLaneAttemptId = null;
+        this._preferredExplicitCloudMode = null;
+        this._failoverAttemptId = null;
+        this._engineRuntimeRecoveryAttemptId = null;
+        this._engineMidRetries = 0;
+        this._engineRetryFromPos = 0;
+        this._playbackStatusOkReported = false;
+        this._seekDebounceTimer = null;
+        this._pendingSeekTarget = null;
+        this._pendingLocalSeekTarget = null;
+        this._pendingLocalSeekAttempts = 0;
+        this._pendingLocalSeekTimer = null;
+        this._gatewaySeekRetry = null;
+        this._gatewaySeekRequestId = 0;
+        this._suppressMediaErrorsUntil = 0;
+        this._pendingPlaybackErrorTimer = null;
+        this._pendingPlaybackErrorMessage = null;
+        this._timelineScrubbing = false;
+        this._lastCommittedSeekPercent = null;
+        this._lastCommittedSeekAt = 0;
+        this._audioSwitchPromise = null;
+        this._audioSwitchRequestId = 0;
+        this._subtitleSwitchPromise = null;
+        this._subtitleSwitchRequestId = 0;
+        this._subtitleSwitchFeedbackState = 'idle';
+        this._subtitleStatusTimer = null;
+        this._subEngineReadyPromise = null;
+        this._gatewayAudioSwitchMetrics = null;
+        this.currentSessionId = null;
+        this.activeSessionIds = new Set();
+        this.currentCloudPlaybackSessionId = null;
+        this.activeCloudPlaybackSessionIds = new Set();
+        this._cloudPlaybackHeartbeatTimer = null;
+        this._cloudPlaybackHeartbeatGeneration = 0;
+        this._cloudPlaybackHeartbeatInFlight = false;
+        this._cloudPlaybackSupersededHandled = false;
+        this._privateMediaCacheAccess = null;
+        this._privateMediaCacheTicketTimer = null;
+        this._privateMediaCacheTicketPromise = null;
+        this._privateMediaCacheTicketGeneration = 0;
+        this._privateMediaCacheFallbackSessionIds = new Set();
+        this._reportedProviderFailureKeys = new Set();
+        this.playbackTelemetry = null;
+        this._playRequestedAt = 0;
+        this._firstFrameReported = false;
+        this._firstFrameCallbackId = null;
+        this._firstFrameObserverAttemptId = null;
+        this._firstFrameObserverAvailable = null;
+        this._firstFrameProgressSample = null;
+        this._gatewayAutomaticRebuffering = false;
+        this._gatewayUserPaused = false;
+        this._watchedLanguageValidationIntent = null;
+        this._deferredEngineTrackEnrichment = null;
+        this._deferredEngineTrackEnrichmentTimer = null;
+        this._playStartedReported = false;
+        this._playbackEnded = false;
+        this._lastPauseTelemetryAt = 0;
+        this._handlingPlaybackFailure = false;
+        this.resumeSnapshotKey = 'norva-watch-resume-v1';
+        this.resumeSnapshotTtlMs = 6 * 60 * 60 * 1000;
+        this.resumeSnapshotSaveIntervalMs = 2000;
+        // Persistent per-title resume positions (localStorage): survives quit and
+        // tab close, independent of the catalog/server, used as a resume fallback.
+        this.resumePositionsKey = 'norva-resume-pos-v1';
+        this.resumePositionsTtlMs = 7 * 24 * 60 * 60 * 1000;
+        this._lastResumeSnapshotSaveAt = 0;
+        this._resumeRestorePromise = null;
+        this._resumePlaybackMetadata = null;
+        this._suspendResumeSnapshotSave = false;
+        // History writes belong to one explicit playback lifecycle. The WatchPage
+        // instance survives SPA navigation, so content/video alone cannot prove
+        // that a history write still belongs to the visible player. In particular,
+        // pagehide/beforeunload may run after stop() reset the media clock to zero.
+        this._historyPersistenceActive = false;
+        this._historyPersistenceGeneration = 0;
+        this._exitHistoryCapture = null;
+        this._lastKnownPlaybackPosition = 0;
+        this._lastKnownPlaybackDuration = 0;
+        this.playbackErrorRefreshKey = 'norva-watch-error-refresh-v1';
+        this.playbackErrorRefreshDelayMs = 2000;
+        this.playbackErrorRefreshGuardMs = 60000;
+        this._playbackErrorRefreshTimer = null;
+
+        // Overlay timer
+        this.overlayTimeout = null;
+        this.overlayVisible = true;
+
+        // Next episode
+        this.nextEpisodeTimeout = null;
+        this.nextEpisodeCountdownDefault = 15;
+        this.nextEpisodeCountdown = this.nextEpisodeCountdownDefault;
+        this.nextEpisodeInterval = null;
+        this.nextEpisodeShowing = false;
+        this.nextEpisodeDismissed = false;
+
+        // Watch history
+        this.historyInterval = null;
+
+        this.init();
+    }
+
+    trackProduct(event, details = {}) {
+        return window.NorvaTrackProduct?.(event, {
+            placement: 'player',
+            journey: 'time_to_value',
+            step: 'playback',
+            ...details
+        });
+    }
+
+    playbackFailureFamily(message) {
+        const value = String(message || '').toLowerCase();
+        if (this.isPlaybackSupersededError(value)) return 'superseded';
+        if (this.isProviderBusyError(value)) return 'provider_busy';
+        if (this.isConnectionLimitError(value) || /403|blocked|forbidden/.test(value)) return 'provider_blocked';
+        if (/401|credential|login|unauthori[sz]ed/.test(value)) return 'credentials';
+        if (/408|504|timeout|timed out/.test(value)) return 'timeout';
+        if (/network|fetch|offline|connection/.test(value)) return 'network';
+        if (/codec|format|decode|container|unsupported/.test(value)) return 'format';
+        return 'unknown';
+    }
+
+    init() {
+        // iOS Safari: detect and compensate for floating bottom toolbar
+        const updateIosUiBottom = () => {
+            let uiBottom = 0;
+            if (window.visualViewport) {
+                const vv = window.visualViewport;
+                uiBottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+            }
+            document.documentElement.style.setProperty('--ios-ui-bottom', uiBottom + 'px');
+        };
+
+        updateIosUiBottom();
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', updateIosUiBottom);
+            window.visualViewport.addEventListener('scroll', updateIosUiBottom);
+        } else {
+            window.addEventListener('resize', updateIosUiBottom);
+        }
+
+        // iOS: use custom --vh unit to avoid 100vh issues with dynamic toolbar
+        const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+        const watchVideoSection = document.querySelector('.watch-video-section');
+        if (isIOS && watchVideoSection) {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+            watchVideoSection.style.height = 'calc(var(--vh) * 100)';
+        }
+
+        // Apply safe area + iOS toolbar padding to overlay
+        if (this.overlay) {
+            this.overlay.style.paddingBottom = 'calc(env(safe-area-inset-bottom, 0px) + var(--ios-ui-bottom, 0px) + 12px)';
+        }
+
+        // Back button
+        this.backBtn?.addEventListener('click', () => this.goBack());
+
+        // Play/Pause
+        this.centerPlayBtn?.addEventListener('click', () => this.togglePlay());
+        this.playPauseBtn?.addEventListener('click', () => this.togglePlay());
+        this.video?.addEventListener('click', () => this.togglePlay());
+
+        // Skip buttons
+        this.skipBackBtn?.addEventListener('click', () => this.skip(-10));
+        this.skipFwdBtn?.addEventListener('click', () => this.skip(10));
+
+        // Volume
+        this.muteBtn?.addEventListener('click', () => this.toggleMute());
+        this.volumeSlider?.addEventListener('input', (e) => this.setVolume(e.target.value));
+
+        // Fullscreen
+        this.fullscreenBtn?.addEventListener('click', () => this.toggleFullscreen());
+
+        // Picture-in-Picture
+        const pipBtn = document.getElementById('watch-pip');
+        pipBtn?.addEventListener('click', () => this.togglePictureInPicture());
+
+        // Overflow Menu
+        const overflowBtn = document.getElementById('watch-overflow');
+        const overflowMenu = document.getElementById('watch-overflow-menu');
+
+        overflowBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            overflowMenu?.classList.toggle('hidden');
+        });
+
+        // Copy Stream URL
+        const copyUrlBtn = document.getElementById('watch-copy-url');
+        copyUrlBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.copyStreamUrl();
+            overflowMenu?.classList.add('hidden');
+        });
+
+        // Close overflow menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (overflowMenu && !overflowMenu.classList.contains('hidden') &&
+                !overflowMenu.contains(e.target) && e.target !== overflowBtn) {
+                overflowMenu.classList.add('hidden');
+            }
+        });
+
+        // Progress bar: update the UI while dragging, commit one real seek on release.
+        this.progressSlider?.addEventListener('pointerdown', () => {
+            this._timelineScrubbing = true;
+        });
+        this.progressSlider?.addEventListener('input', (e) => this.previewSeek(e.target.value));
+        this.progressSlider?.addEventListener('change', (e) => this.commitSeek(e.target.value));
+        this.progressSlider?.addEventListener('pointerup', (e) => this.commitSeek(e.target.value));
+        // Seek thumbnails: storyboard preview above the timeline while hovering/scrubbing.
+        this.progressSlider?.addEventListener('pointermove', (e) => this.updateSeekThumb(e));
+        this.progressSlider?.addEventListener('pointerleave', () => this.hideSeekThumb());
+
+        // Video events
+        this.video?.addEventListener('timeupdate', () => {
+            this.updateProgress();
+            this.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+            this.trackPlaybackPosition();
+            this.saveResumeSnapshotThrottled();
+        });
+        this.video?.addEventListener('loadedmetadata', () => {
+            this.onMetadataLoaded();
+            this.updateBufferedTimeline();
+            this.restorePendingAudioPreference();
+            this.restorePendingSubtitlePreference();
+            this.applyPendingLocalSeek();
+            this.trackPlaybackPosition({ force: true });
+            this.saveResumeSnapshotThrottled(true);
+        });
+        this.video?.addEventListener('seeking', () => {
+            this.trackPlaybackPosition({ force: true });
+            this.updateBufferedTimeline();
+        });
+        this.video?.addEventListener('seeked', () => {
+            this.trackPlaybackPosition({ force: true });
+            this.updateBufferedTimeline();
+            this.saveResumeSnapshotThrottled(true);
+            Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            if (this._subEngine) {
+                Promise.resolve(this.subtitleWindowTick(this._subEngine, true)).catch(() => {});
+            }
+        });
+        this.video?.addEventListener('loadeddata', () => {
+            this.applyPendingLocalSeek();
+            this.markPlaybackUsable();
+        });
+        this.video?.addEventListener('durationchange', () => {
+            const duration = this.updateDurationState();
+            this.updateBufferedTimeline(duration);
+        });
+        this.video?.addEventListener('progress', () => this.updateBufferedTimeline());
+        this.video?.addEventListener('play', () => this.onPlay());
+        this.video?.addEventListener('playing', () => this.markPlaybackUsable({ allowFirstFrameFallback: true }));
+        this.video?.addEventListener('pause', () => this.onPause());
+        this.video?.addEventListener('ended', () => this.onEnded());
+        this.setupMediaSessionHandlers();
+        this.applySubtitleStyle();
+        this.setupCastIntegration();
+        this.video?.addEventListener('error', (e) => this.onError(e));
+        this.video?.addEventListener('waiting', () => {
+            if (this._firstFrameReported && this.video.paused && !this._gatewayAutomaticRebuffering) return;
+            // A queued media event after Back must not restart artwork off-route.
+            if (this.video.currentSrc && document.getElementById('page-watch')?.classList.contains('active')) this.showLoading();
+        });
+        this.video?.addEventListener('canplay', () => {
+            this.applyPendingLocalSeek();
+            this.updateBufferedTimeline();
+            this.markPlaybackUsable();
+        });
+
+        // Overlay auto-hide + click to toggle play
+        const watchSection = document.querySelector('.watch-video-section');
+        watchSection?.addEventListener('mousemove', () => this.showOverlay());
+        watchSection?.addEventListener('touchstart', () => this.showOverlay());
+        watchSection?.addEventListener('click', (e) => {
+            this.showOverlay();
+            // Only toggle play if clicking on video area (not controls)
+            if (e.target === this.video || e.target === watchSection ||
+                e.target.classList.contains('watch-overlay') || e.target === this.overlay) {
+                this.togglePlay();
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+        // Details section buttons
+        this.playBtn?.addEventListener('click', () => this.scrollToVideo());
+        this.favoriteBtn?.addEventListener('click', () => this.toggleFavorite());
+
+        // Next episode buttons
+        this.nextPlayNowBtn?.addEventListener('click', () => this.playNextEpisode());
+        this.nextCancelBtn?.addEventListener('click', () => this.cancelNextEpisode());
+
+        // Audio track toggle
+        this.audioBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleAudioMenu();
+        });
+
+        // Captions toggle
+        this.captionsBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleCaptionsMenu();
+        });
+
+        // Restart from the beginning (movies + series)
+        this.restartBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.restartFromStart(); });
+        // Episode navigation (series)
+        this.prevEpBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.playPreviousEpisode(); });
+        this.nextEpBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.playNextEpisode(); });
+        // In-player episodes selector (series)
+        this.episodesNavBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleEpisodesMenu(); });
+        // Playback speed
+        this.speedBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSpeedMenu(); });
+        this.speedList?.addEventListener('click', (e) => {
+            const opt = e.target.closest('.speed-option');
+            if (opt) this.setPlaybackRate(parseFloat(opt.dataset.rate));
+        });
+
+        // Close track menus when clicking outside
+        document.addEventListener('click', (e) => {
+            if (this.audioMenuOpen && !this.audioMenu?.contains(e.target) && e.target !== this.audioBtn) {
+                this.closeAudioMenu();
+            }
+            if (this.captionsMenuOpen && !this.captionsMenu?.contains(e.target) && e.target !== this.captionsBtn) {
+                this.closeCaptionsMenu();
+            }
+            if (this.speedMenuOpen && !this.speedMenu?.contains(e.target) && e.target !== this.speedBtn) {
+                this.closeSpeedMenu();
+            }
+            if (this.episodesMenuOpen && !this.episodesNavMenu?.contains(e.target) && e.target !== this.episodesNavBtn) {
+                this.closeEpisodesMenu();
+            }
+        });
+
+        // Hide scroll hint after scrolling
+        const watchPage = document.getElementById('page-watch');
+        watchPage?.addEventListener('scroll', () => {
+            if (watchPage.scrollTop > 50) {
+                this.scrollHint?.classList.add('hidden');
+            } else {
+                this.scrollHint?.classList.remove('hidden');
+            }
+        });
+
+        this.updateDurationState();
+
+        window.addEventListener('pagehide', () => this.persistPlaybackStateAndSessionsForExit());
+        window.addEventListener('beforeunload', () => this.persistPlaybackStateAndSessionsForExit());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                this.persistPlaybackStateForExit();
+            }
+        });
+    }
+
+    cloneForResumeStorage(value) {
+        if (value === undefined || value === null) return null;
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_) {
+            return null;
+        }
+    }
+
+    sanitizeResumeContent(content = {}) {
+        if (!content || typeof content !== 'object') return null;
+
+        const copy = {};
+        [
+            'type', 'id', 'title', 'rawTitle', 'subtitle', 'poster', 'description', 'year', 'rating',
+            'sourceId', 'cloudSourceId', 'seriesId', 'categoryId', 'currentSeason',
+            'currentEpisode', 'containerExtension', 'durationHint', 'titleId',
+            'variantCount', '_variantCount', 'providerTmdbId',
+            'audioLanguageValidationStatus', 'audioLanguageVerifiedAt'
+        ].forEach(key => {
+            if (content[key] !== undefined && content[key] !== null) copy[key] = content[key];
+        });
+        const codecProfile = this.cloneForResumeStorage(content.codecProfile || content.codec_profile);
+        if (codecProfile) copy.codecProfile = codecProfile;
+        const providerAudioLanguages = window.MediaUtils?.providerAudioLanguages?.(content) || [];
+        if (providerAudioLanguages.length) {
+            copy.providerAudioLanguages = [...providerAudioLanguages];
+            copy.providerAudioLanguageStatus = 'provider_declared';
+        }
+
+        if (Array.isArray(content.versions)) {
+            copy.versions = content.versions.map(version => {
+                const audioTracks = this.cloneForResumeStorage(version.audioTracks || version.audio_tracks);
+                const subtitleTracks = this.cloneForResumeStorage(version.subtitleTracks || version.subtitle_tracks);
+                const audioLanguages = this.cloneForResumeStorage(version.audioLanguages || version.audio_languages);
+                const codecProfile = this.cloneForResumeStorage(version.codecProfile || version.codec_profile);
+                return {
+                    sourceId: version.sourceId || version.source_id,
+                    cloudSourceId: version.cloudSourceId || version.cloud_source_id || null,
+                    streamId: version.streamId || version.stream_id,
+                    container: version.container || version.containerExtension || version.container_extension,
+                    type: version.type,
+                    label: version.label,
+                    rawTitle: version.rawTitle || version.raw_title || null,
+                    providerAudioLanguages: window.MediaUtils?.providerAudioLanguages?.(version) || [],
+                    providerAudioLanguageStatus: 'provider_declared',
+                    codecProfile: codecProfile || null,
+                    audioTracks: Array.isArray(audioTracks) ? audioTracks : null,
+                    audioTracksScope: Array.isArray(audioTracks)
+                        ? (version.audioTracksScope || version.audio_tracks_scope || 'file')
+                        : null,
+                    audioLanguages: Array.isArray(audioLanguages) ? audioLanguages : null,
+                    audioLanguageValidationStatus: String(
+                        version.audioLanguageValidationStatus ||
+                        version.audio_language_validation_status ||
+                        'not_analyzed'
+                    ).toLowerCase(),
+                    audioLanguageVerifiedAt: version.audioLanguageVerifiedAt ||
+                        version.audio_language_verified_at ||
+                        null,
+                    subtitleTracks: Array.isArray(subtitleTracks) ? subtitleTracks : null,
+                    subtitleTracksScope: Array.isArray(subtitleTracks)
+                        ? (version.subtitleTracksScope || version.subtitle_tracks_scope || 'file')
+                        : null,
+                };
+            }).filter(version => version.sourceId && version.streamId);
+        }
+        if (Number.isFinite(Number(content.versionIndex))) {
+            copy.versionIndex = Number(content.versionIndex);
+        }
+        const defaultVariant = this.cloneForResumeStorage(content.defaultVariant || content.default_variant);
+        if (defaultVariant) copy.defaultVariant = defaultVariant;
+        const seriesInfo = this.cloneForResumeStorage(content.seriesInfo);
+        if (seriesInfo) copy.seriesInfo = seriesInfo;
+
+        return copy;
+    }
+
+    sanitizeResumePlayback(playback = {}) {
+        const metadata = this.playbackMetadataFromResult(playback || {});
+        const codecProfile = this.cloneForResumeStorage(metadata.codecProfile || metadata.codec_profile);
+        const playbackPreferences = this.cloneForResumeStorage(
+            metadata.playbackPreferences
+            || metadata.playback_preferences
+            || metadata.preferences
+            || this.getPlaybackPreferences()
+        );
+        const result = {};
+        if (codecProfile) result.codecProfile = codecProfile;
+        if (metadata.audioMode || metadata.audio_mode) result.audioMode = metadata.audioMode || metadata.audio_mode;
+        if (metadata.gatewayMode || metadata.gateway_mode) result.gatewayMode = metadata.gatewayMode || metadata.gateway_mode;
+        if (playbackPreferences) result.playbackPreferences = playbackPreferences;
+        return result;
+    }
+
+    normalizePlaybackPreferences(value = null) {
+        if (!value || typeof value !== 'object') return null;
+        const audio = value.audio || value.selectedAudio || value.audioTrack || null;
+        const subtitle = value.subtitle || value.subtitles || value.selectedSubtitle || value.caption || null;
+        const result = {};
+        if (audio && typeof audio === 'object') result.audio = { ...audio };
+        if (subtitle && typeof subtitle === 'object') result.subtitle = { ...subtitle };
+        return result.audio || result.subtitle ? result : null;
+    }
+
+    applyPlaybackPreferencesToHint(hint, preferences) {
+        const mediaUtils = typeof MediaUtils !== 'undefined'
+            ? MediaUtils
+            : (typeof window !== 'undefined' ? window.MediaUtils : null);
+        return mediaUtils?.applyPlaybackPreferencesToHint
+            ? mediaUtils.applyPlaybackPreferencesToHint(hint, preferences)
+            : hint;
+    }
+
+    getPlaybackPreferences() {
+        const result = {};
+        const audio = this.getCurrentAudioPreference();
+        const subtitle = this.getCurrentSubtitlePreference();
+        if (audio) result.audio = audio;
+        if (subtitle) result.subtitle = subtitle;
+        return result.audio || result.subtitle ? result : null;
+    }
+
+    getMergedPlaybackPreferences(overrides = {}) {
+        const current = this.getPlaybackPreferences() || {};
+        const existing = this.normalizePlaybackPreferences(
+            this.content?.playbackPreferences || this.content?.playback_preferences || {}
+        ) || {};
+        const merged = {
+            ...existing,
+            ...current,
+            ...overrides
+        };
+        if (!merged.audio) delete merged.audio;
+        if (!merged.subtitle) delete merged.subtitle;
+        return merged.audio || merged.subtitle ? merged : null;
+    }
+
+    savePlaybackPreferences(preferences) {
+        const normalized = this.normalizePlaybackPreferences(preferences);
+        if (!this.content || !normalized) return null;
+        this.content.playbackPreferences = normalized;
+        this.setPendingPlaybackPreferences(normalized);
+        return normalized;
+    }
+
+    getLanguageSafeFailoverPreferences(preferences = this.getMergedPlaybackPreferences()) {
+        const normalized = this.normalizePlaybackPreferences(preferences) || {};
+        const result = {};
+        const language = this.normalizeTrackLanguage(
+            normalized.audio?.language || normalized.audio?.lang
+        );
+
+        // Audio stream indexes are absolute to one container. Carrying an index to
+        // a sibling version can select a completely different language.
+        if (language && language !== 'und') {
+            result.audio = { source: 'probe', language };
+        }
+        if (normalized.subtitle?.source === 'off' || normalized.subtitle?.mode === 'off') {
+            result.subtitle = { source: 'off', mode: 'off' };
+        } else if (normalized.subtitle) {
+            // Subtitle stream indices are file-local too. Preserve only the
+            // language and user timing offset across sibling versions.
+            const subtitleLanguage = this.normalizeTrackLanguage(
+                normalized.subtitle.language || normalized.subtitle.lang
+            );
+            if (subtitleLanguage && subtitleLanguage !== 'und') {
+                result.subtitle = {
+                    source: 'probe',
+                    language: subtitleLanguage,
+                    offsetSeconds: this.normalizeSubtitleOffset(
+                        normalized.subtitle.offsetSeconds ?? normalized.subtitle.offset_seconds ?? 0
+                    )
+                };
+            }
+        }
+        return result.audio || result.subtitle ? result : null;
+    }
+
+    getLanguageSafeFailoverAudioOptions(tracks, preferences) {
+        const audioPreference = this.normalizePlaybackPreferences(preferences)?.audio;
+        if (!audioPreference || !Array.isArray(tracks) || !tracks.length) return {};
+        const track = this.findTrackByPreference(tracks, audioPreference, null, 'audio');
+        const streamIndex = Number(track?.index);
+        if (!Number.isInteger(streamIndex) || streamIndex < 0) return {};
+
+        // A Gateway session fixes its audio map when FFmpeg starts. Restore-by-language
+        // in loadVideo() is therefore too late: resolve the same language to this
+        // sibling file's absolute stream index before requesting the session.
+        return {
+            audioStreamIndex: streamIndex,
+            ...(track?.codec ? { audioCodec: track.codec } : {}),
+            ...(Number.isFinite(Number(track?.channels)) ? { audioChannels: Number(track.channels) } : {}),
+        };
+    }
+
+    getCurrentAudioPreference() {
+        const selectedProbe = this.getSelectedAudioTrack();
+        if (this.selectedAudioTrackUserChoice && selectedProbe) {
+            return this.audioPreferenceFromProbeTrack(selectedProbe);
+        }
+
+        const gatewayAudioContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (gatewayAudioContext && this._gatewayAudioRenditionStatus === 'ready') {
+            const renditions = this.getValidatedGatewayAudioRenditions();
+            if (!renditions) return null;
+            const active = renditions.find((entry) => entry.hlsIndex === this.hls?.audioTrack
+                && entry.streamIndex === Number(this.directAudioStreamIndex));
+            return active ? this.audioPreferenceFromProbeTrack(active) : null;
+        }
+        if (gatewayAudioContext && this.isGatewayAudioRenditionFailClosed()) return null;
+
+        if (this.hls && Number.isInteger(this.hls.audioTrack) && this.hls.audioTrack >= 0) {
+            const track = this.hls.audioTracks?.[this.hls.audioTrack];
+            if (track) {
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
+                return {
+                    source: 'hls',
+                    index: this.hls.audioTrack,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
+                    label: track.name || track.lang || `Audio ${this.hls.audioTrack + 1}`,
+                    language: track.lang || null,
+                    codec: track.codec || track.audioCodec || null
+                };
+            }
+        }
+
+        const nativeTracks = this.video?.audioTracks;
+        if (nativeTracks && Number.isFinite(nativeTracks.length)) {
+            for (let i = 0; i < nativeTracks.length; i++) {
+                const track = nativeTracks[i];
+                if (track?.enabled) {
+                    return {
+                        source: 'native',
+                        index: i,
+                        label: track.label || track.language || `Audio ${i + 1}`,
+                        language: track.language || null
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    audioPreferenceFromProbeTrack(track) {
+        if (!track) return null;
+        return {
+            source: 'probe',
+            streamIndex: track.index,
+            label: this.getTrackLabel(track, 'Audio', 'audio'),
+            language: track.language || null,
+            codec: track.codec || null,
+            channels: track.channels || null
+        };
+    }
+
+    subtitlePreferenceFromProbeTrack(track, subtitleTracks = this.getExtractableSubtitleTracks()) {
+        if (!track) return null;
+        const trackIndex = subtitleTracks.indexOf(track);
+        return {
+            source: 'probe',
+            streamIndex: track.index,
+            label: this.getSubtitleMenuLabel(track, subtitleTracks, trackIndex, 'Subtitles'),
+            language: track.inferredLanguage || track.language || null,
+            offsetSeconds: this.normalizeSubtitleOffset(this.subtitleOffsetSeconds)
+        };
+    }
+
+    getCurrentSubtitlePreference() {
+        const selectedProbe = this._hlsOwnsExactSubtitles ? null : this.getSelectedSubtitleTrack();
+        if (selectedProbe) {
+            const subtitleTracks = this.getExtractableSubtitleTracks();
+            return this.subtitlePreferenceFromProbeTrack(selectedProbe, subtitleTracks);
+        }
+
+        if (this.hls && Number.isInteger(this.hls.subtitleTrack) && this.hls.subtitleTrack >= 0) {
+            const track = this.hls.subtitleTracks?.[this.hls.subtitleTrack];
+            if (track) {
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
+                return {
+                    source: 'hls',
+                    index: this.hls.subtitleTrack,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
+                    label: this.getSubtitleMenuLabel(track, this.hls.subtitleTracks, this.hls.subtitleTrack),
+                    language: track.lang || null
+                };
+            }
+        }
+
+        const textTracks = this.video?.textTracks;
+        if (textTracks && Number.isFinite(textTracks.length)) {
+            for (let i = 0; i < textTracks.length; i++) {
+                const track = textTracks[i];
+                if (track?.mode === 'showing') {
+                    return {
+                        source: 'native',
+                        index: i,
+                        label: this.getSubtitleMenuLabel(track, Array.from(textTracks), i),
+                        language: track.language || null
+                    };
+                }
+            }
+        }
+
+        if (this.selectedSubtitleTrackUserChoice && this.selectedSubtitleStreamIndex === null) {
+            return { source: 'off', mode: 'off' };
+        }
+
+        return null;
+    }
+
+    setPendingPlaybackPreferences(value) {
+        this.pendingPlaybackPreferences = this.normalizePlaybackPreferences(value);
+        this._pendingAudioPreferenceApplied = false;
+        this._pendingSubtitlePreferenceApplied = false;
+    }
+
+    applyAcknowledgedSubtitleSessionMetadata(options = {}) {
+        const gatewaySession = options.gatewaySession || options.gateway_session || {};
+        const pendingSubtitlePreference = this.pendingPlaybackPreferences?.subtitle || {};
+        const pendingSubtitleOff = pendingSubtitlePreference.source === 'off'
+            || pendingSubtitlePreference.mode === 'off';
+        const explicitTracks = Array.isArray(options.subtitleTracks)
+            ? options.subtitleTracks
+            : (Array.isArray(options.subtitle_tracks)
+                ? options.subtitle_tracks
+                : (Array.isArray(gatewaySession.subtitleTracks)
+                    ? gatewaySession.subtitleTracks
+                    : (Array.isArray(gatewaySession.subtitle_tracks) ? gatewaySession.subtitle_tracks : null)));
+        if (explicitTracks !== null) {
+            this.subtitleTracks = [...explicitTracks];
+            this.captureExactSubtitleTracksFromMetadata({
+                ...options,
+                subtitleTracks: explicitTracks,
+            });
+        }
+
+        const acknowledgedIndex = this.nullablePlaybackStreamIndex(
+            options.subtitleStreamIndex ??
+            options.subtitle_stream_index ??
+            gatewaySession.subtitleStreamIndex ??
+            gatewaySession.subtitle_stream_index
+        );
+        if (pendingSubtitleOff) {
+            // "Off" is an explicit user choice. Never let stale session metadata
+            // from the lane being replaced turn captions back on while the new
+            // no-subtitle lane is attaching.
+            this.selectedSubtitleStreamIndex = null;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.subtitleOffsetSeconds = 0;
+            this._pendingSubtitlePreferenceApplied = true;
+        } else if (Number.isInteger(acknowledgedIndex) && acknowledgedIndex >= 0) {
+            const preference = pendingSubtitlePreference;
+            const existingIndex = this.subtitleTracks.findIndex(
+                track => Number(track?.index) === acknowledgedIndex
+            );
+            const existing = existingIndex >= 0 ? this.subtitleTracks[existingIndex] : null;
+            // A returned subtitleStreamIndex is not a client guess: Edge only
+            // returns it after the Gateway maps the requested index to one real
+            // text stream. Preserve that acknowledgement even when an older
+            // cached codec profile omitted the track descriptor.
+            const acknowledgedTrack = {
+                ...(existing || {}),
+                index: acknowledgedIndex,
+                title: existing?.title || preference.title || preference.label || null,
+                language: existing?.language || existing?.lang || preference.language || preference.lang || null,
+                codec: existing?.codec || preference.codec || null,
+                subtitleType: 'text',
+                extractable: true,
+                sessionAcknowledged: true,
+            };
+            if (existingIndex >= 0) {
+                this.subtitleTracks[existingIndex] = acknowledgedTrack;
+            } else {
+                this.subtitleTracks.push(acknowledgedTrack);
+            }
+            if (this._hlsOwnsExactSubtitles) {
+                // The acknowledgement proves the absolute source identity, but
+                // hls.js must still bind that identity to its immutable relative
+                // rendition index before the choice becomes active.
+                this.selectedSubtitleStreamIndex = null;
+                this.selectedSubtitleTrackUserChoice = Boolean(Object.keys(preference).length);
+                this._pendingSubtitlePreferenceApplied = false;
+            } else {
+                this.selectedSubtitleStreamIndex = acknowledgedIndex;
+                this.selectedSubtitleTrackUserChoice = true;
+                this.subtitleOffsetSeconds = this.normalizeSubtitleOffset(
+                    preference.offsetSeconds ?? preference.offset_seconds ?? this.loadSubtitleOffset?.(acknowledgedIndex) ?? 0
+                );
+                this._pendingSubtitlePreferenceApplied = true;
+            }
+        } else {
+            this.restorePendingSubtitlePreference();
+        }
+
+        if (this.currentStreamInfo && typeof this.currentStreamInfo === 'object') {
+            this.currentStreamInfo = {
+                ...this.currentStreamInfo,
+                subtitles: [...this.subtitleTracks],
+            };
+        }
+        this.updateCaptionsTracks?.();
+        return this.subtitleTracks;
+    }
+
+    clearPendingPreference(kind) {
+        if (kind === 'audio') this._pendingAudioPreferenceApplied = true;
+        if (kind === 'subtitle') this._pendingSubtitlePreferenceApplied = true;
+    }
+
+    isExactHlsSubtitleTopology(value) {
+        if (!value || typeof value !== 'object') return false;
+        const sourceTrackCount = Number(value.sourceTrackCount ?? value.source_track_count);
+        const preparedTrackCount = Number(value.preparedTrackCount ?? value.prepared_track_count);
+        const completeGraph = value.cacheEligible === true
+            && value.reason === 'enabled'
+            && preparedTrackCount === sourceTrackCount;
+        const completeNonCacheableGraph = value.cacheEligible === false
+            && value.reason === 'enabled-full-noncacheable'
+            && preparedTrackCount === sourceTrackCount;
+        const partialGraph = value.cacheEligible === false
+            && value.reason === 'enabled-partial'
+            && preparedTrackCount < sourceTrackCount;
+        return value.protocol === 1
+            && value.enabled === true
+            && (completeGraph || completeNonCacheableGraph || partialGraph)
+            && Number.isSafeInteger(sourceTrackCount)
+            && sourceTrackCount > 0
+            && Number.isSafeInteger(preparedTrackCount)
+            && preparedTrackCount > 0
+            && preparedTrackCount <= sourceTrackCount;
+    }
+
+    isPartialExactHlsSubtitleTopology(value = this._exactSubtitleHlsTopology) {
+        if (!this.isExactHlsSubtitleTopology(value)) return false;
+        const sourceTrackCount = Number(value.sourceTrackCount ?? value.source_track_count);
+        const preparedTrackCount = Number(value.preparedTrackCount ?? value.prepared_track_count);
+        return value.cacheEligible === false && preparedTrackCount < sourceTrackCount;
+    }
+
+    hlsTrackSourceStreamIndex(track) {
+        if (!track || typeof track !== 'object') return null;
+        const attrs = track.attrs || track.attributes || {};
+        let viaGetter = null;
+        try {
+            viaGetter = typeof attrs.get === 'function'
+                ? attrs.get('X-NORVA-STREAM-INDEX')
+                : null;
+        } catch (_) { /* malformed third-party track metadata */ }
+        const candidates = [
+            track.streamIndex,
+            track.stream_index,
+            track.sourceStreamIndex,
+            track.source_stream_index,
+            attrs['X-NORVA-STREAM-INDEX'],
+            attrs['x-norva-stream-index'],
+            viaGetter,
+        ];
+        for (const value of candidates) {
+            const parsed = Number(value);
+            if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 4095) return parsed;
+        }
+        return null;
+    }
+
+    findTrackByPreference(tracks, preference, fallbackIndex = null, type = 'track') {
+        if (!Array.isArray(tracks) || !preference) return null;
+        const streamIndex = Number(preference.streamIndex ?? preference.stream_index);
+        if (Number.isInteger(streamIndex)) {
+            const byStream = tracks.find(track => (
+                Number(track?.index) === streamIndex
+                || this.hlsTrackSourceStreamIndex(track) === streamIndex
+            ));
+            if (byStream) return byStream;
+        }
+
+        const index = Number(preference.index);
+        if (Number.isInteger(index) && tracks[index]) return tracks[index];
+
+        const language = this.normalizeTrackLanguage(preference.language || preference.lang);
+        if (language && language !== 'und') {
+            const byLanguage = tracks.find(track => this.normalizeTrackLanguage(track?.language || track?.lang) === language);
+            if (byLanguage) return byLanguage;
+        }
+
+        const label = String(preference.label || '').trim().toLowerCase();
+        if (label) {
+            const byLabel = tracks.find(track => {
+                const trackIndex = tracks.indexOf(track);
+                const candidate = type === 'subtitle'
+                    ? this.getSubtitleTrackLabel(track, '').toLowerCase()
+                    : this.getTrackLabel(track, '', type).toLowerCase();
+                const menuCandidate = type === 'subtitle'
+                    ? this.getSubtitleMenuLabel(track, tracks, trackIndex, '').toLowerCase()
+                    : '';
+                return candidate && (candidate === label || menuCandidate === label);
+            });
+            if (byLabel) return byLabel;
+        }
+
+        if (Number.isInteger(fallbackIndex) && tracks[fallbackIndex]) return tracks[fallbackIndex];
+        return null;
+    }
+
+    restorePendingAudioPreference(info = this.currentStreamInfo) {
+        if (this._pendingAudioPreferenceApplied) return false;
+        const preference = this.pendingPlaybackPreferences?.audio;
+        if (!preference) return false;
+
+        if (this._privateMediaCacheAccess && this.hls?.audioTracks?.length) {
+            const track = this.findTrackByPreference(
+                this.hls.audioTracks,
+                preference,
+                Number(preference.index),
+                'audio'
+            );
+            const index = this.hls.audioTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.audioTrack = index;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        const probeTracks = Array.isArray(info?.audioTracks) && info.audioTracks.length
+            ? info.audioTracks
+            : this.audioTracks;
+        if (probeTracks?.length && (preference.source === 'probe' || preference.streamIndex !== undefined || preference.stream_index !== undefined)) {
+            const track = this.findTrackByPreference(probeTracks, preference, null, 'audio');
+            if (track) {
+                this.selectedAudioStreamIndex = track.index;
+                this.selectedAudioTrackUserChoice = true;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        if (preference.source === 'hls' && this.hls?.audioTracks?.length) {
+            const track = this.findTrackByPreference(this.hls.audioTracks, preference, Number(preference.index), 'audio');
+            const index = this.hls.audioTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.audioTrack = index;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        const nativeTracks = this.video?.audioTracks;
+        if (preference.source === 'native' && nativeTracks && Number.isFinite(nativeTracks.length)) {
+            const index = Number(preference.index);
+            if (Number.isInteger(index) && index >= 0 && index < nativeTracks.length) {
+                for (let i = 0; i < nativeTracks.length; i++) nativeTracks[i].enabled = i === index;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    restorePendingSubtitlePreference() {
+        if (this._pendingSubtitlePreferenceApplied) return false;
+        const preference = this.pendingPlaybackPreferences?.subtitle;
+        if (!preference) return false;
+
+        if (preference.source === 'off' || preference.mode === 'off') {
+            this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
+            this._pendingSubtitlePreferenceApplied = true;
+            if (this.hls) {
+                this.hls.subtitleDisplay = false;
+                this.hls.subtitleTrack = -1;
+            }
+            const textTracks = this.video?.textTracks;
+            if (textTracks && Number.isFinite(textTracks.length)) {
+                for (let i = 0; i < textTracks.length; i++) textTracks[i].mode = 'hidden';
+            }
+            this.clearExternalSubtitleTracks();
+            return true;
+        }
+
+        if (this._hlsOwnsExactSubtitles) {
+            if (this.hls?.subtitleTracks?.length) {
+                const track = this.findTrackByPreference(
+                    this.hls.subtitleTracks,
+                    preference,
+                    Number(preference.index),
+                    'subtitle'
+                );
+                const index = this.hls.subtitleTracks.indexOf(track);
+                if (index >= 0) {
+                    this.hls.subtitleDisplay = true;
+                    this.hls.subtitleTrack = index;
+                    this.selectedSubtitleStreamIndex = null;
+                    this.selectedSubtitleTrackUserChoice = true;
+                    this._pendingSubtitlePreferenceApplied = true;
+                    return true;
+                }
+            }
+            // Exact HLS owns this selection. Wait for the immutable rendition
+            // map instead of prematurely turning it into a probe-backed restart.
+            return false;
+        }
+
+        const probeTracks = this.getExtractableSubtitleTracks();
+        if (probeTracks.length && (preference.source === 'probe' || preference.streamIndex !== undefined || preference.stream_index !== undefined)) {
+            const track = this.findTrackByPreference(probeTracks, preference, null, 'subtitle');
+            if (track) {
+                this.selectedSubtitleStreamIndex = track.index;
+                this.subtitleOffsetSeconds = this.normalizeSubtitleOffset(
+                    preference.offsetSeconds ?? preference.offset_seconds ?? this.loadSubtitleOffset(track.index)
+                );
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
+        }
+
+        if (preference.source === 'hls' && this.hls?.subtitleTracks?.length) {
+            const track = this.findTrackByPreference(this.hls.subtitleTracks, preference, Number(preference.index), 'subtitle');
+            const index = this.hls.subtitleTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.subtitleDisplay = true;
+                this.hls.subtitleTrack = index;
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
+        }
+
+        const textTracks = this.video?.textTracks;
+        if (preference.source === 'native' && textTracks && Number.isFinite(textTracks.length)) {
+            const index = Number(preference.index);
+            if (Number.isInteger(index) && index >= 0 && index < textTracks.length) {
+                for (let i = 0; i < textTracks.length; i++) textTracks[i].mode = i === index ? 'showing' : 'hidden';
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    getResumeSnapshotPosition() {
+        // During a seek/restart the native clock can still expose the old
+        // playhead. Persist the user's explicit target across devices.
+        if (Number.isFinite(this._pendingSeekTarget)) {
+            return Math.max(0, Math.floor(this._pendingSeekTarget));
+        }
+        this.trackPlaybackPosition();
+        const position = Math.max(
+            this._lastKnownPlaybackPosition || 0,
+            this.getPlaybackPosition?.() || 0,
+            this.video?.currentTime || 0,
+            this.resumeTime || 0
+        );
+        return Math.max(0, Math.floor(Number.isFinite(position) ? position : 0));
+    }
+
+    trackPlaybackPosition(options = {}) {
+        const rawDuration = this.getStablePlaybackDuration?.()
+            || this.getDisplayDuration?.()
+            || this.durationHint
+            || this._lastKnownPlaybackDuration
+            || 0;
+        const duration = Number(rawDuration);
+        if (Number.isFinite(duration) && duration > 0) {
+            const normalized = Math.floor(duration);
+            // A MediaSource that is being aborted exposes only the buffered
+            // fragment as video.duration (for example 89s of a 6529s film).
+            // Never let that transient teardown clock shrink a known VOD total.
+            this._lastKnownPlaybackDuration = this.isVodContent?.()
+                ? Math.max(this._lastKnownPlaybackDuration || 0, normalized)
+                : normalized;
+        }
+
+        const rawPosition = Number.isFinite(Number(options.position))
+            ? Number(options.position)
+            : (this.getPlaybackPosition?.() || this.video?.currentTime || this.resumeTime || 0);
+        if (!Number.isFinite(rawPosition) || rawPosition < 0) return this._lastKnownPlaybackPosition || 0;
+
+        const position = Math.floor(rawPosition);
+        if (options.force || position >= (this._lastKnownPlaybackPosition || 0) || position <= 2) {
+            this._lastKnownPlaybackPosition = position;
+            if (this._exitHistoryCapture
+                && this._exitHistoryCapture.generation === this._historyPersistenceGeneration
+                && this._exitHistoryCapture.position !== position) {
+                this._exitHistoryCapture = null;
+            }
+        }
+        return this._lastKnownPlaybackPosition || 0;
+    }
+
+    activateHistoryPersistence() {
+        this._historyPersistenceGeneration = (this._historyPersistenceGeneration || 0) + 1;
+        this._historyPersistenceActive = true;
+        this._exitHistoryCapture = null;
+        return this._historyPersistenceGeneration;
+    }
+
+    deactivateHistoryPersistence() {
+        this._historyPersistenceActive = false;
+        this._historyPersistenceGeneration = (this._historyPersistenceGeneration || 0) + 1;
+        this._exitHistoryCapture = null;
+    }
+
+    captureHistoryPositionForExit() {
+        if (!this._historyPersistenceActive || !this.content || !this.video) return null;
+        if (this._exitHistoryCapture?.generation === this._historyPersistenceGeneration) {
+            return this._exitHistoryCapture;
+        }
+
+        // A seek handler already updates _lastKnownPlaybackPosition with force,
+        // including a deliberate restart at 00:00. Here we deliberately do not
+        // force-track the media element: teardown can expose a synthetic zero.
+        const hasPendingSeek = this._pendingSeekTarget !== null
+            && this._pendingSeekTarget !== undefined
+            && Number.isFinite(Number(this._pendingSeekTarget));
+        const pendingSeek = hasPendingSeek ? Number(this._pendingSeekTarget) : null;
+        const position = hasPendingSeek
+            ? Math.max(0, Math.floor(pendingSeek))
+            : Math.max(
+                0,
+                Math.floor(Number(this._lastKnownPlaybackPosition) || 0),
+                Math.floor(Number(this.getPlaybackPosition?.()) || 0),
+                Math.floor(Number(this.video?.currentTime) || 0),
+                Math.floor(Number(this.resumeTime) || 0)
+            );
+        const duration = Math.max(0, Math.floor(Number(
+            this.getStablePlaybackDuration?.()
+            || this.getDisplayDuration?.()
+            || this._lastKnownPlaybackDuration
+            || this.durationHint
+            || 0
+        ) || 0));
+        this._exitHistoryCapture = {
+            generation: this._historyPersistenceGeneration,
+            position: duration > 0 ? Math.min(position, duration) : position,
+            duration,
+            watchedAt: new Date().toISOString()
+        };
+        return this._exitHistoryCapture;
+    }
+
+    persistPlaybackStateForExit() {
+        const capture = this.captureHistoryPositionForExit();
+        if (!capture) return false;
+        this.trackPlaybackPosition({ position: capture.position, force: true });
+        this.saveResumeSnapshot({ position: capture.position });
+        Promise.resolve(this.saveProgress({
+            force: true,
+            position: capture.position,
+            duration: capture.duration,
+            watchedAt: capture.watchedAt,
+            keepalive: true
+        })).catch(() => {});
+        return true;
+    }
+
+    persistPlaybackStateAndSessionsForExit() {
+        this.persistPlaybackStateForExit();
+        // A full navigation/tab close aborts media bytes in the browser, but the
+        // cloud coordinator otherwise keeps the logical provider slot until TTL.
+        // keepalive lets the tiny expiry POST outlive page teardown.
+        this.stopCloudPlaybackSessions({ keepalive: true }).catch(() => {});
+    }
+
+    getResumeRestorePosition(position, duration = 0) {
+        const rawPosition = Math.max(0, Math.floor(Number(position) || 0));
+        const rawDuration = Math.max(0, Math.floor(Number(duration) || 0));
+        if (rawPosition < 12) return 0;
+        if (rawDuration > 0 && rawPosition >= rawDuration * 0.95) return 0;
+        return rawPosition;
+    }
+
+    saveResumeSnapshotThrottled(force = false) {
+        if (this._suspendResumeSnapshotSave) return;
+        const now = Date.now();
+        if (!force && now - this._lastResumeSnapshotSaveAt < this.resumeSnapshotSaveIntervalMs) return;
+        this._lastResumeSnapshotSaveAt = now;
+        this.saveResumeSnapshot();
+    }
+
+    saveResumeSnapshot(overrides = {}) {
+        if (this._suspendResumeSnapshotSave) return;
+        if (!this.content?.id || !this.content?.sourceId) return;
+        if (this.content.type !== 'movie' && this.content.type !== 'series') return;
+
+        const content = this.sanitizeResumeContent({
+            ...this.content,
+            containerExtension: this.containerExtension,
+            currentSeason: this.currentSeason,
+            currentEpisode: this.currentEpisode,
+            seriesInfo: this.seriesInfo,
+            durationHint: this.durationHint
+        });
+        if (!content?.id || !content?.sourceId) return;
+
+        const position = Number.isFinite(Number(overrides.position))
+            ? Math.max(0, Math.floor(Number(overrides.position)))
+            : this.getResumeSnapshotPosition();
+        const duration = this.getDisplayDuration?.() || this.durationHint || 0;
+
+        const snapshot = {
+            version: 1,
+            savedAt: Date.now(),
+            content,
+            contentType: this.contentType || content.type,
+            containerExtension: this.containerExtension || content.containerExtension || 'mp4',
+            currentSeason: this.currentSeason || content.currentSeason || null,
+            currentEpisode: this.currentEpisode || content.currentEpisode || null,
+            returnPage: this.returnPage || (content.type === 'movie' ? 'movies' : 'series'),
+            position,
+            duration: Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0,
+            playback: this.sanitizeResumePlayback(overrides.playback || this._resumePlaybackMetadata || {})
+        };
+
+        try {
+            sessionStorage.setItem(this.resumeSnapshotKey, JSON.stringify(snapshot));
+        } catch (error) {
+            console.warn('[WatchPage] Could not persist playback resume snapshot:', error?.message || error);
+        }
+        // Also persist a durable per-title position (survives quit + tab close).
+        this._persistResumePosition();
+    }
+
+    readResumeSnapshot() {
+        let snapshot = null;
+        try {
+            snapshot = JSON.parse(sessionStorage.getItem(this.resumeSnapshotKey) || 'null');
+        } catch (_) {
+            snapshot = null;
+        }
+
+        const isValid = snapshot?.version === 1
+            && snapshot?.content?.id
+            && snapshot?.content?.sourceId
+            && (snapshot.content.type === 'movie' || snapshot.content.type === 'series');
+
+        if (!isValid || Date.now() - Number(snapshot.savedAt || 0) > this.resumeSnapshotTtlMs) {
+            this.clearResumeSnapshot();
+            return null;
+        }
+        return snapshot;
+    }
+
+    clearResumeSnapshot() {
+        try {
+            sessionStorage.removeItem(this.resumeSnapshotKey);
+        } catch (_) {
+            // Ignore storage cleanup failures.
+        }
+    }
+
+    _resumePositionId(content) {
+        const c = content || this.content || {};
+        if (!c.id || !c.sourceId) return null;
+        return `${c.sourceId}:${c.id}:${c.currentSeason || ''}:${c.currentEpisode || ''}`;
+    }
+
+    // Persist the current playback position per title (localStorage). Survives
+    // quit + tab close, unlike the sessionStorage snapshot which goBack() clears.
+    _persistResumePosition() {
+        try {
+            const id = this._resumePositionId();
+            if (!id) return;
+            const pos = Math.floor(this.getResumeSnapshotPosition?.() || 0);
+            const dur = Math.floor(this.getDisplayDuration?.() || this.durationHint || 0);
+            if (pos < 12) return;                         // too early to matter
+            if (dur > 0 && pos >= dur * 0.95) return;     // near the end → no resume
+            let map = {};
+            try { map = JSON.parse(localStorage.getItem(this.resumePositionsKey) || '{}') || {}; } catch (_) { map = {}; }
+            map[id] = { position: pos, duration: dur, savedAt: Date.now() };
+            const entries = Object.entries(map);
+            if (entries.length > 60) { // cap + drop oldest
+                entries.sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0));
+                map = Object.fromEntries(entries.slice(0, 60));
+            }
+            localStorage.setItem(this.resumePositionsKey, JSON.stringify(map));
+        } catch (_) { /* best-effort */ }
+    }
+
+    _loadResumePosition(content) {
+        try {
+            const id = this._resumePositionId(content);
+            if (!id) return 0;
+            const map = JSON.parse(localStorage.getItem(this.resumePositionsKey) || '{}') || {};
+            const e = map[id];
+            if (!e || Date.now() - (e.savedAt || 0) > this.resumePositionsTtlMs) return 0;
+            return this.getResumeRestorePosition(e.position, e.duration);
+        } catch (_) { return 0; }
+    }
+
+    _clearResumePosition() {
+        try {
+            const id = this._resumePositionId();
+            if (!id) return;
+            const map = JSON.parse(localStorage.getItem(this.resumePositionsKey) || '{}') || {};
+            if (map[id]) { delete map[id]; localStorage.setItem(this.resumePositionsKey, JSON.stringify(map)); }
+        } catch (_) { /* best-effort */ }
+    }
+
+    // Authoritative cross-device resume: fetch this title's saved position from the
+    // server's continue-watching (cloud_watch_history) via the targeted /history
+    // lookup. Returns 0 on any failure or if the backend lookup isn't available
+    // (older backend returns {history:[...]} with no .item → treated as 0).
+    async _fetchServerResumePosition(content) {
+        return (await this._fetchServerResumeInfo(content)).position;
+    }
+
+    // Same lookup, but distinguishes "the server ANSWERED 0" (finished ≥95% elsewhere, removed
+    // from Continue Watching, <12 s) from "we couldn't ask" (offline, older backend). Only an
+    // answered 0 may override a position the launcher card transmitted.
+    async _fetchServerResumeInfo(content) {
+        try {
+            if (!window.API?.request || !content?.id) return { answered: false, position: 0 };
+            const itemType = content.type === 'movie' ? 'movie' : 'episode';
+            const params = new URLSearchParams({ itemId: String(content.id), itemType });
+            if (content.sourceId) params.set('sourceId', String(content.sourceId));
+            const res = await window.API.request('GET', `/history?${params.toString()}`);
+            if (!res || typeof res !== 'object' || !('item' in res)) return { answered: false, position: 0 };
+            const item = res.item;
+            if (!item || item.completed) return { answered: true, position: 0 };
+            const progress = Number(item.progress_seconds ?? item.progress ?? 0);
+            const duration = Number(item.duration_seconds ?? item.duration ?? 0);
+            return { answered: true, position: this.getResumeRestorePosition(progress, duration) };
+        } catch (err) {
+            console.warn('[WatchPage] Server resume fetch failed:', err?.message || err);
+            return { answered: false, position: 0 };
+        }
+    }
+
+    getHistoryResumePosition(item = {}) {
+        const data = item.data || {};
+        const progress = item.progress || item.progress_seconds || data.progress || 0;
+        const duration = item.duration || item.duration_seconds || data.duration || data.durationHint || 0;
+        return this.getResumeRestorePosition(progress, duration);
+    }
+
+    pickCloudResumeHistoryItem(items = []) {
+        return (items || [])
+            .map((item, index) => ({ item, index }))
+            .filter(({ item }) => {
+                const data = item.data || {};
+                const type = item.item_type || item.itemType || item.type;
+                const sourceId = item.source_id || item.sourceId || data.sourceId;
+                const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id;
+                const isPlayable = type === 'movie' || type === 'episode' || type === 'series';
+                return isPlayable && sourceId && streamId && this.getHistoryResumePosition(item) > 0;
+            })
+            .sort((a, b) => {
+                const aTime = Date.parse(a.item.updated_at || a.item.watched_at || a.item.updatedAt || a.item.watchedAt || '') || 0;
+                const bTime = Date.parse(b.item.updated_at || b.item.watched_at || b.item.updatedAt || b.item.watchedAt || '') || 0;
+                return (bTime - aTime) || (a.index - b.index);
+            })[0]?.item || null;
+    }
+
+    async restoreFromCloudHistory() {
+        if (this.content || this._resumeRestorePromise) return this._resumeRestorePromise;
+        const homePage = this.app?.pages?.home;
+        if (!homePage?.playItem) return null;
+
+        let restoreAttemptId = null;
+        let restoreSignal = null;
+        this._resumeRestorePromise = (async () => {
+            restoreAttemptId = this.beginPlaybackAttempt();
+            restoreSignal = this.playbackResolveSignalForAttempt(restoreAttemptId);
+            const history = window.API?.history?.getAll
+                ? await window.API.history.getAll(20)
+                : await window.API.request('GET', '/history?limit=20');
+            const item = this.pickCloudResumeHistoryItem(Array.isArray(history) ? history : []);
+            if (!item) return null;
+
+            const data = item.data || {};
+            const type = item.item_type || item.itemType || item.type || '';
+            const rawTitle = data.title || item.title || item.name || item.item_name || '';
+            const title = MediaUtils.cleanReleaseName(rawTitle) || rawTitle;
+            const subtitle = type === 'episode'
+                ? MediaUtils.formatEpisodeDisplayLabel(data.subtitle || '', {
+                    season: data.currentSeason,
+                    episode: data.currentEpisode
+                })
+                : (data.subtitle || '');
+            this.titleEl.textContent = title;
+            this.subtitleEl.textContent = subtitle;
+            this.showLoading();
+            console.info('[WatchPage] Restoring playback from cloud history after refresh.', {
+                itemId: item.item_id || item.itemId || item.id,
+                resumeOffset: this.getHistoryResumePosition(item)
+            });
+
+            await homePage.playItem(item, true);
+            return true;
+        })()
+            .catch(error => {
+                console.warn('[WatchPage] Could not restore cloud playback history after refresh:', error?.message || error);
+                this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_96798af93bd4", { defaultValue: "Playback failed after refresh. Try opening the title again." }) ?? 'Playback failed after refresh. Try opening the title again.'));
+                return false;
+            })
+            .finally(() => {
+                this._resumeRestorePromise = null;
+            });
+
+        return this._resumeRestorePromise;
+    }
+
+    findResumeSnapshotEpisode(snapshot) {
+        const episodeId = snapshot?.content?.id;
+        const episodesBySeason = snapshot?.content?.seriesInfo?.episodes;
+        if (!episodeId || !episodesBySeason || typeof episodesBySeason !== 'object') return null;
+
+        for (const episodes of Object.values(episodesBySeason)) {
+            if (!Array.isArray(episodes)) continue;
+            const found = episodes.find(episode => String(episode?.id) === String(episodeId));
+            if (found) return found;
+        }
+        return null;
+    }
+
+    vodPlaybackItemType(content = this.content) {
+        const rawType = String(
+            content?.type
+            ?? content?.itemType
+            ?? content?.item_type
+            ?? content?.streamType
+            ?? content?.stream_type
+            ?? ''
+        ).trim().toLowerCase();
+        const rawStreamType = String(
+            content?.streamType
+            ?? content?.stream_type
+            ?? content?.itemType
+            ?? content?.item_type
+            ?? ''
+        ).trim().toLowerCase();
+
+        if (
+            rawType === 'series'
+            || rawType === 'episode'
+            || rawStreamType === 'series'
+            || rawStreamType === 'episode'
+            || content?.seriesId
+            || content?.series_id
+        ) {
+            return 'series';
+        }
+        if (rawType === 'movie' || rawStreamType === 'movie') return 'movie';
+        return null;
+    }
+
+    canonicalizeVodPlaybackContent(content) {
+        if (!content || typeof content !== 'object') return content;
+        const rawType = String(content.type ?? content.itemType ?? content.item_type ?? '')
+            .trim()
+            .toLowerCase();
+        const itemType = this.vodPlaybackItemType(content);
+        if (!itemType) return content;
+
+        // Continue Watching can legitimately provide `type: "episode"`, while
+        // every provider playback request must use the Xtream type `series`.
+        // Preserve the UI/history semantic once, then keep Watch canonical.
+        if (rawType === 'episode' && !content.itemType && !content.item_type) {
+            content.itemType = 'episode';
+        }
+        content.type = itemType;
+        content.streamType = itemType;
+        return content;
+    }
+
+    captureVodPlaybackIdentity(content = this.content) {
+        const itemType = this.vodPlaybackItemType(content);
+        const sourceId = content?.sourceId ?? content?.source_id ?? null;
+        const itemId = content?.id
+            ?? content?.itemId
+            ?? content?.item_id
+            ?? content?.streamId
+            ?? content?.stream_id
+            ?? content?.externalId
+            ?? content?.external_id
+            ?? null;
+        if (!itemType || sourceId === null || sourceId === '' || itemId === null || itemId === '') {
+            return null;
+        }
+
+        const container = this.containerExtension
+            || content?.containerExtension
+            || content?.container_extension
+            || 'mp4';
+        const playbackItem = Object.freeze({
+            ...content,
+            id: itemId,
+            sourceId,
+            // Keep the episode semantic for MediaUtils metadata, while the
+            // provider contract remains explicitly `series`.
+            type: itemType === 'series' ? 'episode' : 'movie',
+            streamType: itemType,
+            itemType,
+            containerExtension: container,
+            container_extension: container,
+        });
+        return Object.freeze({ sourceId, itemId, itemType, container, playbackItem });
+    }
+
+    buildResumePlaybackHint(snapshot) {
+        const content = snapshot?.content || {};
+        const streamType = this.vodPlaybackItemType(content) || 'movie';
+        const container = snapshot.containerExtension || content.containerExtension || 'mp4';
+        const resumeEpisode = streamType === 'series' ? this.findResumeSnapshotEpisode(snapshot) : null;
+        const item = {
+            ...(resumeEpisode || {}),
+            ...content,
+            type: resumeEpisode ? 'episode' : content.type,
+            streamType,
+            itemType: streamType,
+            container_extension: resumeEpisode?.container_extension || content.containerExtension || container,
+            codecProfile: snapshot.playback?.codecProfile || content.codecProfile || content.defaultVariant?.codecProfile
+                || resumeEpisode?.codecProfile || resumeEpisode?.codec_profile
+        };
+        const base = { container, streamType };
+        const hint = MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(item, base)
+            : base;
+        // Series id so the server can map this episode to its catalog row (reuse/persist
+        // the probed audio map). The played stream id is the episode, not the series.
+        const seriesIdForAudio = content.seriesId || content.series_id;
+        if (streamType === 'series' && seriesIdForAudio) hint.audioSeriesId = seriesIdForAudio;
+        const playbackPreferences = snapshot?.playback?.playbackPreferences
+            || snapshot?.playbackPreferences
+            || snapshot?.content?.playbackPreferences
+            || null;
+        return this.applyPlaybackPreferencesToHint(hint, playbackPreferences);
+    }
+
+    async restoreFromResumeSnapshot() {
+        if (this.content || this._resumeRestorePromise) return this._resumeRestorePromise;
+        const snapshot = this.readResumeSnapshot();
+        if (!snapshot) return this.restoreFromCloudHistory();
+        const snapshotResumePosition = this.getResumeRestorePosition(snapshot.position, snapshot.duration);
+        if (snapshotResumePosition <= 0) {
+            console.info('[WatchPage] Local resume snapshot has no usable position; checking cloud history.');
+            const cloudRestored = await this.restoreFromCloudHistory();
+            if (cloudRestored) return cloudRestored;
+        }
+
+        // Keep the restore attempt scoped to this refresh restore.  The
+        // cloud-history path already declares these handles, but the local
+        // snapshot path also passes its abort signal to provider calls and
+        // checks staleness before attaching the returned session.
+        let restoreAttemptId = null;
+        let restoreSignal = null;
+        this._resumeRestorePromise = (async () => {
+            restoreAttemptId = this.beginPlaybackAttempt();
+            restoreSignal = this.playbackResolveSignalForAttempt(restoreAttemptId);
+            const content = {
+                ...snapshot.content,
+                type: snapshot.content.type,
+                // Carry the origin persisted at save time (saveResumeSnapshot) so a
+                // playback restored after a page refresh — where currentPage is
+                // already 'watch' — still knows where Back should return to.
+                returnPage: snapshot.returnPage || null,
+                resumeTime: snapshotResumePosition,
+                playbackPreferences: snapshot.playback?.playbackPreferences || snapshot.playbackPreferences || snapshot.content.playbackPreferences || null,
+                durationHint: this.normalizeDuration(snapshot.content.durationHint) || this.normalizeDuration(snapshot.duration),
+                currentSeason: snapshot.currentSeason || snapshot.content.currentSeason || null,
+                currentEpisode: snapshot.currentEpisode || snapshot.content.currentEpisode || null,
+                containerExtension: snapshot.containerExtension || snapshot.content.containerExtension || 'mp4'
+            };
+
+            this.titleEl.textContent = content.title || '';
+            this.subtitleEl.textContent = content.subtitle || '';
+            this.showLoading();
+
+            if (content.type === 'series' && !content.seriesInfo && content.seriesId && content.sourceId) {
+                try {
+                    content.seriesInfo = await API.proxy.xtream.seriesInfo(
+                        content.sourceId,
+                        content.seriesId,
+                        { signal: restoreSignal }
+                    );
+                } catch (error) {
+                    console.warn('[WatchPage] Could not reload series info for restored playback:', error?.message || error);
+                }
+            }
+
+            await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(restoreAttemptId) || restoreSignal?.aborted) return false;
+            const resumePlan = this.getGatewaySeekPlan(snapshotResumePosition);
+            let playbackHint = {
+                ...this.buildResumePlaybackHint(snapshot),
+                seekOffset: resumePlan.sessionStart,
+                startOffset: resumePlan.sessionStart,
+                resumeTime: resumePlan.sessionStart
+            };
+            const result = await API.proxy.xtream.getStreamUrl(
+                content.sourceId,
+                content.id,
+                content.type === 'series' ? 'series' : 'movie',
+                content.containerExtension || 'mp4',
+                playbackHint,
+                { signal: restoreSignal }
+            );
+
+            const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+            if (this.isStalePlaybackAttempt(restoreAttemptId) || restoreSignal?.aborted) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return false;
+            }
+
+            if (!result?.url) {
+                throw new Error('Restored playback did not return a media URL');
+            }
+
+            result.seekOffset = resumePlan.sessionStart;
+            result.startOffset = resumePlan.sessionStart;
+            result.resumeTarget = resumePlan.target;
+            content.cloudPlaybackSessionId = resultSessionId || null;
+            await this.play(content, result.url, result);
+            return true;
+        })()
+            .catch(error => {
+                if (restoreSignal?.aborted
+                    || error?.name === 'AbortError'
+                    || (restoreAttemptId !== null && this.isStalePlaybackAttempt(restoreAttemptId))) return false;
+                console.warn('[WatchPage] Could not restore playback after refresh:', error?.message || error);
+                this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_96798af93bd4", { defaultValue: "Playback failed after refresh. Try opening the title again." }) ?? 'Playback failed after refresh. Try opening the title again.'));
+                return false;
+            })
+            .finally(() => {
+                this._resumeRestorePromise = null;
+            });
+
+        return this._resumeRestorePromise;
+    }
+
+    /**
+     * Normalize Cloud playback/session responses so every caller can pass either
+     * the full API result or the already-flattened playback object.
+     */
+    nullablePlaybackStreamIndex(...values) {
+        for (const value of values) {
+            if (value === null || value === undefined || value === '') continue;
+            const parsed = Number(value);
+            if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+        }
+        return null;
+    }
+
+    playbackMetadataFromResult(playback = {}, extra = {}) {
+        const root = playback && typeof playback === 'object' ? playback : {};
+        const nestedPlayback = root.playback && typeof root.playback === 'object' ? root.playback : {};
+        const session = root.session && typeof root.session === 'object' ? root.session : {};
+        const nestedSession = nestedPlayback.session && typeof nestedPlayback.session === 'object' ? nestedPlayback.session : {};
+        const gatewaySession = nestedPlayback.gatewaySession || nestedPlayback.gateway_session || root.gatewaySession || root.gateway_session || null;
+        const seekOffset = Number(
+            extra.seekOffset ??
+            extra.seek_offset ??
+            extra.startOffset ??
+            extra.resumeTime ??
+            root.seekOffset ??
+            root.seek_offset ??
+            root.startOffset ??
+            root.resumeTime ??
+            nestedPlayback.seekOffset ??
+            nestedPlayback.seek_offset ??
+            nestedPlayback.startOffset ??
+            nestedPlayback.resumeTime ??
+            0
+        );
+        const sessionId = extra.sessionId
+            || extra.cloudPlaybackSessionId
+            || root.sessionId
+            || root.cloudPlaybackSessionId
+            || nestedPlayback.sessionId
+            || nestedPlayback.cloudPlaybackSessionId
+            || session.id
+            || nestedSession.id
+            || null;
+        const audioStreamIndex = this.nullablePlaybackStreamIndex(
+            extra.audioStreamIndex,
+            extra.audio_stream_index,
+            root.audioStreamIndex,
+            root.audio_stream_index,
+            nestedPlayback.audioStreamIndex,
+            nestedPlayback.audio_stream_index,
+            gatewaySession?.audioStreamIndex,
+            gatewaySession?.audio_stream_index
+        );
+        const subtitleStreamIndex = this.nullablePlaybackStreamIndex(
+            extra.subtitleStreamIndex,
+            extra.subtitle_stream_index,
+            root.subtitleStreamIndex,
+            root.subtitle_stream_index,
+            nestedPlayback.subtitleStreamIndex,
+            nestedPlayback.subtitle_stream_index,
+            gatewaySession?.subtitleStreamIndex,
+            gatewaySession?.subtitle_stream_index
+        );
+        const requestedSeekOffset = Number(
+            extra.requestedSeekOffset ??
+            extra.requested_seek_offset ??
+            root.requestedSeekOffset ??
+            root.requested_seek_offset ??
+            nestedPlayback.requestedSeekOffset ??
+            nestedPlayback.requested_seek_offset ??
+            seekOffset
+        );
+        const actualStartOffset = Number(
+            extra.actualStartOffset ??
+            extra.actual_start_offset ??
+            root.actualStartOffset ??
+            root.actual_start_offset ??
+            nestedPlayback.actualStartOffset ??
+            nestedPlayback.actual_start_offset ??
+            seekOffset
+        );
+        const localSeekTarget = Number(
+            extra.localSeekTarget ??
+            extra.local_seek_target ??
+            root.localSeekTarget ??
+            root.local_seek_target ??
+            nestedPlayback.localSeekTarget ??
+            nestedPlayback.local_seek_target
+        );
+        const sourceTimestamps = Boolean(
+            extra.sourceTimestamps ??
+            extra.source_timestamps ??
+            root.sourceTimestamps ??
+            root.source_timestamps ??
+            nestedPlayback.sourceTimestamps ??
+            nestedPlayback.source_timestamps ??
+            false
+        );
+        const audioRenditions = extra.audioRenditions
+            ?? extra.audio_renditions
+            ?? root.audioRenditions
+            ?? root.audio_renditions
+            ?? nestedPlayback.audioRenditions
+            ?? nestedPlayback.audio_renditions
+            ?? gatewaySession?.audioRenditions
+            ?? gatewaySession?.audio_renditions
+            ?? null;
+        const multiAudioHls = extra.multiAudioHls
+            ?? extra.multi_audio_hls
+            ?? root.multiAudioHls
+            ?? root.multi_audio_hls
+            ?? nestedPlayback.multiAudioHls
+            ?? nestedPlayback.multi_audio_hls
+            ?? gatewaySession?.multiAudioHls
+            ?? gatewaySession?.multi_audio_hls
+            ?? null;
+        const subtitleRenditions = extra.subtitleRenditions
+            ?? extra.subtitle_renditions
+            ?? root.subtitleRenditions
+            ?? root.subtitle_renditions
+            ?? nestedPlayback.subtitleRenditions
+            ?? nestedPlayback.subtitle_renditions
+            ?? gatewaySession?.subtitleRenditions
+            ?? gatewaySession?.subtitle_renditions
+            ?? null;
+        const exactSubtitleHls = extra.exactSubtitleHls
+            ?? extra.exact_subtitle_hls
+            ?? root.exactSubtitleHls
+            ?? root.exact_subtitle_hls
+            ?? nestedPlayback.exactSubtitleHls
+            ?? nestedPlayback.exact_subtitle_hls
+            ?? gatewaySession?.exactSubtitleHls
+            ?? gatewaySession?.exact_subtitle_hls
+            ?? null;
+        const startupPolicy = extra.startupPolicy
+            ?? extra.startup_policy
+            ?? root.startupPolicy
+            ?? root.startup_policy
+            ?? nestedPlayback.startupPolicy
+            ?? nestedPlayback.startup_policy
+            ?? gatewaySession?.startupPolicy
+            ?? gatewaySession?.startup_policy
+            ?? null;
+
+        return {
+            ...nestedPlayback,
+            ...root,
+            ...extra,
+            sessionId,
+            cloudPlaybackSessionId: extra.cloudPlaybackSessionId
+                || root.cloudPlaybackSessionId
+                || nestedPlayback.cloudPlaybackSessionId
+                || sessionId,
+            gatewaySession,
+            audioRenditions,
+            multiAudioHls,
+            subtitleRenditions,
+            exactSubtitleHls,
+            startupPolicy,
+            codecProfile: extra.codecProfile
+                || extra.codec_profile
+                || root.codecProfile
+                || root.codec_profile
+                || nestedPlayback.codecProfile
+                || nestedPlayback.codec_profile
+                || null,
+            audioMode: extra.audioMode
+                || extra.audio_mode
+                || root.audioMode
+                || root.audio_mode
+                || nestedPlayback.audioMode
+                || nestedPlayback.audio_mode
+                || null,
+            audioStreamIndex: Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0
+                ? audioStreamIndex
+                : null,
+            subtitleStreamIndex: Number.isInteger(subtitleStreamIndex) && subtitleStreamIndex >= 0
+                ? subtitleStreamIndex
+                : null,
+            requestedSeekOffset: Number.isFinite(requestedSeekOffset) && requestedSeekOffset > 0
+                ? requestedSeekOffset
+                : 0,
+            actualStartOffset: Number.isFinite(actualStartOffset) && actualStartOffset > 0
+                ? actualStartOffset
+                : 0,
+            localSeekTarget: Number.isFinite(localSeekTarget) && localSeekTarget > 0
+                ? localSeekTarget
+                : 0,
+            sourceTimestamps,
+            seekOffset: Number.isFinite(seekOffset) && seekOffset > 0 ? Math.floor(seekOffset) : 0,
+            startOffset: Number.isFinite(seekOffset) && seekOffset > 0 ? Math.floor(seekOffset) : 0
+        };
+    }
+
+    durationFromCodecProfile(profile) {
+        if (!profile || typeof profile !== 'object') return null;
+        return this.normalizeDuration(
+            profile.durationSeconds ??
+            profile.duration_seconds ??
+            profile.duration ??
+            profile.formatDuration ??
+            profile.format_duration
+        );
+    }
+
+    /**
+     * Main entry point - play content
+     * @param {Object} content - Movie or episode info
+     * @param {string} streamUrl - Stream URL
+     * @param {Object} playback - Cloud playback metadata
+     */
+    async play(content, streamUrl, playback = {}) {
+        // TTFF starts at the user's playback intention, before resume lookup,
+        // previous-media teardown or cloud-session resolution. Keep the timestamp
+        // local until the incoming content identity is assigned so play_requested
+        // can never be attributed to the outgoing title during an episode handoff.
+        const playbackRequestedAt = Date.now();
+        // Reserve this user intention before any progress save, teardown or slot
+        // cooldown can yield. A later click/Back can now stale this invocation
+        // instead of letting it resume and declare itself newest after the wait.
+        const playbackAttemptId = this.beginPlaybackAttempt();
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
+        this.canonicalizeVodPlaybackContent(content);
+        this._subtitleSwitchRequestId += 1;
+        this._subtitleSwitchPromise = null;
+        this.resetSubtitleSwitchFeedback();
+        const streamUrlResolver = typeof streamUrl === 'function' ? streamUrl : null;
+        this.cancelFirstFrameTelemetryObserver();
+        this.cancelDeferredEngineTrackEnrichment();
+        const replacingActiveWatch = this.app?.currentPage === 'watch'
+            && this.content
+            && (
+                Boolean(streamUrlResolver)
+                ||
+                String(this.content.sourceId ?? '') !== String(content?.sourceId ?? '')
+                || String(this.content.id ?? '') !== String(content?.id ?? '')
+                || Number(this.currentSeason || 0) !== Number(content?.currentSeason || 0)
+                || Number(this.currentEpisode || 0) !== Number(content?.currentEpisode || 0)
+            );
+        if (replacingActiveWatch) {
+            // Capture the outgoing episode before assigning the incoming identity.
+            // Otherwise a same-route handoff can write the old media clock under
+            // the next episode's history key.
+            this.persistPlaybackStateForExit();
+            this.deactivateHistoryPersistence();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this._suspendResumeSnapshotSave = true;
+            try {
+                await this.stop({ preservePlaybackResolutionAttempt: true });
+            } finally {
+                this._suspendResumeSnapshotSave = false;
+            }
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            await this.waitForProviderSlotRelease(2500);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        }
+        // A different title starts with the resolver's normal single-lane choice.
+        // A browser-engine failure may offer an explicit server conversion later,
+        // but that preference must never leak to the next title.
+        this._preferredExplicitCloudMode = null;
+        // Fresh user-initiated playback → reset the engine mid-stream retry budget (the
+        // automatic engine retries in onError don't go through play(), so they don't reset it).
+        this._engineMidRetries = 0;
+        this._engineRetryFromPos = 0;
+        // `streamUrl` may be an async resolver: we render the player shell +
+        // loading animation first, then await it. Resolve it later (after the
+        // shell is on screen) so the metadata below uses what we have upfront.
+        let playbackMetadata = this.playbackMetadataFromResult(playback);
+        this._resumePlaybackMetadata = playbackMetadata;
+        let cloudPlaybackSessionId = playbackMetadata.sessionId
+            || playbackMetadata.cloudPlaybackSessionId
+            || content.cloudPlaybackSessionId
+            || content.playbackSessionId
+            || null;
+        if (cloudPlaybackSessionId) {
+            content.cloudPlaybackSessionId = cloudPlaybackSessionId;
+        }
+
+        this.content = content;
+        this.contentType = content.type;
+        this.trackProduct('content_opened', { step: 'content', state: 'started' });
+        this.beginPlaybackTelemetry(cloudPlaybackSessionId, playbackAttemptId, {
+            requestedAt: playbackRequestedAt,
+        });
+        this.audioLanguageValidationStatus = String(
+            playbackMetadata.audioLanguageValidationStatus ||
+            playbackMetadata.audio_language_validation_status ||
+            content.audioLanguageValidationStatus ||
+            content.audio_language_validation_status ||
+            'not_analyzed'
+        ).toLowerCase();
+        this.seriesInfo = content.seriesInfo || null;
+        this.currentSeason = content.currentSeason || null;
+        this.currentEpisode = content.currentEpisode || null;
+
+        // A new playback intention owns the Watch shell immediately. Clear the
+        // outgoing title's terminal error and content panels before resume/session
+        // resolution can yield, otherwise a slow MKV resolve leaves stale UI on
+        // screen and makes a healthy request look broken.
+        this.hidePlaybackError();
+        this._lastFailureMsg = null;
+        this.closeEpisodesMenu();
+        if (this.recommendedGrid) this.recommendedGrid.replaceChildren();
+        if (this.seasonsContainer) this.seasonsContainer.replaceChildren();
+        if (this.episodesNavList) this.episodesNavList.replaceChildren();
+        if (content.type === 'movie') {
+            this.episodesSection?.classList.add('hidden');
+            this.recommendedSection?.classList.remove('hidden');
+        } else {
+            this.recommendedSection?.classList.add('hidden');
+            this.episodesSection?.classList.remove('hidden');
+        }
+        this.updateEpisodeNavUI();
+        let requestedResumeTime = Number(
+            content.resumeTime ??
+            playbackMetadata.resumeTarget ??
+            playbackMetadata.resume_target ??
+            playbackMetadata.seekOffset ??
+            playbackMetadata.startOffset ??
+            0
+        );
+        // Cross-device resume (audit 2026-07-17 P1): ALWAYS ask the server, no longer only when
+        // the transmitted offset is 0. A Continue Watching card can be up to ~80 s stale (60 s
+        // warm-DOM + 20 s hist cache) — or days, via the SWR paint — and used to short-circuit
+        // the lookup, so the stale card WON over a fresher position written by another device.
+        // Precedence: explicit seek target (session restore) > server answer (even an answered 0
+        // — finished/removed elsewhere restarts honestly) > transmitted card offset > durable
+        // local store (offline / older backend only).
+        const explicitSeekTarget = Number(
+            playbackMetadata.resumeTarget ?? playbackMetadata.resume_target ??
+            playbackMetadata.seekOffset ?? playbackMetadata.startOffset ?? 0
+        ) > 0;
+        let serverAnswered = false;
+        if (!explicitSeekTarget && content?.id && content?.sourceId) {
+            const server = await this._fetchServerResumeInfo(content);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            if (server.answered) {
+                serverAnswered = true;
+                if (server.position !== requestedResumeTime) {
+                    console.log(`[WatchPage] Resume from server: ${server.position}s (card carried ${requestedResumeTime}s)`);
+                }
+                requestedResumeTime = server.position;
+            }
+        }
+        if (!serverAnswered && !(requestedResumeTime > 0) && content?.id && content?.sourceId) {
+            const stored = this._loadResumePosition(content);
+            if (stored > 0) {
+                requestedResumeTime = stored;
+                console.log(`[WatchPage] Resume from stored position: ${stored}s`);
+            }
+        }
+        this.recordPlaybackStartupPhase('resumeResolved');
+        this.resumeTime = Number.isFinite(requestedResumeTime) && requestedResumeTime > 0 ? Math.floor(requestedResumeTime) : 0;
+        const sessionStartOffset = Number(
+            playbackMetadata.seekOffset ??
+            playbackMetadata.seek_offset ??
+            playbackMetadata.startOffset ??
+            playbackMetadata.start_offset ??
+            playbackMetadata.resumeTime ??
+            0
+        );
+        let loadSeekOffset = Number(
+            playbackMetadata.actualStartOffset ??
+            playbackMetadata.actual_start_offset ??
+            sessionStartOffset
+        );
+        loadSeekOffset = Number.isFinite(loadSeekOffset) && loadSeekOffset > 0
+            ? loadSeekOffset
+            : (this.resumeTime || 0);
+        this.containerExtension = content.containerExtension || 'mp4';
+        // Remember where playback was actually launched from so the Back arrow
+        // returns THERE, not a page hardcoded from the content type. app.currentPage
+        // still holds the launching page at this point (navigateTo('watch') runs
+        // further down, at line ~1362). Order of preference:
+        //   1) content.returnPage — an explicit origin (e.g. restore-after-refresh).
+        //   2) the live origin page — the real fix: a VOD opened from Home's
+        //      "Continue Watching" now returns to Home instead of dumping the user
+        //      on the Movies catalogue they never came from.
+        //   3) the content-type default — only when neither is available.
+        // Internal re-plays (next episode, failover, seek re-open) run with
+        // currentPage === 'watch'; they fall through to the existing returnPage,
+        // preserving the origin captured on the first, user-initiated play().
+        const launchOrigin = this.app?.currentPage;
+        if (content.returnPage) {
+            this.returnPage = content.returnPage;
+        } else if (launchOrigin && launchOrigin !== 'watch') {
+            this.returnPage = launchOrigin;
+        } else if (!this.returnPage) {
+            this.returnPage = content.type === 'movie' ? 'movies' : 'series';
+        }
+        // Known total duration (TMDB runtime / episode duration) used as a
+        // timeline fallback when ffprobe can't determine the duration
+        const codecProfile = playbackMetadata.codecProfile || playbackMetadata.codec_profile || null;
+        const codecProfileDuration = this.durationFromCodecProfile(codecProfile);
+        this.durationHint = this.normalizeDuration(content.durationHint) || codecProfileDuration;
+        this._diagCodecProfile = codecProfile;
+        this._timelineDiagLogged = null;
+        // Timeline diagnostics: why a title does/doesn't get a seek bar. The bar needs a duration,
+        // which for a gateway-session comes from durationHint (catalog runtime OR the gateway codec
+        // profile's durationSeconds — incl. the MPEG-TS size*8/bitrate estimate). Logged at load.
+        console.log('[WatchPage] timeline diag (load):', {
+            mode: playbackMetadata.mode || playbackMetadata.playbackMode || null,
+            container: this.containerExtension,
+            contentDurationHint: content.durationHint ?? null,
+            codecProfilePresent: Boolean(codecProfile),
+            codecProfileDurationSeconds: codecProfile ? (codecProfile.durationSeconds ?? codecProfile.duration_seconds ?? codecProfile.duration ?? null) : null,
+            codecProfileBitRate: codecProfile ? (codecProfile.bitRate ?? codecProfile.bit_rate ?? null) : null,
+            codecProfileDuration,
+            resolvedDurationHint: this.durationHint,
+        });
+        this._lastKnownPlaybackPosition = this.resumeTime || 0;
+        this._lastKnownPlaybackDuration = this.durationHint || 0;
+        this.activateHistoryPersistence();
+        this.resetTrackSelectionState();
+        this.captureExactSubtitleTracksFromMetadata(content);
+        this.captureExactSubtitleTracksFromMetadata(playbackMetadata);
+        // Exact file-scoped catalogue metadata can already name the audio tracks
+        // while the playback session and HLS topology are still resolving. Paint
+        // those rows immediately, but keep them disabled until the active player
+        // proves the switchable topology for this exact attempt.
+        this._audioTopologyPending = true;
+        this.updateAudioTracks();
+        this.setPendingPlaybackPreferences(
+            content.playbackPreferences
+            || content.playback_preferences
+            || playbackMetadata.playbackPreferences
+            || playbackMetadata.playback_preferences
+            || playbackMetadata.preferences
+            || null
+        );
+
+        // Alternate versions of the same title (duplicate group) for failover
+        this.versions = Array.isArray(content.versions) && content.versions.length > 1 ? content.versions : null;
+        this.versionIndex = content.versionIndex || 0;
+        this._failoverInProgress = false;
+        this._failoverAttemptId = null;
+        this._playbackStatusOkReported = false;
+        this._lastFailureMsg = null;
+        this._cloudGatewayTranscodeFallbackTried = false;
+        this._firstFrameReported = false;
+        this._playStartedReported = false;
+        this._playbackEnded = false;
+        this._lastPauseTelemetryAt = 0;
+        this._handlingPlaybackFailure = false;
+
+        // Reset state
+        this.cancelNextEpisode();
+        this.nextEpisodeDismissed = false;
+        document.getElementById('watch-still-watching')?.remove();
+        this.resetSkipIntroState();
+        this.loadIntroMarkers();
+        this.resetStoryboard();
+        this.loadStoryboard();
+
+        // Paint the player shell (poster + title + loading animation) FIRST so the
+        // player appears instantly on click — before stopping the previous stream
+        // or waiting on the gateway session. The stream loads into this shell.
+        // Staying on #watch (next/previous episode or internal replay) is a media
+        // handoff, not a page exit. Calling navigateTo here would invoke hide(),
+        // tear down the new identity and clear its resume snapshot.
+        if (this.app?.currentPage !== 'watch') {
+            this.app.navigateTo('watch', true);
+        }
+        document.getElementById('page-watch')?.scrollTo(0, 0);
+        this.titleEl.textContent = content.title || '';
+        this.subtitleEl.textContent = content.subtitle || '';
+        this.saveResumeSnapshot({ playback: playbackMetadata, position: this.resumeTime || 0 });
+        this.renderDetails();
+        this.showLoading();
+
+        // Now stop any previous (Live TV) playback, so the provider's single
+        // connection slot is free before we request this title. Kept before the
+        // stream resolver so the old slot is released first, but no longer blocks
+        // the shell from showing.
+        await this.app?.player?.stop?.();
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+
+        if (streamUrlResolver) {
+            let resolved;
+            let coordinationRetryCount = 0;
+            const coordinationStartedAt = Date.now();
+            while (!resolved) {
+                try {
+                    resolved = await streamUrlResolver({
+                        signal: playbackResolveSignal,
+                        playbackAttemptId,
+                    });
+                } catch (err) {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)
+                        || playbackResolveSignal?.aborted
+                        || err?.name === 'AbortError') return;
+                    const retryDelayMs = this.playbackCoordinationRetryDelayMs(
+                        err,
+                        coordinationRetryCount,
+                        Date.now() - coordinationStartedAt
+                    );
+                    if (retryDelayMs !== null) {
+                        coordinationRetryCount += 1;
+                        this.recordPlaybackStartupPhase('cacheCoordinationWait', playbackAttemptId);
+                        const stillCurrent = await this.waitForPlaybackCoordinationRetry(
+                            retryDelayMs,
+                            playbackResolveSignal
+                        );
+                        if (!stillCurrent || this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                        continue;
+                    }
+                    const errorText = this.getErrorText(err) || 'This title could not be started. Please try again.';
+                    // Only the two exact cache-coordination 425 codes may loop
+                    // above. A terminal resolver failure never arms the generic
+                    // timer retry, which could mint an unrelated provider lane.
+                    this.showPlaybackError(errorText, {
+                        immediate: true,
+                        allowAutomaticRetry: false
+                    });
+                    return;
+                }
+            }
+            // A cloud resolver can finish after Back/navigation invalidated this
+            // attempt. The response already owns a provider session, so capture
+            // and expire that exact session before discarding the late result.
+            // Otherwise its Gateway process can stay alive until the 15-minute
+            // lease expires even though no player is left to consume it.
+            const resolvedPlaybackMetadata = this.playbackMetadataFromResult({ ...playback, ...resolved });
+            const resolvedSessionId = resolvedPlaybackMetadata.sessionId
+                || resolvedPlaybackMetadata.cloudPlaybackSessionId;
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+                await this.cleanupStaleCloudPlaybackSession(resolvedSessionId);
+                return;
+            }
+            if (!resolved || !resolved.url) {
+                await this.cleanupStaleCloudPlaybackSession(resolvedSessionId);
+                this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_05958c958fa0", { defaultValue: "This title could not be started. Please try again." }) ?? 'This title could not be started. Please try again.'), {
+                    immediate: true,
+                    allowAutomaticRetry: false
+                });
+                return;
+            }
+            streamUrl = resolved.url;
+            playbackMetadata = resolvedPlaybackMetadata;
+            this._resumePlaybackMetadata = playbackMetadata;
+            const resolvedStartOffset = Number(
+                playbackMetadata.actualStartOffset ??
+                playbackMetadata.actual_start_offset ??
+                playbackMetadata.seekOffset ??
+                playbackMetadata.startOffset
+            );
+            if (Number.isFinite(resolvedStartOffset) && resolvedStartOffset >= 0) {
+                loadSeekOffset = resolvedStartOffset;
+            }
+            if (resolvedSessionId) {
+                cloudPlaybackSessionId = resolvedSessionId;
+                content.cloudPlaybackSessionId = resolvedSessionId;
+                this.updatePlaybackTelemetrySession(resolvedSessionId, playbackAttemptId);
+            }
+            const resolvedAudioTracks = Array.isArray(playbackMetadata.audioTracks)
+                ? playbackMetadata.audioTracks
+                : (Array.isArray(playbackMetadata.audio_tracks) ? playbackMetadata.audio_tracks : null);
+            if (resolvedAudioTracks !== null) {
+                this.replaceExactContentAudioMetadata(
+                    resolvedAudioTracks,
+                    playbackMetadata.audioLanguages || playbackMetadata.audio_languages || [],
+                    playbackMetadata.audioLanguageValidationStatus ||
+                        playbackMetadata.audio_language_validation_status ||
+                        'pending'
+                );
+            }
+            // The resolver may have enriched content (e.g. episode seriesInfo
+            // for next-episode handoff, or a fuller subtitle) while the shell
+            // was already on screen — refresh the bits that were shown early.
+            if (content.seriesInfo) this.seriesInfo = content.seriesInfo;
+            if (content.currentSeason) this.currentSeason = content.currentSeason;
+            if (content.currentEpisode) this.currentEpisode = content.currentEpisode;
+            this.titleEl.textContent = content.title || '';
+            this.subtitleEl.textContent = content.subtitle || '';
+            this.renderDetails();
+        }
+        this.recordPlaybackStartupPhase('sessionResolved');
+
+        // Load video
+        await this.loadVideo(streamUrl, {
+            cloudPlaybackSessionId,
+            playbackAttemptId,
+            mode: playbackMetadata.mode || null,
+            startTime: this.resumeTime || 0,
+            codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null,
+            seekOffset: loadSeekOffset,
+            actualStartOffset: playbackMetadata.actualStartOffset ?? playbackMetadata.actual_start_offset ?? loadSeekOffset,
+            requestedSeekOffset: playbackMetadata.requestedSeekOffset ?? playbackMetadata.requested_seek_offset ?? this.resumeTime ?? 0,
+            localSeekTarget: playbackMetadata.localSeekTarget ?? playbackMetadata.local_seek_target ?? null,
+            sourceTimestamps: playbackMetadata.sourceTimestamps ?? playbackMetadata.source_timestamps ?? false,
+            audioStreamIndex: playbackMetadata.audioStreamIndex ?? playbackMetadata.audio_stream_index ?? null,
+            subtitleStreamIndex: playbackMetadata.subtitleStreamIndex ?? playbackMetadata.subtitle_stream_index ?? null,
+            audioRenditions: playbackMetadata.audioRenditions ?? playbackMetadata.audio_renditions ?? null,
+            multiAudioHls: playbackMetadata.multiAudioHls ?? playbackMetadata.multi_audio_hls ?? null,
+            subtitleRenditions: playbackMetadata.subtitleRenditions ?? playbackMetadata.subtitle_renditions ?? null,
+            exactSubtitleHls: playbackMetadata.exactSubtitleHls ?? playbackMetadata.exact_subtitle_hls ?? null,
+            startupPolicy: playbackMetadata.startupPolicy ?? playbackMetadata.startup_policy
+                ?? playbackMetadata.gatewaySession?.startupPolicy
+                ?? playbackMetadata.gatewaySession?.startup_policy
+                ?? null,
+            audioLanguageValidationStatus: playbackMetadata.audioLanguageValidationStatus ||
+                playbackMetadata.audio_language_validation_status ||
+                content.audioLanguageValidationStatus ||
+                content.audio_language_validation_status ||
+                'not_analyzed',
+            // Per-track audio languages the SERVER probed for this engine session
+            // (the engine can't read them itself). Must be forwarded explicitly —
+            // loadVideo gets a fresh options object, not the full playback metadata.
+            audioTracks: playbackMetadata.audioTracks || playbackMetadata.audio_tracks || null,
+            // Subtitle tracks the SERVER probed (same relay header-parse as audio).
+            // Known at load → the CC menu lists them AND the saved subtitle pref can
+            // be restored, without a client-side gateway probe during streaming.
+            subtitleTracks: playbackMetadata.subtitleTracks || playbackMetadata.subtitle_tracks || null,
+            // Short-lived private-cache authorization is kept only in memory and
+            // attached to HLS requests as a header; it is never copied to a URL.
+            mediaCache: playbackMetadata.mediaCache || playbackMetadata.media_cache || null
+        });
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+
+        // Keep lock-screen artwork/title and hardware media controls current.
+        // The redundant navbar "Now Playing" CTA was removed: Watch is already
+        // the active route and leaving it deliberately tears playback down.
+        this.updateMediaSessionMetadata();
+
+        // Populate details section
+        this.renderDetails();
+
+        // Load recommended (movies) or episodes (series)
+        if (content.type === 'movie') {
+            this.episodesSection?.classList.add('hidden');
+            this.recommendedSection?.classList.remove('hidden');
+            await this.loadRecommended(content.sourceId, content.categoryId);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        } else {
+            this.recommendedSection?.classList.add('hidden');
+            this.episodesSection?.classList.remove('hidden');
+            this.renderEpisodes();
+        }
+
+        // Reflect the new content in the player controls (series-only prev/next +
+        // episodes selector, and re-apply the chosen playback speed).
+        this.updateEpisodeNavUI();
+
+        // Check favorite status
+        await this.checkFavorite();
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        // Show overlay initially
+        this.showOverlay();
+
+        // Start watch history tracking
+        this.startHistoryTracking();
+    }
+
+    // ==================== Media Session (lock screen / hardware keys) ====
+
+    /**
+     * Lock-screen & hardware transport controls for mobile-web playback:
+     * artwork + title on the lock screen, play/pause/±10s/seek-to handlers.
+     * Safe no-op on browsers without the Media Session API.
+     */
+    setupMediaSessionHandlers() {
+        const ms = navigator.mediaSession;
+        if (!ms || this._mediaSessionWired) return;
+        this._mediaSessionWired = true;
+        const safe = (action, handler) => {
+            try { ms.setActionHandler(action, handler); } catch (_) { /* unsupported action */ }
+        };
+        safe('play', () => {
+            this._gatewayUserPaused = false;
+            try { this.video?.play(); } catch (_) { }
+        });
+        safe('pause', () => {
+            this._gatewayUserPaused = true;
+            try { this.video?.pause(); } catch (_) { }
+        });
+        safe('seekbackward', (d) => this.skip(-(d?.seekOffset || 10)));
+        safe('seekforward', (d) => this.skip(d?.seekOffset || 10));
+        safe('seekto', (d) => {
+            if (typeof d?.seekTime === 'number') this.seekToTime(d.seekTime, { immediate: true });
+        });
+    }
+
+    updateMediaSessionMetadata() {
+        const ms = navigator.mediaSession;
+        if (!ms || !window.MediaMetadata || !this.content) return;
+        try {
+            const artwork = [];
+            if (this.content.poster) {
+                let posterUrl = this.content.poster;
+                try { posterUrl = new URL(posterUrl, location.origin).href; } catch (_) { }
+                artwork.push({ src: posterUrl, sizes: '342x513', type: 'image/jpeg' });
+            }
+            ms.metadata = new MediaMetadata({
+                title: this.content.title || 'Norva',
+                artist: this.content.subtitle || 'Norva',
+                artwork
+            });
+        } catch (_) { /* metadata is cosmetic */ }
+    }
+
+    updateMediaSessionPosition() {
+        const ms = navigator.mediaSession;
+        if (!ms || typeof ms.setPositionState !== 'function') return;
+        try {
+            const duration = this.getDisplayDuration();
+            if (!duration || !isFinite(duration) || duration <= 0) return;
+            const position = Math.min(Math.max(0, this.getPlaybackPosition() || 0), duration);
+            ms.setPositionState({
+                duration,
+                position,
+                playbackRate: this.video?.playbackRate || 1
+            });
+        } catch (_) { /* position state is cosmetic */ }
+    }
+
+    // ==================== Chromecast (web sender) ====================
+    // The receiver fetches server-served URLs itself (gateway HLS / relay MP4);
+    // engine (MSE) titles are re-resolved through a gateway transcode first.
+    // Local playback is fully released before the receiver connects, so
+    // single-connection provider accounts still see exactly one stream.
+
+    setupCastIntegration() {
+        if (!window.NorvaCast?.supported) return;
+        NorvaCast.ensureSdk();
+        // The cast button lives in the control bar (markup) so it sits with the
+        // other transport controls instead of floating. Wire it once.
+        const btn = document.getElementById('watch-cast');
+        if (btn && !btn._norvaBound) {
+            btn._norvaBound = true;
+            btn.addEventListener('click', () => this.startCasting());
+        }
+        // Drive visibility purely off cast-state changes (no fixed blind window):
+        // discovery is async, so also re-check on a few short ticks after mount.
+        NorvaCast.onStateChange(() => this.updateCastButton());
+        [1500, 4000, 8000].forEach(t => setTimeout(() => this.updateCastButton(), t));
+        this.updateCastButton();
+    }
+
+    updateCastButton() {
+        const btn = document.getElementById('watch-cast');
+        if (!btn) return;
+        const available = !!window.NorvaCast?.devicesAvailable?.();
+        btn.classList.toggle('hidden', !available);
+        // Reflect an active session (a device already streaming) so the icon reads
+        // as "casting" and a tap re-opens the cast bar instead of a fresh picker.
+        const casting = !!window.NorvaCast?.isCasting?.();
+        btn.classList.toggle('is-casting', casting);
+        btn.title = casting ? (globalThis.NorvaI18n?.t("ui_web_5438e23960bd", { defaultValue: "Casting — show controls" }) ?? 'Casting — show controls') : (globalThis.NorvaI18n?.t("ui_web_7739923feca7", { defaultValue: "Cast to TV" }) ?? 'Cast to TV');
+    }
+
+    // The Default Media Receiver plays MP4 / WebM / HLS — NOT Matroska, raw TS or
+    // most legacy muxes. Casting those directly fails opaquely on the device, so
+    // they get re-resolved through a gateway transcode instead.
+    isCastSafeDirectUrl(url) {
+        if (!/^https?:\/\//i.test(url || '')) return false;
+        let path = String(url).toLowerCase();
+        const q = path.indexOf('?'); if (q > 0) path = path.slice(0, q);
+        if (/\.(mkv|ts|avi|flv|wmv|mov|m2ts|mpg|mpeg)$/.test(path)) return false;
+        // Known-good extension, or an extension-less gateway session/playlist path.
+        return /\.(m3u8|mp4|webm)$/.test(path) || !/\.[a-z0-9]{2,4}$/.test(path);
+    }
+
+    async startCasting() {
+        if (!this.content) return;
+        if (window.NorvaCast?.isCasting?.()) {
+            this.showCastBar(NorvaCast.deviceName());
+            return;
+        }
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
+        let toreDown = false;
+        try {
+            // First show the device picker while local playback is still intact.
+            // If the viewer cancels, nothing is interrupted. Once a receiver is
+            // chosen, build a fresh HLS session specifically for Cast: connected
+            // TVs fetch media outside the browser, and reusing the local
+            // video/relay session is fragile on single-connection IPTV accounts.
+            await NorvaCast.requestSession();
+            try { this.video?.pause(); } catch (_) { }
+
+            const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
+            toreDown = true;
+            await this.releasePlaybackPipelineForRetry();
+            await this.waitForProviderSlotRelease(900);
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId, this.content.id, itemType,
+                this.containerExtension || 'mp4',
+                {
+                    gatewayMode: 'transcode', audioMode: 'transcode',
+                    ...activeAudioOptions,
+                    seekOffset: position, startOffset: position, resumeTime: position
+                },
+                { signal: this.playbackResolveSignalForAttempt?.() || null }
+            );
+            if (!result?.url || !/^https?:\/\//i.test(result.url)) {
+                throw new Error('No castable stream URL');
+            }
+            const castUrl = result.url;
+            this._castBaseOffset = position; // playlist time 0 == this absolute position
+
+            const device = await NorvaCast.castMedia({
+                url: castUrl,
+                title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
+                poster: this.content.poster,
+                currentTime: 0,
+                live: false,
+                subtitles: this.getCastSubtitles(castUrl)
+            });
+            this.hideLoading();
+            // _castConfirmed is set by updateCastBar once a live session is observed,
+            // so a transient not-yet-STARTED tick can't auto-stop us here.
+            this._castConfirmed = false;
+            this.showCastBar(device);
+            this.startCastProgressSync();
+            this.updateCastButton();
+        } catch (error) {
+            this.hideLoading();
+            // Restore local playback: the viewer cancelled the picker, or the cast
+            // failed after we had already torn the local pipeline down.
+            if (toreDown) { try { this.retryPlaybackInPlace(position); } catch (_) { } }
+            else { try { await this.video?.play(); } catch (_) { } }
+            if (error?.code === 'cancel') return; // dismissing the sheet is not an error
+            console.warn('[WatchPage] Cast failed:', error?.message || error);
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_f157e45c0bbc", { defaultValue: "Cast unavailable for this title" }) ?? 'Cast unavailable for this title'), 'error');
+        }
+    }
+
+    // Resolve the currently-selected subtitle into a receiver-fetchable VTT track.
+    // Embedded tracks map to the gateway sub_<index>.vtt sidecar; AI/generated
+    // captions (held as text) ship as a data: URI. Returns [] when none apply.
+    getCastSubtitles(castUrl) {
+        const out = [];
+        try {
+            const selected = this.getSelectedSubtitleTrack?.();
+            if (selected && Number.isInteger(Number(selected.index))) {
+                let subUrl = '';
+                if (/\/playlist\.m3u8(\?|$)/i.test(castUrl || '')) {
+                    try {
+                        const u = new URL(castUrl, window.location.href);
+                        u.pathname = u.pathname.replace(/\/playlist\.m3u8$/i, `/sub_${selected.index}.vtt`);
+                        subUrl = u.toString();
+                    } catch (_) { /* fall through */ }
+                }
+                if (!subUrl) subUrl = this.gatewaySubtitleUrlForTrack?.(selected.index) || '';
+                if (/^https?:\/\//i.test(subUrl)) {
+                    out.push({ url: subUrl, lang: this.normalizeTrackLanguage(selected.language) || 'und', name: 'Subtitles' });
+                    return out;
+                }
+            }
+            // AI / translated captions currently shown — text in memory → data: URI.
+            if (this._aiActiveVtt && typeof this._aiActiveVtt === 'string') {
+                const b64 = this._toBase64Utf8(this._aiActiveVtt);
+                if (b64 && b64.length < 700000) {
+                    out.push({ url: `data:text/vtt;base64,${b64}`, lang: this._aiActiveLang || 'und', name: (globalThis.NorvaI18n?.t("ui_web_8a7f1791674b", { defaultValue: "AI subtitles" }) ?? 'AI subtitles') });
+                }
+            }
+        } catch (_) { /* no subtitles → cast without, no regression */ }
+        return out;
+    }
+
+    _toBase64Utf8(str) {
+        try { return btoa(unescape(encodeURIComponent(str))); } catch (_) { return ''; }
+    }
+
+    _fmtCast(seconds) {
+        const s = Math.max(0, Math.floor(seconds || 0));
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        const mm = h ? String(m).padStart(2, '0') : String(m);
+        return (h ? `${h}:` : '') + `${mm}:${String(sec).padStart(2, '0')}`;
+    }
+
+    // Full playback duration (for the scrub bar / progress), independent of where
+    // the cast playlist starts.
+    _castTotalDuration() {
+        const disp = this.getDisplayDuration?.() || 0;
+        if (disp > 0) return disp;
+        return (this._castBaseOffset || 0) + (window.NorvaCast?.remoteDuration?.() || 0);
+    }
+
+    castSeekBy(delta) {
+        const rel = Math.max(0, (window.NorvaCast?.remotePosition?.() || 0) + delta);
+        window.NorvaCast?.seekTo?.(rel);
+    }
+
+    showCastBar(device) {
+        const section = document.querySelector('.watch-video-section');
+        if (!section) return;
+        let bar = document.getElementById('watch-cast-bar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'watch-cast-bar';
+            bar.className = 'watch-cast-bar';
+            bar.innerHTML = `
+                <img class="watch-cast-bar-poster" alt="" hidden>
+                <div class="watch-cast-bar-main">
+                    <div class="watch-cast-bar-title"></div>
+                    <div class="watch-cast-bar-label"></div>
+                    <div class="watch-cast-bar-scrub">
+                        <span class="watch-cast-time cur">0:00</span>
+                        <input type="range" class="watch-cast-seek" min="0" max="1000" value="0" aria-label="Seek" data-i18n-aria-label="ui_web_67ae3405bcd4">
+                        <span class="watch-cast-time dur">0:00</span>
+                    </div>
+                </div>
+                <div class="watch-cast-bar-controls">
+                    <button type="button" class="watch-cast-ctl" data-act="back" title="Back 10s" aria-label="Back 10 seconds" data-i18n-title="ui_web_aaf9fb3b02f3" data-i18n-aria-label="ui_web_b07313d85440">⏪</button>
+                    <button type="button" class="watch-cast-ctl watch-cast-toggle" data-act="toggle" title="Play/Pause" aria-label="Play or pause" data-i18n-title="ui_web_c9c7c7ecde58" data-i18n-aria-label="ui_web_a78afaff2fda">⏯</button>
+                    <button type="button" class="watch-cast-ctl" data-act="fwd" title="Forward 10s" aria-label="Forward 10 seconds" data-i18n-title="ui_web_4ae6a0efa598" data-i18n-aria-label="ui_web_26551d43abbb">⏩</button>
+                    <button type="button" class="watch-cast-ctl watch-cast-next" data-act="next" title="Next episode" aria-label="Next episode" hidden data-i18n-title="ui_web_a38c4e18c73d" data-i18n-aria-label="ui_web_a38c4e18c73d">⏭</button>
+                    <button type="button" class="watch-cast-stop" data-act="stop" data-i18n="ui_web_cae7d57bc067">Stop</button>
+                </div>`;
+            bar.addEventListener('click', (e) => {
+                const act = e.target.closest('[data-act]')?.dataset.act;
+                if (!act) return;
+                if (act === 'toggle') window.NorvaCast?.togglePlayback?.();
+                else if (act === 'back') this.castSeekBy(-10);
+                else if (act === 'fwd') this.castSeekBy(10);
+                else if (act === 'next') this.castNextEpisode();
+                else if (act === 'stop') this.stopCasting();
+            });
+            const seek = bar.querySelector('.watch-cast-seek');
+            seek.addEventListener('input', () => { this._castSeeking = true; });
+            seek.addEventListener('change', () => {
+                const total = this._castTotalDuration();
+                const min = this._castBaseOffset || 0;
+                const absTarget = min + (Number(seek.value) / 1000) * Math.max(0, total - min);
+                window.NorvaCast?.seekTo?.(Math.max(0, absTarget - min));
+                this._castSeeking = false;
+            });
+            section.appendChild(bar);
+        }
+        const poster = bar.querySelector('.watch-cast-bar-poster');
+        if (this.content?.poster) { poster.src = this.content.poster; poster.hidden = false; } else { poster.hidden = true; }
+        bar.querySelector('.watch-cast-bar-title').textContent =
+            [this.content?.title, this.content?.subtitle].filter(Boolean).join(' — ') || 'Norva';
+        bar.querySelector('.watch-cast-bar-label').textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_48354e133914", {defaultValue: "Casting to {{p0}}", p0:(device)}) : `Casting to ${device}`);
+        bar.querySelector('.watch-cast-next').hidden = !(this.contentType === 'series' && this.getNextEpisode());
+        bar.classList.remove('hidden');
+        clearInterval(this._castBarTimer);
+        this._castBarTimer = setInterval(() => this.updateCastBar(), 1000);
+        this.updateCastBar();
+    }
+
+    updateCastBar() {
+        const bar = document.getElementById('watch-cast-bar');
+        if (!bar || bar.classList.contains('hidden')) return;
+        if (window.NorvaCast?.isCasting?.()) {
+            this._castConfirmed = true;
+        } else if (this._castConfirmed) {
+            // The receiver was stopped from the TV / another sender — tidy up locally.
+            this.stopCasting();
+            return;
+        }
+        const rel = window.NorvaCast?.remotePosition?.() || 0;
+        const min = this._castBaseOffset || 0;
+        const abs = min + rel;
+        const total = this._castTotalDuration();
+        bar.querySelector('.cur').textContent = this._fmtCast(abs);
+        bar.querySelector('.dur').textContent = total ? this._fmtCast(total) : '';
+        const seek = bar.querySelector('.watch-cast-seek');
+        if (!this._castSeeking && total > min) {
+            seek.value = String(Math.max(0, Math.min(1000, Math.round(((abs - min) / (total - min)) * 1000))));
+        }
+        const paused = window.NorvaCast?.remoteIsPaused?.();
+        bar.querySelector('.watch-cast-toggle').textContent = paused ? '▶' : '⏸';
+    }
+
+    startCastProgressSync() {
+        this.stopCastProgressSync();
+        // Keep Continue Watching current while the receiver plays (local player is off).
+        this._castProgressTimer = setInterval(() => this.saveCastProgress(), 10000);
+        this._castFlush = () => { if (document.visibilityState === 'hidden') this.saveCastProgress(); };
+        document.addEventListener('visibilitychange', this._castFlush);
+        window.addEventListener('pagehide', this._castFlush);
+    }
+
+    stopCastProgressSync() {
+        if (this._castProgressTimer) { clearInterval(this._castProgressTimer); this._castProgressTimer = null; }
+        if (this._castFlush) {
+            document.removeEventListener('visibilitychange', this._castFlush);
+            window.removeEventListener('pagehide', this._castFlush);
+            this._castFlush = null;
+        }
+    }
+
+    async saveCastProgress() {
+        if (!this.content || !window.NorvaCast?.isCasting?.()) return;
+        const rel = window.NorvaCast.remotePosition() || 0;
+        // Timestamp the observation when it is captured from the receiver. A
+        // delayed network response must not be mistaken for newer progress and
+        // overwrite a fresher web/TV save from another device.
+        const watchedAt = new Date().toISOString();
+        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + rel));
+        const total = this._castTotalDuration();
+        const duration = total > 0 ? Math.floor(total) : Math.floor(this._lastKnownPlaybackDuration || 0);
+        if (!absolute || !duration) return;
+        const progress = Math.min(absolute, duration);
+        try {
+            this.saveResumeSnapshot?.({ position: progress });
+            const data = {
+                title: this.content.title || 'Unknown Title',
+                subtitle: this.content.subtitle || (this.content.type === 'movie' ? 'Movie' : 'Series'),
+                poster: this.content.poster,
+                sourceId: this.content.sourceId,
+                containerExtension: this.containerExtension,
+                durationHint: duration,
+                playbackPreferences: this.getPlaybackPreferences?.(),
+                seriesId: this.content.seriesId || null,
+                currentSeason: this.currentSeason || null,
+                currentEpisode: this.currentEpisode || null,
+                nextEpisode: this.content.type === 'series' ? this.sanitizeNextEpisodeForHistory(this.getNextEpisode()) : null
+            };
+            await window.API.request('POST', '/history', {
+                id: this.content.id,
+                type: this.content.type === 'movie' ? 'movie' : 'episode',
+                sourceId: this.content.sourceId,
+                progress, duration, watchedAt, data
+            });
+        } catch (err) {
+            console.warn('[Cast] progress save failed:', err);
+        }
+    }
+
+    // Load the next episode onto the SAME receiver session (no new picker).
+    async castNextEpisode() {
+        const nextEp = this.getNextEpisode?.();
+        if (!nextEp || !this.content?.sourceId) return;
+        try {
+            await this.saveCastProgress();
+            const container = nextEp.container_extension || 'mp4';
+            const prefs = this.getPlaybackPreferences?.() || {};
+            let hint = {
+                gatewayMode: 'transcode', audioMode: 'transcode',
+                ...this.getSelectedAudioPlaybackOptions?.(),
+                audioSeriesId: this.content.seriesId || this.content.series_id || undefined,
+                seekOffset: 0, startOffset: 0, resumeTime: 0
+            };
+            hint = this.applyPlaybackPreferencesToHint(hint, prefs);
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                nextEp.id,
+                'series',
+                container,
+                hint,
+                { signal: this.playbackResolveSignalForAttempt?.() || null }
+            );
+            if (!result?.url || !/^https?:\/\//i.test(result.url)) throw new Error('No stream for next episode');
+            // Advance the episode context so the bar + progress target the new episode.
+            this.currentSeason = nextEp.seasonNum ?? this.currentSeason;
+            this.currentEpisode = nextEp.episode_num ?? this.currentEpisode;
+            this.content.id = nextEp.id;
+            this.content.subtitle = nextEp.title || `S${this.currentSeason}·E${this.currentEpisode}`;
+            this.containerExtension = container;
+            this._castBaseOffset = 0;
+            const device = await NorvaCast.castMedia({
+                url: result.url,
+                title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
+                poster: this.content.poster,
+                currentTime: 0, live: false
+            });
+            this.showCastBar(device);
+        } catch (err) {
+            console.warn('[Cast] next episode failed:', err);
+            this.app?.showToast?.((globalThis.NorvaI18n?.t("ui_web_1ee682ff62e6", { defaultValue: "Could not cast the next episode" }) ?? 'Could not cast the next episode'), 'error');
+        }
+    }
+
+    async stopCasting() {
+        const remote = window.NorvaCast?.remotePosition?.() || 0;
+        try { await this.saveCastProgress(); } catch (_) { }
+        this.stopCastProgressSync();
+        if (this._castBarTimer) { clearInterval(this._castBarTimer); this._castBarTimer = null; }
+        this._castConfirmed = false;
+        try { NorvaCast.endSession(); } catch (_) { }
+        document.getElementById('watch-cast-bar')?.classList.add('hidden');
+        this.updateCastButton();
+        // Resume locally where the receiver stopped.
+        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + remote));
+        if (this.content?.sourceId && this.content?.id) {
+            this.content.resumeTime = absolute;
+            this.resumeTime = absolute;
+            this.retryPlaybackInPlace(absolute);
+        }
+    }
+
+    // ==================== Seek thumbnails (storyboard) ====================
+    // A single sprite JPEG (grid-regular tiles) generated server-side per title,
+    // cross-user cached. First playback enqueues it (the job is deferred while
+    // this account watches — one provider connection); later plays get hover
+    // previews on the timeline like Netflix.
+
+    resetStoryboard() {
+        this._storyboard = null;
+        this._storyboardImage = null;
+        this._storyboardFetched = false;
+        this.hideSeekThumb();
+    }
+
+    // At playback start: DISPLAY an existing sprite only — never generate. Generating
+    // here opens a SECOND provider connection and, on a single-slot provider (most
+    // IPTV panels), starves the very playback that triggered it → RANGE_UNSUPPORTED /
+    // stuck spinner. Generation is deferred to stop() (enqueueStoryboardForCache),
+    // when the viewer releases the slot. First watch = no thumbs; they populate for
+    // the next watch (and, via the provider-shared cache, for everyone on that panel).
+    async loadStoryboard() {
+        if (this.contentType !== 'movie' && this.contentType !== 'series') return;
+        if (this._storyboardFetched || !this.content?.sourceId || !this.content?.id) return;
+        this._storyboardFetched = true;
+        try {
+            // The edge keys storyboards off the CLOUD source UUID, but content.sourceId is the
+            // browser-local alias (e.g. "900001"). Resolve it like the AI-subtitle path does.
+            let sourceId = this.content.sourceId;
+            try {
+                const cloudId = await window.API?.resolveCloudSourceId?.(sourceId);
+                if (cloudId) sourceId = String(cloudId);
+            } catch (_) { /* fall back to the raw id */ }
+            const params = {
+                sourceId,
+                externalId: this.content.id,
+                itemType: this.content.type === 'series' ? 'series' : 'movie',
+                enqueue: 0, // READ-ONLY — see method comment
+            };
+            const res = await window.NorvaCloud?.playback?.storyboard?.(params);
+            if (res?.status === 'ready' && res.spriteUrl && Number(res.intervalSec) > 0) {
+                const img = new Image();
+                img.onload = () => {
+                    this._storyboard = res;
+                    this._storyboardImage = img;
+                };
+                img.src = res.spriteUrl;
+            }
+        } catch (_) { /* thumbnails are progressive enhancement */ }
+    }
+
+    // Warm the storyboard cache as the viewer LEAVES: the provider slot is being
+    // released here, so the gateway's ffmpeg pass no longer competes with live
+    // playback. Fire-and-forget, once per content per session, and only with a real
+    // duration (it drives the sprite's time axis — a wrong one clamps hover previews).
+    enqueueStoryboardForCache() {
+        try {
+            const c = this.content;
+            if (!c || !c.sourceId || c.id == null) return;
+            const itemType = (c.type === 'series' || this.contentType === 'series') ? 'series'
+                : ((c.type === 'movie' || this.contentType === 'movie') ? 'movie' : '');
+            if (!itemType) return;
+            const key = `${c.sourceId}:${c.id}`;
+            if (this._storyboardEnqueuedKey === key) return;
+            const d = this.getDisplayDuration?.() || this.video?.duration || this.durationHint || 0;
+            const duration = Number.isFinite(d) && d > 0 ? Math.round(d) : 0;
+            if (!duration) return; // no reliable duration → skip rather than build a wrong axis
+            this._storyboardEnqueuedKey = key;
+            const container = c.containerExtension;
+            Promise.resolve(window.API?.resolveCloudSourceId?.(c.sourceId)).then((cloudId) => {
+                const params = { sourceId: String(cloudId || c.sourceId), externalId: c.id, itemType, enqueue: 1, duration };
+                // For series the id is the EPISODE; its real container keeps the
+                // server-built episode URL honest (panels 404 a wrong extension).
+                if (container) params.container = container;
+                return window.NorvaCloud?.playback?.storyboard?.(params);
+            }).catch(() => { /* best-effort cache warming */ });
+        } catch (_) { /* never break teardown over a cache warm */ }
+    }
+
+    ensureSeekThumb() {
+        let thumb = document.getElementById('watch-seek-thumb');
+        if (!thumb) {
+            thumb = document.createElement('div');
+            thumb.id = 'watch-seek-thumb';
+            thumb.className = 'watch-seek-thumb hidden';
+            thumb.innerHTML = '<div class="watch-seek-thumb-img"></div><div class="watch-seek-thumb-time"></div>';
+            this.progressContainer?.appendChild(thumb);
+        }
+        return thumb;
+    }
+
+    updateSeekThumb(event) {
+        const sb = this._storyboard;
+        const img = this._storyboardImage;
+        if (!sb || !img || !this.progressSlider) return;
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+        const rect = this.progressSlider.getBoundingClientRect();
+        if (!rect.width) return;
+        const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+        const time = ratio * duration;
+        const cols = Math.max(1, Number(sb.cols) || 10);
+        const rows = Math.max(1, Number(sb.rows) || 1);
+        const count = Math.max(1, Number(sb.count) || cols * rows);
+        const tile = Math.min(count - 1, Math.max(0, Math.floor(time / sb.intervalSec)));
+        const tileW = img.naturalWidth / cols;
+        const tileH = img.naturalHeight / rows;
+        if (!tileW || !tileH) return;
+
+        const thumb = this.ensureSeekThumb();
+        const displayW = 212;
+        const scale = displayW / tileW;
+        thumb.style.width = `${displayW}px`;
+        thumb.style.height = `${Math.round(tileH * scale)}px`;
+        const inner = thumb.querySelector('.watch-seek-thumb-img');
+        inner.style.backgroundImage = `url("${sb.spriteUrl}")`;
+        inner.style.backgroundSize = `${Math.round(img.naturalWidth * scale)}px ${Math.round(img.naturalHeight * scale)}px`;
+        inner.style.backgroundPosition = `-${Math.round((tile % cols) * tileW * scale)}px -${Math.round(Math.floor(tile / cols) * tileH * scale)}px`;
+        thumb.querySelector('.watch-seek-thumb-time').textContent = this.formatTime(time);
+
+        // Anchor above the cursor, clamped inside the timeline.
+        const containerRect = this.progressContainer?.getBoundingClientRect() || rect;
+        const half = displayW / 2 + 4;
+        const x = Math.min(containerRect.width - half, Math.max(half, event.clientX - containerRect.left));
+        thumb.style.left = `${Math.round(x)}px`;
+        thumb.classList.remove('hidden');
+    }
+
+    hideSeekThumb() {
+        document.getElementById('watch-seek-thumb')?.classList.add('hidden');
+    }
+
+    beginPlaybackAttempt() {
+        this.abortPlaybackResolution();
+        this._playbackAttemptId += 1;
+        this._cloudPlaybackLaneAttemptId = null;
+        if (this._privateMediaCacheFallbackSessionIds instanceof Set) {
+            this._privateMediaCacheFallbackSessionIds.clear();
+        } else {
+            this._privateMediaCacheFallbackSessionIds = new Set();
+        }
+        const AbortControllerCtor = typeof window !== 'undefined' && typeof window.AbortController === 'function'
+            ? window.AbortController
+            : (typeof AbortController === 'function' ? AbortController : null);
+        this._playbackResolveAbortController = AbortControllerCtor
+            ? new AbortControllerCtor()
+            : null;
+        return this._playbackAttemptId;
+    }
+
+    abortPlaybackResolution() {
+        const controller = this._playbackResolveAbortController;
+        this._playbackResolveAbortController = null;
+        if (!controller || controller.signal?.aborted) return;
+        try { controller.abort(); } catch (_) { }
+    }
+
+    playbackResolveSignalForAttempt(attemptId = this._playbackAttemptId) {
+        if (this.isStalePlaybackAttempt(attemptId)) return null;
+        return this._playbackResolveAbortController?.signal || null;
+    }
+
+    noteCloudPlaybackLaneForAttempt(sessionId, playbackAttemptId = this._playbackAttemptId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id || this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        this._cloudPlaybackLaneAttemptId = playbackAttemptId;
+    }
+
+    hasOpenedCloudPlaybackLaneForAttempt(playbackAttemptId = this._playbackAttemptId) {
+        return Number.isFinite(playbackAttemptId)
+            && this._cloudPlaybackLaneAttemptId === playbackAttemptId;
+    }
+
+    isStalePlaybackAttempt(attemptId) {
+        return Number.isFinite(attemptId) && attemptId !== this._playbackAttemptId;
+    }
+
+    describeEdgeTraceUrl(url) {
+        const value = String(url || '').trim();
+        if (!value) return { resourceFamily: 'unknown', lane: 'unknown' };
+        if (this.isGatewayPlaybackUrl(value)) {
+            return { resourceFamily: 'gateway-session-playlist', lane: 'edge-to-gateway' };
+        }
+        const kind = this.describePlaybackUrl(value);
+        if (kind === 'external-hls' || kind === 'external-media') {
+            return { resourceFamily: 'provider-direct', lane: 'edge-direct' };
+        }
+        if (kind.startsWith('local-') || kind === 'relay') {
+            return { resourceFamily: kind, lane: 'edge-to-gateway' };
+        }
+        return { resourceFamily: kind, lane: 'edge' };
+    }
+
+    async hashEdgeTraceValue(value) {
+        const text = String(value || '');
+        try {
+            const subtle = window.crypto?.subtle;
+            if (subtle && typeof subtle.digest === 'function') {
+                const bytes = new TextEncoder().encode(text);
+                const digest = await subtle.digest('SHA-256', bytes);
+                return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+            }
+        } catch (_) { /* tracing must never affect playback */ }
+        return `unavailable-${text.length}`;
+    }
+
+    isEdgeTraceDebugEnabled() {
+        try {
+            const params = new URLSearchParams(window.location?.search || '');
+            if (params.get('norva_edge_trace') === '1') return true;
+            return window.sessionStorage?.getItem('norva.edgeTrace.debug') === '1';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    recordEdgeTrace(phase, options = {}) {
+        const descriptor = this.describeEdgeTraceUrl(options.url || options.sourceUrl);
+        const sequence = (this._edgeTraceSequence || 0) + 1;
+        this._edgeTraceSequence = sequence;
+        const code = String(options.code || options.details || '').replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 64);
+        const event = {
+            sequence,
+            at: new Date().toISOString(),
+            phase: String(phase || 'unknown').slice(0, 48),
+            lane: descriptor.lane,
+            resourceFamily: descriptor.resourceFamily,
+            ...(code ? { code } : {}),
+            ...(typeof options.fatal === 'boolean' ? { fatal: options.fatal } : {}),
+            ...(Number.isFinite(Number(options.count)) ? { count: Number(options.count) } : {}),
+            ...(Number.isFinite(Number(options.playbackAttemptId))
+                ? { playbackAttempt: Number(options.playbackAttemptId) } : {})
+        };
+        const sessionValue = options.sessionId || options.cloudPlaybackSessionId;
+        Promise.resolve(sessionValue ? this.hashEdgeTraceValue(sessionValue) : null).then(sessionHash => {
+            if (sessionHash) event.sessionHash = sessionHash.slice(0, 16);
+            try {
+                const root = window;
+                const existing = Array.isArray(root.__norvaEdgeTrace) ? root.__norvaEdgeTrace : [];
+                existing.push(event);
+                while (existing.length > 120) existing.shift();
+                root.__norvaEdgeTrace = existing;
+                root.sessionStorage?.setItem('norva.edgeTrace.v1', JSON.stringify(existing));
+                if (this.isEdgeTraceDebugEnabled()) {
+                    root.document?.documentElement?.setAttribute('data-norva-edge-trace', JSON.stringify(existing));
+                    root.console?.info?.('[NorvaEdgeTrace]', JSON.stringify(event));
+                }
+            } catch (_) { /* private mode or quota denial must not affect playback */ }
+        }).catch(() => {});
+    }
+
+    playbackCoordinationRetryDelayMs(error, retryCount = 0, elapsedMs = 0) {
+        const status = Number(error?.status ?? error?.httpStatus ?? 0);
+        if (status !== 425 || !Number.isInteger(retryCount) || retryCount < 0 || retryCount >= 6) {
+            return null;
+        }
+        const code = String(
+            error?.code
+            || error?.payload?.details?.code
+            || error?.payload?.code
+            || ''
+        ).trim().toUpperCase();
+        if (!['MEDIA_CACHE_PRODUCER_ACTIVE', 'MEDIA_CACHE_BACKGROUND_DRAINING'].includes(code)) {
+            return null;
+        }
+        const elapsed = Number.isFinite(Number(elapsedMs)) ? Math.max(0, Number(elapsedMs)) : 0;
+        const remainingMs = 90_000 - elapsed;
+        if (remainingMs <= 0) return null;
+        const retryAfterSeconds = Number(
+            error?.payload?.details?.retryAfterSeconds
+            ?? error?.payload?.retryAfterSeconds
+        );
+        const requestedMs = Number.isFinite(retryAfterSeconds)
+            && retryAfterSeconds >= 1
+            && retryAfterSeconds <= 10
+            ? Math.ceil(retryAfterSeconds * 1000)
+            : (code === 'MEDIA_CACHE_BACKGROUND_DRAINING' ? 1_000 : 2_000);
+        return Math.min(requestedMs, remainingMs);
+    }
+
+    waitForPlaybackCoordinationRetry(delayMs, signal = null) {
+        if (signal?.aborted) return Promise.resolve(false);
+        const waitMs = Math.max(1, Math.min(10_000, Math.ceil(Number(delayMs) || 0)));
+        return new Promise((resolve) => {
+            let settled = false;
+            let timer = null;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                if (timer !== null) clearTimeout(timer);
+                signal?.removeEventListener?.('abort', onAbort);
+                resolve(value);
+            };
+            const onAbort = () => finish(false);
+            signal?.addEventListener?.('abort', onAbort, { once: true });
+            timer = setTimeout(() => finish(true), waitMs);
+        });
+    }
+
+    async cleanupStaleCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        const cloud = window.NorvaCloud;
+        const playbackApi = cloud?.token
+            ? cloud.playback
+            : (cloud?.deviceToken ? cloud.device?.playback : null);
+        if (typeof playbackApi?.expireSession !== 'function') return;
+        try {
+            await playbackApi.expireSession(id);
+        } catch (error) {
+            console.warn('[WatchPage] Could not expire stale cloud playback session:', error?.message || error);
+        }
+    }
+
+    beginPlaybackTelemetry(sessionId, playbackAttemptId, options = {}) {
+        this.cancelFirstFrameTelemetryObserver();
+        this.cancelDeferredEngineTrackEnrichment();
+        const requestedAt = Number(options.requestedAt);
+        this.playbackTelemetry = {
+            playbackAttemptId,
+            sessionId: sessionId || null,
+            requestedAt: Number.isFinite(requestedAt) && requestedAt > 0 ? requestedAt : Date.now(),
+            startupPhases: {},
+            firstFrameReported: false,
+            playStartedReported: false,
+            ended: false,
+            abandoned: false
+        };
+        this._playRequestedAt = this.playbackTelemetry.requestedAt;
+        this._firstFrameReported = false;
+        this._playStartedReported = false;
+        this._playbackEnded = false;
+        this.sendPlaybackEvent('play_requested');
+    }
+
+    updatePlaybackTelemetrySession(sessionId, playbackAttemptId = this._playbackAttemptId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id || !this.playbackTelemetry) return;
+        if (this.playbackTelemetry.playbackAttemptId !== playbackAttemptId) return;
+        this.playbackTelemetry.sessionId = id;
+    }
+
+    recordPlaybackStartupPhase(name, playbackAttemptId = this._playbackAttemptId) {
+        if (!name || !this.playbackTelemetry || this._firstFrameReported) return;
+        if (this.playbackTelemetry.playbackAttemptId !== playbackAttemptId) return;
+        const requestedAt = Number(this.playbackTelemetry.requestedAt) || Date.now();
+        this.playbackTelemetry.startupPhases ||= {};
+        if (!Number.isFinite(this.playbackTelemetry.startupPhases[name])) {
+            this.playbackTelemetry.startupPhases[name] = Math.max(0, Date.now() - requestedAt);
+        }
+    }
+
+    cancelFirstFrameTelemetryObserver() {
+        if (this._firstFrameCallbackId !== null
+            && this._firstFrameCallbackId !== undefined
+            && typeof this.video?.cancelVideoFrameCallback === 'function') {
+            try { this.video.cancelVideoFrameCallback(this._firstFrameCallbackId); } catch (_) {}
+        }
+        this._firstFrameCallbackId = null;
+        this._firstFrameObserverAttemptId = null;
+        this._firstFrameObserverAvailable = null;
+        this._firstFrameProgressSample = null;
+    }
+
+    armFirstFrameTelemetry(playbackAttemptId = this._playbackAttemptId) {
+        this.cancelFirstFrameTelemetryObserver();
+        const video = this.video;
+        if (!video || this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (typeof video.requestVideoFrameCallback !== 'function') {
+            this._firstFrameObserverAvailable = false;
+            return false;
+        }
+
+        this._firstFrameObserverAttemptId = playbackAttemptId;
+        try {
+            this._firstFrameCallbackId = video.requestVideoFrameCallback((_now, metadata = {}) => {
+                this._firstFrameCallbackId = null;
+                if (this._firstFrameObserverAttemptId !== playbackAttemptId
+                    || this.isStalePlaybackAttempt(playbackAttemptId)
+                    || this._firstFrameReported) return;
+                const reported = this.reportFirstRenderedFrame(
+                    playbackAttemptId,
+                    'video-frame-callback',
+                    metadata
+                );
+                if (reported) {
+                    this.markPlaybackUsable();
+                } else {
+                    // A callback may race a source replacement. Keep waiting for a
+                    // frame belonging to the active media/attempt instead of using
+                    // metadata readiness as a false positive.
+                    this.armFirstFrameTelemetry(playbackAttemptId);
+                }
+            });
+            this._firstFrameObserverAvailable = true;
+            return true;
+        } catch (_) {
+            this._firstFrameCallbackId = null;
+            this._firstFrameObserverAvailable = false;
+            return false;
+        }
+    }
+
+    reportFirstRenderedFrame(playbackAttemptId, frameEvidence, frameMetadata = {}) {
+        if (this._firstFrameReported || this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (!this.playbackTelemetry || this.playbackTelemetry.playbackAttemptId !== playbackAttemptId) return false;
+        const video = this.video;
+        if (!video || video.error || video.ended) return false;
+        if (video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) return false;
+        if (!video.currentSrc && !video.src) return false;
+
+        this.recordPlaybackStartupPhase('firstFrame', playbackAttemptId);
+        this._firstFrameReported = true;
+        this.playbackTelemetry.firstFrameReported = true;
+        const requestedAt = this.playbackTelemetry.requestedAt || this._playRequestedAt || Date.now();
+        const engineTimings = this.norvaEngine?.timings;
+        const presentedFrames = Number(frameMetadata?.presentedFrames);
+        const mediaTime = Number(frameMetadata?.mediaTime);
+        this.sendPlaybackEvent('first_frame', {
+            timeToFirstFrameMs: Math.max(1, Date.now() - requestedAt),
+            metadata: {
+                frameEvidence,
+                ...(Number.isFinite(presentedFrames) ? { presentedFrames } : {}),
+                ...(Number.isFinite(mediaTime) ? { mediaTime } : {}),
+                startupPhases: { ...(this.playbackTelemetry.startupPhases || {}) },
+                ...(engineTimings ? { engineTimings } : {})
+            }
+        });
+        this.trackProduct('playback_first_frame', { state: 'ready', outcome: 'success' });
+        this.rememberWatchedLanguageValidationIntent(playbackAttemptId);
+        // The muxed-mono informational row depends on real decoded-media
+        // evidence. Refresh it at the first rendered frame so an audio menu
+        // opened during startup cannot remain stuck on the earlier fail-closed
+        // placeholder for the rest of the playback.
+        this.updateAudioTracks();
+        this.flushDeferredEngineTrackEnrichment(playbackAttemptId);
+        return true;
+    }
+
+    rememberWatchedLanguageValidationIntent(playbackAttemptId = this._playbackAttemptId) {
+        if (this.isStalePlaybackAttempt(playbackAttemptId) || this.isAudioLanguageVerified()) return null;
+        if (this.contentType !== 'movie' && this.content?.type !== 'movie') return null;
+
+        const sourceId = this.content?.cloudSourceId || this.content?.cloud_source_id
+            || this.content?.sourceId || this.content?.source_id || null;
+        const itemId = this.content?.externalId || this.content?.external_id
+            || this.content?.itemId || this.content?.item_id
+            || this.content?.streamId || this.content?.stream_id || this.content?.id || null;
+        const candidates = [
+            ...(Array.isArray(this.currentStreamInfo?.audioTracks) ? this.currentStreamInfo.audioTracks : []),
+            ...(Array.isArray(this.audioTracks) ? this.audioTracks : []),
+            ...this.getContentAudioTracks(),
+        ];
+        const expectedAudioIndices = Array.from(new Set(candidates
+            .map(track => Number(track?.index))
+            .filter(index => Number.isInteger(index) && index >= 0 && index <= 128)))
+            .sort((a, b) => a - b);
+        if (!sourceId || !itemId || !expectedAudioIndices.length) return null;
+
+        this._watchedLanguageValidationIntent = {
+            playbackAttemptId,
+            sourceId: String(sourceId),
+            itemId: String(itemId),
+            expectedAudioIndices,
+        };
+        return this._watchedLanguageValidationIntent;
+    }
+
+    watchedLanguageValidationRetryDelayMs(error, retryCount = 0) {
+        if (!Number.isInteger(retryCount) || retryCount < 0 || retryCount >= 3) return null;
+        const status = Number(error?.status || 0);
+        // HTTP 458 remains terminal everywhere. This retry lane is limited to
+        // background enqueue contention/outages and can never reopen playback.
+        if (status === 458) return null;
+        const code = String(
+            error?.code || error?.payload?.errorCode || error?.payload?.code
+            || error?.payload?.details?.code || ''
+        ).trim().toUpperCase();
+        const transientConflict = status === 409 && [
+            'LANGUAGE_VALIDATION_JOB_BUSY',
+            'LANGUAGE_VALIDATION_PLAYBACK_ACTIVE',
+            'PROVIDER_ACCOUNT_BUSY',
+        ].includes(code);
+        const transientServer = [500, 502, 503, 504].includes(status);
+        const retryAfterSeconds = Number(error?.payload?.retryAfterSeconds);
+        const boundedRetryAfterMs = Number.isFinite(retryAfterSeconds)
+            && retryAfterSeconds > 0
+            && retryAfterSeconds <= 60
+            ? Math.ceil(retryAfterSeconds * 1000)
+            : null;
+        if (status === 429 && boundedRetryAfterMs === null) return null;
+        if (!transientConflict && !transientServer && status !== 429) return null;
+        return boundedRetryAfterMs ?? Math.min(30_000, 5_000 * (2 ** retryCount));
+    }
+
+    delayWatchedLanguageValidationRetry(delayMs) {
+        return new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    async queueWatchedLanguageValidation(intent, retryCount = 0) {
+        if (!intent || !window.NorvaCloud?.playback?.queueLanguageValidation) return null;
+        let sourceId = String(intent.sourceId || '');
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId)
+            && typeof window.API?.resolveSourceId === 'function') {
+            sourceId = String(await window.API.resolveSourceId(sourceId));
+        }
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId)) {
+            return null;
+        }
+        try {
+            return await window.NorvaCloud.playback.queueLanguageValidation({
+                sourceId,
+                itemType: 'movie',
+                itemId: String(intent.itemId),
+                expectedAudioIndices: [...intent.expectedAudioIndices],
+            });
+        } catch (error) {
+            const delayMs = this.watchedLanguageValidationRetryDelayMs(error, retryCount);
+            if (delayMs === null) throw error;
+            await this.delayWatchedLanguageValidationRetry(delayMs);
+            return this.queueWatchedLanguageValidation(intent, retryCount + 1);
+        }
+    }
+
+    cancelDeferredEngineTrackEnrichment() {
+        if (this._deferredEngineTrackEnrichmentTimer) {
+            clearTimeout(this._deferredEngineTrackEnrichmentTimer);
+        }
+        this._deferredEngineTrackEnrichmentTimer = null;
+        this._deferredEngineTrackEnrichment = null;
+    }
+
+    deferEngineTrackEnrichment(url, playbackAttemptId = this._playbackAttemptId) {
+        this.cancelDeferredEngineTrackEnrichment();
+        if (!url || this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        this._deferredEngineTrackEnrichment = { url, playbackAttemptId };
+    }
+
+    flushDeferredEngineTrackEnrichment(playbackAttemptId = this._playbackAttemptId) {
+        const deferred = this._deferredEngineTrackEnrichment;
+        if (!this._firstFrameReported || !deferred) return;
+        if (deferred.playbackAttemptId !== playbackAttemptId || this.isStalePlaybackAttempt(playbackAttemptId)) {
+            this.cancelDeferredEngineTrackEnrichment();
+            return;
+        }
+        this._deferredEngineTrackEnrichment = null;
+        this._deferredEngineTrackEnrichmentTimer = setTimeout(() => {
+            this._deferredEngineTrackEnrichmentTimer = null;
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || !this.norvaEngine) return;
+            Promise.resolve(this.enrichCloudPlaybackTracks(deferred.url)).catch(() => {});
+        }, 1200);
+    }
+
+    getTelemetrySourceId() {
+        const sourceId = this.content?.cloudSourceId
+            || this.content?.data?.cloudSourceId
+            || this.content?.source_id
+            || this.content?.sourceId
+            || '';
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(sourceId))
+            ? String(sourceId)
+            : null;
+    }
+
+    getTelemetryItemId() {
+        const itemId = this.content?.itemId
+            || this.content?.item_id
+            || this.content?.streamId
+            || this.content?.stream_id
+            || this.content?.seriesId
+            || this.content?.series_id
+            || this.content?.id
+            || '';
+        return String(itemId || '');
+    }
+
+    getTelemetryClientMetadata() {
+        const ua = navigator.userAgent || '';
+        const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || navigator.standalone;
+        const width = Math.max(0, Number(window.innerWidth) || 0);
+        let clientSurface = 'web';
+        if (window.NorvaAndroidTV || /android tv|afts|aftt|aftm|bravia|smart-tv|smarttv|tizen|webos/i.test(ua)) {
+            clientSurface = 'android-tv';
+        } else if (standalone) {
+            clientSurface = 'pwa';
+        } else if (/mobi|android|iphone|ipad|ipod/i.test(ua)) {
+            clientSurface = 'mobile-web';
+        }
+        return {
+            clientSurface,
+            viewportClass: width && width < 600 ? 'phone' : width && width < 1024 ? 'tablet' : 'desktop',
+            appMode: this.isCloudPlaybackMode() ? 'cloud' : 'local',
+            playbackEntry: 'watch'
+        };
+    }
+
+    buildPlaybackEventPayload(eventType, extra = {}) {
+        const duration = this.getDisplayDuration?.() || this.getValidDuration?.() || 0;
+        return {
+            eventType,
+            // Failure events fire as the session is torn down/retried; passing the dead session id
+            // makes the edge 404 the whole event (lost snapshot). Callers can force-omit it with
+            // extra.playbackSessionId = null to record the event unlinked instead.
+            playbackSessionId: ('playbackSessionId' in extra)
+                ? extra.playbackSessionId
+                : (this.currentCloudPlaybackSessionId || this.playbackTelemetry?.sessionId || null),
+            sourceId: this.getTelemetrySourceId(),
+            itemType: this.contentType || this.content?.type || '',
+            itemId: this.getTelemetryItemId(),
+            positionSeconds: Math.max(0, Math.floor(this.getPlaybackPosition?.() || 0)),
+            durationSeconds: Math.max(0, Math.floor(Number.isFinite(duration) ? duration : 0)),
+            playbackMode: extra.playbackMode || this.currentPlaybackMode || null,
+            timeToFirstFrameMs: extra.timeToFirstFrameMs,
+            errorCode: extra.errorCode,
+            errorMessage: extra.errorMessage,
+            metadata: {
+                ...this.getTelemetryClientMetadata(),
+                title: this.content?.title || this.content?.name || null,
+                attemptId: this._playbackAttemptId,
+                variantCount: this.content?.variantCount || this.content?._variantCount || null,
+                providerTmdbId: this.content?.providerTmdbId || this.content?.data?.providerTmdbId || null,
+                titleId: this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || null,
+                readyState: this.video?.readyState ?? null,
+                currentSrcType: this.getTelemetryCurrentSrcType(),
+                // Codec-mix telemetry (the 3rd sizing unknown, docs §9.8/§10): the
+                // container extension is a reliable codec-path proxy (mp4->relay,
+                // mkv/ts->gateway, avi/...->engine); videoCodec when the profile is known.
+                container: this.containerExtension || this.content?.containerExtension || null,
+                videoCodec: (this.content?.codecProfile || this.content?.defaultVariant?.codecProfile || this.content?.data?.codecProfile)?.videoCodec
+                    || this.content?.videoCodec || null,
+                ...extra.metadata
+            }
+        };
+    }
+
+    sendPlaybackEvent(eventType, extra = {}) {
+        if (!this.content || !this.getTelemetryItemId()) return;
+        const cloud = window.NorvaCloud;
+        const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+        const send = api?.event || cloud?.playback?.event;
+        if (typeof send !== 'function') return;
+
+        let payload = this.buildPlaybackEventPayload(eventType, extra);
+        if (!payload.itemType || !payload.itemId) return;
+        // Strings from binary parsing (fMP4 box names, source-head bytes) can carry NUL
+        // and other control characters. Postgres rejects U+0000 in text/jsonb, so ONE
+        // dirty byte silently lost the whole failure event ("\\u0000 cannot be converted
+        // to text"). Deep-scrub every string exactly at the send boundary.
+        try {
+            payload = JSON.parse(JSON.stringify(payload, (_, v) =>
+                typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '\u00B7') : v));
+        } catch (_) { /* send the raw payload rather than dropping the event */ }
+        Promise.resolve(send(payload)).catch((error) => {
+            console.warn('[WatchPage] Playback telemetry failed:', error?.message || error);
+        });
+    }
+
+    reportAbandonedPlayback() {
+        if (!this.playbackTelemetry || this.playbackTelemetry.abandoned || this.playbackTelemetry.ended) return;
+        const position = Math.floor(this.getPlaybackPosition?.() || 0);
+        if (!this._firstFrameReported && position < 2) return;
+        this.playbackTelemetry.abandoned = true;
+        this.sendPlaybackEvent('abandoned');
+    }
+
+    resetTrackSelectionState() {
+        this.resetObservedTrackPersistenceState();
+        this.resetGatewayAudioRenditions();
+        this._audioTopologyPending = false;
+        this.audioTracks = [];
+        this.subtitleTracks = [];
+        this._hlsOwnsExactSubtitles = false;
+        this._exactSubtitleHlsTopology = null;
+        this.subtitleSourceUrl = null;
+        this.subtitleStartOffset = 0;
+        this.selectedSubtitleStreamIndex = null;
+        this.selectedSubtitleTrackUserChoice = false;
+        this.selectedAudioStreamIndex = null;
+        this.selectedAudioTrackUserChoice = false;
+        this.closeAudioMenu();
+        this.closeCaptionsMenu();
+        this.updateAudioTracks();
+        this.updateCaptionsTracks();
+    }
+
+    resetObservedTrackPersistenceState() {
+        this._observedLangsGeneration = Number(this._observedLangsGeneration || 0) + 1;
+        this._observedExactSubtitleTracks = null;
+        this._observedSubtitleProbeComplete = false;
+        this._observedLangsSent = null;
+        this._observedLangsPending = null;
+        this._observedLangsRetryKey = null;
+        this._observedLangsRetryCount = 0;
+        this._observedLangsRetryAt = 0;
+    }
+
+    captureExactSubtitleTrackMap(tracks, evidence = {}) {
+        const gatewaySession = evidence?.gatewaySession || evidence?.gateway_session || {};
+        const scope = String(
+            evidence?.subtitleTracksScope ??
+            evidence?.subtitle_tracks_scope ??
+            gatewaySession?.subtitleTracksScope ??
+            gatewaySession?.subtitle_tracks_scope ??
+            ''
+        ).trim().toLowerCase();
+        const probeComplete = evidence?.subtitleProbeComplete === true
+            || evidence?.subtitle_probe_complete === true
+            || gatewaySession?.subtitleProbeComplete === true
+            || gatewaySession?.subtitle_probe_complete === true;
+        // An empty array is authoritative only when a complete exact-file probe
+        // explicitly says that the file contains no subtitle streams.
+        if (!Array.isArray(tracks) || (!probeComplete && scope !== 'file')) return false;
+
+        this._observedExactSubtitleTracks = tracks
+            .map((track) => {
+                const index = Number(track?.index);
+                const language = this.normalizeTrackLanguage(track?.lang || track?.language);
+                return {
+                    index,
+                    lang: language && language !== 'und' ? language : null,
+                    codec: track?.codec || track?.codecName || track?.codec_name || null,
+                    subtitleType: track?.subtitleType || track?.subtitle_type || null,
+                    extractable: track?.extractable === true,
+                    forced: track?.forced === true,
+                    default: track?.default === true,
+                };
+            })
+            .filter((track) => Number.isInteger(track.index));
+        this._observedSubtitleProbeComplete = true;
+        return true;
+    }
+
+    captureExactSubtitleTracksFromMetadata(metadata = {}) {
+        if (!metadata || typeof metadata !== 'object') return false;
+        const gatewaySession = metadata.gatewaySession || metadata.gateway_session || {};
+        const tracks = Array.isArray(metadata.subtitleTracks)
+            ? metadata.subtitleTracks
+            : (Array.isArray(metadata.subtitle_tracks)
+                ? metadata.subtitle_tracks
+                : (Array.isArray(metadata.subtitles)
+                    ? metadata.subtitles
+                    : (Array.isArray(gatewaySession.subtitleTracks)
+                        ? gatewaySession.subtitleTracks
+                        : (Array.isArray(gatewaySession.subtitle_tracks) ? gatewaySession.subtitle_tracks : null))));
+        return this.captureExactSubtitleTrackMap(tracks, metadata);
+    }
+
+    /**
+     * Start a HLS transcode session
+     */
+    async startTranscodeSession(url, options = {}) {
+        try {
+            console.log('[WatchPage] Starting HLS transcode session...', this.describeProcessingOptions(options));
+            const subtitleTracks = this.getSubtitleExtractionTracks()
+                .map(t => ({ index: t.index, codec: t.codec }));
+            const res = await fetch('/api/transcode/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url,
+                    seekOffset: options.seekOffset ?? this.resumeTime, // Pass resume point to backend
+                    ...options,
+                    // Text subtitle tracks extracted in-process alongside the video
+                    // (no extra provider connection)
+                    subtitleTracks
+                })
+            });
+            if (!res.ok) {
+                let payload = {};
+                try {
+                    payload = await res.json();
+                } catch (e) { /* non-JSON error body */ }
+                const detail = payload.error || payload.details || (globalThis.NorvaI18n?.t("ui_web_f8c4fb50b827", { defaultValue: "Failed to start session" }) ?? 'Failed to start session');
+                const error = new Error(detail);
+                error.details = payload.details;
+                error.code = payload.code;
+                error.upstreamStatus = payload.upstreamStatus;
+                error.terminal = Boolean(payload.terminal);
+                error.payload = payload;
+                error.fromSessionResponse = true;
+                error.httpStatus = res.status;
+                throw error;
+            }
+            const session = await res.json();
+            this.currentSessionId = session.sessionId;
+            this.activeSessionIds.add(session.sessionId);
+
+            // Subtitles were attached before the session existed (or belong to a
+            // previous session after a seek-restart): re-bind the selected track
+            // to this session's in-process .vtt files
+            if (this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined) {
+                setTimeout(() => this.attachSelectedProbeSubtitleTrack(), 0);
+            }
+            return session.playlistUrl;
+        } catch (err) {
+            const errorText = this.getErrorText(err);
+            console.error('[WatchPage] Session start failed:', errorText);
+            // Upstream refused the stream (dead link, expired account, IP ban):
+            // a direct-transcode fallback would hit the same wall — fail over
+            // to another version / show an error instead.
+            if (err?.terminal || err?.fromSessionResponse || this.isTerminalPlaybackError(errorText)) {
+                this._lastFailureMsg = this.sanitizePlaybackMessage(errorText);
+                return null;
+            }
+            // Other failures (session infra): fallback to direct transcode
+            const startOffset = options.seekOffset ?? this.resumeTime ?? 0;
+            this.currentPlaybackMode = 'transcode';
+            this.streamStartOffset = startOffset;
+            return this.getTranscodeUrl(url, startOffset, options);
+        }
+    }
+
+    isCloudPlaybackMode() {
+        try {
+            const host = window.location.hostname;
+            const isHosted = Boolean(host && host !== 'localhost' && host !== '127.0.0.1' && host !== '::1');
+            return isHosted || Boolean(window.API?.isCloudMode?.());
+        } catch (_) {
+            return false;
+        }
+    }
+
+    isGatewayPlaybackUrl(url) {
+        const value = String(url || '');
+        return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value);
+    }
+
+    getTelemetryCurrentSrcType() {
+        const mediaElementSrc = String(this.video?.currentSrc || this.video?.src || '').trim();
+        const gatewaySourceUrl = [this.currentUrl, this.baseStreamUrl, this.hls?.url]
+            .find((url) => this.isGatewayPlaybackUrl(url));
+
+        // hls.js attaches a blob: MediaSource to the video element. Preserve the
+        // server-owned playback authority in telemetry only when both the active
+        // lane and one of its retained source URLs prove a Gateway session.
+        if (this.currentPlaybackMode === 'gateway-session' && gatewaySourceUrl) {
+            return 'gateway';
+        }
+        if (!mediaElementSrc) return null;
+        return this.isGatewayPlaybackUrl(mediaElementSrc) ? 'gateway' : 'direct';
+    }
+
+    describePlaybackUrl(url) {
+        const value = String(url || '').trim();
+        if (!value) return 'empty';
+        if (this.isGatewayPlaybackUrl(value)) return 'gateway-session';
+        if (value.startsWith('blob:')) return 'blob';
+        if (value.startsWith('data:')) return 'data';
+        if (/^\/api\/transcode/i.test(value)) return 'local-transcode';
+        if (/^\/api\/remux/i.test(value)) return 'local-remux';
+        if (/^\/api\/proxy\/stream/i.test(value)) return 'local-proxy';
+        if (/^\/api\//i.test(value)) return 'local-api';
+        if (/^\/relay\//i.test(value)) return 'relay';
+        if (/^https?:\/\//i.test(value)) {
+            return /\.m3u8(?:[?#]|$)/i.test(value) ? 'external-hls' : 'external-media';
+        }
+        return value.startsWith('/') ? 'local-media' : 'unknown';
+    }
+
+    describeProcessingOptions(options = {}) {
+        const { url, sourceUrl, streamUrl, ...safeOptions } = options || {};
+        return safeOptions;
+    }
+
+    isLikelyPlaybackUrl(url) {
+        const value = String(url || '').trim();
+        if (!value || value === 'undefined' || value === 'null') return false;
+        if (/^(blob:|data:|\/api\/|\/sessions\/)/i.test(value)) return true;
+        if (!/^https?:\/\//i.test(value)) return false;
+
+        try {
+            const parsed = new URL(value, window.location.href);
+            if (parsed.origin === window.location.origin) {
+                const path = parsed.pathname.replace(/\/+$/, '') || '/';
+                if (path === '/' || path === '/index.html' || path === '/account.html' || path === '/cloud.html') {
+                    return false;
+                }
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    getCloudSafeSettings(settings = {}) {
+        if (!this.isCloudPlaybackMode()) return settings || {};
+
+        // The hosted Cloud app has no local FFmpeg API. Playback decisions are
+        // already made by Norva Cloud when it returns direct/relay/gateway URLs.
+        return {
+            ...(settings || {}),
+            autoTranscode: false,
+            forceTranscode: false,
+            forceVideoTranscode: false,
+            forceRemux: false,
+            upscaleEnabled: false
+        };
+    }
+
+    /**
+     * Stop and cleanup current transcode session
+     */
+    async stopTranscodeSession() {
+        const sessionIds = new Set(this.activeSessionIds);
+        if (this.currentSessionId) {
+            sessionIds.add(this.currentSessionId);
+        }
+
+        if (!sessionIds.size) return;
+
+        this.currentSessionId = null;
+        this.activeSessionIds.clear();
+
+        await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
+            console.log('[WatchPage] Stopping transcode session:', sessionId);
+            const res = await fetch(`/api/transcode/${sessionId}`, { method: 'DELETE' });
+            if (!res.ok && res.status !== 404) {
+                throw new Error(`Failed to stop session ${sessionId}: ${res.status}`);
+            }
+        })).then(results => {
+            results.forEach(result => {
+                if (result.status === 'rejected') {
+                    console.error(result.reason?.message || 'Failed to stop transcode session');
+                }
+            });
+        });
+    }
+
+    registerCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        this.noteCloudPlaybackLaneForAttempt(id);
+        this.currentCloudPlaybackSessionId = id;
+        this.activeCloudPlaybackSessionIds.add(id);
+        this._cloudPlaybackSupersededHandled = false;
+        this.startCloudPlaybackHeartbeat(id);
+    }
+
+    stopCloudPlaybackHeartbeat() {
+        this._cloudPlaybackHeartbeatGeneration += 1;
+        if (this._cloudPlaybackHeartbeatTimer) {
+            clearInterval(this._cloudPlaybackHeartbeatTimer);
+            this._cloudPlaybackHeartbeatTimer = null;
+        }
+        this._cloudPlaybackHeartbeatInFlight = false;
+    }
+
+    startCloudPlaybackHeartbeat(sessionId) {
+        this.stopCloudPlaybackHeartbeat();
+        const id = String(sessionId || '').trim();
+        if (!id) return;
+        const generation = this._cloudPlaybackHeartbeatGeneration;
+        const pulse = async () => {
+            if (
+                generation !== this._cloudPlaybackHeartbeatGeneration
+                || this.currentCloudPlaybackSessionId !== id
+                || this._cloudPlaybackHeartbeatInFlight
+            ) return;
+            const cloud = window.NorvaCloud;
+            const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+            const heartbeat = api?.heartbeatSession;
+            if (typeof heartbeat !== 'function') return;
+
+            this._cloudPlaybackHeartbeatInFlight = true;
+            try {
+                await heartbeat(id);
+            } catch (error) {
+                if (
+                    generation === this._cloudPlaybackHeartbeatGeneration
+                    && this.currentCloudPlaybackSessionId === id
+                    && this.isPlaybackSupersededError(error)
+                ) {
+                    await this.handlePlaybackSuperseded(id);
+                }
+            } finally {
+                if (generation === this._cloudPlaybackHeartbeatGeneration) {
+                    this._cloudPlaybackHeartbeatInFlight = false;
+                }
+            }
+        };
+        void pulse();
+        this._cloudPlaybackHeartbeatTimer = setInterval(() => { void pulse(); }, 5000);
+    }
+
+    normalizePrivateMediaCacheAccess(value, sessionId, expectedPlaylistUrl = null) {
+        const access = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        const authorization = access?.authorization && typeof access.authorization === 'object'
+            ? access.authorization
+            : null;
+        const objectKey = String(access?.objectKey || '').trim().toLowerCase();
+        const playlistUrl = String(access?.playlistUrl || '').trim();
+        const token = String(authorization?.token || '').trim();
+        const ticketExpiresAtMs = Date.parse(String(access?.ticketExpiresAt || ''));
+        const refreshAfterMs = Date.parse(String(access?.refreshAfter || ''));
+        const hardExpiresAtMs = Date.parse(String(access?.hardExpiresAt || ''));
+        const id = String(sessionId || '').trim().toLowerCase();
+        if (Number(access?.protocol) !== 1
+            || access?.transport !== 'private-r2-hls'
+            || !/^[0-9a-f]{64}$/.test(objectKey)
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+            || authorization?.scheme !== 'Bearer'
+            || !/^mc1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
+            || token.length > 4096
+            || !Number.isFinite(ticketExpiresAtMs)
+            || !Number.isFinite(refreshAfterMs)
+            || !Number.isFinite(hardExpiresAtMs)
+            || refreshAfterMs >= ticketExpiresAtMs
+            || hardExpiresAtMs < ticketExpiresAtMs) return null;
+
+        let parsed;
+        try { parsed = new URL(playlistUrl, window.location.href); } catch (_) { return null; }
+        const expectedPrefix = `/v1/hls/${objectKey}/`;
+        if (parsed.protocol !== 'https:'
+            || parsed.username || parsed.password || parsed.search || parsed.hash
+            || !parsed.pathname.startsWith(expectedPrefix)
+            || (expectedPlaylistUrl && playlistUrl !== String(expectedPlaylistUrl))) return null;
+        return {
+            protocol: 1,
+            transport: 'private-r2-hls',
+            objectKey,
+            playlistUrl: parsed.toString(),
+            origin: parsed.origin,
+            pathPrefix: expectedPrefix,
+            token,
+            sessionId: id,
+            ticketExpiresAtMs,
+            refreshAfterMs,
+            hardExpiresAtMs
+        };
+    }
+
+    clearPrivateMediaCacheAccess() {
+        this._privateMediaCacheTicketGeneration += 1;
+        if (this._privateMediaCacheTicketTimer) {
+            clearTimeout(this._privateMediaCacheTicketTimer);
+            this._privateMediaCacheTicketTimer = null;
+        }
+        this._privateMediaCacheTicketPromise = null;
+        this._privateMediaCacheAccess = null;
+    }
+
+    configurePrivateMediaCacheAccess(value, sessionId, expectedPlaylistUrl) {
+        this.clearPrivateMediaCacheAccess();
+        if (!value) return null;
+        const access = this.normalizePrivateMediaCacheAccess(value, sessionId, expectedPlaylistUrl);
+        if (!access) return null;
+        this._privateMediaCacheAccess = access;
+        this.schedulePrivateMediaCacheTicketRefresh();
+        return access;
+    }
+
+    schedulePrivateMediaCacheTicketRefresh(delayOverrideMs = null) {
+        if (this._privateMediaCacheTicketTimer) clearTimeout(this._privateMediaCacheTicketTimer);
+        this._privateMediaCacheTicketTimer = null;
+        const access = this._privateMediaCacheAccess;
+        if (!access) return;
+        const now = Date.now();
+        const latestSafeRefresh = Math.max(now + 250, access.ticketExpiresAtMs - 5000);
+        const target = delayOverrideMs === null
+            ? Math.min(access.refreshAfterMs, latestSafeRefresh)
+            : Math.min(now + Math.max(250, Number(delayOverrideMs) || 0), latestSafeRefresh);
+        const delay = Math.max(250, target - now);
+        const generation = this._privateMediaCacheTicketGeneration;
+        this._privateMediaCacheTicketTimer = setTimeout(() => {
+            this._privateMediaCacheTicketTimer = null;
+            if (generation !== this._privateMediaCacheTicketGeneration) return;
+            void this.refreshPrivateMediaCacheTicket('scheduled');
+        }, delay);
+    }
+
+    async refreshPrivateMediaCacheTicket(reason = 'scheduled') {
+        if (this._privateMediaCacheTicketPromise) return this._privateMediaCacheTicketPromise;
+        const access = this._privateMediaCacheAccess;
+        if (!access) return false;
+        const generation = this._privateMediaCacheTicketGeneration;
+        const refresh = (async () => {
+            const cloud = window.NorvaCloud;
+            const playbackApi = cloud?.token
+                ? cloud.playback
+                : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+            if (typeof playbackApi?.refreshMediaCacheTicket !== 'function') {
+                throw new Error('Private media cache ticket refresh is unavailable');
+            }
+            const renewed = await playbackApi.refreshMediaCacheTicket(access.sessionId, access.objectKey);
+            if (generation !== this._privateMediaCacheTicketGeneration
+                || this._privateMediaCacheAccess !== access) return false;
+            const normalized = this.normalizePrivateMediaCacheAccess(
+                renewed,
+                access.sessionId,
+                access.playlistUrl
+            );
+            if (!normalized || normalized.objectKey !== access.objectKey) {
+                throw new Error('Private media cache ticket refresh is invalid');
+            }
+            this._privateMediaCacheAccess = normalized;
+            this.schedulePrivateMediaCacheTicketRefresh();
+            if (reason === 'http-auth') {
+                try { this.hls?.startLoad(); } catch (_) { /* player may already be gone */ }
+            }
+            return true;
+        })().catch(error => {
+            if (generation !== this._privateMediaCacheTicketGeneration
+                || this._privateMediaCacheAccess !== access) return false;
+            const remainingMs = access.ticketExpiresAtMs - Date.now();
+            if (remainingMs > 1500) {
+                this.schedulePrivateMediaCacheTicketRefresh(Math.min(2000, Math.max(250, remainingMs - 1000)));
+            } else {
+                console.warn('[WatchPage] Private media cache authorization could not be renewed.');
+                if (this.isPlaybackSupersededError(error)) {
+                    void this.handlePlaybackSuperseded(access.sessionId);
+                } else {
+                    const fallbackAttemptId = this._playbackAttemptId;
+                    void this.fallbackPrivateMediaCacheToProvider(
+                        fallbackAttemptId,
+                        'authorization-expired'
+                    ).then((fellBack) => {
+                        if (!fellBack
+                            && !this.isStalePlaybackAttempt(fallbackAttemptId)
+                            && this._privateMediaCacheAccess === access) {
+                            this.showPlaybackError(
+                                (globalThis.NorvaI18n?.t("ui_web_b602f45e2aca", { defaultValue: "Secure cached playback authorization expired. Please retry." }) ?? 'Secure cached playback authorization expired. Please retry.'),
+                                { immediate: true }
+                            );
+                        }
+                    }).catch((fallbackError) => {
+                        console.warn('[WatchPage] Private media cache authorization fallback failed:', fallbackError?.message || fallbackError);
+                        if (!this.isStalePlaybackAttempt(fallbackAttemptId)) {
+                            this.showPlaybackError(
+                                (globalThis.NorvaI18n?.t("ui_web_b602f45e2aca", { defaultValue: "Secure cached playback authorization expired. Please retry." }) ?? 'Secure cached playback authorization expired. Please retry.'),
+                                { immediate: true }
+                            );
+                        }
+                    });
+                }
+            }
+            return false;
+        }).finally(() => {
+            if (this._privateMediaCacheTicketPromise === refresh) {
+                this._privateMediaCacheTicketPromise = null;
+            }
+        });
+        this._privateMediaCacheTicketPromise = refresh;
+        return refresh;
+    }
+
+    privateMediaCacheAuthorizationForUrl(url) {
+        const access = this._privateMediaCacheAccess;
+        if (!access || Date.now() >= access.ticketExpiresAtMs) return null;
+        let parsed;
+        try { parsed = new URL(String(url || ''), window.location.href); } catch (_) { return null; }
+        if (parsed.origin !== access.origin || !parsed.pathname.startsWith(access.pathPrefix)) return null;
+        return `Bearer ${access.token}`;
+    }
+
+    async handlePlaybackSuperseded(sessionId) {
+        if (
+            this._cloudPlaybackSupersededHandled
+            || String(sessionId || '') !== String(this.currentCloudPlaybackSessionId || '')
+        ) return;
+        this._cloudPlaybackSupersededHandled = true;
+        this.stopCloudPlaybackHeartbeat();
+        this.destroyEngine();
+        await this.releasePlaybackPipelineForRetry();
+        this.showPlaybackError('PLAYBACK_SUPERSEDED', { immediate: true });
+    }
+
+    async fallbackPrivateMediaCacheToProvider(playbackAttemptId, reason = 'cache-unavailable') {
+        const cacheSessionId = String(this._privateMediaCacheAccess?.sessionId || '');
+        if (!(this._privateMediaCacheFallbackSessionIds instanceof Set)) {
+            this._privateMediaCacheFallbackSessionIds = new Set();
+        }
+        if (this.isStalePlaybackAttempt(playbackAttemptId)
+            || !cacheSessionId
+            || this._privateMediaCacheFallbackSessionIds.has(cacheSessionId)) return false;
+        this._privateMediaCacheFallbackSessionIds.add(cacheSessionId);
+        const position = Math.max(0, Math.floor(Number(this.getPlaybackPosition?.()) || 0));
+        this.trackPlaybackPosition?.({ position, force: true });
+        this.resumeTime = position;
+        try { this.saveResumeSnapshotThrottled?.(true); } catch (_) { /* best-effort */ }
+        this.clearPrivateMediaCacheAccess();
+        this.showLoading?.();
+        console.warn(`[WatchPage] Private media cache ${String(reason || 'unavailable')}; falling back once at ${position}s.`);
+        await this.restartCloudGatewayStreamAt(position, {
+            mediaCacheReadPolicy: 'bypass-once',
+            playbackIdentity: this.captureVodPlaybackIdentity?.() || null,
+        });
+        return true;
+    }
+
+    providerFailureSignal(error) {
+        const text = this.getErrorText(error);
+        if (this.isProviderBusyError(text)) {
+            return { code: 'PROVIDER_BUSY', networkCause: 'PROVIDER_BUSY', upstreamStatus: 458 };
+        }
+        const mappings = [
+            [/PROVIDER_CONNECT_TIMEOUT|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT/i, 'PROVIDER_CONNECT_TIMEOUT'],
+            [/PROVIDER_RESPONSE_TIMEOUT|UND_ERR_HEADERS_TIMEOUT/i, 'PROVIDER_RESPONSE_TIMEOUT'],
+            [/PROVIDER_CONNECTION_RESET|ECONNRESET|UND_ERR_SOCKET|EPIPE/i, 'PROVIDER_CONNECTION_RESET'],
+            [/PROVIDER_DNS_FAILURE|ENOTFOUND|EAI_AGAIN/i, 'PROVIDER_DNS_FAILURE'],
+            [/PROVIDER_TLS_FAILURE|CERT|TLS|SSL/i, 'PROVIDER_TLS_FAILURE'],
+            [/PROVIDER_NETWORK_UNREACHABLE|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/i, 'PROVIDER_NETWORK_UNREACHABLE'],
+        ];
+        const match = mappings.find(([pattern]) => pattern.test(text));
+        return match ? { code: match[1], networkCause: match[1] } : null;
+    }
+
+    async reportProviderPlaybackFailure(error, sessionId = this.currentCloudPlaybackSessionId) {
+        const id = String(sessionId || this.playbackTelemetry?.sessionId || '').trim();
+        const signal = this.providerFailureSignal(error);
+        if (!id || !signal) return false;
+        const key = `${id}:${signal.code}`;
+        if (this._reportedProviderFailureKeys.has(key)) return true;
+
+        const cloud = window.NorvaCloud;
+        const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+        const report = api?.reportProviderFailure;
+        if (typeof report !== 'function') return false;
+
+        this._reportedProviderFailureKeys.add(key);
+        if (this._reportedProviderFailureKeys.size > 64) {
+            this._reportedProviderFailureKeys.delete(this._reportedProviderFailureKeys.values().next().value);
+        }
+        try {
+            await report(id, signal);
+            return true;
+        } catch (reportError) {
+            this._reportedProviderFailureKeys.delete(key);
+            console.warn('[WatchPage] Provider failure report failed:', reportError?.message || reportError);
+            return false;
+        }
+    }
+
+    async stopCloudPlaybackSessions(options = {}) {
+        this.stopCloudPlaybackHeartbeat();
+        const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
+        if (this.currentCloudPlaybackSessionId) {
+            sessionIds.add(this.currentCloudPlaybackSessionId);
+        }
+
+        if (!sessionIds.size) return;
+
+        const cloud = window.NorvaCloud;
+        const playbackApi = cloud?.token
+            ? cloud.playback
+            : (cloud?.deviceToken ? cloud.device?.playback : null);
+        if (typeof playbackApi?.expireSession !== 'function') return;
+
+        this.currentCloudPlaybackSessionId = null;
+        this.activeCloudPlaybackSessionIds.clear();
+
+        await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
+            console.log('[WatchPage] Expiring cloud playback session:', sessionId);
+            await playbackApi.expireSession(sessionId, options);
+        })).then(results => {
+            results.forEach(result => {
+                if (result.status === 'rejected') {
+                    console.error(result.reason?.message || 'Failed to expire cloud playback session');
+                }
+            });
+        });
+    }
+
+    async releasePlaybackPipelineForRetry() {
+        try {
+            this.cancelPendingHlsAudioSwitch(false);
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = null;
+            this._pendingLocalSeekTarget = null;
+            this._pendingLocalSeekAttempts = 0;
+
+            if (this.hls) {
+                try { this.hls.destroy(); } catch (error) {
+                    console.warn('[WatchPage] Could not destroy HLS before retry:', error?.message || error);
+                }
+                this.hls = null;
+            }
+
+            if (this.video) {
+                try {
+                    this._suppressMediaErrorsUntil = Date.now() + 2500;
+                    this.video.pause();
+                    this.video.removeAttribute('src');
+                    this.video.load();
+                } catch (error) {
+                    console.warn('[WatchPage] Could not clear video before retry:', error?.message || error);
+                }
+            }
+
+            await Promise.allSettled([
+                this.stopTranscodeSession(),
+                this.stopCloudPlaybackSessions()
+            ]);
+        } catch (error) {
+            console.warn('[WatchPage] Playback retry cleanup failed:', error?.message || error);
+        }
+    }
+
+    buildProcessingUrl(route, url, start = 0, options = {}) {
+        const params = new URLSearchParams({ url });
+        const startOffset = this.normalizeDuration(start);
+        if (startOffset) {
+            params.set('start', String(startOffset));
+        }
+        const audioStreamIndex = Number.parseInt(options.audioStreamIndex, 10);
+        if (Number.isInteger(audioStreamIndex) && audioStreamIndex >= 0) {
+            params.set('audioStreamIndex', String(audioStreamIndex));
+        }
+        return `${route}?${params.toString()}`;
+    }
+
+    getTranscodeUrl(url, start = 0, options = this.currentProcessingOptions) {
+        return this.buildProcessingUrl('/api/transcode', url, start, options);
+    }
+
+    getRemuxUrl(url, start = 0) {
+        return this.buildProcessingUrl('/api/remux', url, start);
+    }
+
+    canUseLocalProxy(url) {
+        if (!url || url.startsWith('/')) return false;
+
+        try {
+            const parsed = new URL(url, window.location.href);
+            if (parsed.pathname.startsWith('/api/')) return false;
+            if (parsed.pathname.startsWith('/relay/')) return false;
+            if (parsed.hostname.includes('workers.dev') && parsed.pathname.includes('/relay/')) return false;
+            if (parsed.hostname.includes('norva-relay')) return false;
+
+            const isSecurePage = window.location.protocol === 'https:';
+            if (isSecurePage && parsed.protocol === 'https:') return false;
+        } catch {
+            return false;
+        }
+
+        return true;
+    }
+
+    getProxiedUrl(url) {
+        if (!this.canUseLocalProxy(url)) return url;
+        return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+    }
+
+    async updateTranscodeStatus(mode, text) {
+        if (!this.transcodeStatusEx) return;
+
+        this.transcodeStatusEx.className = 'transcode-status'; // Reset classes
+
+        if (mode === 'hidden') {
+            this.transcodeStatusEx.classList.add('hidden');
+            return;
+        }
+
+        this.transcodeStatusEx.textContent = text || mode;
+        this.transcodeStatusEx.classList.add(mode);
+
+        // Ensure it's visible
+        this.transcodeStatusEx.classList.remove('hidden');
+    }
+
+    /**
+     * Get quality label from video height
+     */
+    getQualityLabel(height) {
+        if (height >= 2160) return '4K';
+        if (height >= 1440) return '1440p';
+        if (height >= 1080) return '1080p';
+        if (height >= 720) return '720p';
+        if (height >= 480) return '480p';
+        if (height > 0) return `${height}p`;
+        return null;
+    }
+
+    /**
+     * Update quality badge display
+     */
+    updateQualityBadge() {
+        if (!this.qualityBadgeEl) return;
+
+        if (this.currentStreamInfo?.height > 0) {
+            const label = this.getQualityLabel(this.currentStreamInfo.height);
+            const rate = this.getBitrateLabel();
+            this.qualityBadgeEl.textContent = rate ? `${label} · ${rate}` : label;
+            this.qualityBadgeEl.classList.remove('hidden');
+        } else {
+            this.qualityBadgeEl.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Live throughput label (Mbps) from hls.js's bandwidth estimate — the audit
+     * flagged it as computed-but-hidden. Empty when no estimate is available
+     * (engine/direct playback), so the badge stays resolution-only there.
+     */
+    getBitrateLabel() {
+        try {
+            const bps = this.hls?.bandwidthEstimate;
+            if (!bps || !isFinite(bps) || bps <= 0) return '';
+            const mbps = bps / 1_000_000;
+            return mbps >= 10 ? `${Math.round(mbps)} Mbps` : `${mbps.toFixed(1)} Mbps`;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    normalizeDuration(value) {
+        const duration = parseFloat(value);
+        return Number.isFinite(duration) && duration > 0 ? duration : null;
+    }
+
+    getErrorText(error) {
+        if (!error) return '';
+        if (typeof error === 'string') return error;
+
+        const payload = error.payload || {};
+        const payloadDetails = payload.details && typeof payload.details === 'object'
+            ? payload.details
+            : {};
+        return [
+            error.code,
+            error.upstreamStatus,
+            error.message,
+            error.details,
+            payload.code,
+            payload.error,
+            payloadDetails.code,
+            payloadDetails.networkCause,
+            payloadDetails.upstreamStatus,
+            typeof payload.details === 'string' ? payload.details : ''
+        ].filter(Boolean).join(' ');
+    }
+
+    sanitizePlaybackMessage(message) {
+        return String(message || '')
+            .replace(/https?:\/\/[^\s'"<>]+/gi, '[stream URL]')
+            .replace(/([?&](?:username|password|pass)=)[^&\s]+/gi, '$1[redacted]')
+            .replace(/\/(live|movie|series)\/[^/\s]+\/[^/\s]+\//gi, '/$1/[user]/[password]/')
+            .trim();
+    }
+
+    isTerminalPlaybackError(message) {
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|PROVIDER_(ACCOUNT_)?BUSY|PLAYBACK_SUPERSEDED|401|403|404|416|429|458|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
+    }
+
+    isPlaybackSupersededError(error) {
+        const text = this.getErrorText(error);
+        return /PLAYBACK_SUPERSEDED/i.test(text);
+    }
+
+    isRangeSeekFailure(message) {
+        return /416|Requested Range Not Satisfiable|range not satisfiable|RANGE_REJECTED|invalid as first byte of an EBML number|File ended prematurely|exceeds containing master element/i.test(message || '');
+    }
+
+    // Returns true for errors that reflect a temporary connection/account state,
+    // NOT a structurally broken title. These must never trigger "hide broken"
+    // because the title itself is fine — only the provider slot was busy.
+    isConnectionLimitError(message) {
+        // 458 = single-slot provider "max connections" (transient, frees in seconds) —
+        // treat like a connection block so we never mark the title broken or hard-spin.
+        // NB: (?:\b|_)458 — underscore is a word char in JS regex, so \b458\b can NEVER
+        // match "BLOCK_HTTP_458"/"PROBE_HTTP_458" (the exact codes the engine emits).
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|PROVIDER_(ACCOUNT_)?BUSY|401|403|429|(?:\b|_)458\b|Unauthorized|Forbidden|Too Many Requests|rate limit|max connection/i.test(message || '');
+    }
+
+    // Provider single-slot "max connections" (HTTP 458): transient — the slot frees
+    // ~8s after the previous consumer drops. Matches the engine's BLOCK_HTTP_458 /
+    // PROBE_HTTP_458 codes AND the gateway's typed PROVIDER_BUSY details.
+    isProviderBusyError(message) {
+        return /(?:\b|_)458\b|PROVIDER_(ACCOUNT_)?BUSY|max connections?/i.test(String(message || ''));
+    }
+
+    playbackSupersededCopy() {
+        const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
+        if (locale.startsWith('fr')) {
+            return {
+                title: (globalThis.NorvaI18n?.t("ui_web_1f1974a2bbdb", { defaultValue: "Service déjà utilisé sur un autre appareil" }) ?? 'Service déjà utilisé sur un autre appareil'),
+                message: (globalThis.NorvaI18n?.t("ui_web_5f5ece61ccb5", { defaultValue: "Norva a arrêté cette lecture parce qu’une autre lecture a pris sa place." }) ?? 'Norva a arrêté cette lecture parce qu’une autre lecture a pris sa place.'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_691b575cfb50", { defaultValue: "Pour reprendre ici, appuyez sur Reprendre ici. La lecture la plus récente sera conservée." }) ?? 'Pour reprendre ici, appuyez sur Reprendre ici. La lecture la plus récente sera conservée.'),
+                retry: (globalThis.NorvaI18n?.t("ui_web_32b8de249a2e", { defaultValue: "Reprendre ici" }) ?? 'Reprendre ici'),
+            };
+        }
+        return {
+            title: (globalThis.NorvaI18n?.t("ui_web_d55f352db2f6", { defaultValue: "Service already in use on another device" }) ?? 'Service already in use on another device'),
+            message: (globalThis.NorvaI18n?.t("ui_web_904c3f4b701a", { defaultValue: "Norva stopped this playback because another playback took its place." }) ?? 'Norva stopped this playback because another playback took its place.'),
+            hint: (globalThis.NorvaI18n?.t("ui_web_5d3881bae4dc", { defaultValue: "To resume here, select Play here. The most recent playback will be kept." }) ?? 'To resume here, select Play here. The most recent playback will be kept.'),
+            retry: (globalThis.NorvaI18n?.t("ui_web_879990bf5526", { defaultValue: "Play here" }) ?? 'Play here'),
+        };
+    }
+
+    providerAccountConflictCopy() {
+        const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
+        if (locale.startsWith('fr')) {
+            return {
+                title: (globalThis.NorvaI18n?.t("ui_web_d4f8db57d70d", { defaultValue: "Service occupé" }) ?? 'Service occupé'),
+                message: (globalThis.NorvaI18n?.t("ui_web_465aeda3bebe", { defaultValue: "Ce service TV est occupé. Norva réessaie dès que le créneau se libère." }) ?? 'Ce service TV est occupé. Norva réessaie dès que le créneau se libère.'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_ab629056c210", { defaultValue: "Attendez quelques secondes, puis appuyez sur Réessayer." }) ?? 'Attendez quelques secondes, puis appuyez sur Réessayer.'),
+                retry: (globalThis.NorvaI18n?.t("ui_web_af273d956b5b", { defaultValue: "Réessayer" }) ?? 'Réessayer'),
+            };
+        }
+        return {
+            title: (globalThis.NorvaI18n?.t("ui_web_3be599075bbf", { defaultValue: "This TV service is busy" }) ?? 'This TV service is busy'),
+            message: (globalThis.NorvaI18n?.t("ui_web_e746fa23da97", { defaultValue: "This TV service is busy. Norva will retry once the slot is free." }) ?? 'This TV service is busy. Norva will retry once the slot is free.'),
+            hint: (globalThis.NorvaI18n?.t("ui_web_f73ba788238e", { defaultValue: "Wait a few seconds, then select Retry." }) ?? 'Wait a few seconds, then select Retry.'),
+            retry: (globalThis.NorvaI18n?.t("ui_web_942087cc2d41", { defaultValue: "Retry" }) ?? 'Retry'),
+        };
+    }
+
+    cloudTranscodeRecoveryCopy() {
+        const locale = String(document.documentElement?.lang || navigator.language || '').toLowerCase();
+        if (locale.startsWith('fr')) {
+            return {
+                title: (globalThis.NorvaI18n?.t("ui_web_2b949cf60518", { defaultValue: "Conversion serveur nécessaire" }) ?? 'Conversion serveur nécessaire'),
+                message: (globalThis.NorvaI18n?.t("ui_web_058ccf9b7010", { defaultValue: "Le navigateur ne peut pas lire directement ce format. La première session a été arrêtée avant toute autre tentative." }) ?? 'Le navigateur ne peut pas lire directement ce format. La première session a été arrêtée avant toute autre tentative.'),
+                hint: (globalThis.NorvaI18n?.t("ui_web_77d357ed1861", { defaultValue: "Appuyez sur Convertir et lire pour démarrer une seule nouvelle session via le serveur." }) ?? 'Appuyez sur Convertir et lire pour démarrer une seule nouvelle session via le serveur.'),
+                retry: (globalThis.NorvaI18n?.t("ui_web_799d4e0f494d", { defaultValue: "Convertir et lire" }) ?? 'Convertir et lire'),
+            };
+        }
+        return {
+            title: (globalThis.NorvaI18n?.t("ui_web_b2fdf08eeb30", { defaultValue: "Server conversion required" }) ?? 'Server conversion required'),
+            message: (globalThis.NorvaI18n?.t("ui_web_2a9f759e8ed7", { defaultValue: "This browser cannot play the file directly. The first session was stopped before any other route was attempted." }) ?? 'This browser cannot play the file directly. The first session was stopped before any other route was attempted.'),
+            hint: (globalThis.NorvaI18n?.t("ui_web_7f7372c2be5e", { defaultValue: "Select Convert and play to start one new server session." }) ?? 'Select Convert and play to start one new server session.'),
+            retry: (globalThis.NorvaI18n?.t("ui_web_58b57a88c039", { defaultValue: "Convert and play" }) ?? 'Convert and play'),
+        };
+    }
+
+    getProbeFailureText(info) {
+        if (!info) return '';
+        return [
+            info.upstreamCode,
+            info.upstreamStatus,
+            info.friendlyError,
+            info.error
+        ].filter(Boolean).join(' ');
+    }
+
+    getFriendlyPlaybackError(message) {
+        const text = this.sanitizePlaybackMessage(message);
+        const cloud = this.isCloudPlaybackMode();
+
+        if (this.isPlaybackSupersededError(text)) {
+            return this.playbackSupersededCopy().message;
+        }
+        if (this.isProviderBusyError(text)) {
+            return this.providerAccountConflictCopy().message;
+        }
+        if (/MEDIA_CACHE_(PRODUCER_ACTIVE|BACKGROUND_DRAINING)/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_800cec00079f", { defaultValue: "This film is still being prepared. Please retry in a moment." }) ?? 'This film is still being prepared. Please retry in a moment.');
+        }
+        if (/PROVIDER_(CONNECT|RESPONSE)_TIMEOUT|UND_ERR_(CONNECT|HEADERS)_TIMEOUT|ETIMEDOUT/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_1173ac0834ae", { defaultValue: "The TV service did not respond before the connection timed out. Retry once the service is reachable." }) ?? 'The TV service did not respond before the connection timed out. Retry once the service is reachable.');
+        }
+        if (/PROVIDER_DNS_FAILURE|ENOTFOUND|EAI_AGAIN/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_bd979eb9c667", { defaultValue: "The TV service address could not be resolved. Check the service address in Settings." }) ?? 'The TV service address could not be resolved. Check the service address in Settings.');
+        }
+        if (/PROVIDER_TLS_FAILURE|certificate|TLS|SSL/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_382bd774f8c6", { defaultValue: "The TV service could not establish a secure connection." }) ?? 'The TV service could not establish a secure connection.');
+        }
+        if (/PROVIDER_CONNECTION_RESET|ECONNRESET|UND_ERR_SOCKET|EPIPE/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_b87fac7544cd", { defaultValue: "The TV service closed the network connection before playback could start." }) ?? 'The TV service closed the network connection before playback could start.');
+        }
+        if (/PROVIDER_NETWORK_UNREACHABLE|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_73302f0fcb07", { defaultValue: "The network route to the TV service is unavailable." }) ?? 'The network route to the TV service is unavailable.');
+        }
+        if (/NO_SUPPORTED_MIME/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_d3aa098aaeb8", { defaultValue: "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it." }) ?? "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it.");
+        }
+        if (/429|Too Many Requests|Many Requests|rate limit/i.test(text)) {
+            return cloud
+                ? (globalThis.NorvaI18n?.t("ui_web_4a2178cfbf0d", { defaultValue: "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again." }) ?? "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again.")
+                : (globalThis.NorvaI18n?.t("ui_web_4700ef1bdf32", { defaultValue: "The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again." }) ?? 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.');
+        }
+        if (/401|Unauthorized|403|Forbidden/i.test(text)) {
+            return cloud
+                ? (globalThis.NorvaI18n?.t("ui_web_0d831becc649", { defaultValue: "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off." }) ?? "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off.")
+                : (globalThis.NorvaI18n?.t("ui_web_ec9a00a6e6b1", { defaultValue: "The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed." }) ?? 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.');
+        }
+        if (/404|not found/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_e95a86ac0092", { defaultValue: "Stream not found on the provider (404). This title may have been removed." }) ?? 'Stream not found on the provider (404). This title may have been removed.');
+        }
+        if (/416|Requested Range Not Satisfiable|range not satisfiable/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_ea854f56bb8b", { defaultValue: "The provider refused the requested resume/seek position. Restart from the beginning or try another version." }) ?? 'The provider refused the requested resume/seek position. Restart from the beginning or try another version.');
+        }
+        if (/5\d\d|Service Unavailable|server error/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_542c160150e3", { defaultValue: "The provider is temporarily unavailable for this stream. Try another version or retry in a moment." }) ?? 'The provider is temporarily unavailable for this stream. Try another version or retry in a moment.');
+        }
+        if (/SOURCE_NOT_MEDIA/i.test(text)) {
+            // The byte-pipe fetched fine but the provider returned an error page / JSON instead of
+            // the video (stream offline, link expired provider-side, or geo/auth wall on the file).
+            return (globalThis.NorvaI18n?.t("ui_web_8d3b9dd0259c", { defaultValue: "This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment." }) ?? 'This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment.');
+        }
+        if (/SOURCE_UNSUPPORTED_CONTAINER|DEMUX_OPEN/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_d0feb8175eb3", { defaultValue: "In-browser playback couldn't open this file's container (e.g. MPEG-TS). Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced." }) ?? "In-browser playback couldn't open this file's container (e.g. MPEG-TS). Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced.");
+        }
+        if (/provider (closed|refused)|4XX Client Error|Error opening input|Invalid data|Stream ends prematurely|I\/O error/i.test(text)) {
+            return (globalThis.NorvaI18n?.t("ui_web_7ff2af18d5f0", { defaultValue: "The provider closed or refused this stream. Try another version or wait before retrying." }) ?? 'The provider closed or refused this stream. Try another version or wait before retrying.');
+        }
+
+        return (globalThis.NorvaI18n?.t("ui_web_8c3a64e956bc", { defaultValue: "Playback failed." }) ?? 'Playback failed.');
+    }
+
+    escapeHtml(text) {
+        if (typeof MediaUtils !== 'undefined' && MediaUtils.escapeHtml) {
+            return MediaUtils.escapeHtml(text || '');
+        }
+        return String(text || '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
+
+    isGenericTrackTitle(title, type = 'track') {
+        const value = String(title || '').trim();
+        if (!value) return true;
+
+        if (/^soundhandler$/i.test(value)) return true;
+        if (type === 'subtitle') {
+            return /^(subtitle|subtitles?|sous[-\s]?titres?|captions?|track)(?:\s*\d+)*\s*$/i.test(value);
+        }
+        if (type === 'audio') {
+            return /^(audio|track)\s*\d*$/i.test(value);
+        }
+        return false;
+    }
+
+    getLanguageDisplayName(language) {
+        const normalized = this.normalizeTrackLanguage(language);
+        if (!normalized || normalized === 'und') return null;
+
+        try {
+            const locale = typeof document !== 'undefined' ? document.documentElement?.lang || 'en' : 'en';
+            const displayNames = new Intl.DisplayNames([locale], { type: 'language' });
+            const label = displayNames.of(normalized);
+            if (label) return label.charAt(0).toUpperCase() + label.slice(1);
+        } catch (_) {
+            // Fall back to compact English labels below.
+        }
+
+        const fallbacks = {
+            fr: 'French',
+            en: 'English',
+            es: 'Spanish',
+            de: 'German',
+            it: 'Italian',
+            pt: 'Portuguese',
+            ar: 'Arabic',
+            nl: 'Dutch'
+        };
+        return fallbacks[normalized] || normalized.toUpperCase();
+    }
+
+    getSubtitleTrackLabel(track, fallback = 'Subtitles') {
+        if (!track) return fallback;
+
+        // HLS uses name/lang and native TextTrack uses label/language. All
+        // three paths must use the same labels; a generated "Subtitle 1"
+        // must not mask the declared language that arrived with that track.
+        const rawTitle = track.title || track.name || track.label;
+        const title = !this.isGenericTrackTitle(rawTitle, 'subtitle') ? String(rawTitle).trim() : '';
+        const language = [track.language, track.lang, track.inferredLanguage]
+            .map(value => this.normalizeTrackLanguage(value))
+            .find(value => value && value !== 'und');
+        const languageLabel = this.getLanguageDisplayName(language);
+        const roleLabels = this.getSubtitleRoleLabels(track);
+        const parts = [];
+
+        if (languageLabel) parts.push(languageLabel);
+        const titleIsLanguageCode = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(title)
+            && this.normalizeTrackLanguage(title) === language;
+        // Common English/native language names are metadata too, not custom
+        // edition names (avoid e.g. "French - Français" after localization).
+        let titleIsLanguageName = false;
+        if (title && language && language !== 'und') {
+            try {
+                titleIsLanguageName = ['en', 'fr', language].some(locale =>
+                    new Intl.DisplayNames([locale], { type: 'language' }).of(language)?.toLowerCase() === title.toLowerCase());
+            } catch (_) { /* An invalid locale must not hide a useful title. */ }
+        }
+        if (title && !titleIsLanguageCode && !titleIsLanguageName && (!languageLabel || title.toLowerCase() !== languageLabel.toLowerCase())) {
+            parts.push(title);
+        }
+        roleLabels.forEach(label => {
+            if (!parts.some(part => part.toLowerCase() === label.toLowerCase())) {
+                parts.push(label);
+            }
+        });
+
+        if (parts.length) return parts.join(' - ');
+        return fallback;
+    }
+
+    hasTrackDisposition(track, keys = []) {
+        if (!track || !Array.isArray(keys)) return false;
+        const disposition = track.disposition && typeof track.disposition === 'object'
+            ? track.disposition
+            : {};
+        return keys.some(key => {
+            const value = track[key] ?? disposition[key];
+            return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+        });
+    }
+
+    getSubtitleRoleLabels(track) {
+        const labels = [];
+        const title = String(track?.title || track?.label || track?.name || '').toLowerCase();
+        const attrs = track?.attrs || {};
+
+        if (this.hasTrackDisposition(track, ['forced']) || String(attrs.FORCED).toUpperCase() === 'YES'
+            || /\b(forced|force)\b/i.test(title)) {
+            labels.push('Forced');
+        }
+
+        if (this.hasTrackDisposition(track, ['hearingImpaired', 'hearing_impaired', 'sdh'])
+            || /(?:^|,)public\.accessibility\.(?:transcribes-spoken-dialog|describes-music-and-sound)(?:,|$)/i.test(String(attrs.CHARACTERISTICS || ''))
+            || /\b(sdh|hearing|malentendant|malentendants|cc)\b/i.test(title)) {
+            labels.push('SDH');
+        }
+
+        return labels;
+    }
+
+    getSubtitleMenuLabel(track, allTracks = [], index = -1, fallback = null) {
+        fallback ??= globalThis.NorvaI18n?.t('ui_web_0ee695bdeb26', { defaultValue: 'Subtitles' }) ?? 'Subtitles';
+        const base = this.getSubtitleTrackLabel(track, fallback);
+        const tracks = Array.isArray(allTracks) ? allTracks : [];
+        const normalizedBase = base.toLowerCase();
+        const bases = tracks.map(candidate => this.getSubtitleTrackLabel(candidate, fallback).toLowerCase());
+        const duplicateCount = bases.filter(label => label === normalizedBase).length;
+
+        if (duplicateCount > 1) {
+            const safeIndex = Number.isInteger(index) && index >= 0 ? index : tracks.indexOf(track);
+            const occurrence = bases
+                .slice(0, safeIndex + 1)
+                .filter(label => label === normalizedBase)
+                .length || (safeIndex + 1);
+            return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3f22d9bb0ad2", {defaultValue: "{{p0}} - Piste {{p1}}", p0:(base),p1:(occurrence)}) : `${base} - Piste ${occurrence}`);
+        }
+
+        return base;
+    }
+
+    isAudioLanguageVerified() {
+        const status = String(
+            this.audioLanguageValidationStatus ||
+            this.content?.audioLanguageValidationStatus ||
+            this.content?.audio_language_validation_status ||
+            ''
+        ).toLowerCase();
+        return status === 'verified' || status === 'verified_union';
+    }
+
+    isAudioLanguageKnown() {
+        const status = String(
+            this.audioLanguageValidationStatus ||
+            this.content?.audioLanguageValidationStatus ||
+            this.content?.audio_language_validation_status ||
+            ''
+        ).toLowerCase();
+        return status === 'verified' || status === 'verified_union' ||
+            status === 'probed' || status === 'probed_union';
+    }
+
+    getTrackLabel(track, fallback, type = 'track') {
+        if (!track) return fallback;
+        if (type === 'subtitle') return this.getSubtitleTrackLabel(track, fallback);
+
+        const parts = [];
+        const languageKnown = type !== 'audio' || this.isAudioLanguageKnown();
+        const title = languageKnown && !this.isGenericTrackTitle(track.title, type) ? track.title : null;
+        // Full language name ("French", "Japanese") rather than the bare code ("FR"),
+        // matching the card badge + the native mobile player.
+        const language = languageKnown ? this.getLanguageDisplayName(track.language) : null;
+        const codec = track.codec ? String(track.codec).toUpperCase() : null;
+        const channels = this.formatChannelLayout(track.channelLayout || track.channel_layout, track.channels);
+        const providerLabel = type === 'audio' && !title && !language && this.audioTracks.length <= 1
+            ? this.playingAudioVersionLabel()
+            : null;
+
+        if (title) parts.push(title);
+        if (language && !parts.some(part => part.toLowerCase() === language.toLowerCase())) parts.push(language);
+        if (providerLabel) parts.push(providerLabel);
+        if (type === 'audio' && !parts.length) parts.push(fallback || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'));
+        if (codec && type === 'audio') parts.push(codec);
+        if (channels && type === 'audio') parts.push(channels);
+
+        return parts.length ? parts.join(' · ') : fallback;
+    }
+
+    ensureSelectedAudioTrack() {
+        if (!this.audioTracks.length) {
+            this.selectedAudioStreamIndex = null;
+            this.selectedAudioTrackUserChoice = false;
+            return null;
+        }
+
+        const fallback = this.audioTracks.find(track => track.default) || this.audioTracks[0];
+        if (!this.selectedAudioTrackUserChoice) {
+            this.selectedAudioStreamIndex = fallback?.index ?? null;
+            return fallback;
+        }
+
+        const current = this.audioTracks.find(track => Number(track.index) === Number(this.selectedAudioStreamIndex));
+        if (current) return current;
+
+        this.selectedAudioStreamIndex = fallback?.index ?? null;
+        this.selectedAudioTrackUserChoice = false;
+        return fallback;
+    }
+
+    getSelectedAudioTrack(info = this.currentStreamInfo) {
+        const tracks = Array.isArray(info?.audioTracks)
+            ? info.audioTracks
+            : (Array.isArray(this.audioTracks) ? this.audioTracks : []);
+        if (!tracks.length) return null;
+
+        return tracks.find(track => Number(track.index) === Number(this.selectedAudioStreamIndex))
+            || tracks.find(track => track.default)
+            || tracks[0];
+    }
+
+    getAudioProcessingOptions(info = this.currentStreamInfo) {
+        const selectedTrack = this.getSelectedAudioTrack(info);
+        if (!selectedTrack) {
+            return {
+                audioCodec: info?.audio,
+                audioChannels: info?.audioChannels
+            };
+        }
+
+        return {
+            audioStreamIndex: selectedTrack.index,
+            audioCodec: selectedTrack.codec || info?.audio,
+            audioChannels: selectedTrack.channels || info?.audioChannels
+        };
+    }
+
+    getFreshProcessingOptions(overrides = {}, info = this.currentStreamInfo) {
+        const hasKnownAudioTracks = (Array.isArray(info?.audioTracks) && info.audioTracks.length > 0)
+            || this.audioTracks.length > 0;
+        const audioOptions = hasKnownAudioTracks ? this.getAudioProcessingOptions(info) : {};
+
+        return {
+            ...this.currentProcessingOptions,
+            ...audioOptions,
+            ...overrides
+        };
+    }
+
+    getTranscodeVideoMode(info = this.currentStreamInfo, settings = {}) {
+        if (settings.upscaleEnabled || settings.forceVideoTranscode) return 'encode';
+
+        const codec = String(info?.video || '').toLowerCase();
+
+        if (info?.videoCopySafe === true) return 'copy';
+        if (info?.videoCopySafe === false || info?.videoBrowserSafe === false) return 'encode';
+
+        // Backward-compatible fallback for cached/older probe payloads.
+        return (codec.includes('h264') || codec.includes('avc')) ? 'copy' : 'encode';
+    }
+
+    getTranscodeStatusText(videoMode, settings = {}) {
+        if (settings.upscaleEnabled) return 'Upscaling';
+        return videoMode === 'copy' ? 'Transcoding (Audio)' : 'Transcoding (Video)';
+    }
+
+    applyProbeInfo(info) {
+        if (!info) return;
+
+        this._audioTopologyPending = false;
+        this.currentStreamInfo = info;
+        this.probeDuration = this.normalizeDuration(info.duration);
+        this.audioTracks = Array.isArray(info.audioTracks) ? info.audioTracks : [];
+        this.subtitleTracks = Array.isArray(info.subtitles) ? info.subtitles : [];
+        this.captureExactSubtitleTracksFromMetadata(info);
+        this.restorePendingAudioPreference(info);
+        this.restorePendingSubtitlePreference();
+        this.ensureSelectedAudioTrack();
+        this.updateQualityBadge();
+        this.updateAudioTracks();
+        this.updateCaptionsTracks();
+        this.updateDurationState();
+    }
+
+    normalizePlaybackCodecProfile(profile) {
+        if (!profile || typeof profile !== 'object') return null;
+
+        const subtitles = Array.isArray(profile.subtitles)
+            ? profile.subtitles
+            : (Array.isArray(profile.subtitleTracks) ? profile.subtitleTracks : []);
+        const audioTracks = Array.isArray(profile.audioTracks)
+            ? profile.audioTracks
+            : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+        const info = {
+            video: profile.video || profile.videoCodec || profile.video_codec || 'unknown',
+            audio: profile.audio || profile.audioCodec || profile.audio_codec || 'unknown',
+            videoProfile: profile.videoProfile || profile.video_profile || '',
+            videoPixelFormat: profile.videoPixelFormat || profile.video_pixel_format || profile.pix_fmt || '',
+            width: Number(profile.width || profile.videoWidth || profile.video_width || 0) || 0,
+            height: Number(profile.height || profile.videoHeight || profile.video_height || 0) || 0,
+            duration: Number(profile.duration || profile.durationSeconds || profile.duration_seconds || 0) || null,
+            audioChannels: Number(profile.audioChannels || profile.audio_channels || profile.channels || 0) || 0,
+            audioTracks,
+            subtitles,
+            container: profile.container || 'unknown',
+            probeSource: profile.probeSource || profile.probe_source || null,
+            probedAt: profile.probedAt || profile.probed_at || null,
+            compatible: false,
+            needsRemux: false,
+            needsTranscode: false
+        };
+
+        const hasUsefulInfo = info.width > 0
+            || info.height > 0
+            || subtitles.length > 0
+            || audioTracks.length > 0
+            || info.video !== 'unknown'
+            || info.audio !== 'unknown';
+        return hasUsefulInfo ? info : null;
+    }
+
+    resolvePlaybackAudioTracks(codecProfileInfo, options = {}) {
+        const candidates = [
+            codecProfileInfo?.audioTracks,
+            options.audioTracks,
+            options.audio_tracks,
+        ];
+        for (const candidate of candidates) {
+            if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+        }
+        return [];
+    }
+
+    async probeStreamInfo(url, settings = {}) {
+        const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
+        const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}&timeout=7000`);
+        if (!probeRes.ok) {
+            throw new Error(`Probe failed with status ${probeRes.status}`);
+        }
+        return probeRes.json();
+    }
+
+    // ---- in-browser engine (NorvaEngine) ----------------------------------
+    // Plays mkv/HEVC/AC-3/DTS/… entirely client-side: reads the raw file by
+    // byte-range, remuxes the container and transcodes non-browser audio to AAC,
+    // feeding a MediaSource. No transcode server, no Railway. User policy is
+    // Runtime failures are recovered at the exact playback position; the gateway
+    // remains a bounded last resort for genuinely unsupported media.
+    async playWithEngine(url, { startTime = 0, playbackAttemptId, audioStreamIndex = null } = {}) {
+        this.destroyEngine();
+        // An hls instance left over from a prior transcode attempt stays ATTACHED to this same
+        // <video> — its internal recovery machinery keeps churning against the replaced media and
+        // each cycle runs TimelineController._cleanTracks, which strips the cues off EVERY text
+        // track while the engine plays fine (the 04/07 subtitle strobe: wipe → self-heal → wipe).
+        if (this.hls) {
+            this.cancelPendingHlsAudioSwitch(false);
+            try { this.hls.destroy(); } catch (_) { /* already gone */ }
+            this.hls = null;
+        }
+        this.currentPlaybackMode = 'engine';
+        this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = false;
+        try { this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_db2039f22724", { defaultValue: "Navigateur" }) ?? 'Navigateur')); } catch (_) {}
+
+        // HTTP 458 is a provider-account conflict, not a media/container error.
+        // It is handled inside the loop before any transcode fallback or retry.
+        const isSlotBusy = (m) => this.isProviderBusyError(m);
+        for (let attempt = 0; ; attempt++) {
+            // Engine info logs are DEV-ONLY: they fire on every load AND every seek
+            // (seek demuxer / init seg / nudge / pump exit…), which floods the prod
+            // console during normal MKV playback. Opt back in with the established
+            // trace switch: localStorage.norva_trace = '1' (see NorvaTrace, cloudApi.js).
+            const engineTrace = Boolean(window.NorvaTrace?.enabled);
+            const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
+                // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
+                // are buffered from the first packet — eliminates the gap-before-visible delay.
+                inbandSubtitles: this._inbandSubsEnabled(),
+                report: (info) => this.reportEngineFailure(info),
+                log: engineTrace ? (m) => console.log('[NorvaEngine] ' + m) : undefined,
+                onReady: (timings) => { if (engineTrace) console.log('[NorvaEngine] ready', timings); },
+                onSeek: (timings) => {
+                    if (engineTrace) console.log('[NorvaEngine] seek', timings);
+                    // Dedicated seek telemetry (backend accepts the 'seek' event type).
+                    try { this.sendPlaybackEvent('seek', { metadata: { seekTimings: timings } }); } catch (_) {}
+                },
+                onFatal: (error) => {
+                    // Ignore a late callback from an engine that has already been replaced.
+                    if (this.norvaEngine !== engine) return;
+                    this.handleEngineRuntimeFailure(error, playbackAttemptId, {
+                        stage: 'mux-write-discontinuity',
+                        alreadyReported: true,
+                    }).catch((recoveryError) => {
+                        console.warn('[WatchPage] engine recovery failed:', recoveryError?.message || recoveryError);
+                    });
+                },
+            });
+            try {
+                await engine.load(url, { startTime, audioStreamIndex });
+                // onFatal can fire while load() is still unwinding. Its recovery may
+                // already have destroyed/replaced this engine; never let the obsolete
+                // load continuation touch the replacement player.
+                if (this.norvaEngine !== engine) {
+                    try { engine.destroy(); } catch (_) {}
+                    return;
+                }
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                try { this.syncEngineAudioTracks(); } catch (_) {}
+                // In-band subtitles: start capturing text-subtitle packets from the very start
+                // (the demuxer runs ahead of playback) so a later selection shows cues with no
+                // gap and no provider connection. Flag-gated; cheap (text payloads are tiny).
+                try {
+                    if (this._inbandSubsEnabled() && engine.hasInbandSubtitles?.()) engine.enableSubtitleCapture();
+                } catch (_) { /* best-effort */ }
+                try { this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_db2039f22724", { defaultValue: "Navigateur" }) ?? 'Navigateur')); } catch (_) {}
+                this.video.play().catch((e) => this.handleAutoplayError(e));
+                this.setVolumeFromStorage();
+                return;
+            } catch (e) {
+                // A fatal mux callback may have started the shared runtime recovery
+                // before load() rejected. The old catch must not launch a competing
+                // gateway/version fallback or tear down the newly-created engine.
+                if (this.norvaEngine !== engine) {
+                    try { engine.destroy(); } catch (_) {}
+                    return;
+                }
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                const msg = String(e && (e.message || e));
+                if (this.isPlaybackSupersededError(e)) {
+                    this.destroyEngine();
+                    await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                    return;
+                }
+                // A SOURCEOPEN_TIMEOUT means the browser deferred opening the MediaSource (a known
+                // intermittent quirk) — it clears on a fresh engine attempt, which is exactly why
+                // the user's MANUAL retries succeed. Retry in-place a couple of times before any
+                // fallback: cheap (just re-create the engine), and it keeps the fast browser path.
+                const ENGINE_SETUP_RETRIES = 2;
+                if (/SOURCEOPEN_TIMEOUT/i.test(msg) && attempt < ENGINE_SETUP_RETRIES) {
+                    this.destroyEngine();
+                    console.warn(`[NorvaEngine] SOURCEOPEN_TIMEOUT, retry ${attempt + 1}/${ENGINE_SETUP_RETRIES}`);
+                    try { this.showLoading(); } catch (_) {}
+                    await new Promise((r) => setTimeout(r, 400));
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    continue;
+                }
+                // A first 458 is authoritative: the provider's connection limit is
+                // the bottleneck, not the container. Open the account circuit and stop.
+                // A transcode fallback would open yet ANOTHER upstream connection against
+                // the same saturated slot (and 458 too), deepening the contention. Surface
+                // the real condition instead. The error UI suppresses auto-refresh;
+                // only a deliberate viewer retry may create a new server-owned session.
+                if (isSlotBusy(msg)) {
+                    this.reportEngineFailure({ stage: 'load', message: msg });
+                    await this.reportProviderPlaybackFailure(msg);
+                    this.destroyEngine();
+                    // The shared terminal handler expires the exact session before
+                    // rendering the provider-conflict state.
+                    await this.handlePlaybackFailure(msg);
+                    return;
+                }
+                // Provider auth/rate-limit blocks (401/403/429) are not container failures.
+                // The browser engine already reached the provider and was refused; forcing a
+                // gateway transcode would open a second upstream connection from the datacenter
+                // and usually converts the same account/slot refusal into a noisy FFmpeg 401.
+                // Surface the real provider state immediately instead of cascading through
+                // transcode + version failover against the same provider account.
+                if (this.isConnectionLimitError(msg)) {
+                    this.reportEngineFailure({ stage: 'load', message: msg });
+                    this.destroyEngine();
+                    await this.handlePlaybackFailure(msg);
+                    return;
+                }
+                // Read the source-head verdict before tearing the engine down: a real-media demux
+                // failure is worth a gateway-transcode retry; a provider error page is not.
+                let sourceHead = null;
+                try { sourceHead = this.norvaEngine?.engineSnapshot?.()?.sourceHead || null; } catch (_) {}
+                this.reportEngineFailure({ stage: 'load', message: msg });
+                this.destroyEngine();
+                // When the engine fails on REAL media (anything but a provider error page),
+                // fall back to the gateway transcode (full ffmpeg) instead of a dead-end banner.
+                // This covers: containers the libav build can't demux (SOURCE_UNSUPPORTED_CONTAINER,
+                // DEMUX_OPEN on a real head), AND engine setup failures the browser couldn't
+                // complete — SOURCEOPEN_TIMEOUT (MediaSource never opened), NO_SUPPORTED_MIME, etc.
+                // Previously only the demux cases fell back, so a SOURCEOPEN_TIMEOUT left the user
+                // on an endless spinner. A non-media head (provider error page) is NOT retried:
+                // transcode would just refetch the same error.
+                const providerErrorHead = !!(sourceHead && sourceHead.notMedia);
+                const realMediaDemuxFail = !providerErrorHead;
+                if (realMediaDemuxFail && await this.fallbackEngineToTranscode(playbackAttemptId, startTime)) return;
+                // This version can't play — the engine failed AND the transcode fallback
+                // couldn't start (dead/unreachable provider stream, e.g. RANGE_UNSUPPORTED +
+                // FFmpeg I/O error), or the source is a provider error page. Route through
+                // handlePlaybackFailure so it marks THIS version broken and fails over to the
+                // next version of the title before surfacing a dead-end error. (The 458
+                // slot-busy path above returns earlier and never reaches here — one stream at
+                // a time must NOT open another connection.)
+                await this.handlePlaybackFailure(String((e && (e.message || e)) || 'Playback failed.'));
+                return;
+            }
+        }
+    }
+
+    // Local-hub fallback after the browser engine fails. Hosted playback already
+    // owns one Relay/Gateway session, so opening a second cloud lane here would
+    // recreate the provider contention this recovery is meant to solve. The Web
+    // app instead offers one explicit server-conversion action after teardown.
+    async fallbackEngineToTranscode(playbackAttemptId, startOffsetOverride = null) {
+        if (this.isCloudPlaybackMode()) {
+            this._preferredExplicitCloudMode = 'transcode';
+            if (this.hasOpenedCloudPlaybackLaneForAttempt(playbackAttemptId)) return false;
+            // Fail closed even if a legacy response omitted its session id: hosted
+            // code must never infer that it is safe to open another upstream lane.
+            return false;
+        }
+        const c = this.content || {};
+        if (!c.sourceId || !c.id) return false;
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (this._cloudGatewayTranscodeFallbackTried) return false;
+        // This is the single server-side recovery lane for the current
+        // playback intention. Consume its budget before resolving the Gateway
+        // session so a failed resolve/load cannot cascade into Relay/direct.
+        this._cloudGatewayTranscodeFallbackTried = true;
+        const contentAtStart = c;
+        const itemIdAtStart = String(c.id);
+        const sourceIdAtStart = String(c.sourceId);
+        const fallbackBecameStale = () => this.isStalePlaybackAttempt(playbackAttemptId)
+            || this.content !== contentAtStart
+            || String(this.content?.id || '') !== itemIdAtStart
+            || String(this.content?.sourceId || '') !== sourceIdAtStart;
+        const type = c.type === 'series' ? 'series' : 'movie';
+        const hasExplicitOffset = startOffsetOverride !== null && startOffsetOverride !== undefined;
+        const explicitOffset = Number(startOffsetOverride);
+        const snapshotOffset = Number(this.getResumeSnapshotPosition?.());
+        const startOffset = Math.max(0, Math.floor(
+            hasExplicitOffset && Number.isFinite(explicitOffset)
+                ? explicitOffset
+                : (Number.isFinite(snapshotOffset) ? snapshotOffset : (Number(this.resumeTime) || 0))
+        ));
+        const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+        const audioOptions = this.getPlayingEngineAudioOptions();
+        this.resumeTime = startOffset;
+        console.warn(`[WatchPage] engine fallback to gateway transcode from ${startOffset}s`);
+        try { this.showLoading(); } catch (_) {}
+        try { this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_c8ed9eed2916", { defaultValue: "Conversion serveur…" }) ?? 'Conversion serveur…')); } catch (_) {}
+        let result;
+        try {
+            await this.waitForProviderSlotRelease(900);
+            if (fallbackBecameStale()) return true;
+            if (this.currentPlaybackMode !== 'engine') return false;
+            // `mode:'transcode'` selects the Gateway session path; `gatewayMode:'remux'`
+            // asks it to copy safe H.264/AAC first. The API/gateway can still encode a
+            // codec the exact-file profile proves unsafe, without making every runtime
+            // MSE/mux failure replay linearly from byte zero.
+            let playbackHint = {
+                mode: 'transcode', gatewayMode: 'remux',
+                ...audioOptions,
+                ...(type === 'series' && (c.seriesId || c.series_id)
+                    ? { audioSeriesId: c.seriesId || c.series_id }
+                    : {}),
+                seekOffset: startOffset, startOffset, resumeTime: startOffset
+            };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
+            result = await API.proxy.xtream.getStreamUrl(
+                c.sourceId,
+                c.id,
+                type,
+                c.containerExtension || 'mp4',
+                playbackHint,
+                { signal: this.playbackResolveSignalForAttempt(playbackAttemptId) }
+            );
+        } catch (err) {
+            console.warn('[WatchPage] transcode fallback resolve failed:', err?.message || err);
+            return false;
+        }
+        const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+        if (fallbackBecameStale()
+            || this.currentPlaybackMode !== 'engine') {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            return true;
+        }
+        if (!result?.url) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            return false;
+        }
+        const resultMetadata = this.playbackMetadataFromResult(result);
+        const measuredSeek = this.getMeasuredGatewaySeekPlan(resultMetadata, startOffset, startOffset);
+        c.cloudPlaybackSessionId = resultSessionId || null;
+        try {
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
+                playbackAttemptId,
+                seekOffset: measuredSeek.actualStartOffset,
+                startOffset: measuredSeek.actualStartOffset,
+                actualStartOffset: measuredSeek.actualStartOffset,
+                requestedSeekOffset: startOffset,
+                localSeekTarget: measuredSeek.localSeekTarget,
+                sourceTimestamps: measuredSeek.sourceTimestamps,
+                resumeTarget: startOffset,
+                cloudPlaybackSessionId: resultSessionId || null,
+                playbackPreferences,
+                ...audioOptions,
+            }));
+            if (fallbackBecameStale()) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            }
+            return true;
+        } catch (err) {
+            if (fallbackBecameStale()) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return true;
+            }
+            console.warn('[WatchPage] transcode fallback play failed:', err?.message || err);
+            return false;
+        }
+    }
+
+    async handleEngineRuntimeFailure(error, playbackAttemptId, options = {}) {
+        if (!Number.isFinite(playbackAttemptId)) playbackAttemptId = this._playbackAttemptId;
+        if (this._engineRuntimeRecoveryAttemptId === playbackAttemptId) return true;
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        this._engineRuntimeRecoveryAttemptId = playbackAttemptId;
+
+        try {
+            let snapshot = null;
+            try { snapshot = this.norvaEngine?.engineSnapshot?.() || null; } catch (_) {}
+            const wasTs = Boolean(snapshot?.looksLikeMpegTs);
+            const providerErrorHead = Boolean(snapshot?.sourceHead && snapshot.sourceHead.notMedia);
+            // The monotone resume snapshot intentionally remembers the furthest point
+            // seen, but that is wrong after a user seeks backwards. Prefer the visible
+            // playhead while it is available, and only use the snapshot if media reset
+            // to zero before the fatal callback ran.
+            const rememberedPosition = Number(this._lastKnownPlaybackPosition);
+            const visiblePosition = Number(this.getPlaybackPosition?.());
+            const snapshotPosition = Number(this.getResumeSnapshotPosition?.());
+            const resumeAt = Math.max(0, Math.floor(
+                Number.isFinite(visiblePosition) && visiblePosition > 0
+                    ? visiblePosition
+                    : (Number.isFinite(rememberedPosition) && rememberedPosition > 2
+                        ? rememberedPosition
+                        : (Number.isFinite(snapshotPosition) ? snapshotPosition : 0))
+            ));
+            const engineUrl = this.baseStreamUrl || this.currentUrl;
+            const selectedAudioIndex = Number.isInteger(this.directAudioStreamIndex)
+                ? this.directAudioStreamIndex
+                : (Number.isInteger(this.selectedAudioStreamIndex) ? this.selectedAudioStreamIndex : null);
+            const reason = String(error?.message || error || 'ENGINE_RUNTIME_FAILURE');
+
+            // HTTP 458 remains terminal even after the first usable buffer. Stop
+            // the active engine and force the established provider-busy path to
+            // release the lane and show its explicit error. Never reopen the
+            // engine or mint a Gateway session for the same playback intention.
+            if (this.isProviderBusyError(reason)) {
+                this.destroyEngine();
+                await this.handlePlaybackFailure(reason, { forceTerminal: true });
+                return true;
+            }
+
+            if (!options.alreadyReported) {
+                this.reportEngineFailure({
+                    stage: options.stage || 'runtime',
+                    message: options.mediaErrorCode
+                        ? `code=${options.mediaErrorCode} ${reason}`
+                        : reason,
+                });
+            }
+
+            this.trackPlaybackPosition({ position: resumeAt, force: true });
+            this.resumeTime = resumeAt;
+            try { this.saveResumeSnapshotThrottled(true); } catch (_) {}
+            this.destroyEngine();
+
+            // A provider error page is not a remux/decode failure. Reopening it through
+            // another lane would only consume another provider connection.
+            if (providerErrorHead) {
+                if (this.isCloudPlaybackMode()) {
+                    await this.handlePlaybackFailure(reason);
+                    return true;
+                }
+                this.handleEngineUnplayable(error);
+                return false;
+            }
+
+            // One clean reopen fixes a broken post-seek mux sequence for MKV/MP4. TS
+            // sources retain one additional retry because timestamp discontinuities are
+            // common there. The budget only re-arms after 120 healthy seconds.
+            const maxEngineRetries = wasTs ? 2 : 1;
+            this._engineMidRetries = this._engineMidRetries || 0;
+            if (engineUrl
+                && this._engineMidRetries < maxEngineRetries
+                && !this.isStalePlaybackAttempt(playbackAttemptId)) {
+                this._engineMidRetries++;
+                this._engineRetryFromPos = resumeAt;
+                console.warn(
+                    `[WatchPage] engine runtime failure — retry ${this._engineMidRetries}/${maxEngineRetries} from ${resumeAt}s`
+                );
+                try { this.showLoading(); } catch (_) {}
+                await this.waitForProviderSlotRelease(800);
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.currentPlaybackMode !== 'engine') {
+                    return false;
+                }
+                await this.playWithEngine(engineUrl, {
+                    startTime: resumeAt,
+                    playbackAttemptId,
+                    audioStreamIndex: selectedAudioIndex,
+                });
+                return true;
+            }
+
+            // Keep the exact file the viewer selected. A sibling version can have a
+            // different dub/subtitle set, so switching merely because the playhead is
+            // deep into the film silently changes the content (for example AR-SUBS
+            // English audio -> a French dub). The Gateway accepts the absolute seek
+            // offset and selected file-local audio options; the recovery ladder stays
+            // on that exact file. If it is unavailable, surface the failure and let the
+            // viewer explicitly choose another labelled version.
+            if (await this.fallbackEngineToTranscode(playbackAttemptId, resumeAt)) return true;
+
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
+            if (this.isCloudPlaybackMode()) {
+                await this.handlePlaybackFailure(reason);
+                return true;
+            }
+            this.handleEngineUnplayable(error);
+            return false;
+        } finally {
+            if (this._engineRuntimeRecoveryAttemptId === playbackAttemptId) {
+                this._engineRuntimeRecoveryAttemptId = null;
+            }
+        }
+    }
+
+    destroyEngine() {
+        if (this.norvaEngine) {
+            try { this.norvaEngine.destroy(); } catch (_) {}
+            this.norvaEngine = null;
+        }
+    }
+
+    // The engine demuxes every stream but this libav build can't read per-stream
+    // language, so we list the audio streams by index and borrow language labels
+    // from the relay probe (this.audioTracks) when present. Marks the playing stream
+    // active so the menu shows the real, switchable tracks (not a single "Multi").
+    syncEngineAudioTracks() {
+        const engine = this.norvaEngine;
+        if (!engine || typeof engine.audioStreamIndices !== 'function') return;
+        const idxs = engine.audioStreamIndices();
+        const current = typeof engine.currentAudioIndex === 'function' ? engine.currentAudioIndex() : (idxs[0] ?? null);
+        this.directAudioStreamIndex = current;
+        if (!this.selectedAudioTrackUserChoice) this.selectedAudioStreamIndex = current;
+        if (!idxs.length) return;
+        // Borrow languages from the relay probe (ordered, audio-relative). Try the
+        // absolute stream index first; fall back to audio-relative POSITION so a
+        // libav-vs-container index mismatch still resolves the right language.
+        const relay = Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [];
+        const langByIdx = new Map(relay
+            .filter((t) => Number.isInteger(t.index) && t.lang && t.lang !== 'und')
+            .map((t) => [t.index, t.lang]));
+        const posLang = (k) => (relay[k] && relay[k].lang && relay[k].lang !== 'und' ? relay[k].lang : null);
+        let tracks = idxs.map((i, k) => ({
+            index: i,
+            language: langByIdx.get(i) || posLang(k),
+            default: i === current,
+        }));
+        // Single audio stream (e.g. a VOSTFR file's lone Japanese track): show its
+        // language as one informational entry when known, instead of a bare "Default".
+        // Unknown language -> leave the default fallback untouched.
+        if (idxs.length < 2) {
+            if (tracks[0] && tracks[0].language) { this.audioTracks = tracks; this.updateAudioTracks(); }
+            return;
+        }
+        // Hide untagged "Audio N" tracks once we have ≥2 real, named languages: a
+        // multi-audio file's filler streams (an untagged default + a trailing
+        // cover-art-derived track) would otherwise clutter the menu. Keep every
+        // track when fewer than 2 are named so the menu is never left blank.
+        const named = tracks.filter((t) => t.language);
+        if (named.length >= 2) tracks = named;
+        // If the engine opened on a now-hidden untagged stream (so no visible
+        // track is flagged default) and the user hasn't chosen, snap the
+        // selection onto the first real track so the menu shows an active row.
+        if (tracks.length && !tracks.some((t) => t.default) && !this.selectedAudioTrackUserChoice) {
+            tracks[0].default = true;
+            this.selectedAudioStreamIndex = tracks[0].index;
+        }
+        this.audioTracks = tracks;
+        this.updateAudioTracks();
+    }
+
+    // Browser/OS locale as a 2-letter code (fr-FR -> fr) — a zero-cost signal for
+    // "the user's language" used to pick a sensible default audio track. Returns
+    // '' when it can't be resolved to a clean ISO-639-1 code.
+    preferredAudioLanguageCode() {
+        try {
+            const nav = (navigator.language || (navigator.languages && navigator.languages[0]) || '').toLowerCase();
+            const code = this.normalizeTrackLanguage(nav.split('-')[0]);
+            return /^[a-z]{2}$/.test(code) ? code : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    // Stream index the engine should open on, or null to keep the engine's own
+    // (file-order) default. Priority:
+    //  1. An explicit/saved audio choice (resume, or a prior in-session pick) —
+    //     open straight on it so the playing audio matches the menu's tick. Without
+    //     this the engine opened on its untagged default while the menu restored
+    //     "French", so the tick and the actual audio disagreed.
+    //  2. Otherwise auto-default a multi-audio file whose own default (lowest-index
+    //     audio stream) is UNTAGGED onto the user's language (browser locale → en →
+    //     first named), so it never opens on a hidden "Audio N" track.
+    preferredEngineAudioIndex() {
+        if (this.selectedAudioTrackUserChoice && Number.isInteger(this.selectedAudioStreamIndex)) {
+            return this.selectedAudioStreamIndex;
+        }
+        const saved = this.pendingPlaybackPreferences?.audio;
+        if (saved && !this._pendingAudioPreferenceApplied) {
+            const savedIdx = Number(saved.streamIndex ?? saved.stream_index);
+            if (Number.isInteger(savedIdx)) return savedIdx;
+        }
+        const relay = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
+            .filter((t) => Number.isInteger(t.index));
+        const named = relay.filter((t) => t.lang && t.lang !== 'und');
+        const savedLanguage = this.normalizeTrackLanguage(saved?.language || saved?.lang);
+        if (saved && !this._pendingAudioPreferenceApplied && savedLanguage && savedLanguage !== 'und') {
+            const matchingTrack = named.find((track) => track.lang === savedLanguage);
+            if (Number.isInteger(matchingTrack?.index)) return matchingTrack.index;
+        }
+        if (named.length < 2) return null;
+        const naturalDefault = relay.slice().sort((a, b) => a.index - b.index)[0];
+        if (naturalDefault && naturalDefault.lang && naturalDefault.lang !== 'und') return null;
+        const want = this.preferredAudioLanguageCode();
+        const pick = (want && named.find((t) => t.lang === want))
+            || named.find((t) => t.lang === 'en')
+            || named[0];
+        return Number.isInteger(pick?.index) ? pick.index : null;
+    }
+
+    // Switch audio in the in-browser engine: re-load on the chosen stream at the
+    // current position. Fully client-side (zero-egress) — no gateway transcode.
+    async restartEngineWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+        if (this.isStaleAudioSwitch(requestId)) return false;
+        const url = this.baseStreamUrl || this.currentUrl;
+        const selected = this.getSelectedAudioTrack();
+        if (!url || !selected) return false;
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        try { this.setSelectedAudioPreference(selected); } catch (_) {}
+        this.hidePlaybackError();
+        this.showLoading();
+        try { this.updateTranscodeStatus('direct', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(this.getTrackLabel(selected, 'Audio', 'audio'))}) : `Audio: ${this.getTrackLabel(selected, 'Audio', 'audio')}`)); } catch (_) {}
+        await this.playWithEngine(url, {
+            startTime: position,
+            playbackAttemptId: this._playbackAttemptId,
+            audioStreamIndex: selected.index,
+        });
+        return true;
+    }
+
+    reportEngineFailure(info = {}) {
+        console.warn('[NorvaEngine] failed', info?.stage || '?', info?.message || '');
+        // Deep snapshot of the engine state at the moment of failure — the codec/mime
+        // decisions, the exact fMP4 boxes that were appended, the first-video-packet
+        // keyframe flag, append errors, and the live SourceBuffer/MediaSource/video
+        // status. This is what turns a bare CHUNK_DEMUXER_ERROR_APPEND_FAILED into a
+        // diagnosable cause. The ~20-line console dump is DEV-ONLY (localStorage
+        // norva_trace = '1'): playback recovers via fallback, so in prod one warn line
+        // suffices — the full digest still reaches telemetry below either way.
+        let snap = null;
+        try { snap = this.norvaEngine?.engineSnapshot?.() || null; } catch (_) {}
+        if (snap && window.NorvaTrace?.enabled) {
+            try {
+                console.group((globalThis.NorvaI18n?.t("ui_web_529a44428b74", { defaultValue: "[NorvaEngine] failure snapshot" }) ?? '[NorvaEngine] failure snapshot'));
+                console.warn('mime        :', snap.mime, '| video', snap.vName, '| audio', snap.aName, '| copyAudio', snap.copyAudio);
+                console.warn('codec string:', snap.videoCodecString, '| candidates', snap.videoCands, '| audioTag', snap.audioTag);
+                console.warn('init segment:', snap.initBoxes, '(' + snap.initBytes + ' B) | muxerInits', snap.muxerInits);
+                console.warn('1st media   :', snap.firstMediaBoxes, '(' + snap.firstMediaBytes + ' B)');
+                console.warn('box stream  : moof×' + snap.moofCount, 'moov×' + snap.moovCount, 'ftyp×' + snap.ftypCount, '| ' + snap.boxTotalKB + 'KB | BAD:', snap.boxBad || 'none');
+                console.warn('box seq     :', JSON.stringify(snap.boxSeq));
+                console.warn('box hex     :', JSON.stringify(snap.boxHex), '| firstMediaHex', snap.firstMediaHex);
+                console.warn('source head :', snap.sourceHead ? (snap.sourceHead.kind || 'media') + ' | "' + snap.sourceHead.ascii + '"' : 'n/a');
+                console.warn('writes(seek):', 'seekWrites=' + snap.seekWrites, '| firstSeek', JSON.stringify(snap.firstSeek), '| highWater', snap.writeHighWater);
+                console.warn('writes log  :', JSON.stringify(snap.writes));
+                console.warn('1st vid pkt :', JSON.stringify(snap.firstVideoPkt), '| droppedOpenGop', snap.droppedOpenGop);
+                console.warn('appends     :', snap.appendCount, 'ok /', snap.appendBytes, 'B | sbErrorEvents', snap.sbErrorEvents, '| queueLen', snap.queueLen, '| trailerDropped', snap.trailerBytesDropped);
+                console.warn('pump exit   :', snap.pumpExitReason, '| res', snap.pumpExitRes, '| fetched', snap.exitFetchMB, 'MB /', snap.exitFetches, 'fetches | lastReadErr', snap.lastReadError);
+                console.warn('recentAppend:', JSON.stringify(snap.recentAppends));
+                console.warn('appendErrors:', JSON.stringify(snap.appendErrors));
+                console.warn('SourceBuffer:', JSON.stringify(snap.sb));
+                console.warn('MediaSource :', JSON.stringify(snap.ms));
+                console.warn('video elem  :', JSON.stringify(snap.video));
+                console.warn('timings     :', JSON.stringify(snap.timings));
+                console.warn('full snapshot:', snap);
+                console.groupEnd();
+            } catch (_) { console.warn('[NorvaEngine] failure snapshot', snap); }
+        }
+        try {
+            // Use the server-accepted 'playback_error' event type and pack the
+            // engine context into errorMessage so it persists even if the event
+            // store drops unknown metadata fields.
+            const v = this.norvaEngine?.vName || this.currentStreamInfo?.video || '?';
+            const a = this.norvaEngine?.aName || '?';
+            const c = this.containerExtension || '?';
+            // Compact one-line digest of the snapshot for the persisted errorMessage.
+            let digest = '';
+            if (snap) {
+                const ae = (snap.appendErrors && snap.appendErrors[0]) || null;
+                digest = ` | mime=${snap.mime || '?'} init=[${snap.initBoxes || '?'}] media=[${snap.firstMediaBoxes || '?'}]`
+                    + ` vpkt=${snap.firstVideoPkt ? (snap.firstVideoPkt.key ? 'key' : 'NONKEY') + '@' + snap.firstVideoPkt.ptsSrc : '?'}`
+                    + ` appends=${snap.appendCount} verr=${snap.video && snap.video.error ? snap.video.error.code : '-'}`
+                    + (ae ? ` appendErr0=[${ae.boxes}]:${ae.err}` : '');
+            }
+            this.sendPlaybackEvent('playback_error', {
+                playbackSessionId: null, // record even after the session is torn down (see buildPlaybackEventPayload)
+                errorCode: 'ENGINE_' + (info.stage || 'unknown'),
+                errorMessage: `engine ${info.stage || 'unknown'} container=${c} video=${v} audio=${a} :: ${String(info.message || '').slice(0, 200)}${digest}`.slice(0, 600),
+                metadata: {
+                    engineStage: info.stage || null,
+                    engineVideoCodec: v,
+                    engineAudioCodec: a,
+                    engineContainer: c,
+                    engineMime: snap?.mime || null,
+                    engineInitBoxes: snap?.initBoxes || null,
+                    engineFirstMediaBoxes: snap?.firstMediaBoxes || null,
+                    engineFirstVideoKey: snap?.firstVideoPkt ? !!snap.firstVideoPkt.key : null,
+                    engineAppendCount: snap?.appendCount ?? null,
+                    engineVideoErrorCode: snap?.video?.error?.code ?? null,
+                    enginePumpExit: snap?.pumpExitReason ?? null,
+                    engineLastReadError: snap?.lastReadError ?? null,
+                    engineBoxBad: snap?.boxBad ?? null,
+                    engineMoovCount: snap?.moovCount ?? null,
+                    engineSeekWrites: snap?.seekWrites ?? null,
+                    // COMPACT snapshot only: the full snapshot (boxHex/boxSeq/writes/recentAppends/
+                    // appendErrors arrays) grows with fragment count and a large engine run was
+                    // exceeding the event payload limit → the whole playback_error was rejected and
+                    // lost. Persist just the decisive fields so failures are always diagnosable.
+                    engineSnapshot: snap ? {
+                        engineVersion: snap.engineVersion, mime: snap.mime,
+                        ptsEpoch: snap.ptsEpoch, tsAnchor: snap.tsAnchor, tsApplied: snap.tsApplied,
+                        firstVideoPkt: snap.firstVideoPkt,
+                        droppedPreKey: snap.droppedPreKey, droppedPreKeyAudio: snap.droppedPreKeyAudio,
+                        injectedExtradata: snap.injectedExtradata, injectedAudioAsc: snap.injectedAudioAsc, stripAdts: snap.stripAdts, audioCfg: snap.audioCfg,
+                        appendCount: snap.appendCount, appendBytes: snap.appendBytes, sbErrorEvents: snap.sbErrorEvents,
+                        moofCount: snap.moofCount, boxBad: snap.boxBad, boxTotalKB: snap.boxTotalKB,
+                        pumpExitReason: snap.pumpExitReason, lastReadError: snap.lastReadError,
+                        exitFetchMB: snap.exitFetchMB, looksLikeMpegTs: snap.looksLikeMpegTs,
+                        seekWrites: snap.seekWrites, firstSeek: snap.firstSeek,
+                        writeDiscontinuities: snap.writeDiscontinuities,
+                        firstWriteDiscontinuity: snap.firstWriteDiscontinuity,
+                        videoDtsRepairs: snap.videoDtsRepairs,
+                        firstVideoTimestampError: snap.firstVideoTimestampError,
+                        videoDurationCorrections: snap.videoDurationCorrections,
+                        firstVideoDurationError: snap.firstVideoDurationError,
+                        lastAppend: Array.isArray(snap.recentAppends) && snap.recentAppends.length
+                            ? (() => {
+                                const a = snap.recentAppends[snap.recentAppends.length - 1] || {};
+                                return {
+                                    n: Number.isFinite(a.n) ? a.n : null,
+                                    bytes: Number.isFinite(a.bytes) ? a.bytes : null,
+                                    boxes: typeof a.boxes === 'string' ? a.boxes.slice(0, 160) : null,
+                                    tsOffset: Number.isFinite(a.tsOffset) ? a.tsOffset : null,
+                                };
+                            })()
+                            : null,
+                        video: snap.video, sb: snap.sb, ms: snap.ms, timings: snap.timings,
+                    } : null
+                }
+            });
+        } catch (_) {}
+    }
+
+    handleEngineUnplayable(e) {
+        // Pass the raw reason through; showPlaybackError → getFriendlyPlaybackError maps
+        // it to a clear message (458 slot-busy, NO_SUPPORTED_MIME, 401/403, …) and keeps
+        // the original code as the small detail line for diagnosis.
+        const detail = String((e && (e.message || e)) || (globalThis.NorvaI18n?.t("ui_web_feb502bf9c6b", { defaultValue: "Browser playback failed." }) ?? 'Browser playback failed.'));
+        this.showPlaybackError(detail, { immediate: true });
+    }
+
+    async loadVideo(url, options = {}) {
+        const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+        // Record the server-owned lane before validating the media URL. Even a
+        // malformed response consumed this intention's only provider session and
+        // must not be followed by an automatic second resolver call.
+        this.noteCloudPlaybackLaneForAttempt(options.cloudPlaybackSessionId, playbackAttemptId);
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            return;
+        }
+        if (!this.isLikelyPlaybackUrl(url)) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_e5c20e6e20a8", { defaultValue: "Playback session did not return a media URL." }) ?? 'Playback session did not return a media URL.'));
+            return;
+        }
+
+        // Store the URL for copy functionality
+        this.currentUrl = url;
+        this._playbackStatusOkReported = false;
+
+        // Clear any previous playback error banner
+        this.hidePlaybackError();
+
+        // Stop any existing playback and WAIT for the previous transcode
+        // session to release its provider connection before we probe/transcode
+        // the new title — otherwise the old + new connections overlap and a
+        // single-connection IPTV account rejects the new one with 401.
+        this._suspendResumeSnapshotSave = true;
+        try {
+            await this.stop({
+                enqueueStoryboard: false,
+                preservePlaybackResolutionAttempt: true,
+            });
+        } finally {
+            this._suspendResumeSnapshotSave = false;
+        }
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            return;
+        }
+        this.recordPlaybackStartupPhase('teardownComplete', playbackAttemptId);
+        this.registerCloudPlaybackSession(options.cloudPlaybackSessionId);
+        this.updatePlaybackTelemetrySession(options.cloudPlaybackSessionId, playbackAttemptId);
+        const privateMediaCacheAccess = this.configurePrivateMediaCacheAccess(
+            options.mediaCache ?? options.media_cache ?? null,
+            options.cloudPlaybackSessionId,
+            url
+        );
+        if ((options.mediaCache || options.media_cache) && !privateMediaCacheAccess) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_55e2e9cd1333", { defaultValue: "Private media cache authorization is invalid." }) ?? 'Private media cache authorization is invalid.'));
+            return;
+        }
+        const exactSubtitleHls = options.exactSubtitleHls
+            ?? options.exact_subtitle_hls
+            ?? options.gatewaySession?.exactSubtitleHls
+            ?? options.gatewaySession?.exact_subtitle_hls
+            ?? null;
+        const validExactSubtitleHls = this.isExactHlsSubtitleTopology(exactSubtitleHls)
+            ? exactSubtitleHls
+            : null;
+        this._hlsOwnsExactSubtitles = Boolean(privateMediaCacheAccess || validExactSubtitleHls);
+        this._exactSubtitleHlsTopology = validExactSubtitleHls;
+        if (this.video) {
+            this.video.dataset.playbackAttemptId = String(playbackAttemptId);
+        }
+        this.recordPlaybackStartupPhase('mediaAttach', playbackAttemptId);
+        this.armFirstFrameTelemetry(playbackAttemptId);
+        this.baseStreamUrl = url;
+        this.currentPlaybackMode = null;
+        this.currentProcessingOptions = {};
+        this.probeDuration = null;
+        this.streamStartOffset = 0;
+        this.setBufferedProgressValue(0);
+        this._bufferStatusStamp = null;
+        if (this.bufferStatus) this.bufferStatus.textContent = '';
+        this.gatewaySourceTimestamps = options.sourceTimestamps === true
+            || options.source_timestamps === true;
+        this._videoEncodeFallbackTried = false;
+        this.cloudAudioInfo = null;
+        this.resetGatewayAudioRenditions();
+        this.audioTracks = [];
+        this.directAudioStreamIndex = null;
+        this._relayAudioTracks = null;
+        this._engineSubsEnriched = false;
+        this._engineSubsEnriching = false;
+        this.subtitleTracks = [];
+        this.subtitleSourceUrl = null;
+        this.subtitleStartOffset = 0;
+        this.captureExactSubtitleTracksFromMetadata(options);
+        this.selectedSubtitleStreamIndex = null;
+        this.selectedSubtitleTrackUserChoice = false;
+        this.selectedAudioStreamIndex = null;
+        this.selectedAudioTrackUserChoice = false;
+        const incomingPlaybackPreferences = options.playbackPreferences ?? options.playback_preferences;
+        if (incomingPlaybackPreferences && typeof incomingPlaybackPreferences === 'object') {
+            // A Gateway lane restart represents the same explicit user choice,
+            // but loadVideo resets all media-track state above. Make the new
+            // lane eligible to restore that choice before applying its profile.
+            this.setPendingPlaybackPreferences(incomingPlaybackPreferences);
+        }
+        const playbackAudioStreamIndex = Number(
+            options.audioStreamIndex ??
+            options.audio_stream_index ??
+            options.gatewaySession?.audioStreamIndex ??
+            options.gatewaySession?.audio_stream_index
+        );
+        if (Number.isInteger(playbackAudioStreamIndex) && playbackAudioStreamIndex >= 0) {
+            this.directAudioStreamIndex = playbackAudioStreamIndex;
+            this.selectedAudioStreamIndex = playbackAudioStreamIndex;
+        }
+        // Reset the AI-subtitle UI state for the incoming title. The cached VTT is title-keyed,
+        // so a genuine replay of the same title keeps its 'ready' state; any other title starts idle.
+        const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleKey() && this.aiSubtitleVtt;
+        this.aiSubtitleState = aiSameTitle ? 'ready' : 'idle';
+        if (!aiSameTitle) { this.aiSubtitleVtt = null; this._aiSubtitleTitleId = null; this._aiUserRequested = false; }
+        this.stopAiSubtitlePolling();
+        // Fire the shared-cache probe now so a transcript from a prior session (or another user of
+        // the same panel) reads "ready" by the time the captions menu first opens. Fire-and-forget;
+        // one-shot per title and a no-op when this title can't have AI subs.
+        this._ensureAiCacheProbe();
+        this._aiNotifyOptedIn = false;
+        this._aiEtaTargetMs = 0;
+        this._resetTranslations();
+        // A lane restart (engine→transcode failover, seek re-open, quality switch) reloads the
+        // SAME <video> with a new src, and the browser then DISABLES every existing text track
+        // (mode='disabled', cues=null — observed live 04/07 11:01). A failover must not turn the
+        // viewer's subtitles off: stash the showing generated track (same title only) and
+        // re-attach it once the new lane renders its first frame.
+        this._aiRestoreOnStart = (aiSameTitle && this._aiActiveVtt)
+            ? { vtt: this._aiActiveVtt, lang: this._aiActiveLang || 'und', key: this._aiSubtitleKey() }
+            : null;
+        this.clearExternalSubtitleTracks();
+        this.updateAudioTracks();
+        this.updateCaptionsTracks();
+        this.updateDurationState();
+        const codecProfileInfo = this.normalizePlaybackCodecProfile(options.codecProfile);
+        const resolvedPlaybackAudioTracks = this.resolvePlaybackAudioTracks(codecProfileInfo, options);
+        if (codecProfileInfo) {
+            // Some Edge responses carry a useful video codec profile whose
+            // audioTracks field is intentionally empty, while the exact session
+            // track map is serialized alongside it. An empty array must not mask
+            // that stronger playback-scoped evidence.
+            codecProfileInfo.audioTracks = resolvedPlaybackAudioTracks;
+            this.applyProbeInfo(codecProfileInfo);
+            const hasExactEmbeddedLanguage = Boolean(
+                codecProfileInfo.probeSource && codecProfileInfo.probedAt &&
+                codecProfileInfo.audioTracks.some(track => {
+                    const language = this.normalizeTrackLanguage(track?.language || track?.lang);
+                    return language && language !== 'und';
+                })
+            );
+            if (hasExactEmbeddedLanguage) {
+                this.replaceExactContentAudioMetadata(
+                    codecProfileInfo.audioTracks,
+                    codecProfileInfo.audioTracks.map(track => track?.language || track?.lang),
+                    this.isAudioLanguageVerified() ? 'verified' : 'probed'
+                );
+            }
+        }
+        this.applyAcknowledgedSubtitleSessionMetadata(options);
+        this.configureGatewayAudioRenditions(
+            options.audioRenditions ?? options.audio_renditions ?? options.gatewaySession?.audioRenditions
+                ?? options.gatewaySession?.audio_renditions ?? null,
+            options.multiAudioHls ?? options.multi_audio_hls ?? options.gatewaySession?.multiAudioHls
+                ?? options.gatewaySession?.multi_audio_hls ?? null,
+            resolvedPlaybackAudioTracks,
+            {
+                required: this.isGatewayPlaybackUrl(url),
+                playbackAttemptId,
+                audioStreamIndex: playbackAudioStreamIndex,
+                verifiedTracks: this.getContentAudioTracks(),
+                audioLanguageValidationStatus: this.audioLanguageValidationStatus,
+            },
+        );
+
+        // Enrich the audio menu with the provider's track metadata (language,
+        // codec, channels, bitrate) for cloud relay playback — the same source the
+        // mobile player uses. Best-effort, display-only; never touches playback.
+        // The engine path AWAITS this below (before opening the stream) so the header
+        // probe doesn't fight the engine for the provider's single connection.
+        if (options.mode !== 'engine' && !privateMediaCacheAccess) this.enrichCloudPlaybackTracks(url);
+
+        // Show loading spinner
+        this.showLoading();
+
+        // In-browser engine path (MOV/HEVC/AC-3/DTS/…): NorvaEngine owns the
+        // MediaSource — it reads the raw file by byte-range, remuxes the
+        // container and transcodes non-browser audio to AAC client-side. No
+        // gateway/transcode server. Resume seeks straight to the saved offset.
+        if (options.mode === 'engine' && typeof window !== 'undefined' && window.NorvaEngine) {
+            // Name the per-track languages BEFORE the engine opens (the engine can't
+            // read stream-language tags itself). Two sources, in order:
+            //  1. audioTracks returned with the cloud session — the SERVER probed the
+            //     actual file via the relay. This is the only source for engine titles
+            //     with no precomputed map (the engine streams via the media gateway, so
+            //     the browser can't probe them). Most accurate for series (the exact
+            //     episode that's playing).
+            //  2. Otherwise the precomputed/relay map on content (crawled titles).
+            const sessionAudioTracks = Array.isArray(options.audioTracks) ? options.audioTracks : null;
+            if (sessionAudioTracks && sessionAudioTracks.length) {
+                try { this.applyCloudMultiAudioTracks({ audioTracks: sessionAudioTracks }); } catch (_) { /* best-effort */ }
+            } else if (this.getContentAudioTracks().length) {
+                // A file-scoped cached map is synchronous and provider-free, so it
+                // can still select the preferred language before the engine opens.
+                Promise.resolve(this.enrichCloudPlaybackTracks(url)).catch(() => {});
+            } else {
+                // A live /vod-info + /probe-audio request is useful metadata, but it
+                // must not block TTFF or contend with a single-connection provider.
+                // Start it only after a real frame has reached the compositor.
+                this.deferEngineTrackEnrichment(url, playbackAttemptId);
+            }
+            // Multi-audio files often default (file order) to an UNTAGGED track —
+            // opening on it lands the user on a hidden "Audio N" entry. When the
+            // relay probe shows ≥2 real languages and that default is untagged,
+            // open straight on the user's language (fr → en → first named) so the
+            // menu opens on a labelled track. null = keep the engine's own default.
+            const preferredAudioIndex = this.preferredEngineAudioIndex();
+            await this.playWithEngine(url, {
+                startTime: Number(options.startTime ?? options.seekOffset ?? this.resumeTime ?? 0) || 0,
+                playbackAttemptId,
+                audioStreamIndex: preferredAudioIndex
+            });
+            // Subtitles: the SERVER probed them (same relay header-parse as audio) and
+            // returned them in the payload — known at LOAD, so the CC menu lists them and
+            // the saved subtitle preference is restored, with NO client-side gateway probe
+            // during streaming. Enumeration is safe now (it's just payload data); the
+            // restore-ATTACH (which extracts via the gateway = a 2nd provider connection)
+            // is deferred past initial buffering inside applyEngineSubtitleTracks.
+            // Fallback: if the payload carries no subtitles (un-probed file), the lazy
+            // enrich on menu-open still applies (toggleAudioMenu/toggleCaptionsMenu).
+            const sessionSubtitleTracks = Array.isArray(options.subtitleTracks) ? options.subtitleTracks : null;
+            if (sessionSubtitleTracks && sessionSubtitleTracks.length) {
+                try { this.applyEngineSubtitleTracks(sessionSubtitleTracks, playbackAttemptId, options); } catch (_) { /* best-effort */ }
+            }
+            return;
+        }
+
+        // Get settings for proxy/transcode
+        let settings = {};
+        try {
+            settings = await API.settings.get();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+        } catch (e) {
+            console.warn('Could not load settings');
+        }
+        settings = this.getCloudSafeSettings(settings);
+
+        // Signed relay URLs hide the provider suffix. Retain the selected
+        // catalogue format so HLS still reaches hls.js instead of native MP4.
+        const selectedContainer = String(this.containerExtension || this.content?.containerExtension || '').toLowerCase();
+        const looksLikeHls = url.includes('m3u8') || selectedContainer === 'm3u8';
+        const isGatewaySessionUrl = this._gatewayAudioRenditionRequired;
+        const isRawTs = url.includes('.ts') && !url.includes('.m3u8');
+        const isDirectVideo = url.includes('.mp4') || url.includes('.mkv') || url.includes('.avi');
+        let probeInfo = null;
+
+        try {
+            console.log('[WatchPage] Probing stream...');
+            probeInfo = (isGatewaySessionUrl || privateMediaCacheAccess)
+                ? null
+                : await this.probeStreamInfo(url, settings);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            if (probeInfo) {
+                console.log(`[WatchPage] Probe result: video=${probeInfo.video}, audio=${probeInfo.audio}, ` +
+                    `${probeInfo.width}x${probeInfo.height}, duration=${probeInfo.duration || 'unknown'}, ` +
+                    `profile=${probeInfo.videoProfile || 'unknown'}, pix_fmt=${probeInfo.videoPixelFormat || 'unknown'}, ` +
+                    `copySafe=${probeInfo.videoCopySafe}, compatible=${probeInfo.compatible}`);
+                this.applyProbeInfo(probeInfo);
+                const probeFailureText = this.getProbeFailureText(probeInfo);
+                if (probeInfo.upstreamFailure || this.isTerminalPlaybackError(probeFailureText)) {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    await this.handlePlaybackFailure(probeInfo.friendlyError || probeInfo.error || probeFailureText || 'The provider refused this stream.');
+                    return;
+                }
+            }
+        } catch (err) {
+            console.warn('[WatchPage] Probe failed, continuing without duration fallback:', err.message);
+        }
+
+        // Priority 0: Auto Transcode (Smart) - probe first, then decide
+        if (settings.autoTranscode) {
+            if (probeInfo) {
+                const info = probeInfo;
+                if (info.needsTranscode || settings.upscaleEnabled) {
+                    console.log(`[WatchPage] Auto: Using HLS transcode session (${settings.upscaleEnabled ? 'Upscaling' : 'Incompatible audio/video'})`);
+
+                    const videoMode = this.getTranscodeVideoMode(info, settings);
+                    const statusText = this.getTranscodeStatusText(videoMode, settings);
+                    const statusMode = settings.upscaleEnabled ? 'upscaling' : 'transcoding';
+
+                    this.updateTranscodeStatus(statusMode, statusText);
+                    const startOffset = this.resumeTime || 0;
+                    const processingOptions = {
+                        videoMode,
+                        seekOffset: startOffset,
+                        videoCodec: info.video,
+                        ...this.getAudioProcessingOptions(info)
+                    };
+                    this.currentPlaybackMode = 'transcode-session';
+                    this.currentProcessingOptions = processingOptions;
+                    this.streamStartOffset = startOffset;
+                    this.attachProbeSubtitles(url, info.subtitles, startOffset);
+                    const playlistUrl = await this.startTranscodeSession(url, processingOptions);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    this.playHlsOrDirect(playlistUrl, { playbackAttemptId });
+                    this.setVolumeFromStorage();
+                    return;
+                } else if (info.needsRemux) {
+                    const startOffset = this.resumeTime || 0;
+                    this.streamStartOffset = startOffset;
+                    this.attachProbeSubtitles(url, info.subtitles, startOffset);
+
+                    const isMpegTs = String(info.container || '').toLowerCase().includes('mpegts') || isRawTs;
+                    const finalUrl = isMpegTs
+                        ? this.getTranscodeUrl(url, startOffset, this.getAudioProcessingOptions(info))
+                        : this.getRemuxUrl(url, startOffset);
+                    this.currentPlaybackMode = isMpegTs ? 'transcode' : 'remux';
+                    this.currentProcessingOptions = isMpegTs ? this.getAudioProcessingOptions(info) : {};
+                    this.updateTranscodeStatus(
+                        isMpegTs ? 'transcoding' : 'remuxing',
+                        isMpegTs ? 'Transcoding (Audio)' : 'Remux (Auto)'
+                    );
+                    console.log(`[WatchPage] Auto: Using ${isMpegTs ? 'audio transcode' : 'remux'} for incompatible container`);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    this.video.src = finalUrl;
+                    this.video.play().catch(e => this.handleAutoplayError(e));
+                    this.setVolumeFromStorage();
+                    return;
+                }
+                // Compatible - fall through to normal playback
+                console.log('[WatchPage] Auto: Using normal playback (compatible)');
+            } else {
+                console.warn('[WatchPage] Auto Transcode enabled but probe failed, using normal playback');
+            }
+        }
+
+        // Priority 1: Force Video Transcode (Full) or Upscaling
+        if (settings.forceVideoTranscode || settings.upscaleEnabled) {
+            const statusText = settings.upscaleEnabled ? (globalThis.NorvaI18n?.t("ui_web_d827fea4f9a0", { defaultValue: "Upscaling" }) ?? 'Upscaling') : (globalThis.NorvaI18n?.t("ui_web_59d35c5bdd2d", { defaultValue: "Transcoding (Video)" }) ?? 'Transcoding (Video)');
+            const statusMode = settings.upscaleEnabled ? 'upscaling' : 'transcoding';
+            console.log(`[WatchPage] ${statusText} enabled. Starting session (encode)...`);
+            this.updateTranscodeStatus(statusMode, statusText);
+            const startOffset = this.resumeTime || 0;
+            const processingOptions = {
+                videoMode: 'encode',
+                seekOffset: startOffset,
+                videoCodec: probeInfo?.video,
+                ...this.getAudioProcessingOptions(probeInfo)
+            };
+            this.currentPlaybackMode = 'transcode-session';
+            this.currentProcessingOptions = processingOptions;
+            this.streamStartOffset = startOffset;
+            this.attachProbeSubtitles(url, probeInfo?.subtitles, startOffset);
+            const playlistUrl = await this.startTranscodeSession(url, processingOptions);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.playHlsOrDirect(playlistUrl, { playbackAttemptId });
+            this.setVolumeFromStorage();
+            return;
+        }
+
+        if (settings.forceTranscode) {
+            console.log('[WatchPage] Force Audio Transcode enabled. Starting session...');
+
+            // Probe to get video codec for HEVC tag handling
+            let videoCodec = probeInfo?.video || 'unknown';
+            if (!probeInfo) {
+                try {
+                    const info = await this.probeStreamInfo(url, settings);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    this.applyProbeInfo(info);
+                    probeInfo = info;
+                    videoCodec = info.video;
+                } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
+            }
+
+            const startOffset = this.resumeTime || 0;
+            const videoMode = this.getTranscodeVideoMode(probeInfo || this.currentStreamInfo, settings);
+            this.updateTranscodeStatus('transcoding', this.getTranscodeStatusText(videoMode, settings));
+            const processingOptions = {
+                videoMode,
+                videoCodec,
+                seekOffset: startOffset,
+                ...this.getAudioProcessingOptions(probeInfo)
+            };
+            this.currentPlaybackMode = 'transcode-session';
+            this.currentProcessingOptions = processingOptions;
+            this.streamStartOffset = startOffset;
+            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
+            const playlistUrl = await this.startTranscodeSession(url, processingOptions);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.playHlsOrDirect(playlistUrl, { playbackAttemptId });
+            this.setVolumeFromStorage();
+            return;
+        }
+
+        // Priority 2: Force Remux for raw TS streams
+        if (settings.forceRemux && isRawTs) {
+            console.log('[WatchPage] Force Remux enabled');
+            this.updateTranscodeStatus('remuxing', (globalThis.NorvaI18n?.t("ui_web_42cd3feba539", { defaultValue: "Remux (Force)" }) ?? 'Remux (Force)'));
+            const startOffset = this.resumeTime || 0;
+            this.currentPlaybackMode = 'remux';
+            this.currentProcessingOptions = {};
+            this.streamStartOffset = startOffset;
+            this.attachProbeSubtitles(url, probeInfo?.subtitles, startOffset);
+            const finalUrl = this.getRemuxUrl(url, startOffset);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.video.src = finalUrl;
+            this.video.play().catch(e => this.handleAutoplayError(e));
+            this.setVolumeFromStorage();
+            return;
+        }
+
+        // Determine if proxy is needed
+        const proxyRequiredDomains = ['pluto.tv'];
+        const needsProxy = settings.forceProxy || proxyRequiredDomains.some(domain => url.includes(domain));
+        const finalUrl = needsProxy ? this.getProxiedUrl(url) : url;
+
+        console.log('[WatchPage] Playing:', {
+            source: this.describePlaybackUrl(url),
+            final: this.describePlaybackUrl(finalUrl),
+            needsProxy,
+            looksLikeHls
+        });
+
+        // Use HLS.js for HLS streams. The runtime is vendored+lazy — for an HLS URL,
+        // wait for it once; if it truly can't load, the else branch (direct src) still
+        // works natively on Safari, and the media-error ladder covers the rest.
+        if (looksLikeHls && typeof Hls === 'undefined' && window.ensureHls) {
+            try { await window.ensureHls(); } catch (_) { /* degrade below */ }
+        }
+        const hlsSupported = typeof Hls !== 'undefined' && Hls.isSupported();
+        if (looksLikeHls && privateMediaCacheAccess && !hlsSupported) {
+            this.clearPrivateMediaCacheAccess();
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_71be9d417435", { defaultValue: "Secure cached playback is not supported by this browser." }) ?? 'Secure cached playback is not supported by this browser.'), { immediate: true });
+            return;
+        }
+        if (looksLikeHls && hlsSupported) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.updateTranscodeStatus(
+                isGatewaySessionUrl ? 'transcoding' : 'direct',
+                isGatewaySessionUrl
+                    ? 'Norva Gateway'
+                    : (privateMediaCacheAccess ? 'Norva Cache' : 'Direct HLS')
+            );
+            this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
+            this.currentProcessingOptions = {};
+            const startOffset = isGatewaySessionUrl
+                ? Math.max(0, Number(
+                    options.actualStartOffset ??
+                    options.actual_start_offset ??
+                    options.seekOffset ??
+                    this.resumeTime ??
+                    0
+                ) || 0)
+                : 0;
+            this.streamStartOffset = startOffset;
+            this.trackPlaybackPosition({ position: startOffset, force: true });
+            if (!this._hlsOwnsExactSubtitles) {
+                this.attachProbeSubtitles(url, this.subtitleTracks, startOffset);
+            }
+            this.playHls(finalUrl, {
+                playbackAttemptId,
+                autoplay: options.autoplay !== false,
+                audioSwitchRequestId: options.audioSwitchRequestId,
+                startupPolicy: options.startupPolicy ?? options.startup_policy ?? null,
+                privateMediaCache: Boolean(privateMediaCacheAccess),
+                nativeHlsSubtitles: this._hlsOwnsExactSubtitles
+            });
+            const requestedOffset = Number(
+                options.requestedSeekOffset ??
+                options.requested_seek_offset ??
+                options.resumeTarget ??
+                options.startTime ??
+                options.seekOffset ??
+                startOffset
+            );
+            const reportedLocalTarget = Number(
+                options.localSeekTarget ?? options.local_seek_target
+            );
+            const localTarget = Number.isFinite(reportedLocalTarget)
+                ? Math.max(0, reportedLocalTarget)
+                : Math.max(0, (Number.isFinite(requestedOffset) ? requestedOffset : startOffset) - startOffset);
+            if (isGatewaySessionUrl && localTarget > 0.25) {
+                this.queuePendingLocalSeek(localTarget);
+            }
+        } else {
+            // Direct playback for mp4/mkv/avi
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.updateTranscodeStatus('direct', (globalThis.NorvaI18n?.t("ui_web_74d004705fc0", { defaultValue: "Direct Play" }) ?? 'Direct Play'));
+            this.currentPlaybackMode = 'direct';
+            this.currentProcessingOptions = {};
+            this.streamStartOffset = 0;
+            this.trackPlaybackPosition({ position: 0, force: true });
+            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, 0);
+            this.video.src = finalUrl;
+            this.video.play().catch(e => this.handleAutoplayError(e));
+        }
+
+        this.setVolumeFromStorage();
+    }
+
+    gatewayBufferedAheadSeconds() {
+        const video = this.video;
+        if (!video) return 0;
+        try {
+            // TimeRanges is live: appends/evictions can change it between two
+            // getters. Capture one object and fail closed if an index disappears.
+            const ranges = video.buffered;
+            const length = Number(ranges?.length) || 0;
+            if (!length) return 0;
+            const position = Math.max(0, Number(video.currentTime) || 0);
+            let furthestEnd = position;
+            for (let index = 0; index < length; index += 1) {
+                const start = Number(ranges.start(index));
+                const end = Number(ranges.end(index));
+                if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                if (start <= position + 0.25 && end > furthestEnd) furthestEnd = end;
+            }
+            return Math.max(0, furthestEnd - position);
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    normalizeGatewayStartupPolicy(value = null) {
+        const policy = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        if (!policy || Number(policy.protocol) !== 2 || policy.eligible !== true) return null;
+
+        const pipeline = String(policy.pipeline || '').trim().toLowerCase();
+        if (pipeline !== 'copy' && pipeline !== 'audio-transcode' && pipeline !== 'video-transcode') return null;
+        const reason = String(policy.reason || '').trim().toLowerCase();
+        if (reason !== 'mkv-h264-copy-ready'
+            && reason !== 'complete-hls-cache-hit'
+            && reason !== 'vaapi-transcode-ready'
+            && reason !== 'finite-ts-verified-ready') return null;
+        if (reason === 'complete-hls-cache-hit' && pipeline !== 'copy') return null;
+        if (reason === 'vaapi-transcode-ready' && pipeline !== 'video-transcode') return null;
+        if (reason === 'mkv-h264-copy-ready' && pipeline === 'video-transcode') return null;
+        if (reason === 'finite-ts-verified-ready' && pipeline === 'video-transcode') return null;
+
+        const targetBufferSeconds = Number(policy.targetBufferSeconds ?? policy.target_buffer_seconds);
+        const minimumEncodeRateX = Number(policy.minimumEncodeRateX ?? policy.minimum_encode_rate_x);
+        const observedEncodeRateX = Number(policy.observedEncodeRateX ?? policy.observed_encode_rate_x);
+        if (!Number.isFinite(targetBufferSeconds)
+            || targetBufferSeconds < 6
+            || targetBufferSeconds > 24
+            || !Number.isFinite(minimumEncodeRateX)
+            || minimumEncodeRateX < 1.15
+            || minimumEncodeRateX > 20
+            || (reason === 'vaapi-transcode-ready' && minimumEncodeRateX < 2)
+            || (reason === 'finite-ts-verified-ready' && (minimumEncodeRateX < 1.5 || targetBufferSeconds < 12))
+            || !Number.isFinite(observedEncodeRateX)
+            || observedEncodeRateX < minimumEncodeRateX
+            || observedEncodeRateX > 20) {
+            return null;
+        }
+
+        return {
+            protocol: 2,
+            eligible: true,
+            pipeline,
+            reason,
+            targetBufferSeconds,
+            minimumEncodeRateX,
+            observedEncodeRateX,
+        };
+    }
+
+    gatewayStartupBufferOptions(startupPolicy = null) {
+        const policy = this.normalizeGatewayStartupPolicy(startupPolicy);
+        if (!policy) {
+            // A server-selected graph can miss its rate threshold on only two
+            // early segments. Preserve the fallback, but allow new, sustained
+            // browser evidence to supersede that estimate, never a timer alone.
+            const raw = startupPolicy || {};
+            const adaptive = Number(raw.protocol) === 2 && raw.eligible === false
+                && raw.reason === 'encode-rate-below-minimum'
+                && ['copy', 'audio-transcode', 'video-transcode'].includes(raw.pipeline)
+                && raw.targetBufferSeconds === null
+                && Number(raw.minimumEncodeRateX) >= (raw.pipeline === 'video-transcode' ? 2 : 1.15)
+                && Number(raw.minimumEncodeRateX) <= 20
+                && Number.isFinite(raw.observedEncodeRateX) && raw.observedEncodeRateX > 0;
+            return {
+                minimumSeconds: 96,
+                timeoutMs: 360000,
+                policy: null,
+                ...(adaptive ? { adaptive: true } : {}),
+            };
+        }
+        // A growing multi-audio EVENT manifest publishes one video playlist
+        // plus several audio renditions. Six seconds is enough for the mono
+        // fast path, but a real Opplex cold-start showed that it can cross the
+        // first playlist refresh boundary before every selected rendition has
+        // a durable reserve. Match the already-proven recovery floor for this
+        // topology while preserving the faster six-second mono start.
+        const multiAudioTopology = this._gatewayAudioRenditionStatus === 'ready'
+            && Array.isArray(this._gatewayAudioRenditions)
+            && this._gatewayAudioRenditions.length > 1;
+        return {
+            minimumSeconds: multiAudioTopology
+                ? Math.max(12, policy.targetBufferSeconds)
+                : policy.targetBufferSeconds,
+            timeoutMs: 45000,
+            policy,
+        };
+    }
+
+    gatewayRecoveryBufferOptions(startupPolicy = null) {
+        const policy = this.normalizeGatewayStartupPolicy(startupPolicy);
+        const minimumSeconds = policy
+            ? Math.max(12, Math.min(24, policy.targetBufferSeconds * 2))
+            : 24;
+        return {
+            minimumSeconds,
+            timeoutMs: 60000,
+            policy,
+        };
+    }
+
+    async waitForGatewayRecoveryBuffer(playbackAttemptId, hls, options = {}) {
+        const minimumSeconds = Math.max(4, Number(options.minimumSeconds) || 12);
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 60000);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
+            const bufferedAhead = this.gatewayBufferedAheadSeconds();
+            if (bufferedAhead >= minimumSeconds) return true;
+
+            const levels = Array.isArray(hls?.levels) ? hls.levels : [];
+            const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
+                ? hls.currentLevel
+                : 0;
+            const details = levels[currentLevel]?.details || levels[0]?.details || null;
+            const totalDuration = Number(details?.totalduration);
+            if (details?.live === false && Number.isFinite(totalDuration) && totalDuration > 0) {
+                const remaining = Math.max(0, totalDuration - (Number(this.video?.currentTime) || 0));
+                const completeTarget = Math.max(0.5, Math.min(minimumSeconds, remaining) - 0.5);
+                if (bufferedAhead >= completeTarget) return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+    }
+
+    async waitForGatewayStartupBuffer(playbackAttemptId, hls, options = {}) {
+        const minimumSeconds = Math.max(1, Number(options.minimumSeconds) || 24);
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 45000);
+        const deadline = Date.now() + timeoutMs;
+        let growth = null;
+        this._gatewayStartupAdaptiveEvidence = null;
+        while (Date.now() < deadline) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
+            const bufferedAhead = this.gatewayBufferedAheadSeconds();
+            if (bufferedAhead >= minimumSeconds) return true;
+
+            // The viewer may explicitly press Play while a deliberately deep
+            // slow-source gate is still filling. Once media time is genuinely
+            // advancing, the session belongs to that active playback and the
+            // pending gate must settle instead of tearing it down at 6 minutes.
+            const mediaTime = Number(this.video?.currentTime);
+            if (this.video
+                && !this.video.paused
+                && !this.video.ended
+                && Number.isFinite(mediaTime)
+                && mediaTime > 0) {
+                return true;
+            }
+
+            // A genuinely complete short item cannot reach the normal movie
+            // threshold. Admit it only after virtually all declared media is
+            // already resident in the browser buffer.
+            const levels = Array.isArray(hls?.levels) ? hls.levels : [];
+            const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
+                ? hls.currentLevel
+                : 0;
+            const details = levels[currentLevel]?.details || levels[0]?.details || null;
+            if (options.adaptive === true && this.video?.paused && Number(this.video.currentTime) <= 0.25) {
+                const now = Date.now();
+                const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
+                    .slice(-8).map(fragment => Number(fragment.duration));
+                const boundedSegments = durations.length >= 3
+                    && durations.every(duration => Number.isFinite(duration) && duration > 0 && duration <= 12.25);
+                const longestSegment = boundedSegments ? Math.max(...durations) : 0;
+                // A twelve-second segment produced at 2x arrives every six
+                // seconds. A fixed 2.5s gap discarded that valid evidence. The
+                // grace follows known segments, remains bounded, and does not
+                // itself authorize Play: measured growth must still exceed 2x.
+                const maximumGapMs = Math.min(10000, Math.max(2500, longestSegment * 1000));
+                const observationMs = Math.max(12000, maximumGapMs * 4);
+                // Exclude the first burst (already present at the Gateway) and
+                // require several later appends over real elapsed time. Disjoint
+                // ranges, buffer regressions and long gaps restart observation.
+                if (!growth || bufferedAhead < growth.lastBuffer - 0.25
+                    || now - growth.lastAt > maximumGapMs || now - growth.at > observationMs) {
+                    growth = bufferedAhead > 0 ? { at: now, buffer: bufferedAhead,
+                        lastBuffer: bufferedAhead, lastAt: now, appends: 0 } : null;
+                } else if (bufferedAhead >= growth.lastBuffer + 0.25) {
+                    growth.lastBuffer = bufferedAhead;
+                    growth.lastAt = now;
+                    growth.appends += 1;
+                }
+                const reserve = boundedSegments ? Math.max(12, 2 * longestSegment) : Infinity;
+                const elapsedMs = growth ? now - growth.at : 0;
+                const addedSeconds = growth ? bufferedAhead - growth.buffer : 0;
+                const rate = elapsedMs > 0 ? addedSeconds * 1000 / elapsedMs : 0;
+                if (growth && elapsedMs >= 2000 && growth.appends >= 3 && addedSeconds >= 8
+                    && rate >= 2 && bufferedAhead >= reserve && now - growth.lastAt <= 1000
+                    && Number(this.video.readyState) >= 3 && Number(this.video.videoWidth) > 0) {
+                    this._gatewayStartupAdaptiveEvidence = {
+                        elapsedMs, appends: growth.appends, addedSeconds,
+                        bufferedSeconds: bufferedAhead, rateX: Number(rate.toFixed(3)),
+                    };
+                    this.recordPlaybackStartupPhase?.('adaptiveBufferReady', playbackAttemptId);
+                    return true;
+                }
+            }
+            const totalDuration = Number(details?.totalduration);
+            if (details?.live === false && Number.isFinite(totalDuration) && totalDuration > 0) {
+                const completeTarget = Math.max(1, Math.min(minimumSeconds, totalDuration) - 0.5);
+                if (bufferedAhead >= completeTarget) return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+    }
+
+    /**
+     * Play HLS stream using Hls.js
+     */
+    playHls(url, options = {}) {
+        const { autoplay = true } = options;
+        const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+
+        if (typeof Hls === 'undefined') {
+            // hls.js runtime unavailable (vendored copy + CDN both failed — rare).
+            // Native HLS (Safari) still works via a plain src; otherwise surface a
+            // typed error instead of a ReferenceError.
+            if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+                this.video.src = url;
+                this.video.play().catch(() => {});
+            } else {
+                this.handleEngineUnplayable(new Error('HLS_RUNTIME_UNAVAILABLE — hls.js could not be loaded'));
+            }
+            return;
+        }
+
+        if (this.hls) {
+            this.cancelPendingHlsAudioSwitch(false);
+            this.hls.destroy();
+        }
+        this._gatewayAutomaticRebuffering = false;
+        this._gatewayUserPaused = false;
+
+        // Local transcode sessions are VOD: always start from the beginning of
+        // the playlist (never the live edge), even before EXT-X-ENDLIST exists.
+        const isTranscodeSession = url.startsWith('/api/transcode/');
+        const isGatewaySession = this.isGatewayPlaybackUrl(url);
+        const gatewayAudioContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (gatewayAudioContext) {
+            // Each Hls instance must earn its own topology proof. A recovery can
+            // replace Hls without incrementing the playback attempt id.
+            this._gatewayHlsAudioTracksReady = false;
+        }
+
+        // Fresh recovery budget for each new stream
+        this._mediaRecoveries = 0;
+        this._networkRecoveries = 0;
+        this._stallPos = -1;
+        this._stallSince = Date.now();
+
+        const hlsConfig = {
+            // Local transcode sessions: buffer aggressively ahead — segments are
+            // already on disk, so a large forward buffer absorbs slow/erratic
+            // upstream downloads on the encoder side
+            maxBufferLength: (isTranscodeSession || isGatewaySession) ? 120 : 30,
+            maxMaxBufferLength: (isTranscodeSession || isGatewaySession) ? 600 : 60,
+            startLevel: -1,
+            enableWorker: true,
+            // Exact Gateway/cache renditions are part of the HLS graph and must
+            // be rendered by hls.js. Legacy probe subtitles remain external
+            // <track> elements, where hls.js ownership would reset their state.
+            renderTextTracksNatively: options.nativeHlsSubtitles === true,
+            // Cloud gateway sessions are real-time VOD transcodes too: start at
+            // the beginning, never the live edge (otherwise hls.js chases the
+            // edge on the growing EVENT playlist and never loads a fragment).
+            ...((isTranscodeSession || isGatewaySession) ? { startPosition: 0 } : {})
+        };
+        if (options.privateMediaCache === true) {
+            // Every master/media playlist, audio rendition, subtitle rendition
+            // and segment stays private. The short-lived ticket is attached only
+            // to the pinned Worker object path and is never serialized into a URL.
+            hlsConfig.xhrSetup = (xhr, requestUrl) => {
+                const authorization = this.privateMediaCacheAuthorizationForUrl(requestUrl);
+                if (authorization) xhr.setRequestHeader('Authorization', authorization);
+            };
+            hlsConfig.fetchSetup = (context, initParams = {}) => {
+                const requestUrl = context?.url || context;
+                const authorization = this.privateMediaCacheAuthorizationForUrl(requestUrl);
+                const headers = new Headers(initParams.headers || {});
+                if (authorization) headers.set('Authorization', authorization);
+                return new Request(requestUrl, { ...initParams, headers });
+            };
+        }
+        this.hls = new Hls(hlsConfig);
+
+        const activeHls = this.hls;
+        this.recordEdgeTrace?.('hls-created', {
+            url,
+            cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+            playbackAttemptId,
+        });
+        const gatewayStartupBuffer = isGatewaySession
+            ? this.gatewayStartupBufferOptions(options.startupPolicy)
+            : null;
+        const gatewayRecoveryBuffer = isGatewaySession
+            ? this.gatewayRecoveryBufferOptions(options.startupPolicy)
+            : null;
+        let gatewayStartupBufferReady = !isGatewaySession;
+        let gatewayRecoveryRunning = false;
+        let gatewayRecoveryGeneration = 0;
+        const resumeAfterHlsRecovery = (forceResume = false) => {
+            // hls.js/the browser may set `video.paused=true` immediately before
+            // reporting bufferStalledError. That state is not a viewer pause: if
+            // we return here, the buffer can refill indefinitely without playback
+            // ever resuming. Only an explicit transport-control pause suppresses
+            // automatic recovery.
+            if (!forceResume && this._gatewayUserPaused) return;
+            if (!isGatewaySession) {
+                setTimeout(() => {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                    if (autoplay) this.video?.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_9cbe3245df72", { defaultValue: "Recovery autoplay error" }) ?? 'Recovery autoplay error')));
+                    this._reattachAiTrackIfActive();
+                }, 500);
+                return;
+            }
+            if (!autoplay || !gatewayStartupBufferReady || gatewayRecoveryRunning) return;
+            gatewayRecoveryRunning = true;
+            const generation = ++gatewayRecoveryGeneration;
+            this._gatewayAutomaticRebuffering = true;
+            this.showLoading();
+            if (this.video && !this.video.paused) {
+                try { this.video.pause(); } catch (_) {}
+            }
+            setTimeout(async () => {
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                let bufferReady = false;
+                try {
+                    bufferReady = await this.waitForGatewayRecoveryBuffer(
+                        playbackAttemptId,
+                        activeHls,
+                        gatewayRecoveryBuffer,
+                    );
+                } catch (error) {
+                    console.warn('[WatchPage] Gateway recovery buffer inspection failed:', error?.message || error);
+                }
+                if (generation !== gatewayRecoveryGeneration
+                    || this.isStalePlaybackAttempt(playbackAttemptId)
+                    || this.hls !== activeHls) return;
+                gatewayRecoveryRunning = false;
+                if (!this._gatewayAutomaticRebuffering) return;
+                this._gatewayAutomaticRebuffering = false;
+                if (bufferReady) {
+                    this._stallSince = Date.now();
+                    this.video?.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_9cbe3245df72", { defaultValue: "Recovery autoplay error" }) ?? 'Recovery autoplay error')));
+                } else {
+                    // Keep the prepared session available for an explicit retry;
+                    // a slow fill is not a terminal provider/playback failure.
+                    this.hideLoading();
+                    this.centerPlayBtn?.classList.add('show');
+                    this.showOverlay();
+                    clearTimeout(this.overlayTimeout);
+                }
+                this._reattachAiTrackIfActive();
+            }, 250);
+        };
+
+        this.hls.loadSource(url);
+        this.hls.attachMedia(this.video);
+
+        // hls.js TimelineController._cleanTracks wipes the cues of EVERY textTrack — unlabeled
+        // included — on each MEDIA_ATTACHING, i.e. on every recoverMediaError() cycle. That
+        // includes hls-INTERNAL recoveries its error-controller performs on non-fatal
+        // "MediaSource readyState: ended" append errors, which our ERROR handler never sees
+        // (renderTextTracksNatively:false does NOT gate _cleanTracks). MEDIA_ATTACHED fires
+        // right after the wipe, for every recovery origin: repair there, always.
+        this.hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            this.recordEdgeTrace?.('media-attached', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+            });
+            this._reattachAiTrackIfActive();
+            this._subEngine?.seenCues?.clear(); // probe engine: let its ticks re-add wiped cues
+        });
+
+        const bufferAppendedEvent = Hls.Events?.BUFFER_APPENDED;
+        if (bufferAppendedEvent) {
+            this.hls.on(bufferAppendedEvent, () => {
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                this.updateBufferedTimeline();
+            });
+        }
+
+        this.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            this.recordEdgeTrace?.('audio-tracks-updated', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Array.isArray(data?.audioTracks) ? data.audioTracks.length : 0,
+            });
+            console.log('[WatchPage] Audio tracks updated:', data?.audioTracks);
+            this._gatewayHlsAudioTracksReady = true;
+            this._audioTopologyPending = false;
+            const gatewayContext = this._gatewayAudioRenditionRequired
+                || this.currentPlaybackMode === 'gateway-session';
+            const renditions = gatewayContext
+                ? this.getValidatedGatewayAudioRenditions(activeHls)
+                : null;
+            if (renditions) {
+                const desiredStreamIndex = Number.isSafeInteger(this._pendingGatewayAudioStreamIndex)
+                    ? this._pendingGatewayAudioStreamIndex
+                    : (this.selectedAudioTrackUserChoice ? Number(this.selectedAudioStreamIndex) : null);
+                const desired = Number.isSafeInteger(desiredStreamIndex)
+                    ? renditions.find((entry) => entry.streamIndex === desiredStreamIndex)
+                    : null;
+                if (desired && (activeHls.audioTrack !== desired.hlsIndex
+                    || Number(this.directAudioStreamIndex) !== desired.streamIndex)) {
+                    this.selectGatewayHlsAudioTrack(desired.hlsIndex, desired.streamIndex)
+                        .then(() => {
+                            if (this._pendingGatewayAudioStreamIndex === desired.streamIndex) {
+                                this._pendingGatewayAudioStreamIndex = null;
+                            }
+                        })
+                        .catch(() => {});
+                }
+            } else if (!gatewayContext
+                || (this._gatewayAudioRenditionStatus === 'absent'
+                    && Array.isArray(activeHls.audioTracks)
+                    && activeHls.audioTracks.length === 1)) {
+                this.restorePendingAudioPreference();
+            } else {
+                this.cancelPendingHlsAudioSwitch(false);
+            }
+            this.updateAudioTracks();
+        });
+
+        this.hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
+            this.recordEdgeTrace?.('audio-track-switched', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Number.isFinite(Number(data?.id)) ? 1 : 0,
+            });
+            console.log('[WatchPage] Audio track switched:', data);
+            const gatewayContext = this._gatewayAudioRenditionRequired
+                || this.currentPlaybackMode === 'gateway-session';
+            if (gatewayContext) {
+                this.handleGatewayHlsAudioTrackSwitched(activeHls, playbackAttemptId, data);
+            } else if (!this.isStalePlaybackAttempt(playbackAttemptId) && this.hls === activeHls) {
+                this.updateAudioTracks();
+            }
+        });
+
+        // Listen for subtitle track updates
+        this.hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (event, data) => {
+            this.recordEdgeTrace?.('subtitle-tracks-updated', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Array.isArray(data?.subtitleTracks) ? data.subtitleTracks.length : 0,
+            });
+            console.log('[WatchPage] Subtitle tracks updated:', data.subtitleTracks);
+            this.restorePendingSubtitlePreference();
+            // Wait a moment for native text tracks to populate
+            setTimeout(() => this.updateCaptionsTracks(), 100);
+        });
+
+        this.hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (event, data) => {
+            this.recordEdgeTrace?.('subtitle-track-switched', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+            });
+            console.log('[WatchPage] Subtitle track switched:', data);
+        });
+
+        let autoplayGateRunning = false;
+        this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            this.recordEdgeTrace?.('manifest-parsed', {
+                url: this.currentUrl || this.baseStreamUrl || this.hls?.url || '',
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                count: Array.isArray(data.audioTracks) ? data.audioTracks.length : 0,
+            });
+            this.recordPlaybackStartupPhase?.('manifestParsed', playbackAttemptId);
+            // hls.js does not emit AUDIO_TRACKS_UPDATED when audio is muxed into
+            // the sole video playlist. MANIFEST_PARSED is the positive proof that
+            // the current Hls instance completed enumeration with zero alternates.
+            if (gatewayAudioContext
+                && Array.isArray(activeHls.audioTracks)
+                && activeHls.audioTracks.length === 0
+                && (!Array.isArray(data.audioTracks) || data.audioTracks.length === 0)) {
+                this._gatewayHlsAudioTracksReady = true;
+                this._audioTopologyPending = false;
+                this.updateAudioTracks();
+            }
+            // A paused Gateway lane still fills the same proof buffer; it simply
+            // stops after the gate instead of starting the media element.
+            if (!autoplay && !isGatewaySession) return;
+            if (autoplayGateRunning) return;
+            autoplayGateRunning = true;
+
+            if (isGatewaySession) {
+                let bufferReady = false;
+                try {
+                    bufferReady = await this.waitForGatewayStartupBuffer(
+                        playbackAttemptId,
+                        activeHls,
+                        {
+                            // A signed session policy may shorten the gate only
+                            // after Gateway proved the file-exact output graph
+                            // (including locally decoded TS startup segments)
+                            // and measured production above realtime. Unknown,
+                            // unqualified, slow or malformed policies keep the deep
+                            // 96-second anti-stall buffer used by the legacy path.
+                            minimumSeconds: gatewayStartupBuffer.minimumSeconds,
+                            timeoutMs: gatewayStartupBuffer.timeoutMs,
+                            adaptive: gatewayStartupBuffer.adaptive === true,
+                        },
+                    );
+                } catch (error) {
+                    console.warn('[WatchPage] Gateway startup buffer inspection failed:', error?.message || error);
+                }
+                if (!bufferReady) {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                    await this.releasePlaybackPipelineForRetry().catch(() => {});
+                    if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                        this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_b54d8d3e5f7a", { defaultValue: "Playback buffer could not be prepared. Please try again." }) ?? 'Playback buffer could not be prepared. Please try again.'), { immediate: true });
+                    }
+                    return;
+                }
+                gatewayStartupBufferReady = true;
+                this.recordPlaybackStartupPhase?.('startupBufferReady', playbackAttemptId);
+                if (Number.isInteger(Number(options.audioSwitchRequestId))) {
+                    this.updateGatewayAudioSwitchMetrics(
+                        Number(options.audioSwitchRequestId),
+                        autoplay ? 'gateway_gate_ready' : 'ready_paused',
+                        {
+                            gateReadyAt: Date.now(),
+                            bufferedAheadSeconds: this.gatewayBufferedAheadSeconds(),
+                            startupPolicy: gatewayStartupBuffer.policy,
+                        },
+                    );
+                }
+            }
+
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+            if (!autoplay) return;
+            this.video.play()
+                .then(() => {
+                    if (Number.isInteger(Number(options.audioSwitchRequestId))) {
+                        this.updateGatewayAudioSwitchMetrics(
+                            Number(options.audioSwitchRequestId),
+                            'playing',
+                            { playbackStartedAt: Date.now() },
+                        );
+                    }
+                })
+                .catch(e => this.handleAutoplayError(e));
+        });
+
+        this.hls.on(Hls.Events.ERROR, (event, data) => {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.recordEdgeTrace?.('hls-error', {
+                url,
+                cloudPlaybackSessionId: options.cloudPlaybackSessionId,
+                playbackAttemptId,
+                code: data?.details || data?.type,
+                fatal: Boolean(data?.fatal),
+            });
+            const SOFT_MEDIA_DETAILS = ['bufferStalledError', 'bufferNudgeOnStall', 'bufferSeekOverHole', 'fragParsingError'];
+            const responseStatus = Number(
+                data?.response?.code ?? data?.response?.status ?? data?.networkDetails?.status ?? 0
+            );
+            const privateCacheAuthorizationExpired = Boolean(
+                options.privateMediaCache === true
+                && this._privateMediaCacheAccess
+                && Date.now() >= this._privateMediaCacheAccess.ticketExpiresAtMs - 1000
+            );
+            if (options.privateMediaCache === true
+                && data.type === Hls.ErrorTypes.NETWORK_ERROR
+                && ([401, 403].includes(responseStatus) || privateCacheAuthorizationExpired)) {
+                this.showLoading();
+                void this.refreshPrivateMediaCacheTicket('http-auth');
+                return;
+            }
+            // Non-fatal errors (incl. most bufferStalledError occurrences) are
+            // recovered automatically by hls.js. On Gateway VOD, deliberately
+            // hold playback until a useful recovery reserve exists instead of
+            // bouncing at the live edge through repeated visible micro-stalls.
+            if (!data.fatal) {
+                if (isGatewaySession
+                    && gatewayStartupBufferReady
+                    && SOFT_MEDIA_DETAILS.includes(data.details)
+                    && this.gatewayBufferedAheadSeconds() < 2) {
+                    resumeAfterHlsRecovery();
+                }
+                return;
+            }
+
+            console.error('[WatchPage] HLS fatal error:', data.type, data.details);
+
+            // Buffer starvation (encoder/provider slower than playback) is NOT a
+            // terminal error: show the buffering spinner and keep recovering,
+            // exactly like streaming platforms do. Only give up after 45s with
+            // zero playback progress.
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR && SOFT_MEDIA_DETAILS.includes(data.details)) {
+                const pos = this.video?.currentTime || 0;
+                if (pos !== this._stallPos) {
+                    this._stallPos = pos;
+                    this._stallSince = Date.now();
+                }
+                if (Date.now() - this._stallSince < 45000) {
+                    this.showLoading();
+                    if (isGatewaySession && gatewayRecoveryRunning) return;
+                    // THROTTLED: a starving realtime transcode emits fatal stalls every few
+                    // seconds, and each recoverMediaError() is a full media detach/attach —
+                    // the browser drops text-track rendering during the swap, so back-to-back
+                    // recoveries made the CURRENT SUBTITLE LINE strobe unreadably (04/07).
+                    // One recovery per 8 s is just as effective at unsticking the buffer;
+                    // between attempts the spinner shows and hls.js's own nudges keep working.
+                    const sinceRecover = Date.now() - (this._lastSoftRecoverTs || 0);
+                    if (sinceRecover >= 8000) {
+                        this._lastSoftRecoverTs = Date.now();
+                        try {
+                            this.hls.recoverMediaError();
+                            // recoverMediaError re-attaches the media element and
+                            // leaves it paused — resume playback explicitly
+                            resumeAfterHlsRecovery(true);
+                        } catch (e) { /* destroyed */ }
+                    }
+                    return;
+                }
+                // 45s without progress: fall through to terminal handling
+            }
+
+            // Fatal MEDIA_ERROR (bufferAppendError, decode errors...) is
+            // recoverable: try a bounded number of recoveries before giving up.
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                this._mediaRecoveries = (this._mediaRecoveries || 0) + 1;
+                const maxMediaRecoveries = isGatewaySession ? 8 : 3;
+                if (this._mediaRecoveries <= maxMediaRecoveries) {
+                    console.warn(`[WatchPage] Recovering media error (attempt ${this._mediaRecoveries}/${maxMediaRecoveries})`);
+                    if (this._mediaRecoveries === 2) this.hls.swapAudioCodec();
+                    this.hls.recoverMediaError();
+                    resumeAfterHlsRecovery(true);
+                    return;
+                }
+            } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                const privateCacheNetworkFailures = (this._networkRecoveries || 0) + 1;
+                const privateCacheDeliveryFailure = options.privateMediaCache === true
+                    && ![401, 403].includes(responseStatus)
+                    && (
+                        responseStatus >= 400
+                        || (responseStatus === 0 && privateCacheNetworkFailures >= 2)
+                    );
+                if (privateCacheDeliveryFailure) {
+                    void this.fallbackPrivateMediaCacheToProvider(
+                        playbackAttemptId,
+                        `delivery-${responseStatus || 'network'}`
+                    ).catch(error => {
+                        console.warn('[WatchPage] Private media cache fallback failed:', error?.message || error);
+                        if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                            this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_22156a3168f0", { defaultValue: "Cached playback became unavailable." }) ?? 'Cached playback became unavailable.'))
+                                .catch(() => {});
+                        }
+                    });
+                    return;
+                }
+                if (isGatewaySession && this.isGatewaySessionGoneError(data)) {
+                    const message = this.gatewaySessionGoneMessage(data);
+                    console.warn('[WatchPage] Gateway session disappeared; refreshing playback session.');
+                    try {
+                        this.hls?.destroy();
+                    } catch (_) { /* destroyed */ }
+                    this.hls = null;
+                    this.sendPlaybackEvent('gateway_error', {
+                        errorCode: data.details || data.type || 'gateway_session_gone',
+                        errorMessage: message
+                    });
+                    this.handlePlaybackFailure(message)
+                        .catch(error => console.warn('[WatchPage] Gateway session refresh failed:', error?.message || error));
+                    return;
+                }
+                // Try proxy on CORS error (only if not already proxied/transcoded)
+                if (this.canUseLocalProxy(this.currentUrl)) {
+                    console.log('[WatchPage] Retrying via proxy...');
+                    this.playHls(this.getProxiedUrl(this.currentUrl), { ...options, playbackAttemptId });
+                    return;
+                }
+                // Local transcode session: playlist/segments can lag behind the
+                // encoder — restart loading instead of failing
+                this._networkRecoveries = (this._networkRecoveries || 0) + 1;
+                const maxNetworkRecoveries = (isTranscodeSession || isGatewaySession) ? 20 : 3;
+                const retryDelay = isGatewaySession ? Math.min(5000, 1000 + (this._networkRecoveries * 500)) : 1000;
+                if (this._networkRecoveries <= maxNetworkRecoveries) {
+                    console.warn(`[WatchPage] Restarting HLS load (attempt ${this._networkRecoveries}/${maxNetworkRecoveries})`);
+                    this.showLoading();
+                    setTimeout(() => {
+                        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                        try { this.hls?.startLoad(); } catch (e) { /* destroyed */ }
+                    }, retryDelay);
+                    return;
+                }
+            }
+
+            const retriedGatewaySeek = this.retryGatewaySeekAfterFatalPlayback(
+                data.reason || data.details || data.type || 'HLS playback failed.',
+                playbackAttemptId
+            );
+            if (retriedGatewaySeek) return;
+
+            // Recovery exhausted: last resort, try another version of the title
+            this.hls.destroy();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.sendPlaybackEvent(isGatewaySession ? 'gateway_error' : 'playback_error', {
+                errorCode: data.details || data.type || 'hls_fatal',
+                errorMessage: data.reason || data.details || 'HLS playback failed.'
+            });
+            this.handlePlaybackFailure(data.details || data.reason || 'Playback failed.')
+                .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
+        });
+    }
+
+    playHlsOrDirect(url, options = {}) {
+        const { autoplay = true } = options;
+
+        // Session creation failed terminally (upstream 401/404...): try another
+        // version of the title or surface a clear error instead of spinning
+        if (!url) {
+            if (this.isStalePlaybackAttempt(options.playbackAttemptId)) return;
+            this.handlePlaybackFailure(this._lastFailureMsg || 'Playback failed')
+                .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
+            return;
+        }
+
+        if (url.startsWith('/api/transcode?')) {
+            this.video.src = url;
+            if (autoplay) {
+                this.video.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_f69eb5121660", { defaultValue: "Direct transcode play error" }) ?? 'Direct transcode play error')));
+            }
+            return;
+        }
+
+        this.playHls(url, options);
+    }
+
+    setVolumeFromStorage() {
+        const savedVolume = localStorage.getItem('norva-volume') || '80';
+        this.video.volume = parseInt(savedVolume) / 100;
+        if (this.volumeSlider) this.volumeSlider.value = savedVolume;
+    }
+
+    stop({ enqueueStoryboard = true, preservePlaybackResolutionAttempt = false } = {}) {
+        this.clearPlaybackErrorRefreshTimer();
+        if (!preservePlaybackResolutionAttempt) this.hideLoading({ restoreFocus: false });
+        if (!preservePlaybackResolutionAttempt) this.abortPlaybackResolution();
+        if (enqueueStoryboard) {
+            this._subtitleSwitchRequestId += 1;
+            this._subtitleSwitchPromise = null;
+            this.resetSubtitleSwitchFeedback();
+        }
+        if (this._stopPromise) return this._stopPromise;
+
+        this._gatewayAutomaticRebuffering = false;
+        this.cancelPendingHlsAudioSwitch(false);
+        this.cancelFirstFrameTelemetryObserver();
+        this.cancelDeferredEngineTrackEnrichment();
+        this.clearPrivateMediaCacheAccess();
+        // requestVideoFrameCallback is best-effort telemetry: a browser may lose
+        // that callback even though decoded media is visibly progressing. Preserve
+        // the stricter first-frame gate for storyboard work, but do not lose the
+        // watched-file Whisper intent when the media element itself proves a real
+        // frame and non-zero playback progress.
+        const watchedMediaObserved = Boolean(
+            enqueueStoryboard
+            && this.video
+            && !this.video.error
+            && Number(this.video.readyState) >= 2
+            && Number(this.video.videoWidth) > 0
+            && Number(this.video.videoHeight) > 0
+            && Number.isFinite(Number(this.video.currentTime))
+            && Number(this.video.currentTime) > 0
+            && Boolean(this.video.currentSrc || this.video.src)
+        );
+        if (watchedMediaObserved && !this._watchedLanguageValidationIntent) {
+            this.rememberWatchedLanguageValidationIntent(this._playbackAttemptId);
+        }
+        const languageValidationIntent = enqueueStoryboard
+            ? this._watchedLanguageValidationIntent
+            : null;
+        if (enqueueStoryboard) this._watchedLanguageValidationIntent = null;
+        // Only a genuine exit after a rendered frame may warm the storyboard cache.
+        // Internal loadVideo() teardowns and abandoned starts must never open provider
+        // work ahead of the incoming media's first request/frame.
+        if (enqueueStoryboard && this._firstFrameReported) {
+            this.enqueueStoryboardForCache();
+        }
+        this.destroyEngine();
+        this._gatewaySeekRequestId += 1;
+        clearTimeout(this._seekDebounceTimer);
+        this._seekDebounceTimer = null;
+        this._pendingSeekTarget = null;
+        clearTimeout(this._pendingLocalSeekTimer);
+        this._pendingLocalSeekTimer = null;
+        this._pendingLocalSeekTarget = null;
+        this._pendingLocalSeekAttempts = 0;
+        this._gatewaySeekRetry = null;
+
+        // Stop subtitle cue polling/window timers
+        this.stopSubtitleEngine();
+
+        // Stop history tracking and save final progress
+        this.stopHistoryTracking();
+        if (!this._suspendResumeSnapshotSave && this._historyPersistenceActive) {
+            this.persistPlaybackStateForExit();
+            this.deactivateHistoryPersistence();
+            this.reportAbandonedPlayback();
+        }
+
+        this.updateTranscodeStatus('hidden');
+
+        // Hide quality badge
+        this.currentStreamInfo = null;
+        if (this.qualityBadgeEl) {
+            this.qualityBadgeEl.classList.add('hidden');
+        }
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+        this.clearExternalSubtitleTracks();
+        if (this.video) {
+            this.video.pause();
+            this.video.src = '';
+            this.video.load();
+        }
+        // Teardown sessions after destroying HLS so stale playlists are not
+        // requested while the old Gateway session is being expired.
+        const sessionTeardown = Promise.allSettled([
+            this.stopTranscodeSession(),
+            this.stopCloudPlaybackSessions()
+        ]);
+        this.baseStreamUrl = null;
+        this.currentPlaybackMode = null;
+        this.currentProcessingOptions = {};
+        this.probeDuration = null;
+        this.streamStartOffset = 0;
+        this.gatewaySourceTimestamps = false;
+        this._videoEncodeFallbackTried = false;
+        this.subtitleSourceUrl = null;
+        this.subtitleStartOffset = 0;
+        this.selectedSubtitleStreamIndex = null;
+        this.selectedSubtitleTrackUserChoice = false;
+        this.updateDurationState();
+
+        // Resolves once the previous transcode session has fully torn down.
+        const p = sessionTeardown.finally(() => {
+            if (this._stopPromise === p) this._stopPromise = null;
+        });
+        if (languageValidationIntent) {
+            // Start strict Whisper validation only after the playback transports
+            // have released the provider's single-connection lane. The request is
+            // intentionally detached from navigation and can never delay a new play.
+            sessionTeardown.then(() => this.queueWatchedLanguageValidation(languageValidationIntent))
+                .catch(() => { /* best effort; server-side cache remains authoritative */ });
+        }
+        this._stopPromise = p;
+        return this._stopPromise;
+    }
+
+    // === Playback Controls ===
+
+    handleAutoplayError(error, label = (globalThis.NorvaI18n?.t("ui_web_a227de1949a4", { defaultValue: "Autoplay error" }) ?? 'Autoplay error')) {
+        if (error?.name === 'AbortError') return;
+        if (error?.name === 'NotAllowedError') {
+            // A long Gateway preparation can outlive the browser's transient user
+            // activation. This is an expected interaction state, not a playback
+            // failure: keep the prepared session and offer one explicit Play tap.
+            console.info(`[WatchPage] ${label}: user interaction is required.`);
+            this.hidePlaybackError();
+            this.hideLoading();
+            this.centerPlayBtn?.classList.add('show');
+            this.showOverlay();
+            clearTimeout(this.overlayTimeout);
+            return;
+        }
+        console.error(`[WatchPage] ${label}:`, error);
+    }
+
+    togglePlay() {
+        if (this._loadingPresentationActive) return;
+        if (this.video.paused) {
+            // Nothing loaded yet (e.g. mid media-switch, before the engine attaches its
+            // MediaSource) → play() would reject with NotSupportedError. No-op instead.
+            if (!this.video.src && !this.video.currentSrc) return;
+            this._gatewayUserPaused = false;
+            if (this._gatewayAutomaticRebuffering) {
+                // The viewer explicitly chooses immediate playback over the
+                // automatic reserve refill. The pending gate observes this flag
+                // and cannot issue a later duplicate play.
+                this._gatewayAutomaticRebuffering = false;
+                this.hideLoading();
+            }
+            this.video.play().catch((e) => {
+                // These are benign here: NotSupportedError = source not ready/torn down,
+                // AbortError = a newer load() superseded this play. Don't spam the console.
+                if (e && (e.name === 'NotSupportedError' || e.name === 'AbortError')) return;
+                console.error(e);
+            });
+        } else {
+            this._gatewayUserPaused = true;
+            this.video.pause();
+        }
+    }
+
+    skip(seconds) {
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+
+        const base = Number.isFinite(this._pendingSeekTarget)
+            ? this._pendingSeekTarget
+            : this.getPlaybackPosition();
+        Promise.resolve(this.seekToTime(base + seconds, { immediate: true }))
+            .catch(error => {
+                console.error('[WatchPage] Skip seek failed:', error);
+                this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_9ea4cf2324b8", { defaultValue: "Failed to seek in this title." }) ?? 'Failed to seek in this title.')).catch(() => { });
+            });
+    }
+
+    commitSeek(percent) {
+        this._timelineScrubbing = false;
+        const value = Math.max(0, Math.min(100, parseFloat(percent)));
+        if (!Number.isFinite(value)) return;
+
+        const now = Date.now();
+        if (this._lastCommittedSeekPercent !== null
+            && Math.abs(this._lastCommittedSeekPercent - value) < 0.05
+            && now - this._lastCommittedSeekAt < 450) {
+            return;
+        }
+
+        this._lastCommittedSeekPercent = value;
+        this._lastCommittedSeekAt = now;
+        this.seek(value);
+    }
+
+    seek(percent) {
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+
+        const nextPercent = Math.max(0, Math.min(100, parseFloat(percent)));
+        if (!Number.isFinite(nextPercent)) return;
+
+        const target = (nextPercent / 100) * duration;
+        this.recordIntroSeekSignal(target);
+        this.setProgressValue(nextPercent);
+        this._pendingSeekTarget = target;
+        this.trackPlaybackPosition({ position: target, force: true });
+        this.saveResumeSnapshotThrottled(true);
+        const debounceGatewaySeek = this.currentPlaybackMode === 'gateway-session'
+            && this.canRestartForSeek(target);
+        Promise.resolve(this.seekToTime(target, { immediate: !debounceGatewaySeek }))
+            .catch(error => {
+                console.error('[WatchPage] Seek failed:', error);
+                this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_9ea4cf2324b8", { defaultValue: "Failed to seek in this title." }) ?? 'Failed to seek in this title.')).catch(() => { });
+            })
+            .finally(() => {
+                if (!debounceGatewaySeek && !this._timelineScrubbing && this._pendingSeekTarget === target) {
+                    this._pendingSeekTarget = null;
+                }
+            });
+    }
+
+    previewSeek(percent) {
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+
+        const nextPercent = Math.max(0, Math.min(100, parseFloat(percent)));
+        if (!Number.isFinite(nextPercent)) return;
+
+        const target = (nextPercent / 100) * duration;
+        this._pendingSeekTarget = target;
+        this.setProgressValue(nextPercent);
+        if (this.timeCurrent) {
+            this.timeCurrent.textContent = this.formatTime(target);
+        }
+        // Warm the byte cache at the scrub target so the seek on release is instant.
+        this._scheduleEnginePrefetch(target);
+    }
+
+    // Debounced: while scrubbing, ask the browser engine to prefetch the bytes for
+    // the hovered position. Only the browser-engine path supports this; no-op else.
+    _scheduleEnginePrefetch(target) {
+        if (this.currentPlaybackMode !== 'engine' || !this.norvaEngine || typeof this.norvaEngine.prefetchAt !== 'function') return;
+        clearTimeout(this._enginePrefetchTimer);
+        this._enginePrefetchTimer = setTimeout(() => {
+            try { this.norvaEngine?.prefetchAt(target); } catch (_) {}
+        }, 180);
+    }
+
+    scheduleProcessedSeek(target, duration, delay = 900) {
+        this._pendingSeekTarget = target;
+        this.setProgressValue((target / duration) * 100);
+        this.trackPlaybackPosition({ position: target, force: true });
+        this.saveResumeSnapshotThrottled(true);
+        if (this.timeCurrent) {
+            this.timeCurrent.textContent = this.formatTime(target);
+        }
+        this.updateDurationState();
+
+        clearTimeout(this._seekDebounceTimer);
+        if (this.currentPlaybackMode === 'gateway-session') {
+            this._gatewaySeekRequestId += 1;
+            this._gatewaySeekRetry = null;
+        }
+        this._seekDebounceTimer = setTimeout(() => {
+            const nextTarget = this._pendingSeekTarget;
+            this._seekDebounceTimer = null;
+            Promise.resolve(this.seekToTime(nextTarget, { immediate: true }))
+                .catch(error => {
+                    console.error('[WatchPage] Scheduled seek failed:', error);
+                    this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_9ea4cf2324b8", { defaultValue: "Failed to seek in this title." }) ?? 'Failed to seek in this title.')).catch(() => { });
+                })
+                .finally(() => {
+                    if (!this._timelineScrubbing && this._pendingSeekTarget === nextTarget) {
+                        this._pendingSeekTarget = null;
+                    }
+                });
+        }, delay);
+    }
+
+    async seekToTime(targetTime, options = {}) {
+        if (!this.video) return;
+
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+
+        const target = Math.max(0, Math.min(targetTime, duration));
+        const nativeDuration = this.getValidDuration();
+
+        if (this.canRestartForSeek(target) && !options.immediate) {
+            this.scheduleProcessedSeek(target, duration);
+            return;
+        }
+
+        if (this.canRestartForSeek(target)) {
+            await this.restartProcessedStreamAt(target);
+            return;
+        }
+
+        if (nativeDuration) {
+            const localTarget = Math.max(0, target - this.streamStartOffset);
+            this.video.currentTime = Math.min(localTarget, nativeDuration);
+            this.updateDurationState();
+            return;
+        }
+    }
+
+    queuePendingLocalSeek(localTarget) {
+        const target = Number(localTarget);
+        if (!Number.isFinite(target) || target <= 0.25) {
+            this._pendingLocalSeekTarget = null;
+            this._pendingLocalSeekAttempts = 0;
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = null;
+            return;
+        }
+
+        this._pendingLocalSeekTarget = target;
+        this._pendingLocalSeekAttempts = 0;
+        clearTimeout(this._pendingLocalSeekTimer);
+        this._pendingLocalSeekTimer = setTimeout(() => this.applyPendingLocalSeek(), 350);
+    }
+
+    applyPendingLocalSeek() {
+        if (!this.video || !Number.isFinite(this._pendingLocalSeekTarget)) return false;
+
+        const target = Math.max(0, this._pendingLocalSeekTarget);
+        const duration = this.getValidDuration();
+        const seekable = this.video.seekable;
+        const hasSeekableRange = seekable && seekable.length > 0;
+        const requiresSeekableRange = this.currentPlaybackMode === 'gateway-session';
+        let isAvailable = false;
+
+        if (!requiresSeekableRange && duration && target <= duration + 0.75) {
+            isAvailable = true;
+        } else if (hasSeekableRange) {
+            for (let i = 0; i < seekable.length; i += 1) {
+                if (target >= seekable.start(i) - 0.5 && target <= seekable.end(i) + 0.75) {
+                    isAvailable = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isAvailable && this._pendingLocalSeekAttempts < 40) {
+            this._pendingLocalSeekAttempts += 1;
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = setTimeout(() => this.applyPendingLocalSeek(), 500);
+            return false;
+        }
+
+        try {
+            this.video.currentTime = target;
+            this._pendingLocalSeekTarget = null;
+            this._pendingLocalSeekAttempts = 0;
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = null;
+            this.updateDurationState();
+            return true;
+        } catch (error) {
+            console.warn('[WatchPage] Deferred local seek failed:', error?.message || error);
+            return false;
+        }
+    }
+
+    async restartProcessedStreamAt(targetTime) {
+        if (this.currentPlaybackMode === 'gateway-session') {
+            await this.restartCloudGatewayStreamAt(targetTime);
+            return;
+        }
+
+        const sourceUrl = this.baseStreamUrl || this.currentUrl;
+        if (!sourceUrl) return;
+
+        const mode = this.currentPlaybackMode;
+        const autoplay = !this.video?.paused;
+        this.showLoading();
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+
+        await this.stopTranscodeSession();
+
+        this.streamStartOffset = targetTime;
+        this.trackPlaybackPosition({ position: targetTime, force: true });
+        this.saveResumeSnapshotThrottled(true);
+        this.updateDurationState();
+
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        this.attachProbeSubtitles(sourceUrl, this.subtitleTracks, targetTime);
+
+        if (mode === 'remux') {
+            this.video.src = this.getRemuxUrl(sourceUrl, targetTime);
+            if (autoplay) {
+                this.video.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_a65c50da0b42", { defaultValue: "Remux seek play error" }) ?? 'Remux seek play error')));
+            }
+        } else if (mode === 'transcode') {
+            const processingOptions = this.getFreshProcessingOptions();
+            this.currentProcessingOptions = processingOptions;
+            this.video.src = this.getTranscodeUrl(sourceUrl, targetTime, processingOptions);
+            if (autoplay) {
+                this.video.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_f76e193e7544", { defaultValue: "Transcode seek play error" }) ?? 'Transcode seek play error')));
+            }
+        } else if (mode === 'transcode-session') {
+            const processingOptions = this.getFreshProcessingOptions({ seekOffset: targetTime });
+            this.currentProcessingOptions = processingOptions;
+            const playlistUrl = await this.startTranscodeSession(sourceUrl, processingOptions);
+            this.playHlsOrDirect(playlistUrl, { autoplay });
+        }
+
+        this.setVolumeFromStorage();
+    }
+
+    getGatewaySeekPreRoll(target, requestedPreRoll = 0) {
+        const safeTarget = Math.max(0, Math.floor(Number(target) || 0));
+        if (safeTarget <= 5) return 0;
+        const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
+        // The gateway now emits clean frames at the exact requested offset
+        // (accurate two-stage seek), so the default pre-roll is 0: no seek-ahead
+        // that stalls the player while the transcoder grinds up to the target
+        // (the old 90s pre-roll was the main cause of the slow/"buffering"
+        // Resume). A non-zero value is only passed as a fallback when a provider
+        // range-seek failure is actually detected.
+        return Math.min(safeTarget, requested);
+    }
+
+    getGatewaySeekPlan(targetTime, requestedPreRoll = 0) {
+        const target = Math.max(0, Math.floor(Number(targetTime) || 0));
+        const preRoll = this.getGatewaySeekPreRoll(target, requestedPreRoll);
+        const sessionStart = Math.max(0, target - preRoll);
+        return {
+            target,
+            preRoll,
+            sessionStart,
+            localSeekTarget: Math.max(0, target - sessionStart)
+        };
+    }
+
+    async restartCloudGatewayStreamAt(targetTime, options = {}) {
+        // Freeze the exact episode/movie identity before releasing the old lane.
+        // Teardown and provider cooldown both yield, so reading mutable page state
+        // afterwards can otherwise resolve a different title or classify a
+        // Continue Watching episode as a movie.
+        const playbackIdentity = options.playbackIdentity || this.captureVodPlaybackIdentity();
+        if (!playbackIdentity) return;
+
+        const requestId = Number.isInteger(options.requestId)
+            ? options.requestId
+            : ++this._gatewaySeekRequestId;
+        const playbackAttemptId = this._playbackAttemptId;
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
+        const subtitleSwitchRequestId = Number.isInteger(options.subtitleSwitchRequestId)
+            ? options.subtitleSwitchRequestId
+            : null;
+        const isObsoleteRequest = () => requestId !== this._gatewaySeekRequestId
+            || this.isStalePlaybackAttempt(playbackAttemptId)
+            || playbackResolveSignal?.aborted
+            || (subtitleSwitchRequestId !== null
+                && this.isStaleSubtitleSwitch(subtitleSwitchRequestId));
+        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
+        const { target, preRoll, sessionStart } = seekPlan;
+        const autoplay = !this.video?.paused;
+        const { itemType, container } = playbackIdentity;
+        const requestedPlaybackPreferences = this.normalizePlaybackPreferences(
+            options.playbackPreferences ?? options.playback_preferences
+        );
+        const playbackPreferences = this.savePlaybackPreferences(
+            requestedPlaybackPreferences || this.getMergedPlaybackPreferences()
+        );
+        const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
+
+        this.showLoading();
+        this.hidePlaybackError();
+        this.streamStartOffset = sessionStart;
+        this.trackPlaybackPosition({ position: target, force: true });
+        this.saveResumeSnapshotThrottled(true);
+        this.updateDurationState();
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+
+        await this.releasePlaybackPipelineForRetry();
+        await this.waitForProviderSlotRelease(900);
+        if (isObsoleteRequest()) return;
+
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        let playbackHint = {
+            ...(MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(playbackIdentity.playbackItem, { container, streamType: itemType })
+                : { container, streamType: itemType }),
+            ...activeAudioOptions,
+            seekOffset: sessionStart,
+            startOffset: sessionStart,
+            resumeTime: sessionStart,
+            ...(options.mediaCacheReadPolicy === 'bypass-once'
+                ? { mediaCacheReadPolicy: 'bypass-once' }
+                : {})
+        };
+        playbackHint = typeof this.applyPlaybackPreferencesToHint === 'function'
+            ? this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences)
+            : playbackHint;
+
+        let result = null;
+        try {
+            result = await API.proxy.xtream.getStreamUrl(
+                playbackIdentity.sourceId,
+                playbackIdentity.itemId,
+                itemType,
+                container,
+                playbackHint,
+                { signal: playbackResolveSignal }
+            );
+        } catch (error) {
+            if (isObsoleteRequest() || error?.name === 'AbortError') return;
+            console.error('[WatchPage] Gateway seek session failed:', error);
+            if (!options.retryLevel && this.isRangeSeekFailure(error?.message || error?.details || '')) {
+                await this.restartCloudGatewayStreamAt(target, {
+                    preRollSeconds: 75,
+                    retryLevel: 1,
+                    requestId,
+                    subtitleSwitchRequestId,
+                    playbackPreferences,
+                    ...(options.mediaCacheReadPolicy === 'bypass-once'
+                        ? { mediaCacheReadPolicy: 'bypass-once' }
+                        : {}),
+                    playbackIdentity,
+                });
+                return;
+            }
+            if (isObsoleteRequest()) return;
+            await this.handlePlaybackFailure(error?.message || 'Failed to start seek session.');
+            return;
+        }
+
+        if (isObsoleteRequest()) {
+            await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+            return;
+        }
+
+        if (!result?.url) {
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_d6e24678d45a", { defaultValue: "Failed to start seek session." }) ?? 'Failed to start seek session.'));
+            return;
+        }
+
+        const resultMetadata = this.playbackMetadataFromResult(result);
+        const measuredSeek = this.getMeasuredGatewaySeekPlan(resultMetadata, target, sessionStart);
+        this.content.cloudPlaybackSessionId = result.sessionId || null;
+        this.resumeTime = target;
+        await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
+            seekOffset: measuredSeek.actualStartOffset,
+            startOffset: measuredSeek.actualStartOffset,
+            actualStartOffset: measuredSeek.actualStartOffset,
+            requestedSeekOffset: target,
+            localSeekTarget: measuredSeek.localSeekTarget,
+            sourceTimestamps: measuredSeek.sourceTimestamps,
+            playbackAttemptId: this._playbackAttemptId,
+            cloudPlaybackSessionId: result.sessionId || null,
+            autoplay,
+            playbackPreferences,
+            ...activeAudioOptions,
+        }));
+        this._gatewaySeekRetry = {
+            target,
+            preRoll,
+            retryLevel: Number(options.retryLevel) || 0,
+            playbackAttemptId: this._playbackAttemptId,
+            requestId
+        };
+        if (!autoplay) {
+            this.video?.pause?.();
+        }
+
+        if (this._pendingSeekTarget === target) {
+            this._pendingSeekTarget = null;
+        }
+    }
+
+    retryGatewaySeekAfterFatalPlayback(reason = '', playbackAttemptId = this._playbackAttemptId) {
+        const retry = this._gatewaySeekRetry;
+        if (!retry || retry.retryLevel >= 1) return false;
+        if (this.currentPlaybackMode !== 'gateway-session') return false;
+        if (Number.isInteger(playbackAttemptId) && this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (!this.isRangeSeekFailure(reason) && !this.isFormatPlaybackError(reason)) return false;
+
+        const target = Math.max(0, Math.floor(Number(retry.target) || this.getResumeSnapshotPosition() || 0));
+        if (!target) return false;
+
+        console.warn('[WatchPage] Gateway seek playback failed, retrying with wider pre-roll:', reason);
+        this.restartCloudGatewayStreamAt(target, {
+            preRollSeconds: Math.max(75, (Number(retry.preRoll) || 20) * 3),
+            retryLevel: retry.retryLevel + 1
+        }).catch(error => {
+            console.error('[WatchPage] Gateway seek retry failed:', error);
+            this.handlePlaybackFailure(error?.message || 'Failed to seek in this title.').catch(() => { });
+        });
+        return true;
+    }
+
+    toggleMute() {
+        if (this.video) {
+            this.video.muted = !this.video.muted;
+            this.updateVolumeUI();
+        }
+    }
+
+    setVolume(value) {
+        if (this.video) {
+            this.video.volume = value / 100;
+            this.video.muted = false;
+            localStorage.setItem('norva-volume', value);
+            this.updateVolumeUI();
+        }
+    }
+
+    toggleFullscreen() {
+        const container = document.querySelector('.watch-video-section');
+        const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
+
+        if (isFullscreen) {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+        } else {
+            if (container?.requestFullscreen) {
+                container.requestFullscreen();
+            } else if (container?.webkitRequestFullscreen) {
+                container.webkitRequestFullscreen();
+            } else if (this.video?.webkitEnterFullscreen) {
+                // iOS Safari: use native video fullscreen
+                this.video.webkitEnterFullscreen();
+            }
+        }
+    }
+
+    async togglePictureInPicture() {
+        try {
+            // Standard PiP API (Chrome, Edge, Firefox)
+            if (document.pictureInPictureElement) {
+                await document.exitPictureInPicture();
+            } else if (document.pictureInPictureEnabled && this.video.readyState >= 2) {
+                await this.video.requestPictureInPicture();
+            }
+            // Safari fallback using webkitPresentationMode
+            else if (typeof this.video.webkitSetPresentationMode === 'function') {
+                const mode = this.video.webkitPresentationMode;
+                this.video.webkitSetPresentationMode(mode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+            }
+        } catch (err) {
+            if (err.name !== 'NotAllowedError') {
+                console.error('Picture-in-Picture error:', err);
+            }
+        }
+    }
+
+    /**
+     * Copy current stream URL to clipboard
+     */
+    copyStreamUrl() {
+        if (!this.currentUrl) {
+            console.warn('[WatchPage] No stream URL to copy');
+            return;
+        }
+
+        let streamUrl = this.currentUrl;
+
+        // If it's a relative URL, make it absolute
+        if (streamUrl.startsWith('/')) {
+            streamUrl = window.location.origin + streamUrl;
+        }
+
+        const showPromptFallback = () => {
+            prompt((globalThis.NorvaI18n?.t("ui_web_1b0b51b2013f", { defaultValue: "Copy this URL:" }) ?? 'Copy this URL:'), streamUrl);
+        };
+
+        // navigator.clipboard is only available in secure contexts (HTTPS/localhost)
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(streamUrl).then(() => {
+                // Show brief feedback
+                const btn = document.getElementById('watch-copy-url');
+                if (btn) {
+                    btn.textContent = (globalThis.NorvaI18n?.t("ui_web_4e45a91772b8", { defaultValue: "✓ Copied!" }) ?? '✓ Copied!');
+                    setTimeout(() => {
+                        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><norva-i18n data-i18n="ui_web_60f1b404dc5b"> Copy Stream URL</norva-i18n>`;
+                    }, 1500);
+                }
+                console.log('[WatchPage] Stream URL copied:', this.describePlaybackUrl(streamUrl));
+            }).catch(() => {
+                showPromptFallback();
+            });
+        } else {
+            // Fallback for insecure contexts (HTTP)
+            showPromptFallback();
+        }
+    }
+
+    // === UI Updates ===
+
+    getValidDuration(video = this.video) {
+        const duration = video?.duration;
+        return Number.isFinite(duration) && duration > 0 ? duration : null;
+    }
+
+    getProbeDuration() {
+        return this.normalizeDuration(this.probeDuration) || this.normalizeDuration(this.durationHint);
+    }
+
+    isVodContent() {
+        const type = this.contentType || this.content?.type || '';
+        return type === 'movie' || type === 'series';
+    }
+
+    getDisplayDuration() {
+        const probeDuration = this.getProbeDuration();
+        const hintedDuration = this.normalizeDuration(this.durationHint);
+
+        if (this.isVodContent() && probeDuration) {
+            return probeDuration;
+        }
+
+        if (this.streamStartOffset > 0 && hintedDuration && (this.contentType === 'movie' || this.contentType === 'series')) {
+            return hintedDuration;
+        }
+
+        if (probeDuration && ['remux', 'transcode', 'transcode-session'].includes(this.currentPlaybackMode)) {
+            return probeDuration;
+        }
+
+        if (this.isVodContent() && this.currentPlaybackMode === 'direct-hls' && !probeDuration) {
+            // A completed upstream VOD manifest declares the full film duration.
+            // Growing live/Gateway windows still cannot stand in for that total.
+            const level = this.hls?.currentLevel;
+            const details = this.hls?.levels?.[Number.isInteger(level) && level >= 0 ? level : 0]?.details;
+            return details?.live === false ? this.normalizeDuration(details.totalduration) : null;
+        }
+
+        if (this.isVodContent() && this.currentPlaybackMode === 'gateway-session' && !probeDuration) {
+            return null;
+        }
+
+        return this.getValidDuration() || probeDuration;
+    }
+
+    getStablePlaybackDuration() {
+        // Exact-file ffprobe metadata is authoritative across player-lane
+        // changes. `video.duration` is not: aborting a short MSE buffer can turn
+        // it into the buffered end and would corrupt cloud history on recovery.
+        const codecDuration = this.durationFromCodecProfile?.(this._diagCodecProfile);
+        if (codecDuration) return codecDuration;
+
+        const probeDuration = this.normalizeDuration(this.probeDuration);
+        if (probeDuration) return probeDuration;
+
+        const hintedDuration = this.normalizeDuration(this.durationHint);
+        if (hintedDuration) return hintedDuration;
+
+        const rememberedDuration = this.normalizeDuration(this._lastKnownPlaybackDuration);
+        const displayDuration = this.normalizeDuration(this.getDisplayDuration?.());
+        if (this.isVodContent()) {
+            return Math.max(rememberedDuration || 0, displayDuration || 0) || null;
+        }
+        return displayDuration || rememberedDuration || null;
+    }
+
+    isPrematurePlaybackEnd() {
+        if (!this.isVodContent()) return false;
+
+        // A live engine object only declares a natural EOF by setting ended=true
+        // in _pump(). Teardown/recovery deliberately leaves it false (or removes
+        // the object entirely), so an `ended` DOM event from that lane is synthetic.
+        if (this.currentPlaybackMode === 'engine' && this.norvaEngine?.ended !== true) {
+            return true;
+        }
+
+        const duration = this.getStablePlaybackDuration();
+        if (!duration) return false;
+        const position = Math.max(
+            Number(this._lastKnownPlaybackPosition) || 0,
+            Number(this.getPlaybackPosition?.()) || 0
+        );
+        // Native clocks can finish a fraction before the advertised duration.
+        // Permit a small tail, but never confuse a short recovery buffer with EOF.
+        const tolerance = Math.min(60, Math.max(10, duration * 0.02));
+        return position + tolerance < duration;
+    }
+
+    getCurrentTime() {
+        const currentTime = this.video?.currentTime;
+        return Number.isFinite(currentTime) && currentTime > 0 ? currentTime : 0;
+    }
+
+    getPlaybackPosition() {
+        const displayDuration = this.getDisplayDuration();
+        const position = this.streamStartOffset + this.getCurrentTime();
+        return displayDuration ? Math.min(position, displayDuration) : position;
+    }
+
+    isLocalSeekTargetAvailable(target) {
+        if (!this.video || !Number.isFinite(target)) return false;
+
+        const localTarget = target - (this.streamStartOffset || 0);
+        if (localTarget < -0.5) return false;
+
+        // An ended Gateway HLS session may still advertise the full EVENT
+        // playlist as seekable even though its MediaSource only retains the
+        // final buffered window. Treat it as stale so a seek creates a fresh
+        // Gateway session instead of getting stuck at readyState=1.
+        if (this.currentPlaybackMode === 'gateway-session' && (this.video.ended || this._playbackEnded)) {
+            return false;
+        }
+
+        const nativeDuration = this.getValidDuration();
+        if (nativeDuration && localTarget > nativeDuration + 0.75) return false;
+
+        const seekable = this.video.seekable;
+        if (!seekable || seekable.length === 0) {
+            if (this.currentPlaybackMode === 'gateway-session') return false;
+            return Boolean(nativeDuration && localTarget >= 0 && localTarget <= nativeDuration);
+        }
+
+        for (let i = 0; i < seekable.length; i++) {
+            if (localTarget >= seekable.start(i) - 0.5 && localTarget <= seekable.end(i) + 0.5) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    canRestartForSeek(target = null) {
+        if (this.currentPlaybackMode === 'gateway-session') {
+            const canCloudSeek = Boolean(this.isVodContent() && this.content?.sourceId && this.content?.id && this.getDisplayDuration());
+            if (!canCloudSeek) return false;
+            if (!Number.isFinite(target)) return true;
+            return !this.isLocalSeekTargetAvailable(target);
+        }
+
+        return Boolean(
+            this.baseStreamUrl &&
+            this.getProbeDuration() &&
+            ['remux', 'transcode', 'transcode-session'].includes(this.currentPlaybackMode)
+        );
+    }
+
+    canSeekTimeline() {
+        return Boolean(this.getValidDuration() || this.canRestartForSeek());
+    }
+
+    setProgressValue(percent) {
+        if (!this.progressSlider) return;
+
+        const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+        this.progressSlider.value = value;
+        this.progressSlider.style.setProperty('--progress', `${value}%`);
+    }
+
+    setBufferedProgressValue(percent) {
+        if (!this.progressSlider) return;
+
+        const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+        this.progressSlider.style.setProperty('--buffered', `${value}%`);
+    }
+
+    updateBufferedTimeline(durationOverride = null) {
+        const reportedDuration = Number(durationOverride);
+        const duration = Number.isFinite(reportedDuration) && reportedDuration > 0
+            ? reportedDuration
+            : this.getDisplayDuration();
+        if (!duration) {
+            this.setBufferedProgressValue(0);
+            this._bufferStatusStamp = null;
+            if (this.bufferStatus) this.bufferStatus.textContent = '';
+            return 0;
+        }
+
+        const localPosition = this.getCurrentTime();
+        let contiguousEnd = localPosition;
+        try {
+            // TimeRanges is live and may mutate between getters. Read one
+            // snapshot defensively and use only the range containing the play
+            // head: a later disjoint range must not look fully available.
+            const ranges = this.video?.buffered;
+            const length = Number(ranges?.length) || 0;
+            for (let index = 0; index < length; index += 1) {
+                const start = Number(ranges.start(index));
+                const end = Number(ranges.end(index));
+                if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                if (
+                    start <= localPosition + 0.25 &&
+                    end >= localPosition - 0.25 &&
+                    end > contiguousEnd
+                ) contiguousEnd = end;
+            }
+        } catch (_) {
+            contiguousEnd = localPosition;
+        }
+
+        const watchedPosition = Math.max(0, Math.min(duration, this.getPlaybackPosition()));
+        const bufferedPosition = Math.max(
+            watchedPosition,
+            Math.min(duration, Math.max(0, Number(this.streamStartOffset || 0) + contiguousEnd)),
+        );
+        this.setBufferedProgressValue((bufferedPosition / duration) * 100);
+
+        // Keep the assistive announcement useful while a paused video fills,
+        // without speaking on every small append. The visual bar still updates
+        // on every progress/BUFFER_APPENDED event.
+        const complete = bufferedPosition >= duration - 0.25;
+        const statusBucket = complete ? 'complete' : Math.floor(bufferedPosition / 10) * 10;
+        const statusStamp = `${statusBucket}|${Math.floor(duration)}`;
+        if (statusStamp !== this._bufferStatusStamp) {
+            this._bufferStatusStamp = statusStamp;
+            if (this.bufferStatus) {
+                this.bufferStatus.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_23a88d7bc7d7", {defaultValue: "Loaded to {{p0}} of {{p1}}", p0:(this.formatTime(bufferedPosition)),p1:(this.formatTime(duration))}) : `Loaded to ${this.formatTime(bufferedPosition)} of ${this.formatTime(duration)}`);
+            }
+        }
+        return bufferedPosition;
+    }
+
+    setProgressState(hasDuration, isSeekable) {
+        this.progressContainer?.classList.toggle('duration-unknown', !hasDuration);
+        this.progressContainer?.classList.toggle('duration-readonly', hasDuration && !isSeekable);
+
+        if (this.progressSlider) {
+            this.progressSlider.disabled = !isSeekable;
+            this.progressSlider.tabIndex = isSeekable ? 0 : -1;
+            this.progressSlider.setAttribute('aria-disabled', String(!isSeekable));
+        }
+    }
+
+    updateDurationState() {
+        const duration = this.getDisplayDuration();
+        const currentTime = this.getPlaybackPosition();
+
+        // Repaint throttle: outside of scrubbing the slider + time labels render identically
+        // within one integer second (formatTime floors to whole seconds; the gradient step is
+        // sub-pixel per ~4/s timeupdate tick). Skip the redundant DOM writes — they otherwise
+        // re-composite over the playing <video> ~4x/s for no visible change. Scrubbing always
+        // re-renders (the preview position moves continuously) and re-arms the memo.
+        if (!this._timelineScrubbing) {
+            const stamp = `${Math.floor(Number(currentTime) || 0)}|${duration || 0}`;
+            if (stamp === this._durationStateStamp) return duration || null;
+            this._durationStateStamp = stamp;
+        } else {
+            this._durationStateStamp = null;
+        }
+
+        const previewPosition = this._timelineScrubbing && Number.isFinite(this._pendingSeekTarget)
+            ? Math.max(0, Math.min(this._pendingSeekTarget, duration || this._pendingSeekTarget))
+            : null;
+
+        if (this.timeCurrent) {
+            this.timeCurrent.textContent = this.formatTime(previewPosition ?? currentTime);
+        }
+
+        if (!duration) {
+            // Diagnose the missing seek bar exactly once per playback (this runs on every tick).
+            if (this._timelineDiagLogged !== 'hidden') {
+                this._timelineDiagLogged = 'hidden';
+                const v = this.video;
+                console.log('[WatchPage] timeline diag (no seek bar — getDisplayDuration null):', {
+                    mode: this.currentPlaybackMode,
+                    isVod: this.isVodContent(),
+                    probeDuration: this.probeDuration,
+                    durationHint: this.durationHint,
+                    getProbeDuration: this.getProbeDuration(),
+                    videoDuration: v ? v.duration : null,
+                    videoDurationFinite: v ? Number.isFinite(v.duration) : null,
+                    streamStartOffset: this.streamStartOffset,
+                    codecProfileDurationSeconds: this._diagCodecProfile
+                        ? (this._diagCodecProfile.durationSeconds ?? this._diagCodecProfile.duration_seconds ?? null) : null,
+                });
+            }
+            if (this.timeTotal) this.timeTotal.textContent = '';
+            this.setProgressState(false, false);
+            this.setProgressValue(0);
+            this.setBufferedProgressValue(0);
+            return null;
+        }
+        if (this._timelineDiagLogged !== 'shown') {
+            this._timelineDiagLogged = 'shown';
+            console.log('[WatchPage] timeline diag: seek bar shown, duration =', duration, 'mode =', this.currentPlaybackMode);
+        }
+
+        if (this.timeTotal) {
+            this.timeTotal.textContent = this.formatTime(duration);
+        }
+
+        this.setProgressState(true, this.canSeekTimeline());
+        if (!this._timelineScrubbing) {
+            this.setProgressValue((currentTime / duration) * 100);
+        }
+        return duration;
+    }
+
+    updateProgress() {
+        if (!this.video) return;
+
+        // Only re-arm after two minutes of healthy playback. A corrupt remux used to fail
+        // every ~50 seconds, so the old 15-second window created an infinite retry loop.
+        if (this._engineMidRetries > 0 && this.currentPlaybackMode === 'engine') {
+            const pos = Number(this.getPlaybackPosition());
+            if (Number.isFinite(pos) && pos > (this._engineRetryFromPos || 0) + 120) {
+                this._engineMidRetries = 0;
+            }
+        }
+
+        this.updateMediaSessionPosition();
+        this.updateSkipIntroVisibility();
+        // Refresh the throughput readout ~every 5s while an HLS estimate exists.
+        if (this.hls && this.currentStreamInfo?.height > 0) {
+            const now = Date.now();
+            if (now - (this._bitrateBadgeAt || 0) > 5000) {
+                this._bitrateBadgeAt = now;
+                this.updateQualityBadge();
+            }
+        }
+
+        const duration = this.updateDurationState();
+        this.updateBufferedTimeline(duration);
+        if (!duration) return;
+
+        // Show "Up Next" panel early for series (like streaming services do during credits)
+        // Only show if auto-play next episode is enabled
+        const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
+        if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing && !this.nextEpisodeDismissed) {
+            const currentTime = this.getCurrentTime();
+
+            // Only proceed if we have reliable duration data
+            if (duration >= 180 && currentTime >= 120) {
+                const timeRemaining = duration - currentTime;
+                const creditsThreshold = 28; // Netflix-like: appear during credits, not at the final frame
+
+                if (timeRemaining <= creditsThreshold && timeRemaining > 0) {
+                    const nextEp = this.getNextEpisode();
+                    if (nextEp) {
+                        this.nextEpisodeShowing = true;
+                        this.showNextEpisodePanel(nextEp, { autoCountdown: true });
+                    }
+                }
+            }
+        }
+    }
+
+    onMetadataLoaded() {
+        const duration = this.updateDurationState();
+        this.updateBufferedTimeline(duration);
+
+        const gatewayAudioContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (!gatewayAudioContext && this._audioTopologyPending) {
+            this._audioTopologyPending = false;
+            this.updateAudioTracks();
+        }
+
+        // Detect resolution
+        if (this.video && this.video.videoHeight > 0) {
+            this.currentStreamInfo = {
+                width: this.video.videoWidth,
+                height: this.video.videoHeight
+            };
+            this.updateQualityBadge();
+        }
+
+        // Handle resumption
+        if (this.resumeTime > 0 && this.video && this.streamStartOffset === 0) {
+            const duration = this.getValidDuration();
+            const canResume = !duration || this.resumeTime < duration * 0.95; // not near the end
+            if (this.currentPlaybackMode === 'engine') {
+                // The engine resumes itself in load() (it sets currentTime before this
+                // fires). Only rescue if that didn't stick — i.e. it's still at the
+                // start — so we restore the resume without a redundant re-seek.
+                if (canResume && this.video.currentTime < 1 && this.resumeTime > 1) {
+                    console.log(`[WatchPage] Resume rescue at ${this.resumeTime}s`);
+                    try { this.video.currentTime = this.resumeTime; } catch (_) {}
+                }
+            } else if (canResume) {
+                console.log(`[WatchPage] Resuming at ${this.resumeTime}s`);
+                try {
+                    this.video.currentTime = this.resumeTime;
+                } catch (err) {
+                    console.warn('[WatchPage] Resume seek failed:', err.message);
+                }
+            }
+            this.resumeTime = 0; // Reset after use
+        } else if (this.streamStartOffset > 0) {
+            this.resumeTime = 0;
+        }
+    }
+
+    onPlay() {
+        // Update play/pause button icons
+        this.playPauseBtn?.querySelector('.icon-play')?.classList.add('hidden');
+        this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');
+        this.centerPlayBtn?.classList.remove('show');
+        try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; } catch (_) { }
+
+        if (!this._playStartedReported) {
+            this._playStartedReported = true;
+            if (this.playbackTelemetry) this.playbackTelemetry.playStartedReported = true;
+            this.sendPlaybackEvent('play_started');
+            this.trackProduct('playback_started', { state: 'started' });
+        } else if (this._lastPauseTelemetryAt) {
+            this._lastPauseTelemetryAt = 0;
+            this.sendPlaybackEvent('resume');
+        }
+
+        // Start overlay auto-hide
+        this.startOverlayTimer();
+    }
+
+    onPause() {
+        this.playPauseBtn?.querySelector('.icon-play')?.classList.remove('hidden');
+        this.playPauseBtn?.querySelector('.icon-pause')?.classList.add('hidden');
+        if (this._gatewayAutomaticRebuffering) {
+            this.centerPlayBtn?.classList.remove('show');
+            this.showLoading();
+            return;
+        }
+        if (this._rebufferPresentationActive) this.hideLoading();
+        this.centerPlayBtn?.classList.add('show');
+        try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; } catch (_) { }
+        this.trackPlaybackPosition({ force: true });
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
+
+        // Keep overlay visible when paused
+        this.showOverlay();
+        clearTimeout(this.overlayTimeout);
+
+        if (!this.video?.ended && this._playStartedReported) {
+            const now = Date.now();
+            if (now - this._lastPauseTelemetryAt > 1000) {
+                this._lastPauseTelemetryAt = now;
+                this.sendPlaybackEvent('pause');
+            }
+        }
+    }
+
+    onEnded() {
+        if (this.isPrematurePlaybackEnd()) {
+            // Preserve the exact recovery point and authoritative total. Do not
+            // emit `ended`, clear Resume, or turn the card into completed state;
+            // the engine->Gateway recovery already owns the lane transition.
+            this.trackPlaybackPosition({ force: true });
+            this.saveResumeSnapshotThrottled(true);
+            Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
+            return;
+        }
+
+        if (!this._playbackEnded) {
+            this._playbackEnded = true;
+            if (this.playbackTelemetry) this.playbackTelemetry.ended = true;
+            this.sendPlaybackEvent('ended');
+            const duration = this.getDisplayDuration?.() || this._lastKnownPlaybackDuration || 0;
+            if (duration > 0) {
+                this.trackPlaybackPosition({ position: duration, force: true });
+            }
+            this.saveProgress({ force: true });
+            this.clearResumeSnapshot();
+            this._clearResumePosition(); // finished → don't resume next time
+            if (this.playBtnText) this.playBtnText.textContent = (globalThis.NorvaI18n?.t("ui_web_6b983a81e5e8", { defaultValue: "Restart" }) ?? 'Restart');
+        }
+
+        // For series, propose the next episode. Autoplay controls whether the
+        // countdown starts, but the next episode affordance is useful either way.
+        const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
+        if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing) {
+            const nextEp = this.getNextEpisode();
+            if (nextEp) {
+                this.nextEpisodeShowing = true;
+                this.showNextEpisodePanel(nextEp, { autoCountdown: true });
+            }
+        } else if (this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing) {
+            const nextEp = this.getNextEpisode();
+            if (nextEp) {
+                this.nextEpisodeShowing = true;
+                this.showNextEpisodePanel(nextEp, { autoCountdown: false });
+            }
+        }
+    }
+
+    onError(e) {
+        const videoAttemptId = Number.parseInt(this.video?.dataset?.playbackAttemptId || '', 10);
+        if (Number.isFinite(videoAttemptId) && this.isStalePlaybackAttempt(videoAttemptId)) return;
+
+        // The browser can surface the same remux failure either through MediaError
+        // or the engine's explicit continuity guard. Both paths share one bounded
+        // recovery ladder, deduplicated by the exact playback-attempt id.
+        if (this.currentPlaybackMode === 'engine') {
+            const err = this.video?.error;
+            // Benign: fired while the previous src is cleared during stop()/setup,
+            // before the engine has attached its MediaSource. Not a real failure.
+            if (!err || !err.code || /Empty src/i.test(err.message || '')) return;
+            this.handleEngineRuntimeFailure(
+                new Error(`MEDIA_ERR_${err.code}:${err.message || ''}`),
+                videoAttemptId,
+                { stage: 'mediaerror', mediaErrorCode: err.code }
+            ).catch((recoveryError) => {
+                this.handleEngineUnplayable(recoveryError);
+            });
+            return;
+        }
+
+        // Only log actual fatal errors, not benign stream recovery events
+        const error = this.video?.error;
+        if (error && error.code) {
+            if (this.hasCurrentMedia()) {
+                this.hidePlaybackError();
+                return;
+            }
+            const currentSrc = this.video?.currentSrc || this.video?.src || '';
+            if (!currentSrc && Date.now() < this._suppressMediaErrorsUntil) return;
+            // Benign: fired when the src is cleared during stop()/teardown
+            if (/Empty src/i.test(error.message || '')) return;
+            console.error('[WatchPage] Video error:', error.code, error.message);
+            // MEDIA_ERR_NETWORK / MEDIA_ERR_DECODE / MEDIA_ERR_SRC_NOT_SUPPORTED:
+            // fail over to another version of the same title if available
+            if ([2, 3, 4].includes(error.code)) {
+                // code 3 (DECODE) / 4 (SRC_NOT_SUPPORTED) are codec/format failures by definition, but
+                // Chrome routinely leaves error.message EMPTY on HEVC — and a bare 'Media error' doesn't
+                // match isFormatPlaybackError(), so handlePlaybackFailure's gateway-transcode fallback was
+                // skipped and playback dead-looped on retry-in-place. Tag codec codes so the transcode
+                // chain runs. Network (code 2) stays untagged (not a codec issue → no format transcode).
+                const isCodecError = error.code === 3 || error.code === 4;
+                const message = (isCodecError ? (globalThis.NorvaI18n?.t("ui_web_714af210e14c", { defaultValue: "MEDIA_ELEMENT_ERROR: Format error — " }) ?? 'MEDIA_ELEMENT_ERROR: Format error — ') : '')
+                    + (error.message || `code ${error.code}`);
+                if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
+                this.sendPlaybackEvent('playback_error', {
+                    errorCode: String(error.code),
+                    errorMessage: message
+                });
+                this.handlePlaybackFailure(message)
+                    .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
+            }
+        }
+    }
+
+    /**
+     * Terminal playback failure: exhaust the exact-file recovery lanes, then
+     * stop the spinner and show a clear error. Versions can carry different
+     * dubs or burned-in subtitles, so they are never switched automatically.
+     */
+    async handlePlaybackFailure(message) {
+        const options = arguments[1] && typeof arguments[1] === 'object' ? arguments[1] : {};
+        const forceProviderBusyTerminal = options.forceTerminal === true
+            && this.isProviderBusyError(message);
+        const playbackAttemptId = this._playbackAttemptId;
+        if (this._handlingPlaybackFailure) {
+            console.warn('[WatchPage] Ignoring duplicate playback failure while retry is already running:', message);
+            return;
+        }
+
+        if (this.hasCurrentMedia() && !forceProviderBusyTerminal) {
+            console.warn('[WatchPage] Ignoring stale playback failure because media is active:', message);
+            this.hidePlaybackError();
+            this.hideLoading();
+            return;
+        }
+
+        this._handlingPlaybackFailure = true;
+        try {
+            this._lastFailureMsg = message;
+            this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
+            if (this.isPlaybackSupersededError(message)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return;
+            }
+            if (this.isProviderBusyError(message)) {
+                await this.reportProviderPlaybackFailure(message);
+                await this.releasePlaybackPipelineForRetry();
+                if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                    this.showPlaybackError(message, { immediate: true });
+                }
+                return;
+            }
+
+            const cloudLaneConsumed = this.isCloudPlaybackMode()
+                && this.hasOpenedCloudPlaybackLaneForAttempt(playbackAttemptId);
+            if (this.isCloudPlaybackMode()) {
+                // Hosted playback is deliberately single-lane. Once any cloud
+                // session was returned, a demux/HLS failure must tear it down and
+                // stop. A second route is allowed only from the visible Retry CTA,
+                // which starts a new playback attempt after cleanup.
+                if (!cloudLaneConsumed) {
+                    console.warn('[WatchPage] Cloud failure had no session marker; refusing an automatic fallback.');
+                }
+                // An optimistic MP4/M4V Relay can reveal an unsupported codec only
+                // after the media element sees the bytes. Tear down that exact lane
+                // first, then offer one explicit server-conversion action. The click
+                // starts a new attempt; this branch never creates a second session.
+                if (this.isFormatPlaybackError(message)
+                    && this.currentPlaybackMode === 'direct'
+                    && (this.content?.type === 'movie' || this.content?.type === 'series')) {
+                    this._preferredExplicitCloudMode = 'transcode';
+                }
+                await this.releasePlaybackPipelineForRetry();
+                if (!this.isStalePlaybackAttempt(playbackAttemptId)) {
+                    this.showPlaybackError(message, { immediate: true });
+                }
+                return;
+            }
+
+            const retriedWithEncode = await this.retryWithFullVideoTranscode(message);
+            if (retriedWithEncode) return;
+
+            // 401/403/429 = connection-limit or account throttle, not a dead title.
+            // Never mark as broken: it would hide a perfectly valid stream.
+            if (!this.isConnectionLimitError(message)) {
+                await this.reportPlaybackStatus('broken', message);
+            }
+            await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.showPlaybackError(message);
+        } finally {
+            this._handlingPlaybackFailure = false;
+        }
+    }
+
+    isFormatPlaybackError(message) {
+        return /MEDIA_ELEMENT_ERROR|MEDIA_ERR_DECODE|Format error|decode|bufferAppendError|fragParsingError|sourceBuffer|appendBuffer|manifestLoadError|levelLoadError|Gateway session/i.test(message || '');
+    }
+
+    isGatewaySessionGoneError(data = {}) {
+        const response = data.response || {};
+        const networkDetails = data.networkDetails || {};
+        const code = Number(response.code ?? response.status ?? response.statusCode ?? networkDetails.status);
+        const detail = String(data.details || '');
+        const text = [
+            response.text,
+            response.statusText,
+            networkDetails.responseText,
+            networkDetails.statusText,
+            data.reason,
+            data.error?.message,
+            data.details
+        ].filter(Boolean).join(' ');
+        const isPlaylistLoad = /manifestLoadError|levelLoadError|fragLoadError/i.test(detail);
+        return isPlaylistLoad && (
+            code === 404 ||
+            code === 410 ||
+            /session not found|session expired|session gone/i.test(text)
+        );
+    }
+
+    gatewaySessionGoneMessage(data = {}) {
+        const response = data.response || {};
+        const networkDetails = data.networkDetails || {};
+        const code = Number(response.code ?? response.status ?? response.statusCode ?? networkDetails.status);
+        if (code === 410) return (globalThis.NorvaI18n?.t("ui_web_5fcfcc618a1c", { defaultValue: "Gateway session expired." }) ?? 'Gateway session expired.');
+        return (globalThis.NorvaI18n?.t("ui_web_22033bd45598", { defaultValue: "Gateway session not found." }) ?? 'Gateway session not found.');
+    }
+
+    isGatewayOnlyContainer() {
+        const container = String(this.containerExtension || this.content?.containerExtension || '')
+            .split('?')[0].split('#')[0].toLowerCase();
+        // Mirrors api.js requiresGatewayForContainer: the browser can't play
+        // these directly, so relay/direct fallbacks never work — only the
+        // gateway transcode can. Skipping them avoids the "Media error" storm.
+        return ['mkv', 'avi', 'wmv', 'flv', 'mov', 'webm', 'ts', 'mpeg', 'mpg', 'vob'].includes(container);
+    }
+
+    async retryWithCloudRelay(message) {
+        if (!this.isCloudPlaybackMode()) return false;
+        if (this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
+        if (this._cloudRelayFallbackTried) return false;
+        if (!this.isFormatPlaybackError(message)) return false;
+        if (!this.content?.sourceId || !this.content?.id) return false;
+        // Relay yields a direct provider stream the browser can't decode for
+        // gateway-only containers (MKV/AVI/…) — don't even try; let the gateway
+        // transcode retry (already attempted first) own the recovery.
+        if (this.isGatewayOnlyContainer()) return false;
+        // Never turn a failed/expired gateway session into a second direct
+        // provider request. Preserve that first control-plane cause and wait
+        // for an explicit viewer retry to create one new session.
+        if (this.currentPlaybackMode === 'gateway-session'
+            || this.isGatewayPlaybackUrl(this.currentUrl)
+            || this.isGatewayPlaybackUrl(this.baseStreamUrl)) {
+            return false;
+        }
+        const playbackAttemptId = this._playbackAttemptId;
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
+
+        this._cloudRelayFallbackTried = true;
+        console.warn('[WatchPage] Gateway media append failed. Retrying through Relay.');
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('remuxing', (globalThis.NorvaI18n?.t("ui_web_6a16b991523c", { defaultValue: "Norva Relay" }) ?? 'Norva Relay'));
+
+        try {
+            await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) return true;
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                this.content.type === 'series' ? 'series' : 'movie',
+                this.containerExtension || 'mp4',
+                { mode: 'relay' },
+                { signal: playbackResolveSignal }
+            );
+
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) {
+                await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+                return true;
+            }
+            if (!result?.url) return false;
+            this.content.cloudPlaybackSessionId = result.sessionId || null;
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                playbackAttemptId: this._playbackAttemptId
+            }));
+            return true;
+        } catch (error) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || error?.name === 'AbortError') return true;
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return true;
+            }
+            console.warn('[WatchPage] Relay fallback failed:', error?.message || error);
+            return false;
+        }
+    }
+
+    async retryWithCloudGatewayTranscode(message) {
+        if (!this.isCloudPlaybackMode()) return false;
+        if (this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
+        if (this._cloudGatewayTranscodeFallbackTried) return false;
+        if (!this.isFormatPlaybackError(message)) return false;
+        if (!this.content?.sourceId || !this.content?.id) return false;
+        if (this.content.type !== 'movie' && this.content.type !== 'series') return false;
+        const playbackAttemptId = this._playbackAttemptId;
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
+
+        this._cloudGatewayTranscodeFallbackTried = true;
+        console.warn('[WatchPage] Gateway remux failed. Retrying with full Gateway transcode.');
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_3cc84f4b402a", { defaultValue: "Norva Gateway" }) ?? 'Norva Gateway'));
+
+        const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
+        const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
+        try {
+            await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) return true;
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const container = this.containerExtension || 'mp4';
+            const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+            let playbackHint = {
+                // Force the resolver onto the transcode path. gatewayMode alone does NOT set the
+                // resolver's `mode` (getStreamUrl reads query `mode` → forcedMode), so without this
+                // the retry re-evaluated browserSafeVod on the still-metadata-less hint and silently
+                // degraded back to a native relay attempt — no transcode session was ever created.
+                // (Mirrors fallbackEngineToTranscode, which already passes mode:'transcode'.)
+                mode: 'transcode',
+                gatewayMode: 'transcode',
+                audioMode: 'transcode',
+                ...activeAudioOptions,
+                seekOffset: position,
+                startOffset: position,
+                resumeTime: position
+            };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
+
+            await this.waitForProviderSlotRelease(1400);
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) return true;
+            let result;
+            try {
+                result = await API.proxy.xtream.getStreamUrl(
+                    this.content.sourceId,
+                    this.content.id,
+                    itemType,
+                    container,
+                    playbackHint,
+                    { signal: playbackResolveSignal }
+                );
+            } catch (error) {
+                if (this.isProviderBusyError(this.getErrorText(error))) {
+                    await this.reportProviderPlaybackFailure(error);
+                }
+                throw error;
+            }
+
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || playbackResolveSignal?.aborted) {
+                await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+                return true;
+            }
+            if (!result?.url) return false;
+            this.content.cloudPlaybackSessionId = result.sessionId || null;
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                playbackAttemptId: this._playbackAttemptId,
+                seekOffset: position,
+                startOffset: position,
+                ...activeAudioOptions,
+            }));
+            return true;
+        } catch (error) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || error?.name === 'AbortError') return true;
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return true;
+            }
+            console.warn('[WatchPage] Gateway transcode fallback failed:', error?.message || error);
+            return false;
+        }
+    }
+
+    async retryWithFullVideoTranscode(message) {
+        if (this.isCloudPlaybackMode()) return false;
+        if (this._videoEncodeFallbackTried) return false;
+        if (!this.isFormatPlaybackError(message)) return false;
+
+        const sourceUrl = this.baseStreamUrl || this.currentUrl;
+        if (!sourceUrl) return false;
+
+        if (this.currentPlaybackMode === 'transcode-session' && this.currentProcessingOptions?.videoMode === 'encode') {
+            return false;
+        }
+
+        this._videoEncodeFallbackTried = true;
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        const autoplay = true;
+        const info = this.currentStreamInfo || {};
+        const processingOptions = {
+            ...this.currentProcessingOptions,
+            ...this.getAudioProcessingOptions(info),
+            videoMode: 'encode',
+            videoCodec: info.video || this.currentProcessingOptions.videoCodec || 'unknown',
+            seekOffset: position
+        };
+
+        console.warn('[WatchPage] Browser rejected copied/direct video. Retrying with full video transcode.');
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n?.t("ui_web_59d35c5bdd2d", { defaultValue: "Transcoding (Video)" }) ?? 'Transcoding (Video)'));
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+
+        await this.stopTranscodeSession();
+
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        this.currentPlaybackMode = 'transcode-session';
+        this.currentProcessingOptions = processingOptions;
+        this.streamStartOffset = position;
+        this.attachProbeSubtitles(sourceUrl, this.subtitleTracks, position);
+        this.updateDurationState();
+
+        const playlistUrl = await this.startTranscodeSession(sourceUrl, processingOptions);
+        this.playHlsOrDirect(playlistUrl, { autoplay });
+        this.setVolumeFromStorage();
+        return true;
+    }
+
+    showPlaybackError(message, options = {}) {
+        if (this.hasCurrentMedia()) {
+            console.warn('[WatchPage] Suppressing stale playback error because media is already playing:', message);
+            this.hidePlaybackError();
+            return;
+        }
+
+        const safeMessage = this.sanitizePlaybackMessage(message);
+        if (!options.immediate && this.shouldDeferPlaybackError(safeMessage)) {
+            this.deferPlaybackError(safeMessage);
+            return;
+        }
+
+        this.clearDeferredPlaybackError();
+        this.hideLoading();
+        this.updateTranscodeStatus('hidden');
+
+        const videoSection = document.querySelector('.watch-video-section');
+        let errorEl = document.getElementById('watch-error');
+        if (!errorEl) {
+            errorEl = document.createElement('div');
+            errorEl.id = 'watch-error';
+            errorEl.className = 'watch-error';
+            videoSection?.appendChild(errorEl);
+        }
+
+        const friendly = this.getFriendlyPlaybackError(safeMessage);
+        this.trackProduct('journey_error', {
+            state: 'error', outcome: 'error', failureFamily: this.playbackFailureFamily(safeMessage)
+        });
+        // A provider auth / rate-limit block (401/403/429) does not clear on a
+        // reload — auto-refreshing just spins on the same blocked path. Skip it
+        // and point the user to a residential path (native app / local hub).
+        const playbackSuperseded = this.isPlaybackSupersededError(safeMessage);
+        const providerBusy = !playbackSuperseded && this.isProviderBusyError(safeMessage);
+        const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
+        const serverRecovery = !playbackSuperseded
+            && !providerBusy
+            && !providerBlocked
+            && this.isCloudPlaybackMode()
+            && this._preferredExplicitCloudMode === 'transcode';
+        const conflictCopy = playbackSuperseded
+            ? this.playbackSupersededCopy()
+            : providerBusy ? this.providerAccountConflictCopy() : null;
+        const recoveryCopy = serverRecovery ? this.cloudTranscodeRecoveryCopy() : null;
+        // A 458 opens a server-side circuit. Automatic retries would extend the
+        // provider conflict; only an explicit user retry may probe after cooldown.
+        const allowAutomaticRetry = options.allowAutomaticRetry !== false;
+        const refreshScheduled = playbackSuperseded || providerBusy || serverRecovery
+            ? false
+            : providerBlocked || !allowAutomaticRetry
+                ? false
+                : this.schedulePlaybackErrorRefresh();
+        const refreshHint = playbackSuperseded || providerBusy
+            ? conflictCopy.hint
+            : serverRecovery
+                ? recoveryCopy.hint
+            : providerBlocked
+                ? (globalThis.NorvaI18n?.t("ui_web_eea77d940feb", { defaultValue: "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later." }) ?? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later.")
+                : refreshScheduled
+                    ? (globalThis.NorvaI18n?.t("ui_web_61abd551a4ec", { defaultValue: "Retrying automatically in 2 seconds…" }) ?? 'Retrying automatically in 2 seconds…')
+                    : (globalThis.NorvaI18n?.t("ui_web_5e719a93f85f", { defaultValue: "If the problem persists, use Retry below." }) ?? 'If the problem persists, use Retry below.');
+        const refreshBtnLabel = playbackSuperseded || providerBusy
+            ? conflictCopy.retry
+            : serverRecovery ? recoveryCopy.retry : ((providerBlocked) ? (globalThis.NorvaI18n?.t("ui_web_942087cc2d41", { defaultValue: "Retry" }) ?? 'Retry') : (globalThis.NorvaI18n?.t("ui_web_5148c3e20576", { defaultValue: "Retry now" }) ?? 'Retry now'));
+        const errorTitle = playbackSuperseded || providerBusy
+            ? conflictCopy.title
+            : serverRecovery ? recoveryCopy.title : (globalThis.NorvaI18n?.t("ui_web_863453ecda89", { defaultValue: "Unable to play this title" }) ?? 'Unable to play this title');
+        const errorMessage = serverRecovery ? recoveryCopy.message : friendly;
+
+        errorEl.innerHTML = `
+            <div class="watch-error-box">
+                <p class="watch-error-title">${this.escapeHtml(errorTitle)}</p>
+                <p class="watch-error-msg">${this.escapeHtml(errorMessage)}</p>
+                <p class="watch-error-refresh">${this.escapeHtml(refreshHint)}</p>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(refreshBtnLabel)}</button>
+            </div>`;
+        errorEl.setAttribute('role', 'alert');
+        errorEl.setAttribute('aria-live', 'assertive');
+        errorEl.classList.remove('hidden');
+        videoSection?.classList.add('has-playback-error');
+        document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
+            this.clearPlaybackErrorRefreshTimer();
+            this._nextProductRetrySource = 'manual';
+            this.retryPlaybackInPlace();
+        });
+
+        // HLS/transcode sessions can recover just after an error callback fired.
+        // Re-check shortly so a stale fatal banner never stays over active video.
+        [500, 1500, 4000].forEach(delay => {
+            setTimeout(() => this.markPlaybackUsable(), delay);
+        });
+    }
+
+    hidePlaybackError() {
+        this.clearDeferredPlaybackError();
+        this.clearPlaybackErrorRefreshTimer();
+        document.getElementById('watch-error')?.classList.add('hidden');
+        document.querySelector('.watch-video-section')?.classList.remove('has-playback-error');
+    }
+
+    getPlaybackErrorRefreshGuardKey() {
+        const contentKey = [
+            this.content?.sourceId,
+            this.content?.type,
+            this.content?.id
+        ].filter(Boolean).join(':');
+        return contentKey || window.location.href;
+    }
+
+    schedulePlaybackErrorRefresh(delayMs = this.playbackErrorRefreshDelayMs) {
+        this.clearPlaybackErrorRefreshTimer();
+        if (this.isCloudPlaybackMode() && this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
+        if (this.app?.currentPage && this.app.currentPage !== 'watch') return false;
+
+        const key = this.getPlaybackErrorRefreshGuardKey();
+        const now = Date.now();
+        const scheduledAttemptId = this._playbackAttemptId;
+        try {
+            const previous = JSON.parse(sessionStorage.getItem(this.playbackErrorRefreshKey) || 'null');
+            if (previous?.key === key && now - Number(previous.at || 0) < this.playbackErrorRefreshGuardMs) {
+                return false;
+            }
+            sessionStorage.setItem(this.playbackErrorRefreshKey, JSON.stringify({ key, at: now }));
+        } catch (error) {
+            console.warn('[WatchPage] Auto-refresh guard unavailable:', error?.message || error);
+            return false;
+        }
+
+        this._playbackErrorRefreshTimer = setTimeout(() => {
+            this._playbackErrorRefreshTimer = null;
+            const errorEl = document.getElementById('watch-error');
+            const errorVisible = errorEl && !errorEl.classList.contains('hidden');
+            if (!errorVisible
+                || this.hasCurrentMedia()
+                || this.isStalePlaybackAttempt(scheduledAttemptId)
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
+            try {
+                this.trackPlaybackPosition({ force: true });
+                this.saveResumeSnapshotThrottled(true);
+            } catch (_) {
+                // Continue with the retry even if local persistence fails.
+            }
+            this.retryPlaybackInPlace();
+        }, delayMs);
+
+        return true;
+    }
+
+    /**
+     * Restart the stream pipeline in place — no document reload, so the SPA
+     * state, the player shell and the resume position all survive. Falls back
+     * to a hard refresh only when the in-place path itself fails (or when
+     * there is no content to retry against).
+     */
+    async retryPlaybackInPlace(positionOverride = null) {
+        const playbackRequestedAt = Date.now();
+        if (this._inPlaceRetryRunning) return;
+        if (this.app?.currentPage && this.app.currentPage !== 'watch') return;
+        const retrySource = this._nextProductRetrySource === 'manual' ? 'manual' : 'automatic';
+        this._nextProductRetrySource = '';
+        this.trackProduct('journey_retry', {
+            source: retrySource, state: 'started', outcome: 'retry'
+        });
+        if (!this.content?.sourceId || !this.content?.id) {
+            window.location.reload();
+            return;
+        }
+        const activeAudioOptions = this.getCurrentAudioPlaybackOptions();
+        const retryPosition = positionOverride !== null
+            ? Math.max(0, Math.floor(positionOverride))
+            : Math.max(0, Math.floor(this.getResumeSnapshotPosition()));
+        this._inPlaceRetryRunning = true;
+        const playbackAttemptId = this.beginPlaybackAttempt();
+        const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
+        const contentAtStart = this.content;
+        this.beginPlaybackTelemetry(null, playbackAttemptId, {
+            requestedAt: playbackRequestedAt,
+        });
+        try {
+            this.hidePlaybackError();
+            this.showLoading();
+            // A visible user action starts exactly one new lane. If the browser
+            // engine proved incompatible, select server conversion up front;
+            // never create it as a hidden fallback after another cloud session.
+            this._cloudGatewayTranscodeFallbackTried = false;
+            this._videoEncodeFallbackTried = false;
+            this._handlingPlaybackFailure = false;
+
+            await this.releasePlaybackPipelineForRetry();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
+            await this.waitForProviderSlotRelease(800);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
+
+            const position = retryPosition;
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const container = this.containerExtension || 'mp4';
+            const explicitServerConversion = this.isCloudPlaybackMode()
+                && this._preferredExplicitCloudMode === 'transcode';
+            const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
+            let playbackHint = {
+                ...(explicitServerConversion ? {
+                    mode: 'transcode',
+                    gatewayMode: 'remux',
+                } : {}),
+                ...activeAudioOptions,
+                seekOffset: position,
+                startOffset: position,
+                resumeTime: position
+            };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                itemType,
+                container,
+                playbackHint,
+                { signal: playbackResolveSignal }
+            );
+            const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return;
+            }
+            if (!result?.url) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                throw new Error('No stream URL from retry');
+            }
+            this.content.cloudPlaybackSessionId = resultSessionId || null;
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                playbackAttemptId,
+                ...activeAudioOptions,
+            }));
+        } catch (error) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)
+                || playbackResolveSignal?.aborted
+                || error?.name === 'AbortError'
+                || this.content !== contentAtStart
+                || (this.app?.currentPage && this.app.currentPage !== 'watch')) return;
+            // A slot still busy after the retry is a provider-side state — a full page
+            // reload would just replay the whole cascade against the same busy slot.
+            const errorText = this.getErrorText(error);
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+                return;
+            }
+            if (this.isProviderBusyError(errorText)) {
+                console.warn('[WatchPage] In-place retry hit a busy provider slot:', errorText);
+                this.showPlaybackError(errorText || 'BLOCK_HTTP_458', { immediate: true });
+                return;
+            }
+            if (this.isCloudPlaybackMode()) {
+                console.warn('[WatchPage] Explicit cloud retry failed without opening another route:', errorText);
+                await this.releasePlaybackPipelineForRetry();
+                this.showPlaybackError(errorText || 'Playback failed.', { immediate: true });
+                return;
+            }
+            console.warn('[WatchPage] In-place retry failed, falling back to a page refresh:', error?.message || error);
+            window.location.reload();
+        } finally {
+            this._inPlaceRetryRunning = false;
+        }
+    }
+
+    clearPlaybackErrorRefreshTimer() {
+        if (this._playbackErrorRefreshTimer) {
+            clearTimeout(this._playbackErrorRefreshTimer);
+            this._playbackErrorRefreshTimer = null;
+        }
+    }
+
+    shouldDeferPlaybackError(message) {
+        if (this._pendingPlaybackErrorTimer) return false;
+        if (!this.isCloudPlaybackMode()) return false;
+        if (this.hasOpenedCloudPlaybackLaneForAttempt()) return false;
+        if (!this.content?.id) return false;
+        if (this.hasCurrentMedia()) return false;
+        return this.isFormatPlaybackError(message)
+            || this.isConnectionLimitError(message)
+            || /Media error|Playback failed|network|timeout|refused/i.test(message || '');
+    }
+
+    deferPlaybackError(message, delayMs = 7000) {
+        this.clearDeferredPlaybackError();
+        this._pendingPlaybackErrorMessage = message;
+        this.showLoading();
+        this._pendingPlaybackErrorTimer = setTimeout(() => {
+            this._pendingPlaybackErrorTimer = null;
+            const deferredMessage = this._pendingPlaybackErrorMessage;
+            this._pendingPlaybackErrorMessage = null;
+            if (this.hasCurrentMedia()) {
+                this.hidePlaybackError();
+                return;
+            }
+            if (this._handlingPlaybackFailure) {
+                this.deferPlaybackError(deferredMessage || message, 3000);
+                return;
+            }
+            this.showPlaybackError(deferredMessage || message, { immediate: true });
+        }, delayMs);
+    }
+
+    clearDeferredPlaybackError() {
+        if (this._pendingPlaybackErrorTimer) {
+            clearTimeout(this._pendingPlaybackErrorTimer);
+            this._pendingPlaybackErrorTimer = null;
+        }
+        this._pendingPlaybackErrorMessage = null;
+    }
+
+    isCurrentPlaybackUsable() {
+        return this.hasCurrentMedia() && !this.video.paused && !this.video.ended;
+    }
+
+    hasCurrentMedia() {
+        const video = this.video;
+        if (!video) return false;
+        if (video.error) return false;
+        const hasMetadata = video.readyState >= 1
+            && Number.isFinite(video.duration)
+            && video.duration > 0;
+        const hasMedia = video.readyState >= 2 || video.currentTime > 0 || (hasMetadata && !video.paused);
+        return hasMedia && !video.ended && Boolean(video.currentSrc || video.src);
+    }
+
+    markPlaybackUsable(options = {}) {
+        if (!this.hasCurrentMedia()) return;
+        const allowFirstFrameFallback = options.allowFirstFrameFallback === true;
+        const allowPlaybackProgressFallback = options.allowPlaybackProgressFallback === true;
+        const fallbackHasRenderedFrame = allowFirstFrameFallback
+            && this._firstFrameObserverAvailable !== true
+            && !this.video.paused
+            && this.video.readyState >= 2
+            && this.video.videoWidth > 0
+            && this.video.videoHeight > 0;
+        if (!this._firstFrameReported && fallbackHasRenderedFrame) {
+            this.reportFirstRenderedFrame(
+                this._playbackAttemptId,
+                'playing-ready-state'
+            );
+        }
+        if (!this._firstFrameReported && allowPlaybackProgressFallback) {
+            const mediaTime = Number(this.video.currentTime);
+            const progressReady = this._firstFrameObserverAvailable === true
+                && this._firstFrameObserverAttemptId === this._playbackAttemptId
+                && !this.video.paused
+                && !this.video.seeking
+                && this.video.readyState >= 2
+                && this.video.videoWidth > 0
+                && this.video.videoHeight > 0
+                && Number.isFinite(mediaTime);
+            const previous = this._firstFrameProgressSample;
+            if (!progressReady) {
+                this._firstFrameProgressSample = null;
+            } else if (!previous
+                || previous.playbackAttemptId !== this._playbackAttemptId
+                || mediaTime < previous.mediaTime
+                || mediaTime - previous.mediaTime > 5) {
+                // The first timeupdate after attach/seek establishes a baseline;
+                // it is not by itself proof that a frame was presented.
+                this._firstFrameProgressSample = {
+                    playbackAttemptId: this._playbackAttemptId,
+                    mediaTime,
+                };
+            } else if (mediaTime - previous.mediaTime >= 0.05) {
+                this.reportFirstRenderedFrame(
+                    this._playbackAttemptId,
+                    'playback-progress-fallback',
+                    { mediaTime },
+                );
+            }
+        }
+        // loadeddata/canplay alone prove decoded data, not compositor
+        // presentation. Keep loading/error state until rVFC, the strict playing
+        // fallback, or two advancing timeupdates confirm active presentation.
+        if (!this._firstFrameReported) return;
+        if (this._rebufferPresentationActive) {
+            // Metadata/canplay and a final queued timeupdate also arrive while
+            // starved. Only playing or real forward progress ends rebuffering.
+            const progressing = allowPlaybackProgressFallback && !this.video.seeking
+                && Number(this.video.currentTime) - this._rebufferMediaTime >= 0.05;
+            const playing = allowFirstFrameFallback && this.video.readyState >= 3;
+            if (this.video.paused || (!progressing && !playing)) return;
+        }
+        this.hideLoading();
+        this.hidePlaybackError();
+        if (!this._playbackStatusOkReported) {
+            this._playbackStatusOkReported = true;
+            this.reportPlaybackStatus('ok').catch(() => { });
+        }
+        this.reportObservedAudioLanguages();
+        // Restore the viewer's generated subtitles: instantly on a NEW media src (the browser
+        // disables tracks per new src / lane restart), then as a BOUNDED periodic self-heal.
+        // Something can still empty the track once, silently (04/07 runtime trace: track frozen
+        // at 0 cues, no hls instance, no app call in 45 s — actor unidentified), and a strict
+        // one-shot left the viewer subtitle-less for the rest of the film. Bounds make it
+        // strobe-proof: markPlaybackUsable runs per timeupdate (~4×/s), but a dead track
+        // re-attaches at most once per 5 s and 12 times per src — a one-time wipe becomes a
+        // ≤5 s gap, a persistent wiper can't flicker, and each heal warns with a counter so a
+        // runtime trace exposes the wiper's cadence.
+        const mediaSrc = this.video?.currentSrc || this.video?.src || '';
+        if (mediaSrc && mediaSrc !== this._aiHealedForSrc) {
+            this._aiHealedForSrc = mediaSrc;
+            this._aiHealCount = 0;
+            this._aiHealLastTs = 0;
+            if (this._aiRestoreOnStart) {
+                const r = this._aiRestoreOnStart;
+                this._aiRestoreOnStart = null;
+                if (r.key === this._aiSubtitleKey() && this.attachGeneratedSubtitleTrack(r.vtt, r.lang)) {
+                    this.updateCaptionsTracks();
+                }
+                return;
+            }
+        }
+        if (this._aiActiveVtt) {
+            const now = Date.now();
+            if (now - (this._aiHealLastTs || 0) < 5000 || (this._aiHealCount || 0) >= 12) return;
+            // A viewer-hidden track (mode 'hidden', cues intact via the C toggle) is deliberate
+            // and left alone — only disabled/emptied/missing tracks are rebuilt.
+            const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+            const dead = !el || !el.track || el.track.mode === 'disabled' || !el.track.cues || !el.track.cues.length;
+            if (!dead) return;
+            this._aiHealLastTs = now;
+            this._aiHealCount = (this._aiHealCount || 0) + 1;
+            console.warn(`[WatchPage] AI subtitle track found empty — re-healing (#${this._aiHealCount})`);
+            if (this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und')) {
+                this.updateCaptionsTracks();
+            }
+        }
+    }
+
+    getPlaybackHealthTarget() {
+        if (!this.content?.sourceId || !this.content?.id) return null;
+        if (this.content.type === 'movie') {
+            return {
+                sourceId: this.content.sourceId,
+                itemType: 'movie',
+                itemId: this.content.id
+            };
+        }
+        return {
+            sourceId: this.content.sourceId,
+            itemType: 'series',
+            itemId: this.content.seriesId || this.content.id
+        };
+    }
+
+    async reportPlaybackStatus(status, reason = '') {
+        const target = this.getPlaybackHealthTarget();
+        if (!target || !window.PlaybackHealth?.report) return;
+        await PlaybackHealth.report({ ...target, status, reason });
+    }
+
+    /**
+     * Failover: when a stream fails to play and the content was opened from
+     * a duplicate group, automatically switch to the next available version.
+     */
+    async tryNextVersion(positionOverride = null, playbackAttemptId = this._playbackAttemptId) {
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        // No version left: report failure even if a (failed) switch just happened
+        if (!this.versions || this.versionIndex >= this.versions.length - 1) return false;
+        if (this._failoverInProgress) return false;
+
+        this._failoverInProgress = true;
+        this._failoverAttemptId = playbackAttemptId;
+        const contentAtStart = this.content;
+        const nextIndex = this.versionIndex + 1;
+        const next = this.versions[nextIndex];
+        const nextStreamId = next.streamId ?? next.stream_id;
+        const nextSourceId = next.sourceId ?? next.source_id;
+        const nextCloudSourceId = next.cloudSourceId ?? next.cloud_source_id ?? null;
+        const nextContainer = next.container || next.containerExtension || next.container_extension || 'mp4';
+        const nextAudioTracks = Array.isArray(next.audioTracks)
+            ? next.audioTracks
+            : (Array.isArray(next.audio_tracks) ? next.audio_tracks : null);
+        const nextAudioLanguages = Array.isArray(next.audioLanguages)
+            ? next.audioLanguages
+            : (Array.isArray(next.audio_languages) ? next.audio_languages : []);
+        const nextAudioValidationStatus = String(
+            next.audioLanguageValidationStatus ||
+            next.audio_language_validation_status ||
+            'not_analyzed'
+        ).toLowerCase();
+        const nextSubtitleTracks = Array.isArray(next.subtitleTracks)
+            ? next.subtitleTracks
+            : (Array.isArray(next.subtitle_tracks) ? next.subtitle_tracks : null);
+        const nextCodecProfile = next.codecProfile || next.codec_profile || null;
+        const nextPlaybackHint = window.MediaUtils?.playbackHintFromItem
+            ? window.MediaUtils.playbackHintFromItem(next, { container: nextContainer })
+            : { container: nextContainer, ...(nextCodecProfile ? { codecProfile: nextCodecProfile } : {}) };
+        const playbackPreferences = this.getLanguageSafeFailoverPreferences();
+        const nextAudioOptions = this.getLanguageSafeFailoverAudioOptions(
+            nextAudioTracks,
+            playbackPreferences
+        );
+        console.warn(`[WatchPage] Playback failed, switching to version ${nextIndex + 1}/${this.versions.length}: ${next.label}`);
+        let handedOff = false;
+
+        try {
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.content !== contentAtStart) return false;
+            // Resume close to where the previous version failed
+            const position = positionOverride !== null
+                ? Math.max(0, Math.floor(Number(positionOverride) || 0))
+                : Math.max(0, Math.floor(this.getPlaybackPosition()));
+            let failoverHint = {
+                ...nextPlaybackHint,
+                ...nextAudioOptions,
+                seekOffset: position,
+                startOffset: position,
+                resumeTime: position
+            };
+            failoverHint = this.applyPlaybackPreferencesToHint(failoverHint, playbackPreferences);
+            const result = await API.proxy.xtream.getStreamUrl(
+                nextSourceId,
+                nextStreamId,
+                next.type || 'movie',
+                nextContainer,
+                failoverHint,
+                { signal: this.playbackResolveSignalForAttempt(playbackAttemptId) }
+            );
+            const resultSessionId = this.playbackMetadataFromResult(result).sessionId;
+            if (this.isStalePlaybackAttempt(playbackAttemptId) || this.content !== contentAtStart) {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+                return true;
+            }
+            if (result?.url) {
+                const resultAudioTracks = Array.isArray(result.audioTracks)
+                    ? result.audioTracks
+                    : (Array.isArray(result.audio_tracks) ? result.audio_tracks : null);
+                const resultAudioLanguages = Array.isArray(result.audioLanguages)
+                    ? result.audioLanguages
+                    : (Array.isArray(result.audio_languages) ? result.audio_languages : null);
+                const resultAudioValidationStatus = String(
+                    result.audioLanguageValidationStatus ||
+                    result.audio_language_validation_status ||
+                    nextAudioValidationStatus
+                ).toLowerCase();
+                const resultSubtitleTracks = Array.isArray(result.subtitleTracks)
+                    ? result.subtitleTracks
+                    : (Array.isArray(result.subtitle_tracks) ? result.subtitle_tracks : null);
+                const exactAudioTracks = resultAudioTracks !== null ? resultAudioTracks : nextAudioTracks;
+                const exactAudioLanguages = resultAudioLanguages !== null ? resultAudioLanguages : nextAudioLanguages;
+                const exactSubtitleTracks = resultSubtitleTracks !== null ? resultSubtitleTracks : nextSubtitleTracks;
+
+                this.resetObservedTrackPersistenceState();
+                this.versionIndex = nextIndex;
+                this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8f3305d730d5", {defaultValue: "Switched: {{p0}}", p0:(next.label)}) : `Switched: ${next.label}`));
+                if (this.subtitleEl) {
+                    this.subtitleEl.textContent = next.label || '';
+                }
+                this.resumeTime = position;
+                this.content.id = nextStreamId;
+                this.content.itemId = nextStreamId;
+                this.content.item_id = nextStreamId;
+                this.content.streamId = nextStreamId;
+                this.content.stream_id = nextStreamId;
+                this.content.externalId = nextStreamId;
+                this.content.external_id = nextStreamId;
+                this.content.sourceId = nextSourceId;
+                this.content.source_id = nextSourceId;
+                this.content.cloudSourceId = nextCloudSourceId;
+                this.content.cloud_source_id = nextCloudSourceId;
+                this.content.containerExtension = nextContainer;
+                this.content.container_extension = nextContainer;
+                this.content.rawTitle = next.rawTitle || next.raw_title || this.content.rawTitle || null;
+                // A sibling file must never inherit the previous dub's declaration.
+                this.content.providerAudioLanguages = window.MediaUtils?.providerAudioLanguages?.(next) || [];
+                this.content.providerAudioLanguageStatus = 'provider_declared';
+                delete this.content.provider_audio_languages;
+                delete this.content.provider_audio_language_status;
+                this.content.codecProfile = nextCodecProfile;
+                this.content.versionIndex = nextIndex;
+                this.content.version_index = nextIndex;
+                this.replaceExactContentAudioMetadata(
+                    exactAudioTracks,
+                    exactAudioLanguages,
+                    resultAudioValidationStatus
+                );
+                this.content.subtitleTracks = exactSubtitleTracks;
+                this.content.subtitle_tracks = exactSubtitleTracks;
+                this.content.subtitleTracksScope = exactSubtitleTracks !== null ? 'file' : null;
+                this.content.subtitle_tracks_scope = exactSubtitleTracks !== null ? 'file' : null;
+                this.captureExactSubtitleTracksFromMetadata(this.content);
+                this.content.cloudPlaybackSessionId = resultSessionId || null;
+                this.content.playbackPreferences = playbackPreferences;
+                this.content.playback_preferences = playbackPreferences;
+                this.setPendingPlaybackPreferences(playbackPreferences);
+                this.selectedAudioStreamIndex = null;
+                this.directAudioStreamIndex = null;
+                this.selectedAudioTrackUserChoice = false;
+                this.containerExtension = nextContainer;
+                handedOff = true;
+                const failoverMetadata = this.playbackMetadataFromResult(result, {
+                    playbackAttemptId,
+                    seekOffset: position,
+                    startOffset: position,
+                    cloudPlaybackSessionId: resultSessionId || null,
+                    playbackPreferences,
+                });
+                this._resumePlaybackMetadata = failoverMetadata;
+                await this.loadVideo(result.url, failoverMetadata);
+            } else {
+                await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            }
+        } catch (err) {
+            console.error('[WatchPage] Failover failed:', err);
+        } finally {
+            if (this._failoverAttemptId === playbackAttemptId) {
+                this._failoverInProgress = false;
+                this._failoverAttemptId = null;
+            }
+        }
+        return handedOff;
+    }
+
+    updateVolumeUI() {
+        const isMuted = this.video?.muted || this.video?.volume === 0;
+        this.muteBtn?.querySelector('.icon-vol')?.classList.toggle('hidden', isMuted);
+        this.muteBtn?.querySelector('.icon-muted')?.classList.toggle('hidden', !isMuted);
+    }
+
+    formatTime(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        if (h > 0) {
+            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    // === Loading Spinner ===
+
+    showLoading() {
+        // The opaque preparation scene belongs to cold startup only. Keeping
+        // the last frame and transport available is essential during a stall,
+        // seek or same-title recovery; never move focus back to the Back button.
+        if (this._firstFrameReported) {
+            if (this._loadingPresentationActive) this.hideLoading({ restoreFocus: false });
+            if (this._rebufferPresentationActive) return;
+            this._rebufferPresentationActive = true;
+            this._rebufferMediaTime = Number(this.video?.currentTime) || 0;
+            this.loadingSpinner?.classList.add('is-rebuffering');
+            this.loadingSpinner?.classList.add('show');
+            this.loadingSpinner?.setAttribute('aria-hidden', 'false');
+            this._loadingArtworkRefresh = () => this.refreshLoadingArtwork();
+            window.addEventListener('online', this._loadingArtworkRefresh);
+            window.addEventListener('offline', this._loadingArtworkRefresh);
+            this.refreshLoadingArtwork();
+            return;
+        }
+        this.loadingSpinner?.classList.add('show');
+        this.centerPlayBtn?.classList.remove('show');
+        const section = this.loadingSpinner?.closest?.('.watch-video-section');
+        if (!section || this._loadingPresentationActive) return;
+        this._loadingPresentationActive = true;
+        section.classList.add('has-playback-loading');
+        this.loadingSpinner.setAttribute('aria-hidden', 'false');
+        this._loadingVideoAriaHidden = this.video?.getAttribute('aria-hidden');
+        this.video?.setAttribute('aria-hidden', 'true');
+        clearTimeout(this.overlayTimeout);
+
+        // Keep the canonical Back button accessible. Hide/inert only transport
+        // UI, not the video itself: display:none would disrupt frame observers.
+        const topBar = this.overlay?.querySelector('.watch-top-bar');
+        const masked = [
+            ...Array.from(section.children).filter(el => el !== this.overlay && el !== this.loadingSpinner && el !== this.video),
+            ...Array.from(this.overlay?.children || []).filter(el => el !== topBar),
+            ...Array.from(topBar?.children || []).filter(el => el !== this.backBtn),
+        ];
+        const focused = document.activeElement;
+        this._loadingMaskedElements = masked.map(el => ({ el, inert: el.inert, ariaHidden: el.getAttribute('aria-hidden') }));
+        this._loadingReturnFocus = masked.some(el => el.contains(focused)) ? focused : null;
+        if (this._loadingReturnFocus) this.backBtn?.focus({ preventScroll: true });
+        masked.forEach(el => { el.inert = true; el.setAttribute('aria-hidden', 'true'); });
+
+        this._loadingMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+        this._loadingArtworkRefresh = () => this.refreshLoadingArtwork();
+        this._loadingMotionQuery?.addEventListener('change', this._loadingArtworkRefresh);
+        document.addEventListener('visibilitychange', this._loadingArtworkRefresh);
+        window.addEventListener('online', this._loadingArtworkRefresh);
+        window.addEventListener('offline', this._loadingArtworkRefresh);
+        navigator.connection?.addEventListener?.('change', this._loadingArtworkRefresh);
+        this.refreshLoadingArtwork();
+    }
+
+    refreshLoadingArtwork() {
+        const offline = navigator.onLine === false;
+        const copy = this._rebufferPresentationActive ? [
+            ['.watch-loading-label', offline ? 'ui_web_4d5c943931a4' : 'ui_watch_buffering', offline ? 'You are offline' : 'Buffering…'],
+        ] : offline ? [
+            ['.watch-loading-label', 'ui_web_4d5c943931a4', 'You are offline'],
+            ['.watch-loading-help', 'ui_watch_preparing_video_offline', 'Check your internet connection to continue preparing your video.'],
+        ] : [
+            ['.watch-loading-label', 'ui_watch_preparing_video', 'Preparing your video'],
+            ['.watch-loading-help', 'ui_watch_preparing_video_help', 'Playback will start automatically when your video is ready.'],
+        ];
+        for (const [selector, key, fallback] of copy) {
+            const element = this.loadingSpinner?.querySelector?.(selector);
+            if (element && element.dataset.i18n !== key) {
+                element.dataset.i18n = key;
+                element.textContent = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
+            }
+        }
+        if (this._rebufferPresentationActive) return;
+        const still = this.loadingSpinner?.querySelector?.('.watch-loading-still');
+        const animation = this.loadingSpinner?.querySelector?.('.watch-loading-animation');
+        const art = this.loadingSpinner?.querySelector?.('.watch-loading-art');
+        if (!still || !animation || !art) return;
+        if (!still.getAttribute('src')) {
+            still.onerror = () => { still.style.visibility = 'hidden'; };
+            still.src = still.dataset.src;
+        }
+        const animate = this._loadingPresentationActive && !document.hidden
+            && !this._loadingMotionQuery?.matches && !navigator.connection?.saveData
+            && !this._loadingArtworkFailed;
+        if (!animate) {
+            animation.onload = null;
+            animation.onerror = null;
+            animation.removeAttribute('src');
+            art.classList.remove('is-animated');
+            return;
+        }
+        if (animation.getAttribute('src')) return;
+        animation.onload = () => {
+            if (this._loadingPresentationActive && animation.getAttribute('src')) art.classList.add('is-animated');
+        };
+        animation.onerror = () => {
+            this._loadingArtworkFailed = true;
+            this.refreshLoadingArtwork();
+        };
+        // Never await artwork: network, decoding and first-frame readiness belong
+        // exclusively to playback. The still/text remain usable on a slow link.
+        animation.src = animation.dataset.src;
+    }
+
+    hideLoading({ restoreFocus = true } = {}) {
+        this.loadingSpinner?.classList.remove('show');
+        this.loadingSpinner?.classList.remove('is-rebuffering');
+        this.loadingSpinner?.setAttribute('aria-hidden', 'true');
+        if (this._rebufferPresentationActive) {
+            this._rebufferPresentationActive = false;
+            this._rebufferMediaTime = null;
+            window.removeEventListener('online', this._loadingArtworkRefresh);
+            window.removeEventListener('offline', this._loadingArtworkRefresh);
+            this._loadingArtworkRefresh = null;
+        }
+        if (!this._loadingPresentationActive) return;
+        this._loadingPresentationActive = false;
+        this.loadingSpinner?.setAttribute('aria-hidden', 'true');
+        this.loadingSpinner?.closest('.watch-video-section')?.classList.remove('has-playback-loading');
+        this._loadingMotionQuery?.removeEventListener('change', this._loadingArtworkRefresh);
+        document.removeEventListener('visibilitychange', this._loadingArtworkRefresh);
+        window.removeEventListener('online', this._loadingArtworkRefresh);
+        window.removeEventListener('offline', this._loadingArtworkRefresh);
+        navigator.connection?.removeEventListener?.('change', this._loadingArtworkRefresh);
+        this.refreshLoadingArtwork();
+        for (const { el, inert, ariaHidden } of this._loadingMaskedElements || []) {
+            el.inert = inert;
+            if (ariaHidden === null) el.removeAttribute('aria-hidden');
+            else el.setAttribute('aria-hidden', ariaHidden);
+        }
+        if (this._loadingVideoAriaHidden == null) this.video?.removeAttribute('aria-hidden');
+        else this.video?.setAttribute('aria-hidden', this._loadingVideoAriaHidden);
+        if (restoreFocus && this._loadingReturnFocus?.isConnected && document.activeElement === this.backBtn) {
+            this.showOverlay();
+            this._loadingReturnFocus.focus({ preventScroll: true });
+        }
+        this._loadingMaskedElements = null;
+        this._loadingReturnFocus = null;
+        this._loadingMotionQuery = null;
+        this._loadingArtworkRefresh = null;
+    }
+
+    // === Audio & Captions ===
+
+    toggleAudioMenu() {
+        if (this.audioMenuOpen) {
+            this.closeAudioMenu();
+        } else {
+            // Engine path: enumerate audio/subtitle languages now (buffer built →
+            // the gateway's second provider connection is survivable). Populates the
+            // gateway-ffprobe audio fallback (e.g. a lone Japanese track the relay
+            // parser missed) and the subtitle list. Best-effort, runs once.
+            if (this.currentPlaybackMode === 'engine') this.enrichEngineSubtitleTracks();
+            this.updateAudioTracks();
+            this.audioMenu?.classList.remove('hidden');
+            this.audioMenuOpen = true;
+            this.closeCaptionsMenu();
+        }
+    }
+
+    closeAudioMenu() {
+        this.audioMenu?.classList.add('hidden');
+        this.audioMenuOpen = false;
+    }
+
+    getNativeAudioTracks() {
+        const tracks = this.video?.audioTracks;
+        if (!tracks || !Number.isFinite(tracks.length) || tracks.length <= 0) return [];
+
+        const items = [];
+        for (let i = 0; i < tracks.length; i++) {
+            const track = tracks[i];
+            items.push({
+                source: 'native',
+                index: i,
+                label: track.label || track.language || `Audio ${i + 1}`,
+                active: Boolean(track.enabled)
+            });
+        }
+        return items;
+    }
+
+    cancelPendingHlsAudioSwitch(result = false) {
+        const pending = this._pendingHlsAudioSwitch;
+        if (!pending) return false;
+
+        this._pendingHlsAudioSwitch = null;
+        clearTimeout(pending.timeoutId);
+        pending.resolve(Boolean(result));
+        return true;
+    }
+
+    resetGatewayAudioRenditions() {
+        this.cancelPendingHlsAudioSwitch(false);
+        this._gatewayAudioRenditionStatus = 'absent';
+        this._gatewayAudioRenditions = [];
+        this._gatewayMultiAudioHls = null;
+        this._gatewayMuxedMonoStreamIndex = null;
+        this._gatewayAudioRenditionAttemptId = null;
+        this._gatewayAudioRenditionRequired = false;
+        this._gatewayHlsAudioTracksReady = false;
+        this._latestHlsAudioSwitch = null;
+        this._pendingGatewayAudioStreamIndex = null;
+    }
+
+    configureGatewayAudioRenditions(rawRenditions, rawMultiAudioHls, codecTracks = [], options = {}) {
+        this.resetGatewayAudioRenditions();
+        this._gatewayAudioRenditionRequired = options.required === true;
+        this._gatewayAudioRenditionAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+
+        const declared = rawRenditions !== null && rawRenditions !== undefined
+            || rawMultiAudioHls !== null && rawMultiAudioHls !== undefined;
+        if (!declared) return false;
+
+        // Gateway v135 explicitly serializes a disabled multi-audio topology for
+        // a genuine muxed-mono MKV: [] renditions plus one exact source track.
+        // Treat that signed shape as the normal mono contract, not as a malformed
+        // rollout. The absolute stream identity remains fail-closed and is used
+        // only to label the already-selected muxed track; it never enables an HLS
+        // switch or a provider-session restart.
+        const codecTrackList = Array.isArray(codecTracks) ? codecTracks : [];
+        const monoCodecStreamIndex = Number(
+            codecTrackList[0]?.index
+                ?? codecTrackList[0]?.streamIndex
+                ?? codecTrackList[0]?.stream_index,
+        );
+        const declaredAudioStreamIndex = Number(options.audioStreamIndex);
+        const disabledMonoContract = Array.isArray(rawRenditions)
+            && rawRenditions.length === 0
+            && codecTrackList.length === 1
+            && Number.isSafeInteger(monoCodecStreamIndex)
+            && monoCodecStreamIndex >= 0
+            && Number.isSafeInteger(declaredAudioStreamIndex)
+            && declaredAudioStreamIndex === monoCodecStreamIndex
+            && rawMultiAudioHls
+            && typeof rawMultiAudioHls === 'object'
+            && Number(rawMultiAudioHls.protocol) === 1
+            && rawMultiAudioHls.enabled === false
+            && String(rawMultiAudioHls.reason || '') === 'audio_track_count_below_minimum'
+            && Number(rawMultiAudioHls.sourceTrackCount ?? rawMultiAudioHls.source_track_count) === 1
+            && Number(rawMultiAudioHls.preparedTrackCount ?? rawMultiAudioHls.prepared_track_count) === 0
+            && (rawMultiAudioHls.defaultHlsIndex ?? rawMultiAudioHls.default_hls_index) == null
+            && (rawMultiAudioHls.defaultStreamIndex ?? rawMultiAudioHls.default_stream_index) == null;
+        if (disabledMonoContract) {
+            this._gatewayMuxedMonoStreamIndex = monoCodecStreamIndex;
+            return false;
+        }
+
+        // A partially rolled-out or malformed multi-audio contract must never
+        // fall back to a relative HLS index or to a session-restarting probe row.
+        this._gatewayAudioRenditionStatus = 'invalid';
+        if (!Array.isArray(rawRenditions) || rawRenditions.length === 0
+            || !rawMultiAudioHls || typeof rawMultiAudioHls !== 'object') {
+            return false;
+        }
+
+        const codecByStreamIndex = new Map();
+        (Array.isArray(codecTracks) ? codecTracks : []).forEach((track) => {
+            const streamIndex = Number(track?.index ?? track?.streamIndex ?? track?.stream_index);
+            if (Number.isSafeInteger(streamIndex) && streamIndex >= 0 && !codecByStreamIndex.has(streamIndex)) {
+                codecByStreamIndex.set(streamIndex, track);
+            }
+        });
+        const verifiedLanguageByStreamIndex = new Map();
+        const exactLanguageVerified = String(options.audioLanguageValidationStatus || '').toLowerCase() === 'verified';
+        if (exactLanguageVerified) {
+            (Array.isArray(options.verifiedTracks) ? options.verifiedTracks : []).forEach((track) => {
+                const streamIndex = Number(track?.index ?? track?.streamIndex ?? track?.stream_index);
+                const language = this.normalizeTrackLanguage(track?.lang ?? track?.language);
+                if (Number.isSafeInteger(streamIndex) && streamIndex >= 0
+                    && language && language !== 'und' && !verifiedLanguageByStreamIndex.has(streamIndex)) {
+                    verifiedLanguageByStreamIndex.set(streamIndex, language);
+                }
+            });
+        }
+
+        const seenStreamIndexes = new Set();
+        const renditions = [];
+        for (let position = 0; position < rawRenditions.length; position += 1) {
+            const raw = rawRenditions[position];
+            const hlsIndex = Number(raw?.hlsIndex ?? raw?.hls_index);
+            const streamIndex = Number(raw?.streamIndex ?? raw?.stream_index);
+            const renditionCodec = String(raw?.codec || '').trim().toLowerCase();
+            const outputChannels = Number(raw?.outputChannels ?? raw?.output_channels);
+            if (!raw || typeof raw !== 'object'
+                || !Number.isSafeInteger(hlsIndex) || hlsIndex !== position
+                || !Number.isSafeInteger(streamIndex) || streamIndex < 0
+                || seenStreamIndexes.has(streamIndex)
+                || renditionCodec !== 'aac'
+                || outputChannels !== 2) {
+                return false;
+            }
+
+            seenStreamIndexes.add(streamIndex);
+            const codecTrack = codecByStreamIndex.get(streamIndex) || null;
+            const sourceChannels = Number(raw.sourceChannels ?? raw.source_channels ?? codecTrack?.channels);
+            const sourceCodec = String(codecTrack?.codec || '').trim().toLowerCase() || null;
+            const verifiedLanguage = verifiedLanguageByStreamIndex.get(streamIndex) || null;
+            renditions.push({
+                ...(codecTrack || {}),
+                index: streamIndex,
+                hlsIndex,
+                streamIndex,
+                // HLS LANGUAGE/NAME and the rendition title are provider tags,
+                // not speech verification. Keep the provider language separate
+                // so it can label the menu when verification is unavailable,
+                // while only an exact-file verified catalogue row may populate
+                // the authoritative `language` field.
+                language: verifiedLanguage,
+                renditionLanguage: this.normalizeTrackLanguage(raw.language),
+                renditionTitle: String(raw.title ?? '').trim() || null,
+                codec: sourceCodec,
+                channels: Number.isFinite(sourceChannels) && sourceChannels > 0 ? sourceChannels : null,
+                renditionCodec,
+                outputChannels,
+            });
+        }
+
+        const defaultHlsIndex = Number(
+            rawMultiAudioHls.defaultHlsIndex ?? rawMultiAudioHls.default_hls_index
+        );
+        const defaultStreamIndex = Number(
+            rawMultiAudioHls.defaultStreamIndex ?? rawMultiAudioHls.default_stream_index
+        );
+        const defaultRendition = renditions.find((entry) => entry.hlsIndex === defaultHlsIndex);
+        if (!Number.isSafeInteger(defaultHlsIndex) || defaultHlsIndex < 0
+            || !Number.isSafeInteger(defaultStreamIndex) || defaultStreamIndex < 0
+            || !defaultRendition || defaultRendition.streamIndex !== defaultStreamIndex) {
+            return false;
+        }
+
+        const actualStreamValue = options.audioStreamIndex;
+        if (actualStreamValue !== null && actualStreamValue !== undefined) {
+            const actualStreamIndex = Number(actualStreamValue);
+            if (!Number.isSafeInteger(actualStreamIndex) || actualStreamIndex !== defaultStreamIndex) {
+                return false;
+            }
+        }
+
+        renditions.forEach((entry) => {
+            entry.default = entry.streamIndex === defaultStreamIndex;
+        });
+        const exactCodecTracks = Array.from(codecByStreamIndex.entries()).map(([streamIndex, track]) => {
+            const verifiedLanguage = verifiedLanguageByStreamIndex.get(streamIndex) || null;
+            return {
+                ...track,
+                index: streamIndex,
+                streamIndex,
+                language: verifiedLanguage,
+                lang: verifiedLanguage,
+                default: streamIndex === defaultStreamIndex,
+            };
+        });
+        const visibleSourceTracks = exactCodecTracks.length >= renditions.length
+            ? exactCodecTracks
+            : renditions;
+        this._gatewayAudioRenditionStatus = 'ready';
+        this._gatewayAudioRenditions = renditions;
+        this._gatewayMultiAudioHls = { defaultHlsIndex, defaultStreamIndex };
+        // Product truth and server capacity are deliberately separate: expose
+        // every exact-file stream to the menu, while only `_gatewayAudioRenditions`
+        // describes the bounded AAC cohort already prepared in this HLS session.
+        this.audioTracks = visibleSourceTracks;
+        if (this.currentStreamInfo && typeof this.currentStreamInfo === 'object') {
+            this.currentStreamInfo = { ...this.currentStreamInfo, audioTracks: visibleSourceTracks };
+        }
+
+        const pendingStreamIndex = Number(
+            this.pendingPlaybackPreferences?.audio?.streamIndex
+                ?? this.pendingPlaybackPreferences?.audio?.stream_index
+        );
+        const selectedStreamIndex = Number(this.selectedAudioStreamIndex);
+        const exactPendingStreamIndex = Number.isSafeInteger(pendingStreamIndex)
+            && renditions.some((entry) => entry.streamIndex === pendingStreamIndex)
+            ? pendingStreamIndex
+            : (this.selectedAudioTrackUserChoice
+                && renditions.some((entry) => entry.streamIndex === selectedStreamIndex)
+                ? selectedStreamIndex
+                : null);
+        this._pendingGatewayAudioStreamIndex = exactPendingStreamIndex !== defaultStreamIndex
+            ? exactPendingStreamIndex
+            : null;
+        // The selected/direct fields always describe confirmed playback. A saved
+        // preference is only promoted after AUDIO_TRACK_SWITCHED proves it.
+        this.selectedAudioStreamIndex = defaultStreamIndex;
+        this.selectedAudioTrackUserChoice = false;
+        this.directAudioStreamIndex = defaultStreamIndex;
+        this.updateAudioTracks();
+        return true;
+    }
+
+    getValidatedGatewayAudioRenditions(activeHls = this.hls) {
+        if (this._gatewayAudioRenditionStatus !== 'ready'
+            || !activeHls || activeHls !== this.hls
+            || this._gatewayAudioRenditionAttemptId !== this._playbackAttemptId
+            || !this._gatewayHlsAudioTracksReady) {
+            return null;
+        }
+
+        const hlsTracks = activeHls.audioTracks;
+        const renditions = this._gatewayAudioRenditions;
+        if (!Array.isArray(hlsTracks) || !Array.isArray(renditions)
+            || hlsTracks.length === 0 || renditions.length === 0
+            || hlsTracks.length !== renditions.length) {
+            return null;
+        }
+
+        for (let index = 0; index < renditions.length; index += 1) {
+            const rendition = renditions[index];
+            const hlsTrack = hlsTracks[index];
+            if (!hlsTrack || rendition.hlsIndex !== index) return null;
+            const advertisedId = Number(hlsTrack.id);
+            if (Number.isSafeInteger(advertisedId) && advertisedId !== rendition.hlsIndex) return null;
+        }
+        return renditions;
+    }
+
+    isGatewayAudioRenditionFailClosed() {
+        const isGatewayContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (!isGatewayContext) return false;
+        if (this._gatewayAudioRenditionStatus === 'invalid') return true;
+        if (this._gatewayAudioRenditionStatus === 'ready') {
+            return !this.getValidatedGatewayAudioRenditions();
+        }
+
+        // Legacy Gateway mono-audio remains available only after hls.js has
+        // positively reported exactly one track. Zero/unknown or multiple tracks
+        // without an absolute map are intentionally non-selectable.
+        const hlsTracks = this.hls?.audioTracks;
+        if (!this._gatewayHlsAudioTracksReady
+            || !Array.isArray(hlsTracks)
+            || hlsTracks.length !== 1) {
+            return true;
+        }
+        const advertisedId = hlsTracks[0]?.id;
+        if (advertisedId === null || advertisedId === undefined) return false;
+        const parsedId = Number(advertisedId);
+        return !Number.isSafeInteger(parsedId) || parsedId !== 0;
+    }
+
+    getVerifiedGatewayMuxedMonoAudioTrack(activeHls = this.hls) {
+        if (this._gatewayAudioRenditionStatus !== 'absent'
+            || this._gatewayAudioRenditionRequired !== true
+            || this.currentPlaybackMode !== 'gateway-session'
+            || !activeHls || activeHls !== this.hls
+            || this._gatewayAudioRenditionAttemptId !== this._playbackAttemptId
+            || !this._gatewayHlsAudioTracksReady
+            || this._pendingGatewayAudioStreamIndex !== null) {
+            return null;
+        }
+
+        const video = this.video;
+        const readyState = Number(video?.readyState);
+        const videoWidth = Number(video?.videoWidth);
+        const videoHeight = Number(video?.videoHeight);
+        const contractStreamIndex = Number(this._gatewayMuxedMonoStreamIndex);
+        const hasExactDisabledMonoContract = this._gatewayMuxedMonoStreamIndex !== null
+            && this._gatewayMuxedMonoStreamIndex !== undefined
+            && Number.isSafeInteger(contractStreamIndex)
+            && contractStreamIndex >= 0;
+        if (!hasExactDisabledMonoContract && (!video || video.error
+            || !Number.isFinite(readyState) || readyState < 3
+            || !Number.isFinite(videoWidth) || videoWidth <= 0
+            || !Number.isFinite(videoHeight) || videoHeight <= 0)) {
+            return null;
+        }
+
+        // A mono rendition may be muxed into the only video playlist. hls.js then
+        // positively reports zero alternate audio tracks. Accept that UI-only case
+        // (and the existing single alternate-track form) without weakening the
+        // fail-closed topology used by preference restoration or HLS switching.
+        const hlsTracks = activeHls.audioTracks;
+        if (!Array.isArray(hlsTracks) || hlsTracks.length > 1) return null;
+        if (hlsTracks.length === 1) {
+            const rawAdvertisedId = hlsTracks[0]?.id;
+            if (rawAdvertisedId !== null && rawAdvertisedId !== undefined) {
+                const advertisedId = Number(rawAdvertisedId);
+                if (!Number.isSafeInteger(advertisedId) || advertisedId !== 0) return null;
+            }
+        }
+
+        const scope = String(
+            this.content?.audioTracksScope || this.content?.audio_tracks_scope || '',
+        ).toLowerCase();
+        const validationStatus = String(
+            this.content?.audioLanguageValidationStatus
+                || this.content?.audio_language_validation_status
+                || '',
+        ).toLowerCase();
+        const playbackValidationStatus = String(this.audioLanguageValidationStatus || '').toLowerCase();
+        if (scope !== 'file' || validationStatus !== 'verified'
+            || playbackValidationStatus !== 'verified') {
+            return null;
+        }
+
+        const exactIndex = (value) => {
+            if (typeof value !== 'number'
+                && !(typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value))) {
+                return null;
+            }
+            const parsed = Number(value);
+            return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+        };
+        const rawVerifiedTracks = this.content?.audioTracks || this.content?.audio_tracks;
+        const verifiedTracks = this.getContentAudioTracks();
+        const probeTracks = Array.isArray(this.audioTracks) ? this.audioTracks : [];
+        if (!Array.isArray(rawVerifiedTracks) || rawVerifiedTracks.length !== 1
+            || exactIndex(rawVerifiedTracks[0]?.index) === null
+            || verifiedTracks.length !== 1 || probeTracks.length !== 1) {
+            return null;
+        }
+
+        const verifiedTrack = verifiedTracks[0];
+        const probeTrack = probeTracks[0];
+        const streamIndex = exactIndex(verifiedTrack.index);
+        const probeStreamIndex = exactIndex(probeTrack?.index);
+        const directStreamIndex = exactIndex(this.directAudioStreamIndex);
+        const selectedStreamIndex = exactIndex(this.selectedAudioStreamIndex);
+        const verifiedLanguage = this.normalizeTrackLanguage(verifiedTrack.lang);
+        const probeLanguage = this.normalizeTrackLanguage(probeTrack?.language ?? probeTrack?.lang);
+        if (streamIndex === null
+            || probeStreamIndex !== streamIndex
+            || !verifiedLanguage || verifiedLanguage === 'und'
+            || probeLanguage !== verifiedLanguage
+            || directStreamIndex !== streamIndex
+            || selectedStreamIndex !== streamIndex
+            || (hasExactDisabledMonoContract && contractStreamIndex !== streamIndex)) {
+            return null;
+        }
+
+        const displayLanguage = this.getLanguageDisplayName(verifiedLanguage);
+        if (!displayLanguage) return null;
+
+        return {
+            source: 'gateway-muxed-mono',
+            index: 0,
+            streamIndex,
+            label: displayLanguage,
+            language: verifiedLanguage,
+            active: true,
+        };
+    }
+
+    getInformationalGatewayMuxedMonoAudioTrack(activeHls = this.hls) {
+        if (this._gatewayAudioRenditionStatus !== 'absent'
+            || this._gatewayAudioRenditionRequired !== true
+            || this.currentPlaybackMode !== 'gateway-session'
+            || !activeHls || activeHls !== this.hls
+            || this._gatewayAudioRenditionAttemptId !== this._playbackAttemptId
+            || !this._gatewayHlsAudioTracksReady
+            || this._pendingGatewayAudioStreamIndex !== null) {
+            return null;
+        }
+
+        const video = this.video;
+        const readyState = Number(video?.readyState);
+        const videoWidth = Number(video?.videoWidth);
+        const videoHeight = Number(video?.videoHeight);
+        const contractStreamIndex = Number(this._gatewayMuxedMonoStreamIndex);
+        const hasExactDisabledMonoContract = this._gatewayMuxedMonoStreamIndex !== null
+            && this._gatewayMuxedMonoStreamIndex !== undefined
+            && Number.isSafeInteger(contractStreamIndex)
+            && contractStreamIndex >= 0;
+        if (!hasExactDisabledMonoContract && (!video || video.error
+            || !Number.isFinite(readyState) || readyState < 3
+            || !Number.isFinite(videoWidth) || videoWidth <= 0
+            || !Number.isFinite(videoHeight) || videoHeight <= 0)) {
+            return null;
+        }
+
+        // The current Hls instance has positively enumerated no alternate audio
+        // rendition (or the legacy single id=0 form), while the exact Gateway
+        // profile describes one muxed source track. This is display-only: keep
+        // source=none so an unverified/provider label can never restart playback
+        // or become an authority for HLS track switching.
+        const hlsTracks = activeHls.audioTracks;
+        if (!Array.isArray(hlsTracks) || hlsTracks.length > 1) return null;
+        if (hlsTracks.length === 1) {
+            const rawAdvertisedId = hlsTracks[0]?.id;
+            if (rawAdvertisedId !== null && rawAdvertisedId !== undefined) {
+                const advertisedId = Number(rawAdvertisedId);
+                if (!Number.isSafeInteger(advertisedId) || advertisedId !== 0) return null;
+            }
+        }
+
+        const probeTracks = this.getProbeAudioTracks();
+        const rawTracks = Array.isArray(this.audioTracks) ? this.audioTracks : [];
+        if (probeTracks.length !== 1 || rawTracks.length !== 1) return null;
+
+        const streamIndex = Number(rawTracks[0]?.index);
+        if (!Number.isSafeInteger(streamIndex) || streamIndex < 0
+            || Number(this.directAudioStreamIndex) !== streamIndex
+            || Number(this.selectedAudioStreamIndex) !== streamIndex
+            || (hasExactDisabledMonoContract && contractStreamIndex !== streamIndex)) {
+            return null;
+        }
+
+        return {
+            source: 'none',
+            index: -1,
+            label: probeTracks[0].label || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'),
+            active: true,
+        };
+    }
+
+    getGatewayAudioRenditionLabel(track, index, allTracks) {
+        const buildBase = (candidate, fallbackIndex) => {
+            const parts = [];
+            // Exact speech/file verification wins. If it has not run yet, the
+            // HLS LANGUAGE tag is still useful presentation metadata and avoids
+            // showing "Unknown language" for correctly tagged provider tracks.
+            // It deliberately stays out of `track.language`, so preferences and
+            // playback decisions never mistake provider metadata for verification.
+            const language = this.getLanguageDisplayName(
+                candidate?.language || candidate?.renditionLanguage,
+            );
+            parts.push(language || (globalThis.NorvaI18n?.t("ui_web_1315cf5d5d8a", { defaultValue: "Unknown language" }) ?? 'Unknown language'));
+            const codec = candidate?.codec || candidate?.renditionCodec;
+            if (codec) parts.push(String(codec).toUpperCase());
+            const channels = Number(candidate?.channels ?? candidate?.outputChannels);
+            if (Number.isFinite(channels) && channels > 0) parts.push(`${channels}ch`);
+            return parts.length ? parts.join(' - ') : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_00d0b35b71f0", {defaultValue: "Audio {{p0}}", p0:(fallbackIndex + 1)}) : `Audio ${fallbackIndex + 1}`);
+        };
+
+        const tracks = Array.isArray(allTracks) ? allTracks : [];
+        const base = buildBase(track, index);
+        const bases = tracks.map((candidate, candidateIndex) => buildBase(candidate, candidateIndex));
+        const duplicateCount = bases.filter((candidate) => candidate === base).length;
+        if (duplicateCount <= 1) return base;
+        const occurrence = bases.slice(0, index + 1).filter((candidate) => candidate === base).length;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4e4404ed9769", {defaultValue: "{{p0}} - Track {{p1}}", p0:(base),p1:(occurrence)}) : `${base} - Track ${occurrence}`);
+    }
+
+    handleGatewayHlsAudioTrackSwitched(activeHls, playbackAttemptId, data = {}) {
+        const pending = this._pendingHlsAudioSwitch;
+        if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) {
+            if (pending?.hls === activeHls) {
+                if (this._latestHlsAudioSwitch?.hls === activeHls) {
+                    this._latestHlsAudioSwitch.acceptEvents = false;
+                }
+                this.cancelPendingHlsAudioSwitch(false);
+            }
+            return false;
+        }
+
+        const renditions = this.getValidatedGatewayAudioRenditions(activeHls);
+        const hlsIndex = Number(data.id ?? data.audioTrack ?? data.index ?? activeHls.audioTrack);
+        const rendition = Number.isSafeInteger(hlsIndex)
+            ? renditions?.find((entry) => entry.hlsIndex === hlsIndex)
+            : null;
+        if (!rendition) {
+            if (pending?.hls === activeHls) {
+                if (this._latestHlsAudioSwitch?.hls === activeHls) {
+                    this._latestHlsAudioSwitch.acceptEvents = false;
+                }
+                this.cancelPendingHlsAudioSwitch(false);
+            }
+            this.updateAudioTracks();
+            return false;
+        }
+
+        if (pending) {
+            if (pending.hls !== activeHls
+                || pending.playbackAttemptId !== playbackAttemptId
+                || pending.hlsIndex !== hlsIndex
+                || pending.streamIndex !== rendition.streamIndex) {
+                return false;
+            }
+            this.directAudioStreamIndex = rendition.streamIndex;
+            this.selectedAudioStreamIndex = rendition.streamIndex;
+            this.selectedAudioTrackUserChoice = true;
+            if (this._pendingGatewayAudioStreamIndex === rendition.streamIndex) {
+                this._pendingGatewayAudioStreamIndex = null;
+            }
+            this.clearPendingPreference('audio');
+            this.setSelectedAudioPreference(rendition);
+            this.cancelPendingHlsAudioSwitch(true);
+            this.closeAudioMenu();
+        } else {
+            const latest = this._latestHlsAudioSwitch;
+            if (latest?.hls === activeHls && latest.playbackAttemptId === playbackAttemptId
+                && (!latest.acceptEvents || latest.hlsIndex !== hlsIndex
+                    || latest.streamIndex !== rendition.streamIndex)) {
+                return false;
+            }
+            this.directAudioStreamIndex = rendition.streamIndex;
+            if (!this.selectedAudioTrackUserChoice
+                || !renditions.some((entry) => entry.streamIndex === Number(this.selectedAudioStreamIndex))) {
+                this.selectedAudioStreamIndex = rendition.streamIndex;
+                this.selectedAudioTrackUserChoice = false;
+            }
+        }
+        this.updateAudioTracks();
+        return true;
+    }
+
+    selectGatewayHlsAudioTrack(hlsIndex, streamIndex) {
+        const activeHls = this.hls;
+        const playbackAttemptId = this._playbackAttemptId;
+        const renditions = this.getValidatedGatewayAudioRenditions(activeHls);
+        const rendition = renditions?.find((entry) => entry.hlsIndex === hlsIndex);
+        if (!rendition || rendition.streamIndex !== streamIndex) {
+            if (this._latestHlsAudioSwitch) this._latestHlsAudioSwitch.acceptEvents = false;
+            this.cancelPendingHlsAudioSwitch(false);
+            return Promise.resolve(false);
+        }
+
+        if (activeHls.audioTrack === hlsIndex
+            && Number(this.selectedAudioStreamIndex) === streamIndex
+            && Number(this.directAudioStreamIndex) === streamIndex) {
+            this.closeAudioMenu();
+            return Promise.resolve(true);
+        }
+
+        this.cancelPendingHlsAudioSwitch(false);
+        let resolveSwitch;
+        const switchPromise = new Promise((resolve) => { resolveSwitch = resolve; });
+        const timeoutId = setTimeout(() => {
+            if (this._pendingHlsAudioSwitch?.hls === activeHls
+                && this._pendingHlsAudioSwitch?.hlsIndex === hlsIndex) {
+                console.warn('[WatchPage] HLS audio switch was not confirmed; keeping the prior absolute track.');
+                if (this._latestHlsAudioSwitch?.hls === activeHls
+                    && this._latestHlsAudioSwitch?.hlsIndex === hlsIndex) {
+                    this._latestHlsAudioSwitch.acceptEvents = false;
+                }
+                this.cancelPendingHlsAudioSwitch(false);
+                this.updateAudioTracks();
+            }
+        }, 8000);
+        this._pendingHlsAudioSwitch = {
+            hls: activeHls,
+            playbackAttemptId,
+            hlsIndex,
+            streamIndex,
+            timeoutId,
+            resolve: resolveSwitch,
+        };
+        this._latestHlsAudioSwitch = {
+            hls: activeHls,
+            playbackAttemptId,
+            hlsIndex,
+            streamIndex,
+            acceptEvents: true,
+        };
+
+        try {
+            activeHls.audioTrack = hlsIndex;
+        } catch (error) {
+            console.warn('[WatchPage] Could not request the HLS audio track:', error?.message || error);
+            this._latestHlsAudioSwitch.acceptEvents = false;
+            this.cancelPendingHlsAudioSwitch(false);
+        }
+        return switchPromise;
+    }
+
+    getHlsAudioTracks() {
+        const tracks = this.hls?.audioTracks;
+        if (!Array.isArray(tracks) || tracks.length <= 0) return [];
+
+        const isGatewayContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (isGatewayContext) {
+            if (this._gatewayAudioRenditionStatus === 'ready') {
+                const renditions = this.getValidatedGatewayAudioRenditions();
+                if (!renditions) return [];
+                return renditions.map((track) => ({
+                    source: 'hls',
+                    index: track.hlsIndex,
+                    streamIndex: track.streamIndex,
+                    label: this.getGatewayAudioRenditionLabel(track, track.hlsIndex, renditions),
+                    language: track.language,
+                    codec: track.codec || track.renditionCodec || null,
+                    active: this.hls.audioTrack === track.hlsIndex
+                        && Number(this.directAudioStreamIndex) === track.streamIndex,
+                }));
+            }
+            if (this._gatewayAudioRenditionStatus === 'invalid'
+                || !this._gatewayHlsAudioTracksReady
+                || tracks.length !== 1) {
+                return [];
+            }
+        }
+
+        return tracks.map((track, index) => ({
+            source: 'hls',
+            index,
+            ...(Number.isInteger(this.hlsTrackSourceStreamIndex(track))
+                ? { streamIndex: this.hlsTrackSourceStreamIndex(track) }
+                : {}),
+            label: track.name || track.lang || `Audio ${index + 1}`,
+            language: track.lang || track.language || null,
+            codec: track.codec || track.audioCodec || null,
+            active: this.hls.audioTrack === index
+        }));
+    }
+
+    buildPendingAudioTracks(rawTracks = []) {
+        const languageKnown = this.isAudioLanguageKnown();
+        const normalized = (Array.isArray(rawTracks) ? rawTracks : [])
+            .map((track) => {
+                const streamIndex = Number(track?.streamIndex ?? track?.stream_index ?? track?.index);
+                if (!Number.isSafeInteger(streamIndex) || streamIndex < 0) return null;
+                const language = languageKnown
+                    ? this.normalizeTrackLanguage(track?.language || track?.lang)
+                    : null;
+                return {
+                    ...(track && typeof track === 'object' ? track : {}),
+                    streamIndex,
+                    language: language && language !== 'und' ? language : null,
+                };
+            })
+            .filter(Boolean);
+
+        return normalized.map((track, index) => ({
+            source: 'none',
+            index: -1,
+            streamIndex: track.streamIndex,
+            label: this.getGatewayAudioRenditionLabel(track, index, normalized),
+            language: track.language,
+            codec: track.codec || track.renditionCodec || null,
+            active: false,
+            pending: true,
+        }));
+    }
+
+    getPendingContentAudioTracks() {
+        const exactTracks = this.getContentAudioTracks();
+        if (!exactTracks.length) return [];
+        const rawTracks = Array.isArray(this.content?.audioTracks)
+            ? this.content.audioTracks
+            : (Array.isArray(this.content?.audio_tracks) ? this.content.audio_tracks : []);
+        const rawByStreamIndex = new Map();
+        rawTracks.forEach((track) => {
+            const streamIndex = Number(track?.index ?? track?.streamIndex ?? track?.stream_index);
+            if (Number.isSafeInteger(streamIndex) && streamIndex >= 0 && !rawByStreamIndex.has(streamIndex)) {
+                rawByStreamIndex.set(streamIndex, track);
+            }
+        });
+        return this.buildPendingAudioTracks(exactTracks.map((track) => ({
+            ...(rawByStreamIndex.get(track.index) || {}),
+            index: track.index,
+            streamIndex: track.index,
+            language: track.lang,
+            lang: track.lang,
+        })));
+    }
+
+    getPendingGatewayAudioTracks() {
+        const isGatewayContext = this._gatewayAudioRenditionRequired
+            || this.currentPlaybackMode === 'gateway-session';
+        if (!isGatewayContext
+            || this._gatewayAudioRenditionStatus === 'invalid'
+            || this._gatewayHlsAudioTracksReady) {
+            return [];
+        }
+
+        if (this._gatewayAudioRenditionStatus === 'ready'
+            && Array.isArray(this._gatewayAudioRenditions)
+            && this._gatewayAudioRenditions.length) {
+            return this.buildPendingAudioTracks(this._gatewayAudioRenditions);
+        }
+
+        const exactTracks = this.getPendingContentAudioTracks();
+        if (exactTracks.length) return exactTracks;
+        return [{
+            source: 'none',
+            index: -1,
+            label: (globalThis.NorvaI18n?.t("ui_web_64465840f383", { defaultValue: "Audio tracks loading" }) ?? 'Audio tracks loading'),
+            active: false,
+            pending: true,
+        }];
+    }
+
+    getProbeAudioTracks() {
+        if (!Array.isArray(this.audioTracks) || !this.audioTracks.length) return [];
+        const selected = this.getSelectedAudioTrack();
+
+        return this.audioTracks.map((track, index) => ({
+            source: 'probe',
+            index,
+            streamIndex: track.index,
+            label: this.getTrackLabel(
+                track,
+                this.audioTracks.length === 1 ? (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track') : `Audio track ${index + 1}`,
+                'audio'
+            ),
+            active: Number(track.index) === Number(selected?.index)
+        }));
+    }
+
+    // Provider track metadata (get_vod_info via the relay) for cloud playback.
+    // Display-only: it enriches the single audio entry's label to match what
+    // native players show ("English · AAC · Stereo · 128 kbps"); it never makes the
+    // entry a switchable 'probe' track, so it can't restart or break playback.
+    // Ordered per-track audio map precomputed by the crawl and served on content
+    // (audioTracks = [{index, lang|null}, ...] in absolute-stream order). Present → the
+    // player labels every track with ZERO playback-time probe.
+    getContentAudioTracks() {
+        const scope = String(this.content?.audioTracksScope || this.content?.audio_tracks_scope || '').toLowerCase();
+        const variantCount = Number(
+            this.content?.variantCount ||
+            this.content?.variant_count ||
+            this.content?.versions?.length ||
+            1
+        );
+        // On grouped titles, an unscoped map may belong to a sibling file.
+        // Only a file-scoped map (or a truly single-version title) is safe.
+        if (scope !== 'file' && variantCount > 1) return [];
+        const raw = this.content?.audioTracks || this.content?.audio_tracks;
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .map((t) => ({
+                index: Number(t?.index),
+                lang: this.normalizeTrackLanguage(t?.lang || t?.language) || null
+            }))
+            .filter((t) => Number.isInteger(t.index));
+    }
+
+    replaceExactContentAudioMetadata(rawTracks, rawLanguages = [], validationStatus = 'pending') {
+        if (!this.content) return null;
+        const normalizedValidation = String(validationStatus || 'pending').toLowerCase();
+        const languageKnown = ['verified', 'verified_union', 'probed', 'probed_union']
+            .includes(normalizedValidation);
+        const hasExactTracks = Array.isArray(rawTracks);
+        const tracks = hasExactTracks
+            ? rawTracks.map((track) => {
+                const index = Number(track?.index);
+                const language = this.normalizeTrackLanguage(track?.lang || track?.language);
+                return {
+                    ...(track && typeof track === 'object' ? track : {}),
+                    index,
+                    lang: languageKnown && language && language !== 'und' ? language : null,
+                    language: languageKnown && language && language !== 'und' ? language : null,
+                };
+            }).filter((track) => Number.isInteger(track.index))
+            : null;
+        const languages = hasExactTracks && languageKnown
+            ? Array.from(new Set([
+                ...(Array.isArray(rawLanguages) ? rawLanguages : []),
+                ...tracks.map((track) => track.lang),
+            ].map((language) => this.normalizeTrackLanguage(language))
+                .filter((language) => language && language !== 'und')))
+            : null;
+        const scope = hasExactTracks ? 'file' : null;
+
+        this.content.audioTracks = tracks;
+        this.content.audio_tracks = tracks;
+        this.content.audioTracksScope = scope;
+        this.content.audio_tracks_scope = scope;
+        this.content.audioLanguages = languages;
+        this.content.audio_languages = languages;
+        this.content.audioLanguageValidationStatus = normalizedValidation;
+        this.content.audio_language_validation_status = normalizedValidation;
+        this.audioLanguageValidationStatus = normalizedValidation;
+        return tracks;
+    }
+
+    async enrichCloudPlaybackTracks(playbackUrl) {
+        try {
+            const playbackAttemptId = this._playbackAttemptId;
+            const contentAtStart = this.content;
+            const itemIdAtStart = String(contentAtStart?.externalId || contentAtStart?.id || '');
+            const sourceIdAtStart = String(contentAtStart?.cloudSourceId || contentAtStart?.sourceId || '');
+            const isStaleEnrichment = () => this.isStalePlaybackAttempt(playbackAttemptId)
+                || this.content !== contentAtStart
+                || String(this.content?.externalId || this.content?.id || '') !== itemIdAtStart
+                || String(this.content?.cloudSourceId || this.content?.sourceId || '') !== sourceIdAtStart;
+            // Robust path: a precomputed ordered map on content means real language names
+            // with NO provider hit at playback (no probe to contend with the stream, no
+            // latency). Reuse applyCloudMultiAudioTracks so the engine/direct wiring is
+            // identical to the live-probe path — only the source of the data differs.
+            const pre = this.getContentAudioTracks();
+            if (pre.length) {
+                this.replaceExactContentAudioMetadata(
+                    pre,
+                    this.content?.audioLanguages || this.content?.audio_languages || [],
+                    this.content?.audioLanguageValidationStatus ||
+                        this.content?.audio_language_validation_status ||
+                        'pending'
+                );
+                this.applyCloudMultiAudioTracks({ audioTracks: pre });
+                this.updateAudioTracks();
+                return;
+            }
+            if (!playbackUrl || typeof fetch !== 'function') return;
+            const m = /^(https?:\/\/[^/]+)\/relay\/(.+)$/.exec(String(playbackUrl));
+            if (!m) return;
+            const host = m[1], token = m[2];
+            // No precomputed map (we early-returned above if we had one), so probe the file's
+            // real audio tracks at play time — UNGATED. The old contentLooksMultiAudio() gate
+            // meant a single-/unknown-language file was NEVER probed and fell to a bare
+            // "Default" menu; since the precompute crawl only reaches a few % of the catalogue,
+            // that was nearly every title. Probing here gives the real language (e.g. Persian)
+            // for whatever the user actually watches, 24h-cached relay-side, and the result is
+            // reported back to populate the shared cache for next time / other users.
+            const infoP = fetch(`${host}/vod-info/${token}`, { cache: 'no-store' })
+                .then(r => (r.ok ? r.json() : null)).catch(() => null);
+            const probeP = fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
+                .then(r => (r.ok ? r.json() : null)).catch(() => null);
+            const [data, probe] = await Promise.all([infoP, probeP]);
+            if (isStaleEnrichment()) return;
+            if (data) {
+                this.cloudAudioInfo = (Array.isArray(data.audioTracks) && data.audioTracks[0]) || null;
+                if (data.duration && !this.probeDuration) {
+                    this.probeDuration = this.normalizeDuration(data.duration);
+                    this.updateDurationState();
+                }
+            }
+            const hasExactProbe = Array.isArray(probe?.audioTracks) || Array.isArray(probe?.audioLanguages);
+            if (hasExactProbe) {
+                const exactTracks = this.replaceExactContentAudioMetadata(
+                    Array.isArray(probe?.audioTracks) ? probe.audioTracks : [],
+                    Array.isArray(probe?.audioLanguages) ? probe.audioLanguages : [],
+                    probe?.audioLanguageValidationStatus ||
+                        probe?.audio_language_validation_status ||
+                        'pending'
+                );
+                this.applyCloudMultiAudioTracks({ ...probe, audioTracks: exactTracks || [] });
+            }
+            this.updateAudioTracks();
+            this.reportObservedAudioLanguages();
+        } catch (_) { /* best-effort enrichment */ }
+    }
+
+    // True when the title is known to carry multiple audio languages (so the extra
+    // container probe to enumerate switchable per-track entries is worthwhile).
+    contentLooksMultiAudio() {
+        const a = this.content?.audioLanguages || this.content?.audio_languages;
+        if (Array.isArray(a) && a.length >= 2) return true;
+        const v = this.content?.versionLanguages || this.content?.version_languages;
+        return Array.isArray(v) && v.some(t => /^multi$/i.test(String(t)));
+    }
+
+    repairAudioPreferenceFromExactTracks(exactTracks) {
+        const tracks = Array.isArray(exactTracks)
+            ? exactTracks.filter(track => Number.isInteger(Number(track?.index)))
+            : [];
+        if (!tracks.length) return false;
+
+        const repair = (preferences) => {
+            const normalized = this.normalizePlaybackPreferences(preferences);
+            const audio = normalized?.audio;
+            if (!audio) return normalized;
+
+            const streamIndex = Number(audio.streamIndex ?? audio.stream_index);
+            const savedLanguage = this.normalizeTrackLanguage(audio.language || audio.lang);
+            let exact = Number.isInteger(streamIndex)
+                ? tracks.find(track => Number(track.index) === streamIndex)
+                : null;
+            if (!exact && savedLanguage && savedLanguage !== 'und') {
+                exact = tracks.find(track =>
+                    this.normalizeTrackLanguage(track.lang || track.language) === savedLanguage
+                );
+            }
+            // A single exact file track is also an unambiguous fallback for an old
+            // preference that carried only a now-invalid language label.
+            if (!exact && tracks.length === 1) exact = tracks[0];
+            if (!exact) return normalized;
+
+            const language = this.normalizeTrackLanguage(exact.lang || exact.language);
+            const correctedAudio = {
+                ...audio,
+                source: 'probe',
+                streamIndex: Number(exact.index),
+            };
+            delete correctedAudio.stream_index;
+            if (language && language !== 'und') {
+                correctedAudio.language = language;
+                correctedAudio.label = this.getLanguageDisplayName(language) || language.toUpperCase();
+            } else {
+                delete correctedAudio.language;
+                delete correctedAudio.lang;
+                delete correctedAudio.label;
+            }
+            return { ...normalized, audio: correctedAudio };
+        };
+
+        let changed = false;
+        const beforePending = JSON.stringify(this.pendingPlaybackPreferences || null);
+        const repairedPending = repair(this.pendingPlaybackPreferences);
+        if (repairedPending) this.pendingPlaybackPreferences = repairedPending;
+        changed = beforePending !== JSON.stringify(this.pendingPlaybackPreferences || null);
+
+        if (this.content) {
+            const stored = this.content.playbackPreferences || this.content.playback_preferences || null;
+            const repairedStored = repair(stored);
+            if (repairedStored) {
+                const beforeStored = JSON.stringify(stored);
+                this.content.playbackPreferences = repairedStored;
+                this.content.playback_preferences = repairedStored;
+                changed = changed || beforeStored !== JSON.stringify(repairedStored);
+            }
+        }
+        return changed;
+    }
+
+    // Populate this.audioTracks from the relay's ordered per-track probe so a
+    // direct-play MULTI file shows real, switchable language tracks (not just "Multi").
+    // Each track carries the ABSOLUTE ffmpeg stream index, so selecting a non-default
+    // language restarts via the gateway with the correct -map. The default track keeps
+    // playing zero-egress until the user picks another. A single exact track is still
+    // materialized so an old title/preference label cannot overwrite its real language.
+    applyCloudMultiAudioTracks(probe) {
+        const raw = Array.isArray(probe?.audioTracks) ? probe.audioTracks : [];
+        // Raw ORDERED tracks (audio-relative) kept for the engine path, which maps
+        // them to its demuxed streams by index (and falls back to position).
+        this._relayAudioTracks = raw
+            .map((t) => {
+                const language = this.normalizeTrackLanguage(t?.lang || t?.language);
+                return {
+                    index: Number(t?.index),
+                    lang: language && language !== 'und' ? language : null
+                };
+            })
+            .filter((track) => Number.isInteger(track.index));
+        this.repairAudioPreferenceFromExactTracks(this._relayAudioTracks);
+
+        // index -> exact language from the relay probe (including null/unknown).
+        // Presence matters: an exact unknown must clear a stale sibling/title label
+        // instead of silently preserving it.
+        const exactByIdx = new Map();
+        for (const t of this._relayAudioTracks) {
+            if (!exactByIdx.has(t.index)) exactByIdx.set(t.index, t.lang);
+        }
+        const exactLanguage = (track, position) => {
+            const index = Number(track?.index);
+            if (Number.isInteger(index) && exactByIdx.has(index)) return exactByIdx.get(index);
+            return position < this._relayAudioTracks.length
+                ? this._relayAudioTracks[position].lang
+                : undefined;
+        };
+        // A track object may come from an older codec/title profile. Its display
+        // fields are not safe to merge into an exact-file probe: keeping a stale
+        // `title: "French"` while replacing only `language` would render
+        // "French - English" (or still "French" when the exact language is unknown).
+        // Preserve only transport/codec facts that remain useful to playback.
+        const technicalTrackMetadata = (track) => {
+            const safe = {};
+            [
+                'index', 'order', 'codec', 'profile', 'channels',
+                'channelLayout', 'channel_layout',
+                'sampleRate', 'sample_rate',
+                'bitRate', 'bit_rate',
+                'default'
+            ].forEach((key) => {
+                if (track?.[key] !== undefined) safe[key] = track[key];
+            });
+            return safe;
+        };
+        const reconcileTrackList = (tracks) => tracks.map((track, position) => {
+            const language = exactLanguage(track, position);
+            if (language === undefined) return track;
+            return {
+                ...technicalTrackMetadata(track),
+                language: language || null,
+                lang: language || null
+            };
+        });
+
+        if (Array.isArray(this.currentStreamInfo?.audioTracks)) {
+            this.currentStreamInfo = {
+                ...this.currentStreamInfo,
+                audioTracks: reconcileTrackList(this.currentStreamInfo.audioTracks)
+            };
+        }
+        // Engine mode owns the track LIST (every demuxed stream); the relay only
+        // supplies the exact language labels, merged in by absolute stream index.
+        if (this.currentPlaybackMode === 'engine' && Array.isArray(this.audioTracks) && this.audioTracks.length) {
+            this.audioTracks = reconcileTrackList(this.audioTracks);
+            this.updateAudioTracks();
+            return;
+        }
+        // Direct/Gateway play: materialize EVERY exact file track. Two tracks can
+        // legitimately share a language (commentary, stereo/5.1, descriptive
+        // audio), and an untagged track is still a real selectable stream. Hiding
+        // either would make the audio menu disagree with the exact ffprobe map.
+        const rawByIdx = new Map();
+        for (const track of raw) {
+            const index = Number(track?.index);
+            if (Number.isInteger(index) && !rawByIdx.has(index)) rawByIdx.set(index, track);
+        }
+        const usable = Array.from(exactByIdx, ([index, language]) => ({
+            index,
+            language: language || null
+        }));
+        if (!usable.length) {
+            if (Array.isArray(this.audioTracks) && this.audioTracks.length) {
+                this.audioTracks = reconcileTrackList(this.audioTracks);
+            }
+            return;
+        }
+        const declaredDefaultIndex = Number(
+            raw.find((track) => track?.default === true || track?.disposition?.default === 1)?.index
+        );
+        const defLang = this.normalizeTrackLanguage(probe?.audioDefaultLanguage);
+        let defPos = Number.isInteger(declaredDefaultIndex)
+            ? usable.findIndex(t => t.index === declaredDefaultIndex)
+            : -1;
+        if (defPos < 0) defPos = usable.findIndex(t => t.language === defLang);
+        if (defPos < 0) defPos = 0;
+        this.audioTracks = usable.map((t, i) => {
+            const existing = (Array.isArray(this.currentStreamInfo?.audioTracks)
+                ? this.currentStreamInfo.audioTracks
+                : []).find(track => Number(track?.index) === Number(t.index));
+            const rawTrack = rawByIdx.get(t.index);
+            return {
+                ...technicalTrackMetadata(rawTrack),
+                ...(existing || {}),
+                index: t.index,
+                language: t.language,
+                lang: t.language,
+                default: i === defPos
+            };
+        });
+        if (!Number.isInteger(this.directAudioStreamIndex)) this.directAudioStreamIndex = usable[defPos].index;
+        if (!this.selectedAudioTrackUserChoice && !Number.isInteger(this.selectedAudioStreamIndex)) {
+            this.selectedAudioStreamIndex = usable[defPos].index;
+        }
+    }
+
+    formatChannelLayout(layout, channels) {
+        const map = { mono: 'Mono', stereo: 'Stereo', '5.1': '5.1', '5.1(side)': '5.1', '7.1': '7.1' };
+        if (layout && map[layout]) return map[layout];
+        if (layout) return layout;
+        if (channels === 1) return 'Mono';
+        if (channels === 2) return 'Stereo';
+        return channels ? `${channels}ch` : '';
+    }
+
+    // Reliable language label from the title's server-detected audio_languages
+    // (the same ground truth behind the "Audio FR confirmed" card badge), formatted
+    // exactly like the card via MediaUtils.audioLanguageBadge: 1 lang -> "French",
+    // 2-3 -> "Multi: FR/EN/JA", >3 -> "Multi". Returns null when nothing is detected,
+    // so callers keep "Default"/"Audio" rather than fabricating a language.
+    contentAudioLanguageLabel() {
+        if (!this.isAudioLanguageKnown()) return null;
+        const variantCount = Number(
+            this.content?.variantCount ||
+            this.content?.variant_count ||
+            this.content?.versions?.length ||
+            1
+        );
+        const scope = String(this.content?.audioTracksScope || this.content?.audio_tracks_scope || '').toLowerCase();
+        if (variantCount > 1 && scope !== 'file') return null;
+        const audio = this.content?.audioLanguages || this.content?.audio_languages || null;
+        const hasAudio = Array.isArray(audio) && audio.length;
+        if (!hasAudio) return null;
+        try {
+            const label = window.MediaUtils?.audioLanguageBadge?.(audio || [], []);
+            return label || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Resolve the physical file first: Selection season/part files deliberately
+    // have no episode number, and two parts can share a season/episode number.
+    currentEpisodeMetadata() {
+        try {
+            if (!this.seriesInfo?.episodes) return null;
+            const id = this.content?.id || this.content?.externalId || this.content?.external_id;
+            if (id) return this.findEpisodeById(id);
+            if (!this.currentSeason || !this.currentEpisode) return null;
+            const eps = this.seriesInfo.episodes[this.currentSeason] || [];
+            return eps.find((e) => parseInt(e.episode_num) === parseInt(this.currentEpisode)) || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    currentEpisodeRawTitle() {
+        const ep = this.currentEpisodeMetadata();
+        return ep?.rawTitle || ep?.raw_title || ep?.title || ep?.name || null;
+    }
+
+    // Player-menu fallback when no real per-track language is known: infer the audio VERSION
+    // from the provider's episode/title name (e.g. a "VOSTFR"/"VO" tag => the ORIGINAL audio,
+    // a "VF" tag => French) so the menu reads something meaningful instead of "Default".
+    // CRITICAL: "original" is NOT a language — VOSTFR can be any source language. It resolves to
+    // the title's real TMDB original_language ("Japanese", "English", "Korean"…) when known, and
+    // otherwise to a plain "VO". We never assume a specific language from the VOSTFR tag.
+    playingAudioVersionLabel() {
+        try {
+            // Display-only fallback from the selected file's curated declaration.
+            // Never create a track/index, a verified language or a saved audio
+            // preference from it. Multiple declared languages cannot name one track.
+            const item = this.currentEpisodeMetadata() || this.content || {};
+            const languages = window.MediaUtils?.providerAudioLanguages?.(item) || [];
+            if (languages.length === 1) return this.getLanguageDisplayName(languages[0]);
+            if (languages.length > 1) return null;
+            // Provider filename tags are display hints only. Their provenance and
+            // validation stay in the record, not in the public track label.
+            const name = this.currentEpisodeRawTitle() || this.content?.rawTitle
+                || this.content?.raw_title || this.content?.title || '';
+            const info = window.MediaUtils?.parseVersionInfo?.(name);
+            const audioSig = (info?.audioSignals || [])[0];
+            if (!audioSig) return null;
+            if (audioSig.language === 'original') {
+                const orig = this.normalizeTrackLanguage(
+                    this.content?.originalLanguage || this.content?.original_language,
+                );
+                if (orig && orig !== 'und') {
+                    const display = this.getLanguageDisplayName(orig);
+                    if (display) return display;
+                }
+                return (globalThis.NorvaI18n?.t("ui_web_8a0d7658de66", { defaultValue: "Original audio" }) ?? 'Original audio');
+            }
+            const display = this.getLanguageDisplayName(audioSig.language);
+            return display || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    getCloudAudioLabel(a) {
+        if (!a) {
+            return this.contentAudioLanguageLabel() ||
+                this.playingAudioVersionLabel() ||
+                (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track');
+        }
+        const parts = [];
+        // PRIMARY: the real per-track language from get_vod_info. When the provider
+        // omits it (language:""), fall back to the title's detected language so a
+        // real-language file still reads "French · AAC · 5.1" instead of codec-only.
+        const lang = this.isAudioLanguageKnown()
+            ? (this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel())
+            : null;
+        if (lang) parts.push(lang);
+        if (!lang) {
+            const providerLabel = this.playingAudioVersionLabel();
+            if (providerLabel) parts.push(providerLabel);
+        }
+        if (a.codec) parts.push(String(a.codec).toUpperCase());
+        const ch = this.formatChannelLayout(a.channelLayout, a.channels);
+        if (ch) parts.push(ch);
+        if (a.bitRate) parts.push(`${Math.round(a.bitRate / 1000)} kbps`);
+        return parts.length ? parts.join(' · ') : (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track');
+    }
+
+    getVisibleAudioTracks() {
+        const hlsTracks = this.getHlsAudioTracks();
+        if (hlsTracks.length > 1) {
+            const probeTracks = this.getProbeAudioTracks();
+            if (probeTracks.length <= hlsTracks.length) return hlsTracks;
+            const preparedByStreamIndex = new Map(
+                hlsTracks.map((track) => [Number(track.streamIndex), track])
+            );
+            // Prepared rows switch inside HLS. Every other exact-file row stays
+            // visible and uses the existing serialized provider-safe restart.
+            return probeTracks.map((track) => (
+                preparedByStreamIndex.get(Number(track.streamIndex)) || track
+            ));
+        }
+        const verifiedMuxedMono = this.getVerifiedGatewayMuxedMonoAudioTrack();
+        if (verifiedMuxedMono) return [verifiedMuxedMono];
+        const informationalMuxedMono = this.getInformationalGatewayMuxedMonoAudioTrack();
+        if (informationalMuxedMono) return [informationalMuxedMono];
+        const pendingGatewayTracks = this.getPendingGatewayAudioTracks();
+        if (pendingGatewayTracks.length) return pendingGatewayTracks;
+        if (this.isGatewayAudioRenditionFailClosed()) {
+            return [{ source: 'none', index: -1, label: (globalThis.NorvaI18n?.t("ui_web_55c7c3b7088e", { defaultValue: "Audio tracks unavailable" }) ?? 'Audio tracks unavailable'), active: true }];
+        }
+
+        const nativeTracks = this.getNativeAudioTracks();
+        if (nativeTracks.length > 1) return nativeTracks;
+
+        const probeTracks = this.getProbeAudioTracks();
+        if (probeTracks.length) return probeTracks;
+
+        if (this.cloudAudioInfo) {
+            return [{ source: 'none', index: -1, label: this.getCloudAudioLabel(this.cloudAudioInfo), active: true }];
+        }
+
+        if (this._audioTopologyPending) {
+            const pendingContentTracks = this.getPendingContentAudioTracks();
+            if (pendingContentTracks.length) return pendingContentTracks;
+        }
+
+        // Browser can't demux video.audioTracks for direct-MP4 play, so there's no
+        // switchable track list. Show the title's detected language (matches the card
+        // badge + the native mobile player) instead of a meaningless "Default".
+        const contentLabel = this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
+        return [{ source: 'none', index: -1, label: contentLabel || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'), active: true }];
+    }
+
+    // Persist only COMPLETE ordered maps returned by a trusted file-scoped
+    // playback/gateway probe. Audio and subtitles are independent: a complete
+    // empty subtitle probe is evidence, while an absent probe is not.
+    reportObservedAudioLanguages() {
+        try {
+            if (!window.API?.isCloudMode?.()) return;
+            const titleId = this.content?.titleId || this.content?.title_id;
+            const sourceId = this.content?.sourceId || this.content?.source_id || null;
+            const cloudSourceId = this.content?.cloudSourceId
+                || this.content?.cloud_source_id
+                || this.content?.data?.cloudSourceId
+                || this.content?.data?.cloud_source_id
+                || null;
+            const itemType = this.content?.type === 'series' || this.contentType === 'series' ? 'series' : 'movie';
+            const externalId = this.content?.externalId
+                || this.content?.external_id
+                || this.content?.itemId
+                || this.content?.item_id
+                || this.content?.streamId
+                || this.content?.stream_id
+                || this.content?.id
+                || null;
+            if (!titleId && !(cloudSourceId && externalId)) return;
+            const orderedTracks = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
+                .map((t) => ({
+                    index: Number(t.index),
+                    lang: (t.lang && t.lang !== 'und') ? this.normalizeTrackLanguage(t.lang) : null
+                }))
+                .filter((track) => Number.isInteger(track.index));
+            const orderedSubtitleTracks = this._observedSubtitleProbeComplete === true
+                && Array.isArray(this._observedExactSubtitleTracks)
+                ? this._observedExactSubtitleTracks.map((track) => ({ ...track }))
+                : null;
+            const hasExactAudioMap = orderedTracks.length > 0;
+            const hasExactSubtitleMap = orderedSubtitleTracks !== null;
+            if (!hasExactAudioMap && !hasExactSubtitleMap) return;
+
+            const audioFingerprint = orderedTracks
+                .map((track) => `${track.index}:${track.lang || ''}`)
+                .join('|');
+            const subtitleFingerprint = hasExactSubtitleMap
+                ? orderedSubtitleTracks.map((track) => [
+                    track.index,
+                    track.lang || '',
+                    track.codec || '',
+                    track.subtitleType || '',
+                    track.extractable ? 1 : 0,
+                    track.forced ? 1 : 0,
+                    track.default ? 1 : 0,
+                ].join(':')).join('|')
+                : '-';
+            const key = `${titleId || ''}:${cloudSourceId || sourceId || ''}:${itemType}:${externalId || ''}:audio:${hasExactAudioMap ? audioFingerprint : '-'}:subtitles:${subtitleFingerprint}`;
+            if (this._observedLangsSent === key || this._observedLangsPending === key) return;
+            const generation = Number(this._observedLangsGeneration || 0);
+            const stateIsCurrent = () => Number(this._observedLangsGeneration || 0) === generation;
+            const now = Date.now();
+            if (this._observedLangsRetryKey === key && Number(this._observedLangsRetryAt || 0) > now) return;
+            if (this._observedLangsRetryKey !== key) {
+                this._observedLangsRetryKey = key;
+                this._observedLangsRetryCount = 0;
+                this._observedLangsRetryAt = 0;
+            }
+            const deferRetry = () => {
+                if (!stateIsCurrent()) return;
+                if (this._observedLangsRetryKey !== key) {
+                    this._observedLangsRetryKey = key;
+                    this._observedLangsRetryCount = 0;
+                }
+                const attempts = Math.min(6, Number(this._observedLangsRetryCount || 0) + 1);
+                this._observedLangsRetryCount = attempts;
+                // markPlaybackUsable can run several times per second. Retry a
+                // failed exact write without turning a persistent 400/5xx into
+                // a request storm for the rest of the film.
+                this._observedLangsRetryAt = Date.now() + Math.min(60_000, 2_000 * (2 ** (attempts - 1)));
+            };
+            this._observedLangsPending = key;
+            const request = window.API?.media?.reportObservedLanguages?.({
+                titleId: titleId || null,
+                sourceId,
+                cloudSourceId,
+                itemType,
+                itemId: externalId,
+                externalId,
+                parentExternalId: this.content?.parentExternalId
+                    || this.content?.parent_external_id
+                    || this.content?.data?.parentExternalId
+                    || this.content?.data?.parent_external_id
+                    || this.content?.seriesId
+                    || this.content?.series_id
+                    || this.content?.data?.seriesId
+                    || this.content?.data?.series_id
+                    || null,
+                ...(hasExactAudioMap ? {
+                    audioTracks: orderedTracks,
+                    audioTracksScope: 'file',
+                } : {}),
+                ...(hasExactSubtitleMap ? {
+                    subtitleTracks: orderedSubtitleTracks,
+                    subtitleTracksScope: 'file',
+                } : {}),
+            });
+            Promise.resolve(request).then((result) => {
+                if (!stateIsCurrent()) return;
+                if (this._observedLangsPending === key) this._observedLangsPending = null;
+                // Only a server-validated exact-file write suppresses later
+                // attempts. HTTP 400/5xx, transport errors and incomplete
+                // coordinates remain retryable during this playback.
+                if (result?.ok === true && result?.updated === true && result?.exact === true) {
+                    this._observedLangsSent = key;
+                    this._observedLangsRetryCount = 0;
+                    this._observedLangsRetryAt = 0;
+                } else {
+                    deferRetry();
+                }
+            }).catch(() => {
+                if (!stateIsCurrent()) return;
+                if (this._observedLangsPending === key) this._observedLangsPending = null;
+                deferRetry();
+            });
+        } catch (_) { /* best-effort capture; never disrupt playback */ }
+    }
+
+    updateAudioTracks() {
+        if (!this.audioList) return;
+
+        const tracks = this.getVisibleAudioTracks();
+        const pending = tracks.some(track => track.pending === true);
+        const unavailable = tracks.some(track => track.label === 'Audio tracks unavailable');
+        this.audioList.setAttribute('aria-busy', pending ? 'true' : 'false');
+        if (this.audioStatus) {
+            const previousState = this.audioStatus.dataset.state || '';
+            const nextState = pending ? 'pending' : (unavailable ? 'unavailable' : 'ready');
+            this.audioStatus.dataset.state = nextState;
+            this.audioStatus.textContent = pending
+                ? (globalThis.NorvaI18n?.t("ui_web_1dd3dcd41013", { defaultValue: "Checking audio tracks…" }) ?? 'Checking audio tracks…')
+                : (unavailable
+                    ? (globalThis.NorvaI18n?.t("ui_web_4f3a2c197dec", { defaultValue: "Audio tracks unavailable." }) ?? 'Audio tracks unavailable.')
+                    : (previousState === 'pending' ? (globalThis.NorvaI18n?.t("ui_web_dc24e45cf864", { defaultValue: "Audio tracks ready." }) ?? 'Audio tracks ready.') : ''));
+        }
+        this.audioList.innerHTML = tracks.map(track => {
+            const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
+            const pendingClass = track.pending ? ' pending' : '';
+            const pendingAttr = track.pending ? ' data-state="pending" disabled aria-disabled="true"' : '';
+            return `<button class="audio-option ${track.active ? 'active' : ''}${pendingClass}" data-source="${track.source}" data-index="${track.index}"${streamAttr}${pendingAttr}>${this.escapeHtml(track.label)}</button>`;
+        }).join('');
+
+        this.audioList.querySelectorAll('.audio-option').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.disabled || btn.dataset.state === 'pending') return;
+                this.selectAudioTrack(
+                    btn.dataset.source,
+                    parseInt(btn.dataset.index, 10),
+                    btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
+                ).catch(error => {
+                    console.error('[WatchPage] Audio selection failed:', error);
+                    this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_010cd3912663", { defaultValue: "Failed to switch audio track." }) ?? 'Failed to switch audio track.')).catch(() => { });
+                });
+            });
+        });
+    }
+
+    async selectAudioTrack(source, index, streamIndex = null) {
+        if (!this.video || source === 'none') {
+            this.closeAudioMenu();
+            return;
+        }
+
+        if (source === 'hls' && this.hls && index >= 0) {
+            const gatewayContext = this._gatewayAudioRenditionRequired
+                || this.currentPlaybackMode === 'gateway-session';
+            if (gatewayContext) {
+                if (!Number.isSafeInteger(streamIndex) || streamIndex < 0) return false;
+                this._pendingGatewayAudioStreamIndex = null;
+                return this.selectGatewayHlsAudioTrack(index, streamIndex);
+            }
+            this.hls.audioTrack = index;
+            this.clearPendingPreference('audio');
+            this.updateAudioTracks();
+            this.closeAudioMenu();
+            this.saveResumeSnapshotThrottled(true);
+            this.saveProgress({ force: true });
+            return true;
+        }
+
+        if (source === 'native') {
+            const tracks = this.video.audioTracks;
+            if (tracks && index >= 0 && index < tracks.length) {
+                for (let i = 0; i < tracks.length; i++) {
+                    tracks[i].enabled = i === index;
+                }
+            }
+            this.clearPendingPreference('audio');
+            this.updateAudioTracks();
+            this.closeAudioMenu();
+            this.saveResumeSnapshotThrottled(true);
+            this.saveProgress({ force: true });
+            return;
+        }
+
+        // This dedicated source can only be rendered by the verified muxed-mono
+        // exception. Revalidate every guard at click time and never let a stale
+        // row fall through to the generic probe restart path.
+        if (source === 'gateway-muxed-mono') {
+            const verifiedMuxedMono = this.getVerifiedGatewayMuxedMonoAudioTrack();
+            if (index !== 0 || !Number.isSafeInteger(streamIndex) || streamIndex < 0
+                || !verifiedMuxedMono || verifiedMuxedMono.streamIndex !== streamIndex) {
+                this.closeAudioMenu();
+                return false;
+            }
+            this.updateAudioTracks();
+            this.closeAudioMenu();
+            return true;
+        }
+
+        if (source !== 'probe' || !Number.isInteger(streamIndex)) {
+            this.closeAudioMenu();
+            return;
+        }
+
+        // Already playing this track via a zero-egress path (direct play or the
+        // in-browser engine) — picking it again must NOT spin up a needless reload.
+        if ((this.currentPlaybackMode === 'direct' || this.currentPlaybackMode === 'engine')
+            && Number(streamIndex) === Number(this.directAudioStreamIndex)) {
+            this.selectedAudioStreamIndex = streamIndex;
+            this.selectedAudioTrackUserChoice = false;
+            this.updateAudioTracks();
+            this.closeAudioMenu();
+            return;
+        }
+
+        const previous = Number(this.selectedAudioStreamIndex);
+        this.selectedAudioStreamIndex = streamIndex;
+        this.selectedAudioTrackUserChoice = true;
+        this.clearPendingPreference('audio');
+        this.updateAudioTracks();
+        this.closeAudioMenu();
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
+
+        if (previous === streamIndex && ['gateway-session', 'transcode-session'].includes(this.currentPlaybackMode)) {
+            return;
+        }
+
+        await this.queueSelectedAudioTrackRestart();
+    }
+
+    queueSelectedAudioTrackRestart() {
+        const requestId = ++this._audioSwitchRequestId;
+        const run = (this._audioSwitchPromise || Promise.resolve())
+            .catch(() => { })
+            .then(() => {
+                if (requestId !== this._audioSwitchRequestId) return false;
+                return this.restartWithSelectedAudioTrack(requestId);
+            });
+
+        this._audioSwitchPromise = run.finally(() => {
+            if (requestId === this._audioSwitchRequestId) {
+                this._audioSwitchPromise = null;
+            }
+        });
+        return this._audioSwitchPromise;
+    }
+
+    isStaleAudioSwitch(requestId) {
+        return Number.isInteger(requestId) && requestId !== this._audioSwitchRequestId;
+    }
+
+    setSelectedAudioPreference(track) {
+        const audio = this.audioPreferenceFromProbeTrack(track);
+        if (!audio || !this.content) return null;
+
+        return this.savePlaybackPreferences(this.getMergedPlaybackPreferences({ audio }));
+    }
+
+    getSelectedAudioPlaybackOptions() {
+        if (!this.selectedAudioTrackUserChoice) return {};
+        const selected = this.getSelectedAudioTrack();
+        if (!selected) return {};
+        return this.getAudioProcessingOptions({
+            ...(this.currentStreamInfo || {}),
+            audioTracks: this.audioTracks
+        });
+    }
+
+    // The engine may auto-select a concrete stream without turning it into an
+    // explicit user preference. A lane recovery must nevertheless keep the audio
+    // that was actually playing. `directAudioStreamIndex` is the engine's live
+    // stream, so it wins over the UI selection; codec/channels let the Gateway
+    // decide whether that exact stream can be copied or needs audio encoding.
+    getPlayingEngineAudioOptions() {
+        const asStreamIndex = (value) => {
+            if (value === null || value === undefined) return null;
+            const parsed = Number(value);
+            return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+        };
+        const directIndex = asStreamIndex(this.directAudioStreamIndex);
+        const selectedIndex = asStreamIndex(this.selectedAudioStreamIndex);
+        const streamIndex = directIndex ?? selectedIndex;
+        if (!Number.isInteger(streamIndex)) return {};
+
+        const trackSets = [
+            this.audioTracks,
+            this.currentStreamInfo?.audioTracks,
+            this._relayAudioTracks,
+        ];
+        const matchingTracks = [];
+        for (const tracks of trackSets) {
+            if (!Array.isArray(tracks)) continue;
+            const match = tracks.find(candidate => asStreamIndex(candidate?.index) === streamIndex);
+            if (match) matchingTracks.push(match);
+        }
+
+        const codec = String(
+            matchingTracks.find(track => String(track?.codec || '').trim())?.codec || ''
+        ).trim();
+        const channels = Number(
+            matchingTracks.find(track => Number.isFinite(Number(track?.channels))
+                && Number(track.channels) > 0)?.channels
+        );
+        return {
+            audioStreamIndex: streamIndex,
+            ...(codec ? { audioCodec: codec } : {}),
+            ...(Number.isFinite(channels) && channels > 0 ? { audioChannels: channels } : {}),
+        };
+    }
+
+    getMeasuredGatewaySeekPlan(playback, targetTime, fallbackStart = targetTime) {
+        const metadata = this.playbackMetadataFromResult(playback);
+        const target = Math.max(0, Number(targetTime) || 0);
+        const measured = Number(metadata.actualStartOffset ?? metadata.actual_start_offset);
+        const sourceTimestamps = metadata.sourceTimestamps === true
+            || metadata.source_timestamps === true;
+        const actualStartOffset = sourceTimestamps
+            && Number.isFinite(measured)
+            && measured >= 0
+            && measured <= target + 1
+            ? measured
+            : Math.max(0, Number(fallbackStart) || 0);
+        const reportedLocal = Number(metadata.localSeekTarget ?? metadata.local_seek_target);
+        const localSeekTarget = sourceTimestamps && Number.isFinite(reportedLocal)
+            ? Math.max(0, reportedLocal)
+            : Math.max(0, target - actualStartOffset);
+        return { actualStartOffset, localSeekTarget, sourceTimestamps };
+    }
+
+    getCurrentAudioPlaybackOptions() {
+        const explicit = this.getSelectedAudioPlaybackOptions();
+        const explicitIndex = explicit?.audioStreamIndex;
+        if (explicitIndex !== null && explicitIndex !== undefined) {
+            const parsedIndex = Number(explicitIndex);
+            if (Number.isInteger(parsedIndex) && parsedIndex >= 0) return explicit;
+        }
+        return this.getPlayingEngineAudioOptions();
+    }
+
+    async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+        if (this.isStaleAudioSwitch(requestId)) return false;
+
+        // In-browser engine: switch audio client-side (zero-egress), no gateway.
+        if (this.currentPlaybackMode === 'engine') {
+            return this.restartEngineWithSelectedAudioTrack(requestId);
+        }
+
+        if (this.isCloudPlaybackMode() && this.content?.sourceId && this.content?.id) {
+            return this.restartCloudGatewayWithSelectedAudioTrack(requestId);
+        }
+
+        const sourceUrl = this.baseStreamUrl || this.currentUrl;
+        const selected = this.getSelectedAudioTrack();
+        if (!sourceUrl || !selected) return;
+
+        const position = Math.max(0, this.getPlaybackPosition());
+        const autoplay = !this.video?.paused;
+        const info = this.currentStreamInfo || {};
+        const playbackPreferences = this.setSelectedAudioPreference(selected);
+        const videoCodec = info.video || this.currentProcessingOptions.videoCodec || 'unknown';
+        const videoMode = this.currentProcessingOptions.videoMode
+            || this.getTranscodeVideoMode(info);
+
+        const processingOptions = {
+            ...this.currentProcessingOptions,
+            ...this.getAudioProcessingOptions(info),
+            videoMode,
+            videoCodec,
+            seekOffset: position
+        };
+
+        const audioLabel = this.getTrackLabel(selected, 'Selected audio', 'audio');
+        console.log(`[WatchPage] Restarting transcode with audio track ${selected.index}: ${audioLabel}`);
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(audioLabel)}) : `Audio: ${audioLabel}`));
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+
+        await this.stopTranscodeSession();
+        if (this.isStaleAudioSwitch(requestId)) return false;
+
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        this.currentPlaybackMode = 'transcode-session';
+        this.currentProcessingOptions = processingOptions;
+        this.streamStartOffset = position;
+        this.attachProbeSubtitles(sourceUrl, this.subtitleTracks, position);
+        this.updateDurationState();
+
+        const playlistUrl = await this.startTranscodeSession(sourceUrl, processingOptions);
+        if (this.isStaleAudioSwitch(requestId)) {
+            await this.stopTranscodeSession();
+            return false;
+        }
+        this.playHlsOrDirect(playlistUrl, { autoplay });
+        if (playbackPreferences) this.saveResumeSnapshotThrottled(true);
+        this.setVolumeFromStorage();
+        return true;
+    }
+
+    async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+        const selected = this.getSelectedAudioTrack();
+        const playbackIdentity = this.captureVodPlaybackIdentity();
+        if (!selected || !playbackIdentity) return false;
+
+        const switchStartedAt = Date.now();
+        const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 0);
+        const sessionStart = Math.max(0, targetPosition - preRoll);
+        const autoplay = !this.video?.paused;
+        const { itemType, container } = playbackIdentity;
+        const audioOptions = this.getAudioProcessingOptions({
+            ...(this.currentStreamInfo || {}),
+            audioTracks: this.audioTracks
+        });
+        const playbackPreferences = this.setSelectedAudioPreference(selected);
+        const audioLabel = this.getTrackLabel(selected, 'Selected audio', 'audio');
+        const requestedAudioStreamIndex = Number(audioOptions.audioStreamIndex ?? selected.index);
+        this._gatewayAudioSwitchMetrics = {
+            requestId,
+            requestedAudioStreamIndex: Number.isInteger(requestedAudioStreamIndex)
+                ? requestedAudioStreamIndex
+                : null,
+            actualAudioStreamIndex: null,
+            targetPosition,
+            autoplay,
+            sessionCreateAttempts: 0,
+            releaseBarrierCompleted: false,
+            status: 'releasing_previous_session',
+            startedAt: switchStartedAt,
+            elapsedMs: 0,
+        };
+
+        console.log(`[WatchPage] Restarting Gateway with audio track ${selected.index}: ${audioLabel}`);
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_ca19cecf0377", {defaultValue: "Audio: {{p0}}", p0:(audioLabel)}) : `Audio: ${audioLabel}`));
+        this.trackPlaybackPosition({ position: targetPosition, force: true });
+        this.saveResumeSnapshotThrottled(true);
+
+        await this.releasePlaybackPipelineForRetry();
+        if (this.isStaleAudioSwitch(requestId)) return false;
+        this.updateGatewayAudioSwitchMetrics(requestId, 'provider_cooldown', {
+            releaseBarrierCompleted: true,
+            releasedAt: Date.now(),
+        });
+        await this.waitForProviderSlotRelease(300);
+        if (this.isStaleAudioSwitch(requestId)) return false;
+
+        let playbackHint = {
+            ...(MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(playbackIdentity.playbackItem, { container, streamType: itemType })
+                : { container, streamType: itemType }),
+            ...audioOptions,
+            seekOffset: sessionStart,
+            startOffset: sessionStart,
+            resumeTime: sessionStart
+        };
+        playbackHint = typeof this.applyPlaybackPreferencesToHint === 'function'
+            ? this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences)
+            : playbackHint;
+
+        let result = null;
+        try {
+            this.updateGatewayAudioSwitchMetrics(requestId, 'creating_session', {
+                sessionCreateAttempts: 1,
+                sessionRequestedAt: Date.now(),
+            });
+            result = await this.requestAudioSwitchGatewayUrl(
+                itemType,
+                container,
+                playbackHint,
+                requestId,
+                playbackIdentity
+            );
+        } catch (error) {
+            console.error('[WatchPage] Gateway audio switch failed:', error);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
+                failedAt: Date.now(),
+                failureCode: String(error?.code || error?.status || 'session_create_failed'),
+            });
+            await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
+            return false;
+        }
+
+        const resultMetadata = this.playbackMetadataFromResult(result || {});
+        const resultSessionId = resultMetadata.sessionId || null;
+        if (this.isStaleAudioSwitch(requestId)) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'cancelled', {
+                cancelledAt: Date.now(),
+            });
+            return false;
+        }
+
+        if (!result?.url) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
+                failedAt: Date.now(),
+                failureCode: 'missing_playback_url',
+            });
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_010cd3912663", { defaultValue: "Failed to switch audio track." }) ?? 'Failed to switch audio track.'));
+            return false;
+        }
+
+        const rawActualAudioStreamIndex = resultMetadata.audioStreamIndex;
+        const actualAudioStreamIndex = rawActualAudioStreamIndex === null
+            || rawActualAudioStreamIndex === undefined
+            || rawActualAudioStreamIndex === ''
+            ? null
+            : Number(rawActualAudioStreamIndex);
+        if (
+            Number.isInteger(requestedAudioStreamIndex)
+            && (
+                !Number.isInteger(actualAudioStreamIndex)
+                || actualAudioStreamIndex !== requestedAudioStreamIndex
+            )
+        ) {
+            await this.cleanupStaleCloudPlaybackSession(resultSessionId);
+            this.updateGatewayAudioSwitchMetrics(requestId, 'failed', {
+                failedAt: Date.now(),
+                actualAudioStreamIndex,
+                failureCode: Number.isInteger(actualAudioStreamIndex)
+                    ? 'audio_map_mismatch'
+                    : 'audio_map_unverified',
+            });
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_b57e2339947b", { defaultValue: "The selected audio track could not be activated." }) ?? 'The selected audio track could not be activated.'));
+            return false;
+        }
+
+        const effectiveAudioStreamIndex = Number.isInteger(actualAudioStreamIndex)
+            ? actualAudioStreamIndex
+            : null;
+        this.updateGatewayAudioSwitchMetrics(requestId, 'attaching_gateway_lane', {
+            actualAudioStreamIndex: effectiveAudioStreamIndex,
+            sessionResolvedAt: Date.now(),
+        });
+        this.content.cloudPlaybackSessionId = resultSessionId;
+        this.resumeTime = targetPosition;
+        const effectiveSessionStart = Number(playbackHint.seekOffset) || sessionStart;
+        const measuredSeek = this.getMeasuredGatewaySeekPlan(
+            resultMetadata,
+            targetPosition,
+            effectiveSessionStart
+        );
+        this.updateGatewayAudioSwitchMetrics(requestId, 'waiting_gateway_gate', {
+            laneAttachedAt: Date.now(),
+        });
+        await this.loadVideo(result.url, this.playbackMetadataFromResult(resultMetadata, {
+            seekOffset: measuredSeek.actualStartOffset,
+            startOffset: measuredSeek.actualStartOffset,
+            actualStartOffset: measuredSeek.actualStartOffset,
+            requestedSeekOffset: targetPosition,
+            localSeekTarget: measuredSeek.localSeekTarget,
+            sourceTimestamps: measuredSeek.sourceTimestamps,
+            playbackAttemptId: this._playbackAttemptId,
+            cloudPlaybackSessionId: resultSessionId,
+            autoplay,
+            audioSwitchRequestId: requestId,
+            playbackPreferences,
+            ...audioOptions,
+            ...(Number.isInteger(effectiveAudioStreamIndex)
+                ? { audioStreamIndex: effectiveAudioStreamIndex }
+                : {}),
+        }));
+        this._gatewaySeekRetry = {
+            target: targetPosition,
+            preRoll: Math.max(0, targetPosition - effectiveSessionStart),
+            retryLevel: 0,
+            playbackAttemptId: this._playbackAttemptId,
+            audioSwitchRequestId: requestId
+        };
+        this.setVolumeFromStorage();
+        return true;
+    }
+
+    updateGatewayAudioSwitchMetrics(requestId, status, details = {}) {
+        const current = this._gatewayAudioSwitchMetrics;
+        if (!current || Number(current.requestId) !== Number(requestId)) return;
+        this._gatewayAudioSwitchMetrics = {
+            ...current,
+            ...details,
+            status,
+            elapsedMs: Math.max(0, Date.now() - Number(current.startedAt || Date.now())),
+        };
+    }
+
+    async waitForProviderSlotRelease(delay = 1400) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    async requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId, playbackIdentity = null) {
+        if (this.isStaleAudioSwitch(requestId)) return null;
+        const identity = playbackIdentity
+            || (typeof this.captureVodPlaybackIdentity === 'function'
+                ? this.captureVodPlaybackIdentity()
+                : null);
+        const sourceId = identity?.sourceId ?? this.content?.sourceId;
+        const itemId = identity?.itemId ?? this.content?.id;
+        try {
+            return await API.proxy.xtream.getStreamUrl(
+                sourceId,
+                itemId,
+                itemType,
+                container,
+                playbackHint,
+                { signal: this.playbackResolveSignalForAttempt?.() || null }
+            );
+        } catch (error) {
+            if (this.isPlaybackSupersededError(error)) {
+                await this.handlePlaybackSuperseded(this.currentCloudPlaybackSessionId);
+            } else if (this.isProviderBusyError(this.getErrorText(error))) {
+                await this.reportProviderPlaybackFailure(error);
+            }
+            throw error;
+        }
+    }
+
+    clearExternalSubtitleTracks({ keepAiPolling = false } = {}) {
+        this.stopSubtitleEngine();
+        // attachGeneratedSubtitleTrack clears the previous track as part of ATTACHING a new one —
+        // killing the AI poll there silently ended progressive delivery after the FIRST partial
+        // (the attach ran inside the poll tick, cleared the timer, nothing restarted it).
+        if (!keepAiPolling) this.stopAiSubtitlePolling();
+        this.stopAllTranslatePolling();
+        this._stopAllOcrPolling();
+        this._aiActiveLang = null;
+        this._aiActiveVtt = null;
+        this._ocrActiveStreamIndex = null;
+        if (this._aiTrackBlobUrl) {
+            try { URL.revokeObjectURL(this._aiTrackBlobUrl); } catch (_) { /* best-effort */ }
+            this._aiTrackBlobUrl = null;
+        }
+        this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]').forEach(track => {
+            if (track.track) {
+                track.track.mode = 'disabled';
+            }
+            const bootstrapUrl = track.dataset.norvaBootstrapUrl;
+            if (bootstrapUrl) {
+                try { URL.revokeObjectURL(bootstrapUrl); } catch (_) { /* best-effort */ }
+                delete track.dataset.norvaBootstrapUrl;
+            }
+            track.remove();
+        });
+    }
+
+    setSubtitleSwitchFeedback(state, label = '') {
+        const status = this.subtitleStatusEl;
+        if (!status) return;
+        clearTimeout(this._subtitleStatusTimer);
+        this._subtitleStatusTimer = null;
+        this._subtitleSwitchFeedbackState = state;
+
+        const safeLabel = String(label || (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected')).trim();
+        const messages = {
+            applying: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_7158e33e3afc", {defaultValue: "Applying {{p0}} subtitles…", p0:(safeLabel)}) : `Applying ${safeLabel} subtitles…`),
+            ready: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4afd56d99ebb", {defaultValue: "{{p0}} subtitles on", p0:(safeLabel)}) : `${safeLabel} subtitles on`),
+            off: (globalThis.NorvaI18n?.t("ui_web_6a5216300cb9", { defaultValue: "Subtitles off" }) ?? 'Subtitles off'),
+            deferred: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4872b443110b", {defaultValue: "{{p0}} is not prepared for this playback; video continues unchanged", p0:(safeLabel)}) : `${safeLabel} is not prepared for this playback; video continues unchanged`),
+            error: (globalThis.NorvaI18n?.t("ui_web_893cc8a2758a", { defaultValue: "Subtitles could not be displayed" }) ?? 'Subtitles could not be displayed'),
+        };
+        status.textContent = messages[state] || '';
+        status.classList.remove('hidden', 'is-applying', 'is-ready', 'is-error');
+        if (state === 'applying') status.classList.add('is-applying');
+        else if (state === 'ready' || state === 'off') status.classList.add('is-ready');
+        else if (state === 'error' || state === 'deferred') status.classList.add('is-error');
+        else status.classList.add('hidden');
+
+        this.showOverlay();
+        if (state !== 'applying') {
+            const visibleMs = state === 'error' || state === 'deferred' ? 5000 : 2400;
+            this._subtitleStatusTimer = setTimeout(() => {
+                if (this._subtitleSwitchFeedbackState !== state) return;
+                this._subtitleSwitchFeedbackState = 'idle';
+                status.classList.add('hidden');
+                this.startOverlayTimer();
+            }, visibleMs);
+        }
+    }
+
+    resetSubtitleSwitchFeedback() {
+        clearTimeout(this._subtitleStatusTimer);
+        this._subtitleStatusTimer = null;
+        this._subtitleSwitchFeedbackState = 'idle';
+        if (!this.subtitleStatusEl) return;
+        this.subtitleStatusEl.textContent = '';
+        this.subtitleStatusEl.classList.remove('is-applying', 'is-ready', 'is-error');
+        this.subtitleStatusEl.classList.add('hidden');
+    }
+
+    subtitleTrackLabel(track = this.getSelectedSubtitleTrack()) {
+        if (!track) return (globalThis.NorvaI18n?.t("ui_web_57fd7a0cf33f", { defaultValue: "Selected" }) ?? 'Selected');
+        const tracks = this.getExtractableSubtitleTracks();
+        return this.getSubtitleMenuLabel(track, tracks, tracks.indexOf(track), 'Selected');
+    }
+
+    async waitForSelectedSubtitleActivation(streamIndex, requestId = this._subtitleSwitchRequestId, timeoutMs = 12_000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (this.isStaleSubtitleSwitch(requestId)) return false;
+            const engine = this._subEngine;
+            if (engine && Number(engine.streamIndex) === Number(streamIndex)) {
+                if (this._subEngineReadyPromise) {
+                    try {
+                        await Promise.race([
+                            this._subEngineReadyPromise,
+                            new Promise(resolve => setTimeout(() => resolve(false), 250)),
+                        ]);
+                    } catch (_) { /* retry until the bounded deadline */ }
+                }
+                const textTrackReady = engine.trackReady === true
+                    && engine.trackEl?.track?.mode === 'showing';
+                // A successful request can still be the empty WEBVTT bootstrap
+                // while FFmpeg is opening the selected stream. Only announce
+                // captions as ready after at least one real cue reached the
+                // showing TextTrack (network and in-band modes alike).
+                const deliveryReady = Number(engine.trackEl?.track?.cues?.length || 0) > 0;
+                if (textTrackReady && deliveryReady) return true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+    }
+
+    queueSelectedSubtitleTrackRestart(preference) {
+        const requestId = ++this._subtitleSwitchRequestId;
+        const run = (this._subtitleSwitchPromise || Promise.resolve())
+            .catch(() => {})
+            .then(() => {
+                if (this.isStaleSubtitleSwitch(requestId)) return false;
+                return this.restartWithSelectedSubtitleTrack(preference, requestId);
+            });
+
+        this._subtitleSwitchPromise = run.finally(() => {
+            if (!this.isStaleSubtitleSwitch(requestId)) {
+                this._subtitleSwitchPromise = null;
+            }
+        });
+        return this._subtitleSwitchPromise;
+    }
+
+    isStaleSubtitleSwitch(requestId) {
+        return Number.isInteger(requestId) && requestId !== this._subtitleSwitchRequestId;
+    }
+
+    async restartWithSelectedSubtitleTrack(preference, requestId = this._subtitleSwitchRequestId) {
+        if (this.isStaleSubtitleSwitch(requestId)) return false;
+
+        const selectedIndex = Number(preference?.streamIndex ?? preference?.stream_index);
+        const selectedIsOff = preference?.source === 'off' || preference?.mode === 'off';
+        const selectedLabel = selectedIsOff ? '' : this.subtitleTrackLabel();
+
+        // Hosted VOD owns one provider lane. Tear it down first, then let the
+        // normal measured-seek restart mint one replacement session carrying the
+        // selected subtitle index (or no index for Off).
+        if (this.currentPlaybackMode === 'gateway-session'
+            && this.content?.sourceId && this.content?.id) {
+            const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+            // Carry this exact selection across teardown. Recomputing preferences
+            // after stop/load resets can otherwise fall back to the previous
+            // content state and mint a Gateway lane without subtitle output.
+            const playbackPreferences = this.savePlaybackPreferences(
+                this.getMergedPlaybackPreferences({ subtitle: preference })
+            );
+            await this.restartCloudGatewayStreamAt(position, {
+                subtitleSwitchRequestId: requestId,
+                playbackPreferences,
+            });
+            if (this.isStaleSubtitleSwitch(requestId)) return false;
+            if (selectedIsOff) {
+                this.setSubtitleSwitchFeedback('off');
+                return true;
+            }
+            const activated = Number.isInteger(selectedIndex)
+                && await this.waitForSelectedSubtitleActivation(selectedIndex, requestId);
+            this.setSubtitleSwitchFeedback(activated ? 'ready' : 'error', selectedLabel);
+            return activated;
+        }
+
+        if (this.currentPlaybackMode !== 'transcode-session') {
+            if (preference?.source === 'probe') {
+                this.attachSelectedProbeSubtitleTrack();
+                const activated = Number.isInteger(selectedIndex)
+                    && await this.waitForSelectedSubtitleActivation(selectedIndex, requestId);
+                this.setSubtitleSwitchFeedback(activated ? 'ready' : 'error', selectedLabel);
+                return activated;
+            }
+            this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
+            this.setSubtitleSwitchFeedback('off');
+            return true;
+        }
+
+        const sourceUrl = this.baseStreamUrl || this.currentUrl;
+        if (!sourceUrl) return false;
+        const position = Math.max(0, this.getPlaybackPosition());
+        const autoplay = !this.video?.paused;
+        const info = this.currentStreamInfo || {};
+        const videoCodec = info.video || this.currentProcessingOptions.videoCodec || 'unknown';
+        const processingOptions = {
+            ...this.currentProcessingOptions,
+            ...this.getCurrentAudioPlaybackOptions(),
+            videoMode: this.currentProcessingOptions.videoMode || this.getTranscodeVideoMode(info),
+            videoCodec,
+            seekOffset: position
+        };
+
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', preference?.source === 'probe'
+            ? (globalThis.NorvaI18n?.t("ui_web_5782bd6ac28c", { defaultValue: "Subtitles: selected track" }) ?? 'Subtitles: selected track')
+            : (globalThis.NorvaI18n?.t("ui_web_6a5216300cb9", { defaultValue: "Subtitles off" }) ?? 'Subtitles off'));
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+        await this.stopTranscodeSession();
+        if (this.isStaleSubtitleSwitch(requestId)) return false;
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        this.currentPlaybackMode = 'transcode-session';
+        this.currentProcessingOptions = processingOptions;
+        this.streamStartOffset = position;
+        this.attachProbeSubtitles(sourceUrl, this.subtitleTracks, position);
+        this.updateDurationState();
+        const playlistUrl = await this.startTranscodeSession(sourceUrl, processingOptions);
+        if (this.isStaleSubtitleSwitch(requestId)) {
+            await this.stopTranscodeSession();
+            return false;
+        }
+        if (!playlistUrl) {
+            await this.handlePlaybackFailure((globalThis.NorvaI18n?.t("ui_web_e78f95163771", { defaultValue: "Failed to restart playback with the selected subtitles." }) ?? 'Failed to restart playback with the selected subtitles.'));
+            return false;
+        }
+        this.playHlsOrDirect(playlistUrl, { autoplay });
+        this.setVolumeFromStorage();
+        if (selectedIsOff) {
+            this.setSubtitleSwitchFeedback('off');
+            return true;
+        }
+        const activated = Number.isInteger(selectedIndex)
+            && await this.waitForSelectedSubtitleActivation(selectedIndex, requestId);
+        this.setSubtitleSwitchFeedback(activated ? 'ready' : 'error', selectedLabel);
+        return activated;
+    }
+
+    // True for the managed <track> elements we own (probe extraction + AI transcript), whose
+    // cues we feed via addCue(). The CC menu lists these through their own metadata/state rows,
+    // so the native-textTrack enumeration must skip them to avoid a duplicate entry.
+    _isManagedTextTrack(textTrack) {
+        const owned = this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]');
+        if (!owned) return false;
+        for (const el of owned) if (el.track === textTrack) return true;
+        return false;
+    }
+
+    isSubtitleExtractable(track) {
+        return track && track.extractable === true && String(track.subtitleType || 'text').toLowerCase() === 'text';
+    }
+
+    normalizeTrackLanguage(language) {
+        const shared = typeof MediaUtils !== 'undefined' &&
+            typeof MediaUtils.normalizeLanguagePreference === 'function'
+            ? MediaUtils.normalizeLanguagePreference(language)
+            : '';
+        const normalized = shared || String(language || '').toLowerCase();
+        const aliases = {
+            fre: 'fr',
+            fra: 'fr',
+            eng: 'en',
+            ger: 'de',
+            deu: 'de',
+            spa: 'es',
+            ita: 'it',
+            por: 'pt',
+            dut: 'nl',
+            nld: 'nl',
+            ara: 'ar',
+            rus: 'ru',
+            tur: 'tr',
+            pol: 'pl',
+            hin: 'hi',
+            jpn: 'ja',
+            kor: 'ko',
+            zho: 'zh',
+            chi: 'zh'
+        };
+        return aliases[normalized] || normalized || 'und';
+    }
+
+    inferSubtitleLanguageFromText(text) {
+        const sample = String(text || '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/[{}][^}]*[}]/g, ' ')
+            .toLowerCase();
+        if (sample.length < 40) return null;
+
+        if (/[\u0600-\u06ff]/.test(sample)) return ('ar');
+
+        const scores = {
+            fr: 0,
+            en: 0,
+            es: 0
+        };
+
+        const countMatches = (patterns) => patterns.reduce((score, pattern) => score + (sample.match(pattern) || []).length, 0);
+        scores.fr += countMatches([
+            /\b(le|la|les|des|une|un|que|qui|vous|nous|dans|pour|pas|est|avec|sur|mais|alors|cette|comme)\b/g,
+            /\b(c'est|j'ai|d'accord|qu'il|qu'elle|n'est|voil[aà])\b/g,
+            /[àâçéèêëîïôûùüÿœ]/g
+        ]);
+        scores.en += countMatches([
+            /\b(the|and|you|that|this|with|for|not|are|have|what|will|from|they|your|about)\b/g,
+            /\b(don't|can't|it's|i'm|you're|we're|that's)\b/g
+        ]);
+        scores.es += countMatches([
+            /\b(el|la|los|las|una|uno|que|con|para|por|pero|como|esta|este|usted|nosotros)\b/g,
+            /[áéíñóúü]/g
+        ]);
+
+        const winner = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+        return winner && winner[1] >= 3 ? winner[0] : null;
+    }
+
+    maybeInferSubtitleLanguage(engine, text) {
+        if (!engine?.trackMeta) return false;
+
+        const currentLanguage = this.normalizeTrackLanguage(engine.trackMeta.inferredLanguage || engine.trackMeta.language);
+        if (currentLanguage && currentLanguage !== 'und') return false;
+
+        engine.languageSample = `${engine.languageSample || ''}\n${text || ''}`.slice(-5000);
+        const inferred = this.inferSubtitleLanguageFromText(engine.languageSample);
+        if (!inferred) return false;
+
+        engine.trackMeta.inferredLanguage = inferred;
+        if (engine.trackEl) {
+            const subtitleTracks = this.getExtractableSubtitleTracks();
+            engine.trackEl.label = this.getSubtitleMenuLabel(engine.trackMeta, subtitleTracks, subtitleTracks.indexOf(engine.trackMeta), 'Subtitles');
+            engine.trackEl.srclang = inferred;
+        }
+        return true;
+    }
+
+    getSubtitleOffsetStorageKey(streamIndex = this.selectedSubtitleStreamIndex) {
+        const sourceId = this.getTelemetrySourceId?.() || this.content?.sourceId || this.content?.source_id || 'local';
+        const itemId = this.getTelemetryItemId?.() || this.content?.id || this.content?.stream_id || 'unknown';
+        const trackId = streamIndex === null || streamIndex === undefined ? 'default' : String(streamIndex);
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_8ef7892473ba", {defaultValue: "norva-subtitle-offset:{{p0}}:{{p1}}:{{p2}}", p0:(sourceId),p1:(itemId),p2:(trackId)}) : `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`);
+    }
+
+    normalizeSubtitleOffset(value) {
+        const seconds = Number(value);
+        if (!Number.isFinite(seconds)) return 0;
+        return Math.max(-15, Math.min(15, Math.round(seconds * 10) / 10));
+    }
+
+    loadSubtitleOffset(streamIndex) {
+        try {
+            return this.normalizeSubtitleOffset(localStorage.getItem(this.getSubtitleOffsetStorageKey(streamIndex)));
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    saveSubtitleOffset(streamIndex, value) {
+        try {
+            const key = this.getSubtitleOffsetStorageKey(streamIndex);
+            const normalized = this.normalizeSubtitleOffset(value);
+            if (normalized === 0) localStorage.removeItem(key);
+            else localStorage.setItem(key, String(normalized));
+        } catch (_) {
+            // Offset persistence is a convenience only.
+        }
+    }
+
+    formatSubtitleOffset(seconds = this.subtitleOffsetSeconds) {
+        const value = this.normalizeSubtitleOffset(seconds);
+        if (value === 0) return '0.0s';
+        return `${value > 0 ? '+' : ''}${value.toFixed(1)}s`;
+    }
+
+    applySubtitleOffsetDelta(delta) {
+        if (this.selectedSubtitleStreamIndex === null || this.selectedSubtitleStreamIndex === undefined) return;
+
+        const next = this.normalizeSubtitleOffset(this.subtitleOffsetSeconds + delta);
+        this.subtitleOffsetSeconds = next;
+        this.saveSubtitleOffset(this.selectedSubtitleStreamIndex, next);
+        this.attachSelectedProbeSubtitleTrack();
+        this.updateCaptionsTracks();
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
+    }
+
+    getExtractableSubtitleTracks(subtitles = this.subtitleTracks) {
+        return (Array.isArray(subtitles) ? subtitles : []).filter(track => this.isSubtitleExtractable(track));
+    }
+
+    getSubtitleExtractionTracks() {
+        const selected = this.getSelectedSubtitleTrack();
+        return selected ? [selected] : [];
+    }
+
+    getSelectedSubtitleTrack() {
+        if (this.selectedSubtitleStreamIndex === null || this.selectedSubtitleStreamIndex === undefined) return null;
+        return this.getExtractableSubtitleTracks()
+            .find(track => Number(track.index) === Number(this.selectedSubtitleStreamIndex)) || null;
+    }
+
+    // ============================================================
+    // Subtitle engine
+    //
+    // Two delivery modes, both feeding cues into a loaded managed <track>
+    // via TextTrack.addCue() (no reload, no flicker):
+    //
+    // 1. transcode-session: FFmpeg extracts only the explicitly selected text
+    //    track to a growing sub_<index>.vtt file IN the transcoding process — zero extra
+    //    provider connections (critical for single-connection accounts).
+    //    We poll the local file and append new cues as they are written.
+    //
+    // 2. direct/remux: windowed extraction via /api/subtitle (a separate
+    //    provider connection, unavoidable here) with auto-sliding windows
+    //    so subtitles keep working past the first window.
+    // ============================================================
+
+    /**
+     * Minimal WebVTT parser — returns [{ start, end, text }]
+     */
+    parseVttCues(vttText) {
+        const cues = [];
+        const timeRe = /(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})/;
+        const blocks = String(vttText || '').split(/\r?\n\r?\n/);
+        for (const block of blocks) {
+            const lines = block.split(/\r?\n/);
+            const timingIdx = lines.findIndex(l => l.includes('-->'));
+            if (timingIdx === -1) continue;
+            const m = lines[timingIdx].match(timeRe);
+            if (!m) continue;
+            const start = (parseInt(m[1] || 0) * 3600) + (parseInt(m[2]) * 60) + parseInt(m[3]) + parseInt(m[4]) / 1000;
+            const end = (parseInt(m[5] || 0) * 3600) + (parseInt(m[6]) * 60) + parseInt(m[7]) + parseInt(m[8]) / 1000;
+            const text = lines.slice(timingIdx + 1).join('\n').trim();
+            if (!text || !(end > start)) continue;
+            cues.push({ start, end, text });
+        }
+        return cues;
+    }
+
+    stopSubtitleEngine() {
+        clearInterval(this._subEngineTimer);
+        clearTimeout(this._subEngineTimer);
+        this._subEngineTimer = null;
+        this._subEngineReadyPromise = null;
+        this._subEngine = null;
+    }
+
+    /**
+     * Fetch a VTT payload and append unseen cues to the engine's TextTrack.
+     * timeOffset rebases cue timestamps onto the local playback timeline.
+     */
+    async fetchSubtitleCues(engine, url, timeOffset = 0, { headers } = {}) {
+        let text;
+        try {
+            const res = await fetch(url, headers ? { headers } : undefined);
+            // 304 Not Modified: the growing .vtt hasn't changed since last tick
+            if (res.status === 304) {
+                engine.failures = 0;
+                return 0;
+            }
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try { detail = (await res.json()).error || detail; } catch (e) { /* not json */ }
+                throw new Error(detail);
+            }
+            const etag = res.headers.get('etag');
+            if (etag) engine.lastEtag = etag;
+            text = await res.text();
+        } catch (err) {
+            console.warn('[WatchPage] Subtitle fetch failed:', err.message);
+            engine.failures = (engine.failures || 0) + 1;
+            return -1;
+        }
+
+        if (engine !== this._subEngine || !engine.trackEl?.track) return -1;
+        engine.failures = 0;
+
+        const textTrack = engine.trackEl.track;
+        let added = 0;
+        let inferredLanguage = false;
+        const subtitleOffset = this.normalizeSubtitleOffset(engine.subtitleOffsetSeconds || 0);
+        for (const cue of this.parseVttCues(text)) {
+            const start = Math.max(0, cue.start + timeOffset + subtitleOffset);
+            const end = Math.max(start + 0.05, cue.end + timeOffset + subtitleOffset);
+            const key = `${start.toFixed(3)}|${end.toFixed(3)}|${cue.text}`;
+            if (engine.seenCues.has(key)) continue;
+            engine.seenCues.add(key);
+            try {
+                textTrack.addCue(new VTTCue(start, end, cue.text));
+                inferredLanguage = this.maybeInferSubtitleLanguage(engine, cue.text) || inferredLanguage;
+                added++;
+            } catch (e) { /* malformed cue, skip */ }
+        }
+        if (inferredLanguage) this.updateCaptionsTracks();
+        return added;
+    }
+
+    // Gateway subtitle endpoint base for the engine (byte-pipe) path: the playback URL
+    // is https://host/raw/<token>, and the same token authorizes https://host/subtitle/<token>.
+    engineSubtitleBaseUrl() {
+        const url = this.baseStreamUrl || this.currentUrl;
+        const m = /^(https?:\/\/[^/]+)\/raw\/(.+)$/.exec(String(url || ''));
+        return m ? `${m[1]}/subtitle/${m[2]}` : '';
+    }
+
+    // Engine in-band subtitles are now ON by default (tested OK): the engine reads its own
+    // subtitle packets, so text subtitles render on single-slot sources where the gateway
+    // extraction (a 2nd provider connection) is refused (458). A device can opt OUT with
+    // localStorage.setItem('norvaInbandSubs','0').
+    _inbandSubsEnabled() {
+        try { return localStorage.getItem('norvaInbandSubs') !== '0'; } catch (_) { return true; }
+    }
+
+    // In-band engine subtitles: pull the cues the engine built from its demuxed packets
+    // (already in player-local time) and append the unseen ones to the TextTrack. No network,
+    // no provider connection. Polled while the track is selected.
+    subtitleEngineInbandTick(engine) {
+        if (engine !== this._subEngine || !engine.trackEl?.track) return;
+        const cues = this.norvaEngine?.getSubtitleCues?.(engine.streamIndex) || [];
+        if (!cues.length) return;
+        const textTrack = engine.trackEl.track;
+        const off = this.normalizeSubtitleOffset(engine.subtitleOffsetSeconds || 0);
+        let added = 0;
+        let inferredLanguage = false;
+        for (const c of cues) {
+            if (!c || !c.text) continue;
+            const start = Math.max(0, c.start + off);
+            const end = Math.max(start + 0.05, c.end + off);
+            const key = `${start.toFixed(3)}|${end.toFixed(3)}|${c.text}`;
+            if (engine.seenCues.has(key)) continue;
+            engine.seenCues.add(key);
+            try {
+                textTrack.addCue(new VTTCue(start, end, c.text));
+                inferredLanguage = this.maybeInferSubtitleLanguage(engine, c.text) || inferredLanguage;
+                added++;
+            } catch (_) { /* malformed cue, skip */ }
+        }
+        if (added || inferredLanguage) this.updateCaptionsTracks();
+    }
+
+    // Engine path: apply the subtitle tracks the SERVER probed (relay header-parse,
+    // returned in the playback payload). Known at LOAD, so the CC menu lists them and
+    // the saved subtitle preference is restored — the bug where the chosen track came
+    // back as OFF (because the lazy client enum populated the list too late to restore).
+    // Enumeration is provider-free (payload data). The restore-ATTACH extracts via the
+    // gateway lane selected for this same playback session. Returns true when tracks applied.
+    applyEngineSubtitleTracks(tracks, playbackAttemptId, evidence = {}) {
+        if (!Array.isArray(tracks) || !tracks.length) return false;
+        const mapped = tracks
+            .filter((s) => Number.isInteger(Number(s.index)))
+            .map((s) => ({
+                index: Number(s.index),
+                language: s.language || s.lang || null,
+                title: s.title || null,
+                codec: s.codec || null,
+                subtitleType: s.subtitleType || (s.extractable ? 'text' : 'image'),
+                extractable: s.extractable === true,
+                forced: s.forced === true,
+                default: s.default === true,
+            }));
+        if (!mapped.length) return false;
+        this.subtitleTracks = mapped;
+        this.captureExactSubtitleTrackMap(mapped, evidence);
+        this.subtitleSourceUrl = this.baseStreamUrl || this.currentUrl;
+        this.subtitleStartOffset = 0;
+        this._engineSubsEnriched = true; // server-provided → skip the client gateway probe
+        this.updateCaptionsTracks();
+        // Restore the saved choice now that the list is known. The selected text track is
+        // extracted in the same Gateway FFmpeg process, so attach its local VTT as soon as
+        // the session metadata exists rather than imposing an arbitrary five-second blank.
+        let restored = false;
+        try { restored = this.restorePendingSubtitlePreference(); } catch (_) { /* best-effort */ }
+        if (restored && this.selectedSubtitleStreamIndex !== null) {
+            this.updateCaptionsTracks();
+            const targetIndex = this.selectedSubtitleStreamIndex;
+            if (!this.isStalePlaybackAttempt(playbackAttemptId)
+                && this.selectedSubtitleStreamIndex === targetIndex) {
+                try { this.attachSelectedProbeSubtitleTrack(); } catch (_) { /* best-effort */ }
+            }
+        }
+        return true;
+    }
+
+    // Engine path: the engine demuxes subtitle streams but can't render them. Ask the
+    // gateway (it has ffmpeg/ffprobe) to enumerate the container's subtitle tracks
+    // (index, language, codec) so the CC menu lists them. Extraction is on selection.
+    // Best-effort + non-blocking; no-op when the file has no subtitle streams.
+    async enrichEngineSubtitleTracks() {
+        // Run at most once per playback (and never two in flight). A transient gateway
+        // failure leaves _engineSubsEnriched false so the next menu-open retries.
+        if (this._engineSubsEnriched || this._engineSubsEnriching) return;
+        try {
+            const engine = this.norvaEngine;
+            if (!engine || typeof engine.subtitleStreams !== 'function') return;
+            // The gateway ffprobe returns BOTH the subtitle tracks AND robust audio-track
+            // languages. A multi-audio file with NO embedded subtitles still needs that
+            // audio fallback — otherwise its menu is stuck on "Audio 1/2/3" every time the
+            // relay probe was refused (e.g. a single-slot provider that 458s the second
+            // connection). So don't bail on "no subtitles" alone: also run when there are
+            // ≥2 audio streams whose languages we don't yet know. One success persists via
+            // reportObservedAudioLanguages, so the next play of this title needs zero probe.
+            const subCount = engine.subtitleStreams().length;
+            const audioCount = typeof engine.audioStreamIndices === 'function' ? engine.audioStreamIndices().length : 0;
+            const audioLangKnown = Array.isArray(this._relayAudioTracks)
+                && this._relayAudioTracks.some((t) => t.lang && t.lang !== 'und');
+            if (!subCount && !(audioCount >= 2 && !audioLangKnown)) { this._engineSubsEnriched = true; return; } // nothing to enrich → don't retry
+            const base = this.engineSubtitleBaseUrl();
+            if (!base) return;
+            this._engineSubsEnriching = true;
+            const attempt = this._playbackAttemptId;
+            const data = await fetch(base, { cache: 'no-store' })
+                .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+            this._engineSubsEnriching = false;
+            if (!data || this.isStalePlaybackAttempt(attempt)) return; // failure → allow retry on next open
+            this._engineSubsEnriched = true;
+            // Audio fallback: the gateway's ffprobe reads audio languages robustly. When
+            // the relay/server probe couldn't name the audio (some MKV files leave it
+            // untagged-by-our-parser), use the gateway's languages and re-sync the audio
+            // menu — e.g. a VOSTFR file's lone Japanese track now shows "Japanese".
+            const gwAudio = (Array.isArray(data.audioTracks) ? data.audioTracks : [])
+                .filter((a) => Number.isInteger(Number(a.index)))
+                .map((a) => ({
+                    index: Number(a.index),
+                    lang: this.normalizeTrackLanguage(a.language || a.lang) || null
+                }));
+            const gatewayHasLang = gwAudio.some((track) => track.lang && track.lang !== 'und');
+            const relayHasLang = Array.isArray(this._relayAudioTracks)
+                && this._relayAudioTracks.some((t) => t.lang && t.lang !== 'und');
+            if (gatewayHasLang && !relayHasLang) {
+                this._relayAudioTracks = gwAudio;
+                try { this.syncEngineAudioTracks(); } catch (_) { /* best-effort */ }
+            }
+            const tracks = (Array.isArray(data.subtitles) ? data.subtitles : [])
+                .filter((s) => Number.isInteger(Number(s.index)))
+                .map((s) => ({
+                    index: Number(s.index),
+                    language: s.language || null,
+                    title: s.title || null,
+                    codec: s.codec || null,
+                    subtitleType: s.subtitleType || (s.extractable ? 'text' : 'image'),
+                    extractable: s.extractable === true,
+                    forced: s.forced === true,
+                    default: s.default === true,
+                }));
+            // A successful response from this token-scoped endpoint is the complete
+            // ffprobe enumeration for the exact playback file. The gateway's legacy
+            // JSON shape has no explicit completion fields, so add that evidence at
+            // this trusted call site (including the authoritative empty-map case).
+            const exactSubtitleEvidence = {
+                ...data,
+                subtitleProbeComplete: true,
+                subtitleTracksScope: 'file',
+            };
+            this.captureExactSubtitleTrackMap(tracks, exactSubtitleEvidence);
+            // Self-heal both independent exact maps. A complete gateway probe
+            // with zero subtitles is evidence too; an absent/incomplete probe is not.
+            try { this.reportObservedAudioLanguages(); } catch (_) { /* best-effort capture */ }
+            if (!tracks.length) return;
+            this.subtitleTracks = tracks;
+            // Windowed extraction reads from the engine /raw URL → gateway /subtitle.
+            this.subtitleSourceUrl = this.baseStreamUrl || this.currentUrl;
+            this.subtitleStartOffset = 0;
+            this.updateCaptionsTracks();
+        } catch (_) {
+            this._engineSubsEnriching = false; // best-effort; allow a later retry
+        }
+    }
+
+    /**
+     * Session mode: poll the growing in-process .vtt for new cues.
+     */
+    gatewaySubtitleUrlForTrack(streamIndex) {
+        const sourceUrl = this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl;
+        if (!sourceUrl) return '';
+
+        try {
+            const url = new URL(sourceUrl, window.location.href);
+            const normalizedStreamIndex = this.nullablePlaybackStreamIndex(streamIndex);
+            if (normalizedStreamIndex === null) return '';
+            const nextPath = url.pathname.replace(
+                /(\/sessions\/[^/?#]+)\/(?:playlist|video|audio_\d+)\.m3u8$/i,
+                `$1/sub_${normalizedStreamIndex}.vtt`
+            );
+            if (nextPath === url.pathname) return '';
+            url.pathname = nextPath;
+            return url.toString();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    async subtitleSessionTick(engine) {
+        if (engine !== this._subEngine) return null;
+        if (engine.done || engine.busy) return null;
+        engine.busy = true;
+
+        // If-None-Match + size-based ETag: ticks are sub-second so a freshly
+        // demuxed cue lands before its startTime, but unchanged files cost a
+        // cheap local 304 instead of a full re-download + re-parse.
+        const url = engine.mode === 'gateway-session'
+            ? engine.gatewaySubtitleUrl
+            : `/api/transcode/${engine.sessionId}/sub_${engine.streamIndex}.vtt`;
+        if (!url) {
+            engine.done = true;
+            engine.busy = false;
+            return -1;
+        }
+        const headers = engine.lastEtag ? { 'If-None-Match': engine.lastEtag } : undefined;
+        const sessionTimeOffset = engine.sourceTimestamps
+            ? -Math.max(0, Number(engine.streamStartOffset) || 0)
+            : 0;
+        const added = await this.fetchSubtitleCues(engine, url, sessionTimeOffset, { headers });
+        engine.busy = false;
+        if (engine !== this._subEngine) return null;
+
+        if (added > 0) {
+            engine.idleRounds = 0;
+            engine.lastSuccessfulFetchAt = Date.now();
+            this.updateCaptionsTracks();
+        } else if (added === 0) {
+            engine.lastSuccessfulFetchAt = Date.now();
+            engine.idleRounds = (engine.idleRounds || 0) + 1;
+            // Whole file covered (last cue reaches the known duration) and the
+            // file stopped growing for ~30s: extraction is complete, stop polling
+            const duration = this.getDisplayDuration();
+            const track = engine.trackEl?.track;
+            const lastCue = track?.cues?.length ? track.cues[track.cues.length - 1] : null;
+            if (engine.idleRounds >= 60 && duration && lastCue && lastCue.endTime >= duration - 120) {
+                engine.done = true;
+            }
+        }
+        // Session gone (cleaned up server-side after a seek/restart): stop
+        if ((engine.failures || 0) >= 30) engine.done = true;
+        return added;
+    }
+
+    startSubtitleSessionPolling(engine) {
+        const tick = async () => {
+            if (engine !== this._subEngine || engine.done) return;
+            await this.subtitleSessionTick(engine);
+            if (engine !== this._subEngine || engine.done) return;
+            // Warm up aggressively until the selected VTT endpoint is real,
+            // then settle on the existing low-cost local polling cadence.
+            const delay = Number.isFinite(engine.lastSuccessfulFetchAt) ? 500 : 150;
+            this._subEngineTimer = setTimeout(tick, delay);
+        };
+        void tick();
+    }
+
+    /**
+     * Windowed mode (direct/remux): load the window around the playhead and
+     * slide forward automatically before the current window runs out.
+     */
+    async subtitleWindowTick(engine, force = false) {
+        if (engine !== this._subEngine || engine.busy) return;
+
+        const localPos = this.getCurrentTime();
+        // User sought back before the covered range: reload a window there
+        const seekedBack = engine.coveredStartLocal !== undefined &&
+            localPos < engine.coveredStartLocal - 5;
+        const jumpedForward = engine.windowEndLocal !== undefined &&
+            localPos > engine.windowEndLocal + 5;
+        const needsNext = force || seekedBack || jumpedForward ||
+            engine.windowEndLocal === undefined ||
+            localPos >= engine.windowEndLocal - 120;
+        if (!needsNext) return;
+        if ((engine.failures || 0) >= 3) return; // provider keeps refusing, stop hammering
+
+        engine.busy = true;
+        // Gateway extraction time scales with the window length (it must demux that much of
+        // the file). A 15-min first window is why the initial subtitle took ~30s to appear.
+        // Fetch a SMALL window first (fast first cues), then extend with large windows — the
+        // next tick fires immediately because windowEndLocal lands just ahead of the playhead.
+        const WINDOW = (force || seekedBack || jumpedForward) ? 90 : 900;
+        // Absolute position in the source file = local time + session seek offset
+        const windowStartLocal = (force || seekedBack || jumpedForward)
+            ? Math.max(0, localPos - 5)
+            : (engine.windowEndLocal ?? 0);
+        engine.coveredStartLocal = engine.coveredStartLocal === undefined
+            ? windowStartLocal
+            : Math.min(engine.coveredStartLocal, windowStartLocal);
+        // Engine (byte-pipe) path: the player re-bases its clock to start at currentTime 0
+        // by subtracting the file's first-frame PTS, but this extractor reads the SOURCE by
+        // absolute time. Re-derive the source offset from the engine on every tick (it is
+        // the first-frame PTS on a fresh play and converges to 0 after a seek) so cues line
+        // up with the picture from 00:00 on files whose stream doesn't start at 0. No-op
+        // (offset 0) for files that already start at 0, so existing-good playback is unchanged.
+        if (this.currentPlaybackMode === 'engine' && typeof this.norvaEngine?.subtitleSourceOffset === 'function') {
+            this.subtitleStartOffset = this.norvaEngine.subtitleSourceOffset();
+        }
+        const absStart = (this.normalizeDuration(this.subtitleStartOffset) || 0) + windowStartLocal;
+
+        // Engine path → the gateway /subtitle endpoint (same token as /raw); other
+        // paths → the local /api/subtitle extractor. Both take index/start and window
+        // duration and return rebased WebVTT, so the cue handling below is identical.
+        let extractUrl;
+        if (engine.gatewayWindowBase) {
+            const gp = new URLSearchParams({ index: String(engine.streamIndex), dur: String(WINDOW) });
+            if (absStart > 0) gp.set('start', String(absStart));
+            extractUrl = `${engine.gatewayWindowBase}?${gp.toString()}`;
+        } else {
+            const params = new URLSearchParams({
+                url: engine.sourceUrl,
+                index: String(engine.streamIndex),
+                codec: String(engine.codec || ''),
+                duration: String(WINDOW)
+            });
+            if (absStart > 0) params.set('start', String(absStart));
+            extractUrl = `/api/subtitle?${params.toString()}`;
+        }
+
+        const added = await this.fetchSubtitleCues(engine, extractUrl, windowStartLocal ? windowStartLocal : 0);
+        if (engine === this._subEngine && added >= 0) {
+            engine.lastSuccessfulFetchAt = Date.now();
+            engine.windowEndLocal = windowStartLocal + WINDOW;
+            this.updateCaptionsTracks();
+        }
+        engine.busy = false;
+    }
+
+    waitForManagedSubtitleTrack(trackEl, timeoutMs = 2000) {
+        if (!trackEl) return Promise.resolve(false);
+        if (trackEl.readyState === 2) return Promise.resolve(true);
+        if (trackEl.readyState === 3) return Promise.resolve(false);
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (ready) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                trackEl.removeEventListener('load', onLoad);
+                trackEl.removeEventListener('error', onError);
+                resolve(ready);
+            };
+            const onLoad = () => finish(true);
+            const onError = () => finish(false);
+            const timer = setTimeout(() => finish(trackEl.readyState === 2), timeoutMs);
+            trackEl.addEventListener('load', onLoad, { once: true });
+            trackEl.addEventListener('error', onError, { once: true });
+        });
+    }
+
+    attachSelectedProbeSubtitleTrack() {
+        if (!this.video) return false;
+
+        const selected = this.getSelectedSubtitleTrack();
+        this.clearExternalSubtitleTracks();
+        if (!selected) {
+            this.selectedSubtitleStreamIndex = null;
+            this.updateCaptionsTracks();
+            return false;
+        }
+
+        // A managed TextTrack still needs a valid WebVTT resource. A src-less
+        // <track> enters readyState=ERROR in Chromium: addCue() then fails while
+        // the menu misleadingly says the subtitle is active. Bootstrap it with
+        // a valid empty VTT and keep feeding cues into that loaded TextTrack.
+        const trackEl = document.createElement('track');
+        trackEl.kind = 'subtitles';
+        const subtitleTracks = this.getExtractableSubtitleTracks();
+        trackEl.label = this.getSubtitleMenuLabel(selected, subtitleTracks, subtitleTracks.indexOf(selected), 'Subtitles');
+        trackEl.srclang = this.normalizeTrackLanguage(selected.language);
+        trackEl.dataset.norvaProbeSubtitle = 'true';
+        trackEl.dataset.streamIndex = String(selected.index);
+        const bootstrapUrl = URL.createObjectURL(new Blob(['WEBVTT\n\n'], { type: 'text/vtt' }));
+        trackEl.dataset.norvaBootstrapUrl = bootstrapUrl;
+        trackEl.src = bootstrapUrl;
+        trackEl.default = true;
+        this.video.appendChild(trackEl);
+        if (trackEl.track) trackEl.track.mode = 'showing';
+
+        const isLocalSessionMode = this.currentPlaybackMode === 'transcode-session';
+        const gatewaySubtitleUrl = this.currentPlaybackMode === 'gateway-session'
+            ? this.gatewaySubtitleUrlForTrack(selected.index)
+            : '';
+        // Engine (byte-pipe) path: windowed extraction, but from the gateway /subtitle
+        // endpoint instead of the local /api/subtitle (which doesn't exist on the cloud).
+        const gatewayWindowBase = this.currentPlaybackMode === 'engine' ? this.engineSubtitleBaseUrl() : '';
+        // In-band engine subtitles (no provider connection): when the byte-pipe engine can
+        // turn its own demuxed text-subtitle packets into cues, prefer that over the gateway
+        // extraction — a 2nd provider connection that 458s on a single-slot source, so the
+        // chosen track silently shows nothing. Flag-gated (localStorage.norvaInbandSubs='1').
+        const useInbandSubs = this.currentPlaybackMode === 'engine'
+            && this._inbandSubsEnabled()
+            && typeof this.norvaEngine?.hasInbandSubtitles === 'function'
+            && this.norvaEngine.hasInbandSubtitles()
+            && this.isSubtitleExtractable(selected);
+        // Which subtitle path served this selection (support/diagnostic). engine-inband is
+        // instant (cues captured from playback start); gateway-window is the slower fallback.
+        console.log('[WatchPage] subtitle path:',
+            useInbandSubs ? 'engine-inband (instant)' : (isLocalSessionMode || gatewaySubtitleUrl ? 'session' : 'gateway-window'),
+            '| mode=', this.currentPlaybackMode,
+            '| hasInband=', this.norvaEngine?.hasInbandSubtitles?.(),
+            '| extractable=', this.isSubtitleExtractable(selected),
+            '| codec=', selected.codec, '| index=', selected.index);
+        const isSessionMode = isLocalSessionMode || Boolean(gatewaySubtitleUrl);
+        const engine = {
+            trackEl,
+            trackMeta: selected,
+            streamIndex: selected.index,
+            codec: selected.codec,
+            seenCues: new Set(),
+            subtitleOffsetSeconds: this.subtitleOffsetSeconds,
+            mode: isLocalSessionMode ? 'session' : (gatewaySubtitleUrl ? 'gateway-session' : 'window'),
+            sessionId: this.currentSessionId,
+            gatewaySubtitleUrl,
+            gatewayWindowBase,
+            sourceUrl: this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl,
+            sourceTimestamps: this.currentPlaybackMode === 'gateway-session'
+                && this.gatewaySourceTimestamps === true,
+            streamStartOffset: this.streamStartOffset || 0,
+            failures: 0,
+            trackReady: false,
+            lastSuccessfulFetchAt: null,
+        };
+        this._subEngine = engine;
+
+        this._subEngineReadyPromise = this.waitForManagedSubtitleTrack(trackEl).then((loaded) => {
+            if (engine !== this._subEngine) return false;
+            if (!loaded || !trackEl.track) {
+                engine.trackLoadFailed = true;
+                return false;
+            }
+            engine.trackReady = true;
+            trackEl.track.mode = 'showing';
+
+            if (useInbandSubs) {
+                // No network: the engine decodes cues from packets it already demuxed.
+                engine.mode = 'engine-inband';
+                try { this.norvaEngine.enableSubtitleCapture(); } catch (_) { /* best-effort */ }
+                this.subtitleEngineInbandTick(engine);
+                this._subEngineTimer = setInterval(() => this.subtitleEngineInbandTick(engine), 1000);
+            } else if (isSessionMode && (this.currentSessionId || gatewaySubtitleUrl)) {
+                this.startSubtitleSessionPolling(engine);
+            } else if (isSessionMode) {
+                // Session not created yet (subtitles attach before session start):
+                // do nothing — startTranscodeSession re-attaches once the id exists.
+                // Crucially, no /api/subtitle fallback here: that would open a
+                // second provider connection while the session is starting.
+            } else {
+                void this.subtitleWindowTick(engine, true);
+                this._subEngineTimer = setInterval(() => this.subtitleWindowTick(engine), 10000);
+            }
+
+            this.updateCaptionsTracks();
+            return true;
+        });
+        return true;
+    }
+
+    attachProbeSubtitles(url, subtitles = this.subtitleTracks, startOffset = this.streamStartOffset) {
+        if (!this.video || !url) return;
+
+        this.subtitleSourceUrl = url;
+        this.subtitleStartOffset = this.normalizeDuration(startOffset) || 0;
+        this.subtitleTracks = Array.isArray(subtitles) ? subtitles : [];
+        this.clearExternalSubtitleTracks();
+        this.restorePendingSubtitlePreference();
+
+        if (this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined) {
+            this.attachSelectedProbeSubtitleTrack();
+            return;
+        }
+
+        setTimeout(() => this.updateCaptionsTracks(), 0);
+    }
+
+    toggleCaptionsMenu() {
+        if (this.captionsMenuOpen) {
+            this.closeCaptionsMenu();
+        } else {
+            // Engine path: enumerate subtitle tracks lazily (see toggleAudioMenu) so
+            // the gateway probe never races the engine's initial buffering. Runs once.
+            if (this.currentPlaybackMode === 'engine') this.enrichEngineSubtitleTracks();
+            this.updateCaptionsTracks();
+            this.captionsMenu?.classList.remove('hidden');
+            this.captionsMenuOpen = true;
+            this.closeAudioMenu();
+        }
+    }
+
+    closeCaptionsMenu() {
+        this.captionsMenu?.classList.add('hidden');
+        this.captionsMenuOpen = false;
+    }
+
+    // Local heuristic (no network): IPTV titles tag burned-in subtitles in the
+    // name — "SUBT AR" / "VOST FR" / "مترجم" … There is no extractable subtitle
+    // TRACK (the text is rendered into the picture), but we can at least tell the
+    // user it's there and in which language, instead of a blank "no track".
+    // Returns a language code, 'und' (burned but unknown language), or undefined
+    // (no burned-subtitle marker found).
+    contentCategoryName() {
+        const c = this.content || {};
+        return String(c.category_name || c.categoryName || c.metadata?.categoryName || c.metadata?.category_name || '');
+    }
+
+    // Burned-in subtitle intel from the cheap label+category intelligence
+    // (MediaUtils.deriveTrackIntel). The container has NO subtitle TRACK (the text is
+    // baked into the picture) so we pass hasSubtitleStream:false; a subtitle language
+    // signalled by the label/category then resolves to type 'burned-in'.
+    // Returns { code, name } | null.
+    burnedSubtitleIntel() {
+        try {
+            // Burned-in subtitles are a VOD concept; a live channel/group whose name happens to carry a
+            // sub marker must NOT show a permanent "always on" lock.
+            const type = String(this.contentType || this.content?.type || '').toLowerCase();
+            if (type === 'live' || type === 'channel' || type === 'tv') return null;
+            const r = window.MediaUtils?.deriveTrackIntel?.({
+                title: this.content?.title || '',
+                category: this.contentCategoryName(),
+                originalLanguage: this.content?.originalLanguage || this.content?.original_language,
+                // Feed REAL stream presence (text OR image track). If the container exposes any subtitle
+                // track it is toggleable / OCR-able — NOT burned into the picture — so deriveTrackIntel
+                // returns 'soft', not 'burned-in'. Hardcoding false used to claim a PGS/VOBSUB title was
+                // burned-in while the menu simultaneously offered an "OCR → text" row for that track.
+                hasSubtitleStream: Array.isArray(this.subtitleTracks) && this.subtitleTracks.length > 0,
+            });
+            const s = r && r.subtitle;
+            if (s && s.type === 'burned-in') return { code: s.code || 'und', name: s.name || null };
+            return null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Back-compat: language code, 'und' (burned but unknown), or undefined (none).
+    detectBurnedSubtitleLanguage() {
+        const intel = this.burnedSubtitleIntel();
+        if (!intel) return undefined;
+        return intel.code || 'und';
+    }
+
+    getBurnedSubtitleMessage() {
+        const lang = this.detectBurnedSubtitleLanguage();
+        if (lang === undefined) return (globalThis.NorvaI18n?.t("ui_web_cca75acfd11c", { defaultValue: "No subtitle track in this stream." }) ?? 'No subtitle track in this stream.');
+        if (lang === 'und') return (globalThis.NorvaI18n?.t("ui_web_214313ff015c", { defaultValue: "Burned-in subtitles — always on, can’t be turned off." }) ?? 'Burned-in subtitles — always on, can’t be turned off.');
+        const name = this.getLanguageDisplayName(lang) || lang.toUpperCase();
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_567707f74907", {defaultValue: "Burned-in subtitles ({{p0}}) — always on, can’t be turned off.", p0:(name)}) : `Burned-in subtitles (${name}) — always on, can’t be turned off.`);
+    }
+
+    // ============================================================
+    // Phase 3 AI subtitles
+    //
+    // When a title has no usable text subtitle track, the viewer can ask Norva to
+    // transcribe the spoken audio with the self-hosted whisper.cpp on the gateway.
+    // The result is cached cross-user (keyed by providerKey + file), so the first
+    // viewer of a panel pays the (background) cost and everyone else reuses it for
+    // free. The VTT is fed into a src-less <track> via addCue(), exactly like the
+    // probe/engine subtitle paths — no reload, no flicker.
+    // ============================================================
+
+    // The file coordinates the edge needs to find/produce a transcript. The player always holds
+    // these for a cloud VOD (it just used them to resolve the stream), so AI subs no longer depend
+    // on a cloud_titles UUID being present. titleId is sent too when available (a cheap fast-path).
+    // Movies AND series episodes are eligible (the edge resolves an unknown series external id as
+    // an EPISODE id — the path built for player-triggered transcriptions); live is excluded.
+    _aiSubtitleParams() {
+        const c = this.content || {};
+        const type = String(this.contentType || c.type || '').toLowerCase();
+        // SeriesPage plays with type 'series', Home/continue-watching with type 'episode' —
+        // same content, both must behave identically.
+        const isEpisode = type === 'series' || type === 'episode';
+        if (type !== 'movie' && !isEpisode) return null;
+        // Raw source id as the player holds it (cloud UUID OR a local/provider alias like "900016").
+        // requestAiSubtitles() resolves it to the cloud UUID before calling the edge; here we just
+        // need a stable, present id so the menu entry shows and the in-session key is consistent.
+        const sourceId = String((this.getTelemetrySourceId ? this.getTelemetrySourceId() : '') || c.sourceId || c.source_id || c.cloudSourceId || '');
+        // For episodes: c.id MUST be the EPISODE id (playEpisodeFromList sets it). Never fall back
+        // to getTelemetryItemId(), which prefers the SERIES id — transcribing a series id resolves
+        // the FIRST episode and would serve S1E1 subtitles on any episode, silently wrong.
+        const externalId = isEpisode
+            ? String(c.id || c.streamId || c.stream_id || '')
+            : String(c.id || c.streamId || c.stream_id || (this.getTelemetryItemId ? this.getTelemetryItemId() : '') || '');
+        if (!sourceId || !externalId) return null;
+        if (isEpisode && externalId === String(c.seriesId || c.series_id || '')) return null;
+        const titleId = isEpisode ? '' : String(c.titleId || c.title_id || c.data?.titleId || '');
+        // itemType is ALWAYS 'movie'|'series' — the edge clamps anything else to 'movie', which
+        // would resolve the wrong URL and pollute the movie cache keyspace with episode ids.
+        return { sourceId, externalId, itemType: isEpisode ? 'series' : 'movie', titleId };
+    }
+
+    // Stable in-session key for a title's AI-subtitle state (cache reuse + stale-response guards).
+    _aiSubtitleKey() {
+        const p = this._aiSubtitleParams();
+        return p ? `${p.sourceId}:${p.itemType}:${p.externalId}` : '';
+    }
+
+    // AI subs only make sense for cloud on-demand titles with a backend route to call.
+    _canRequestAiSubtitles() {
+        if (!this._aiSubtitleParams()) return false;
+        if (typeof this.isCloudPlaybackMode === 'function' && !this.isCloudPlaybackMode()) return false;
+        return Boolean(window.NorvaCloud?.playback?.generatedSubtitle);
+    }
+
+    aiSubtitleTrackShowing() {
+        const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+        return Boolean(el && el.track && el.track.mode === 'showing');
+    }
+
+    // ============================================================
+    // Phase 4 OCR — image (PGS) subtitle tracks → text
+    // Blu-ray PGS subtitles are bitmaps, not text, so they can't be extracted as a WebVTT. The
+    // viewer can OCR one on demand: the edge runs tesseract on the gateway, caches the VTT
+    // cross-user (kind='ocr', lang=<track language>), and we attach it via the same src-less
+    // <track> path as AI subtitles. Per-track state, keyed by the subtitle STREAM index.
+    // ============================================================
+
+    // The image-sub tracks we can OCR (gated like AI subs: cloud on-demand movie). Covers PGS
+    // (Blu-ray), VOBSUB (DVD) and DVB — the gateway picks the right pipeline from `fmt`.
+    getOcrableSubtitleTracks() {
+        if (!this._canRequestAiSubtitles()) return [];
+        return (Array.isArray(this.subtitleTracks) ? this.subtitleTracks : []).filter((t) =>
+            t && String(t.subtitleType || '').toLowerCase() === 'image' && this._ocrFmtOf(t));
+    }
+
+    // Map a track codec to the gateway OCR pipeline, or '' if not an OCR-able image codec.
+    _ocrFmtOf(track) {
+        const c = String(track?.codec || '').toLowerCase();
+        if (/pgs/.test(c)) return 'pgs';
+        if (/dvd|vobsub/.test(c)) return 'vobsub';
+        if (/dvb/.test(c)) return 'dvb';
+        return '';
+    }
+
+    _ocrLangOf(track) {
+        return this.normalizeTrackLanguage(track?.language || track?.lang || '') || 'und';
+    }
+
+    _ocrEntry(streamIndex) {
+        let e = this._ocr.get(streamIndex);
+        if (!e) { e = { state: 'idle', vtt: null, lang: 'und', pollTimer: null, titleKey: null }; this._ocr.set(streamIndex, e); }
+        return e;
+    }
+
+    // State for THIS title only — a stale entry from a previous title reads as idle.
+    _ocrStateFor(streamIndex) {
+        const e = this._ocr.get(streamIndex);
+        return (e && e.titleKey === this._aiSubtitleKey()) ? e.state : 'idle';
+    }
+
+    _stopOcrPolling(streamIndex) {
+        const e = this._ocr.get(streamIndex);
+        if (e?.pollTimer) { clearInterval(e.pollTimer); e.pollTimer = null; }
+    }
+
+    _stopAllOcrPolling() {
+        if (!this._ocr) return;
+        for (const e of this._ocr.values()) { if (e.pollTimer) { clearInterval(e.pollTimer); e.pollTimer = null; } }
+    }
+
+    _attachOcrTrack(streamIndex, vtt, lang) {
+        const ok = this.attachGeneratedSubtitleTrack(vtt, lang);
+        if (ok) this._ocrActiveStreamIndex = streamIndex;
+        return ok;
+    }
+
+    // Menu rows for the title's PGS tracks, reflecting each track's OCR state machine.
+    _ocrSubtitleMenuHtml(tracks) {
+        return tracks.map((t) => {
+            const idx = Number(t.index);
+            const lang = this._ocrLangOf(t);
+            const tag = lang && lang !== 'und' ? ` · ${lang.toUpperCase()}` : '';
+            const base = `OCR${tag}`;
+            const state = this._ocrStateFor(idx);
+            if (state === 'processing') {
+                return `<button class="captions-option locked" data-source="ocr" data-index="-1" data-stream-index="${idx}" disabled aria-disabled="true" title="Reading the image subtitles with OCR in the background — you can keep watching." data-i18n-title="ui_web_b1930b310d06">⏳ ${this.escapeHtml(base + ' — generating')}</button>`;
+            }
+            if (state === 'failed') {
+                return `<button class="captions-option" data-source="ocr" data-index="-1" data-stream-index="${idx}">⚠️ ${this.escapeHtml(base + ' failed — retry')}</button>`;
+            }
+            const active = state === 'ready' && this._ocrActiveStreamIndex === idx;
+            const label = state === 'ready' ? base : `${base} → text`;
+            return `<button class="captions-option ${active ? 'active' : ''}" data-source="ocr" data-index="-1" data-stream-index="${idx}">🔤 ${this.escapeHtml(label)}</button>`;
+        }).join('');
+    }
+
+    async requestOcrSubtitle(streamIndex, lang, fmt = 'pgs') {
+        const base = this._aiSubtitleParams();
+        if (!base || !Number.isInteger(streamIndex)) return;
+        const api = window.NorvaCloud?.playback;
+        if (!api?.generatedSubtitle) return;
+        const key = this._aiSubtitleKey();
+        const entry = this._ocrEntry(streamIndex);
+        entry.lang = lang || 'und';
+        entry.titleKey = key;
+
+        const params = { ...base };
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* raw id */ }
+
+        // Already produced this session → just re-attach from cache.
+        if (entry.state === 'ready' && entry.vtt) {
+            this._attachOcrTrack(streamIndex, entry.vtt, entry.lang);
+            this.updateCaptionsTracks();
+            return;
+        }
+
+        // index is part of the OCR cache key (the edge forms `<lang>#<index>`), so the read GET must
+        // carry it too — otherwise two image tracks of the same language read the same cache row.
+        const getParams = { ...params, kind: 'ocr', lang: entry.lang, index: streamIndex };
+        entry.state = 'processing';
+        this.updateCaptionsTracks();
+        // 1) shared cache (another viewer may already have OCR'd this track).
+        try {
+            const got = await api.generatedSubtitle(getParams);
+            if (this._applyOcrResponse(streamIndex, got, key)) return;
+        } catch (_) { /* fall through to trigger */ }
+        // 2) trigger an OCR pass and poll for it.
+        try {
+            const enq = await api.requestGeneratedSubtitle({ ...params, kind: 'ocr', index: streamIndex, lang: entry.lang, fmt });
+            if (enq && String(enq.status) === 'ready') {
+                const got = await api.generatedSubtitle(getParams);
+                if (this._applyOcrResponse(streamIndex, got, key)) return;
+            }
+            if (enq && String(enq.status) === 'error') {
+                entry.state = 'failed'; this.updateCaptionsTracks(); return;
+            }
+        } catch (err) {
+            console.warn('[WatchPage] OCR enqueue failed:', err?.status, err?.message || err);
+            entry.state = 'failed'; this.updateCaptionsTracks(); return;
+        }
+        this._startOcrPolling(streamIndex, getParams, key);
+    }
+
+    _applyOcrResponse(streamIndex, got, key) {
+        if (this._aiSubtitleKey() !== key) return true; // title changed → stop this flow
+        const entry = this._ocrEntry(streamIndex);
+        const status = String(got?.status || 'none');
+        if (status === 'ready' && got.vtt) {
+            entry.vtt = got.vtt;
+            entry.lang = this.normalizeTrackLanguage(got.lang) || entry.lang;
+            entry.state = this._attachOcrTrack(streamIndex, got.vtt, entry.lang) ? 'ready' : 'failed';
+            this._stopOcrPolling(streamIndex);
+            this.updateCaptionsTracks();
+            return true;
+        }
+        if (status === 'failed') {
+            entry.state = 'failed'; this._stopOcrPolling(streamIndex); this.updateCaptionsTracks(); return true;
+        }
+        if (status === 'processing') { entry.state = 'processing'; return false; }
+        return false; // 'none' → caller triggers
+    }
+
+    _startOcrPolling(streamIndex, getParams, key) {
+        this._stopOcrPolling(streamIndex);
+        const entry = this._ocrEntry(streamIndex);
+        const startedAt = Date.now();
+        const MAX_MS = 60 * 60 * 1000; // a full-film OCR can be long; cap the poll generously
+        entry.pollTimer = setInterval(async () => {
+            if (this._aiSubtitleKey() !== key) { this._stopOcrPolling(streamIndex); return; }
+            if (Date.now() - startedAt > MAX_MS) { this._stopOcrPolling(streamIndex); entry.state = 'failed'; this.updateCaptionsTracks(); return; }
+            try { const got = await window.NorvaCloud.playback.generatedSubtitle(getParams); this._applyOcrResponse(streamIndex, got, key); } catch (_) { /* transient — keep polling */ }
+        }, 20000);
+    }
+
+    // Menu entry reflecting the AI-subtitle state machine. Rendered as a normal .captions-option
+    // so the existing click wiring routes it to selectCaptionTrack('ai', …).
+    _aiSubtitleMenuHtml(hasTextTracks = false) {
+        const showing = this.aiSubtitleTrackShowing();
+        if (this.aiSubtitleState === 'processing') {
+            const head = `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml(this._aiProcessingTooltip())}">${this._aiProcessingLabelHtml()}</button>`;
+            const on = this._aiNotifyOptedIn;
+            // Poll expired (job still alive server-side, we just stop hammering): push email hard.
+            const notifyLabel = on ? (globalThis.NorvaI18n?.t("ui_web_c97fcf769a9a", { defaultValue: "We'll email you when it's ready" }) ?? "We'll email you when it's ready") : (this._aiPollExpired ? (globalThis.NorvaI18n?.t("ui_web_37470b728b3c", { defaultValue: "Longer than usual — email me when ready" }) ?? 'Longer than usual — email me when ready') : (globalThis.NorvaI18n?.t("ui_web_c72bc122e09b", { defaultValue: "Notify me by email when ready" }) ?? 'Notify me by email when ready'));
+            const notify = `<button class="captions-option ${on ? 'active' : ''}" data-action="ai-notify" type="button" title="${this.escapeHtml(on ? (globalThis.NorvaI18n?.t("ui_web_e44ec0e1a5cc", { defaultValue: "You'll get an email the moment your AI subtitles finish." }) ?? 'You\'ll get an email the moment your AI subtitles finish.') : (globalThis.NorvaI18n?.t("ui_web_2f2b55f3e9d5", { defaultValue: "Get an email when your AI subtitles finish — no need to wait here." }) ?? 'Get an email when your AI subtitles finish — no need to wait here.'))}">${on ? '🔔' : '🔕'} ${this.escapeHtml(notifyLabel)}</button>`;
+            return head + notify;
+        }
+        if (this.aiSubtitleState === 'failed') {
+            // Daily cap is not a failure to retry: a retry re-POSTs and re-429s until tomorrow —
+            // "retry" would be a promise of guaranteed failure. Locked, honest, terminal for today.
+            if (this._aiIsDailyLimit()) {
+                return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_df60263c8286", { defaultValue: "You reached today's AI subtitle limit. Already-generated subtitles keep working — new generations resume tomorrow." }) ?? 'You reached today\'s AI subtitle limit. Already-generated subtitles keep working — new generations resume tomorrow.'))}">⏳ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_60dbe6081c30", { defaultValue: "Daily AI subtitle limit reached — try again tomorrow" }) ?? 'Daily AI subtitle limit reached — try again tomorrow'))}</button>`;
+            }
+            const reason = this._aiFailureShort();
+            const title = this._aiLastError ? ` title="${this.escapeHtml(this._aiLastError)}"` : '';
+            return `<button class="captions-option" data-source="ai" data-index="-1"${title}>⚠️ ${this.escapeHtml(reason ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_e64e5cce6fdd", {defaultValue: "AI subtitles failed ({{p0}}) — retry", p0:(reason)}) : `AI subtitles failed (${reason}) — retry`) : (globalThis.NorvaI18n?.t("ui_web_2b2c1a7e3b3f", { defaultValue: "AI subtitles failed — retry" }) ?? 'AI subtitles failed — retry'))}</button>`;
+        }
+        if (this.aiSubtitleState === 'empty') {
+            // Terminal: the audio was transcribed but yielded no dialogue (silence / music only).
+            return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="The audio was transcribed but no speech was found" data-i18n-title="ui_web_d2b89e6ac0c1">${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_214cf68359cb", { defaultValue: "AI subtitles — no speech detected" }) ?? 'AI subtitles — no speech detected'))}</button>`;
+        }
+        const srcLang = this.normalizeTrackLanguage(this.aiSubtitleLang);
+        // The transcript row is "active" only when the SOURCE track shows (a translation showing
+        // makes _aiActiveLang the target instead) — so source vs translation never both read active.
+        const transcriptActive = this.aiSubtitleState === 'ready' && this._aiActiveLang && this._aiActiveLang === srcLang;
+        if (this.aiSubtitleState === 'ready') {
+            // Name the original's language explicitly ("show original (Français)") — without it,
+            // viewers can't tell what clicking the row will display, nor why their own language
+            // is missing from "Translate to" (it IS the original).
+            const srcName = (srcLang && srcLang !== 'und') ? this._langDisplayName(srcLang) : '';
+            const readyLabel = transcriptActive
+                ? (srcName ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_965a7462fa5d", {defaultValue: "AI subtitles — {{p0}} (original)", p0:(srcName)}) : `AI subtitles — ${srcName} (original)`) : (globalThis.NorvaI18n?.t("ui_web_57c105f5d0ea", { defaultValue: "AI subtitles (original)" }) ?? 'AI subtitles (original)'))
+                : (srcName ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_87b47db8bdfa", {defaultValue: "AI subtitles — show original ({{p0}})", p0:(srcName)}) : `AI subtitles — show original (${srcName})`) : (globalThis.NorvaI18n?.t("ui_web_8fe4a47ccaf9", { defaultValue: "AI subtitles — show original" }) ?? 'AI subtitles — show original'));
+            let html = `<button class="captions-option ${transcriptActive ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(readyLabel)}</button>`;
+            html += this._aiTranslateRowsHtml();
+            return html;
+        }
+        // Idle: the viewer picks the LANGUAGE at click time — [Original] plus every installed
+        // translation target. The choice rides the whole chain (transcript → auto-translation).
+        const targets = (this._aiTranslateTargets || []).filter(Boolean);
+        const rows = [
+            `<button class="captions-option" data-action="ai-generate" data-lang="src">🎙 ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_4c7e7770c359", { defaultValue: "Original (spoken language)" }) ?? 'Original (spoken language)'))}</button>`,
+            ...targets.map((lang) => `<button class="captions-option" data-action="ai-generate" data-lang="${this.escapeHtml(lang)}" title="${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_b0380f85d773", { defaultValue: "Transcribes the audio, then auto-translates — works even if you close the tab." }) ?? 'Transcribes the audio, then auto-translates — works even if you close the tab.'))}">🌐 ${this.escapeHtml(this._langDisplayName(lang))}</button>`),
+        ].join('');
+        // With real text tracks above, the AI section is the secondary option for a language
+        // the file doesn't carry — not the headline act.
+        const subhead = hasTextTracks ? (globalThis.NorvaI18n?.t("ui_web_39694411608a", { defaultValue: "AI subtitles — more languages" }) ?? 'AI subtitles — more languages') : (globalThis.NorvaI18n?.t("ui_web_20b52aee0458", { defaultValue: "Generate AI subtitles" }) ?? 'Generate AI subtitles');
+        return `<div class="captions-subhead">✨ ${this.escapeHtml(subhead)}</div>${rows}`;
+    }
+
+    // Honest processing label: stage-aware when the server reports one (V1.2 heartbeats),
+    // countdown only while actually transcribing.
+    _aiProcessingLabelHtml() {
+        const stage = String(this._aiStage || '');
+        const pos = Number(this._aiQueuePos);
+        if (this._aiPollExpired) return `⏳ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_8b56d09b5ff6", { defaultValue: "Still queued — enable email below, we'll let you know" }) ?? 'Still queued — enable email below, we\'ll let you know'))}`;
+        // Optimistic pre-network state: the click was registered, the cache lookup is in flight.
+        if (stage === 'checking') return `✨ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_6fdbe97f0e57", { defaultValue: "Checking for existing subtitles…" }) ?? 'Checking for existing subtitles…'))}`;
+        if (stage === 'enqueueing') return `✨ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_14d27018bf31", { defaultValue: "Starting AI subtitles…" }) ?? 'Starting AI subtitles…'))}`;
+        if (stage === 'deferred') {
+            return this._aiDeferredByYou
+                ? `⏸ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_b22268213f7d", { defaultValue: "Waiting for your playback to stop (your provider allows one connection)" }) ?? 'Waiting for your playback to stop (your provider allows one connection)'))}`
+                : `⏸ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_9d23e4953cae", { defaultValue: "Waiting for the provider slot to free up" }) ?? 'Waiting for the provider slot to free up'))}`;
+        }
+        if (stage === 'extracting') return `🎙 ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_713f243f106c", { defaultValue: "Extracting the audio…" }) ?? 'Extracting the audio…'))}`;
+        if (stage === 'transcribing') {
+            this._ensureAiEta();
+            const eta = this._aiEtaText();
+            const partial = this._aiPartialCues > 0 ? ` · ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_aa9af6e014ea", { defaultValue: "partial subtitles already showing" }) ?? 'partial subtitles already showing'))}` : '';
+            return `✍️ ${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_47c6addbf1cc", { defaultValue: "Transcribing…" }) ?? 'Transcribing…'))}${eta ? ` <span data-ai-countdown>${this.escapeHtml(eta)}</span>` : ''}${partial}`;
+        }
+        const posTxt = Number.isFinite(pos) && pos > 0 ? ` (position ${pos})` : '';
+        return `⏳ ${this.escapeHtml((globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_f22525537d33", {defaultValue: "Queued{{p0}}…", p0:(posTxt)}) : `Queued${posTxt}…`))}`;
+    }
+
+    _aiProcessingTooltip() {
+        if (String(this._aiStage || '') === 'deferred' && this._aiDeferredByYou) {
+            return (globalThis.NorvaI18n?.t("ui_web_7aec2c2ed221", { defaultValue: "Your provider allows a single connection: the transcription starts as soon as your playback stops. Or close the tab and enable the email — we'll notify you." }) ?? 'Your provider allows a single connection: the transcription starts as soon as your playback stops. Or close the tab and enable the email — we\'ll notify you.');
+        }
+        return (globalThis.NorvaI18n?.t("ui_web_ace00d25c084", { defaultValue: "Transcribing the audio with AI in the background. Closing the tab is fine — enable the email to be notified." }) ?? 'Transcribing the audio with AI in the background. Closing the tab is fine — enable the email to be notified.');
+    }
+
+    // The edge's daily-cap 429 must never read as "provider refused the connection".
+    _aiIsDailyLimit() {
+        const e = String(this._aiLastError || '').toLowerCase();
+        return e.includes('daily limit') || e.includes('limite quotidienne');
+    }
+
+    // Short human reason from the server's error detail (full text kept in the tooltip).
+    _aiFailureShort() {
+        const e = String(this._aiLastError || '').toLowerCase();
+        if (!e) return '';
+        if (this._aiIsDailyLimit()) return (globalThis.NorvaI18n?.t("ui_web_57be39080300", { defaultValue: "daily limit reached" }) ?? 'daily limit reached');
+        if (e.includes('unavailable on this provider')) return (globalThis.NorvaI18n?.t("ui_web_ab60e5942528", { defaultValue: "not available on this provider" }) ?? 'not available on this provider');
+        if (e.includes('timeout') || e.includes('killed')) return (globalThis.NorvaI18n?.t("ui_web_7886a3b2696e", { defaultValue: "transcription took too long" }) ?? 'transcription took too long');
+        if (e.includes('401') || e.includes('403') || e.includes('429') || e.includes('unauthorized') || e.includes('forbidden')) return (globalThis.NorvaI18n?.t("ui_web_4bc1fe90c54e", { defaultValue: "provider refused the connection" }) ?? 'provider refused the connection');
+        if (e.includes('extraction')) return (globalThis.NorvaI18n?.t("ui_web_2984e93cee46", { defaultValue: "audio extraction failed" }) ?? 'audio extraction failed');
+        if (e.includes('deferred too long')) return (globalThis.NorvaI18n?.t("ui_web_43237a5ae175", { defaultValue: "provider slot stayed busy" }) ?? 'provider slot stayed busy');
+        return '';
+    }
+
+    // Phase 3b: one row per available translation TARGET language (shown once the source transcript
+    // is ready). Reflects each target's own state machine: idle → translating… → active / retry.
+    _aiTranslateRowsHtml() {
+        const src = this.normalizeTrackLanguage(this.aiSubtitleLang);
+        const targets = (this._aiTranslateTargets || []).filter((l) => l && l !== src);
+        if (!targets.length) return '';
+        const rows = targets.map((lang) => {
+            const st = (this._translations.get(lang) || {}).state || 'idle';
+            const name = this.escapeHtml(this._langDisplayName(lang));
+            if (st === 'processing') {
+                return `<button class="captions-option locked" data-action="ai-translate" data-lang="${lang}" disabled aria-disabled="true" title="Translating on the server — this is quick" data-i18n-title="ui_web_b90caf9824f8">🌐 ${name} — ${this.escapeHtml('translating…')}</button>`;
+            }
+            if (st === 'failed') {
+                return `<button class="captions-option" data-action="ai-translate" data-lang="${lang}">🌐 ${name} — ${this.escapeHtml('retry')}</button>`;
+            }
+            const active = this._aiActiveLang === lang;
+            return `<button class="captions-option ${active ? 'active' : ''}" data-action="ai-translate" data-lang="${lang}">🌐 ${name}</button>`;
+        }).join('');
+        return `<div class="captions-subhead">${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_1944d5ab19cd", { defaultValue: "Translate to" }) ?? 'Translate to'))}</div>${rows}`;
+    }
+
+    _langDisplayName(code) {
+        const N = {
+            fr: 'Français', en: 'English', es: 'Español', ar: 'العربية', de: 'Deutsch', it: 'Italiano',
+            pt: 'Português', nl: 'Nederlands', ru: 'Русский', tr: 'Türkçe', pl: 'Polski', sv: 'Svenska',
+            ro: 'Română', uk: 'Українська', zh: '中文', ja: '日本語', ko: '한국어', hi: 'हिन्दी',
+        };
+        return N[code] || String(code || '').toUpperCase();
+    }
+
+    // Human title for the email body (and the in-menu copy). Best-effort across the shapes content
+    // takes (cloud catalog vs tmdb-enriched vs raw provider item). Episodes append their label —
+    // notifications are keyed per-episode, so "your subtitles for Breaking Bad are ready" without
+    // saying WHICH episode would be a half-truth.
+    _aiTitleLabel() {
+        const c = this.content || {};
+        const base = String(c.name || c.title || c.tmdb?.title || c.tmdb?.name || c.data?.title || c.data?.name || '').trim();
+        const type = String(this.contentType || c.type || '').toLowerCase();
+        const ep = (type === 'series' || type === 'episode') ? String(c.subtitle || c.episodeLabel || '').trim() : '';
+        return (ep && !base.includes(ep) ? `${base} — ${ep}` : base).slice(0, 200);
+    }
+
+    // Set the completion target ONCE, anchored to when the server actually started transcribing
+    // (the stage heartbeat flip, not the click). Measured whisper RTF on the gateway is ~0.15;
+    // 0.2× realtime gives headroom → a 95-min film ≈ ~19 min; clamp to [4, 45] min. The old
+    // 0.4×/[8,60] guess was ~2× too pessimistic AND re-armed itself on every expiry (zombie
+    // countdown) — now it arms once per transcription and stays expired ("longer than usual").
+    _ensureAiEta() {
+        if (this._aiEtaTargetMs) return; // armed once; cleared on state/title transitions
+        const dur = Number(this.video?.duration);
+        const base = (Number.isFinite(dur) && dur > 0) ? dur : 95 * 60;
+        const etaSec = Math.min(45 * 60, Math.max(4 * 60, base * 0.2));
+        this._aiEtaTargetMs = Date.now() + etaSec * 1000;
+    }
+
+    _aiEtaText() {
+        if (!this._aiEtaTargetMs) return '';
+        const remMs = this._aiEtaTargetMs - Date.now();
+        if (remMs <= 0) return (globalThis.NorvaI18n?.t("ui_web_87defe1c2a52", { defaultValue: "longer than usual — hang on…" }) ?? 'longer than usual — hang on…');
+        const t = Math.round(remMs / 1000);
+        const m = Math.floor(t / 60), s = t % 60;
+        return (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_73fe06b245eb", {defaultValue: "~{{p0}}:{{p1}} left", p0:(m),p1:(String(s).padStart(2, '0'))}) : `~${m}:${String(s).padStart(2, '0')} left`);
+    }
+
+    // Tick the countdown text in place (no full menu rebuild — that would churn the open popover and
+    // re-bind handlers every second). Cheap no-op while the menu is closed (the span isn't in the DOM).
+    _startAiCountdown() {
+        this._stopAiCountdown();
+        this._aiCountdownTimer = setInterval(() => {
+            if (this.aiSubtitleState !== 'processing') { this._stopAiCountdown(); return; }
+            const span = this.captionsList?.querySelector('[data-ai-countdown]');
+            if (span) span.textContent = this._aiEtaText();
+        }, 1000);
+    }
+
+    _stopAiCountdown() {
+        if (this._aiCountdownTimer) { clearInterval(this._aiCountdownTimer); this._aiCountdownTimer = null; }
+    }
+
+    // Toggle the per-title "email me when ready" opt-in. Optimistic (flips the chip immediately),
+    // then registers/cancels server-side via the cheap notify route (no provider call). Reverts the
+    // chip if the server can't honour it (e.g. the account has no email on file).
+    async toggleAiNotify() {
+        if (this.aiSubtitleState !== 'processing') return;
+        const enabled = !this._aiNotifyOptedIn;
+        this._aiNotifyOptedIn = enabled;
+        this.updateCaptionsTracks();
+        try {
+            const params = this._aiSubtitleParams();
+            if (!params || !window.NorvaCloud?.playback?.notifyGeneratedSubtitle) return;
+            try {
+                const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+                if (cloudId) params.sourceId = String(cloudId);
+            } catch (_) { /* fall back to the raw id */ }
+            const c = this.content || {};
+            const res = await window.NorvaCloud.playback.notifyGeneratedSubtitle({
+                sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
+                titleId: params.titleId, titleLabel: this._aiTitleLabel(), enabled,
+                // Episodes are cached by EPISODE id but the email deep link opens the SERIES fiche
+                // — the server stores this alongside the subscription for exactly that.
+                ...(params.itemType === 'series' ? { seriesId: String(c.seriesId || c.series_id || '') } : {}),
+                // A language was picked at click time → the email should fire when the TRANSLATED
+                // subtitles are ready (the server chain produces them right after the transcript).
+                ...(this._pendingTranslateTarget ? { kind: 'translation', lang: this._pendingTranslateTarget } : {}),
+            });
+            if (enabled && res && res.ok === false) {
+                // Couldn't register (no email / no provider key) — undo the optimistic chip.
+                this._aiNotifyOptedIn = false;
+                this.updateCaptionsTracks();
+                console.warn('[WatchPage] AI notify opt-in not registered:', res.reason || '');
+            }
+        } catch (err) {
+            console.warn('[WatchPage] AI notify toggle failed:', err?.status, err?.message || err);
+            this._aiNotifyOptedIn = !enabled;
+            this.updateCaptionsTracks();
+        }
+    }
+
+    stopAiSubtitlePolling() {
+        // Invalidate the whole tick chain, not just the pending timer: a terminal response calls
+        // this from INSIDE a tick (timer already fired) — without the bump, that tick reschedules.
+        this._aiPollGen = (this._aiPollGen || 0) + 1;
+        if (this._aiSubtitlePollTimer) {
+            clearTimeout(this._aiSubtitlePollTimer);
+            this._aiSubtitlePollTimer = null;
+        }
+        this._stopAiCountdown();
+    }
+
+    // Apply a /generated-subtitle response to the state machine. Returns true on any TERMINAL
+    // state (ready or empty) so the caller stops; 'ready' is terminal regardless of body, because
+    // a transcript with no cues (genuine silence/music) is a final answer, not a reason to keep
+    // polling forever. Ignores stale responses (title switched mid-flight).
+    _applyAiSubtitleResponse(res, key) {
+        if (!res || this._aiSubtitleKey() !== key) return false;
+        const status = String(res.status || 'none');
+        if (res.timings && typeof res.timings === 'object') this._aiServerTimings = { ...res.timings };
+        if (status === 'ready') {
+            this._aiJobId = null;
+            this._aiSubtitleTitleId = key;
+            this.stopAiSubtitlePolling();
+            const vtt = String(res.vtt || '');
+            const lang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
+            // Cache surfaced WITHOUT a click this session (menu probe / another user's run on the
+            // shared per-panel cache): show the ready row, but subtitles never turn themselves on.
+            // Same cue validation as the attach path, so a degenerate VTT still resolves to 'empty'.
+            if (vtt && !this._aiUserRequested && this.parseVttCues(vtt).length) {
+                this.aiSubtitleState = 'ready';
+                this.aiSubtitleVtt = vtt;
+                this.aiSubtitleLang = lang;
+                this._pendingTranslateTarget = null;
+                this._ensureTranslateTargets();
+                this.updateCaptionsTracks();
+                return true;
+            }
+            // attachGeneratedSubtitleTrack returns false when the VTT has no usable cues.
+            if (vtt && this.attachGeneratedSubtitleTrack(vtt, lang)) {
+                this.aiSubtitleState = 'ready';
+                this.aiSubtitleVtt = vtt;
+                this.aiSubtitleLang = lang;
+                this._ensureTranslateTargets();
+                // A translation target picked before the transcript existed → fire it now.
+                if (this._pendingTranslateTarget && this._pendingTranslateTarget !== lang) {
+                    const t = this._pendingTranslateTarget; this._pendingTranslateTarget = null;
+                    this.requestAiTranslation(t);
+                } else {
+                    this._pendingTranslateTarget = null;
+                }
+            } else {
+                // Transcription finished but produced nothing to show — terminal "no speech" state.
+                this.aiSubtitleState = 'empty';
+                this.aiSubtitleVtt = null;
+            }
+            this.updateCaptionsTracks();
+            return true;
+        }
+        if (status === 'failed') {
+            this._aiJobId = null;
+            this.aiSubtitleState = 'failed';
+            this._aiLastError = String(res.error || ''); // server now exposes the real cause
+            this.stopAiSubtitlePolling();
+            this.updateCaptionsTracks();
+            return false;
+        }
+        if (status === 'starting' || status === 'processing' || status === 'pending-transcript') {
+            const durableJobId = String(res.jobId || res.job_id || '').trim();
+            if (!durableJobId) {
+                this.aiSubtitleState = 'failed';
+                this._aiLastError = 'subtitle job was not durably created';
+                this.stopAiSubtitlePolling();
+                this.updateCaptionsTracks();
+                return false;
+            }
+            this._aiJobId = durableJobId;
+            this.aiSubtitleState = 'processing';
+            const prevStage = this._aiStage;
+            this._aiStage = status === 'starting' ? 'enqueueing' : String(res.stage || '');
+            this._aiDeferredByYou = res.deferredByYou === true;
+            // The ETA anchors on the moment the server actually starts transcribing.
+            if (this._aiStage !== 'transcribing') this._aiEtaTargetMs = 0;
+            // Progressive delivery (V2): a partial VTT lands while transcription continues —
+            // attach/refresh it so cues show minutes after the real start, not at the end.
+            const pvtt = String(res.vtt || '');
+            if (res.partial && pvtt && this._aiUserRequested) {
+                const cueCount = Number(res.segments || 0) || pvtt.split('-->').length - 1;
+                if (cueCount > (this._aiPartialCues || 0)) {
+                    const lang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
+                    if (this.attachGeneratedSubtitleTrack(pvtt, lang)) this._aiPartialCues = cueCount;
+                }
+            }
+            if (this._aiStage === 'transcribing') this._startAiCountdown();
+            if (prevStage !== this._aiStage || res.partial) this.updateCaptionsTracks();
+        }
+        return false;
+    }
+
+    startAiSubtitlePolling(params, key) {
+        if (!this._aiJobId) return false;
+        this.stopAiSubtitlePolling();
+        const gen = (this._aiPollGen = (this._aiPollGen || 0) + 1);
+        const startedAt = Date.now();
+        // 2h cap, aligned with the server's stale-job reaper: below it, a live job could still be
+        // running (long film + queue). At expiry the job is NOT declared failed (that was a lie —
+        // guaranteed for any >1h watch): we stop hammering and point at the email toggle.
+        const MAX_MS = 2 * 60 * 60 * 1000;
+        this._aiPollExpired = false;
+        // A first 90-second VTT can now land quickly. Poll active work every two
+        // seconds and queued/deferred work every five, so the UI does not hide a
+        // ready partial for the old 20-second interval.
+        const delayMs = () => {
+            const stage = String(this._aiStage || '');
+            return stage === 'extracting' || stage === 'transcribing' ? 2000 : 5000;
+        };
+        const tick = async () => {
+            if (this._aiPollGen !== gen) return; // superseded by a newer poll (or stopped)
+            if (this._aiSubtitleKey() !== key) { this.stopAiSubtitlePolling(); return; }
+            if (Date.now() - startedAt > MAX_MS) {
+                this._aiPollExpired = true;
+                this.stopAiSubtitlePolling();
+                this.updateCaptionsTracks();
+                return;
+            }
+            try {
+                const got = await window.NorvaCloud.playback.generatedSubtitle(params);
+                this._applyAiSubtitleResponse(got, key);
+            } catch (_) { /* transient — keep polling */ }
+            if (this._aiPollGen !== gen) return; // a terminal state stopped the poll mid-tick
+            this._aiSubtitlePollTimer = setTimeout(tick, delayMs());
+        };
+        this._aiSubtitlePollTimer = setTimeout(tick, delayMs());
+        return true;
+    }
+
+    // One-shot cache probe per title. A transcript produced in a PRIOR session — or by another
+    // user of the same panel (the cache is shared per provider identity) — must surface as
+    // "AI subtitles — show original" when the menu opens, not as a misleading "Generate" chooser
+    // that suggests a long re-run. Read-only: ready → state flips but nothing attaches
+    // (_aiUserRequested stays false); in-flight → resume honest progress + polling; failed/none →
+    // keep the idle chooser ((re)generating stays a deliberate click).
+    async _ensureAiCacheProbe() {
+        const key = this._aiSubtitleKey();
+        if (!key || this._aiCacheProbeKey === key) return;
+        if (this.aiSubtitleState !== 'idle' || !this._canRequestAiSubtitles()) return;
+        this._aiCacheProbeKey = key; // marked only once we really probe — earlier bails may retry
+        const params = this._aiSubtitleParams();
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
+        let got = null;
+        try { got = await window.NorvaCloud.playback.generatedSubtitle(params); } catch (_) { return; }
+        if (!got || this._aiSubtitleKey() !== key || this.aiSubtitleState !== 'idle') return;
+        const status = String(got.status || 'none');
+        if (status === 'ready') { this._applyAiSubtitleResponse(got, key); return; }
+        if (status === 'starting' || status === 'processing' || status === 'pending-transcript') {
+            this._aiSubtitleTitleId = key;
+            this._applyAiSubtitleResponse(got, key);
+            if (this._aiJobId) this.startAiSubtitlePolling(params, key);
+        }
+    }
+
+    // Entry point for the "AI subtitles" menu rows. `targetLang` is the language picked at click
+    // time (null = original): it is sent to the server so the transcript→translation chain runs
+    // server-side (survives closing the tab), and mirrored locally for the tab-open fast path.
+    // Idempotent across states: a cached ready VTT re-attaches instantly; otherwise it reads the
+    // cross-user cache, and if nothing usable is there yet, triggers a transcription and polls.
+    async requestAiSubtitles(targetLang = null) {
+        if (!this._canRequestAiSubtitles()) return;
+        // Synchronous double-click guard: state stays 'idle' until the first await settles, so a
+        // state check alone can NOT stop the second click of a double-click.
+        if (this._aiRequestInFlight) return;
+        this._aiRequestInFlight = true;
+        this._aiUserRequested = true; // a click — auto-attach is allowed from here on
+        this._aiRequestStartedAt = Date.now();
+        this._aiFirstCueVisibleReported = false;
+        this._aiLastResponseWasCached = false;
+        try {
+            // `normalizeTrackLanguage(null)` intentionally returns `und` for metadata display, but
+            // `und` is not a valid translation target. Preserve the semantic distinction here:
+            // null / "src" means "transcribe the original spoken language", while only an explicit
+            // supported language may enter the translation branch.
+            const rawTargetLang = String(targetLang ?? '').trim().toLowerCase();
+            const normalizedTargetLang = (!rawTargetLang || rawTargetLang === 'src')
+                ? null
+                : this.normalizeTrackLanguage(rawTargetLang);
+            await this._requestAiSubtitlesInner(
+                normalizedTargetLang && normalizedTargetLang !== 'und' ? normalizedTargetLang : null
+            );
+        } finally {
+            this._aiRequestInFlight = false;
+        }
+    }
+
+    async _requestAiSubtitlesInner(targetLang) {
+        const params = this._aiSubtitleParams();
+        const key = this._aiSubtitleKey();
+        const api = window.NorvaCloud.playback;
+
+        // Same title, already produced this session → just (re)attach from cache (no network).
+        if (this.aiSubtitleState === 'ready' && this.aiSubtitleVtt && this._aiSubtitleTitleId === key && !targetLang) {
+            this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
+            this.updateCaptionsTracks();
+            return;
+        }
+
+        // Switched titles → drop any stale state/timer before starting fresh.
+        if (this._aiSubtitleTitleId !== key) {
+            this.stopAiSubtitlePolling();
+            this.aiSubtitleVtt = null;
+            this.aiSubtitleState = 'idle';
+            this._aiNotifyOptedIn = false;
+            this._aiEtaTargetMs = 0;
+            this._aiStage = '';
+            this._aiDeferredByYou = false;
+            this._aiQueuePos = 0;
+            this._aiPartialCues = 0;
+            this._aiPollExpired = false;
+            this._aiLastError = '';
+            this._aiJobId = null;
+            this._aiServerTimings = null;
+            this._resetTranslations();
+        }
+        this._aiSubtitleTitleId = key;
+        // AFTER _resetTranslations (it clears the pending) — the language picked at click time.
+        if (targetLang) this._pendingTranslateTarget = targetLang;
+
+        // Optimistic: acknowledge the click BEFORE any network. Until here the menu stayed on the
+        // idle chooser for the whole source-resolve + cache lookup (~0.3–1 s, worse on a cold edge)
+        // — the only silent hole in the funnel. Every path below replaces this state honestly:
+        // cache hit → ready, terminal error → failed, nothing cached → enqueue keeps 'processing'.
+        this.aiSubtitleState = 'processing';
+        this._aiStage = 'checking';
+        this.updateCaptionsTracks();
+
+        // The edge keys every cloud route off the CLOUD source UUID, but content.sourceId may be a
+        // local/provider alias (e.g. "900016", a browser-local id). Resolve it the same way the
+        // playback path does, so the edge can find the title. The in-session key stays on the raw id.
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
+
+        console.log('[WatchPage] AI subtitles request', params, targetLang || 'src');
+        // 0) A target language was picked and its translation is already cached → attach directly.
+        if (targetLang) {
+            try {
+                const tr = await api.generatedSubtitle({ ...params, kind: 'translation', lang: targetLang });
+                if (tr && String(tr.status) === 'ready' && tr.vtt && this.attachGeneratedSubtitleTrack(String(tr.vtt), targetLang)) {
+                    this._pendingTranslateTarget = null;
+                    this._translations.set(targetLang, { state: 'ready', vtt: String(tr.vtt) });
+                    this._aiActiveLang = targetLang;
+                    this.aiSubtitleState = 'ready';
+                    this.updateCaptionsTracks();
+                    return;
+                }
+            } catch (_) { /* fall through to the transcript path */ }
+        }
+
+        // 1) Read the shared cache — another user (or a prior session) may already have it.
+        try {
+            const got = await api.generatedSubtitle(params);
+            this._aiLastResponseWasCached = String(got?.status || '') === 'ready';
+            if (this._applyAiSubtitleResponse(got, key)) return;
+            // Decide on the RESPONSE status, not this.aiSubtitleState — the optimistic 'processing'
+            // above would otherwise swallow the enqueue when the cache answers 'none'.
+            const gotStatus = String(got?.status || 'none');
+            if ((gotStatus === 'starting' || gotStatus === 'processing' || gotStatus === 'pending-transcript') && this._aiJobId) {
+                this.startAiSubtitlePolling(params, key);
+                return;
+            }
+        } catch (err) {
+            console.warn('[WatchPage] AI subtitles GET failed:', err?.status, err?.message || err, err?.details || '');
+            /* fall through to trigger */
+        }
+
+        // 2) Nothing usable yet → trigger a background transcription (with the chained target
+        //    language when one was picked) and poll for it.
+        this.aiSubtitleState = 'processing';
+        this._aiStage = 'enqueueing';
+        this._aiLastResponseWasCached = false;
+        this.updateCaptionsTracks();
+        try {
+            const enq = await api.requestGeneratedSubtitle(targetLang ? { ...params, targetLang, chain: true } : params);
+            console.log('[WatchPage] AI subtitles enqueue reply:', enq);
+            // Queue position from the gateway 202 — shown in the menu instead of dying in a log.
+            const pos = Number(enq?.gateway?.position);
+            if (Number.isFinite(pos) && pos > 0) { this._aiQueuePos = pos; this.updateCaptionsTracks(); }
+            // The enqueue reply carries status but no VTT body; if the server already had it
+            // cached ('ready'), fetch the body right away instead of waiting a poll cycle.
+            if (enq && String(enq.status) === 'ready') {
+                const got = await api.generatedSubtitle(params);
+                if (this._applyAiSubtitleResponse(got, key)) return;
+            }
+            // The enqueue itself can report a terminal error (e.g. couldn't resolve the stream).
+            if (enq && String(enq.status) === 'error') {
+                console.warn('[WatchPage] AI subtitles enqueue returned error:', enq);
+                this.aiSubtitleState = 'failed';
+                this._aiLastError = String(enq.error || enq.gatewayStatus || '');
+                this.updateCaptionsTracks();
+                return;
+            }
+            const enqueueStatus = String(enq?.status || 'processing');
+            const enqueuedJobId = String(enq?.jobId || enq?.job_id || '').trim();
+            if (!enqueuedJobId) {
+                this.aiSubtitleState = 'failed';
+                this._aiLastError = 'subtitle job was not durably created';
+                this.updateCaptionsTracks();
+                return;
+            }
+            this._aiJobId = enqueuedJobId;
+            this._aiStage = enqueueStatus === 'starting'
+                ? 'enqueueing'
+                : String(enq?.gateway?.stage || enq?.stage || 'queued');
+            this.updateCaptionsTracks();
+        } catch (err) {
+            console.warn('[WatchPage] AI subtitles enqueue failed:', err?.status, err?.message || err, '| sent:', JSON.stringify(params), err?.details || '');
+            this.aiSubtitleState = 'failed';
+            // Keep the server's reason: the daily-cap 429 must surface as its honest, terminal
+            // menu state — not the generic "failed — retry" that re-POSTs into the same 429.
+            this._aiLastError = String(err?.message || err?.details || err?.status || '');
+            this.updateCaptionsTracks();
+            return;
+        }
+        this.startAiSubtitlePolling(params, key);
+    }
+
+    // Parse a whisper VTT and feed its cues into a src-less <track>. Replaces any active text
+    // track (AI subs are the chosen track). Honors the current subtitle sync offset.
+    // Fetch the gateway's installed translation targets once (global, not per-title). Re-renders the
+    // menu when they land so the "Translate to" rows appear.
+    async _ensureTranslateTargets() {
+        if (this._aiTranslateTargets !== null) return;
+        this._aiTranslateTargets = []; // guard against concurrent fetches while in flight
+        try {
+            const res = await window.NorvaCloud?.playback?.translateLangs?.();
+            this._aiTranslateTargets = Array.isArray(res?.targets) ? res.targets.map((x) => this.normalizeTrackLanguage(x)).filter(Boolean) : [];
+        } catch (_) { this._aiTranslateTargets = []; }
+        this.updateCaptionsTracks();
+    }
+
+    stopTranslatePolling(lang) {
+        const t = this._translatePollTimers.get(lang);
+        if (t) { clearInterval(t); this._translatePollTimers.delete(lang); }
+    }
+
+    stopAllTranslatePolling() {
+        if (!this._translatePollTimers) return;
+        for (const t of this._translatePollTimers.values()) clearInterval(t);
+        this._translatePollTimers.clear();
+    }
+
+    // Drop per-title translation state (kept: _aiTranslateTargets, which is gateway-global).
+    _resetTranslations() {
+        this.stopAllTranslatePolling();
+        this._translations?.clear();
+        this._pendingTranslateTarget = null;
+        this._aiActiveLang = null;
+    }
+
+    startTranslatePolling(lang, params, key) {
+        this.stopTranslatePolling(lang);
+        const startedAt = Date.now();
+        const MAX_MS = 10 * 60 * 1000; // translation is fast (~min); cap the poll generously at 10 min
+        const timer = setInterval(async () => {
+            if (this._aiSubtitleKey() !== key) { this.stopTranslatePolling(lang); return; }
+            if (Date.now() - startedAt > MAX_MS) {
+                this.stopTranslatePolling(lang);
+                this._translations.set(lang, { state: 'failed', vtt: null });
+                this.updateCaptionsTracks();
+                return;
+            }
+            try { await this._pollTranslateOnce(lang, params, key); } catch (_) { /* transient — keep polling */ }
+        }, 12000);
+        this._translatePollTimers.set(lang, timer);
+    }
+
+    // GET the translation cache row once; attach + finalize when ready.
+    async _pollTranslateOnce(lang, params, key) {
+        const got = await window.NorvaCloud.playback.generatedSubtitle({
+            sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
+            titleId: params.titleId, kind: 'translation', lang,
+        });
+        if (!got || this._aiSubtitleKey() !== key) return false;
+        const status = String(got.status || 'none');
+        if (status === 'ready') {
+            this.stopTranslatePolling(lang);
+            const vtt = String(got.vtt || '');
+            if (vtt && this.attachGeneratedSubtitleTrack(vtt, lang)) {
+                this._translations.set(lang, { state: 'ready', vtt });
+            } else {
+                this._translations.set(lang, { state: 'failed', vtt: null }); // ready but no cues
+            }
+            this.updateCaptionsTracks();
+            return true;
+        }
+        if (status === 'failed') {
+            this.stopTranslatePolling(lang);
+            this._translations.set(lang, { state: 'failed', vtt: null });
+            this.updateCaptionsTracks();
+            return true;
+        }
+        // none / processing → keep waiting
+        this._translations.set(lang, { state: 'processing', vtt: null });
+        return false;
+    }
+
+    // Entry point for a "🌐 Translate to <lang>" row. Re-attaches a cached translation instantly;
+    // otherwise enqueues an Argos translation of the (ready) transcript and polls until it lands.
+    async requestAiTranslation(lang) {
+        lang = this.normalizeTrackLanguage(lang);
+        if (!lang || !this._canRequestAiSubtitles()) return;
+        this._aiUserRequested = true; // a click — auto-attach is allowed from here on
+        const key = this._aiSubtitleKey();
+        const api = window.NorvaCloud.playback;
+
+        const cached = this._translations.get(lang);
+        if (cached && cached.state === 'ready' && cached.vtt) {
+            this.attachGeneratedSubtitleTrack(cached.vtt, lang);
+            this.updateCaptionsTracks();
+            return;
+        }
+
+        const params = this._aiSubtitleParams();
+        if (!params) return;
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
+
+        this._translations.set(lang, { state: 'processing', vtt: null });
+        this.updateCaptionsTracks();
+        try {
+            const enq = await api.requestGeneratedSubtitle({
+                sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
+                titleId: params.titleId, kind: 'translation', targetLang: lang,
+            });
+            const status = String(enq?.status || 'none');
+            if (status === 'ready' && enq.sameLang) {
+                // The transcript is already in the requested language — just show it.
+                this._translations.set(lang, { state: 'ready', vtt: this.aiSubtitleVtt });
+                if (this.aiSubtitleVtt) this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
+                this.updateCaptionsTracks();
+                return;
+            }
+            if (status === 'ready') { await this._pollTranslateOnce(lang, params, key); return; }
+            if (status === 'transcript-required') {
+                // The source transcript was evicted/never made — produce it, then auto-translate.
+                this._pendingTranslateTarget = lang;
+                this._translations.delete(lang);
+                this.requestAiSubtitles();
+                return;
+            }
+            if (status === 'error') {
+                this._translations.set(lang, { state: 'failed', vtt: null });
+                this.updateCaptionsTracks();
+                return;
+            }
+            this.startTranslatePolling(lang, params, key); // processing
+        } catch (err) {
+            console.warn('[WatchPage] AI translate enqueue failed:', err?.status, err?.message || err, '| lang:', lang);
+            this._translations.set(lang, { state: 'failed', vtt: null });
+            this.updateCaptionsTracks();
+        }
+    }
+
+    // Defense-in-depth after hls.recoverMediaError(): the media element is detached/re-attached
+    // and some hls versions wipe cues off generated tracks in the process. If our track lost its
+    // cues while a generated subtitle was active, rebuild it from the kept state. Cheap no-op
+    // when the track survived intact (the 1.5.7 fix is the unlabeled track — this covers upgrades).
+    _reattachAiTrackIfActive() {
+        try {
+            if (!this._aiActiveVtt) return;
+            const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+            if (el && el.track && el.track.cues && el.track.cues.length) return; // survived
+            this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und');
+        } catch (_) { /* best-effort */ }
+    }
+
+    // SDH (hearing-impaired) annotation stripping — Norva's AI subtitles are DIALOGUE subtitles,
+    // not closed captions. Whisper emits sound annotations as *musique du générique*, (Rires),
+    // [Bruit de porte], ♪…♪, and sometimes mixes them with real speech (*Musique* "lyric").
+    // Wrapped segments are removed INLINE (speech is never wrapped by whisper), and a cue whose
+    // whole residual is a bare sound keyword ("Musique de générique") is dropped entirely.
+    // Returns the cleaned text, or '' when nothing speakable remains.
+    _stripSdhAnnotations(text) {
+        let t = String(text || '')
+            .replace(/\*[^*\n]{1,80}\*/g, ' ')
+            .replace(/\([^)\n]{1,80}\)/g, ' ')
+            .replace(/\[[^\]\n]{1,80}\]/g, ' ')
+            .replace(/♪[^♪\n]{0,120}♪/g, ' ')
+            .replace(/[♪🎵🎶]+/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+        // Bare annotation line (no wrapper): a short cue that IS a sound keyword phrase.
+        if (/^(musiques?|music|bruits?|rires?|cris?|applaudissements?|applause|laughter|g[ée]n[ée]riques?|silence|sonneries?|soupirs?|sifflements?|klaxons?)(\s+(de|du|des|d'|of|the)\s*[\p{L}' -]{0,40}|\s*[.…!]*)?$/iu.test(t)) {
+            return '';
+        }
+        return t;
+    }
+
+    attachGeneratedSubtitleTrack(vtt, lang = 'und') {
+        if (!this.video) return false;
+        const cues = this.parseVttCues(vtt);
+        if (!cues.length) return false;
+
+        // keepAiPolling: this clear is part of ATTACHING a track, not turning subtitles off —
+        // partial-delivery attaches run inside the poll tick and must not kill their own timer.
+        this.clearExternalSubtitleTracks({ keepAiPolling: true });
+        this.selectedSubtitleStreamIndex = null;
+
+        const trackEl = document.createElement('track');
+        trackEl.kind = 'subtitles';
+        // Deliberately NO label: hls.js 1.5.7's filterSubtitleTracks only touches LABELED
+        // subtitle/caption tracks, and its onMediaDetaching (run by every recoverMediaError —
+        // routine on transcode stalls) wipes all cues from matching tracks while leaving
+        // mode='showing'. A labeled track = silently blank AI subs after the first recovery.
+        // Nothing reads this label: identification is data-norva-ai-subtitle everywhere.
+        trackEl.srclang = this.normalizeTrackLanguage(lang) || 'und';
+        trackEl.dataset.norvaAiSubtitle = 'true';
+        this.video.appendChild(trackEl);
+
+        // Cue times are film-absolute; the media timeline restarts at 0 when the gateway
+        // transcode starts at -ss N (resume/seek restart) — rebase by streamStartOffset so
+        // the lines match the speech (no-op for fresh plays and direct playback).
+        const offset = (this.normalizeSubtitleOffset(this.subtitleOffsetSeconds) || 0)
+            - (this.streamStartOffset || 0);
+        // The cues ride a REAL src (blob VTT), not addCue on a src-less track: Chromium's track
+        // processing model resets the programmatic cue list of a never-loading track ~200 ms
+        // after insertion (proven 04/07: 1862 cues right after attach → 0 at the next sample,
+        // with ZERO removeCue calls — the wiper was the browser itself). A loaded blob track
+        // (readiness LOADED, native VTT parsing) keeps its cues for the element's lifetime.
+        const fmtTs = (t) => {
+            const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+            const s = (t % 60).toFixed(3).padStart(6, '0');
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s}`;
+        };
+        let body = 'WEBVTT\n\n';
+        let added = 0;
+        for (const c of cues) {
+            if (c.end + offset <= 0) continue; // cue entirely before the session start
+            const spoken = this._stripSdhAnnotations(c.text);
+            if (!spoken) continue; // pure sound annotation — dialogue subtitles skip it
+            const text = spoken.replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '').join('\n');
+            if (!text) continue; // an empty payload would terminate the VTT cue block early
+            const start = Math.max(0, c.start + offset);
+            const end = Math.max(start + 0.05, c.end + offset);
+            body += `${fmtTs(start)} --> ${fmtTs(end)}\n${text}\n\n`;
+            added += 1;
+        }
+        // Honest failure: a track that would be EMPTY (offset pushed every cue out of the
+        // session) must not linger as a ghost "active" track.
+        if (!added) {
+            console.warn(`[WatchPage] AI subtitle attach produced 0 cues (parsed=${cues.length}, offset=${offset}) — detaching`);
+            trackEl.remove();
+            return false;
+        }
+        if (this._aiTrackBlobUrl) { try { URL.revokeObjectURL(this._aiTrackBlobUrl); } catch (_) { } }
+        this._aiTrackBlobUrl = URL.createObjectURL(new Blob([body], { type: 'text/vtt' }));
+        trackEl.src = this._aiTrackBlobUrl;
+        if (trackEl.track) trackEl.track.mode = 'showing';
+        const reportFirstVisibleCue = () => {
+            if (!this._aiUserRequested || this._aiFirstCueVisibleReported || !trackEl.isConnected) return;
+            if (!trackEl.track?.activeCues?.length) return;
+            this._aiFirstCueVisibleReported = true;
+            trackEl.track.removeEventListener?.('cuechange', reportFirstVisibleCue);
+            const totalMs = this._aiRequestStartedAt > 0
+                ? Math.max(0, Math.min(10 * 60 * 1000, Date.now() - this._aiRequestStartedAt))
+                : null;
+            const timings = this._aiServerTimings || {};
+            const elapsed = (start, end) => {
+                const a = Date.parse(start || '');
+                const b = Date.parse(end || '');
+                return Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : null;
+            };
+            this.sendPlaybackEvent('subtitle_first_cue', {
+                metadata: {
+                    subtitleKind: 'ai',
+                    requestToFirstCueVisibleMs: totalMs,
+                    cacheHit: this._aiLastResponseWasCached === true,
+                    resolutionMs: elapsed(timings.requestedAt, timings.resolvedAt),
+                    enqueueMs: elapsed(timings.resolvedAt, timings.enqueuedAt),
+                    extractionQueueMs: elapsed(timings.enqueuedAt, timings.extractionStartedAt),
+                    whisperQueueMs: elapsed(timings.extractionStartedAt, timings.whisperStartedAt),
+                    firstVttMs: elapsed(timings.whisperStartedAt, timings.firstVttAt),
+                },
+            });
+        };
+        trackEl.track?.addEventListener?.('cuechange', reportFirstVisibleCue);
+        setTimeout(() => {
+            if (trackEl.track) trackEl.track.mode = 'showing';
+            reportFirstVisibleCue();
+            this.updateCaptionsTracks();
+        }, 0);
+        this._aiActiveLang = trackEl.srclang || null;
+        this._aiActiveVtt = vtt || null; // kept so casting can side-load these captions
+        return true;
+    }
+
+    updateCaptionsTracks() {
+        if (!this.captionsList || !this.video) return;
+
+        const tracks = this.video.textTracks;
+        const hlsSubtitleTracks = Array.isArray(this.hls?.subtitleTracks) ? this.hls.subtitleTracks : [];
+        const probeSubtitleTracks = this.getExtractableSubtitleTracks();
+        let options = [];
+        let anyActive = false;
+
+        if (this._hlsOwnsExactSubtitles && hlsSubtitleTracks.length) {
+            const hlsOptions = hlsSubtitleTracks.map((track, index) => {
+                const active = this.hls.subtitleTrack === index;
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
+                return {
+                    source: 'hls',
+                    index,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
+                    label: this.getSubtitleMenuLabel(track, hlsSubtitleTracks, index),
+                    active
+                };
+            });
+            if (this.isPartialExactHlsSubtitleTopology() && probeSubtitleTracks.length) {
+                const preparedByStreamIndex = new Map(hlsOptions
+                    .filter(track => Number.isInteger(track.streamIndex))
+                    .map(track => [Number(track.streamIndex), track]));
+                const usedPreparedIndexes = new Set();
+                options = probeSubtitleTracks.map((track, index) => {
+                    const prepared = preparedByStreamIndex.get(Number(track.index));
+                    if (prepared) {
+                        usedPreparedIndexes.add(prepared.index);
+                        return prepared;
+                    }
+                    return {
+                        source: 'unprepared-hls',
+                        index,
+                        streamIndex: track.index,
+                        label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_9ccbf9fc8b91", {defaultValue: "{{p0}} · Load", p0:(this.getSubtitleMenuLabel(
+                            track,
+                            probeSubtitleTracks,
+                            index,
+                            `Subtitles ${index + 1}`,
+                        ))}) : `${this.getSubtitleMenuLabel(
+                            track,
+                            probeSubtitleTracks,
+                            index,
+                            `Subtitles ${index + 1}`,
+                        )} · Load`),
+                        active: false,
+                        disabled: false,
+                        requiresRestart: true,
+                    };
+                });
+                hlsOptions.forEach((track) => {
+                    if (!usedPreparedIndexes.has(track.index)) options.push(track);
+                });
+            } else {
+                options = hlsOptions;
+            }
+            anyActive = options.some(track => track.active);
+        } else if (this._hlsOwnsExactSubtitles && probeSubtitleTracks.length) {
+            // Exact metadata can arrive before hls.js publishes its rendition
+            // map. Keep truthful rows visible but inert until that signed map is
+            // ready, rather than exposing a click that tears playback down.
+            options = probeSubtitleTracks.map((track, index) => ({
+                source: 'unprepared-hls',
+                index,
+                streamIndex: track.index,
+                label: (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_4b17a7a9a0ee", {defaultValue: "{{p0}} · Preparing", p0:(this.getSubtitleMenuLabel(
+                    track,
+                    probeSubtitleTracks,
+                    index,
+                    `Subtitles ${index + 1}`,
+                ))}) : `${this.getSubtitleMenuLabel(
+                    track,
+                    probeSubtitleTracks,
+                    index,
+                    `Subtitles ${index + 1}`,
+                )} · Preparing`),
+                active: false,
+                disabled: true,
+            }));
+        } else if (probeSubtitleTracks.length) {
+            options = probeSubtitleTracks.map((track, index) => {
+                const active = Number(track.index) === Number(this.selectedSubtitleStreamIndex);
+                anyActive = anyActive || active;
+                return {
+                    source: 'probe',
+                    index,
+                    streamIndex: track.index,
+                    label: this.getSubtitleMenuLabel(track, probeSubtitleTracks, index, probeSubtitleTracks.length > 1 ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_182da8bf4542", {defaultValue: "Subtitles {{p0}}", p0:(index + 1)}) : `Subtitles ${index + 1}`) : (globalThis.NorvaI18n?.t("ui_web_0ee695bdeb26", { defaultValue: "Subtitles" }) ?? 'Subtitles')),
+                    active
+                };
+            });
+        } else {
+            for (let i = 0; i < tracks.length; i++) {
+                const track = tracks[i];
+                // Skip the src-less <track>s we manage (probe extraction + AI transcript) — they
+                // have their own menu rows, so listing them here too would double them up.
+                if (this._isManagedTextTrack(track)) continue;
+                if (track.kind === 'subtitles' || track.kind === 'captions') {
+                    const label = this.getSubtitleMenuLabel(track, Array.from(tracks), i);
+                    const active = track.mode === 'showing';
+                    anyActive = anyActive || active;
+                    options.push({
+                        source: 'native',
+                        index: i,
+                        label,
+                        active
+                    });
+                }
+            }
+        }
+
+        if (!options.length && hlsSubtitleTracks.length) {
+            options = hlsSubtitleTracks.map((track, index) => {
+                const active = this.hls.subtitleTrack === index;
+                const streamIndex = this.hlsTrackSourceStreamIndex(track);
+                anyActive = anyActive || active;
+                return {
+                    source: 'hls',
+                    index,
+                    ...(Number.isInteger(streamIndex) ? { streamIndex } : {}),
+                    label: this.getSubtitleMenuLabel(track, hlsSubtitleTracks, index),
+                    active
+                };
+            });
+        }
+
+        // AI subtitles: offered on every eligible cloud VOD — even when real text tracks exist
+        // (they may all be in languages useless to this viewer; the AI section then reads as the
+        // secondary "more languages" option). The row reflects the transcription state machine
+        // and, once ready, shows like any track.
+        const aiAvailable = this._canRequestAiSubtitles();
+        const aiShowing = aiAvailable && this.aiSubtitleTrackShowing();
+        anyActive = anyActive || aiShowing;
+        // Lazily fetch the gateway's translation targets (one-shot) so the language rows can
+        // render — both for the IDLE chooser (pick the language at click time) and the ready
+        // "Translate to" rows. Guarded inside, so this is a cheap no-op afterwards.
+        if (aiAvailable && (this.aiSubtitleState === 'ready' || this.aiSubtitleState === 'idle' || !this.aiSubtitleState) && this._aiTranslateTargets === null) {
+            this._ensureTranslateTargets();
+        }
+        // Safety net for menus opened before (or without) a playback start: surface a cached
+        // transcript instead of the misleading "Generate" chooser. One-shot per title.
+        if (aiAvailable && this.aiSubtitleState === 'idle') this._ensureAiCacheProbe();
+
+        // No selectable subtitle TRACK, but the label/category says the picture carries
+        // burned-in subtitles → show them as a locked, always-on entry instead of "Off".
+        const burned = !options.length ? this.burnedSubtitleIntel() : null;
+        const offActive = !anyActive && !burned;
+        const optionHtml = options.map(track => {
+            const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
+            const pendingClass = track.disabled ? 'pending' : (track.requiresRestart ? 'loadable' : '');
+            const disabledAttr = track.disabled
+                ? (globalThis.NorvaI18n?.t("ui_web_8b82f8f9d5b0", { defaultValue: " disabled aria-disabled=\"true\" title=\"Not prepared in the current playback session\"" }) ?? ' disabled aria-disabled="true" title="Not prepared in the current playback session"')
+                : (track.requiresRestart ? (globalThis.NorvaI18n?.t("ui_web_5fce929fc1a8", { defaultValue: " title=\"Loads at the current position\"" }) ?? ' title="Loads at the current position"') : '');
+            return `<button class="captions-option ${track.active ? 'active' : pendingClass}" data-source="${track.source}" data-index="${track.index}"${streamAttr}${disabledAttr}>${this.escapeHtml(track.label)}</button>`;
+        }).join('');
+        // Burned-in: the off-row becomes a locked entry (can't be turned off); otherwise
+        // the usual "Off" + "no track / burned message" applies.
+        const headerHtml = burned
+            ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on" data-i18n-title="ui_web_666f633cffda">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : (globalThis.NorvaI18n?.t("ui_web_13988d6f9aef", { defaultValue: "Burned-in subtitles" }) ?? 'Burned-in subtitles'))}</button>`
+            : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1" data-i18n="ui_web_ca7981b46ecf">Off</button>`;
+        const aiHtml = aiAvailable ? this._aiSubtitleMenuHtml(options.length > 0) : '';
+        // Phase 4: PGS image tracks get an "OCR → text" row each (offered alongside any text/AI rows).
+        const ocrTracks = this.getOcrableSubtitleTracks();
+        const ocrHtml = ocrTracks.length ? this._ocrSubtitleMenuHtml(ocrTracks) : '';
+        // When AI/OCR subtitles are on offer, the "no track" message would contradict the rows, so
+        // suppress it (the AI/OCR rows + their own title text carry the message instead).
+        const emptyHtml = burned
+            ? `<div class="captions-empty">${this.escapeHtml((globalThis.NorvaI18n?.t("ui_web_f54b5219a064", { defaultValue: "Always on — subtitles are part of the picture, they can’t be turned off." }) ?? 'Always on — subtitles are part of the picture, they can’t be turned off.'))}</div>`
+            : (!options.length && !aiAvailable && !ocrTracks.length
+                ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
+                : '');
+        const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
+            ? `<div class="captions-offset" aria-label="Subtitle sync" data-i18n-aria-label="ui_web_7c00519e5d03">
+                <div class="captions-offset-label" data-i18n="ui_web_d54102038298" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(this.formatSubtitleOffset())}) || "{}")}">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
+                <div class="captions-offset-controls">
+                  <button type="button" class="captions-offset-btn" data-offset-delta="-0.5">-0.5s</button>
+                  <button type="button" class="captions-offset-btn" data-offset-delta="0.5">+0.5s</button>
+                </div>
+              </div>`
+            : '';
+
+        const subStyle = this.getSubtitleStyle();
+        const styleHtml = `
+            <div class="captions-style" aria-label="Subtitle appearance" data-i18n-aria-label="ui_web_f6ca17751586">
+                <div class="captions-offset-label" data-i18n="ui_web_3907fa7f8072">Appearance</div>
+                <div class="captions-style-row">
+                    <span class="captions-style-name" data-i18n="ui_web_9e319ad01588" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(Math.round(subStyle.scale * 100))}) || "{}")}">Size · ${Math.round(subStyle.scale * 100)}%</span>
+                    <span class="captions-offset-controls">
+                        <button type="button" class="captions-offset-btn" data-style-action="scale-down">A−</button>
+                        <button type="button" class="captions-offset-btn" data-style-action="scale-up">A+</button>
+                    </span>
+                </div>
+                <div class="captions-style-row">
+                    <span class="captions-style-name" data-i18n="ui_web_ea2b8a878841">Background</span>
+                    <button type="button" class="captions-offset-btn" data-style-action="bg">${this.escapeHtml(subStyle.bgLabel)}</button>
+                </div>
+                <div class="captions-style-row">
+                    <span class="captions-style-name" data-i18n="ui_web_6b73191a0a4b">Color</span>
+                    <button type="button" class="captions-offset-btn" data-style-action="color">${this.escapeHtml(subStyle.colorLabel)}</button>
+                </div>
+            </div>`;
+
+        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${ocrHtml}${emptyHtml}${offsetHtml}${styleHtml}`;
+
+        this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
+            if (btn.dataset.action) return; // non-track actions (e.g. ai-notify) wire themselves below
+            btn.addEventListener('click', () => this.selectCaptionTrack(
+                btn.dataset.source,
+                parseInt(btn.dataset.index, 10),
+                btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
+            ));
+        });
+
+        this.captionsList.querySelector('[data-action="ai-notify"]')?.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.toggleAiNotify();
+        });
+
+        // Idle language chooser: "Original" or a translation target — the choice rides the whole
+        // chain (transcript → auto-translation server-side), so it survives closing the tab.
+        this.captionsList.querySelectorAll('[data-action="ai-generate"]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const lang = String(btn.dataset.lang || 'src');
+                this.selectedSubtitleStreamIndex = null;
+                this.selectedSubtitleTrackUserChoice = true;
+                this.clearPendingPreference('subtitle');
+                this.requestAiSubtitles(lang === 'src' ? null : lang).then(() => this.updateCaptionsTracks());
+            });
+        });
+
+        this.captionsList.querySelectorAll('[data-action="ai-translate"]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.requestAiTranslation(btn.dataset.lang);
+            });
+        });
+
+        this.captionsList.querySelectorAll('.captions-offset-btn').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (btn.dataset.styleAction) {
+                    this.adjustSubtitleStyle(btn.dataset.styleAction);
+                    return;
+                }
+                this.applySubtitleOffsetDelta(Number(btn.dataset.offsetDelta) || 0);
+            });
+        });
+    }
+
+    // ==================== Subtitle appearance ====================
+    // User-tunable cue styling (size / background / color) applied through CSS
+    // custom properties consumed by the ::cue rules — works for embedded, AI
+    // and OCR tracks alike. Persisted per device.
+
+    getSubtitleStyle() {
+        const defaults = { scale: 1, bg: 'dim', color: 'white' };
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem('norva-subtitle-style') || 'null'); } catch (_) { }
+        const s = { ...defaults, ...(saved && typeof saved === 'object' ? saved : {}) };
+        const bgMap = {
+            dim: ['rgba(0, 0, 0, 0.6)', 'Dark'],
+            solid: ['rgba(0, 0, 0, 0.95)', 'Black'],
+            none: ['transparent', 'None']
+        };
+        const colorMap = {
+            white: ['#ffffff', 'White'],
+            yellow: ['#ffe14d', 'Yellow'],
+            cyan: ['#8be9fd', 'Cyan']
+        };
+        const bg = bgMap[s.bg] || bgMap.dim;
+        const color = colorMap[s.color] || colorMap.white;
+        return { ...s, bgValue: bg[0], bgLabel: bg[1], colorValue: color[0], colorLabel: color[1] };
+    }
+
+    saveSubtitleStyle(patch) {
+        const current = this.getSubtitleStyle();
+        const next = { scale: current.scale, bg: current.bg, color: current.color, ...patch };
+        next.scale = Math.min(1.6, Math.max(0.7, Math.round(next.scale * 100) / 100));
+        try { localStorage.setItem('norva-subtitle-style', JSON.stringify(next)); } catch (_) { }
+        this.applySubtitleStyle();
+    }
+
+    applySubtitleStyle() {
+        const s = this.getSubtitleStyle();
+        const root = document.documentElement;
+        root.style.setProperty('--norva-sub-scale', String(s.scale));
+        root.style.setProperty('--norva-sub-bg', s.bgValue);
+        root.style.setProperty('--norva-sub-color', s.colorValue);
+    }
+
+    adjustSubtitleStyle(action) {
+        const s = this.getSubtitleStyle();
+        if (action === 'scale-up') this.saveSubtitleStyle({ scale: s.scale + 0.15 });
+        else if (action === 'scale-down') this.saveSubtitleStyle({ scale: s.scale - 0.15 });
+        else if (action === 'bg') {
+            const order = ['dim', 'solid', 'none'];
+            this.saveSubtitleStyle({ bg: order[(order.indexOf(s.bg) + 1) % order.length] });
+        } else if (action === 'color') {
+            const order = ['white', 'yellow', 'cyan'];
+            this.saveSubtitleStyle({ color: order[(order.indexOf(s.color) + 1) % order.length] });
+        }
+        this.updateCaptionsTracks(); // repaint the panel's live values
+    }
+
+    async selectCaptionTrack(source, index, streamIndex = null) {
+        if (!this.video) return;
+
+        const gatewayBackedAtSelection = ['gateway-session', 'transcode-session'].includes(this.currentPlaybackMode);
+        let loadUnpreparedExactTrack = false;
+        if (source === 'unprepared-hls') {
+            const track = this.getExtractableSubtitleTracks()
+                .find(candidate => Number(candidate?.index) === Number(streamIndex));
+            if (
+                !track
+                || !gatewayBackedAtSelection
+                || !this.isPartialExactHlsSubtitleTopology()
+                || !Number.isInteger(Number(streamIndex))
+            ) {
+                this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
+                return false;
+            }
+            // The exact track exists but is outside the bounded startup cohort.
+            // Reuse the existing provider-lane handoff at the current playhead;
+            // the requested stream is placed first in the replacement cohort.
+            source = 'probe';
+            index = this.getExtractableSubtitleTracks().indexOf(track);
+            loadUnpreparedExactTrack = true;
+        }
+        if (source === 'probe' && gatewayBackedAtSelection) {
+            if (this._hlsOwnsExactSubtitles) {
+                const preparedIndex = Array.isArray(this.hls?.subtitleTracks)
+                    ? this.hls.subtitleTracks.findIndex(track => (
+                        this.hlsTrackSourceStreamIndex(track) === Number(streamIndex)
+                    ))
+                    : -1;
+                if (preparedIndex >= 0) {
+                    source = 'hls';
+                    index = preparedIndex;
+                } else if (!loadUnpreparedExactTrack) {
+                    const track = this.getExtractableSubtitleTracks()
+                        .find(candidate => Number(candidate?.index) === Number(streamIndex));
+                    this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
+                    this.updateCaptionsTracks();
+                    return false;
+                }
+            } else if (Number(this.video.readyState) >= 2 || this.getPlaybackPosition() > 0.25) {
+                const track = this.getExtractableSubtitleTracks()
+                    .find(candidate => Number(candidate?.index) === Number(streamIndex));
+                this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
+                this.updateCaptionsTracks();
+                return false;
+            }
+        }
+
+        const previousPreference = this.normalizePlaybackPreferences(
+            this.content?.playbackPreferences || this.content?.playback_preferences || {}
+        )?.subtitle || this.getCurrentSubtitlePreference();
+        const previousStreamIndex = Number(previousPreference?.streamIndex ?? previousPreference?.stream_index);
+        const previousWasOff = previousPreference?.source === 'off' || previousPreference?.mode === 'off';
+
+        const tracks = this.video.textTracks;
+        for (let i = 0; i < tracks.length; i++) {
+            tracks[i].mode = 'hidden';
+        }
+
+        if (this.hls) {
+            this.hls.subtitleDisplay = false;
+            this.hls.subtitleTrack = -1;
+        }
+
+        // Picking any non-AI row (Off, a probe/native/HLS track, an OCR run) revokes the standing
+        // AI auto-attach consent: with real tracks now coexisting with the AI section, the partial
+        // deliveries and the finished transcript must never steal the viewer's chosen track. The
+        // finished transcript then surfaces as a "show original" row instead of self-attaching.
+        if (source !== 'ai') this._aiUserRequested = false;
+
+        // AI subtitles run their own state machine (read cache → trigger → poll → attach), so
+        // they short-circuit the standard track-selection tail. The menu stays open while a
+        // transcription is in flight so the viewer sees the "generating…" / "retry" feedback.
+        if (source === 'ai') {
+            this.selectedSubtitleStreamIndex = null;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.clearPendingPreference('subtitle');
+            await this.requestAiSubtitles();
+            this.updateCaptionsTracks();
+            if (this.aiSubtitleState === 'ready') this.closeCaptionsMenu();
+            return;
+        }
+
+        // Phase 4 OCR: an image (PGS) track → run tesseract on the gateway, attach the VTT. Own
+        // state machine (read cache → trigger → poll → attach), keyed by the subtitle stream index.
+        if (source === 'ocr' && Number.isInteger(streamIndex)) {
+            this.selectedSubtitleStreamIndex = null;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.clearPendingPreference('subtitle');
+            const track = this.getOcrableSubtitleTracks().find((t) => Number(t.index) === streamIndex);
+            await this.requestOcrSubtitle(streamIndex, this._ocrLangOf(track), this._ocrFmtOf(track) || 'pgs');
+            this.updateCaptionsTracks();
+            if (this._ocrStateFor(streamIndex) === 'ready') this.closeCaptionsMenu();
+            return;
+        }
+
+        let subtitlePreference = null;
+        if (source === 'off') {
+            this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
+            subtitlePreference = { source: 'off', mode: 'off' };
+            // Turning subtitles off must not silently kill an in-flight transcription's polling —
+            // the job keeps running server-side; keep tracking it so the menu can flip to ready.
+            this.clearExternalSubtitleTracks({ keepAiPolling: this.aiSubtitleState === 'processing' });
+        } else if (source === 'probe' && Number.isInteger(streamIndex)) {
+            this.selectedSubtitleStreamIndex = streamIndex;
+            this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
+            this.selectedSubtitleTrackUserChoice = true;
+            subtitlePreference = loadUnpreparedExactTrack
+                ? this.subtitlePreferenceFromProbeTrack(this.getSelectedSubtitleTrack())
+                : this.getCurrentSubtitlePreference();
+            this.setSubtitleSwitchFeedback('applying', this.subtitleTrackLabel());
+        } else if (source === 'native' && index >= 0 && index < tracks.length) {
+            this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
+            tracks[index].mode = 'showing';
+        } else if (source === 'hls' && this.hls && index >= 0) {
+            this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.hls.subtitleDisplay = true;
+            this.hls.subtitleTrack = index;
+            subtitlePreference = this.getCurrentSubtitlePreference();
+        }
+
+        this.clearPendingPreference('subtitle');
+        const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences(
+            subtitlePreference ? { subtitle: subtitlePreference } : {}
+        ));
+        this.updateCaptionsTracks();
+        this.closeCaptionsMenu();
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
+
+        const selectedStreamIndex = Number(subtitlePreference?.streamIndex ?? subtitlePreference?.stream_index);
+        const selectedIsOff = subtitlePreference?.source === 'off' || subtitlePreference?.mode === 'off';
+        const gatewayBacked = ['gateway-session', 'transcode-session'].includes(this.currentPlaybackMode);
+        const laneChanged = selectedIsOff
+            ? !previousWasOff
+            : Number.isInteger(selectedStreamIndex) && selectedStreamIndex !== previousStreamIndex;
+        if (gatewayBacked && subtitlePreference?.source === 'probe' && laneChanged) {
+            await this.queueSelectedSubtitleTrackRestart(subtitlePreference);
+        } else if (subtitlePreference?.source === 'probe') {
+            this.attachSelectedProbeSubtitleTrack();
+            const activated = await this.waitForSelectedSubtitleActivation(
+                selectedStreamIndex,
+                this._subtitleSwitchRequestId,
+            );
+            this.setSubtitleSwitchFeedback(
+                activated ? 'ready' : 'error',
+                this.subtitleTrackLabel(),
+            );
+        } else if (selectedIsOff) {
+            this.setSubtitleSwitchFeedback('off');
+        } else if (source === 'native' && index >= 0 && index < tracks.length) {
+            this.setSubtitleSwitchFeedback('ready', this.getSubtitleMenuLabel(tracks[index], Array.from(tracks), index));
+        } else if (source === 'hls' && this.hls && index >= 0) {
+            this.setSubtitleSwitchFeedback(
+                'ready',
+                this.getSubtitleMenuLabel(this.hls.subtitleTracks?.[index], this.hls.subtitleTracks, index),
+            );
+        }
+        if (playbackPreferences) this.saveResumeSnapshotThrottled(true);
+    }
+
+    // === Overlay Auto-Hide ===
+
+    showOverlay() {
+        this.overlay?.classList.remove('hidden');
+        this.overlayVisible = true;
+        this.startOverlayTimer();
+    }
+
+    hideOverlay() {
+        if (this._subtitleSwitchFeedbackState === 'applying') return;
+        if (!this.video?.paused) {
+            this.overlay?.classList.add('hidden');
+            this.overlayVisible = false;
+        }
+    }
+
+    startOverlayTimer() {
+        clearTimeout(this.overlayTimeout);
+        if (this._loadingPresentationActive) return;
+        this.overlayTimeout = setTimeout(() => this.hideOverlay(), 3000);
+    }
+
+    // === Keyboard Shortcuts ===
+
+    handleKeyboard(e) {
+        // Only handle when watch page is active
+        const watchPage = document.getElementById('page-watch');
+        if (!watchPage?.classList.contains('active')) return;
+
+        // Don't handle if typing in input (including another app dialog).
+        if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+
+        // Transport shortcuts must not seek/pause/restart a preparation. Keep
+        // Tab, Back (Enter/Space on its button), Escape and OS shortcuts working.
+        if (this._loadingPresentationActive && e.key !== 'Escape') {
+            if (!e.ctrlKey && !e.metaKey && !e.altKey && e.target !== this.backBtn
+                && /^( |[0-9kjlmfcn]|Arrow(Left|Right|Up|Down))$/.test(e.key)) e.preventDefault();
+            return;
+        }
+
+        switch (e.key) {
+            case ' ':
+            case 'k':
+                e.preventDefault();
+                this.togglePlay();
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                this.skip(-10);
+                this.showOverlay();
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                this.skip(10);
+                this.showOverlay();
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                this.setVolume(Math.min(100, parseInt(this.volumeSlider.value) + 10));
+                this.volumeSlider.value = Math.min(100, parseInt(this.volumeSlider.value) + 10);
+                this.showOverlay();
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                this.setVolume(Math.max(0, parseInt(this.volumeSlider.value) - 10));
+                this.volumeSlider.value = Math.max(0, parseInt(this.volumeSlider.value) - 10);
+                this.showOverlay();
+                break;
+            case 'f':
+                e.preventDefault();
+                this.toggleFullscreen();
+                break;
+            case 'm':
+                e.preventDefault();
+                this.toggleMute();
+                this.showOverlay();
+                break;
+            case 'j':
+                e.preventDefault();
+                this.skip(-10);
+                this.showOverlay();
+                break;
+            case 'l':
+                e.preventDefault();
+                this.skip(10);
+                this.showOverlay();
+                break;
+            case 'c':
+                // Toggle subtitles: last-used track back on, or off (YouTube parity).
+                e.preventDefault();
+                this.toggleCaptionsShortcut();
+                this.showOverlay();
+                break;
+            case 'n':
+                // Next episode (series only; no-op on movies).
+                e.preventDefault();
+                if (this.contentType === 'series' && this.getNextEpisode()) this.playNextEpisode();
+                break;
+            case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9': {
+                // Number keys jump to N×10% of the timeline (YouTube parity).
+                e.preventDefault();
+                const duration = this.getDisplayDuration();
+                if (duration) {
+                    this.seekToTime((Number(e.key) / 10) * duration, { immediate: true });
+                    this.showOverlay();
+                }
+                break;
+            }
+            case 'Escape':
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else {
+                    this.goBack();
+                }
+                break;
+        }
+    }
+
+    /**
+     * `c`: flip subtitles off/on. Off remembers the active selection; on
+     * restores it (or picks the first available track when none was chosen yet).
+     */
+    toggleCaptionsShortcut() {
+        try {
+            const tracks = this.video?.textTracks || [];
+            let active = null;
+            for (let i = 0; i < tracks.length; i++) {
+                if (tracks[i].mode === 'showing') { active = i; break; }
+            }
+            if (active !== null) {
+                this._captionsShortcutMemory = active;
+                tracks[active].mode = 'hidden';
+                return;
+            }
+            const restore = this._captionsShortcutMemory ?? 0;
+            if (tracks.length > 0) {
+                const idx = Math.min(restore, tracks.length - 1);
+                tracks[idx].mode = 'showing';
+            }
+        } catch (_) { /* shortcut is best-effort */ }
+    }
+
+    // === Details Section ===
+
+    renderDetails() {
+        if (!this.content) return;
+
+        const isChannel = this.content.type === 'channel' || !this.content.type; // Default to channel if unknown
+        const fallback = isChannel ? '/img/placeholder.png' : '/img/norva-media-placeholder.png';
+
+        this.posterEl.onerror = () => {
+            this.posterEl.onerror = null;
+            this.posterEl.src = fallback;
+        };
+        this.posterEl.src = MediaUtils.safeImageUrl(this.content.poster, fallback);
+        this.posterEl.alt = this.content.title || '';
+        this.contentTitleEl.textContent = this.content.title || '';
+        this.yearEl.textContent = this.content.year || '';
+        this.ratingEl.textContent = this.content.rating ? `★ ${this.content.rating}` : '';
+        this.descriptionEl.textContent = this.content.description || '';
+
+        // Update play button text
+        if (this.playBtnText) {
+            this.playBtnText.textContent = this.resumeTime > 0 ? (globalThis.NorvaI18n?.t("ui_web_d640c7421da0", { defaultValue: "Resume" }) ?? 'Resume') : (globalThis.NorvaI18n?.t("ui_web_436e61016e26", { defaultValue: "Play" }) ?? 'Play');
+        }
+    }
+
+    async checkFavorite() {
+        if (!this.content) return;
+
+        try {
+            const itemId = this.contentType === 'movie' ? this.content.id : this.content.seriesId;
+            const itemType = this.contentType === 'movie' ? 'movie' : 'series';
+            const result = await API.favorites.check(this.content.sourceId, itemId, itemType);
+            this.isFavorite = result?.isFavorite || false;
+            this.updateFavoriteUI();
+        } catch (e) {
+            console.warn('Could not check favorite status');
+        }
+    }
+
+    async toggleFavorite() {
+        if (!this.content) return;
+
+        const itemId = this.contentType === 'movie' ? this.content.id : this.content.seriesId;
+        const itemType = this.contentType === 'movie' ? 'movie' : 'series';
+
+        try {
+            if (this.isFavorite) {
+                await API.favorites.remove(this.content.sourceId, itemId, itemType);
+                this.isFavorite = false;
+            } else {
+                await API.favorites.add(this.content.sourceId, itemId, itemType);
+                this.isFavorite = true;
+            }
+            this.updateFavoriteUI();
+        } catch (e) {
+            console.error('Error toggling favorite:', e);
+        }
+    }
+
+    updateFavoriteUI() {
+        const outlineIcon = this.favoriteBtn?.querySelector('.icon-fav-outline');
+        const filledIcon = this.favoriteBtn?.querySelector('.icon-fav-filled');
+
+        outlineIcon?.classList.toggle('hidden', this.isFavorite);
+        filledIcon?.classList.toggle('hidden', !this.isFavorite);
+    }
+
+    scrollToVideo() {
+        document.getElementById('page-watch')?.scrollTo({ top: 0, behavior: 'smooth' });
+        if (this.video?.paused) {
+            this.video.play().catch(console.error);
+        }
+    }
+
+    // === Recommended Movies ===
+
+    async loadRecommended(sourceId, categoryId) {
+        if (!sourceId || !categoryId) {
+            this.recommendedSection?.classList.add('hidden');
+            return;
+        }
+
+        try {
+            const movies = await API.proxy.xtream.vodStreams(sourceId, categoryId);
+            if (!movies || movies.length === 0) {
+                this.recommendedSection?.classList.add('hidden');
+                return;
+            }
+
+            // Filter out current movie, take first 12
+            const filtered = movies
+                .filter(m => m.stream_id !== this.content?.id)
+                .slice(0, 12);
+
+            this.renderRecommendedGrid(filtered, sourceId);
+        } catch (e) {
+            console.error('Error loading recommended:', e);
+            this.recommendedSection?.classList.add('hidden');
+        }
+    }
+
+    renderRecommendedGrid(movies, sourceId) {
+        if (!this.recommendedGrid) return;
+
+        this.recommendedGrid.innerHTML = movies.map(movie => `
+            <div class="watch-recommended-card" data-id="${movie.stream_id}" data-source="${sourceId}">
+                <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(movie.stream_icon || movie.cover, '/img/norva-media-placeholder.png'))}"
+                     alt="${MediaUtils.escapeHtml(movie.name)}"
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy">
+                <p>${MediaUtils.escapeHtml(movie.name)}</p>
+            </div>
+        `).join('');
+
+        const moviesById = new Map(
+            movies.map(movie => [String(movie.stream_id), movie])
+        );
+
+        // Click handlers
+        this.recommendedGrid.querySelectorAll('.watch-recommended-card').forEach(card => {
+            const movie = moviesById.get(String(card.dataset.id));
+            if (!movie) return;
+            card.addEventListener('click', () => this.playRecommendedMovie(movie, sourceId));
+        });
+    }
+
+    async playRecommendedMovie(movie, sourceId) {
+        try {
+            if (!movie) return;
+
+            const streamId = movie.stream_id;
+            const container = movie.container_extension || 'mp4';
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(movie, { container, streamType: 'movie' })
+                : { container, streamType: 'movie' };
+            const content = {
+                type: 'movie',
+                id: movie.stream_id,
+                title: movie.name,
+                poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover),
+                description: movie.plot || '',
+                year: movie.year,
+                rating: movie.rating,
+                sourceId,
+                categoryId: movie.category_id,
+                containerExtension: container
+            };
+
+            // Let play() expire the outgoing mono-account session before this
+            // resolver claims the provider slot for the recommended title.
+            await this.play(content, async ({ signal } = {}) => {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    sourceId,
+                    streamId,
+                    'movie',
+                    container,
+                    playbackHint,
+                    { signal }
+                );
+                return result;
+            });
+        } catch (e) {
+            console.error('Error playing recommended movie:', e);
+        }
+    }
+
+    // === Series Episodes ===
+
+    isCurrentEpisode(ep, season) {
+        if (ep?.selectionUnit) return String(ep.id) === String(this.content?.id || this.content?.externalId || '');
+        return parseInt(season) === parseInt(this.currentSeason) &&
+            parseInt(ep?.episode_num) === parseInt(this.currentEpisode);
+    }
+
+    selectionAdjacentEpisode(direction) {
+        const files = Object.keys(this.seriesInfo?.episodes || {})
+            .sort((a, b) => Number(a) - Number(b))
+            .flatMap(seasonNum => this.seriesInfo.episodes[seasonNum].map(ep => ({ ...ep, seasonNum })));
+        const index = files.findIndex(ep => this.isCurrentEpisode(ep, ep.seasonNum));
+        return index < 0 ? null : files[index + direction] || null;
+    }
+
+    episodePlaybackSubtitle(ep, season) {
+        return MediaUtils.selectionUnitLabel?.(ep) ||
+            `S${season} E${ep.episode_num} - ${ep.title || `Episode ${ep.episode_num}`}`;
+    }
+
+    renderEpisodes() {
+        if (!this.seriesInfo?.episodes || !this.seasonsContainer) return;
+
+        const seasons = Object.keys(this.seriesInfo.episodes).sort((a, b) => parseInt(a) - parseInt(b));
+
+        this.seasonsContainer.innerHTML = seasons.map(seasonNum => {
+            const episodes = this.seriesInfo.episodes[seasonNum];
+            const isCurrentSeason = parseInt(seasonNum) === parseInt(this.currentSeason);
+
+            return `
+                <div class="watch-season-group">
+                    <div class="watch-season-header ${isCurrentSeason ? '' : 'collapsed'}">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                            <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+                        </svg>
+                        <span class="watch-season-name" data-i18n="ui_web_883c5a88c0bf" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p1":(seasonNum)}) || "{}")}">Season ${seasonNum}</span>
+                        ${this.seriesInfo.seriesDelivery === 'selection'
+                            ? `<span class="watch-season-count">${globalThis.NorvaI18n?.t('ui_selection_videos', { defaultValue: '{{p0}} videos', p0: episodes.length }) ?? `${episodes.length} videos`}</span>`
+                            : `<span class="watch-season-count" data-i18n="ui_web_6c182c7f810a" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p2":(episodes.length)}) || "{}")}">${episodes.length} episodes</span>`}
+                    </div>
+                    <div class="watch-episode-list">
+                        ${episodes.map(ep => {
+                const isActive = this.isCurrentEpisode(ep, seasonNum);
+                const unitLabel = MediaUtils.selectionUnitLabel?.(ep);
+                return `
+                                <div class="watch-episode-item ${isActive ? 'active' : ''}" 
+                                     data-episode-id="${ep.id}" 
+                                     data-season="${seasonNum}"
+                                     data-episode="${ep.episode_num ?? ''}"
+                                     data-container="${ep.container_extension || 'mp4'}">
+                                    ${unitLabel ? '' : `<span class="watch-episode-num">E${ep.episode_num}</span>`}
+                                    <span class="watch-episode-title">${unitLabel ? MediaUtils.escapeHtml(unitLabel) : (ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`))}</span>
+                                    <span class="watch-episode-duration">${ep.duration || ''}</span>
+                                </div>
+                            `;
+            }).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Season header toggle
+        this.seasonsContainer.querySelectorAll('.watch-season-header').forEach(header => {
+            header.addEventListener('click', () => {
+                header.classList.toggle('collapsed');
+            });
+        });
+
+        // Episode click handlers
+        this.seasonsContainer.querySelectorAll('.watch-episode-item').forEach(ep => {
+            ep.addEventListener('click', () => this.playEpisodeFromList(ep));
+        });
+    }
+
+    findEpisodeById(episodeId) {
+        if (!this.seriesInfo?.episodes) return null;
+        for (const episodes of Object.values(this.seriesInfo.episodes)) {
+            const found = Array.isArray(episodes)
+                ? episodes.find(ep => String(ep.id) === String(episodeId))
+                : null;
+            if (found) return found;
+        }
+        return null;
+    }
+
+    async playEpisodeFromList(episodeEl) {
+        const episodeId = episodeEl.dataset.episodeId;
+        const seasonNum = episodeEl.dataset.season;
+        const episodeNum = episodeEl.dataset.episode;
+        const container = episodeEl.dataset.container || 'mp4';
+        const episode = this.findEpisodeById(episodeId) || {
+            id: episodeId,
+            container_extension: container,
+            type: 'episode',
+            streamType: 'series'
+        };
+
+        try {
+            const outgoingContent = this.content || {};
+            const sourceId = outgoingContent.sourceId;
+            const cloudSourceId = outgoingContent.cloudSourceId
+                || outgoingContent.cloud_source_id
+                || outgoingContent.data?.cloudSourceId
+                || outgoingContent.data?.cloud_source_id
+                || null;
+            const titleId = outgoingContent.titleId
+                || outgoingContent.title_id
+                || outgoingContent.data?.titleId
+                || outgoingContent.data?.title_id
+                || null;
+            const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
+            const seriesInfo = this.seriesInfo;
+            const playbackPreferences = this.getPlaybackPreferences();
+            let playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(episode, {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: seriesId
+                })
+                : {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: seriesId
+                };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
+            const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(episodeNum)}) : `Episode ${episodeNum}`);
+            const content = {
+                type: 'series',
+                id: episodeId,
+                title: outgoingContent.title,
+                subtitle: this.episodePlaybackSubtitle({ ...episode, title: episodeTitle, episode_num: episodeNum }, seasonNum),
+                poster: outgoingContent.poster,
+                description: outgoingContent.description,
+                year: outgoingContent.year,
+                rating: outgoingContent.rating,
+                sourceId,
+                cloudSourceId,
+                titleId,
+                seriesId,
+                externalId: episodeId,
+                parentExternalId: seriesId,
+                seriesInfo,
+                currentSeason: seasonNum,
+                currentEpisode: episodeNum,
+                containerExtension: container,
+                playbackPreferences
+            };
+
+            await this.play(content, async ({ signal } = {}) => {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    sourceId,
+                    episodeId,
+                    'series',
+                    container,
+                    playbackHint,
+                    { signal }
+                );
+                return result;
+            });
+        } catch (e) {
+            console.error('Error playing episode:', e);
+        }
+    }
+
+    // === Next Episode ===
+
+    // ==================== Skip intro (crowd-learned markers) ====================
+    // Netflix ships editorial intro timestamps; Norva learns them from real
+    // usage instead: early forward seeks on a series season are aggregated
+    // server-side (à la SponsorBlock) and served back as [start, end] markers.
+    // Zero provider connections involved.
+
+    resetSkipIntroState() {
+        this._introMarkers = null;
+        this._introSkipUsed = false;
+        this._introSignalSent = false;
+        this._introFetchKey = null;
+        document.getElementById('watch-skip-intro')?.classList.add('hidden');
+    }
+
+    introMarkerParams() {
+        if (this.contentType !== 'series') return null;
+        const tmdbId = this.content?.providerTmdbId || this.content?.data?.providerTmdbId
+            || this.content?.tmdb?.id || null;
+        const season = parseInt(this.content?.currentSeason ?? this.currentSeason, 10);
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !Number.isFinite(season)) return null;
+        return { tmdbId: String(tmdbId), season };
+    }
+
+    async loadIntroMarkers() {
+        const params = this.introMarkerParams();
+        if (!params) return;
+        const key = `${params.tmdbId}:${params.season}`;
+        if (this._introFetchKey === key && this._introMarkers) return;
+        this._introFetchKey = key;
+        try {
+            const res = await window.NorvaCloud?.media?.introMarkers?.(params);
+            const end = Number(res?.introEnd ?? res?.intro_end);
+            if (Number.isFinite(end) && end > 4) {
+                this._introMarkers = {
+                    start: Math.max(0, Number(res.introStart ?? res.intro_start) || 0),
+                    end
+                };
+            }
+        } catch (_) { /* markers are progressive enhancement */ }
+    }
+
+    updateSkipIntroVisibility() {
+        const m = this._introMarkers;
+        if (!m || this._introSkipUsed) return;
+        const pos = this.getPlaybackPosition();
+        if (!Number.isFinite(pos)) return;
+        const btn = this.ensureSkipIntroButton();
+        const visible = pos >= m.start && pos < m.end - 1;
+        btn.classList.toggle('hidden', !visible);
+    }
+
+    ensureSkipIntroButton() {
+        let btn = document.getElementById('watch-skip-intro');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'watch-skip-intro';
+            btn.type = 'button';
+            btn.className = 'watch-skip-intro hidden';
+            btn.textContent = (globalThis.NorvaI18n?.t("ui_web_5ee6bb693d75", { defaultValue: "Skip intro" }) ?? 'Skip intro');
+            btn.addEventListener('click', () => this.skipIntro());
+            document.querySelector('.watch-video-section')?.appendChild(btn);
+        }
+        return btn;
+    }
+
+    skipIntro() {
+        const m = this._introMarkers;
+        if (!m) return;
+        this._introSkipUsed = true;
+        document.getElementById('watch-skip-intro')?.classList.add('hidden');
+        Promise.resolve(this.seekToTime(m.end, { immediate: true })).catch(() => { });
+    }
+
+    /**
+     * An early, medium-size forward jump is the "I skipped the intro" gesture.
+     * Report it once per playback; the server aggregates across viewers and
+     * starts serving markers once enough independent samples agree.
+     */
+    recordIntroSeekSignal(target) {
+        try {
+            if (this._introSignalSent) return;
+            const params = this.introMarkerParams();
+            if (!params) return;
+            const from = this.getPlaybackPosition();
+            const jump = target - from;
+            if (from >= 0 && from <= 240 && jump >= 20 && jump <= 240 && target <= 420) {
+                this._introSignalSent = true;
+                window.NorvaCloud?.media?.introSignal?.({
+                    ...params,
+                    from: Math.round(from),
+                    seekTo: Math.round(target)
+                })?.catch?.(() => { });
+            }
+        } catch (_) { /* learning is best-effort */ }
+    }
+
+    getNextEpisode() {
+        if (this.seriesInfo?.seriesDelivery === 'selection') return this.selectionAdjacentEpisode(1);
+        if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
+
+        const seasons = Object.keys(this.seriesInfo.episodes).sort((a, b) => parseInt(a) - parseInt(b));
+        const currentSeasonEpisodes = this.seriesInfo.episodes[this.currentSeason] || [];
+
+        // Find next episode in current season
+        const currentEpIndex = currentSeasonEpisodes.findIndex(ep =>
+            parseInt(ep.episode_num) === parseInt(this.currentEpisode)
+        );
+
+        if (currentEpIndex >= 0 && currentEpIndex < currentSeasonEpisodes.length - 1) {
+            return {
+                ...currentSeasonEpisodes[currentEpIndex + 1],
+                seasonNum: this.currentSeason
+            };
+        }
+
+        // Try next season
+        const currentSeasonIndex = seasons.indexOf(String(this.currentSeason));
+        if (currentSeasonIndex >= 0 && currentSeasonIndex < seasons.length - 1) {
+            const nextSeason = seasons[currentSeasonIndex + 1];
+            const nextSeasonEpisodes = this.seriesInfo.episodes[nextSeason];
+            if (nextSeasonEpisodes?.length > 0) {
+                return {
+                    ...nextSeasonEpisodes[0],
+                    seasonNum: nextSeason
+                };
+            }
+        }
+
+        return null;
+    }
+
+    getPreviousEpisode() {
+        if (this.seriesInfo?.seriesDelivery === 'selection') return this.selectionAdjacentEpisode(-1);
+        if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
+
+        const seasons = Object.keys(this.seriesInfo.episodes).sort((a, b) => parseInt(a) - parseInt(b));
+        const currentSeasonEpisodes = this.seriesInfo.episodes[this.currentSeason] || [];
+
+        const currentEpIndex = currentSeasonEpisodes.findIndex(ep =>
+            parseInt(ep.episode_num) === parseInt(this.currentEpisode)
+        );
+
+        // Previous episode in the current season.
+        if (currentEpIndex > 0) {
+            return {
+                ...currentSeasonEpisodes[currentEpIndex - 1],
+                seasonNum: this.currentSeason
+            };
+        }
+
+        // Else the last episode of the previous season.
+        const currentSeasonIndex = seasons.indexOf(String(this.currentSeason));
+        if (currentSeasonIndex > 0) {
+            const prevSeason = seasons[currentSeasonIndex - 1];
+            const prevSeasonEpisodes = this.seriesInfo.episodes[prevSeason];
+            if (prevSeasonEpisodes?.length > 0) {
+                return {
+                    ...prevSeasonEpisodes[prevSeasonEpisodes.length - 1],
+                    seasonNum: prevSeason
+                };
+            }
+        }
+
+        return null;
+    }
+
+    sanitizeNextEpisodeForHistory(nextEp) {
+        if (!nextEp) return null;
+        return {
+            id: nextEp.id || null,
+            season: nextEp.seasonNum || null,
+            episode: nextEp.episode_num || null,
+            title: nextEp.title || null,
+            containerExtension: nextEp.container_extension || 'mp4',
+            duration: nextEp.duration || null
+        };
+    }
+
+    showNextEpisodePanel(nextEp, options = {}) {
+        if (!this.nextEpisodePanel) return;
+        clearInterval(this.nextEpisodeInterval);
+        this.nextEpisodeInterval = null;
+
+        const autoCountdown = options.autoCountdown !== false;
+        this.nextEpisodePanel.classList.toggle('no-countdown', !autoCountdown);
+        this.nextEpisodePanel.setAttribute('aria-hidden', 'false');
+        this.nextEpisodeTitle.textContent = this.episodePlaybackSubtitle(nextEp, nextEp.seasonNum);
+        // Richer panel (Netflix parity): a still, a one-line synopsis, and the
+        // Cancel button reads "Watch Credits" so dismissing is an explicit choice.
+        if (this.nextEpisodeStill) {
+            const still = MediaUtils.safeImageUrl(
+                nextEp.info?.movie_image || nextEp.movie_image || nextEp.still || nextEp.cover_big || nextEp.poster || '', '');
+            if (still) {
+                this.nextEpisodeStill.src = still;
+                this.nextEpisodeStill.hidden = false;
+                this.nextEpisodeStill.onerror = () => { this.nextEpisodeStill.hidden = true; };
+            } else {
+                this.nextEpisodeStill.hidden = true;
+            }
+        }
+        if (this.nextEpisodeSynopsis) {
+            const synopsis = String(nextEp.info?.plot || nextEp.plot || nextEp.description || '').trim();
+            this.nextEpisodeSynopsis.textContent = synopsis;
+            this.nextEpisodeSynopsis.hidden = !synopsis;
+        }
+        this.nextEpisodePanel.classList.remove('hidden');
+        this.nextEpisodePanel.nextEpisodeData = nextEp;
+
+        this.nextEpisodeCountdown = this.nextEpisodeCountdownDefault;
+        this.updateNextCountdownVisual(autoCountdown);
+        if (!autoCountdown) {
+            try { this.nextPlayNowBtn?.focus?.({ preventScroll: true }); } catch (_) { }
+            return;
+        }
+
+        this.nextEpisodeInterval = setInterval(() => {
+            this.nextEpisodeCountdown--;
+            this.updateNextCountdownVisual(true);
+
+            if (this.nextEpisodeCountdown <= 0) {
+                this.playNextEpisode({ auto: true });
+            }
+        }, 1000);
+    }
+
+    updateNextCountdownVisual(show) {
+        if (!this.nextCountdown) return;
+        if (!show) {
+            this.nextCountdown.hidden = true;
+            this.nextCountdown.setAttribute('aria-label', (globalThis.NorvaI18n?.t("ui_web_8f7fcea6e1de", { defaultValue: "Autoplay disabled" }) ?? 'Autoplay disabled'));
+            return;
+        }
+        this.nextCountdown.hidden = false;
+        const remaining = Math.max(0, this.nextEpisodeCountdown || 0);
+        const total = Math.max(1, this.nextEpisodeCountdownDefault || 15);
+        const pct = Math.max(0, Math.min(100, (remaining / total) * 100));
+        this.nextCountdown.style.setProperty('--next-progress', pct + '%');
+        const num = this.nextCountdown.querySelector('.next-countdown-num');
+        const label = this.nextCountdown.querySelector('.next-countdown-label');
+        if (num) num.textContent = String(remaining);
+        else this.nextCountdown.textContent = String(remaining);
+        if (label) label.textContent = remaining === 1 ? (globalThis.NorvaI18n?.t("ui_web_add93534eeb4", { defaultValue: "sec" }) ?? 'sec') : (globalThis.NorvaI18n?.t("ui_web_e6c5669ee730", { defaultValue: "secs" }) ?? 'secs');
+        this.nextCountdown.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_40db998bf899", {defaultValue: "Playing next episode in {{p0}} seconds", p0:(remaining)}) : `Playing next episode in ${remaining} seconds`));
+    }
+
+    async playNextEpisode(options = {}) {
+        // From the end-of-episode panel if present, else resolve live (the
+        // persistent "next" button). cancel clears the panel data, so read first.
+        const nextEp = this.nextEpisodePanel?.nextEpisodeData || this.getNextEpisode();
+        if (!nextEp) {
+            this.cancelNextEpisode();
+            return;
+        }
+        // "Are you still watching?" — after several UNINTERRUPTED auto-plays,
+        // pause the binge and ask, so a title doesn't stream to an empty room all
+        // night. A manual Play (button/shortcut) resets the counter.
+        if (options.auto) {
+            this._consecutiveAutoplays = (this._consecutiveAutoplays || 0) + 1;
+            if (this._consecutiveAutoplays >= 3) {
+                this.cancelNextEpisode();
+                this.showStillWatchingPrompt(nextEp);
+                return;
+            }
+        } else {
+            this._consecutiveAutoplays = 0;
+        }
+        this.cancelNextEpisode();
+        this.closeEpisodesMenu();
+        await this.playEpisode(nextEp);
+    }
+
+    /**
+     * Idle guard: after N back-to-back auto-plays, pause and confirm someone is
+     * still there. Continue resets the counter and resumes the binge; dismissing
+     * leaves the player paused on the finished episode.
+     */
+    showStillWatchingPrompt(nextEp) {
+        try { this.video?.pause(); } catch (_) { /* best-effort */ }
+        document.getElementById('watch-still-watching')?.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'watch-still-watching';
+        overlay.className = 'watch-still-watching';
+        overlay.innerHTML = `
+            <div class="still-watching-box">
+                <h3 data-i18n="ui_web_2392dacee0f8">Are you still watching?</h3>
+                <p data-i18n="ui_web_12307689b91f">Playback paused after a few episodes.</p>
+                <button type="button" class="btn btn-primary" id="still-watching-continue" data-i18n="ui_web_34d8eb01e1bf">Continue Watching</button>
+            </div>`;
+        const section = document.querySelector('.watch-video-section') || document.getElementById('page-watch');
+        section?.appendChild(overlay);
+        overlay.querySelector('#still-watching-continue')?.addEventListener('click', () => {
+            overlay.remove();
+            this._consecutiveAutoplays = 0;
+            this.closeEpisodesMenu();
+            this.playEpisode(nextEp);
+        });
+    }
+
+    async playPreviousEpisode() {
+        this.closeEpisodesMenu();
+        await this.playEpisode(this.getPreviousEpisode());
+    }
+
+    // Shared episode launcher — resolve the stream for an episode object and play
+    // it. Used by the autoplay panel, the prev/next buttons and the selector.
+    async playEpisode(ep) {
+        if (!ep) return;
+        try {
+            const outgoingContent = this.content || {};
+            const sourceId = outgoingContent.sourceId;
+            const cloudSourceId = outgoingContent.cloudSourceId
+                || outgoingContent.cloud_source_id
+                || outgoingContent.data?.cloudSourceId
+                || outgoingContent.data?.cloud_source_id
+                || null;
+            const titleId = outgoingContent.titleId
+                || outgoingContent.title_id
+                || outgoingContent.data?.titleId
+                || outgoingContent.data?.title_id
+                || null;
+            const seriesId = outgoingContent.seriesId || outgoingContent.series_id;
+            const seriesInfo = this.seriesInfo;
+            const container = ep.container_extension || 'mp4';
+            const playbackPreferences = this.getPlaybackPreferences();
+            let playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(ep, {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: seriesId
+                })
+                : {
+                    container,
+                    streamType: 'series',
+                    audioSeriesId: seriesId
+                };
+            playbackHint = this.applyPlaybackPreferencesToHint(playbackHint, playbackPreferences);
+            const content = {
+                type: 'series',
+                id: ep.id,
+                title: outgoingContent.title,
+                subtitle: this.episodePlaybackSubtitle(ep, ep.seasonNum),
+                poster: outgoingContent.poster,
+                description: outgoingContent.description,
+                year: outgoingContent.year,
+                rating: outgoingContent.rating,
+                sourceId,
+                cloudSourceId,
+                titleId,
+                seriesId,
+                externalId: ep.id,
+                parentExternalId: seriesId,
+                seriesInfo,
+                currentSeason: ep.seasonNum,
+                currentEpisode: ep.episode_num,
+                containerExtension: container,
+                playbackPreferences
+            };
+
+            await this.play(content, async ({ signal } = {}) => {
+                const result = await API.proxy.xtream.getStreamUrl(
+                    sourceId,
+                    ep.id,
+                    'series',
+                    container,
+                    playbackHint,
+                    { signal }
+                );
+                return result;
+            });
+        } catch (e) {
+            console.error('Error playing episode:', e);
+            this.showPlaybackError((globalThis.NorvaI18n?.t("ui_web_9e347c3cb779", { defaultValue: "This episode could not be started. Please try again." }) ?? 'This episode could not be started. Please try again.'), { immediate: true });
+        }
+    }
+
+    // Restart the current movie/episode from 0 (works for all VOD).
+    async restartFromStart() {
+        try { await this.seekToTime(0, { immediate: true }); } catch (_) {}
+        try { await this.video?.play?.(); } catch (_) {}
+        this.showOverlay();
+    }
+
+    // ---- Playback speed ---------------------------------------------------
+    setPlaybackRate(rate) {
+        const r = Number(rate) || 1;
+        this._playbackRate = r;
+        if (this.video) { try { this.video.playbackRate = r; } catch (_) {} }
+        this.speedList?.querySelectorAll('.speed-option').forEach((o) =>
+            o.classList.toggle('active', Math.abs(parseFloat(o.dataset.rate) - r) < 0.001));
+        this.closeSpeedMenu();
+    }
+
+    toggleSpeedMenu() { this.speedMenuOpen ? this.closeSpeedMenu() : this.openSpeedMenu(); }
+    openSpeedMenu() {
+        this.closeOtherMenus('speed');
+        this.speedMenu?.classList.remove('hidden');
+        this.speedMenuOpen = true;
+    }
+    closeSpeedMenu() { this.speedMenu?.classList.add('hidden'); this.speedMenuOpen = false; }
+
+    // ---- In-player episodes selector --------------------------------------
+    toggleEpisodesMenu() { this.episodesMenuOpen ? this.closeEpisodesMenu() : this.openEpisodesMenu(); }
+    openEpisodesMenu() {
+        this.renderEpisodesMenu();
+        this.closeOtherMenus('episodes');
+        this.episodesNavMenu?.classList.remove('hidden');
+        this.episodesMenuOpen = true;
+    }
+    closeEpisodesMenu() { this.episodesNavMenu?.classList.add('hidden'); this.episodesMenuOpen = false; }
+
+    renderEpisodesMenu() {
+        if (!this.episodesNavList) return;
+        const eps = this.seriesInfo?.episodes;
+        if (!eps) { this.episodesNavList.innerHTML = '<div class="captions-menu-empty" data-i18n="ui_web_eca73b91d505">No episodes</div>'; return; }
+        const seasons = Object.keys(eps).sort((a, b) => parseInt(a) - parseInt(b));
+        const esc = (s) => MediaUtils.escapeHtml ? MediaUtils.escapeHtml(String(s ?? '')) : String(s ?? '');
+        let html = '';
+        for (const season of seasons) {
+            const list = eps[season] || [];
+            if (!list.length) continue;
+            if (seasons.length > 1) html += `<div class="watch-ep-season" data-i18n="ui_web_9e42662ef1b7" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p0":(esc(season))}) || "{}")}">Season ${esc(season)}</div>`;
+            for (const ep of list) {
+                const isCurrent = this.isCurrentEpisode(ep, season);
+                const unitLabel = MediaUtils.selectionUnitLabel?.(ep);
+                html += `<button class="watch-ep-option${isCurrent ? ' active' : ''}" data-season="${esc(season)}" data-ep="${esc(ep.episode_num)}" data-episode-id="${esc(ep.id)}">
+                    ${unitLabel ? '' : `<span class="watch-ep-num">${esc(ep.episode_num)}</span>`}
+                    <span class="watch-ep-title">${esc(unitLabel || ep.title || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_82ab493e3310", {defaultValue: "Episode {{p0}}", p0:(ep.episode_num)}) : `Episode ${ep.episode_num}`))}</span>
+                </button>`;
+            }
+        }
+        this.episodesNavList.innerHTML = html || '<div class="captions-menu-empty" data-i18n="ui_web_eca73b91d505">No episodes</div>';
+        this.episodesNavList.querySelectorAll('.watch-ep-option').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const season = btn.dataset.season;
+                const epNum = parseInt(btn.dataset.ep);
+                const ep = (this.seriesInfo.episodes[season] || []).find(e => btn.dataset.episodeId
+                    ? String(e.id) === btn.dataset.episodeId : parseInt(e.episode_num) === epNum);
+                this.closeEpisodesMenu();
+                if (ep) this.playEpisode({ ...ep, seasonNum: season });
+            });
+        });
+        // Keep the current episode in view.
+        this.episodesNavList.querySelector('.watch-ep-option.active')?.scrollIntoView({ block: 'center' });
+    }
+
+    closeOtherMenus(except) {
+        if (except !== 'audio') this.closeAudioMenu?.();
+        if (except !== 'captions') this.closeCaptionsMenu?.();
+        if (except !== 'speed') this.closeSpeedMenu?.();
+        if (except !== 'episodes') this.closeEpisodesMenu?.();
+    }
+
+    // Show/hide the series-only controls and reflect prev/next availability +
+    // the current speed on the (possibly newly created) video element.
+    updateEpisodeNavUI() {
+        const isSeries = this.contentType === 'series' && !!this.seriesInfo?.episodes;
+        [this.prevEpBtn, this.nextEpBtn, this.episodesNavWrapper].forEach((el) => { if (el) el.hidden = !isSeries; });
+        if (isSeries) {
+            if (this.prevEpBtn) this.prevEpBtn.disabled = !this.getPreviousEpisode();
+            if (this.nextEpBtn) this.nextEpBtn.disabled = !this.getNextEpisode();
+        }
+        // Loading new media resets the browser's playbackRate to 1× — reflect that
+        // in state + the speed menu so the highlight never lies.
+        this._playbackRate = 1;
+        this.speedList?.querySelectorAll('.speed-option').forEach((o) =>
+            o.classList.toggle('active', parseFloat(o.dataset.rate) === 1));
+    }
+
+    cancelNextEpisode() {
+        clearInterval(this.nextEpisodeInterval);
+        this.nextEpisodePanel?.classList.add('hidden');
+        this.nextEpisodePanel?.setAttribute('aria-hidden', 'true');
+        this.nextEpisodePanel?.classList.remove('no-countdown');
+        this.nextEpisodeShowing = false;
+        this.nextEpisodeDismissed = true; // Prevent re-triggering
+        if (this.nextEpisodePanel) {
+            this.nextEpisodePanel.nextEpisodeData = null;
+        }
+    }
+
+    // === Navigation ===
+
+    goBack() {
+        // Re-entrancy guard: on TV the BACK key repeats/queues, and without this a
+        // stalled exit let every press stack another goBack().
+        if (this._goingBack) return;
+        this._goingBack = true;
+
+        try {
+            // Invalidate a resolver that is still waiting for the Edge/Gateway. Its
+            // response may already own a provider session even though stop() cannot
+            // know its id yet; the late-result guard will expire it exactly.
+            this.beginPlaybackAttempt();
+
+            // Capture the position synchronously (cheap, local state) so nothing is lost.
+            // Capture one immutable final position before teardown. The request stays
+            // fire-and-forget so TV Back remains immediate, while the lifecycle gate
+            // prevents later pagehide/pause events from writing the reset media clock.
+            this.persistPlaybackStateForExit();
+            this.deactivateHistoryPersistence();
+
+            this._suspendResumeSnapshotSave = true;
+            try {
+                this.stop();
+            } finally {
+                this._suspendResumeSnapshotSave = false;
+            }
+            this.clearResumeSnapshot();
+            this.cancelNextEpisode();
+        } catch (_) {
+            // A synchronous teardown failure must never trap the viewer on Watch or
+            // leave the re-entrancy latch armed. Late resolver/session guards still
+            // own best-effort server cleanup after this immediate route exit.
+            console.warn('[WatchPage] Back teardown did not complete cleanly; navigating away.');
+        } finally {
+            // Navigate to the page we came from (stored in returnPage) IMMEDIATELY.
+            // We don't use history.back() because we used replaceHistory when navigating here.
+            try {
+                this.app.navigateTo(this.returnPage || 'movies');
+            } finally {
+                this._goingBack = false;
+            }
+        }
+    }
+
+    show() {
+        this.restoreFromResumeSnapshot();
+    }
+
+    hide() {
+        this.cancelNextEpisode();
+        // A navbar click, browser Back/Forward, or programmatic route change does
+        // not pass through goBack(). Leaving the watch route must still persist
+        // the visible position and tear down every playback lane immediately;
+        // otherwise the hidden <video> keeps decoding/playing in the background
+        // and continues holding the provider's single connection slot.
+        if (this._goingBack) return;
+        // Route changes must stale an unresolved playback before tearing down
+        // the sessions that are already known locally. Otherwise a late Gateway
+        // result can register and play after the Watch page has disappeared.
+        this.beginPlaybackAttempt();
+        this.persistPlaybackStateForExit();
+        this.deactivateHistoryPersistence();
+        this._suspendResumeSnapshotSave = true;
+        this.stop();
+        this._suspendResumeSnapshotSave = false;
+        this.clearResumeSnapshot();
+    }
+    // ============================================================
+    // Watch History Tracking
+    // ============================================================
+
+    startHistoryTracking() {
+        this.stopHistoryTracking(); // Clear existing if any
+        this.historyInterval = setInterval(() => this.saveProgress(), 10000); // 10s
+    }
+
+    stopHistoryTracking() {
+        if (this.historyInterval) {
+            clearInterval(this.historyInterval);
+            this.historyInterval = null;
+        }
+    }
+
+    async saveProgress(options = {}) {
+        if (!this.content || !this.video) return;
+        if (!this._historyPersistenceActive || this._suspendResumeSnapshotSave) return;
+        if (this.video.paused && !options.force) return;
+
+        const persistenceGeneration = this._historyPersistenceGeneration;
+        const validDuration = Number.isFinite(Number(options.duration)) && Number(options.duration) > 0
+            ? Number(options.duration)
+            : (this.getStablePlaybackDuration()
+                || this.getDisplayDuration()
+                || this._lastKnownPlaybackDuration);
+        const duration = validDuration ? Math.floor(validDuration) : 0;
+        const rawProgress = Number.isFinite(Number(options.position))
+            ? Math.max(0, Math.floor(Number(options.position)))
+            : Math.floor(this.getResumeSnapshotPosition());
+        const progress = duration > 0 ? Math.min(rawProgress, duration) : rawProgress;
+
+        if (isNaN(progress) || isNaN(duration) || duration <= 0) return;
+        this.saveResumeSnapshot({ position: progress });
+
+        try {
+            // Byte win: the 10s heartbeat only needs {progress,duration}. The server
+            // MERGES history rows (saveHistory: existing.data + incoming.data, item_name
+            // falls back to existing), so title/poster/prefs/next-episode persist from an
+            // earlier save. Send the rich `data` blob only on the FIRST save of a
+            // title/episode and on force saves (pause/seek/close/episode change) — steady
+            // ticks drop from ~0.5-2 KB to ~100 bytes.
+            const metaKey = `${this.content.id}|${this.currentSeason || ''}|${this.currentEpisode || ''}`;
+            const sendMeta = options.force || this._historyMetaSentFor !== metaKey;
+            const payload = {
+                id: this.content.id,
+                type: this.content.type === 'movie' ? 'movie' : 'episode',
+                sourceId: this.content.sourceId,
+                progress,
+                duration,
+                // Temporal guard: the database only lets a NEWER capture overwrite
+                // progress, atomically across devices. `force` requests an immediate
+                // flush; it no longer bypasses ordering for delayed exit packets.
+                watchedAt: options.watchedAt || new Date().toISOString(),
+                ...(options.force ? { force: true } : {})
+            };
+            if (sendMeta) {
+                const titleId = this.content.titleId
+                    || this.content.title_id
+                    || this.content.data?.titleId
+                    || this.content.data?.title_id
+                    || null;
+                payload.data = {
+                    title: this.content.title || 'Unknown Title',
+                    subtitle: this.content.subtitle || (this.content.type === 'movie' ? 'Movie' : 'Series'),
+                    poster: this.content.poster,
+                    sourceId: this.content.sourceId,
+                    containerExtension: this.containerExtension,
+                    durationHint: duration,
+                    playbackPreferences: this.getPlaybackPreferences(),
+                    // Keep declarations separate from observed tracks across resume.
+                    providerAudioLanguages: window.MediaUtils?.providerAudioLanguages?.(this.currentEpisodeMetadata() || this.content) || [],
+                    providerAudioLanguageStatus: 'provider_declared',
+                    // Optional, non-destructive stable identity. Legacy rows remain
+                    // valid without it; JSON merge keeps it on delta heartbeats.
+                    ...(titleId ? { titleId } : {}),
+                    // Series-specific fields for next episode functionality
+                    seriesId: this.content.seriesId || null,
+                    currentSeason: this.currentSeason || null,
+                    currentEpisode: this.currentEpisode || null,
+                    nextEpisode: this.content.type === 'series' ? this.sanitizeNextEpisodeForHistory(this.getNextEpisode()) : null
+                };
+            }
+
+            const moviePage = options.force && payload.type === 'movie'
+                ? window.app?.pages?.movies
+                : null;
+            const movieProgress = moviePage ? {
+                itemId: payload.id,
+                itemType: payload.type,
+                sourceId: payload.sourceId,
+                progress,
+                duration,
+                watchedAt: payload.watchedAt,
+                data: payload.data || {},
+            } : null;
+            // Back must remain immediate, so the final history POST is intentionally
+            // fire-and-forget. Mirror its immutable capture into Movies before the
+            // route changes; otherwise Movies can win the race with an older GET and
+            // keep the open fiche on "Play" until a manual reload.
+            try { moviePage?.applyPlaybackProgress?.(movieProgress); } catch (_) { /* best-effort UI sync */ }
+
+            await window.API.request(
+                'POST',
+                '/history',
+                payload,
+                options.keepalive ? { keepalive: true } : {}
+            );
+            // Re-apply after the authoritative write, then launch a fresh, ordered
+            // history read if Movies is already visible. Its request generation
+            // supersedes any pre-commit GET still in flight during navigation.
+            try {
+                moviePage?.applyPlaybackProgress?.(movieProgress);
+                moviePage?.refreshWatchStateAfterSave?.();
+            } catch (_) { /* best-effort UI sync */ }
+            if (sendMeta
+                && this._historyPersistenceActive
+                && this._historyPersistenceGeneration === persistenceGeneration) {
+                this._historyMetaSentFor = metaKey;
+            }
+            // Continue Watching just changed: bust Home's warm-DOM TTL so returning from
+            // playback within 60s shows the fresh position, not the stale card.
+            try { const hp = window.app?.pages?.home; if (hp) hp.lastLoadedAt = 0; } catch (_) { /* best-effort */ }
+        } catch (err) {
+            console.warn('[History] Failed to save progress:', err);
+        }
+    }
+}
+
+window.WatchPage = WatchPage;
