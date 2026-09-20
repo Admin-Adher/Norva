@@ -31,16 +31,15 @@
   "public/js/pages/PartnersPage.js": "2e4adbbee5",
   "public/js/pages/SeriesPage.js": "7161b4c70c",
   "public/js/pages/Settings.js": "085f271b82",
-  "public/js/pages/WatchPage.js": "6a8080cb70",
+  "public/js/pages/WatchPage.js": "7734fece81",
   "public/js/plan-selection-ui.js": "06877f0757",
   "public/js/profiles.js": "a086ae985e",
   "public/js/promo-ui.js": "16352011b4",
   "public/js/utils/GenreRails.js": "823fb3b57f",
   "public/js/utils/GenreTaxonomy.js": "ad8c124ca0",
-  "public/js/utils/hoverPreview.js": "89a1abb538",
   "public/js/utils/mediaUtils.js": "a87d07bf87",
   "public/js/utils/regions.js": "68b00bc227",
   "public/js/utils/sourceHealth.js": "c9d3adcf56",
-  "public/js/utils/standalone.js": "bedbd1e12f",
+  "public/js/utils/standalone.js": "bedbd1e12",
   "public/js/utils/tvNavigation.js": "f5f0aa2f08"
 }
