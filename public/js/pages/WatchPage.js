@@ -1697,7 +1697,15 @@ class WatchPage {
             if (cloudRestored) return cloudRestored;
         }
 
+        // Keep the restore attempt scoped to this refresh restore.  The
+        // cloud-history path already declares these handles, but the local
+        // snapshot path also passes its abort signal to provider calls and
+        // checks staleness before attaching the returned session.
+        let restoreAttemptId = null;
+        let restoreSignal = null;
         this._resumeRestorePromise = (async () => {
+            restoreAttemptId = this.beginPlaybackAttempt();
+            restoreSignal = this.playbackResolveSignalForAttempt(restoreAttemptId);
             const content = {
                 ...snapshot.content,
                 type: snapshot.content.type,
