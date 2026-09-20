@@ -204,49 +204,64 @@ function _catalogFacetCacheScope() {
     return '';
 }
 
-// A language-facet request can be in flight while playback reports a newer,
-// exact observation. Keep a generation per cache key so that the older
-// response cannot repopulate a cache we just invalidated.
-const _languageFacetGenerations = new Map();
-function _languageFacetGeneration(key) {
-    return _languageFacetGenerations.get(key) || 0;
+// A cache deletion alone cannot stop an older in-flight request from writing
+// its now-obsolete response after the exact-file observation has completed.
+// Fence writes by account + media type so invalidation remains atomic even
+// when the old request resolves after the replacement request.
+const _catalogLanguageFacetGenerations = new Map();
+
+function _catalogLanguageFacetGenerationKey(scope, type) {
+    return scope ? `${scope}:${type === 'series' ? 'series' : 'movie'}` : '';
 }
-function _invalidateLanguageFacetCaches({ type = 'movie', source = null } = {}) {
+
+function _catalogLanguageFacetGeneration(generationKey) {
+    return generationKey
+        ? Number(_catalogLanguageFacetGenerations.get(generationKey) || 0)
+        : 0;
+}
+
+function _clearCatalogLanguageFacetCache(params = {}) {
     const scope = _catalogFacetCacheScope();
     if (!scope) return 0;
-    const normalizedType = type === 'series' ? 'series' : 'movie';
-    const prefix = `norva-facets4-${scope}-${normalizedType}-`;
+    const type = params && params.type === 'series' ? 'series' : 'movie';
+    const generationKey = _catalogLanguageFacetGenerationKey(scope, type);
+    _catalogLanguageFacetGenerations.set(
+        generationKey,
+        _catalogLanguageFacetGeneration(generationKey) + 1
+    );
+    const prefix = `norva-facets4-${scope}-${type}-`;
     let removed = 0;
     try {
-        const keys = [];
-        for (let index = 0; index < Number(localStorage?.length || 0); index += 1) {
+        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
             const key = localStorage.key(index);
-            if (key != null) keys.push(String(key));
+            if (!key || !key.startsWith(prefix)) continue;
+            localStorage.removeItem(key);
+            removed += 1;
         }
-        for (const key of keys) {
-            if (!key.startsWith(prefix)) continue;
-            _languageFacetGenerations.set(key, _languageFacetGeneration(key) + 1);
-            try {
-                if (localStorage.getItem(key) != null) removed += 1;
-                localStorage.removeItem(key);
-            } catch (_) { /* best-effort storage cleanup */ }
-        }
-    } catch (_) { /* storage unavailable */ }
-    // Bump the canonical all-provider key even when no entry exists yet. This
-    // covers an in-flight request that has not written its cache entry.
-    const allKey = `${prefix}all`;
-    _languageFacetGenerations.set(allKey, _languageFacetGeneration(allKey) + 1);
-    try {
-        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-            const EventCtor = window.CustomEvent;
-            if (typeof EventCtor === 'function') {
-                window.dispatchEvent(new EventCtor('norva:catalog-language-facets-invalidated', {
-                    detail: { type: normalizedType, source: source || null, removed }
-                }));
-            }
-        }
-    } catch (_) { /* event delivery is best-effort */ }
+    } catch (_) { /* best-effort cache invalidation */ }
     return removed;
+}
+
+function _emitCatalogLanguageFacetInvalidation(params = {}) {
+    try {
+        if (typeof window?.dispatchEvent !== 'function') return false;
+        const EventCtor = window.CustomEvent || (typeof CustomEvent === 'function' ? CustomEvent : null);
+        if (!EventCtor) return false;
+        const type = params?.type === 'series' ? 'series' : 'movie';
+        const source = String(
+            params?.cloudSourceId ?? params?.cloud_source_id ?? params?.sourceId ?? params?.source_id ?? ''
+        ).trim();
+        window.dispatchEvent(new EventCtor('norva:catalog-language-facets-invalidated', {
+            detail: {
+                type,
+                source: source || null,
+                removed: Math.max(0, Number(params?.removed || 0)),
+            }
+        }));
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 function _cloudAvailable() {
@@ -478,8 +493,8 @@ const CloudAdapter = (() => {
         };
     }
 
-    async function listSources() {
-        const payload = await cloudSourcesApi().list();
+    async function listSources(options = {}) {
+        const payload = await cloudSourcesApi().list(options);
         // A transient 2xx with a MALFORMED body — e.g. a carrier/CDN proxy returning an HTML
         // interstitial with status 200 — arrives here as {} or {error:'…'} (cloudApi requestToBase
         // resolves, not rejects, a 2xx whose body isn't the expected JSON). Coercing that to [] used
@@ -800,7 +815,10 @@ const CloudAdapter = (() => {
         const categoryId = String(item.parent_external_id || metadata.categoryId || metadata.group || 'uncategorized');
         const title = item.title || item.name || 'Norva';
         const poster = item.poster_url || item.posterUrl || item.cover || item.stream_icon || '';
-        const container = playbackHint.container || metadata.container || defaultProviderContainerForType(itemType);
+        const defaultVariant = item.default_variant || item.defaultVariant || {};
+        const container = playbackHint.container || item.container_extension || item.containerExtension
+            || defaultVariant.container_extension || defaultVariant.containerExtension
+            || metadata.container || metadata.containerExtension || defaultProviderContainerForType(itemType);
         const base = {
             ...item,
             sourceId,
@@ -895,7 +913,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}) {
+    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}, options = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -929,7 +947,7 @@ const CloudAdapter = (() => {
             addedDays,
             limit: normalizedLimit,
             offset: normalizedOffset
-        });
+        }, options);
         syncVisibilityEpoch(payload);
         const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
@@ -950,8 +968,8 @@ const CloudAdapter = (() => {
         return page;
     }
 
-    async function listMediaPage(options = {}) {
-        return (await getMediaPage(options)).items;
+    async function listMediaPage(params = {}, options = {}) {
+        return (await getMediaPage(params, options)).items;
     }
 
     async function listMediaCategories({ sourceId, type } = {}) {
@@ -1371,6 +1389,8 @@ const CloudAdapter = (() => {
             codecProfile,
             audio_tracks: audioTracks,
             audioTracks,
+            providerAudioLanguages: raw.providerAudioLanguages || raw.provider_audio_languages || [],
+            providerAudioLanguageStatus: raw.providerAudioLanguageStatus || raw.provider_audio_language_status || null,
             audio_tracks_scope: audioTracks !== null ? 'file' : null,
             audioTracksScope: audioTracks !== null ? 'file' : null,
             audio_probed_at: raw.audio_probed_at || raw.audioProbedAt || null,
@@ -1612,6 +1632,7 @@ const CloudAdapter = (() => {
             audioChannels: query.get('audioChannels'),
             audioStreamIndex: numericPlaybackHint(query.get('audioStreamIndex') ?? query.get('audio_stream_index')),
             audioTrackCount: numericPlaybackHint(query.get('audioTrackCount') ?? query.get('audio_track_count')),
+            subtitleStreamIndex: numericPlaybackHint(query.get('subtitleStreamIndex') ?? query.get('subtitle_stream_index')),
             subtitleTrackCount: numericPlaybackHint(query.get('subtitleTrackCount') ?? query.get('subtitle_track_count')),
             durationSeconds: numericPlaybackHint(query.get('durationSeconds') ?? query.get('duration_seconds')),
             audioMode: query.get('audioMode'),
@@ -1661,6 +1682,11 @@ const CloudAdapter = (() => {
         const normalized = String(container || '').split('?')[0].split('#')[0].toLowerCase();
         // MKA is audio-only and the Gateway HLS pipeline requires a video map.
         return normalized === 'mkv';
+    }
+
+    function isBrowserNativeMp4Container(container) {
+        const normalized = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        return normalized === 'mp4' || normalized === 'm4v';
     }
 
     function hasReliableVodCodecHint(playbackHint) {
@@ -1808,10 +1834,10 @@ const CloudAdapter = (() => {
         // mapping, l'appel tombait dans le « Cloud API route not mapped » final,
         // avalé par le best-effort appelant → aucun appareil enregistré.
         if (method === 'POST' && path === '/push-token') {
-            return NorvaCloud.push.register(data && data.token, data && data.platform);
+            return NorvaCloud.push.register(data && data.token, data || {});
         }
 
-        if (method === 'GET' && path === '/sources') return listSources();
+        if (method === 'GET' && path === '/sources') return listSources(options);
         if (method === 'GET' && path.startsWith('/sources/type/')) {
             const type = decodeURIComponent(path.split('/').pop());
             return (await listSources()).filter(source => source.type === type);
@@ -1828,7 +1854,7 @@ const CloudAdapter = (() => {
         }
         if (method === 'GET' && /^\/sources\/[^/]+$/.test(path)) {
             const id = path.split('/').pop();
-            return (await listSources()).find(source => String(source.id) === String(id) || source.cloudId === id) || null;
+            return (await listSources(options)).find(source => String(source.id) === String(id) || source.cloudId === id) || null;
         }
         if (method === 'POST' && path === '/sources/attempt') {
             if (!hasUserSession()) return { accepted: false };
@@ -1878,7 +1904,8 @@ const CloudAdapter = (() => {
         if (method === 'POST' && /^\/sources\/[^/]+\/toggle$/.test(path)) {
             const id = await resolveSourceId(path.split('/')[2]);
             if (!hasUserSession()) throw new Error('Sign in to change this TV provider.');
-            const payload = await NorvaCloud.sources.toggle(id);
+            if (typeof data?.enabled !== 'boolean') throw new Error('The desired source state is required.');
+            const payload = await NorvaCloud.sources.toggle(id, data.enabled);
             clearMediaCaches();
             return payload;
         }
@@ -2011,7 +2038,7 @@ const CloudAdapter = (() => {
                             mode: 'direct',
                             clientMetadata: _cloudClientTelemetryMetadata(),
                             ...(userAgent ? { userAgent } : {})
-                        });
+                        }, options);
                         const providerUrl = direct?.playback?.url || direct?.url;
                         if (!providerUrl) throw new Error('Cloud did not return a direct stream URL');
                         const seekOffset = Math.max(0, Math.floor(Number(
@@ -2020,7 +2047,8 @@ const CloudAdapter = (() => {
                         const transcodeRes = await fetch(`${localTranscoder}/api/transcode/session`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: providerUrl, seekOffset })
+                            body: JSON.stringify({ url: providerUrl, seekOffset }),
+                            ...(options.signal ? { signal: options.signal } : {})
                         });
                         if (!transcodeRes.ok) {
                             const detail = await transcodeRes.json().catch(() => ({}));
@@ -2115,7 +2143,7 @@ const CloudAdapter = (() => {
                             ttlSeconds: 7200,
                             clientMetadata: _cloudClientTelemetryMetadata(),
                             ...(liveUserAgent ? { userAgent: liveUserAgent } : {})
-                        });
+                        }, options);
                         const relayUrl = relayPayload.playback?.url || relayPayload.url;
                         if (relayUrl) {
                             _clearSourceCloudBlock(sourceId);
@@ -2154,6 +2182,14 @@ const CloudAdapter = (() => {
                 const browserMkv = isVodPlayback
                     && !nativePlayer
                     && isMatroskaContainer(container);
+                // MP4/M4V is a browser-native container. Always let the browser
+                // try the byte-preserving Relay first, even when an old probe says
+                // HEVC/AC-3 or the local Engine bundle has not loaded yet. A real
+                // media rejection may still expose the explicit conversion action,
+                // but initial playback must never pay Gateway/FFmpeg startup cost.
+                const browserNativeMp4 = isVodPlayback
+                    && !nativePlayer
+                    && isBrowserNativeMp4Container(container);
                 const denseTrackVod = isVodPlayback
                     && !nativePlayer
                     && shouldDenseVodUseGateway(container, playbackHint);
@@ -2179,7 +2215,7 @@ const CloudAdapter = (() => {
                 // containers (MOV/AVI/...) keep the bounded Engine/Gateway path below.
                 const browserSafeVod = isVodPlayback
                     && !needsGateway
-                    && !shouldVodUseGatewayTranscode(container, playbackHint);
+                    && (browserNativeMp4 || !shouldVodUseGatewayTranscode(container, playbackHint));
                 // Browser VOD that needs container/codec help (avi/mov, HEVC,
                 // AC-3/DTS/TrueHD audio, …): play it with the in-browser engine
                 // (NorvaEngine remuxes the container + transcodes the audio to
@@ -2254,6 +2290,9 @@ const CloudAdapter = (() => {
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint,
+                    ...(query.get('mediaCacheReadPolicy') === 'bypass-once'
+                        ? { mediaCacheReadPolicy: 'bypass-once' }
+                        : {}),
                     gatewayAutoMode: mode === 'transcode' && !forcedMode,
                     publicHlsDirectSessionGuard: type === 'live' && !nativePlayer
                         && window.app?.player?.supportsPublicHlsDirectSessionGuard === true,
@@ -2263,16 +2302,18 @@ const CloudAdapter = (() => {
                     ...(userAgent ? { userAgent } : {})
                 };
                 // Engine mode: fetch a RAW pass-through URL (byte-range + CORS)
-                // via the relay and hand it to the in-browser engine. No gateway
-                // transcode session is created, so there is no Railway dependency
-                // and Resume seeks straight to the saved offset client-side.
+                // via the relay and hand it to the in-browser engine.
+                // Normally Resume seeks client-side without a transcode session.
+                // The server may instead promote an observed container to HLS;
+                // honor that single session rather than feed its manifest to the
+                // byte-range engine or open another provider connection.
                 if (mode === 'engine') {
                     const enginePayload = await cloudPlaybackApi().createSession({
                         ...baseSession,
                         mode: 'relay',
                         requiresRelay: true,
                         enginePipe: true
-                    });
+                    }, options);
                     const engineUrl = enginePayload.playback?.url || enginePayload.url;
                     if (!engineUrl) {
                         const e = new Error('Engine: relay unavailable (raw URL missing).');
@@ -2286,8 +2327,9 @@ const CloudAdapter = (() => {
                         streamUrl: engineUrl,
                         playbackUrl: engineUrl,
                         cloud: true,
-                        mode: 'engine',
-                        sessionId: enginePayload.session?.id
+                        mode: enginePayload.playback?.mode === 'transcode' ? 'transcode' : 'engine',
+                        sessionId: enginePayload.session?.id,
+                        cloudSourceId
                     };
                 }
                 let payload;
@@ -2301,7 +2343,7 @@ const CloudAdapter = (() => {
                         mode,
                         requiresRelay: mode === 'relay',
                         requiresTranscode: mode === 'transcode'
-                    });
+                    }, options);
                 } catch (sessionError) {
                     if (type === 'live') {
                         if (_looksProviderSlotBusy(sessionError)) {
@@ -2424,7 +2466,11 @@ const CloudAdapter = (() => {
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
             const type = cloudTypeFromLocal(requestedType);
             try {
-                const payload = await getHomeRails({ type, limit });
+                // Home's cold-load fallback must not repeat a slow/failed
+                // personalized request before it can show available titles.
+                const payload = query.get('direct') === '1'
+                    ? { rails: [] }
+                    : await getHomeRails({ type, limit }, options);
                 const rail = (payload.rails || []).find(item => item.itemType === type || item.item_type === type || String(item.id || '').includes(type));
                 if (rail?.items?.length) {
                     return rail.items.slice(0, limit).map(normalizeHomeRailItem);
@@ -2432,7 +2478,7 @@ const CloudAdapter = (() => {
             } catch (err) {
                 console.warn('[Cloud] Home rail unavailable, falling back to media page:', err);
             }
-            const items = await listMediaPage({ type, limit });
+            const items = await listMediaPage({ type, limit }, options);
             return items.map(normalizeRecentItem);
         }
         if (path.startsWith('/channels/')) return { success: true };
@@ -2681,9 +2727,9 @@ const CloudAdapter = (() => {
         // first play on the free browse tier — routes to the subscribe screen.
         // These calls bypass API.request, so they need their own guard.
         return Object.assign({}, api, {
-            createSession: async (session) => {
+            createSession: async (session, requestOptions = {}) => {
                 try {
-                    return await api.createSession(session);
+                    return await api.createSession(session, requestOptions);
                 } catch (error) {
                     if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
                         routeToSubscribeWall(error);
@@ -2796,7 +2842,10 @@ const API = {
             headers: {
                 'Content-Type': 'application/json'
             },
-            ...(options.signal ? { signal: options.signal } : {})
+            ...(options.signal ? { signal: options.signal } : {}),
+            // Final history/session writes must be allowed to finish while the
+            // document is unloading. Callers opt in and keep payloads bounded.
+            ...(options.keepalive ? { keepalive: true } : {})
         };
 
         // Add authentication token if available
@@ -2828,7 +2877,7 @@ const API = {
                 window.location.href = hub ? `${hub}/login.html` : '/login.html';
                 return;
             }
-            const message = result.details || result.message || result.error || `Server responded with ${response.status}`;
+            const message = result.details || result.message || result.error || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5667176d5dff", {defaultValue: "Server responded with {{p0}}", p0:(response.status)}) : `Server responded with ${response.status}`);
             const error = new Error(message);
             error.status = response.status;
             error.payload = result;
@@ -2843,14 +2892,14 @@ const API = {
 
     // Sources
     sources: {
-        getAll: () => API.request('GET', '/sources'),
+        getAll: (options = {}) => API.request('GET', '/sources', null, options),
         getByType: (type) => API.request('GET', `/sources/type/${type}`),
-        getById: (id) => API.request('GET', `/sources/${id}`),
+        getById: (id, options = {}) => API.request('GET', `/sources/${id}`, null, options),
         recordAttempt: (data) => API.request('POST', '/sources/attempt', data),
         create: (data) => API.request('POST', '/sources', data),
         update: (id, data) => API.request('PUT', `/sources/${id}`, data),
         delete: (id) => API.request('DELETE', `/sources/${id}`),
-        toggle: (id) => API.request('POST', `/sources/${id}/toggle`),
+        toggle: (id, enabled) => API.request('POST', `/sources/${id}/toggle`, { enabled }),
         test: (id) => API.request('POST', `/sources/${id}/test`),
         sync: (id) => API.request('POST', `/sources/${id}/sync`), // Manual sync
         finalize: (id, params = {}) => API.request('POST', `/sources/${id}/finalize`, params), // Resume catalog finalization
@@ -2975,16 +3024,17 @@ const API = {
         languageFacets: async (params = {}) => {
             const type = params && params.type === 'series' ? 'series' : 'movie';
             const requestedSource = String(params?.source || params?.sourceId || '').trim();
-            // MoviesPage normally passes the cloud UUID, but a restored tab can
-            // still hold the local numeric alias. Resolve it through the same
-            // source map as media-items before building the provider-scoped key;
-            // otherwise the edge correctly refuses the malformed scope and the
-            // audio/subtitle menus stay empty only for the selected provider.
+            // The UI can retain the local numeric source alias across reloads. Resolve it
+            // through the same alias table used by media requests before asking Edge for
+            // provider-scoped facets; otherwise the provider scope is rejected and the
+            // menus fall back to the single generic audio option.
             const source = String(requestedSource
                 ? await CloudAdapter.resolveSourceId(requestedSource)
                 : '').trim().toLowerCase();
             const sourceScope = source || 'all';
             const scope = _catalogFacetCacheScope();
+            const generationKey = _catalogLanguageFacetGenerationKey(scope, type);
+            const requestGeneration = _catalogLanguageFacetGeneration(generationKey);
             const facetCacheKey = () => {
                 let visibilityEpoch = '';
                 try { visibilityEpoch = String(CloudAdapter.visibilityEpoch?.() || ''); } catch (_) { /* legacy adapter */ }
@@ -2998,7 +3048,6 @@ const API = {
             // epoch additionally prevents a pre-switch result from surviving promotion.
             const key = facetCacheKey();
             const TTL = 60000; // 60s, aligned with the server-side facet memo
-            const generation = key ? _languageFacetGeneration(key) : 0;
             const nonEmpty = (v) => v && ((Array.isArray(v.audio) && v.audio.length) || (Array.isArray(v.subtitles) && v.subtitles.length));
             try {
                 const raw = key ? localStorage.getItem(key) : null;
@@ -3015,41 +3064,54 @@ const API = {
             // scope) throws a ReferenceError that this try/catch silently swallows, which is exactly
             // why the Audio/Subtitle menus were always empty (the endpoint was never even reached).
             // Reach it through the exposed handle, like clearRailCache below.
-            try { p = CloudAdapter.cloudHomeApi().languageFacets({ ...params, type, source, sourceId: source }); }
-            catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
+            try {
+                p = CloudAdapter.cloudHomeApi().languageFacets({
+                    ...params,
+                    type,
+                    source,
+                    sourceId: source
+                });
+            }
+            catch (_) { return { audio: [], subtitles: [] }; }
             return Promise.resolve(p).then((value) => {
                 try {
                     // Cache ONLY a non-empty result. An empty set is treated as "not ready" so the
-                    // next call re-fetches instead of serving a stale blank menu.
+                    // next call re-fetches instead of serving a stale blank menu. An exact-file
+                    // invalidation also fences requests that started before it, otherwise a slow
+                    // old response can repopulate the entry after it was cleared.
                     const writeKey = facetCacheKey();
-                    if (writeKey && generation === _languageFacetGeneration(writeKey) && nonEmpty(value)) {
+                    const generationIsCurrent = requestGeneration === _catalogLanguageFacetGeneration(generationKey);
+                    if (writeKey && generationIsCurrent && nonEmpty(value)) {
                         localStorage.setItem(writeKey, JSON.stringify({ exp: Date.now() + TTL, value }));
                     }
                 } catch (_) { /* ignore quota */ }
                 return value;
-            }).catch((error) => {
-                // Preserve transport failures so the caller can retry immediately;
-                // an empty response is a valid "not indexed yet" result, while a
-                // rejected request must never be cached or mistaken for that state.
-                throw error;
             });
         },
         // Best-effort capture of real audio-track languages observed at playback.
-        reportObservedLanguages: async (body = {}) => {
-            let result;
-            try {
-                result = await CloudAdapter.cloudHomeApi().reportObservedLanguages(body);
-            } catch (error) {
-                // Transport failures leave the current facet caches retryable.
-                throw error;
-            }
-            if (result && result.ok !== false && result.updated === true && result.exact === true) {
-                const type = body?.itemType === 'series' ? 'series' : 'movie';
-                const source = body?.cloudSourceId || body?.sourceId || body?.source || null;
-                _invalidateLanguageFacetCaches({ type, source: source ? String(source) : null });
-            }
-            return result;
+        reportObservedLanguages: (body) => {
+            let request;
+            try { request = CloudAdapter.cloudHomeApi().reportObservedLanguages(body); }
+            catch (_) { return Promise.resolve({ ok: false }); }
+            return Promise.resolve(request).then((value) => {
+                // The server already invalidates its in-isolate memo. Drop every
+                // local provider/all-source facet entry for this account + media
+                // type as soon as exact evidence changed, so Back to Movies does
+                // not display the old menu for another 60 seconds.
+                if (value?.ok === true && value?.updated === true) {
+                    const type = body?.itemType || body?.item_type;
+                    const removed = _clearCatalogLanguageFacetCache({ type });
+                    _emitCatalogLanguageFacetInvalidation({
+                        type,
+                        cloudSourceId: body?.cloudSourceId || body?.cloud_source_id,
+                        sourceId: body?.sourceId || body?.source_id,
+                        removed,
+                    });
+                }
+                return value;
+            });
         },
+        clearLanguageFacetCache: (params = {}) => _clearCatalogLanguageFacetCache(params),
         // Drop the cached home/genre rails so a hidden-genre change shows on the
         // browse pages immediately instead of after the 2-min TTL.
         clearRailCache: () => CloudAdapter.clearRailCache(),
@@ -3154,7 +3216,7 @@ const API = {
             // cloud request. Make it resilient: serve from a short cache, dedupe
             // concurrent calls (double-taps), and retry the transient 429 a couple
             // of times — the collision clears within a second or two.
-            seriesInfo: (sourceId, seriesId) => {
+            seriesInfo: (sourceId, seriesId, requestOptions = {}) => {
                 const key = `${sourceId}:${seriesId}`;
                 const cache = (API._seriesInfoCache = API._seriesInfoCache || new Map());
                 const cached = cache.get(key);
@@ -3165,7 +3227,12 @@ const API = {
                     let lastErr;
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
-                            const data = await API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`);
+                            const data = await API.request(
+                                'GET',
+                                `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`,
+                                null,
+                                requestOptions
+                            );
                             cache.set(key, { at: Date.now(), data });
                             return data;
                         } catch (err) {
@@ -3204,13 +3271,25 @@ const API = {
                     throw err;
                 }
             },
-            getStreamUrl: (sourceId, streamId, type = 'live', container = defaultProviderContainerForType(type), options = {}) => {
+            getStreamUrl: (
+                sourceId,
+                streamId,
+                type = 'live',
+                container = defaultProviderContainerForType(type),
+                options = {},
+                requestOptions = {}
+            ) => {
                 const params = new URLSearchParams({ container });
                 Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {
                     if (key === 'container') return;
                     params.set(key, value === true ? '1' : String(value));
                 });
-                return API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`);
+                return API.request(
+                    'GET',
+                    `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`,
+                    null,
+                    requestOptions
+                );
             }
         },
 
