@@ -3113,7 +3113,8 @@ class WatchPage {
                 root.__norvaEdgeTrace = existing;
                 root.sessionStorage?.setItem('norva.edgeTrace.v1', JSON.stringify(existing));
                 if (this.isEdgeTraceDebugEnabled()) {
-                    root.console?.info?.('[NorvaEdgeTrace]', event);
+                    root.document?.documentElement?.setAttribute('data-norva-edge-trace', JSON.stringify(existing));
+                    root.console?.info?.('[NorvaEdgeTrace]', JSON.stringify(event));
                 }
             } catch (_) { /* private mode or quota denial must not affect playback */ }
         }).catch(() => {});
