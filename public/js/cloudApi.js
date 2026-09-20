@@ -84,12 +84,12 @@
     const CONTENT_REGIONS = REGIONS_DATA
         ? REGIONS_DATA.list().map((r) => ({ key: r.code, label: r.name, flag: r.flag, kind: r.kind }))
         : [
-            { key: 'FR', label: 'France' },
-            { key: 'US', label: 'United States' },
-            { key: 'IN', label: 'India' },
-            { key: 'MAGHREB', label: 'Maghreb' },
-            { key: 'LUSOPHONE', label: 'Lusophone' },
-            { key: 'INTERNATIONAL', label: 'International' }
+            { key: 'FR', label: (globalThis.NorvaI18n?.t("ui_web_7a1ca4ef7515", { defaultValue: "France" }) ?? 'France') },
+            { key: 'US', label: (globalThis.NorvaI18n?.t("ui_web_49dca65f362f", { defaultValue: "United States" }) ?? 'United States') },
+            { key: 'IN', label: (globalThis.NorvaI18n?.t("ui_web_abd149214539", { defaultValue: "India" }) ?? 'India') },
+            { key: 'MAGHREB', label: (globalThis.NorvaI18n?.t("ui_web_50738e586c59", { defaultValue: "Maghreb" }) ?? 'Maghreb') },
+            { key: 'LUSOPHONE', label: (globalThis.NorvaI18n?.t("ui_web_4138cb274155", { defaultValue: "Lusophone" }) ?? 'Lusophone') },
+            { key: 'INTERNATIONAL', label: (globalThis.NorvaI18n?.t("ui_web_93202df2ec70", { defaultValue: "International" }) ?? 'International') }
         ];
     const CONTENT_REGION_LABELS = CONTENT_REGIONS.reduce((labels, region) => {
         labels[region.key] = region.label;
@@ -243,7 +243,7 @@
 
     function contentRegionLabel(region) {
         const normalized = normalizeContentRegion(region);
-        return CONTENT_REGION_LABELS[normalized] || normalized || 'International';
+        return CONTENT_REGION_LABELS[normalized] || normalized || (globalThis.NorvaI18n?.t("ui_web_93202df2ec70", { defaultValue: "International" }) ?? 'International');
     }
 
     function inferContentRegionFromLocale() {
@@ -468,7 +468,7 @@
         // openModal() so the D-pad is trapped inside and Back/Escape dismisses it.
         prompt.setAttribute('role', 'dialog');
         prompt.setAttribute('aria-modal', 'true');
-        prompt.setAttribute('aria-label', `Organize Norva for ${label}`);
+        prompt.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_65d8fb144873", {defaultValue: "Organize Norva for {{p0}}", p0:(label)}) : `Organize Norva for ${label}`));
         // A dimmed full-screen backdrop makes this "one thing at a time": it covers
         // the onboarding form, the trial pill and everything else, so nothing can
         // visually collide with the prompt. Mobile gets a bottom sheet (thumb-reachable,
@@ -514,18 +514,18 @@
         const btnBase = 'min-height:44px;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer';
         prompt.innerHTML = `
             ${isTv ? '' : '<div aria-hidden="true" style="width:40px;height:4px;border-radius:999px;background:var(--color-border,#334155);margin:-6px auto 14px"></div>'}
-            <button type="button" aria-label="Close" data-region-close class="modal-close" style="float:right;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;color:var(--color-text-secondary,#94a3b8);font-size:24px;line-height:1;cursor:pointer;margin:-8px -8px 0 0">&times;</button>
-            <strong style="display:block;font-size:${isTv ? 20 : 16}px;margin:0 40px 8px 0">Organize Norva for ${escapeHtml(label)}?</strong>
-            <span style="display:block;color:var(--color-text-secondary,#aeb8cc);margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
+            <button type="button" aria-label="Close" data-region-close class="modal-close" style="float:right;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;color:var(--color-text-secondary,#94a3b8);font-size:24px;line-height:1;cursor:pointer;margin:-8px -8px 0 0" data-i18n-aria-label="ui_web_7d9eb7acb13e">&times;</button>
+            <strong style="display:block;font-size:${isTv ? 20 : 16}px;margin:0 40px 8px 0" data-i18n="ui_web_25ba1e177c7f" data-i18n-args="${(globalThis.NorvaI18n?.args?.({"p2":(label)}) || "{}")}">Organize Norva for ${escapeHtml(label)}?</strong>
+            <span style="display:block;color:var(--color-text-secondary,#aeb8cc);margin-bottom:14px" data-i18n="ui_web_e55353011f8d">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
             <div data-region-actions style="display:flex;gap:10px;flex-wrap:wrap">
-                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase}">Yes</button>
-                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid var(--color-border,#334155);background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#dbe7ff);${btnBase}">Choose another region</button>
+                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase}" data-i18n="ui_web_85a39ab345d6">Yes</button>
+                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid var(--color-border,#334155);background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#dbe7ff);${btnBase}" data-i18n="ui_web_cec61e496bb7">Choose another region</button>
             </div>
             <div data-region-picker style="display:none;gap:10px;flex-wrap:wrap;margin-top:2px">
-                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;min-height:44px;border:1px solid var(--color-border,#334155);border-radius:10px;background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#f8fafc);padding:10px 12px;font-weight:700;cursor:pointer">
+                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;min-height:44px;border:1px solid var(--color-border,#334155);border-radius:10px;background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#f8fafc);padding:10px 12px;font-weight:700;cursor:pointer" data-i18n-aria-label="ui_web_0a084642de84">
                     ${CONTENT_REGIONS.map((r) => `<option value="${escapeHtml(r.key)}">${r.flag ? escapeHtml(r.flag) + ' ' : ''}${escapeHtml(r.label)}</option>`).join('')}
                 </select>
-                <button type="button" data-region-apply style="flex:0 0 auto;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase};padding:10px 16px">Confirm</button>
+                <button type="button" data-region-apply style="flex:0 0 auto;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase};padding:10px 16px" data-i18n="ui_web_eebdd24a77d9">Confirm</button>
             </div>
         `;
 
@@ -655,6 +655,21 @@
     // invalidated the moment its data is mutated.
     const _getCache = new Map();      // key -> { at, data }
     const _getInFlight = new Map();   // key -> promise
+    // Mutations can finish while an older GET for the same namespace is still
+    // in flight. Deleting only the settled cache entry is not enough: a later
+    // reader would join that stale promise, and the stale response could also
+    // repopulate the cache after the mutation. Namespace generations make such
+    // responses observable to their original caller but permanently ineligible
+    // for joining or caching after invalidation.
+    const _getInvalidationGeneration = new Map();
+
+    function cacheNamespace(cacheKey) {
+        return String(cacheKey || '').split(':', 1)[0];
+    }
+
+    function cacheGeneration(cacheKey) {
+        return _getInvalidationGeneration.get(cacheNamespace(cacheKey)) || 0;
+    }
     const _responseVisibilityEpoch = new WeakMap();
     let _visibilityEpoch = '';
 
@@ -750,6 +765,7 @@
     function cachedGet(cacheKey, ttlMs, fetchFn) {
         const startEpoch = _visibilityEpoch;
         const scopedKey = visibilityScopedCacheKey(cacheKey, startEpoch);
+        const startGeneration = cacheGeneration(cacheKey);
         const hit = _getCache.get(scopedKey);
         if (hit && (Date.now() - hit.at) < ttlMs) { NorvaTrace.log('cache HIT (in-memory)', scopedKey + ' · age ' + Math.round((Date.now() - hit.at) / 1000) + 's'); return Promise.resolve(cloneJson(hit.data)); }
         if (_getInFlight.has(scopedKey)) { NorvaTrace.log('cache JOIN in-flight', scopedKey); return _getInFlight.get(scopedKey).then(cloneJson); }
@@ -758,7 +774,8 @@
             .then((data) => {
                 const responseEpoch = visibilityEpochFromPayload(data);
                 const epochChangedWithoutProof = !responseEpoch && _visibilityEpoch !== startEpoch;
-                if (!epochChangedWithoutProof) {
+                const invalidatedWhileInFlight = cacheGeneration(cacheKey) !== startGeneration;
+                if (!epochChangedWithoutProof && !invalidatedWhileInFlight) {
                     _getCache.set(visibilityScopedCacheKey(cacheKey, responseEpoch || startEpoch), {
                         at: Date.now(),
                         data
@@ -773,8 +790,16 @@
         return p.then(cloneJson);
     }
     function invalidateCache(prefix) {
+        const namespace = cacheNamespace(prefix);
+        _getInvalidationGeneration.set(namespace, (_getInvalidationGeneration.get(namespace) || 0) + 1);
         for (const k of Array.from(_getCache.keys())) {
             if (k === prefix || k.indexOf(prefix + ':') === 0) _getCache.delete(k);
+        }
+        // Promises cannot be cancelled here, but removing their join handles lets
+        // the post-mutation refresh start a new authoritative GET immediately.
+        // Their guarded finally blocks cannot delete a newer promise at this key.
+        for (const k of Array.from(_getInFlight.keys())) {
+            if (k === prefix || k.indexOf(prefix + ':') === 0) _getInFlight.delete(k);
         }
     }
     const SOURCES_TTL_MS = 30 * 1000;
@@ -787,8 +812,19 @@
     const ENTITLEMENTS_TTL_MS = 30 * 1000;
     const PROFILES_TTL_MS = 60 * 1000;
     const PROFILE_TTL_MS = 60 * 1000;
+    // Episode metadata is editorial and slow-changing. Keep one response per
+    // (TMDB series, season, language) for the tab session, and let cachedGet join
+    // concurrent fiche opens onto the same in-flight request. The catalog Edge
+    // adds a 6h isolate tier and a shared 14-day Postgres tier underneath this.
+    const TMDB_EPISODES_TTL_MS = 6 * 60 * 60 * 1000;
     function invalidateSourcesCache() { invalidateCache('sources'); }
-    function listSourcesCached() { return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources')); }
+    function listSourcesCached(options = {}) {
+        if (options.fresh) invalidateSourcesCache();
+        return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources', null, {
+            signal: options.signal,
+            ...(options.fresh ? { _visibilityForceNoStore: true } : {})
+        }));
+    }
 
     // One-shot cold-start aggregation. A fresh load otherwise fans out into ~7
     // separate norva-cloud calls (profile, profiles, entitlements, sources,
@@ -901,6 +937,18 @@
         }
     }
 
+    function tmdbEpisodesRequest(params = {}) {
+        const tmdbId = String(params?.tmdbId || '').trim();
+        const season = String(params?.season ?? '').trim();
+        const lang = String(params?.lang || resolveLang() || 'en').slice(0, 2).toLowerCase();
+        const cacheKey = `tmdb-episodes:${tmdbId}:${season}:${lang}`;
+        return cachedGet(
+            cacheKey,
+            TMDB_EPISODES_TTL_MS,
+            () => catalogRequest('/tmdb-episodes', params)
+        );
+    }
+
     async function catalogMutate(path, body, options = {}) {
         const route = `${path}${query({ country: resolveCountry(), lang: resolveLang() })}`;
         try {
@@ -953,6 +1001,19 @@
             'POST',
             `/playback/sessions/${encodeURIComponent(id)}/heartbeat`,
             null,
+            options
+        );
+    }
+
+    // Private cache tickets are security-sensitive and renewable. Never fall
+    // back to an older edge function that does not implement the same binding,
+    // revocation and Authorization-header contract.
+    function playbackMediaCacheTicketRequest(id, objectKey, options = {}) {
+        return requestToBase(
+            playbackBase(),
+            'POST',
+            `/playback/sessions/${encodeURIComponent(id)}/media-cache-ticket`,
+            { protocol: 1, objectKey },
             options
         );
     }
@@ -1035,6 +1096,7 @@
         // Only user-session calls (no explicit token) get the refresh-and-retry.
         // Device tokens ('' / device token) keep their own invalidation path.
         const usingUserToken = options.token === undefined;
+        const usesCatalogVisibility = options.catalogVisibility !== false;
         const headers = {
             'Content-Type': 'application/json',
             ...(options.headers || {})
@@ -1057,12 +1119,18 @@
             // Once an epoch is known, make it part of the browser-cache URL. On
             // the first authenticated read there is no trustworthy generation
             // yet, so bypass the HTTP cache and learn it from the server.
-            const requestPath = authenticatedGet ? visibilityVersionedPath(path) : path;
+            const requestPath = authenticatedGet && usesCatalogVisibility
+                ? visibilityVersionedPath(path)
+                : path;
             return fetch(`${baseUrl}${requestPath}`, {
             method,
             headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body),
-            ...(authenticatedGet && (!_visibilityEpoch || options._visibilityForceNoStore)
+            ...(authenticatedGet && (
+                !usesCatalogVisibility
+                || !_visibilityEpoch
+                || options._visibilityForceNoStore
+            )
                 ? { cache: 'no-store' }
                 : {}),
             ...(options.signal ? { signal: options.signal } : {}),
@@ -1097,7 +1165,10 @@
 
         const responseVisibilityEpoch = visibilityEpochFromResponse(response)
             || visibilityEpochFromPayload(payload);
-        if (token && responseVisibilityEpoch && isOlderVisibilityEpoch(responseVisibilityEpoch, _visibilityEpoch)) {
+        if (usesCatalogVisibility
+            && token
+            && responseVisibilityEpoch
+            && isOlderVisibilityEpoch(responseVisibilityEpoch, _visibilityEpoch)) {
             // A private HTTP-cache entry or an already in-flight request from the
             // previous generation must never be handed to a caller after another
             // response has advanced the account epoch. Retry once against the
@@ -1118,13 +1189,14 @@
         // Visibility is a server-owned generation. Remember it before any caller
         // can consult an in-memory cache; a response header is accepted for routes
         // whose legacy JSON body cannot yet carry metadata.
-        observeVisibilityEpoch(payload, response);
+        if (usesCatalogVisibility) observeVisibilityEpoch(payload, response);
 
         const visibilityErrorCode = payload && typeof payload === 'object'
             ? String(payload?.details?.code || payload?.code || '')
             : '';
         if (
-            token
+            usesCatalogVisibility
+            && token
             && method === 'GET'
             && response.status === 409
             && visibilityErrorCode === 'CATALOG_VISIBILITY_EPOCH_CHANGED'
@@ -1146,14 +1218,14 @@
         try {
             if (response.headers.get('x-norva-profile-fallback') === 'locked' && !requestToBase._profileFallbackToasted) {
                 requestToBase._profileFallbackToasted = true;
-                window.NorvaModal?.toast?.('This profile is locked by your current plan — showing the main profile instead.', { tone: 'warn' });
+                window.NorvaModal?.toast?.((globalThis.NorvaI18n?.t("ui_web_89a9b2abd522", { defaultValue: "This profile is locked by your current plan — showing the main profile instead." }) ?? 'This profile is locked by your current plan — showing the main profile instead.'), { tone: 'warn' });
             }
         } catch (_) { /* purely informative */ }
 
         NorvaTrace.log('net ← ' + _trLabel, response.status + ' (' + Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0) - _trT0) + 'ms)' + (_trRefreshed ? ' [after 401→refresh]' : ''));
 
         if (!response.ok) {
-            const baseMessage = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const baseMessage = payload.error || payload.message || (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_3926a74b94bc", {defaultValue: "Norva responded with {{p0}}", p0:(response.status)}) : `Norva responded with ${response.status}`);
             const detail = extractUpstreamDetail(payload.details);
             const message = detail && !baseMessage.includes(detail)
                 ? `${baseMessage} — ${detail}`.slice(0, 400)
@@ -3475,6 +3547,16 @@
         return key;
     }
 
+    function partnersApiRequest(method, path, body, options = {}) {
+        return requestToBase(partnersBase(), method, path, body, {
+            ...options,
+            skipProfile: true,
+            // The Partners contract rejects unknown query parameters. Catalogue
+            // visibility epochs do not describe financial programme state.
+            catalogVisibility: false
+        });
+    }
+
     async function partnersPost(path, body, idempotencyKey, validator, externalSignal) {
         partnersRequireUserSession();
         const safeIdempotencyKey = partnersIdempotencyKey(idempotencyKey);
@@ -3489,13 +3571,11 @@
         }, 20000);
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'POST',
                 path,
                 body,
                 {
-                    skipProfile: true,
                     signal: controller.signal,
                     headers: { 'Idempotency-Key': safeIdempotencyKey }
                 }
@@ -3526,12 +3606,11 @@
         }, 20000);
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'POST',
                 path,
                 body,
-                { skipProfile: true, signal: controller.signal }
+                { signal: controller.signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') {
@@ -3550,12 +3629,11 @@
         partnersRequireUserSession();
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 path,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -3609,12 +3687,11 @@
         }, 20000);
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 path,
                 null,
-                { signal: controller.signal, skipProfile: true }
+                { signal: controller.signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') {
@@ -3650,6 +3727,7 @@
                     token: getDeviceToken(),
                     signal,
                     skipProfile: true,
+                    catalogVisibility: false,
                     headers
                 }
             );
@@ -3681,12 +3759,11 @@
         });
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 `/bootstrap${suffix}`,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -3702,12 +3779,11 @@
         partnersRequireUserSession();
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 '/access-request',
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -3952,12 +4028,11 @@
         partnersRequireUserSession();
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 '/payout-profile',
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -4111,8 +4186,7 @@
         }
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 `/dashboard${query({
                     limit: safeLimit,
@@ -4120,7 +4194,7 @@
                     cursor: safeCursor || undefined
                 })}`,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -4142,15 +4216,14 @@
         }
         let payload;
         try {
-            payload = await requestToBase(
-                partnersBase(),
+            payload = await partnersApiRequest(
                 'GET',
                 `/referrals${query({
                     limit: safeLimit,
                     cursor: safeCursor || undefined
                 })}`,
                 null,
-                { signal, skipProfile: true }
+                { signal }
             );
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
@@ -4411,7 +4484,40 @@
         // endpoints catalogue (c'était le bug historique : « Cloud API route
         // not mapped » avalé en silence → zéro appareil enregistré).
         push: {
-            register: (token, platform) => request('POST', '/push-token', { token, platform: platform || 'android' })
+            register: (token, platform = 'android', context = {}) => {
+                const details = platform && typeof platform === 'object'
+                    ? platform
+                    : { ...(context || {}), platform };
+                return request('POST', '/push-token', {
+                    token,
+                    platform: details.platform || 'android',
+                    permissionState: details.permissionState || details.permission_state || 'unknown',
+                    timezone: details.timezone || null,
+                    timezoneObserved: details.timezoneObserved === true,
+                    locale: details.locale || null,
+                    appVersion: details.appVersion || details.app_version || null
+                });
+            }
+        },
+
+        lifecycleEvents: {
+            recordContext: (timezone) => {
+                // Only observed scheduling context, never country inference or a default UTC.
+                if (typeof timezone !== 'string' || !timezone || timezone.length > 64) return Promise.resolve(null);
+                try {
+                    return request('POST', '/lifecycle-context', { timezone }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            },
+            record: (deliveryId, event) => {
+                try {
+                    return request('POST', '/lifecycle-events', { deliveryId, event }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            },
+            recordProduct: (event) => {
+                try {
+                    return request('POST', '/lifecycle-events', { event }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            }
         },
 
         entitlements: {
@@ -4514,11 +4620,11 @@
         },
 
         sources: {
-            list: () => listSourcesCached(),
+            list: (options = {}) => listSourcesCached(options),
             recordAttempt: (attempt) => request('POST', '/sources/attempt', attempt),
             create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
-            toggle: (id) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`).then((r) => { invalidateSourcesCache(); return r; }),
+            toggle: (id, enabled) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`, { enabled }).then((r) => { invalidateSourcesCache(); return r; }),
             test: (id) => request('POST', `/sources/${encodeURIComponent(id)}/test`),
             seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId),
             shortEpg: (id, streamId, limit = 8) => request(
@@ -4606,7 +4712,7 @@
         },
 
         mediaItems: {
-            list: (params = {}) => catalogRequest('/media-items', params),
+            list: (params = {}, options = {}) => catalogRequest('/media-items', params, options),
             categories: (params = {}) => catalogRequest('/media-categories', params),
             enrichmentProgress: () => catalogRequest('/enrichment-progress'),
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
@@ -4614,10 +4720,11 @@
 
         media: {
             // Live TMDB extras (videos/credits) for the fiches — proxied by the
-            // edge so the TMDB key never reaches the browser; cached CDN-side.
+            // edge so the TMDB key never reaches the browser.
             tmdbMeta: (params = {}) => catalogRequest('/tmdb-meta', params),
-            // Per-episode TMDB data (stills / localized names / air dates) for one season.
-            tmdbEpisodes: (params = {}) => catalogRequest('/tmdb-episodes', params),
+            // Per-season metadata is joined/cached in this tab, then read through
+            // the Edge's shared persistent cache before any live TMDB request.
+            tmdbEpisodes: (params = {}) => tmdbEpisodesRequest(params),
             // Crowd-learned skip-intro markers, keyed on tmdbId+season.
             introMarkers: (params = {}) => catalogRequest('/intro-markers', params),
             introSignal: (body = {}) => catalogMutate('/intro-signal', body)
@@ -4687,7 +4794,7 @@
         },
 
         playback: {
-            createSession: (session) => playbackRequest(session),
+            createSession: (session, options = {}) => playbackRequest(session, options),
             // Server-owned strict language validation. The browser submits only
             // catalog identity + expected absolute audio indexes; playback/raw
             // tokens remain inside norva-playback and the media gateway.
@@ -4695,6 +4802,7 @@
             validateLanguages: validatePlaybackLanguages,
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             heartbeatSession: (id) => playbackHeartbeatRequest(id),
+            refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(id, objectKey),
             expireSession: (id, options = {}) => playbackSessionRequest(
                 'POST',
                 `/playback/sessions/${encodeURIComponent(id)}/expire`,
@@ -4736,7 +4844,7 @@
             acknowledgeCommand: (id) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'acknowledged' }, { token: getDeviceToken() }),
             failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() }),
             sources: {
-                list: () => request('GET', '/device/sources', null, { token: getDeviceToken() }),
+                list: (options = {}) => request('GET', '/device/sources', null, { signal: options.signal, _visibilityForceNoStore: true, token: getDeviceToken() }),
                 test: (id) => request(
                     'POST',
                     `/device/sources/${encodeURIComponent(id)}/test`,
@@ -4763,7 +4871,7 @@
                 )
             },
             mediaItems: {
-                list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() }),
+                list: (params = {}, options = {}) => catalogRequest('/device/media-items', params, { ...options, token: getDeviceToken() }),
                 categories: (params = {}) => catalogRequest('/device/media-categories', params, { token: getDeviceToken() })
             },
             live: {
@@ -4779,8 +4887,16 @@
                 reportObservedLanguages: (body) => catalogMutate('/device/media-observed-languages', body, { token: getDeviceToken() })
             },
             playback: {
-                createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
+                createSession: (session, options = {}) => playbackRequest(
+                    session,
+                    { ...options, token: getDeviceToken() }
+                ),
                 heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
+                refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(
+                    id,
+                    objectKey,
+                    { token: getDeviceToken() }
+                ),
                 expireSession: (id, options = {}) => playbackSessionRequest(
                     'POST',
                     `/playback/sessions/${encodeURIComponent(id)}/expire`,
