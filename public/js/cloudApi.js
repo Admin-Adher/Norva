@@ -1171,9 +1171,19 @@
 
         const responseVisibilityEpoch = visibilityEpochFromResponse(response)
             || visibilityEpochFromPayload(payload);
+        // A successful creation is a receipt for a server-owned playback lane.
+        // Dropping it after an unrelated catalogue GET advances this tab's epoch
+        // strands that lane and prevents the player from using or closing it.
+        // The server still owns source/epoch validation; its errors remain errors.
+        const createdPlaybackReceipt = method === 'POST'
+            && path === '/playback/session'
+            && response.status === 201
+            && typeof payload?.session?.id === 'string'
+            && Boolean(payload.session.id);
         if (usesCatalogVisibility
             && token
             && responseVisibilityEpoch
+            && !createdPlaybackReceipt
             && isOlderVisibilityEpoch(responseVisibilityEpoch, _visibilityEpoch)) {
             // A private HTTP-cache entry or an already in-flight request from the
             // previous generation must never be handed to a caller after another
