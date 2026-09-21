@@ -25,7 +25,10 @@ function fixture({ failed = false } = {}) {
     } },
   });
   vm.runInContext(stripTypeScriptTypes(languageCode), context);
-  const facets = catalog.slice(catalog.indexOf('const FACET_CACHE ='), catalog.indexOf('function normalizeObservedSubtitleTracks('));
+  const facetEnd = catalog.indexOf('function normalizeObservedSubtitleTracks(') >= 0
+    ? catalog.indexOf('function normalizeObservedSubtitleTracks(')
+    : catalog.indexOf('// Capture audio/subtitle languages observed');
+  const facets = catalog.slice(catalog.indexOf('const FACET_CACHE ='), facetEnd);
   vm.runInContext(stripTypeScriptTypes(facets), context);
   return { context, calls };
 }
