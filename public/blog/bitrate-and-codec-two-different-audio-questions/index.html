@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=68c3ed7e5c"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Audio Bitrate vs Codec: Two Questions | Norva Blog</title>
+  <meta name="description" content="Learn why an audio codec defines a representation while bitrate describes data over time, and why source, encoder, channels, sample format, and content still matter.">
+  <link rel="canonical" href="https://norva.tv/blog/bitrate-and-codec-two-different-audio-questions/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Audio Bitrate vs Codec: Two Questions | Norva Blog">
+  <meta property="og:description" content="Learn why an audio codec defines a representation while bitrate describes data over time, and why source, encoder, channels, sample format, and content still matter.">
+  <meta property="og:url" content="https://norva.tv/blog/bitrate-and-codec-two-different-audio-questions/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Audio Bitrate vs Codec: Two Questions | Norva Blog">
+  <meta name="twitter:description" content="Learn why an audio codec defines a representation while bitrate describes data over time, and why source, encoder, channels, sample format, and content still matter.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Bitrate and Codec: Two Different Audio Questions",
+  "description": "Learn why an audio codec defines a representation while bitrate describes data over time, and why source, encoder, channels, sample format, and content still matter.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-21T06:00:00+02:00",
+  "dateModified": "2026-09-21T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/bitrate-and-codec-two-different-audio-questions/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Bitrate and Codec: Two Different Audio Questions",
+      "item": "https://norva.tv/blog/bitrate-and-codec-two-different-audio-questions/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">Bitrate and Codec: Two Different Audio Questions</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="bitrate-and-codec-two-different-audio-questions" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">Audio Quality Literacy</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-21T06:00:00+02:00">21 September 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>Bitrate and Codec: Two Different Audio Questions</h1>
+      <p class="lede">A controlled distinction between audio format and data rate, including source, encoder, channels, sample format, content complexity, delivery, decoding, and output.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#identify-the-full-codec-configuration">Identify the full codec configuration</a></li><li><a href="#interpret-bitrate-in-context">Interpret bitrate in context</a></li><li><a href="#include-source-and-encoder">Include source and encoder</a></li><li><a href="#original-evidence-codec-bitrate-card">Original evidence: codec-bitrate card</a></li><li><a href="#match-listening-level">Match listening level</a></li><li><a href="#choose-revealing-excerpts">Choose revealing excerpts</a></li><li><a href="#include-delivery-and-decode">Include delivery and decode</a></li><li><a href="#keep-sample-format-separate">Keep sample format separate</a></li><li><a href="#report-the-comparison">Report the comparison</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#repeat-the-excerpt-after-silence">Repeat the excerpt after silence</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> An audio codec defines how audio is represented and decoded. Bitrate describes how much encoded data is used over time, with exact meaning depending on whether the value is target, average, peak, or measured. Equal codec labels can use different rates and settings; equal bitrates across different codecs, channels, and sources do not guarantee equal quality.</blockquote>
+<p>The codec name is a format clue, not a score for the recording, mix, or encoder.</p>
+<h2 id="identify-the-full-codec-configuration">Identify the full codec configuration</h2>
+<p>Record codec string, profile or mode when exposed, channel count or layout, sample rate, bit depth where relevant, bitrate and its definition, container, protection context, and track language or mix. Mark hidden values unknown.</p>
+<p>The Opus specification, for example, defines a codec with operating modes and parameters; one label does not describe every encoder choice.</p>
+<h2 id="interpret-bitrate-in-context">Interpret bitrate in context</h2>
+<p>Bitrate can be constant, constrained, variable, averaged over a track, or measured over a segment. Container and audio-only values can differ. Never compare a file-size-derived rate without accounting for duration, other tracks, and overhead.</p>
+<p>More channels or a different sample format can change allocation needs. Do not apply one stereo threshold to multichannel audio.</p>
+<h2 id="include-source-and-encoder">Include source and encoder</h2>
+<p>Recording, mix, noise, transients, tonal density, stereo image, ambience, and previous compression affect how difficult audio is to represent. Encoder implementation and settings also differ within a codec.</p>
+<p>The audio compression-artifact guide helps describe warbling, pre-echo, smearing, metallic texture, or image instability without guessing the exact cause.</p>
+<h2 id="original-evidence-codec-bitrate-card">Original evidence: codec-bitrate card</h2>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Field</th><th scope="col">Track A</th><th scope="col">Track B</th><th scope="col">Controlled?</th></tr></thead>
+<tbody><tr><td>Source/mix</td><td>Known/unknown</td><td>Known/unknown</td><td>Yes/no</td></tr><tr><td>Codec/configuration</td><td>Verified</td><td>Verified</td><td>Yes/no</td></tr><tr><td>Bitrate type/value</td><td>Verified/unknown</td><td>Verified/unknown</td><td>Yes/no</td></tr><tr><td>Channels/sample format</td><td>Verified</td><td>Verified</td><td>Yes/no</td></tr><tr><td>Route/level</td><td>Context</td><td>Context</td><td>Same/different</td></tr><tr><td>Artifact/excerpt</td><td>Description</td><td>Description</td><td>Observation</td></tr></tbody>
+</table></div>
+<p>Do not claim a codec effect when source, mix, and channels also differ.</p>
+<h2 id="match-listening-level">Match listening level</h2>
+<p>Louder tracks can seem clearer. Use a valid loudness measurement or careful safe perceived-level matching, keep output route and processing fixed, and alternate order. Never raise level beyond a comfortable range to reveal artifacts.</p>
+<h2 id="choose-revealing-excerpts">Choose revealing excerpts</h2>
+<p>Use authorised material with transients, sustained tones, cymbals, applause, ambience, stereo movement, quiet tails, speech, and dense mixtures. Compare exact timecodes. One excerpt cannot represent every codec mode or rate.</p>
+<h2 id="include-delivery-and-decode">Include delivery and decode</h2>
+<p>Network playback may select a different track or representation. Devices may support one codec configuration and not another. W3C Media Capabilities models content type, channels, bitrate, and sample rate for audio capability queries, but current application behavior requires direct verification.</p>
+<p><a href="/blog/the-complete-guide-to-understanding-audio-quality/">The complete audio-quality guide</a> maps delivery, decoding, routing, and output.</p>
+<h2 id="keep-sample-format-separate">Keep sample format separate</h2>
+<p>Sample rate and bit depth describe the sampled representation before or within coding contexts; they are not synonyms for bitrate or codec. The sample-rate and bit-depth guide explains those limits.</p>
+<h2 id="report-the-comparison">Report the comparison</h2>
+<p>Include track versions without private source data, codec configuration, bitrate type and source, channels, sample format, source lineage, excerpts, device and software, delivery, output route, processing, safe level-match method, observations, and unknowns. Current Norva audio metadata requires official verification.</p>
+<p>Norva organises and plays compatible authorised sources; it does not certify their encoders.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<p>Avoid ranking codecs from one track, comparing unaligned mixes, treating bitrate as file size, or listening at unmatched volume. An informal preference cannot establish universal codec efficiency.</p>
+<h2 id="repeat-the-excerpt-after-silence">Repeat the excerpt after silence</h2>
+<p>Insert a comfortable pause between comparisons and replay the same short excerpt in reversed order. Immediate repetition can make small differences easier to locate, while fatigue or expectation can alter preference. Record whether the same artifact recurs at the same moment and whether the choice survives safe level matching.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="is-a-higher-bitrate-always-better">Is a higher bitrate always better?</h3>
+<p>Not across uncontrolled codecs, sources, channels, encoders, sample formats, and playback paths.</p>
+<h3 id="can-two-files-with-the-same-codec-sound-different">Can two files with the same codec sound different?</h3>
+<p>Yes. Bitrate, settings, source, mix, channels, encoder, and output can differ.</p>
+<h3 id="is-sample-rate-the-same-as-bitrate">Is sample rate the same as bitrate?</h3>
+<p>No. Sample rate describes sampling over time; bitrate describes encoded data over time.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#features" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="bitrate-and-codec-two-different-audio-questions">Explore Norva's playback features</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://www.rfc-editor.org/rfc/rfc6716.html" target="_blank" rel="noopener">IETF RFC 6716: Opus Audio Codec</a></li><li><a href="https://www.w3.org/TR/media-capabilities/" target="_blank" rel="noopener">W3C: Media Capabilities</a></li><li><a href="https://www.itu.int/rec/R-REC-BS.1116/en" target="_blank" rel="noopener">ITU-R BS.1116: Subjective Assessment of Audio Systems</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/the-complete-guide-to-understanding-audio-quality/">
+          <span class="tag">Audio Quality Literacy</span>
+          <div class="card-title">The Complete Guide to Understanding Audio Quality</div>
+
+          <p>A source-to-listener model for audio quality across mix, encoding, loudness, channels, delivery, decoding, routing, output devices, room, and preferences.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
