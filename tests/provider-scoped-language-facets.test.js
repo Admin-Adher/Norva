@@ -27,12 +27,14 @@ test('catalog facets route scopes RPC, memo and labels to provider plus media ty
     const catalog = read('supabase/functions/norva-catalog/index.ts');
 
     assert.match(catalog, /url\.searchParams\.get\("source"\)/);
-    assert.match(catalog, /cloud_exact_language_counts_by_source/);
+    assert.match(catalog, /cloud_catalog_audio_language_counts/);
+    assert.match(catalog, /cloud_catalog_subtitle_language_counts/);
     assert.match(catalog, /p_source_id: sourceId/);
     assert.match(catalog, /`\$\{userId\}:\$\{cacheEpoch\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
     assert.match(catalog, /itemType === "series" \? "series" : "movies"/);
     assert.match(catalog, /`\$\{name\} · \$\{FACET_NUMBER\.format\(count\)\} \$\{noun\}`/);
-    assert.match(catalog, /if \(error\) throwDb\(error, "Unable to load exact language facets"\)/);
+    assert.match(catalog, /if \(subtitleError\) throwDb\(subtitleError, 'Unable to load catalogue subtitle facets'\)/);
+    assert.match(catalog, /await Promise\.all\(/);
     assert.doesNotMatch(catalog, /else if \(!sourceId\)/);
     assert.doesNotMatch(catalog, /cloud_language_facets/);
 });

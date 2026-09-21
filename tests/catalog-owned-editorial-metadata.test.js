@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
-const code = fs.readFileSync(path.join(__dirname, '../supabase/functions/norva-catalog/index.ts'), 'utf8');
+const code = fs.readFileSync(process.env.NORVA_CATALOG_TEST_SOURCE
+  || path.join(__dirname, '../supabase/functions/norva-catalog/index.ts'), 'utf8');
 const start = code.indexOf('async function attachOwnedMediaEditorialMetadata(');
 const block = code.slice(start, code.indexOf('\nasync function attachMediaLanguages(', start));
 const compiled = transformSync(block + '\nmodule.exports = attachOwnedMediaEditorialMetadata;', { loader: 'ts', format: 'cjs' }).code;
@@ -21,6 +22,7 @@ function fixture({ foreign = false, stale = false, ambiguous = false } = {}) {
   const query = { select() { return this; }, eq(k, v) { calls.push([k, v]); return this; },
     in() { return this; }, async limit(n) { assert.equal(n, 4); return { data: ambiguous ? [variant, variant] : [variant] }; } };
   const sandbox = { module: { exports: null }, db: { from: () => query },
+    flatMediaGlobalLocalizedTitle: new WeakSet(),
     requiredCatalogTitleVisibilityEpoch: () => '42',
     async hydrateVisibleCatalogTitlesByIds(user, ids, epoch) {
       assert.equal(user, 'owner'); assert.equal(ids[0], titleId); assert.equal(epoch, '42');
@@ -37,18 +39,27 @@ function fixture({ foreign = false, stale = false, ambiguous = false } = {}) {
       genres: ['Action'], tmdb: { overview: 'Résumé TMDB' }, audio_languages: ['en'], id: 'must-not-copy' }),
   };
   vm.runInNewContext(compiled, sandbox);
-  return { row, calls, run: () => sandbox.module.exports([row], 'owner', 'movie', 'fr') };
+  return { row, calls, localized: sandbox.flatMediaGlobalLocalizedTitle,
+    run: () => sandbox.module.exports([row], 'owner', 'movie', 'fr') };
 }
 test('an M3U row without provider TMDB ID receives its owned title synopsis and genres', async () => {
-  const f = fixture(); await f.run();
+  const f = fixture(); const hydrated = await f.run();
   assert.equal(f.row.title, 'Inception'); assert.equal(f.row.overview, 'Résumé TMDB');
   assert.equal(f.row.metadata.providerTmdbId, '27205'); assert.deepEqual([...f.row.genres], ['Action']);
   assert.equal(f.row.id, mediaId); assert.deepEqual(f.row.audio_languages, ['hi']);
   assert.deepEqual(f.row.playback_hint, { streamId: 'provider-file' });
   assert.ok(f.calls.some(([key, value]) => key === 'user_id' && value === 'owner'));
+  assert.equal(hydrated.length, 1);
+  assert.equal(hydrated[0].id, titleId);
+  assert.equal(hydrated[0].display_generation_id, 'active-generation', 'private proof stays out of the serialized overlay');
+  assert.equal(f.localized.has(f.row), true, 'exact localized titles never need a second broad view read');
 });
 test('foreign, ambiguous and stale title ownership never replaces provider metadata', async () => {
   for (const options of [{ foreign: true }, { ambiguous: true }, { stale: true }]) {
-    const f = fixture(options); const before = structuredClone(f.row); await f.run(); assert.deepEqual(f.row, before);
+    const f = fixture(options); const before = structuredClone(f.row);
+    const hydrated = await f.run();
+    assert.deepEqual(f.row, before);
+    assert.equal(hydrated.length, 0);
+    assert.equal(f.localized.has(f.row), false);
   }
 });

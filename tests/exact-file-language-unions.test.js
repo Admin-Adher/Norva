@@ -758,11 +758,13 @@ test('catalog exact-language writes and facet reads fail closed without caching 
     '\nasync function listTitleRail(',
   );
 
-  assert.ok(facets.includes('if (error) throwDb(error, "Unable to load exact language facets")'));
+    assert.ok(facets.includes("if (catalogError) throwDb(catalogError, 'Unable to load catalogue language facets')"));
+    assert.ok(facets.includes("if (subtitleError) throwDb(subtitleError, 'Unable to load catalogue subtitle facets')"));
+    assert.ok(facets.includes("if (unidentifiedError) throwDb(unidentifiedError, 'Unable to load unidentified audio facet')"));
   assert.ok(!facets.includes('cloud_language_facets'));
   assert.ok(!facets.includes('leave the menus empty'));
   assert.ok(
-    facets.indexOf('if (error) throwDb(error, "Unable to load exact language facets")') <
+    facets.indexOf("if (subtitleError) throwDb(subtitleError, 'Unable to load catalogue subtitle facets')") <
       facets.lastIndexOf('FACET_CACHE.set(cacheKey'),
     'an RPC failure must throw before a new cache entry can be written',
   );

@@ -9,7 +9,8 @@ const { pathToFileURL } = require('node:url');
 const { transformSync } = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
-const CATALOG_PATH = path.join(ROOT, 'supabase/functions/norva-catalog/index.ts');
+const CATALOG_PATH = process.env.NORVA_CATALOG_TEST_SOURCE
+  || path.join(ROOT, 'supabase/functions/norva-catalog/index.ts');
 const PUBLIC_VIEW_PATH = path.join(ROOT, 'supabase/functions/_shared/catalog-public-view.mjs');
 const CLIENT_PATH = path.join(ROOT, 'public/js/cloudApi.js');
 const CATALOG = fs.readFileSync(CATALOG_PATH, 'utf8').replace(/\r\n?/g, '\n');
@@ -325,6 +326,8 @@ test('flat media grid and search keep P display data isolated from global A unde
   const generationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const pTitleId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   const gTitleId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const pMediaId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const gMediaId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
   const globalCalls = [];
   let catalogFlag = true;
   let hydrationFails = false;
@@ -382,12 +385,14 @@ test('flat media grid and search keep P display data isolated from global A unde
       select(value) { state.select = String(value); return query; },
       eq() { return query; },
       in(_field, ids) { state.ids = [...ids]; return query; },
+      limit() { return query; },
       then(resolve, reject) {
         let data;
-        if (table === 'cloud_catalog_visible_titles') {
-          data = state.select.includes('audio_languages')
-            ? visibleRows.filter((row) => state.ids.includes(row.provider_tmdb_id))
-            : [{ provider_tmdb_id: '200', loc: 'Titre G visible' }];
+        if (table === 'cloud_catalog_visible_title_variants') {
+          data = [{ id: 'variant-b', media_item_id: pMediaId, source_id: 'source-b',
+            item_type: 'movie', title_id: pTitleId, generation_id: generationId },
+          { id: 'variant-g', media_item_id: gMediaId, source_id: 'source-g',
+            item_type: 'movie', title_id: gTitleId, generation_id: null }];
         } else {
           assert.equal(table, 'catalog_titles');
           globalCalls.push({ select: state.select, ids: [...state.ids] });
@@ -419,8 +424,11 @@ test('flat media grid and search keep P display data isolated from global A unde
     requiredCatalogTitleVisibilityEpoch: () => '7',
     hydrateVisibleCatalogTitlesByIds: async () => {
       if (hydrationFails) throw new Error('visibility epoch moved');
-      return [structuredClone(hydratedP)];
+      return [structuredClone(hydratedP), { ...structuredClone(visibleRows[1]), user_id: 'user-1',
+        display_generation_id: null, variant_count: 1 }];
     },
+    applyCatalogOverlay: async () => {},
+    titleRailItem: (title) => ({ title: title.title, name: title.title }),
     titleAudioLanguages: (row) => Array.isArray(row.audio_languages) ? row.audio_languages : [],
     titleVersionLanguages: (row) => Array.isArray(row.version_languages) ? row.version_languages : [],
     titleAudioTracks: (row) => Array.isArray(row.audio_tracks) ? row.audio_tracks : [],
@@ -437,13 +445,13 @@ test('flat media grid and search keep P display data isolated from global A unde
     catalogFlag = flag;
     globalCalls.length = 0;
     const p = {
-      id: 'media-b', source_id: 'source-b', item_type: 'movie', external_id: 'stream-100',
+      id: pMediaId, source_id: 'source-b', item_type: 'movie', external_id: 'stream-100',
       generation_id: generationId,
       title: 'Provider B raw', poster_url: 'https://images.example/provider-b.jpg',
       overview: 'Provider B overview', metadata: { providerTmdbId: '100', categoryName: 'Provider B' },
     };
     const g = {
-      id: 'media-g', source_id: 'source-g', item_type: 'movie', external_id: 'stream-200',
+      id: gMediaId, source_id: 'source-g', item_type: 'movie', external_id: 'stream-200',
       title: 'Provider G raw', metadata: { providerTmdbId: '200' },
     };
     await runtime.attachMediaLanguages([p, g], 'user-1', 'movie', 'fr');

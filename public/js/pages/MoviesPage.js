@@ -447,12 +447,15 @@ class MoviesPage {
             });
             if (requestId !== this._facetRequestId || (this.selectedCloudSourceId() || 'all') !== scope) return;
             const previousAudio = this.audioSelect?.value;
+            const previousSubtitle = this.subtitleSelect?.value;
             this.applyFacetOptions(this.audioSelect, (globalThis.NorvaI18n?.t("ui_web_24aead1e0632", { defaultValue: "Any Audio" }) ?? 'Any Audio'), facets && facets.audio, this.savedFilters?.audio, 'movies');
             this.applyFacetOptions(this.subtitleSelect, (globalThis.NorvaI18n?.t("ui_web_40cbdd931b1f", { defaultValue: "Any Subtitles" }) ?? 'Any Subtitles'), facets && facets.subtitles, this.savedFilters?.subtitle, 'movies');
             this.renderActiveFilterChips();
             // A saved strict ISO option can become a unified catalogue option.
             // Refresh membership as well as the label/count when that happens.
-            if (previousAudio && previousAudio !== this.audioSelect?.value && this.app?.currentPage === 'movies') this.onFiltersChanged();
+            const languageChanged = (previousAudio && previousAudio !== this.audioSelect?.value)
+                || (previousSubtitle && previousSubtitle !== this.subtitleSelect?.value);
+            if (languageChanged && this.app?.currentPage === 'movies') this.onFiltersChanged();
         } catch (_) {
             if (requestId === this._facetRequestId) this._facetsLoadedAt = 0; // allow a retry on the next show
         }

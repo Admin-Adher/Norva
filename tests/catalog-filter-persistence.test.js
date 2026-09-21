@@ -243,6 +243,31 @@ for (const spec of [
         });
     });
 
+    test(`${spec.className} reloads membership when a saved subtitle gains provider declarations`, async () => {
+        const { Page, context } = loadPage(spec.file, spec.className);
+        const page = Object.create(Page.prototype);
+        let reloads = 0;
+        Object.assign(page, {
+            audioSelect: new FakeSelect(),
+            subtitleSelect: new FakeSelect('<option value="">Any Subtitles</option><option value="fr">French</option>'),
+            savedFilters: { subtitle: 'fr' },
+            sourceSelect: { value: '' },
+            app: { currentPage: spec.key },
+            isCloudPagedMode: () => true,
+            renderActiveFilterChips: () => {},
+            onFiltersChanged: () => { reloads += 1; }
+        });
+        page.subtitleSelect.value = 'fr';
+        context.API = { media: { languageFacets: async () => ({
+            audio: [], subtitles: [{ value: 'catalog-fr', language: 'fr', count: 12 }]
+        }) } };
+        await page.populateLanguageFacets();
+        assert.equal(page.subtitleSelect.value, 'catalog-fr');
+        assert.equal(reloads, 1);
+        await page.populateLanguageFacets({ force: true });
+        assert.equal(reloads, 1, 'unchanged facet refresh must not reload the grid');
+    });
+
     test(`${spec.className} immediately reloads facets after a matching exact observation`, async () => {
         const { Page } = loadPage(spec.file, spec.className);
         const page = Object.create(Page.prototype);

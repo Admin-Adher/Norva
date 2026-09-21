@@ -1092,6 +1092,12 @@
         });
     }
 
+    function waitForCatalogRetry(delayMs, signal) {
+        let timer;
+        const delay = new Promise((resolve) => { timer = setTimeout(resolve, delayMs); });
+        return awaitWithSignal(delay, signal).finally(() => clearTimeout(timer));
+    }
+
     async function requestToBase(baseUrl, method, path, body, options = {}) {
         // Only user-session calls (no explicit token) get the refresh-and-retry.
         // Device tokens ('' / device token) keep their own invalidation path.
@@ -1200,14 +1206,21 @@
             && method === 'GET'
             && response.status === 409
             && visibilityErrorCode === 'CATALOG_VISIBILITY_EPOCH_CHANGED'
-            && !options._visibilityEpochRetry
+            && responseVisibilityEpoch
+            && (options._catalogVisibilityConflictAttempt || 0) < 3
         ) {
             // The server discarded a body assembled across an atomic cutover.
-            // It has already supplied the authoritative new epoch above; rebuild
-            // the GET once on that versioned URL and bypass intermediary caches.
+            // Imports can commit several consecutive cutovers. Give those
+            // commits a bounded settling window instead of failing the view
+            // after one immediate retry. Each attempt still needs a complete
+            // stable response, uses the latest epoch and bypasses HTTP caches.
+            // Keep this budget separate from stale-response recovery: observing
+            // an older response must not consume the next cutover retry.
+            const attempt = options._catalogVisibilityConflictAttempt || 0;
+            await waitForCatalogRetry([100, 300, 600][attempt], options.signal);
             return requestToBase(baseUrl, method, path, body, {
                 ...options,
-                _visibilityEpochRetry: true,
+                _catalogVisibilityConflictAttempt: attempt + 1,
                 _visibilityForceNoStore: true
             });
         }

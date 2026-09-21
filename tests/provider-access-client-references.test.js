@@ -450,7 +450,7 @@ test('authenticated GETs version the browser-cache URL and retry an older epoch 
     assert.equal(cloud.catalogVisibility.epoch(), '8');
 });
 
-test('authenticated GET retries once when the server discards a body built across a cutover', async () => {
+test('authenticated GET retries when the server discards a body built across a cutover', async () => {
     const requests = [];
     const cloud = loadCloudApi(async (url, init = {}) => {
         requests.push({ url: String(url), cache: init.cache || null });
@@ -477,6 +477,73 @@ test('authenticated GET retries once when the server discards a body built acros
     assert.equal(new URL(requests[1].url).searchParams.get('__norva_visibility_epoch'), '9');
     assert.equal(requests[1].cache, 'no-store');
     assert.equal(cloud.catalogVisibility.epoch(), '9');
+});
+
+test('catalog reads survive consecutive import cutovers with fresh epoch-scoped attempts', async () => {
+    const requests = [];
+    const cloud = loadCloudApi(async (url, init = {}) => {
+        requests.push({ url: String(url), cache: init.cache || null });
+        const epoch = String(20 + requests.length);
+        return requests.length < 4
+            ? response({ details: { code: 'CATALOG_VISIBILITY_EPOCH_CHANGED' } }, {
+                'x-norva-visibility-epoch': epoch
+            }, 409)
+            : response({ items: [{ id: 'lion-movie' }] }, { 'x-norva-visibility-epoch': epoch });
+    });
+    cloud.setToken('user-token');
+
+    const payload = await cloud.mediaItems.list({ type: 'movie', sourceId: 'lion-source' });
+
+    assert.deepEqual(payload.items, [{ id: 'lion-movie' }]);
+    assert.equal(requests.length, 4);
+    assert.deepEqual(requests.map((request) => request.cache), Array(4).fill('no-store'));
+    assert.deepEqual(requests.map((request) => new URL(request.url).searchParams.get('__norva_visibility_epoch')),
+        [null, '21', '22', '23']);
+    assert.equal(cloud.catalogVisibility.epoch(), '24');
+});
+
+test('continuous catalog churn stays bounded and never returns a discarded body', async () => {
+    let requests = 0;
+    const cloud = loadCloudApi(async () => response({
+        items: [{ id: 'discarded-movie' }],
+        details: { code: 'CATALOG_VISIBILITY_EPOCH_CHANGED' }
+    }, { 'x-norva-visibility-epoch': String(++requests) }, 409));
+    cloud.setToken('user-token');
+
+    await assert.rejects(cloud.mediaItems.list({ type: 'movie' }), (error) =>
+        error.status === 409 && error.payload.details.code === 'CATALOG_VISIBILITY_EPOCH_CHANGED');
+    assert.equal(requests, 4);
+});
+
+test('catalog cutover retries honor abort before a second network attempt', async () => {
+    const controller = new AbortController();
+    let requests = 0;
+    const cloud = loadCloudApi(async () => {
+        requests += 1;
+        queueMicrotask(() => controller.abort());
+        return response({ details: { code: 'CATALOG_VISIBILITY_EPOCH_CHANGED' } }, {
+            'x-norva-visibility-epoch': '30'
+        }, 409);
+    });
+    cloud.setToken('user-token');
+
+    await assert.rejects(cloud.mediaItems.list({ type: 'movie' }, { signal: controller.signal }),
+        { name: 'AbortError' });
+    assert.equal(requests, 1);
+});
+
+test('a mutation visibility conflict is never automatically repeated', async () => {
+    let requests = 0;
+    const cloud = loadCloudApi(async () => {
+        requests += 1;
+        return response({ details: { code: 'CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN' } }, {
+            'x-norva-visibility-epoch': '40'
+        }, 409);
+    });
+    cloud.setToken('user-token');
+
+    await assert.rejects(cloud.mediaItems.upsert('lion-source', []), (error) => error.status === 409);
+    assert.equal(requests, 1);
 });
 
 test('catalog GETs always bypass the browser HTTP cache after the visibility epoch is known', async () => {

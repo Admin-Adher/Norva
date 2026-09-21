@@ -32,6 +32,18 @@ test('genre rails use one generation-fenced read model and never restore the per
   assert.doesNotMatch(block, /Promise\.all\(candidateBuckets\.map/);
   assert.doesNotMatch(block, /from\("cloud_catalog_visible_titles"\)/);
 });
+
+test('flat catalogue pages reuse bounded owned-title hydration for language and display overlays', () => {
+  const start = catalog.indexOf('async function attachMediaLanguages(');
+  const end = catalog.indexOf('\nasync function listMediaCategories(', start);
+  const block = catalog.slice(start, end);
+
+  assert.match(block, /const ownedTitles = await attachOwnedMediaEditorialMetadata\(items, userId, itemType, lang\)/);
+  assert.match(block, /for \(const row of ownedTitles\)/);
+  assert.match(block, /bindFlatMediaGenerationTitles\(items, userId, itemType, visibleTitles, lang, ownedTitles\)/);
+  assert.doesNotMatch(block, /from\("cloud_catalog_visible_titles"\)/);
+  assert.match(catalog, /hydrated = hydratedTitles \?\? await hydrateVisibleCatalogTitlesByIds/);
+});
 test('the SQL read model is bounded, service-only and visibility-epoch fenced', () => {
   assert.match(migration, /bucket_rank <= 150/);
   assert.match(migration, /with visible as materialized/);
