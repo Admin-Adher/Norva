@@ -732,10 +732,12 @@ function prepareProviderMediaRow(row: Record<string, any>) {
 }
 
 async function listMediaItems(url: URL, userId: string) {
-  const sourceId = url.searchParams.get("sourceId");
+  // Empty selectors represent the all-sources/all-categories state. PostgREST
+  // must receive null for an absent UUID instead of attempting to cast "".
+  const sourceId = stringOrNull(url.searchParams.get("sourceId"));
   const itemType = url.searchParams.get("type");
   const search = url.searchParams.get("q");
-  const categoryId = url.searchParams.get("categoryId");
+  const categoryId = stringOrNull(url.searchParams.get("categoryId"));
   const sort = url.searchParams.get("sort") || "default";
   const lang = railLang(url);
   const limit = boundedInt(url.searchParams.get("limit"), 1000, 1, 1000);
