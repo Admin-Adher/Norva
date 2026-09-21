@@ -50,6 +50,7 @@ class MoviesPage {
         this.cloudTotal = null;
         this.cloudPageSize = 120;
         this.cloudRequestId = 0;
+        this._pendingCloudReset = false;
         this._tvPendingCloudReset = false;
         this._tvSearchTextCache = new WeakMap();
         this._tvSearchGeneration = 0;
@@ -112,16 +113,24 @@ class MoviesPage {
 
         // Source change reloads everything
         this.sourceSelect?.addEventListener('change', async () => {
+            const sourceChangeId = this._sourceChangeRequestId = (this._sourceChangeRequestId || 0) + 1;
+            this._retireCloudGridRequest();
+            this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
+            this.bucketRequestId = (this.bucketRequestId || 0) + 1;
+            this.bucketHasMore = false;
+            this.bucketObserver?.disconnect();
+            this.activeBucketLangKey = null;
             // Save immediately: a refresh while the scoped facets are loading must
             // keep the provider the user just selected.
             this.persistFilters();
             this._facetsLoadedAt = 0;
-            await this.populateLanguageFacets({ force: true });
-            await this.loadCategories();
+            // Cold language counts refresh independently of the visible catalogue.
+            void this.populateLanguageFacets({ force: true });
+            await Promise.all([this.loadCategories(), this.loadPlaybackStatuses()]);
+            if (sourceChangeId !== this._sourceChangeRequestId) return;
             // Category availability can change with the provider scope. Persist the
             // still-valid selection after setOptions has removed unavailable buckets.
             this.persistFilters();
-            await this.loadPlaybackStatuses();
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
             if (buckets.length || this.isLanguageFilterActive()) {
                 this.onFiltersChanged();
@@ -561,7 +570,7 @@ class MoviesPage {
         const scopeKey = this.currentBucketViewKey();
         const isCurrent = () => requestId === this._genreRailsRequestId &&
             scopeKey === this.currentBucketViewKey() && !this.activeBucket && this.shouldShowRails();
-        this.cloudRequestId = (this.cloudRequestId || 0) + 1;
+        this._retireCloudGridRequest();
         this.isLoading = true;
         this._viewRenderedAt = 0;
         this.activeBucket = null;
@@ -625,6 +634,7 @@ class MoviesPage {
         this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
+        this._retireCloudGridRequest();
         this.activeBucket = bucket;
         this.activeBucketLangKey = this.currentBucketViewKey();
         this.bucketLabel = (rail && (rail.title || rail.name)) || '';
@@ -696,10 +706,11 @@ class MoviesPage {
                 this.countEl.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_117bd4782d6b", {defaultValue: "{{p0}} titles", p0:(payload.count)}) : `${payload.count} titles`);
             }
         } catch (err) {
+            if (requestId !== this.bucketRequestId) return;
             console.warn('[Movies] Genre bucket page failed:', err);
             this.bucketHasMore = false;
         } finally {
-            this.bucketLoading = false;
+            if (requestId === this.bucketRequestId) this.bucketLoading = false;
         }
     }
 
@@ -1233,6 +1244,7 @@ class MoviesPage {
     }
 
     async loadCloudCategories() {
+        const requestId = this._categoryRequestId = (this._categoryRequestId || 0) + 1;
         try {
             this.hiddenCategoryIds = new Set();
             // Mirror Manage Content: the dropdown lists the clean, curated genre
@@ -1240,6 +1252,7 @@ class MoviesPage {
             // Picking a genre opens that genre's full grid (see onFiltersChanged).
             const source = this.selectedCloudSourceId();
             const payload = await API.media.genreSummary({ type: 'movie', ...(source ? { source } : {}) });
+            if (requestId !== this._categoryRequestId || source !== this.selectedCloudSourceId()) return;
             const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
             // The API exposes the profile mask at payload.hidden. Keep accepting
             // the per-row flag as well for compatibility with an older response
@@ -1373,11 +1386,24 @@ class MoviesPage {
         return 'movies:default:' + (window.NorvaCloud?.contentLanguage?.() || 'en');
     }
 
+    _retireCloudGridRequest() {
+        this.cloudRequestId = (this.cloudRequestId || 0) + 1;
+        this.cloudHasMore = false;
+        this.observer?.disconnect();
+        this.isLoading = false;
+        this.cloudLoadingMore = false;
+        this._pendingCloudReset = false;
+        this._tvPendingCloudReset = false;
+    }
+
     async loadCloudMovies({ reset = false } = {}) {
-        // A TV search can arrive while the infinite-scroll page is still loading.
-        // Never drop that reset: coalesce it and replay once the append completes.
+        // A filter/source change can arrive while infinite scroll is loading.
+        // Coalesce it and replay once the append completes in every browser mode.
         if (this.cloudLoadingMore) {
-            if (reset && this._isTvMode()) this._tvPendingCloudReset = true;
+            if (reset) {
+                this._pendingCloudReset = true;
+                if (this._isTvMode()) this._tvPendingCloudReset = true;
+            }
             return;
         }
         if (reset && this._isTvMode() && this.isLoading) {
@@ -1389,6 +1415,7 @@ class MoviesPage {
         let paintedFromCache = false;
         let requestId = this.cloudRequestId;
         if (reset) {
+            this._pendingCloudReset = false;
             if (this._isTvMode()) this._tvPendingCloudReset = false;
             this.isLoading = true;
             this.cloudRequestId += 1;
@@ -1422,9 +1449,12 @@ class MoviesPage {
             const renderedBefore = reset ? 0 : this.container.querySelectorAll('.movie-card').length;
             // On reset always refetch page 1 (offset 0), even after a cache paint.
             const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
-            if (!reset && this._isTvMode() && this._tvPendingCloudReset) return;
+            // A pending reset owns the next surface; do not append old-scope rows.
+            if (requestId !== this.cloudRequestId) return;
+            if (!reset && (this._pendingCloudReset || (this._isTvMode() && this._tvPendingCloudReset))) return;
             if (reset && (
                 requestId !== this.cloudRequestId ||
+                this._pendingCloudReset ||
                 (this._isTvMode() && this._tvPendingCloudReset)
             )) return;
             const incoming = (page.items || [])
@@ -1475,22 +1505,22 @@ class MoviesPage {
                 this.renderNextBatch();
             }
         } catch (err) {
+            // A newer query owns the surface now, including on web/mobile. An
+            // older failure must not replace its loading/result state.
+            if (requestId !== this.cloudRequestId || this._pendingCloudReset || this._tvPendingCloudReset) return;
             console.error('Error loading cloud movies:', err);
-            // A newer TV query owns the surface now; an older failure must not
-            // replace its loading/result state with an error message.
-            if (reset && this._isTvMode() && (
-                requestId !== this.cloudRequestId || this._tvPendingCloudReset
-            )) return;
             // Keep the cached paint on error; only show an error with nothing shown.
             if (reset && !paintedFromCache) {
                 this.renderLoadError();
             }
         } finally {
-            if (reset && (!this._isTvMode() || requestId === this.cloudRequestId)) {
+            const pendingReset = this._pendingCloudReset || this._tvPendingCloudReset;
+            if (reset && requestId === this.cloudRequestId) {
                 this.isLoading = false;
             }
-            if (!reset) this.cloudLoadingMore = false;
-            if (this._isTvMode() && this._tvPendingCloudReset && !this.cloudLoadingMore) {
+            if (!reset && requestId === this.cloudRequestId) this.cloudLoadingMore = false;
+            if (requestId === this.cloudRequestId && pendingReset && !this.cloudLoadingMore) {
+                this._pendingCloudReset = false;
                 this._tvPendingCloudReset = false;
                 // Read the current controls when this runs: several keystrokes may
                 // have been coalesced while the append request was in flight.

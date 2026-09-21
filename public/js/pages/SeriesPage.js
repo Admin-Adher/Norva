@@ -57,6 +57,7 @@ class SeriesPage {
         this.cloudTotal = null;
         this.cloudPageSize = 120;
         this.cloudRequestId = 0;
+        this._pendingCloudReset = false;
         this._tvPendingCloudReset = false;
         this._tvSearchTextCache = new WeakMap();
         this._tvSearchGeneration = 0;
@@ -123,14 +124,22 @@ class SeriesPage {
         });
 
         this.sourceSelect?.addEventListener('change', async () => {
+            const sourceChangeId = this._sourceChangeRequestId = (this._sourceChangeRequestId || 0) + 1;
+            this._retireCloudGridRequest();
+            this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
+            this.bucketRequestId = (this.bucketRequestId || 0) + 1;
+            this.bucketHasMore = false;
+            this.bucketObserver?.disconnect();
+            this.activeBucketLangKey = null;
             // The provider is catalogue scope, not a disposable filter. Persist it
             // before async facet/category work so refresh cannot jump back to All.
             this.persistFilters();
             this._facetsLoadedAt = 0;
-            await this.populateLanguageFacets({ force: true });
-            await this.loadCategories();
+            // Cold language counts refresh independently of the visible catalogue.
+            void this.populateLanguageFacets({ force: true });
+            await Promise.all([this.loadCategories(), this.loadPlaybackStatuses()]);
+            if (sourceChangeId !== this._sourceChangeRequestId) return;
             this.persistFilters();
-            await this.loadPlaybackStatuses();
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
             if (this._isTvMode() || buckets.length || this.isLanguageFilterActive()) this.onFiltersChanged();
             else if (this.shouldShowRails()) await this.renderGenreRails();
@@ -559,7 +568,7 @@ class SeriesPage {
         const scopeKey = this.currentBucketViewKey();
         const isCurrent = () => requestId === this._genreRailsRequestId &&
             scopeKey === this.currentBucketViewKey() && !this.activeBucket && this.shouldShowRails();
-        this.cloudRequestId = (this.cloudRequestId || 0) + 1;
+        this._retireCloudGridRequest();
         this.isLoading = true;
         this._viewRenderedAt = 0;
         this.activeBucket = null;
@@ -641,6 +650,7 @@ class SeriesPage {
         this._genreRailsRequestId = (this._genreRailsRequestId || 0) + 1;
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
+        this._retireCloudGridRequest();
         this.activeBucket = bucket;
         this.activeBucketLangKey = this.currentBucketViewKey();
         this.bucketLabel = (rail && (rail.title || rail.name)) || '';
@@ -728,10 +738,11 @@ class SeriesPage {
                 setTimeout(() => this.loadBucketPage(), 0);
             }
         } catch (err) {
+            if (requestId !== this.bucketRequestId) return;
             console.warn('[Series] Genre bucket page failed:', err);
             this.bucketHasMore = false;
         } finally {
-            this.bucketLoading = false;
+            if (requestId === this.bucketRequestId) this.bucketLoading = false;
         }
     }
 
@@ -1381,9 +1392,22 @@ class SeriesPage {
         return 'series:default:' + (window.NorvaCloud?.contentLanguage?.() || 'en');
     }
 
+    _retireCloudGridRequest() {
+        this.cloudRequestId = (this.cloudRequestId || 0) + 1;
+        this.cloudHasMore = false;
+        this.observer?.disconnect();
+        this.isLoading = false;
+        this.cloudLoadingMore = false;
+        this._pendingCloudReset = false;
+        this._tvPendingCloudReset = false;
+    }
+
     async loadCloudSeries({ reset = false } = {}) {
         if (this.cloudLoadingMore) {
-            if (reset && this._isTvMode()) this._tvPendingCloudReset = true;
+            if (reset) {
+                this._pendingCloudReset = true;
+                if (this._isTvMode()) this._tvPendingCloudReset = true;
+            }
             return;
         }
         if (reset && this._isTvMode() && this.isLoading) {
@@ -1395,6 +1419,7 @@ class SeriesPage {
         let paintedFromCache = false;
         let requestId = this.cloudRequestId;
         if (reset) {
+            this._pendingCloudReset = false;
             if (this._isTvMode()) this._tvPendingCloudReset = false;
             this.isLoading = true;
             this.cloudRequestId += 1;
@@ -1428,9 +1453,12 @@ class SeriesPage {
             const renderedBefore = reset ? 0 : this.container.querySelectorAll('.series-card').length;
             // On reset always refetch page 1 (offset 0), even after a cache paint.
             const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
-            if (!reset && this._isTvMode() && this._tvPendingCloudReset) return;
+            // A pending reset owns the next surface; do not append old-scope rows.
+            if (requestId !== this.cloudRequestId) return;
+            if (!reset && (this._pendingCloudReset || (this._isTvMode() && this._tvPendingCloudReset))) return;
             if (reset && (
                 requestId !== this.cloudRequestId ||
+                this._pendingCloudReset ||
                 (this._isTvMode() && this._tvPendingCloudReset)
             )) return;
             const incoming = (page.items || [])
@@ -1480,19 +1508,19 @@ class SeriesPage {
                 this.renderNextBatch();
             }
         } catch (err) {
+            if (requestId !== this.cloudRequestId || this._pendingCloudReset || this._tvPendingCloudReset) return;
             console.error('Error loading cloud series:', err);
-            if (reset && this._isTvMode() && (
-                requestId !== this.cloudRequestId || this._tvPendingCloudReset
-            )) return;
             if (reset && !paintedFromCache) {
                 this.renderLoadError();
             }
         } finally {
-            if (reset && (!this._isTvMode() || requestId === this.cloudRequestId)) {
+            const pendingReset = this._pendingCloudReset || this._tvPendingCloudReset;
+            if (reset && requestId === this.cloudRequestId) {
                 this.isLoading = false;
             }
-            if (!reset) this.cloudLoadingMore = false;
-            if (this._isTvMode() && this._tvPendingCloudReset && !this.cloudLoadingMore) {
+            if (!reset && requestId === this.cloudRequestId) this.cloudLoadingMore = false;
+            if (requestId === this.cloudRequestId && pendingReset && !this.cloudLoadingMore) {
+                this._pendingCloudReset = false;
                 this._tvPendingCloudReset = false;
                 Promise.resolve().then(() => this.loadCloudSeries({ reset: true }));
             }
