@@ -2391,8 +2391,8 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
   // run together; the response still passes the shared visibility epoch fence.
   const rpcArgs = { p_user_id: userId, p_item_type: itemType, p_source_id: sourceId };
   const [audioResult, unidentifiedResult, subtitleResult] = await Promise.all([
-    db.rpc('cloud_catalog_audio_language_counts', rpcArgs),
-    db.rpc('cloud_catalog_unidentified_audio_count', rpcArgs),
+    loadCatalogAudioFacetCount(rpcArgs, 'audio'),
+    loadCatalogAudioFacetCount(rpcArgs, 'unidentified'),
     db.rpc('cloud_catalog_subtitle_language_counts', rpcArgs),
   ]);
   const { data: catalogCounts, error: catalogError } = audioResult;
@@ -2430,6 +2430,30 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     }
   }
   return value;
+}
+
+async function loadCatalogAudioFacetCount(
+  rpcArgs: { p_user_id: string; p_item_type: 'movie' | 'series'; p_source_id: string | null },
+  facet: 'audio' | 'unidentified',
+) {
+  const legacyRpc = facet === 'audio'
+    ? 'cloud_catalog_audio_language_counts' : 'cloud_catalog_unidentified_audio_count';
+  // Series retain their existing query plans. The private movie helpers bind
+  // movie type themselves and scope the planner setting to this single call.
+  if (rpcArgs.p_item_type !== 'movie') return db.rpc(legacyRpc, rpcArgs);
+  const movieRpc = facet === 'audio'
+    ? 'norva_catalog_movie_audio_language_counts' : 'norva_catalog_movie_unidentified_audio_count';
+  const result = await db.rpc(movieRpc, {
+    p_user_id: rpcArgs.p_user_id,
+    p_source_id: rpcArgs.p_source_id,
+  });
+  // Permit mixed Edge/DB rollout only when the helper is not installed yet.
+  // Timeouts, access errors and other failures keep their original error path
+  // and cannot publish an empty result into the successful-facet cache.
+  if (result.error && ['PGRST202', '42883'].includes(String(result.error.code || ''))) {
+    return db.rpc(legacyRpc, rpcArgs);
+  }
+  return result;
 }
 
 function normalizeObservedSubtitleTracks(value: unknown): JsonRecord[] {

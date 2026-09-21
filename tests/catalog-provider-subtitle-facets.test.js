@@ -6,7 +6,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { stripTypeScriptTypes } = require('node:module');
 const root = path.join(__dirname, '..');
-const catalog = fs.readFileSync(path.join(root, 'supabase/functions/norva-catalog/index.ts'), 'utf8');
+const catalog = fs.readFileSync(process.env.NORVA_CATALOG_TEST_SOURCE
+  || path.join(root, 'supabase/functions/norva-catalog/index.ts'), 'utf8');
 const sql = fs.readFileSync(path.join(root, 'supabase/migrations/20260921153000_catalog_provider_subtitle_facets.sql'), 'utf8');
 const languageCode = catalog.slice(catalog.indexOf('const FILE_LANGUAGE_ALIASES:'), catalog.indexOf('function titleVersionLanguages('));
 function fixture({ failed = false } = {}) {
@@ -18,8 +19,8 @@ function fixture({ failed = false } = {}) {
     db: { rpc: async (name, args) => {
       calls.push([name, args]);
       if (name === 'cloud_exact_language_counts_by_source' || name === 'cloud_exact_language_counts') return { data: { audio: { fr: 8 }, subtitles: {} } };
-      if (name === 'cloud_catalog_audio_language_counts') return { data: { fr: 80 } };
-      if (name === 'cloud_catalog_unidentified_audio_count') return { data: 3 };
+      if (name === 'cloud_catalog_audio_language_counts' || name === 'norva_catalog_movie_audio_language_counts') return { data: { fr: 80 } };
+      if (name === 'cloud_catalog_unidentified_audio_count' || name === 'norva_catalog_movie_unidentified_audio_count') return { data: 3 };
       if (name === 'cloud_catalog_subtitle_language_counts') return failed ? { error: { code: 'timeout' } } : { data: { fra: 12, eng: 8 } };
       throw Error('Unexpected RPC ' + name);
     } },
