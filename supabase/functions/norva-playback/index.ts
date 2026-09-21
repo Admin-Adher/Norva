@@ -45,6 +45,7 @@ import {
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
+import { bindCompletedPlaybackReceipt, finalizePlaybackReceiptResponse } from "../_shared/playback-receipt-visibility.mjs";
 import {
   buildMediaGatewayRoutingConfig,
   MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL,
@@ -54,6 +55,7 @@ import {
 import {
   type ActiveCatalogGeneration,
   assertActiveCatalogGenerationCurrent,
+  adoptActiveCatalogUserVisibilityEpoch,
   callActiveCatalogGenerationRpc,
   catalogGenerationFields,
   catalogGenerationRpcFence,
@@ -339,12 +341,12 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
-  return await finalizeCatalogVisibilityResponse(
+  return await finalizePlaybackReceiptResponse(req, async () => finalizeCatalogVisibilityResponse(
     req,
     await handleRequest(req),
     supabase,
     { service: "norva-playback", corsHeaders },
-  );
+  ));
 });
 
 async function handleRequest(req: Request): Promise<Response> {
@@ -3111,6 +3113,45 @@ async function createPlaybackSessionCore(
       await gateway.cleanupCreatedSession?.().catch(() => null);
     }
     throw playbackRequestAbortError();
+  }
+  // A long movie startup may overlap unrelated account catalogue enrichment.
+  // Rebind only after rechecking the original source authority and exact file.
+  // A global policy change, changed target, hidden source or revoked device
+  // still fails; the ordinary final epoch fence remains the last response step.
+  const receiptOwnedItemId = stringOrNull(recordOrEmpty(recordOrEmpty(resolved).itemCas).id);
+  if (itemType === "movie" && !episodeCoordinates && receiptOwnedItemId) {
+    await bindCompletedPlaybackReceipt(req, {
+      refreshEpoch: async () => {
+        const before = catalogVisibilityEpochHeaders(req);
+        await bindCatalogVisibilityEpochShared(req, userId, db);
+        const after = catalogVisibilityEpochHeaders(req);
+        if (!before["X-Norva-Global-Visibility-Epoch"] ||
+            before["X-Norva-Global-Visibility-Epoch"] !== after["X-Norva-Global-Visibility-Epoch"]) {
+          throw new HttpError(409, "Catalog policy changed during playback preparation");
+        }
+      },
+      assertSourceCurrent: async () => {
+        await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
+        await assertSourceCatalogVisible(sourceId, userId, db);
+        if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+        const { data: ownedReceiptItem, error: ownedReceiptError } = await db
+          .from("cloud_catalog_visible_media_items").select("id")
+          .eq("id", receiptOwnedItemId).eq("user_id", userId).eq("source_id", sourceId)
+          .eq("item_type", itemType).eq("external_id", itemId).maybeSingle();
+        if (ownedReceiptError || !ownedReceiptItem) {
+          throw new HttpError(409, "Playback item is no longer visible");
+        }
+        const currentTarget = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
+        if (await sha256Hex(currentTarget.targetUrl) !== targetUrlHash) {
+          throw new HttpError(409, "Playback item changed during preparation");
+        }
+        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
+      },
+      cleanup: async () => {
+        try { await expirePlaybackSession(session.id, userId, db); }
+        catch (_) { await gateway.cleanupCreatedSession?.(); }
+      },
+    });
   }
   markStartup("readyResponseMs");
   // Internal timing only: no account, source, target URL or access token.
