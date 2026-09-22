@@ -125,7 +125,7 @@
 <p>Do not call the whole navigation journey “buffering.” Separate user interaction from measured playback startup.</p>
 <h2 id="define-a-midplay-event">Define a midplay event</h2>
 <p>Record when advancing playback stops after it had been stable, how long it stops, whether audio and picture behave differently, exact title timecode, elapsed time since start, quality change, message, and recovery.</p>
-<p>If the event always occurs at one title timecode, the one-title pattern guide becomes relevant.</p>
+<p>If the event always occurs at one title timecode, <a href="/blog/one-title-buffers-but-others-do-not-what-that-pattern-suggests/">the one-title pattern guide</a> becomes relevant.</p>
 <h2 id="list-startup-candidate-stages">List startup candidate stages</h2>
 <p>Name resolution, connection establishment, source authorization, playlist or metadata retrieval, version selection, initial media delivery, decoder preparation, and output setup may contribute. Not every implementation exposes these stages.</p>
 <p>RFC 8216 and W3C Media Source Extensions illustrate delivery and buffered-media concepts, but they should not be presented as the internal architecture of every source or player.</p>
@@ -171,6 +171,12 @@
           <div class="card-title">A Symptom-Pattern Atlas for Video Buffering</div>
 
           <p>Classify buffering by playback phase, title and version, device, network link, room, time window, simultaneous traffic, recurrence, and recovery. Each pattern narrows candidate layers but does not prove one cause. Capture the failing state, then change one axis and compare the same authorised content.</p>
+        </a>
+        <a class="card" href="/blog/one-title-buffers-but-others-do-not-what-that-pattern-suggests/">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">One Title Buffers but Others Do Not: What That Pattern Suggests</div>
+
+          <p>If one authorised title buffers while several others work on the same device and path, title or version-specific layers become more relevant: encoding, packaging, track, quality version, endpoint, source state, or a repeatable media timecode. The shared network can still contribute, so use matched controls and repeat the event.</p>
         </a>
       </div>
     </section>

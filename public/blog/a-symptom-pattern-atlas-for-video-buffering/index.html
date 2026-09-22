@@ -128,7 +128,7 @@
 <p>If the pause always happens at one content timecode, title/version evidence becomes more relevant than elapsed network time.</p>
 <h2 id="pattern-3-one-title-or-version">Pattern 3: one title or version</h2>
 <p>When other authorised titles work on the same device and path, compare the affected title's version, duration, tracks, verified metadata, and recurrence. Source endpoint, packaging, encoding complexity, or a specific media defect may differ.</p>
-<p>The one-title comparison prevents a universal network conclusion.</p>
+<p><a href="/blog/one-title-buffers-but-others-do-not-what-that-pattern-suggests/">The one-title comparison</a> prevents a universal network conclusion.</p>
 <h2 id="pattern-4-one-device">Pattern 4: one device</h2>
 <p>If a title works on another supported device through the same network, inspect device radio, active route, app and operating-system version, media capabilities, storage and memory pressure, power state, and output configuration. Device tests are rarely perfectly matched.</p>
 <p>Build a one-device comparison and disclose every difference.</p>
@@ -174,6 +174,12 @@
           <div class="card-title">Startup Buffering or Mid-Playback Buffering: Separate the Cases</div>
 
           <p>Startup buffering happens before the first usable frame; mid-playback buffering interrupts media that was already advancing. Define both events precisely, record wall-clock and title time, and test them independently. Startup emphasizes setup and initial data; midplay emphasizes continued delivery, buffer behavior, decoding, and transitions.</p>
+        </a>
+        <a class="card" href="/blog/one-title-buffers-but-others-do-not-what-that-pattern-suggests/">
+          <span class="tag">Buffering Diagnostics</span>
+          <div class="card-title">One Title Buffers but Others Do Not: What That Pattern Suggests</div>
+
+          <p>If one authorised title buffers while several others work on the same device and path, title or version-specific layers become more relevant: encoding, packaging, track, quality version, endpoint, source state, or a repeatable media timecode. The shared network can still contribute, so use matched controls and repeat the event.</p>
         </a>
       </div>
     </section>
