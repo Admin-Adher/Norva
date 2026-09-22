@@ -647,7 +647,16 @@
     // the edge function's cold-start. Cache it briefly and share one in-flight
     // request. (Live sync STATUS is read from the separate /sources/status
     // endpoint, which stays uncached, so this never staleness progress.)
-    function cloneJson(d) { try { return d == null ? d : JSON.parse(JSON.stringify(d)); } catch (_) { return d; } }
+    function cloneJson(d) {
+        try {
+            const cloned = d == null ? d : JSON.parse(JSON.stringify(d));
+            // Keep the response's proof attached to cache copies, rather than
+            // substituting a possibly newer epoch observed from another request.
+            const epoch = d && typeof d === 'object' ? _responseVisibilityEpoch.get(d) : null;
+            if (epoch && cloned && typeof cloned === 'object') _responseVisibilityEpoch.set(cloned, epoch);
+            return cloned;
+        } catch (_) { return d; }
+    }
     // Short-lived cache + in-flight dedup for idempotent GETs that several
     // surfaces request on the same navigation (sources, favorites, watch
     // history) — collapsing the duplicate round-trips that each pay the edge
@@ -930,15 +939,88 @@
         }
     }
 
+    function exactSyncSource(payload, id) {
+        const matches = Array.isArray(payload?.sources)
+            ? payload.sources.filter(source => source?.id === id) : [];
+        return matches.length === 1 ? matches[0] : null;
+    }
+
+    function sourceSyncAuthority(source) {
+        if (!source || source.catalog_visible !== true || source.enabled !== true || source.deleted_at
+            || !/^[1-9]\d*$/.test(String(source.config_revision ?? ''))
+            || !/^[1-9]\d*$/.test(String(source.visibility_epoch ?? ''))) return null;
+        return JSON.stringify([
+            source.id, source.source_type, String(source.config_revision), String(source.visibility_epoch),
+            source.lifecycle_state ?? null, source.catalog_visibility ?? null,
+            source.replacement_root_id ?? null, source.replaces_source_id ?? null, source.replaced_by_source_id ?? null
+        ]);
+    }
+
+    async function reconcileSourceSync(id, prior, error) {
+        // This is a current-state proof, not a retry or a receipt asserting that
+        // this particular POST won. Another accepted sync may already own the run.
+        // Prevent the legacy UI stale-response handler from treating an old READY
+        // status as proof when this stricter reconciliation cannot establish it.
+        if (error.code === 'STALE_CATALOG_VISIBILITY_EPOCH') error.code = 'SOURCE_SYNC_RECONCILIATION_FAILED';
+        invalidateSourcesCache();
+        let current;
+        try {
+            current = await request('GET', '/sources', null, { _visibilityForceNoStore: true });
+        } catch (readError) {
+            if (readError.code === 'STALE_CATALOG_VISIBILITY_EPOCH') readError.code = 'SOURCE_SYNC_RECONCILIATION_FAILED';
+            throw readError;
+        }
+        const before = exactSyncSource(prior, id);
+        const found = exactSyncSource(current, id);
+        const beforeAuthority = sourceSyncAuthority(before);
+        const beforeEpoch = parsedVisibilityEpoch(visibilityEpochFromPayload(prior));
+        const currentEpoch = parsedVisibilityEpoch(visibilityEpochFromPayload(current));
+        const progress = found?.config_hint?.syncProgress;
+        const started = Date.parse(progress?.startedAt || '');
+        const updated = Date.parse(progress?.updatedAt || '');
+        const previousStart = Date.parse(before?.config_hint?.syncProgress?.startedAt || '');
+        if (!beforeAuthority || sourceSyncAuthority(found) !== beforeAuthority
+            || beforeEpoch?.version !== 2 || currentEpoch?.version !== 2
+            || beforeEpoch.global !== currentEpoch.global || currentEpoch.user < beforeEpoch.user
+            || found.sync_status !== 'syncing' || found.sync_error
+            || !['syncing', 'running'].includes(progress?.status)
+            || !Number.isFinite(started) || !Number.isFinite(updated) || updated < started
+            || (before.sync_status !== 'syncing' && Number.isFinite(previousStart) && started <= previousStart)) throw error;
+        return { source: found, accepted: true, syncStarted: true, reconciled: true };
+    }
+
     async function sourceSyncRequest(id, opts = {}) {
+        // Reuse an already authorized loaded source snapshot when available.
+        // It supplies authority for reconciliation only; normal POST authorization
+        // still belongs to the server even if this list no longer contains id.
+        const prior = await listSourcesCached();
         // force=1 → bypass the cloud's change-detection skip (hard refresh).
         const force = opts && opts.force ? '&force=1' : '';
         const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}${force}`;
         try {
             return await requestToBase(sourceSyncBase(), 'POST', path, {});
         } catch (error) {
+            const outcome = error.sourceSyncOutcome || { status: error.status, code: error.payload?.details?.code };
+            if ((outcome.status === 409 && outcome.code === 'CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN')
+                || (error.code === 'STALE_CATALOG_VISIBILITY_EPOCH' && outcome.status >= 200 && outcome.status < 300)) {
+                return reconcileSourceSync(id, prior, error);
+            }
+            if (error.code === 'STALE_CATALOG_VISIBILITY_EPOCH') {
+                // An older response must not hide a primary source/config denial.
+                error.code = outcome.code || 'SOURCE_SYNC_RECONCILIATION_FAILED';
+            }
             if ([404, 405, 502, 503, 504, 546].includes(error.status)) {
-                return request('POST', path, {});
+                try {
+                    return await request('POST', path, {});
+                } catch (fallbackError) {
+                    const fallbackOutcome = fallbackError.sourceSyncOutcome || { status: fallbackError.status, code: fallbackError.payload?.details?.code };
+                    if ((fallbackOutcome.status === 409 && fallbackOutcome.code === 'CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN')
+                        || (fallbackError.code === 'STALE_CATALOG_VISIBILITY_EPOCH' && fallbackOutcome.status >= 200 && fallbackOutcome.status < 300)) {
+                        return reconcileSourceSync(id, prior, fallbackError);
+                    }
+                    if (fallbackError.code === 'STALE_CATALOG_VISIBILITY_EPOCH') fallbackError.code = fallbackOutcome.code || 'SOURCE_SYNC_RECONCILIATION_FAILED';
+                    throw fallbackError;
+                }
             }
             throw error;
         }
@@ -1222,6 +1304,9 @@
             stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
             if (method === 'POST' && path === '/sources') {
                 stale.sourceCreationReceiptId = sourceCreationReceiptId(response.status, payload);
+            }
+            if (method === 'POST' && /^\/sources\/[^/]+\/sync(?:\?|$)/.test(path)) {
+                stale.sourceSyncOutcome = { status: response.status, code: payload?.details?.code || payload?.code || '' };
             }
             throw stale;
         }
