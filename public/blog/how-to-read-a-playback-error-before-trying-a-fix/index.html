@@ -145,7 +145,7 @@
 <p>Search only official app, device, provider, and source documentation for the exact code and version. Timestamp status notices and note their geographic or product scope. A code found on an unrelated product or old forum post may be misleading.</p>
 <p>RFC 9110 defines HTTP semantics, but a user-visible error is not necessarily an HTTP status and should not be mapped to one without evidence.</p>
 <h2 id="preserve-privacy">Preserve privacy</h2>
-<p>RFC 6973 discusses privacy considerations and data minimization. Record codes without exposing private data by cropping screenshots and removing accounts, network identifiers, device IDs, addresses, cookies, and session data.</p>
+<p>RFC 6973 discusses privacy considerations and data minimization. <a href="/blog/how-to-record-an-error-code-without-exposing-private-data/">Record codes without exposing private data</a> by cropping screenshots and removing accounts, network identifiers, device IDs, addresses, cookies, and session data.</p>
 <p>Use a trusted support channel for any requested diagnostic.</p>
 <h2 id="choose-the-smallest-next-check">Choose the smallest next check</h2>
 <p>For a session message, verify clock, account status, and official reauthentication. For unavailable media, compare time and version. For unsupported media, verify capabilities. For a network message, compare one endpoint and path without changing DNS and router together.</p>
@@ -174,6 +174,12 @@
           <div class="card-title">Build a Plain-English Taxonomy of Playback Error Messages</div>
 
           <p>Group messages by the stage they appear to reference—availability, session or authorization, permission, network resolution or transfer, media capability, media processing, output, device resources, or unknown—while preserving the exact official code. A category routes the next question; it does not establish the cause.</p>
+        </a>
+        <a class="card" href="/blog/how-to-record-an-error-code-without-exposing-private-data/">
+          <span class="tag">Playback Error Diagnostics</span>
+          <div class="card-title">How to Record an Error Code Without Exposing Private Data</div>
+
+          <p>Preserve the exact code, message, language, timestamp, playback phase, app and operating-system versions, device class, and abstract scope. Before sharing, remove account names, email, tokens, cookies, full source URLs, addresses, network names, device identifiers, notifications, location, unrelated viewing history, and unnecessary copyrighted imagery.</p>
         </a>
       </div>
     </section>
