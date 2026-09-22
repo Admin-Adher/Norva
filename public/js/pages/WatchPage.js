@@ -6141,6 +6141,9 @@ class WatchPage {
             // upstream downloads on the encoder side
             maxBufferLength: (isTranscodeSession || isGatewaySession) ? 120 : 30,
             maxMaxBufferLength: (isTranscodeSession || isGatewaySession) ? 600 : 60,
+            // Keep recent rewind media without retaining the full watched film.
+            // hls.js applies this to both growing and completed VOD playlists.
+            backBufferLength: 30,
             startLevel: -1,
             enableWorker: true,
             // Exact Gateway/cache renditions are part of the HLS graph and must
@@ -7412,6 +7415,28 @@ class WatchPage {
 
         const nativeDuration = this.getValidDuration();
         if (nativeDuration && localTarget > nativeDuration + 0.75) return false;
+
+        if (this.currentPlaybackMode === 'gateway-session' && this.isVodContent()) {
+            // Native HLS and MSE may advertise the whole film as seekable after
+            // the browser and the Gateway's bounded window have evicted it.
+            // Only retained bytes support a local seek; otherwise restart the
+            // existing Gateway seek path at the absolute playback position.
+            try {
+                const buffered = this.video.buffered;
+                const length = buffered?.length || 0;
+                for (let i = 0; i < length; i += 1) {
+                    const start = buffered.start(i);
+                    const end = buffered.end(i);
+                    if (Number.isFinite(start) && Number.isFinite(end)
+                        && localTarget >= start && localTarget < end) {
+                        return true;
+                    }
+                }
+            } catch (_) {
+                // TimeRanges can change while a SourceBuffer is being trimmed.
+            }
+            return false;
+        }
 
         const seekable = this.video.seekable;
         if (!seekable || seekable.length === 0) {

@@ -912,6 +912,9 @@ test('an ended Gateway EVENT session is restarted instead of trusting stale seek
   assert.strictEqual(page.isLocalSeekTargetAvailable(0), false);
 
   page._playbackEnded = false;
+  assert.strictEqual(page.isLocalSeekTargetAvailable(0), false,
+    'an active Gateway also needs retained bytes, not just a stale seekable range');
+  page.video.buffered = { length: 1, start: () => 0, end: () => 30 };
   assert.strictEqual(page.isLocalSeekTargetAvailable(0), true);
 });
 
