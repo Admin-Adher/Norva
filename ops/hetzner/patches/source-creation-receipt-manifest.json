@@ -1,0 +1,38 @@
+{
+  "contract": "source-create-reconciliation-review-v1",
+  "production_mutated": true,
+  "files": [
+    {
+      "target": "supabase/functions/norva-cloud/index.ts",
+      "candidate": "candidate/norva-cloud/index.ts",
+      "baseline_sha256": "c82b96fb4344a108b57f4b12cebc11ca9751fad37c32d04dc1f2367859dae009",
+      "candidate_sha256": "88387508c7da4c6ae0ca268d818b129d0d9feed464c3966b48e13b2445ce5a6e"
+    },
+    {
+      "target": "supabase/functions/_shared/source-creation-receipt.mjs",
+      "candidate": "candidate/_shared/source-creation-receipt.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "f3e8bb076ff65dff8ecc6d14a75e233934dea4d6d8edc3db2dc002d93f2feaca"
+    },
+    {
+      "target": "public/js/cloudApi.js",
+      "candidate": "candidate/public/js/cloudApi.js",
+      "baseline_sha256": "9f19eede65cab7b985bf61140188a725c97d433099b10e60380e8e448c200fa2",
+      "candidate_sha256": "fb22ec069109ec8879e3d4d4f472908bb5619f278056e75eac65c609f98e17cc"
+    }
+  ],
+  "web_base_url": "https://norva.tv/js/cloudApi.js?v=9f19eede65",
+  "app_html_note": "candidate/public/app.html changes the served cloudApi script cache key only; it is a preview. Deploy against an exact complete static snapshot, never stale dirty public/. Other HTML pages referencing cloudApi must be rehashed by the deployment packaging step.",
+  "validation": {
+    "behavior_tests_passed": 10,
+    "syntax": "node --check cloudApi.js; esbuild TS parse norva-cloud/index.ts",
+    "durable_test": "tests/source-creation-receipt.test.js"
+  },
+  "limitations": [
+    "Receipt does not cover a response lost to a network disconnect or process death.",
+    "No general creation idempotency key is introduced.",
+    "No real source was created for this correction; the web client requires the separate static-site release."
+  ],
+  "backend_deployed_at": "2026-09-22T09:22:14Z",
+  "frontend_deployed_by_this_subtask": false
+}

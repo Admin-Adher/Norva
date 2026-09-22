@@ -826,6 +826,43 @@
         }));
     }
 
+    function sourceCreationReceiptId(status, payload) {
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (status === 201 && typeof payload?.source?.id === 'string' && uuid.test(payload.source.id)) {
+            return payload.source.id;
+        }
+        const receipt = payload?.details?.sourceCreationReceipt;
+        return status === 409
+            && payload?.details?.code === 'CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN'
+            && receipt?.contract === 'source-creation-receipt-v1'
+            && typeof receipt.sourceId === 'string'
+            && uuid.test(receipt.sourceId)
+            ? receipt.sourceId : null;
+    }
+
+    async function createSourceWithReconciliation(source) {
+        try {
+            return await request('POST', '/sources', source);
+        } catch (error) {
+            const createdId = error?.code === 'STALE_CATALOG_VISIBILITY_EPOCH'
+                ? error.sourceCreationReceiptId
+                : sourceCreationReceiptId(error?.status, error?.payload);
+            if (!createdId) throw error;
+            // A committed source can outlive a rejected POST response. Resolve
+            // its exact identity through today's authorization/visibility fences;
+            // never replay the POST or match another provider by name or host.
+            invalidateSourcesCache();
+            const current = await request('GET', '/sources', null, { _visibilityForceNoStore: true });
+            const matches = Array.isArray(current?.sources)
+                ? current.sources.filter((item) => item?.id === createdId) : [];
+            const found = matches.length === 1 ? matches[0] : null;
+            if (!found || found.catalog_visible !== true || found.enabled === false || found.deleted_at) throw error;
+            return { source: found, syncStarted: found.sync_status === 'syncing' };
+        } finally {
+            invalidateSourcesCache();
+        }
+    }
+
     // One-shot cold-start aggregation. A fresh load otherwise fans out into ~7
     // separate norva-cloud calls (profile, profiles, entitlements, sources,
     // trial, …), each paying its own isolate cold-start + auth — the dominant
@@ -1183,6 +1220,9 @@
             }
             const stale = new Error('Stale catalog visibility generation');
             stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
+            if (method === 'POST' && path === '/sources') {
+                stale.sourceCreationReceiptId = sourceCreationReceiptId(response.status, payload);
+            }
             throw stale;
         }
 
@@ -4622,7 +4662,7 @@
         sources: {
             list: (options = {}) => listSourcesCached(options),
             recordAttempt: (attempt) => request('POST', '/sources/attempt', attempt),
-            create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
+            create: createSourceWithReconciliation,
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
             toggle: (id, enabled) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`, { enabled }).then((r) => { invalidateSourcesCache(); return r; }),
             test: (id) => request('POST', `/sources/${encodeURIComponent(id)}/test`),

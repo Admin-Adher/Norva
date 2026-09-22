@@ -40,9 +40,11 @@ function database(rows) {
 async function fixture(initial = []) {
   const identity = await shared('discovery-catalog.mjs');
   const { selectionEnrollment } = await shared('selection-enrollment.mjs');
+  const { bindCommittedSourceCreationReceipt } = await shared('source-creation-receipt.mjs');
   const rows = structuredClone(initial), db = database(rows), events = [];
   class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
   const context = vm.createContext({ Request, URL, JSON, ...identity, selectionEnrollment, HttpError,
+    bindCommittedSourceCreationReceipt,
     readJson: request => request.json(), stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     stringOrNull: value => typeof value === 'string' ? value : null,
     recordOrEmpty: value => value && typeof value === 'object' ? value : {}, compactRecord: value => value,

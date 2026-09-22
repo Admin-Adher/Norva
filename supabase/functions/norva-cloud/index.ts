@@ -1,3 +1,4 @@
+import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
@@ -240,11 +241,13 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
-  return await finalizeCatalogVisibilityResponse(
-    req,
-    await handleRequest(req),
-    supabase,
-    { service: "norva-cloud", corsHeaders },
+  return await finalizeSourceCreationReceiptResponse(req, async () =>
+    await finalizeCatalogVisibilityResponse(
+      req,
+      await handleRequest(req),
+      supabase,
+      { service: "norva-cloud", corsHeaders },
+    )
   );
 });
 
@@ -428,6 +431,7 @@ async function route(
         behavioralLifecycleProtocol: 1,
         sourceDesiredStateProtocol: 1,
         legacySourceToggleBridge: 1,
+        sourceCreationReceiptProtocol: 1,
         m3uSyncLeaseProtocol: 2,
         m3uStreamingImportProtocol: 1,
         playbackCreationProtocol: 1,
@@ -1580,6 +1584,7 @@ async function createSource(req: Request, userId: string, db: SupabaseClient, en
       return { source: await managedSourceSnapshot(selectionId, userId, db), syncStarted: false };
     }
     if (error) throwDb(error, "Unable to create source");
+    bindCommittedSourceCreationReceipt(req, data.id);
 
     if (syncNow) {
       waitUntil(syncCloudSource(data.id, userId, db));

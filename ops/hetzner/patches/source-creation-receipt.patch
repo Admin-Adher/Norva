@@ -1,0 +1,143 @@
+--- a/supabase/functions/norva-cloud/index.ts
++++ b/supabase/functions/norva-cloud/index.ts
+@@ -1,3 +1,4 @@
++import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
+ import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
+ import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
+ import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
+@@ -242,11 +243,13 @@
+     return new Response(null, { status: 204, headers: corsHeaders(req) });
+   }
+ 
+-  return await finalizeCatalogVisibilityResponse(
+-    req,
+-    await handleRequest(req),
+-    supabase,
+-    { service: "norva-cloud", corsHeaders },
++  return await finalizeSourceCreationReceiptResponse(req, async () =>
++    await finalizeCatalogVisibilityResponse(
++      req,
++      await handleRequest(req),
++      supabase,
++      { service: "norva-cloud", corsHeaders },
++    )
+   );
+ });
+ 
+@@ -430,6 +433,7 @@
+         behavioralLifecycleProtocol: 1,
+         sourceDesiredStateProtocol: 1,
+         legacySourceToggleBridge: 1,
++        sourceCreationReceiptProtocol: 1,
+         m3uSyncLeaseProtocol: 2,
+         m3uStreamingImportProtocol: 1,
+         m3uFinalizeResumeProtocol: 2,
+@@ -1587,6 +1591,7 @@
+       return { source: await managedSourceSnapshot(selectionId, userId, db), syncStarted: false };
+     }
+     if (error) throwDb(error, "Unable to create source");
++    bindCommittedSourceCreationReceipt(req, data.id);
+ 
+     if (syncNow) {
+       waitUntil(syncCloudSource(data.id, userId, db));
+--- /dev/null
++++ b/supabase/functions/_shared/source-creation-receipt.mjs
+@@ -0,0 +1,33 @@
++const committedSources = new WeakMap();
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++
++// Called only after this authenticated request has successfully inserted a row.
++// This is an identity receipt, never permission to display the source or replay
++// its creation. The client must reconcile it through a fresh authorized read.
++export function bindCommittedSourceCreationReceipt(req, sourceId) {
++  if (req.method === "POST" && typeof sourceId === "string" && UUID.test(sourceId)) {
++    committedSources.set(req, sourceId);
++  }
++}
++
++export async function finalizeSourceCreationReceiptResponse(req, finalize) {
++  try {
++    const response = await finalize();
++    const sourceId = committedSources.get(req);
++    if (!sourceId || response.status !== 409) return response;
++    const payload = await response.clone().json().catch(() => null);
++    if (payload?.details?.code !== "CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN") return response;
++    const headers = new Headers(response.headers);
++    headers.delete("content-length");
++    headers.set("content-type", "application/json; charset=utf-8");
++    return new Response(JSON.stringify({
++      ...payload,
++      details: {
++        ...payload.details,
++        sourceCreationReceipt: { contract: "source-creation-receipt-v1", sourceId },
++      },
++    }), { status: response.status, statusText: response.statusText, headers });
++  } finally {
++    committedSources.delete(req);
++  }
++}
+--- a/public/js/cloudApi.js
++++ b/public/js/cloudApi.js
+@@ -824,6 +824,43 @@
+             signal: options.signal,
+             ...(options.fresh ? { _visibilityForceNoStore: true } : {})
+         }));
++    }
++
++    function sourceCreationReceiptId(status, payload) {
++        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++        if (status === 201 && typeof payload?.source?.id === 'string' && uuid.test(payload.source.id)) {
++            return payload.source.id;
++        }
++        const receipt = payload?.details?.sourceCreationReceipt;
++        return status === 409
++            && payload?.details?.code === 'CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN'
++            && receipt?.contract === 'source-creation-receipt-v1'
++            && typeof receipt.sourceId === 'string'
++            && uuid.test(receipt.sourceId)
++            ? receipt.sourceId : null;
++    }
++
++    async function createSourceWithReconciliation(source) {
++        try {
++            return await request('POST', '/sources', source);
++        } catch (error) {
++            const createdId = error?.code === 'STALE_CATALOG_VISIBILITY_EPOCH'
++                ? error.sourceCreationReceiptId
++                : sourceCreationReceiptId(error?.status, error?.payload);
++            if (!createdId) throw error;
++            // A committed source can outlive a rejected POST response. Resolve
++            // its exact identity through today's authorization/visibility fences;
++            // never replay the POST or match another provider by name or host.
++            invalidateSourcesCache();
++            const current = await request('GET', '/sources', null, { _visibilityForceNoStore: true });
++            const matches = Array.isArray(current?.sources)
++                ? current.sources.filter((item) => item?.id === createdId) : [];
++            const found = matches.length === 1 ? matches[0] : null;
++            if (!found || found.catalog_visible !== true || found.enabled === false || found.deleted_at) throw error;
++            return { source: found, syncStarted: found.sync_status === 'syncing' };
++        } finally {
++            invalidateSourcesCache();
++        }
+     }
+ 
+     // One-shot cold-start aggregation. A fresh load otherwise fans out into ~7
+@@ -1183,6 +1220,9 @@
+             }
+             const stale = new Error('Stale catalog visibility generation');
+             stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
++            if (method === 'POST' && path === '/sources') {
++                stale.sourceCreationReceiptId = sourceCreationReceiptId(response.status, payload);
++            }
+             throw stale;
+         }
+ 
+@@ -4622,7 +4662,7 @@
+         sources: {
+             list: (options = {}) => listSourcesCached(options),
+             recordAttempt: (attempt) => request('POST', '/sources/attempt', attempt),
+-            create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
++            create: createSourceWithReconciliation,
+             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
+             toggle: (id, enabled) => request('POST', `/sources/${encodeURIComponent(id)}/toggle`, { enabled }).then((r) => { invalidateSourcesCache(); return r; }),
+             test: (id) => request('POST', `/sources/${encodeURIComponent(id)}/test`),
