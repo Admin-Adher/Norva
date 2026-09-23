@@ -770,7 +770,7 @@ test('a cloud engine lane cannot open a second Gateway session in the same playb
   assert.strictEqual(calls.length, 0, 'one user intention must never mint a second cloud session');
 });
 
-test('a terminal cloud media failure releases its lane without invoking any fallback resolver', async () => {
+test('a terminal cloud format failure offers one explicit conversion across browser-native lanes', async () => {
   const context = { window: {}, console, setTimeout, clearTimeout };
   vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
   const page = Object.create(context.window.WatchPage.prototype);
@@ -782,8 +782,8 @@ test('a terminal cloud media failure releases its lane without invoking any fall
   page.isPlaybackSupersededError = () => false;
   page.isProviderBusyError = () => false;
   page.isCloudPlaybackMode = () => true;
-  page.currentPlaybackMode = 'direct';
-  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie', containerExtension: 'mp4' };
+  page.currentPlaybackMode = 'remux';
+  page.content = { sourceId: 'source-1', id: 'episode-1', type: 'series', containerExtension: 'mp4' };
   page.isFormatPlaybackError = (message) => /Format error/i.test(message);
   page.isStalePlaybackAttempt = () => false;
   page.releasePlaybackPipelineForRetry = async () => { page.releaseCount = (page.releaseCount || 0) + 1; };
@@ -798,7 +798,7 @@ test('a terminal cloud media failure releases its lane without invoking any fall
   assert.strictEqual(page.shown.message, 'MEDIA_ELEMENT_ERROR: Format error');
   assert.strictEqual(page.shown.options.immediate, true);
   assert.strictEqual(page._preferredExplicitCloudMode, 'transcode',
-    'an incompatible optimistic relay must offer one explicit server-conversion action');
+    'an incompatible browser relay must offer one explicit server-conversion action');
 });
 
 test('the visible server-conversion action starts one fresh cloud session and no fallback cascade', async () => {
@@ -825,7 +825,7 @@ test('the visible server-conversion action starts one fresh cloud session and no
   page._playbackAttemptId = 9;
   page._cloudPlaybackLaneAttemptId = 9;
   page._preferredExplicitCloudMode = 'transcode';
-  page.content = { sourceId: 'source-1', id: 'movie-1', type: 'movie', containerExtension: 'mkv' };
+  page.content = { sourceId: 'source-1', id: 'episode-1', type: 'series', seriesId: 'series-1', containerExtension: 'mp4' };
   page.containerExtension = 'mkv';
   page.getCurrentAudioPlaybackOptions = () => ({ audioStreamIndex: 2 });
   page.getResumeSnapshotPosition = () => 180;
@@ -843,6 +843,7 @@ test('the visible server-conversion action starts one fresh cloud session and no
   const [, , , , hint] = calls[0];
   assert.strictEqual(hint.mode, 'transcode');
   assert.strictEqual(hint.gatewayMode, 'remux');
+  assert.strictEqual(hint.audioSeriesId, 'series-1');
   assert.strictEqual(hint.seekOffset, 180);
   assert.strictEqual(page._playbackAttemptId, 10);
   assert.strictEqual(page.loaded.options.playbackAttemptId, 10);
