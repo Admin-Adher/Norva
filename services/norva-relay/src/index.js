@@ -66,6 +66,7 @@ export default {
           service: "norva-edge",
           version: 2,
           relaySessionRevocationProtocol: 1,
+          playbackAudioProbeCacheOnlyProtocol: 1,
           components: {
             relay: true,
             imageProxy: true,
@@ -1845,6 +1846,14 @@ async function relayProbeAudio(request, env, claims, ctx) {
     audioProbeComplete: false,
     subtitleProbeComplete: false,
   };
+  // A viewer already owns the provider's single stream slot. A cold header
+  // probe used to open a second stream alongside /relay and could continue
+  // through tail reads after that playback generation had been stopped.
+  // Playback callers may reuse cached evidence above, but only a separately
+  // scheduled service probe may acquire provider bytes on a cache miss.
+  if (classifyRelaySessionClaims(claims).kind !== "service") {
+    return json(request, env, { ...out, deferred: true, reason: "playback_owns_provider_slot" }, 200);
+  }
   try {
     const su = new URL(claims.url);
     const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
