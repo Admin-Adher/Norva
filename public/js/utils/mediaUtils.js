@@ -2448,8 +2448,10 @@ const MediaUtils = (() => {
         const { headline, accessibleHeadline, languageStatus, languageConfirmationStatus, audioSource, kind } = languagePresentation(item, {}, opts.providerLanguageHints === true);
         const metaParts = [subtitleLabel, providerHint, provider, container];
         const badge = (quality && quality !== headline) ? quality : '';
-        // Keep provider labels secondary, without repeating the audio headline.
-        let meta = metaParts.filter(p => p && p !== headline).join(' · ');
+        // Reduced-ICU WebViews can display a language as its code (for example
+        // SO). Keep the provider marker even when that fallback equals the
+        // headline: it still identifies the version independently of audio.
+        let meta = metaParts.filter(p => p && (p === providerHint || p !== headline)).join(' · ');
 
         // If provider hint+provider+container+quality match a sibling, use an
         // available category to distinguish copies without exposing internal IDs.

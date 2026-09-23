@@ -8,8 +8,8 @@ const root = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'public/js/utils/mediaUtils.js'), 'utf8');
 const translations = {...require('../i18n/web-dynamic.json'), ...require('../i18n/web-extra.json')};
 const locales = require('../i18n/locales.json');
-function load(language = 'en') {
-    const ctx = { window: {}, Intl, document: { documentElement: { lang: language } },
+function load(language = 'en', intl = Intl) {
+    const ctx = { window: {}, Intl: intl, document: { documentElement: { lang: language } },
         NorvaI18n: { language, t(key, args = {}) {
             return (translations[key]?.[language] || args.defaultValue || key)
                 .replace(/\{\{(\w+)\}\}/g, (_, k) => args[k] ?? '');
@@ -31,6 +31,23 @@ const seven = [
     ['NL ▎ Example Film', 'NL | DISNEY+', 'Dutch'],
     ['SO ▎ Example Film', '', 'Somali']
 ];
+
+test('reduced-ICU WebViews retain a provider marker when the language headline falls back to its code', () => {
+    const reducedIntl = { DisplayNames: class { of() { return undefined; } } };
+    const utility = load('en', reducedIntl);
+    const item = make('SO - Example Film', '', { sourceId: 'synthetic' });
+    const before = JSON.stringify(item);
+    const result = utility.versionDescriptor(item, {
+        providerLanguageHints: true, resolveSourceName: () => 'Synthetic source'
+    });
+    assert.equal(result.headline, 'SO');
+    assert.equal(result.meta, 'SO · Synthetic source · MKV');
+    assert.equal(result.internalProviderLabel, 'SO · Provider label');
+    assert.equal(result.audioSource, 'provider-label');
+    assert.equal(result.languageStatus, 'Provider · Unverified');
+    assert.equal(JSON.stringify(item), before);
+    assert.equal(utility.providerAudioLanguages(item).length, 0);
+});
 
 test('the seven approved interpretations retain internal provenance without creating audio evidence', () => {
     for (const [raw, category, expected] of seven) {
