@@ -7915,7 +7915,7 @@ class WatchPage {
                 // first, then offer one explicit server-conversion action. The click
                 // starts a new attempt; this branch never creates a second session.
                 if (this.isFormatPlaybackError(message)
-                    && this.currentPlaybackMode === 'direct'
+                    && !['gateway-session', 'transcode-session', 'transcode'].includes(this.currentPlaybackMode)
                     && (this.content?.type === 'movie' || this.content?.type === 'series')) {
                     this._preferredExplicitCloudMode = 'transcode';
                 }
@@ -8397,6 +8397,9 @@ class WatchPage {
                     mode: 'transcode',
                     gatewayMode: 'remux',
                 } : {}),
+                ...(itemType === 'series' && (this.content.seriesId || this.content.series_id)
+                    ? { audioSeriesId: this.content.seriesId || this.content.series_id }
+                    : {}),
                 ...activeAudioOptions,
                 seekOffset: position,
                 startOffset: position,
