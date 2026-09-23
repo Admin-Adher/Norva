@@ -631,6 +631,9 @@ async function handleRequest(req: Request): Promise<Response> {
     if (req.method === "POST" && segments[0] === "storyboard-callback") {
       return json(req, await runStoryboardCallback(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "storyboard-admission") {
+      return json(req, await checkStoryboardAdmission(req, supabase));
+    }
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
     }
@@ -12920,7 +12923,7 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   // The signed upload URL is minted against the internal SUPABASE_URL; rewrite its
   // origin to the public one so the external gateway can PUT to it (token stays valid).
   const uploadUrl = signed.signedUrl.replace(SUPABASE_URL, PUBLIC_ORIGIN);
-  const asyncUrl = `${pipe.url.replace("/raw/", "/storyboard-async/")}?jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&uploadUrl=${encodeURIComponent(uploadUrl)}&duration=${duration}&origin=service`;
+  const asyncUrl = `${pipe.url.replace("/raw/", "/storyboard-async/")}?jobId=${jobId}&sourceId=${encodeURIComponent(sourceId)}&callback=${encodeURIComponent(cbUrl)}&uploadUrl=${encodeURIComponent(uploadUrl)}&duration=${duration}&origin=service`;
   let gwStatus = 0;
   try { gwStatus = (await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) })).status; } catch (_) { gwStatus = 0; }
   if (gwStatus !== 202) {
@@ -12928,6 +12931,26 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
     return { status: "failed", error: `gateway ${gwStatus}` };
   }
   return { status: "processing", enqueued: true };
+}
+
+async function checkStoryboardAdmission(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!runtimeConfig.mediaGatewayToken || provided !== runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(401, "Unauthorized");
+  }
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const sourceId = stringOr(body.sourceId, "");
+  const ownerId = stringOr(body.ownerId, "");
+  if (!/^[0-9a-f-]{36}$/i.test(sourceId) || !/^[0-9a-f-]{36}$/i.test(ownerId)) {
+    throw new HttpError(400, "Invalid storyboard source");
+  }
+  const { data, error } = await db.from("cloud_sources").select("id")
+    .eq("id", sourceId).eq("user_id", ownerId)
+    .eq("enabled", true).is("deleted_at", null).maybeSingle();
+  if (error) throwDb(error, "Unable to check storyboard source");
+  if (!data) throw new HttpError(410, "Source removed");
+  return { active: true, protocol: 1 };
 }
 
 async function runStoryboardCallback(req: Request, db: SupabaseClient): Promise<JsonRecord> {
@@ -12942,6 +12965,10 @@ async function runStoryboardCallback(req: Request, db: SupabaseClient): Promise<
   if (body.heartbeat === true) {
     await db.from("catalog_storyboards").update({ updated_at: nowIso }).eq("job_id", jobId).eq("status", "processing");
     return { ok: true, heartbeat: true, jobId };
+  }
+  if (body.error === "source_removed") {
+    await db.from("catalog_storyboards").delete().eq("job_id", jobId).eq("status", "processing");
+    return { ok: true, cancelled: true };
   }
   if (body.ok === true) {
     await db.from("catalog_storyboards").update({
