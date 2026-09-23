@@ -3001,6 +3001,11 @@ class SourceManager {
         const title = document.getElementById('modal-title');
         const body = document.getElementById('modal-body');
         const footer = document.getElementById('modal-footer');
+        // The connection wizard removes body padding and hides the shared footer.
+        // Progress is a separate view, including when opened directly after save.
+        modal.classList.remove('provider-access-wizard-modal');
+        modal.classList.add('catalog-preparation-modal');
+        footer.hidden = false;
         const sourceId = initialSource.id || initialSource.cloudId || initialSource.cloud_id;
         const token = Symbol('catalog-preparation');
         this.catalogPreparationToken = token;
@@ -3014,7 +3019,7 @@ class SourceManager {
             if (closing) return;
             closing = true;
             if (this.catalogPreparationToken === token) this.catalogPreparationToken = null;
-            modal.classList.remove('active');
+            modal.classList.remove('active', 'catalog-preparation-modal');
             if (!modalHygieneAvailable) {
                 try { previouslyFocused?.focus?.({ preventScroll: true }); } catch (_) { /* noop */ }
             }

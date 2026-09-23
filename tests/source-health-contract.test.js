@@ -609,6 +609,7 @@ function sourceManagerHarness(options = {}) {
   window.window = window;
   const context = {
     window,
+    document: options.document,
     API: api,
     Icons: { live: '', guide: '', series: '' },
     console,
@@ -623,6 +624,47 @@ function sourceManagerHarness(options = {}) {
   manager.sourceStatuses = [];
   return { manager, api };
 }
+
+test('catalog progress leaves the connection wizard layout and restores its background action', async () => {
+  const classes = new Set(['active', 'provider-access-wizard-modal']);
+  const closeButton = { focus() {} };
+  const backgroundButton = {};
+  const body = { innerHTML: '', querySelector: () => null };
+  const footer = { hidden: true, innerHTML: '', contains: () => false };
+  const modal = {
+    classList: {
+      add: (...names) => names.forEach(name => classes.add(name)),
+      remove: (...names) => names.forEach(name => classes.delete(name)),
+    },
+    querySelector: () => closeButton,
+  };
+  const nodes = { modal, 'modal-title': {}, 'modal-body': body, 'modal-footer': footer,
+    'catalog-background': backgroundButton };
+  let focusRestored = false;
+  const { manager } = sourceManagerHarness({
+    document: {
+      getElementById: id => nodes[id],
+      activeElement: { focus() { focusRestored = true; } },
+    },
+  });
+  manager.loadSources = async () => {};
+  manager.notifySourceHealthChanged = () => {};
+
+  await manager.showCatalogPreparation({ name: 'QA provider', sync_status: 'syncing' });
+
+  assert.equal(classes.has('provider-access-wizard-modal'), false);
+  assert.equal(classes.has('catalog-preparation-modal'), true);
+  assert.equal(footer.hidden, false);
+  assert.match(body.innerHTML, /source-sync-step/);
+  assert.match(footer.innerHTML, /Run in Background/);
+  assert.equal(typeof backgroundButton.onclick, 'function');
+
+  await backgroundButton.onclick();
+  assert.equal(classes.has('active'), false);
+  assert.equal(classes.has('catalog-preparation-modal'), false);
+  assert.equal(manager.catalogPreparationToken, null);
+  assert.equal(focusRestored, true);
+});
 
 test('SourceManager shows usable catalogue and pending retry together', () => {
   const { manager } = sourceManagerHarness({
