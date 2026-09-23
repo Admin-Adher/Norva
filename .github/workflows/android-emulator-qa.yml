@@ -84,7 +84,7 @@ jobs:
           api-level: 34
           target: android-tv
           arch: x86
-          profile: tv
+          profile: tv_1080p
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
           script: bash scripts/qa/run-android-emulator-tests.sh tv
       - name: Upload TV test reports
