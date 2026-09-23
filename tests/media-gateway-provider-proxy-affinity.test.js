@@ -295,7 +295,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   assert.doesNotMatch(gateway, /proxyEnvFor\(proxyKey\s*\|\|/);
   assert.doesNotMatch(gateway, /proxyEnvFor\(session\.userId\s*\|\|/);
 
-  assert.match(gateway, /const rawProxyAgent = pickProxyAgent\(pumpProxyKey\);/);
+  assert.match(gateway, /const rawProxyAgent = pickProxyAgent\(pumpProxyKey, claims\.url\);/);
   assert.match(gateway, /dispatcher: rawProxyAgent \|\| undefined/);
   assert.match(
     gateway,
@@ -324,12 +324,14 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /env: pumpedMkvInput[\s\S]{0,180}\? loopbackOnlyEnv\(\)[\s\S]{0,120}: proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\)/,
+    /const inputEnv = pumpedMkvInput \|\| localSpoolInput[\s\S]{0,180}\? loopbackOnlyEnv\(\)[\s\S]{0,120}: proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\)/,
     'seek-broker transcodes must stay loopback-only while direct provider inputs retain account proxy affinity',
   );
+  assert.match(gateway, /env: outputAdmission \? loopbackOutputEnv\(inputEnv\) : inputEnv/,
+    'the admitted local HLS writer must also bypass provider proxies');
   assert.match(
     gateway,
-    /spawn\(FFPROBE_PATH, args, \{[\s\S]{0,160}env: proxyEnvFor\(proxyKeyFromUrl\(sourceUrl\)\)/,
+    /spawn\(FFPROBE_PATH, args, \{[\s\S]{0,160}env: options\.loopbackBroker === true \? loopbackOnlyEnv\(\) : proxyEnvFor\(proxyKeyFromUrl\(sourceUrl\)\)/,
     'ffprobe must use the provider-account key',
   );
   assert.match(
@@ -344,7 +346,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /function pickProxyAgent\(key\) \{[\s\S]{0,160}providerRouteForKey\(key\)/,
+    /function pickProxyAgent\(key, sourceUrl = ''\) \{[\s\S]{0,160}providerRouteForKey\(key\)/,
     'HTTP lanes must resolve their operator override through the shared sticky slot selector',
   );
   assert.match(
@@ -429,6 +431,7 @@ test('account activity groups exact canonical keys with real gateway work taking
       return { groupProviderAccountActivities, activeProviderAccountActivityGroups };
     })()`,
     {
+      ...require('../services/media-gateway/src/provider-metadata-transport'),
       accountExtractions,
       strictLidBrokers: new Map([
         ['lid-broker', 'provider/lid-broker'],
@@ -494,7 +497,7 @@ test('strict LID reports a dedicated kind without leaving the extraction/preempt
   );
   assert.match(
     gateway,
-    /activityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH/,
+    /activityKind: ACCOUNT_ACTIVITY_KIND_CATALOG_METADATA/,
   );
   assert.match(gateway, /body: JSON\.stringify\(\{ keys, kind \}\)/);
 });

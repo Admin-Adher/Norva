@@ -7,6 +7,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const providerFailure = require('../services/media-gateway/src/providerFailure.js');
+const { createProviderMetadataTransport, finishProviderMetadataTransport, isUndrainedProviderMetadata }
+  = require('../services/media-gateway/src/provider-metadata-transport.js');
 
 const root = path.join(__dirname, '..');
 const gateway = fs.readFileSync(
@@ -80,6 +82,7 @@ function makeHarness({ globalViewerBusyChecks = null } = {}) {
     setTimeout,
     ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
     ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH: 'catalog-refresh',
+    ACCOUNT_ACTIVITY_KIND_CATALOG_METADATA: 'catalog-metadata',
     ACCOUNT_ACTIVITY_KIND_GATEWAY: 'gateway',
     FFPROBE_PATH: '/fake/ffprobe',
     lastNonEmptyLine(value) {
@@ -155,6 +158,7 @@ function makeProbeRouteHarness() {
     PROVIDER_SLOT_RELEASE_DELAY_MS: 2_500,
     ACCOUNT_ACTIVITY_KIND_LANGUAGE_VALIDATION: 'language-validation',
     ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH: 'catalog-refresh',
+    ACCOUNT_ACTIVITY_KIND_CATALOG_METADATA: 'catalog-metadata',
     ACCOUNT_ACTIVITY_KIND_GATEWAY: 'gateway',
     FFPROBE_PATH: '/fake/ffprobe',
     lastNonEmptyLine(value) {
@@ -669,10 +673,37 @@ test('metadata uses the same decoded provider-account key and is viewer-preempti
   );
   assert.match(
     gateway,
-    /registerAccountExtraction\([\s\S]{0,120}backgroundKey,[\s\S]{0,120}\{ kill: \(\) => controller\.abort\(\) \},[\s\S]{0,120}ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH/,
+    /registerAccountExtraction\([\s\S]{0,120}backgroundKey,[\s\S]{0,120}metadataTransport,[\s\S]{0,120}ACCOUNT_ACTIVITY_KIND_CATALOG_METADATA/,
   );
   assert.match(
     gateway,
     /if \(registration\?\.preempted\)[\s\S]*'viewer_preempted'/,
   );
+});
+
+test('metadata preemption retains its account reservation until the HTTP close is attested', async () => {
+  for (const closeFails of [false, true]) {
+    const harness = makeHarness();
+    const controller = new AbortController();
+    const transport = createProviderMetadataTransport(controller);
+    const entry = harness.registerAccountExtraction(providerKey, transport, 'catalog-metadata');
+    assert.equal(entry.activityKind, 'catalog-metadata');
+    assert.equal(harness.preemptAccountExtractions(providerKey, 'viewer'), 1);
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(isUndrainedProviderMetadata(entry), true);
+    assert.equal(harness.accountExtractions.get(providerKey).has(entry), true);
+    let closeStarted = false, releaseClose;
+    const closeGate = new Promise(resolve => { releaseClose = resolve; });
+    const finished = finishProviderMetadataTransport(transport, { async close() {
+      closeStarted = true;
+      await closeGate;
+      if (closeFails) throw new Error('uncertain provider close');
+    } }, entry);
+    assert.equal(closeStarted, true);
+    assert.equal(isUndrainedProviderMetadata(entry), true);
+    releaseClose();
+    await finished;
+    assert.equal(isUndrainedProviderMetadata(entry), closeFails);
+    assert.equal(harness.accountExtractions.has(providerKey), closeFails);
+  }
 });

@@ -230,7 +230,11 @@ test('video encoder capacity follows only encode children and releases determini
         const videoModeForSession = (session) => session.videoMode;
         ${gateway.slice(start, end)}
         return { activeVideoEncoderAdmissions, reserveVideoEncoderAdmission, releaseVideoEncoderAdmission };
-    })()`);
+    })()`, {
+        require: require('node:module').createRequire(path.join(__dirname, '../services/media-gateway/src/index.js')),
+        process: { env: {} },
+        clampInt: (_value, fallback) => fallback,
+    });
     const copy = { id: 'copy', videoMode: 'copy' };
     const first = { id: 'encode-1', videoMode: 'encode' };
     const second = { id: 'encode-2', videoMode: 'encode' };

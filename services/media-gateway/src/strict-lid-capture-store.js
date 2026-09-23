@@ -11,11 +11,6 @@ const { planStrictSpeechWindow } = require('./strict-lid-speech-window');
 
 const MAGIC = Buffer.from('NLIDCAP1');
 const MAX_RECORD_BYTES = 3 * 1024 * 1024;
-// Two admitted jobs can need their next current window simultaneously. Future
-// track prefetch and passive collection must leave these worst-case slots free
-// inside the SAME budget; otherwise a track-major cursor cannot consume the
-// speculative records which have filled its buffer.
-const PRIMARY_CAPTURE_HEADROOM = 2;
 const HEX = /^[a-f0-9]{64}$/;
 const RECORD = /^[a-f0-9]{64}\.bin$/;
 const PART = /^[a-f0-9]{64}\.[a-f0-9-]{36}\.part$/;
@@ -127,16 +122,14 @@ class StrictLidCaptureStore {
 
     // Reserve worst-case encrypted bytes BEFORE a provider request. Duplicate
     // captures and a full disk budget cannot waste a mono-account connection.
-    reserve(binding, { opportunistic = false } = {}) {
+    reserve(binding) {
         return this.withLock(async () => {
-            if (typeof opportunistic !== 'boolean') throw error('LID_CAPTURE_RESERVATION_INVALID');
             await this.prune();
             const name = this.name(binding);
             if (this.entries.has(name)) return { cached: true, release: async () => {} };
             if (this.reservations.has(name)) throw error('LID_CAPTURE_ALREADY_RUNNING');
-            const headroom = opportunistic ? PRIMARY_CAPTURE_HEADROOM : 0;
-            if (this.entries.size + this.reservations.size + headroom >= this.maxEntries
-                || this.bytes + (this.reservations.size + 1 + headroom) * MAX_RECORD_BYTES > this.maxBytes) {
+            if (this.entries.size + this.reservations.size >= this.maxEntries
+                || this.bytes + (this.reservations.size + 1) * MAX_RECORD_BYTES > this.maxBytes) {
                 throw error('LID_CAPTURE_STORE_FULL');
             }
             const token = crypto.randomUUID(); this.reservations.set(name, token);

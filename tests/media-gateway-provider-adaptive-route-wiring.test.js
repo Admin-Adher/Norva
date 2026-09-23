@@ -24,22 +24,39 @@ test('Gateway v166 keeps adaptive routing behind dedicated route and benchmark g
   assert.match(gateway, /providerRouteBenchmark: providerRouteBenchmarkPublicStatus\(\)/);
 });
 
-test('Node can choose HTTP or SOCKS5 while child processes retain the same HTTP slot', () => {
-  assert.match(gateway, /let providerHttpProxyAgents = \[\];[\s\S]{0,80}let providerSocksProxyAgents = \[\];/);
-  assert.match(
-    gateway,
-    /function pickProxyAgent\(key\)[\s\S]{0,260}route\.nodeTransport === 'socks5'[\s\S]{0,160}agents\[route\.slot - 1\]/,
-  );
-  assert.match(
-    gateway,
-    /function pinnedProxyAgentFactory\(key\)[\s\S]{0,320}route\.nodeTransport === 'socks5'[\s\S]{0,220}urls\[route\.slot - 1\]/,
-  );
-  assert.match(
-    gateway,
-    /function proxyEnvFor\(key\)[\s\S]{0,240}providerHttpProxyUrls\[poolIndexForKey\(key\)\]/,
-  );
+test('Node chooses HTTP, forward or SOCKS5 without changing the child process account slot', () => {
+  const vm = require('node:vm');
+  const { useProviderHttpForward } = require('../services/media-gateway/src/provider-http-forward-policy');
+  let transport = 'http';
+  const context = {
+    useProviderHttpForward, providerHttpForwardAccounts: new Set(),
+    providerHttpForwardPolicy: { allCompatibleHttpMedia: true },
+    providerProxyAgents: ['configured'], providerProxyUrls: ['configured'],
+    providerHttpForwardAgents: ['forward-one', 'forward-two'],
+    providerHttpProxyAgents: ['http-one', 'http-two'],
+    providerSocksProxyAgents: ['socks-one', 'socks-two'],
+    providerHttpProxyUrls: ['http://slot-one.invalid', 'http://slot-two.invalid'],
+    providerSocksProxyUrls: ['socks5://slot-one.invalid', 'socks5://slot-two.invalid'],
+    providerRouteForKey: key => { assert.equal(key, 'owned-account'); return { slot: 2, nodeTransport: transport }; },
+    poolIndexForKey: key => { assert.equal(key, 'owned-account'); return 1; },
+    createProviderProxyAgent: url => ({ url }), process: { env: {} },
+  };
+  const start = gateway.indexOf('function pickProxyAgent(');
+  const end = gateway.indexOf('// A strict LID ffmpeg', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInNewContext(gateway.slice(start, end), context);
+  for (transport of ['http', 'socks5']) {
+    assert.equal(context.pickProxyAgent('owned-account', 'https://provider.invalid/a.mp4'), transport === 'http' ? 'http-two' : 'socks-two');
+    assert.equal(context.pickProxyAgent('owned-account', 'http://provider.invalid/a.mp4'), 'forward-two');
+    assert.equal(context.pickProxyAgent('owned-account', 'http://provider.invalid/a.mkv'), transport === 'http' ? 'http-two' : 'socks-two');
+    const pinned = context.pinnedProxyAgentFactory('owned-account');
+    const expected = `${transport === 'http' ? 'http' : 'socks5'}://slot-two.invalid`;
+    assert.equal(pinned().url, expected);
+    assert.equal(pinned().url, expected);
+    const child = context.proxyEnvFor('owned-account');
+    for (const name of ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']) assert.equal(child[name], 'http://slot-two.invalid');
+  }
 });
-
 test('complete cache hit avoids route control while every provider-backed session resolves before I/O', () => {
   const sessionRoute = gateway.slice(
     gateway.indexOf("app.post('/sessions'"),
@@ -62,7 +79,7 @@ test('raw playback preempts route benchmarking before freezing its one dispatche
   );
   const localPreemption = rawRoute.indexOf('preemptBackgroundWorkGlobally(');
   const routeResolution = rawRoute.indexOf('providerAdaptiveRouteControl.resolveForPlayback');
-  const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey)');
+  const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url)');
   assert.ok(localPreemption >= 0 && routeResolution > localPreemption && dispatcherFreeze > routeResolution);
   assert.match(rawRoute, /if \(ac\.signal\.aborted \|\| res\.destroyed \|\| res\.writableEnded\) return;/);
   assert.ok(rawRoute.indexOf('scheduleProviderRouteBenchmark(', routeResolution) < dispatcherFreeze);

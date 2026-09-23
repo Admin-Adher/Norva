@@ -9,6 +9,12 @@ const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { Writable, PassThrough } = require('node:stream');
 const providerFailure = require('../services/media-gateway/src/providerFailure.js');
+const { useProviderHttpForward } = require('../services/media-gateway/src/provider-http-forward-policy.js');
+const { StartupAdmissionQueue } = require('../services/media-gateway/src/startup-admission-queue.js');
+const { createPlaybackStartupWindowPolicy } = require('../services/media-gateway/src/playback-startup-window.js');
+const { boundedHlsArgs } = require('../services/media-gateway/src/bounded-hls-output.js');
+const { createPrivateResumeOwnerGate } = require('../services/media-gateway/src/private-resume-binding.js');
+const { SharedPlaybackRanges, hybridPlaybackRanges } = require('../services/media-gateway/src/shared-playback-ranges.js');
 const { providerAccountAffinityKey } = require('../services/media-gateway/src/providerProxyPool.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -75,6 +81,9 @@ function pumpHarness(overrides = {}) {
         '\nasync function probeFromHeaderBytes(',
     );
     const globals = {
+        useProviderHttpForward,
+        providerHttpForwardAccounts: new Set(),
+        providerHttpForwardPolicy: { allCompatibleHttpMedia: false },
         URL,
         crypto,
         path,
@@ -356,6 +365,8 @@ function startRetryHarness(overrides = {}) {
     const isInsufficientInputProbeFailure = vm.runInNewContext(`(${insufficientSource})`);
     return vm.runInNewContext(`(() => { ${retrySource}; return startSessionWithProviderRetry; })()`, {
         STARTUP_TIMEOUT_MS: 100,
+        BOUNDED_HLS_OUTPUT_ENABLED: false,
+        prepareWeakAuthoritativeSpool: async () => false,
         PROVIDER_SLOT_RELEASE_DELAY_MS: 0,
         sessionStartupStats: { fastInputProbeFallbacks: 0 },
         startFfmpeg: () => ({}),
@@ -3467,7 +3478,10 @@ test('viewer startup admission is bounded, provider-first and abort-aware before
         '\nfunction sha256Hex(',
     );
     const h = vm.runInNewContext(
-        `(() => { ${lockSource}; return {
+        `(() => { ${lockSource};
+          const viewerStartupQueue = new StartupAdmissionQueue({
+            tryAcquire: (owner, provider) => tryAdmitViewerSessionStartup(owner, provider, false)
+          }); return {
             viewerSessionStartupLocks,
             viewerSessionStartupAdmissions,
             viewerSessionStartupAdmissionCounts,
@@ -3478,6 +3492,7 @@ test('viewer startup admission is bounded, provider-first and abort-aware before
         }; })()`,
         {
             AbortController,
+            StartupAdmissionQueue,
             MAX_VIEWER_SESSION_STARTUP_ADMISSIONS: 4,
             MAX_VIEWER_SESSION_STARTUPS_PER_KEY: 4,
             wakePlaybackBlockedQueues() {},
@@ -3550,7 +3565,7 @@ test('viewer startup admission is bounded, provider-first and abort-aware before
 
     const sessionRoute = sourceBetween(source, "app.post('/sessions'", "\n// Cross-device kill-switch");
     const abortListenerAt = sessionRoute.indexOf("req.once('aborted', abortSessionRequest)");
-    const admissionAt = sessionRoute.indexOf('tryAdmitViewerSessionStartup(');
+    const admissionAt = sessionRoute.indexOf('await viewerStartupQueue.acquire(');
     const acquireAt = sessionRoute.indexOf('await acquireViewerSessionStartupLocks(');
     const qosAt = sessionRoute.indexOf('viewerStartupReservation = reserveViewerStartup();');
     assert.ok(abortListenerAt >= 0 && abortListenerAt < admissionAt && admissionAt < acquireAt && acquireAt < qosAt,
@@ -3777,6 +3792,10 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
         {
             Number,
             FFMPEG_USER_AGENT: 'Norva-Test/1',
+            playbackStartupWindowPolicy: createPlaybackStartupWindowPolicy({ enabled: false }),
+            canUsePrivateResumeCache: createPrivateResumeOwnerGate({ enabled: false }),
+            sharedPlaybackRanges: new SharedPlaybackRanges({ enabled: false }),
+            hybridPlaybackRanges,
             PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
             FINITE_MKV_SEEK_WINDOW_BYTES: 2 * 1024 * 1024,
             FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES: 1 * 1024 * 1024,
@@ -3944,6 +3963,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
         return child;
     };
     const startFfmpeg = vm.runInNewContext(`(${startSource})`, {
+        boundedHlsArgs,
         path,
         Number,
         multiAudioHlsEnabled: () => false,
@@ -4018,8 +4038,8 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
 test('production finite MKV resume uses continuous indexed windows and keeps linear seek only as fallback', () => {
     const source = readGateway();
     const startFfmpeg = sourceBetween(source, 'function startFfmpeg(', '\nfunction seekArgsForSession(');
-    assert.match(startFfmpeg, /const seekableMkvInput = usesFiniteMkvSeekBroker\(session\)/);
-    assert.match(startFfmpeg, /const pumpedMkvInput = isFiniteMkvVodSession\(session\) && !seekableMkvInput/);
+    assert.match(startFfmpeg, /const seekableMkvInput = !localSpoolInput && usesFiniteMkvSeekBroker\(session\)/);
+    assert.match(startFfmpeg, /const pumpedMkvInput = !localSpoolInput && \(isFiniteMkvVodSession\(session\) \|\| session\.retainedVodStartupFormat\) && !seekableMkvInput/);
     assert.match(startFfmpeg, /seekableMkvInput \? \[/);
     assert.match(startFfmpeg, /'-seekable', '1'/);
     assert.match(startFfmpeg, /session\.finiteMkvSeekBroker\.inputUrl/);
@@ -4104,7 +4124,8 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /FINITE_MKV_SEEK_WINDOW_BYTES[\s\S]+?8 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES[\s\S]+?4 \* 1024 \* 1024/);
     assert.match(source, /FINITE_MKV_SEEK_CACHE_BYTES[\s\S]+?64 \* 1024 \* 1024/);
-    assert.match(source, /finiteSequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
+    assert.match(source, /finiteSequentialWindowBytes:\s*sequentialWindowBytes/);
+    assert.match(source, /playbackStartupWindowPolicy\.bytes\(session\.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES\)/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?sequentialWindowBytes:\s*FINITE_MKV_SEEK_WINDOW_BYTES/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?bufferedWindowBeforeLocalResponse:\s*false/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?continuousLocalRangeResponse:\s*true/);

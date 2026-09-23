@@ -192,13 +192,17 @@ function buildExactSubtitleHlsPlan(profileValue, options = {}) {
     });
 }
 
-function exactSubtitleOutputArgs(planValue, outputDirectory, postInputSeek = []) {
+function exactSubtitleOutputArgs(planValue, outputDirectory, postInputSeek = [], seekClock = 'relative') {
     const plan = record(planValue);
     if (plan.enabled !== true || !Array.isArray(plan.renditions)) return [];
     return plan.renditions.flatMap((rendition) => [
         ...postInputSeek,
         '-map', `0:${rendition.streamIndex}`,
         '-c:s', 'webvtt',
+        // Apply only if the configured binary preserves PTS after output -ss.
+        // Older binaries already rebase this output; subtracting twice loses cues.
+        ...(seekClock === 'preserved' ? ['-output_ts_offset',
+            String(-Number(postInputSeek[0] === '-ss' ? postInputSeek[1] : 0))] : []),
         '-f', 'segment',
         '-segment_time', '2',
         // Sequence zero belongs to the harmless bootstrap playlist written
@@ -212,6 +216,17 @@ function exactSubtitleOutputArgs(planValue, outputDirectory, postInputSeek = [])
         '-segment_format', 'webvtt',
         '-segment_list', path.join(outputDirectory, rendition.playlistName),
         path.join(outputDirectory, rendition.segmentPattern),
+        // MP4 timed text explicitly encodes empty intervals as two zero bytes.
+        // Observe those packets in the SAME demuxer, without a second input or
+        // provider request. Copying preserves empty packets discarded by the
+        // subtitle decoder. This private sidecar is proof, not a media output.
+        ...(rendition.sourceCodec === 'movtext' ? [
+            '-map', `0:${rendition.streamIndex}`, '-c:s', 'copy', '-copyinkf',
+            '-avoid_negative_ts', 'disabled',
+            '-output_ts_offset', String(-Number(postInputSeek[0] === '-ss' ? postInputSeek[1] : 0)),
+            '-flush_packets', '1', '-f', 'framecrc',
+            path.join(outputDirectory, `subtitle_${rendition.hlsIndex}.empty-proof`),
+        ] : []),
     ]);
 }
 

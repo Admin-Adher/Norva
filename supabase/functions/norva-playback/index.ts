@@ -4,6 +4,7 @@ import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
 import { selectionSnapshotPlaybackTags } from "../_shared/selection-snapshot-tracks.mjs";
 import { resolveOwnedSelectionEpisode } from "../_shared/selection-series-info.mjs";
+import { isM3uEpisodeId, resolveOwnedM3uEpisode } from "../_shared/m3u-series-info.mjs";
 import { resolveSelectionLiveDelivery, shouldUseSelectionLiveDirect } from "../_shared/selection-live-delivery.mjs";
 import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -18,7 +19,6 @@ import {
   publicEdgeErrorLog,
   publicEdgeErrorPayload,
 } from "../_shared/catalog-visibility-response.mjs";
-import { bindCompletedPlaybackReceipt, finalizePlaybackReceiptResponse } from "../_shared/playback-receipt-visibility.mjs";
 import {
   PLAYBACK_EVENT_PUBLIC_SELECT,
   PLAYBACK_SESSION_PUBLIC_SELECT,
@@ -44,18 +44,21 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
+import { useNativeMp4Gateway, browserNativeMp4Proof, validNativeMp4Grant } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
+import { bindCompletedPlaybackReceipt, finalizePlaybackReceiptResponse } from "../_shared/playback-receipt-visibility.mjs";
 import {
   buildMediaGatewayRoutingConfig,
   MEDIA_GATEWAY_CANARY_ROUTING_PROTOCOL,
   selectMediaGatewayRouteForGatewayId,
   selectMediaGatewayRouteForUserHash,
 } from "../_shared/media-gateway-canary-routing.mjs";
+import { buildMediaGatewayHlsRoutingConfig, selectMediaGatewayHlsRoute } from "../_shared/media-gateway-hls-routing.mjs";
 import {
   type ActiveCatalogGeneration,
-  adoptActiveCatalogUserVisibilityEpoch,
   assertActiveCatalogGenerationCurrent,
+  adoptActiveCatalogUserVisibilityEpoch,
   callActiveCatalogGenerationRpc,
   catalogGenerationFields,
   catalogGenerationRpcFence,
@@ -107,6 +110,7 @@ type RuntimeConfig = {
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
   mediaGatewayRouting: MediaGatewayRoutingConfig;
+  mediaGatewayHlsRouting: ReturnType<typeof buildMediaGatewayHlsRoutingConfig>;
   lidWorkerUrl: string;
   lidWorkerToken: string;
   sourceConfigKey: string;
@@ -194,6 +198,7 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_GATEWAY_CANARY_TOKEN",
   "NORVA_MEDIA_GATEWAY_CANARY_ID",
   "NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES",
+  "NORVA_MEDIA_GATEWAY_HLS_CANARY_BPS",
   "NORVA_LID_WORKER_URL",
   "NORVA_LID_WORKER_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
@@ -297,6 +302,7 @@ const ENV_MEDIA_GATEWAY_CANARY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA
 const ENV_MEDIA_GATEWAY_CANARY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_TOKEN") ?? "";
 const ENV_MEDIA_GATEWAY_CANARY_ID = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_ID") ?? "";
 const ENV_MEDIA_GATEWAY_CANARY_USER_HASHES = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES") ?? "";
+const ENV_MEDIA_GATEWAY_HLS_CANARY_BPS = Deno.env.get("NORVA_MEDIA_GATEWAY_HLS_CANARY_BPS") ?? null;
 const ENV_LID_WORKER_URL = trimTrailingSlash(Deno.env.get("NORVA_LID_WORKER_URL") ?? "");
 const ENV_LID_WORKER_TOKEN = Deno.env.get("NORVA_LID_WORKER_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
@@ -360,8 +366,12 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 81,
+        version: 82,
+        genericNativeMp4Protocol: 1,
+        genericNativeMp4Enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
         nativeHeartbeatProtocol: 1,
+        nativePlaybackReceiptProtocol: 1,
+        playbackTerminalReceiptProtocol: 1,
         providerCircuitProtocol: 1,
         exactTrackCrawlerProtocol: 2,
         providerFileProbeLeaseProtocol: 2,
@@ -426,8 +436,10 @@ async function handleRequest(req: Request): Promise<Response> {
           state: config.mediaGatewayRouting.canaryState,
           selectedUsers: config.mediaGatewayRouting.canaryUserHashes.length,
         },
+        mediaGatewayHlsRouting: config.mediaGatewayHlsRouting,
         exactTailDrainSafe: true,
         providerCatalogRefreshDrainMs: PROVIDER_CATALOG_REFRESH_DRAIN_MS,
+        catalogMetadataPriorityProtocol: 1,
         completeHlsCacheCallbackProtocol: 1,
         providerAdaptiveRouteControlProtocol: 1,
         privateMediaCacheTicketProtocol: 1,
@@ -554,7 +566,14 @@ async function handleRequest(req: Request): Promise<Response> {
       segments[3] === "expire"
     ) {
       const identity = await requireIdentity(req, supabase);
-      return json(req, await expirePlaybackSession(segments[2], identity.userId, supabase));
+      const body = recordOrEmpty(await req.json().catch(() => ({})));
+      const resumePosition = typeof body.resumePosition === "number"
+        && Number.isFinite(body.resumePosition) && body.resumePosition > 0 && body.resumePosition < 86_400
+        ? body.resumePosition : null;
+      const expired = await expirePlaybackSession(segments[2], identity.userId, supabase, resumePosition);
+      return json(req, await terminalPlaybackReceipt(
+        req, segments[2], identity.userId, identity.deviceId ?? null, supabase, expired,
+      ));
     }
     if (req.method === "POST" && segments[0] === "audio-backfill") {
       return json(req, await runAudioBackfill(req, supabase));
@@ -936,7 +955,7 @@ function stripMkvH264FastStartProofDeep(value: unknown, depth = 0): unknown {
     if (
       key === "mkvH264FastStartProof" || key === "mkv_h264_fast_start_proof" ||
       key === "mkvCompleteHlsCacheProof" || key === "mkv_complete_hls_cache_proof" ||
-      key === "__norvaMkvH264FastStartItemCasV2"
+      key === "__norvaMkvH264FastStartItemCasV2" || key === "__norvaNativeMp4SessionV1"
     ) continue;
     clean[key] = stripMkvH264FastStartProofDeep(entry, depth + 1);
   }
@@ -2181,7 +2200,7 @@ async function createPlaybackSessionCore(
       "",
     )
     : "";
-  const episodeCoordinates = itemType === "series"
+  const episodeCoordinates = itemType === "series" && !isM3uEpisodeId(itemId)
     ? await resolveCatalogSeriesEpisodeCoordinates(
       db,
       userId,
@@ -2219,8 +2238,6 @@ async function createPlaybackSessionCore(
       db,
       requestedPlaybackHint,
     );
-  // Progressive publication can advance the account-wide cache epoch without
-  // changing this source's generation, head, config or visibility authority.
   await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   markStartup("targetResolutionMs");
@@ -2248,6 +2265,9 @@ async function createPlaybackSessionCore(
   assertHttpUrl(targetUrl);
 
   const clientMode = choosePlaybackMode(requestedMode, body);
+  const serverOwnedM3uEpisodeGateway = shouldUseOwnedM3uEpisodeBrowserGateway(
+    resolved, itemType, clientMode, body,
+  );
   const serverDirectPublicHls = shouldUseSelectionLiveDirect({
     delivery: "selectionLiveDelivery" in resolved ? resolved.selectionLiveDelivery : null,
     targetUrl,
@@ -2276,6 +2296,18 @@ async function createPlaybackSessionCore(
   );
   const browserNativeMp4 = (itemType === "movie" || itemType === "series") &&
     authoritativeVodContainer === "mp4";
+  // Every owned movie can use native H.264/AAC after an exact server probe.
+  // Incompatible/unknown audio still uses HLS adaptation. /raw stays private.
+  const serverPromotedProviderMp4 = body.enginePipe !== true && body.engine_pipe !== true &&
+    (clientMode === "relay" || (clientMode === "transcode" && body.gatewayAutoMode === true)) &&
+    useNativeMp4Gateway({
+      sourceId, itemType, container: authoritativeVodContainer,
+      enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
+    });
+  const nativeMp4Proof = serverPromotedProviderMp4 && !serverSelectionVodRelay && !serverDirectPublicHls
+    ? browserNativeMp4Proof(resolved.playbackHint, requestedPlaybackHint)
+    : null;
+  const serverNativeProviderMp4 = Boolean(nativeMp4Proof);
   // Old cached web bundles may still ask for an automatic Gateway lane when a
   // reliable codec probe reports HEVC/AC-3. The real MP4 container remains
   // browser-native: demote only that automatic request to the byte-preserving
@@ -2291,8 +2323,14 @@ async function createPlaybackSessionCore(
       // server-observed, a browser relay must be remuxed without requiring a
       // failed native attempt first. Direct/native clients retain their lane.
       || authoritativeVodContainer === "ts");
-  const mode = serverDirectPublicHls
+  const mode = serverOwnedM3uEpisodeGateway
+    ? "transcode"
+    : serverDirectPublicHls
     ? "direct"
+    : serverNativeProviderMp4
+    ? "relay"
+    : serverPromotedProviderMp4
+    ? "transcode"
     : serverDemotedAutomaticMp4
     ? "relay"
     : serverSelectionVodRelay
@@ -2300,7 +2338,7 @@ async function createPlaybackSessionCore(
     : serverPromotedRelay
     ? "transcode"
     : clientMode;
-  if (serverPromotedRelay) {
+  if (serverPromotedRelay || serverPromotedProviderMp4) {
     // The browser may still be holding a catalogue extension (for example MP4)
     // while a server-owned probe has already identified an AVI/MPEG-4/AC-3
     // file. Never ask it to fail once through the raw relay first. Preserve the
@@ -2309,9 +2347,15 @@ async function createPlaybackSessionCore(
       gatewayMode: authoritativeVodTier === "video_transcode" ? "transcode" : "remux",
     });
   }
+  if (serverOwnedM3uEpisodeGateway) {
+    // This lane selects the gateway, not a codec. Its exact input probe decides
+    // whether video/audio can be copied or must be converted. The M3U extension
+    // and caller's codec hints are never native-playback proof.
+    requestedPlaybackHint = mergePlaybackHints(requestedPlaybackHint, { gatewayMode: "remux" });
+  }
   const gatewayVideoTranscodeExplicit = mode === "transcode" && (
-    (serverPromotedRelay && authoritativeVodTier === "video_transcode") ||
-    (!serverPromotedRelay && body.gatewayAutoMode !== true)
+    ((serverPromotedRelay || serverPromotedProviderMp4) && authoritativeVodTier === "video_transcode") ||
+    (!serverOwnedM3uEpisodeGateway && !serverPromotedRelay && !serverPromotedProviderMp4 && body.gatewayAutoMode !== true)
   );
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
@@ -2332,6 +2376,8 @@ async function createPlaybackSessionCore(
   const itemCasUpdatedAt = stringOrNull(resolvedItemCas.updatedAt ?? resolvedItemCas.updated_at);
   requestedPlaybackHint = compactRecord({
     ...stripMkvH264FastStartInternalHints(requestedPlaybackHint),
+    // Override caller input; this internal marker controls the liveness lease.
+    __norvaNativeMp4SessionV1: serverNativeProviderMp4 ? true : undefined,
     ...(itemType === "movie" && itemCasId && itemCasUpdatedAt
       ? {
         __norvaMkvH264FastStartItemCasV2: {
@@ -2488,6 +2534,12 @@ async function createPlaybackSessionCore(
   }
   markStartup("claimMs");
 
+  // Read the historical probe cooldown before upgrading the holder. Claim the
+  // foreground presence before draining: the next discovery request must park
+  // while every existing provider connection is closed on both gateways.
+  const catalogRefreshDrainMs = await providerCatalogRefreshDrainRemainingMs(db, providerAccountHash);
+  await touchProviderAccountByUrl(db, targetUrl, "session");
+
   // Viewer playback is authoritative. The DB claim removed the background
   // validation lease under the provider advisory lock; now close every real
   // Gateway transport for that provider affinity and require an explicit drain
@@ -2521,20 +2573,9 @@ async function createPlaybackSessionCore(
 
   const playbackCreatedAt = stringOr(session.created_at, new Date().toISOString());
   markStartup("validationDrainMs");
-  // A catalogue metadata call can finish before the Gateway's 60-second reporter
-  // tick yet leave a single-slot provider connection draining upstream. Read its
-  // last opaque activity before upgrading the holder to `session`, then wait only
-  // the remaining bounded drain. This prevents the first provider connection from
-  // being opened into a known collision; it is deliberately not a retry after 458.
-  const catalogRefreshDrainMs = await providerCatalogRefreshDrainRemainingMs(
-    db,
-    providerAccountHash,
-  );
-
-  // Account busy-lock writer: every playback session start means this provider account's
-  // single connection slot is (about to be) held — direct native plays included. Best-effort.
-  await touchProviderAccountByUrl(db, targetUrl, "session");
-
+  // Real media probes retain their bounded provider cooldown. Fully closed
+  // JSON metadata reports a distinct lower-priority activity and adds no
+  // artificial 60-second sleep while import work is on CPU/database.
   // The atomic claim already made the previous generation terminal. Close its
   // real Gateway/raw transport before any provider drain or new coordinator lock;
   // otherwise the bounded catalogue wait would consume the coordinator's TTL.
@@ -2580,9 +2621,23 @@ async function createPlaybackSessionCore(
   markStartup("coordinatorMs");
   startupTrace.coordinatorWaitMs = startupWaitMs;
 
-  const bindPreparedSeriesReceipt = async (cleanupGateway?: () => Promise<unknown>) => {
-    if (itemType !== "series" || !parentSeriesId ||
-        !await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) return;
+  // Native and HLS movie grants use the same exact-source receipt fence.
+  // Only unrelated account catalogue changes may be adopted after preparation.
+  const bindPreparedPlaybackReceipt = async (
+    cleanup: () => Promise<unknown>,
+    requireOwnedMovie = false,
+  ) => {
+    const receiptOwnedItemId = stringOrNull(recordOrEmpty(recordOrEmpty(resolved).itemCas).id);
+    const movieReceiptProved = itemType === "movie" && !episodeCoordinates && Boolean(receiptOwnedItemId);
+    const seriesReceiptProved = itemType === "series" && Boolean(parentSeriesId)
+      && await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId);
+    if (!movieReceiptProved && !seriesReceiptProved) {
+      if (requireOwnedMovie) {
+        await cleanup().catch(() => null);
+        throw new HttpError(409, "Exact playback item authority is unavailable");
+      }
+      return;
+    }
     await bindCompletedPlaybackReceipt(req, {
       refreshEpoch: async () => {
         const before = catalogVisibilityEpochHeaders(req);
@@ -2597,12 +2652,20 @@ async function createPlaybackSessionCore(
         await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
         await assertSourceCatalogVisible(sourceId, userId, db);
         if (deviceId) await assertOwnedDevice(deviceId, userId, db);
-        if (!await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) {
+        if (movieReceiptProved) {
+          const { data: ownedReceiptItem, error: ownedReceiptError } = await db
+            .from("cloud_catalog_visible_media_items").select("id")
+            .eq("id", receiptOwnedItemId).eq("user_id", userId).eq("source_id", sourceId)
+            .eq("item_type", itemType).eq("external_id", itemId).maybeSingle();
+          if (ownedReceiptError || !ownedReceiptItem) {
+            throw new HttpError(409, "Playback item is no longer visible");
+          }
+        } else if (!await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) {
           throw new HttpError(409, "Playback episode is no longer visible");
         }
-        const currentCoordinates = await resolveCatalogSeriesEpisodeCoordinates(
-          db, userId, sourceId, parentSeriesId, itemId,
-        );
+        const currentCoordinates = itemType === "series"
+          ? await resolveCatalogSeriesEpisodeCoordinates(db, userId, sourceId, parentSeriesId, itemId)
+          : null;
         if (episodeCoordinates && !currentCoordinates) {
           throw new HttpError(409, "Playback episode coordinates changed");
         }
@@ -2610,14 +2673,11 @@ async function createPlaybackSessionCore(
           ? await resolveExactEpisodePlaybackTarget(sourceId, userId, currentCoordinates, requestedPlaybackHint, db)
           : await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
         if (await sha256Hex(currentTarget.targetUrl) !== targetUrlHash) {
-          throw new HttpError(409, "Playback episode changed during preparation");
+          throw new HttpError(409, "Playback item changed during preparation");
         }
         await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
       },
-      cleanup: async () => {
-        try { await expirePlaybackSession(session.id, userId, db); }
-        catch (_) { await cleanupGateway?.(); }
-      },
+      cleanup,
     });
   };
 
@@ -2625,7 +2685,7 @@ async function createPlaybackSessionCore(
     // Direct playback gets exactly one transport. A hidden gateway fallback
     // would turn one provider refusal into a second concurrent connection and
     // obscure the original HTTP/network cause.
-    await bindPreparedSeriesReceipt();
+    await bindPreparedPlaybackReceipt(() => expirePlaybackSession(session.id, userId, db));
     return {
       session: publicPlaybackSession(session),
       playback: {
@@ -2640,6 +2700,68 @@ async function createPlaybackSessionCore(
   }
 
   if (mode === "relay") {
+    if (serverNativeProviderMp4 && nativeMp4Proof) {
+      const nativeCoordination = await prepareEdgeSessionCoordinator({
+        userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
+        playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
+      }, db);
+      if (!nativeCoordination?.lockId) {
+        await expirePlaybackSession(session.id, userId, db).catch(() => {});
+        throw new HttpError(503, "Playback session coordinator is unavailable");
+      }
+      try {
+        if (nativeCoordination.waitMs) await sleep(nativeCoordination.waitMs);
+        markStartup("nativeCoordinatorMs");
+        startupTrace.nativeCoordinatorWaitMs = nativeCoordination.waitMs || 0;
+        const capability = await createBytePipeCapability(session.id, userId, targetUrl,
+          transportExpiresAt, db, userAgent, "native-browser-mp4", nativeMp4Proof.fileSizeBytes,
+          nativeMp4Proof.durationSeconds, null, true,
+          { sourceId, sourceRevision: await loadSourceConfigRevision(sourceId, userId, db),
+            sharedFragmentGrant: await createSharedFragmentGrant(sourceId, userId, itemType, itemId, transportExpiresAt, db) });
+        const response = await fetch(`${capability.gatewayUrl}/native-sessions`, {
+          method: "POST", headers: { Authorization: `Bearer ${capability.serviceToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ capability: capability.capability }), signal: AbortSignal.timeout(8_000),
+        });
+        if (!response.ok) throw new HttpError(502, "Native media session could not be prepared");
+        const grant = await response.json();
+        const access = new URL(String(grant.url || ""));
+        if (!validNativeMp4Grant(grant, session.id, capability.gatewayPublicBaseUrl))
+          throw new HttpError(502, "Native media session response is invalid");
+        const committed = await commitEdgeSessionCoordinator(nativeCoordination, {
+          playbackSessionId: session.id, gatewaySessionId: null, lane: "raw",
+          itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
+        });
+        if (!committed?.ok) throw new HttpError(503, "Playback session coordinator did not accept the native session");
+        if (itemType === "movie") {
+          await bindPreparedPlaybackReceipt(async () => {
+            // Revoke the exact prepared grant even if the catalogue/database is
+            // unavailable during cleanup; never recalculate its gateway route.
+            const cleanupUrl = new URL(`${capability.gatewayUrl}/raw-pumps`);
+            cleanupUrl.searchParams.set("ownerKey", await sha256Hex(userId));
+            cleanupUrl.searchParams.set("sid", session.id);
+            try {
+              const cleanupResponse = await fetch(cleanupUrl.toString(), {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${capability.serviceToken}` },
+                signal: AbortSignal.timeout(8_000),
+              });
+              await cleanupResponse.body?.cancel().catch(() => {});
+            } finally {
+              await expirePlaybackSession(session.id, userId, db);
+            }
+          }, true);
+        }
+        markStartup("nativeGrantAndCommitMs");
+        console.info(JSON.stringify({ event: "playback_native_mp4_startup_phases",
+          startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
+        return { session: publicPlaybackSession(session), playback: { mode, transport: "native-mp4-session",
+          url: access.toString(), tokenExpiresAt: transportExpiresAt } };
+      } catch (error) {
+        await expirePlaybackSession(session.id, userId, db).catch(() => {});
+        await abortEdgeSessionCoordinator(nativeCoordination);
+        throw error;
+      }
+    }
     // In-browser engine: relay the RAW bytes through the media gateway (an IP
     // the provider accepts), not the Cloudflare relay (which the provider's WAF
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
@@ -2883,7 +3005,7 @@ async function createPlaybackSessionCore(
           });
         } catch (_) { /* exact-language union is best-effort; playback must continue */ }
       }
-      await bindPreparedSeriesReceipt();
+      await bindPreparedPlaybackReceipt(() => expirePlaybackSession(session.id, userId, db));
       return {
         session: publicPlaybackSession(session),
         playback: {
@@ -2956,7 +3078,7 @@ async function createPlaybackSessionCore(
         });
       }
       if (relayCommit.waitMs) await sleep(relayCommit.waitMs);
-      await bindPreparedSeriesReceipt();
+      await bindPreparedPlaybackReceipt(() => expirePlaybackSession(session.id, userId, db));
       return {
         session: publicPlaybackSession(session),
         playback: {
@@ -3164,11 +3286,14 @@ async function createPlaybackSessionCore(
     }
     throw playbackRequestAbortError();
   }
+  await bindPreparedPlaybackReceipt(async () => {
+    try { await expirePlaybackSession(session.id, userId, db); }
+    catch (_) { await gateway.cleanupCreatedSession?.(); }
+  });
   markStartup("readyResponseMs");
   // Internal timing only: no account, source, target URL or access token.
   console.info(JSON.stringify({ event: "playback_gateway_startup_phases",
     startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
-  await bindPreparedSeriesReceipt(gateway.cleanupCreatedSession);
   return {
     session: publicPlaybackSession(session),
     playback: {
@@ -5984,7 +6109,7 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
   const nowIso = new Date(nowMs).toISOString();
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
-    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at")
+    .select("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at,native_mp4_session:playback_hint->__norvaNativeMp4SessionV1")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -6007,6 +6132,17 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
     expiresAt: session.expires_at,
   });
   if (!sourceId || !policy.accepted) throw new HttpError(410, "Playback session is not active");
+
+  if (session.native_mp4_session === true) {
+    const route = await mediaGatewayRouteForPlaybackUser(await getRuntimeConfig(db), userId);
+    if (!route) throw new HttpError(503, "Native media session route unavailable");
+    const renewal = await fetch(`${route.url}/native-sessions/${id}/heartbeat`, {
+      method: "POST", headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ownerKey: await sha256Hex(userId) }), signal: AbortSignal.timeout(5_000),
+    });
+    if (!renewal.ok) throw new HttpError(renewal.status === 410 || renewal.status === 404 ? 410 : 503,
+      "Native media session is not active");
+  }
 
   // Once the first call establishes the native liveness chain, duplicate or
   // over-eager callbacks are acknowledged without another session/activity write.
@@ -6126,7 +6262,55 @@ async function requestDemandDrivenMediaCacheContinuationForLiveAttachment(
   return data === true;
 }
 
-async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
+async function terminalPlaybackReceipt(
+  req: Request,
+  sessionId: string,
+  userId: string,
+  deviceId: string | null,
+  db: SupabaseClient,
+  expired: Awaited<ReturnType<typeof expirePlaybackSession>>,
+) {
+  // Closing an owned session remains valid when its source disappears. Return
+  // only a terminal receipt, never stale catalogue or provider access data.
+  await bindCompletedPlaybackReceipt(req, {
+    refreshEpoch: async () => {
+      const before = catalogVisibilityEpochHeaders(req);
+      await bindCatalogVisibilityEpochShared(req, userId, db);
+      const after = catalogVisibilityEpochHeaders(req);
+      const previousUserEpoch = before["X-Norva-User-Visibility-Epoch"] || "";
+      const currentUserEpoch = after["X-Norva-User-Visibility-Epoch"] || "";
+      if (!before["X-Norva-Global-Visibility-Epoch"] ||
+          before["X-Norva-Global-Visibility-Epoch"] !== after["X-Norva-Global-Visibility-Epoch"] ||
+          !/^[1-9]\d*$/.test(previousUserEpoch) || !/^[1-9]\d*$/.test(currentUserEpoch) ||
+          BigInt(currentUserEpoch) < BigInt(previousUserEpoch)) {
+        throw new HttpError(409, "Catalog policy changed during playback expiry");
+      }
+    },
+    assertSourceCurrent: async () => {
+      const { data: terminal, error } = await db.from("cloud_playback_sessions")
+        .select("id,user_id,status").eq("id", sessionId).eq("user_id", userId).maybeSingle();
+      if (error || !terminal || terminal.id !== sessionId || terminal.user_id !== userId || terminal.status !== "expired") {
+        throw new HttpError(409, "Playback expiry could not be verified");
+      }
+      if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+    },
+    // The transport has already been closed. A late cache fence must never
+    // replay expiry or reopen provider I/O.
+    cleanup: async () => {},
+  });
+  return {
+    session: { id: sessionId, status: "expired" },
+    gatewayClosed: expired.gatewayClosed,
+    rawPumpsAborted: expired.rawPumpsAborted,
+    fastStartProofPersisted: expired.fastStartProofPersisted,
+    gatewayErrors: expired.gatewayErrors,
+    mediaCacheGrantRevoked: expired.mediaCacheGrantRevoked,
+    mediaCacheWorkerRevoked: expired.mediaCacheWorkerRevoked,
+    mediaCacheErrors: expired.mediaCacheErrors,
+  };
+}
+
+async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient, resumePosition: number | null = null) {
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
     .select("*, cloud_gateway_sessions(*)")
@@ -6232,6 +6416,10 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
         );
       if (liveAttachmentId) cleanupUrl.searchParams.set("playbackSessionId", id);
       if (continueMediaCache) cleanupUrl.searchParams.set("completeCache", "continue");
+      if (!liveAttachmentId && typeof resumePosition === "number" && Number.isFinite(resumePosition)
+          && resumePosition > 0 && resumePosition < 86_400) {
+        cleanupUrl.searchParams.set("resumePosition", String(resumePosition));
+      }
       const response = await fetch(cleanupUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${storedGatewayRoute.token}` },
@@ -7083,6 +7271,27 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
   else sourceIdentityCache.delete(cacheKey);
   return identity;
 }
+
+// Explicit provider-by-provider opt-in. This authorizes only a sharing scope;
+// the Gateway still needs THIS consumer's fresh exact Range response, strong
+// ETag, identical complete effective URL and upstream public cache permission.
+// Client-supplied hints, titles, TMDB ids and editable source hosts never grant
+// a cross-user byte read. Off by default, without extra startup DB requests.
+async function createSharedFragmentGrant(sourceId: string, userId: string, itemType: string,
+  itemId: string, expiresAt: string, db: SupabaseClient): Promise<JsonRecord | null> {
+  const allowed = new Set((Deno.env.get("NORVA_SHARED_FRAGMENT_PROVIDER_IDENTITIES") || "")
+    .split(/[,\s]+/).filter(Boolean));
+  if (!allowed.size || !["movie", "series", "episode"].includes(itemType) || !itemId) return null;
+  try {
+    const identity = await resolveSourceIdentity(sourceId, userId, db);
+    if (!identity.key || identity.key.startsWith("source:") || !allowed.has(identity.key)) return null;
+    const expiresAtMs = new Date(expiresAt).getTime();
+    if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= Date.now()) return null;
+    return { protocol: 1, ownerKey: await sha256Hex(userId),
+      providerIdentitySha256: await sha256Hex(identity.key),
+      catalogueItemSha256: await sha256Hex(JSON.stringify([itemType, itemId])), expiresAtMs };
+  } catch (_) { return null; } // Cache discovery never makes playback unavailable.
+}
 // catalog_media_items keying stays on the hostname (its writer writes the hostname;
 // re-keying it on providerKey is a scoped follow-up — see the dedup doc).
 async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
@@ -7215,27 +7424,21 @@ async function hasVisibleSeriesEpisodeReceiptProof(
 ): Promise<boolean> {
   if (!parentSeriesId || !episodeId) return false;
   try {
-  const { data: parent, error: parentError } = await db
-    .from("cloud_catalog_visible_title_variants").select("id")
-    .eq("user_id", userId).eq("source_id", sourceId)
-    .eq("item_type", "series").eq("external_id", parentSeriesId).limit(1);
-  if (parentError || !Array.isArray(parent) || parent.length !== 1) return false;
-
-  // A registered episode is the strongest proof. During a new provider import,
-  // inventory registration can lag its already-visible parent variant. In that
-  // case the provider's server-owned series-info cache proves the exact episode
-  // without a new provider request or trusting a client-supplied URL.
-  if (await resolveCatalogSeriesEpisodeCoordinates(db, userId, sourceId, parentSeriesId, episodeId)) {
-    return true;
-  }
-  const serverHost = await resolveSourceHost(sourceId, userId, db);
-  if (!serverHost) return false;
-  const { data: cached, error: cacheError } = await db
-    .from("cloud_series_info_cache").select("payload")
-    .eq("server_host", serverHost).eq("series_id", parentSeriesId).maybeSingle();
-  return !cacheError && seriesInfoPayloadContainsEpisode(cached?.payload, episodeId);
+    const { data: parent, error: parentError } = await db
+      .from("cloud_catalog_visible_title_variants").select("id")
+      .eq("user_id", userId).eq("source_id", sourceId)
+      .eq("item_type", "series").eq("external_id", parentSeriesId).limit(1);
+    if (parentError || !Array.isArray(parent) || parent.length !== 1) return false;
+    if (await resolveCatalogSeriesEpisodeCoordinates(db, userId, sourceId, parentSeriesId, episodeId)) {
+      return true;
+    }
+    const serverHost = await resolveSourceHost(sourceId, userId, db);
+    if (!serverHost) return false;
+    const { data: cached, error: cacheError } = await db
+      .from("cloud_series_info_cache").select("payload")
+      .eq("server_host", serverHost).eq("series_id", parentSeriesId).maybeSingle();
+    return !cacheError && seriesInfoPayloadContainsEpisode(cached?.payload, episodeId);
   } catch (_) {
-    // An unavailable optional proof keeps the ordinary visibility fence.
     return false;
   }
 }
@@ -7302,6 +7505,14 @@ async function resolvePlaybackTarget(
     playback_hint?: unknown;
     metadata?: unknown;
   } | null = null;
+  const genericM3uEpisode = isM3uEpisodeId(itemId);
+  if (genericM3uEpisode) {
+    if (itemType !== "series" && itemType !== "episode") throw new HttpError(404, "Media item not found");
+    const episode = await resolveOwnedM3uEpisode({ db, sourceId, userId, itemId,
+      parentId: stringOrNull(requestHint.audioSeriesId ?? requestHint.audio_series_id ?? requestHint.parentSeriesId ?? requestHint.seriesId ?? requestHint.series_id) });
+    if (!episode) throw new HttpError(404, "Media item not found");
+    ownedItem = episode; item = episode;
+  }
   const containerObservation = await resolveObservedVodContainer(
     sourceId,
     userId,
@@ -7309,7 +7520,7 @@ async function resolvePlaybackTarget(
     itemId,
     db,
   );
-  if (mediaReadFromCatalog()) {
+  if (!genericM3uEpisode && mediaReadFromCatalog()) {
     const host = await resolveSourceHost(sourceId, userId, db);
     if (host) {
       const { data } = await db
@@ -7322,7 +7533,7 @@ async function resolvePlaybackTarget(
       if (data) item = data;
     }
   }
-  if (!item || mediaReadFromCatalog()) {
+  if (!genericM3uEpisode && (!item || mediaReadFromCatalog())) {
     const { data, error } = await db
       .from("cloud_catalog_visible_media_items")
       .select("id,updated_at,playback_hint,metadata")
@@ -7481,6 +7692,9 @@ async function resolvePlaybackTarget(
       targetUrl,
       selectionLiveDelivery,
       selectionVodDelivery,
+      // Set only after resolveOwnedM3uEpisode proves owner/source/generation,
+      // available parent/episode rows, and the exact imported URL digest.
+      ownedM3uEpisode: genericM3uEpisode,
       playbackHint: storedPlaybackHint,
       // The server-verified descriptor retains Xumo's shared feed boundary.
       // Test canaries use an exact public-media boundary so one unrelated
@@ -7720,6 +7934,7 @@ async function createBytePipeCapability(
   durationSeconds: number | null = null,
   strictLidWindowClaims: StrictLidWindowCapabilityClaims | null = null,
   usePlaybackCanary = false,
+  resumeBinding: { sourceId: string; sourceRevision: string; sharedFragmentGrant?: JsonRecord | null } | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   const gatewayRoute = usePlaybackCanary
@@ -7769,6 +7984,11 @@ async function createBytePipeCapability(
     url: targetUrl,
     ...(userAgent ? { ua: userAgent } : {}),
     ...(scope ? { scope } : {}),
+    ...(scope === "native-browser-mp4" && resumeBinding ? {
+      resumeSourceId: resumeBinding.sourceId,
+      resumeSourceRevision: resumeBinding.sourceRevision,
+      ...(resumeBinding.sharedFragmentGrant ? { sharedFragmentGrant: resumeBinding.sharedFragmentGrant } : {}),
+    } : {}),
     ...(Number.isSafeInteger(fileSizeBytes) && Number(fileSizeBytes) > 0
       ? { fileSizeBytes }
       : {}),
@@ -7802,6 +8022,9 @@ async function createBytePipeCapability(
   return {
     capability,
     gatewayUrl: gatewayRoute.url,
+    gatewayPublicBaseUrl: gatewayRoute.kind === "canary"
+      ? Deno.env.get("NORVA_NATIVE_MP4_PILOT_PUBLIC_BASE_URL") || ""
+      : Deno.env.get("NORVA_NATIVE_MP4_PUBLIC_BASE_URL") || "",
     serviceToken: gatewayRoute.token,
   };
 }
@@ -8135,7 +8358,7 @@ async function createGatewaySession(
     1024,
   );
   const runtimeConfig = await getRuntimeConfig(db);
-  const gatewayRoute = await mediaGatewayRouteForPlaybackUser(runtimeConfig, userId);
+  const gatewayRoute = await mediaGatewayRouteForHlsPlaybackUser(runtimeConfig, userId);
   if (!gatewayRoute) {
     const { data, error } = await db
       .from("cloud_gateway_sessions")
@@ -8172,6 +8395,11 @@ async function createGatewaySession(
 
   const startupStartedAt = performance.now();
   const originalTargetUrlHash = await sha256Hex(targetUrl);
+  const identityForTarget = async (resolvedUrl: string) => await sha256Hex(JSON.stringify([
+    "norva-vod-identity-v1", playbackIdentity.sourceId, playbackIdentity.itemType,
+    playbackIdentity.itemId, playbackIdentity.variantId || null, resolvedUrl,
+  ]));
+  const vodIdentityKey = await identityForTarget(targetUrl);
   const initialSourceContainerAuthority = await sourceContainerAuthorityFromObservation(
     sourceContainerObservation,
     targetUrl,
@@ -8183,7 +8411,11 @@ async function createGatewaySession(
     mode: gatewayMode,
     expiresAt,
     playbackHint: compactRecord(stripMkvH264FastStartInternalHints(playbackHint)),
-    playbackIdentity: compactRecord(playbackIdentity),
+    playbackIdentity: compactRecord({ ...playbackIdentity,
+      vodIdentityKey,
+      sourceRevision: await loadSourceConfigRevision(playbackIdentity.sourceId, userId, db),
+      sharedFragmentGrant: await createSharedFragmentGrant(playbackIdentity.sourceId, userId,
+        playbackIdentity.itemType, playbackIdentity.itemId, expiresAt, db) }),
     seekOffset: gatewayHints.seekOffset,
     startOffset: gatewayHints.startOffset,
     ...gatewayHints,
@@ -8243,6 +8475,8 @@ async function createGatewaySession(
         {
           ...baseGatewayBody,
           sourceUrl: correctedTargetUrl,
+          playbackIdentity: { ...baseGatewayBody.playbackIdentity,
+            vodIdentityKey: await identityForTarget(correctedTargetUrl) },
           playbackHint: stripMkvH264FastStartInternalHints(correctedPlaybackHint),
           ...correctedGatewayHints,
           sourceContainerAuthority: {
@@ -8302,6 +8536,11 @@ async function createGatewaySession(
       }
     }
     if (!response.ok) {
+      if (response.status === 404 && gatewayBody.code === "PROVIDER_HTTP_ERROR") {
+        throw new HttpError(404, "Media file not found on the provider (404). Try another version or retry later.", {
+          code: "PROVIDER_HTTP_ERROR",
+        });
+      }
       throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
     }
   }
@@ -9170,6 +9409,14 @@ function mkvH264FastStartItemCasFromPlaybackSession(value: unknown) {
 
 function normalizeGatewayStartupPolicy(value: unknown) {
   const raw = recordOrEmpty(value);
+  if (raw.protocol === 3) {
+    return raw.eligible === true && raw.reason === "private-resume-window-ready"
+      && raw.pipeline === "video-transcode" && raw.targetBufferSeconds === 6
+      && raw.fileIdentityRevalidated === true && typeof raw.cachedAheadSeconds === "number"
+      && Number.isFinite(raw.cachedAheadSeconds) && raw.cachedAheadSeconds >= 24 && raw.cachedAheadSeconds <= 150
+      ? { protocol: 3, eligible: true, reason: "private-resume-window-ready", pipeline: "video-transcode",
+        targetBufferSeconds: 6, cachedAheadSeconds: raw.cachedAheadSeconds, fileIdentityRevalidated: true } : null;
+  }
   const protocol = Number(raw.protocol);
   const pipeline = stringOr(raw.pipeline, "");
   const targetBufferSeconds = boundedNullableNumber(
@@ -9901,7 +10148,9 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   if (runtimeConfigCache && runtimeConfigCache.expiresAt > Date.now()) return runtimeConfigCache.value;
 
   const fromDb = new Map<string, string>();
+  let runtimeConfigReadFailed = false;
   const needsDb =
+    ENV_MEDIA_GATEWAY_HLS_CANARY_BPS === null ||
     !ENV_RELAY_BASE_URL ||
     !ENV_RELAY_TOKEN_SECRET ||
     !ENV_MEDIA_GATEWAY_URL ||
@@ -9930,7 +10179,10 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
       .from("cloud_runtime_config")
       .select("key, value")
       .in("key", RUNTIME_CONFIG_KEYS);
-    if (error) console.warn("[norva-playback] runtime config unavailable", error.message);
+    if (error) {
+      runtimeConfigReadFailed = true;
+      console.warn("[norva-playback] runtime config unavailable", error.message);
+    }
     else {
       for (const item of data ?? []) {
         if (typeof item.key === "string" && typeof item.value === "string") fromDb.set(item.key, item.value);
@@ -9950,6 +10202,12 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     canaryUserHashes: ENV_MEDIA_GATEWAY_CANARY_USER_HASHES ||
       fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_USER_HASHES") || "",
   }) as MediaGatewayRoutingConfig;
+  const mediaGatewayHlsRouting = buildMediaGatewayHlsRoutingConfig({
+    routing: mediaGatewayRouting,
+    basisPoints: ENV_MEDIA_GATEWAY_HLS_CANARY_BPS === null && runtimeConfigReadFailed
+      ? "unavailable"
+      : ENV_MEDIA_GATEWAY_HLS_CANARY_BPS ?? fromDb.get("NORVA_MEDIA_GATEWAY_HLS_CANARY_BPS") ?? "0",
+  });
   const mediaCacheCanary = buildMediaCacheCanaryConfig({
     userHashes: ENV_MEDIA_CACHE_CANARY_USER_HASHES ||
       fromDb.get("NORVA_MEDIA_CACHE_CANARY_USER_HASHES") || "",
@@ -9962,6 +10220,7 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     mediaGatewayUrl,
     mediaGatewayToken,
     mediaGatewayRouting,
+    mediaGatewayHlsRouting,
     lidWorkerUrl: trimTrailingSlash(ENV_LID_WORKER_URL || fromDb.get("NORVA_LID_WORKER_URL") || ""),
     lidWorkerToken: ENV_LID_WORKER_TOKEN || fromDb.get("NORVA_LID_WORKER_TOKEN") || "",
     sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
@@ -10059,6 +10318,22 @@ async function mediaGatewayRouteForPlaybackUser(
     });
   }
   return route;
+}
+
+async function mediaGatewayRouteForHlsPlaybackUser(
+  runtimeConfig: RuntimeConfig,
+  userId: string,
+): Promise<MediaGatewayRoute | null> {
+  const userHash = await sha256Hex(userId);
+  try {
+    return selectMediaGatewayHlsRoute(
+      runtimeConfig.mediaGatewayRouting, runtimeConfig.mediaGatewayHlsRouting, userHash,
+    ) as MediaGatewayRoute | null;
+  } catch (_) {
+    throw new HttpError(503, "HLS media gateway routing is unavailable", {
+      code: "MEDIA_GATEWAY_HLS_ROUTING_UNAVAILABLE",
+    });
+  }
 }
 
 function mediaGatewayRoutesForProviderPreemption(
@@ -10357,6 +10632,19 @@ async function hmacBase64Url(secret: string, payload: string) {
   );
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
   return base64Url(new Uint8Array(signature));
+}
+
+function shouldUseOwnedM3uEpisodeBrowserGateway(
+  resolved: unknown,
+  itemType: string,
+  clientMode: string,
+  body: JsonRecord,
+) {
+  if (itemType !== "series" || recordOrEmpty(resolved).ownedM3uEpisode !== true) return false;
+  if (body.enginePipe === true || body.engine_pipe === true) return false;
+  // Native direct playback and an explicit conversion keep their existing
+  // modes. Browser relay and automatic gateway requests need an exact probe.
+  return clientMode === "relay" || (clientMode === "transcode" && body.gatewayAutoMode === true);
 }
 
 function choosePlaybackMode(requestedMode: string, body: JsonRecord) {
