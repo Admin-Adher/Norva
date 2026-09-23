@@ -78,6 +78,7 @@ public class SubscribeLayoutInstrumentedTest {
                     + "const title=document.querySelector('.shared-benefits h2');if(title.getBoundingClientRect().height>90)throw Error('title '+locale.code);"
                     + "if(document.querySelector('#continue-plan').disabled)throw Error('disabled '+locale.code);"
                     + "if(locale.code!=='en'&&/billed annually|per month/.test(document.querySelector('.price-note').textContent))throw Error('English '+locale.code);"
+                    + "const decision=document.querySelector('.plan-decision');for(let attempt=0;attempt<10;attempt++){const required=Math.ceil(decision.getBoundingClientRect().height)+24;const reserved=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--plan-decision-space'))||0;if(reserved>=required)break;await pause();}"
                     + "scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'});await pause();"
                     + "const top=document.querySelector('.plan-decision').getBoundingClientRect().top;"
                     + "for(const a of document.querySelectorAll('.note a')){const b=a.getBoundingClientRect();if(b.bottom>top+1)throw Error('covered '+locale.code);if(b.width<44||b.height<44)throw Error('touch target '+locale.code);}"

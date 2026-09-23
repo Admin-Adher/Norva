@@ -241,6 +241,14 @@ public final class FirstFrameFixtureInstrumentedTest {
             });
             SystemClock.sleep(250L);
 
+            // Compare the same decoded frame across the controller transition.
+            // A playing video can change this pixel even with transparent controls.
+            instrumentation.runOnMainSync(() -> {
+                PlayerView playerView = activity.findViewById(R.id.norva_player_view);
+                if (playerView.getPlayer() != null) playerView.getPlayer().pause();
+            });
+            SystemClock.sleep(250L);
+
             Bitmap screenshot = instrumentation.getUiAutomation().takeScreenshot();
             File screenshotFile = new File(
                     target.getExternalFilesDir(null),
