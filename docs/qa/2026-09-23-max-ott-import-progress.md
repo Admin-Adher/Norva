@@ -106,6 +106,12 @@ a fresh large-provider onboarding latency measurement is still outstanding.
 | --- | --- | --- | --- | --- |
 | 14:17:30 | 158,384 | 28,551 | 28,645 | building_titles, 77% |
 | 14:23:06 | 158,384 | 35,872 | 36,021 | building_titles, 78% |
+| 14:31:22 | 158,384 | 42,819 | 43,020 | building_titles, 78% |
+
+The production browser's MAX OTT French filter returned **4,158 titles**,
+matching its facet count. Its Spanish facet had increased from 213 to **2,301**.
+The audio filter was reset to Any audio after the check. Counts are partial and
+can differ from a later database snapshot while publication continues.
 
 ## Playback diagnosis and replay
 
@@ -125,13 +131,16 @@ a fresh large-provider onboarding latency measurement is still outstanding.
   decoded video. Playback was closed afterwards to release the account slot.
 - Therefore the whole provider is not unplayable. The original entry remains
   unavailable upstream and cannot be repaired by changing Norva's decoder.
+- A third title, **FR| A-X-L**, then started on its first browser attempt without
+  a retry: `readyState=4`, decoded video width 1280, advancing time above 27s.
+  Playback was closed to release the account connection.
 
 ## Remaining QA
 
 1. Observe completed import and compare final visible titles/variants with raw
    entries, accounting for grouping and catalogue exclusions.
 2. Verify source/category/language filters and refresh after publication.
-3. Replay another cold movie start and series/live playback; resolve the
+3. Replay series/live playback; resolve the
    provider-side Tokyo Drift refusal with the provider if that title is needed.
 4. Measure a fresh import with the progressive publisher; Android playback is
    separate from the completed modal layout replay.
