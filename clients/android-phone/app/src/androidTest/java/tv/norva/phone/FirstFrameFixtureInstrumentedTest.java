@@ -268,8 +268,14 @@ public final class FirstFrameFixtureInstrumentedTest {
             SystemClock.sleep(250L);
             Bitmap controlsHidden = instrumentation.getUiAutomation().takeScreenshot();
             int controlsHiddenPixel = controlsHidden.getPixel(sampleX, sampleY);
+            try (FileOutputStream output = new FileOutputStream(new File(
+                    target.getExternalFilesDir(null), "norva-player-episode-navigation-hidden.png"), false)) {
+                assertTrue(controlsHidden.compress(Bitmap.CompressFormat.PNG, 100, output));
+            }
             controlsHidden.recycle();
-            assertTrue("controller must not wash out the decoded frame",
+            assertTrue("controller must not wash out the decoded frame; visible="
+                            + Integer.toHexString(controlsVisiblePixel) + " hidden="
+                            + Integer.toHexString(controlsHiddenPixel) + " sample=" + sampleX + "," + sampleY,
                     rgbDistance(controlsVisiblePixel, controlsHiddenPixel) <= 24);
             instrumentation.runOnMainSync(() -> {
                 PlayerView playerView = activity.findViewById(R.id.norva_player_view);

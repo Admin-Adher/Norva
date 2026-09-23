@@ -33,7 +33,16 @@ esac
 
 collect_captures() {
   mkdir -p app/build/outputs/androidTest-results/connected/captures
-  adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/ || true
+  adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/ >/dev/null 2>&1 || true
 }
-trap collect_captures EXIT
+# UTP can remove the test application and its external files at teardown.
+# Copy while instrumentation is running, before those files disappear.
+(while true; do collect_captures; sleep 5; done) &
+capture_pid=$!
+finish_captures() {
+  kill "$capture_pid" 2>/dev/null || true
+  wait "$capture_pid" 2>/dev/null || true
+  collect_captures
+}
+trap finish_captures EXIT
 gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
