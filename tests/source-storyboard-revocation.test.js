@@ -85,23 +85,45 @@ test('a remaining provider session keeps the activity fence busy after targeted 
   assert.equal(result.providerIdle, false);
 });
 
-function cloudHarness(gatewayResults) {
+function cloudHarness(gatewayResults, { onGatewayCall } = {}) {
   const events = [];
   let sourceRead = false;
+  let gatewayCallCount = 0;
+  const activity = { kind: 'gateway', last_seen_at: '2026-09-23T15:44:42.000Z' };
   const db = {
     from(table) {
+      const filters = {};
+      let updateValue = null;
       const query = {
-        select() { return this; }, eq() { return this; }, is() { return this; },
-        in() { return this; },
-        update(value) { events.push({ type: table === 'cloud_sources' ? 'soft-delete' : 'fence-update', value }); return this; },
+        select() { return this; }, is() { return this; },
+        eq(column, value) {
+          filters[column] = value;
+          if (table === 'provider_account_activity' && updateValue && column === 'last_seen_at') {
+            events.push({ type: 'fence-cas', filters: { ...filters } });
+            if (activity.kind === filters.kind && activity.last_seen_at === filters.last_seen_at) {
+              activity.kind = updateValue.kind;
+            }
+            return Promise.resolve({ error: null });
+          }
+          return this;
+        },
+        update(value) {
+          updateValue = value;
+          events.push({ type: table === 'cloud_sources' ? 'soft-delete' : 'fence-update', value });
+          return this;
+        },
         maybeSingle() {
+          if (table === 'provider_account_activity') {
+            events.push({ type: 'fence-read' });
+            return Promise.resolve({ data: { ...activity }, error: null });
+          }
+          assert.equal(table, 'cloud_sources');
           if (!sourceRead) {
             sourceRead = true;
             return Promise.resolve({ data: { id: OLD, source_type: 'xtream', config_ciphertext: 'encrypted', deleted_at: null }, error: null });
           }
           return Promise.resolve({ data: { id: OLD }, error: null });
         },
-        lte(column, value) { events.push({ type: 'fence-cas', column, value }); return Promise.resolve({ error: null }); },
       };
       return query;
     },
@@ -120,32 +142,55 @@ function cloudHarness(gatewayResults) {
     throwDb: error => { throw error; },
     fetch: async (url, init) => {
       events.push({ type: 'gateway', url, body: JSON.parse(init.body) });
+      onGatewayCall?.(++gatewayCallCount, activity);
       const result = gatewayResults.shift();
       return { ok: result?.ok === true, json: async () => result?.body || {} };
     },
   };
   const source = stripTypeScriptTypes(section(cloud, 'async function deleteSource(', 'async function assertOwnedDevice('));
   vm.runInNewContext(`${source}\nglobalThis.testApi = { deleteSource };`, context);
-  return { db, events, deleteSource: context.testApi.deleteSource };
+  return { db, events, activity, deleteSource: context.testApi.deleteSource };
 }
 
-test('source deletion waits for both Gateway drains and then clears only the older account activity', async () => {
-  const h = cloudHarness([
-    { ok: true, body: { protocol: 1, providerDrained: true, providerIdle: true } },
-    { ok: true, body: { protocol: 1, providerDrained: true, providerIdle: true } },
-  ]);
+const idleGateway = () => ({ ok: true, body: { protocol: 1, providerDrained: true, providerIdle: true } });
+
+test('source deletion clears the final extraction heartbeat only after a second idle attestation', async () => {
+  const h = cloudHarness([idleGateway(), idleGateway(), idleGateway(), idleGateway()]);
   const result = await h.deleteSource(OLD, OWNER, h.db);
   assert.equal(result.visibilityChanged, true);
   assert.deepEqual(h.events.map(event => event.type), [
-    'gateway', 'gateway', 'soft-delete', 'fence-update', 'fence-cas',
+    'gateway', 'gateway', 'soft-delete', 'fence-read',
+    'gateway', 'gateway', 'fence-update', 'fence-cas',
   ]);
   assert.equal(h.events[0].body.affinityHash, HASH);
-  assert.equal(h.events[4].column, 'last_seen_at');
+  assert.equal(h.events[7].filters.last_seen_at, '2026-09-23T15:44:42.000Z');
+  assert.equal(h.activity.kind, 'catalog-refresh');
+});
+
+test('a new heartbeat after the idle recheck wins the exact activity comparison', async () => {
+  const h = cloudHarness([idleGateway(), idleGateway(), idleGateway(), idleGateway()], {
+    onGatewayCall(count, activity) {
+      if (count === 4) activity.last_seen_at = '2026-09-23T15:44:43.000Z';
+    },
+  });
+  const result = await h.deleteSource(OLD, OWNER, h.db);
+  assert.equal(result.visibilityChanged, true);
+  assert.equal(h.activity.kind, 'gateway');
+  assert.equal(h.events.at(-1).type, 'fence-cas');
+});
+
+test('deletion succeeds but leaves the activity fence when the second attestation is busy', async () => {
+  const busyGateway = { ok: true, body: { protocol: 1, providerDrained: true, providerIdle: false } };
+  const h = cloudHarness([idleGateway(), idleGateway(), idleGateway(), busyGateway]);
+  const result = await h.deleteSource(OLD, OWNER, h.db);
+  assert.equal(result.visibilityChanged, true);
+  assert.equal(h.activity.kind, 'gateway');
+  assert.equal(h.events.filter(event => event.type === 'fence-update').length, 0);
 });
 
 test('source deletion fails before soft-delete when a Gateway does not attest drain', async () => {
   const h = cloudHarness([
-    { ok: true, body: { protocol: 1, providerDrained: true, providerIdle: true } },
+    idleGateway(),
     { ok: false, body: { protocol: 1, providerDrained: false } },
   ]);
   await assert.rejects(() => h.deleteSource(OLD, OWNER, h.db), error => error.status === 503);
