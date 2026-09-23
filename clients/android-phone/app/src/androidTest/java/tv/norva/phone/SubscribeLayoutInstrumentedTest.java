@@ -78,9 +78,10 @@ public class SubscribeLayoutInstrumentedTest {
                     + "const title=document.querySelector('.shared-benefits h2');if(title.getBoundingClientRect().height>90)throw Error('title '+locale.code);"
                     + "if(document.querySelector('#continue-plan').disabled)throw Error('disabled '+locale.code);"
                     + "if(locale.code!=='en'&&/billed annually|per month/.test(document.querySelector('.price-note').textContent))throw Error('English '+locale.code);"
-                    + "scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'});await pause();"
+                    + "const decision=document.querySelector('.plan-decision');for(let attempt=0;attempt<10;attempt++){const required=Math.ceil(decision.getBoundingClientRect().height)+24;const reserved=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--plan-decision-space'))||0;if(reserved>=required)break;await pause();}"
+                    + "await document.fonts.ready;let bottomSettled=false;for(let attempt=0;attempt<15;attempt++){const before=document.documentElement.scrollHeight;scrollTo({top:before,behavior:'instant'});await pause();const after=document.documentElement.scrollHeight;if(before===after&&Math.abs(after-innerHeight-scrollY)<=2){bottomSettled=true;break;}}if(!bottomSettled)throw Error('bottom layout did not settle '+locale.code);"
                     + "const top=document.querySelector('.plan-decision').getBoundingClientRect().top;"
-                    + "for(const a of document.querySelectorAll('.note a')){const b=a.getBoundingClientRect();if(b.bottom>top+1)throw Error('covered '+locale.code);if(b.width<44||b.height<44)throw Error('touch target '+locale.code);}"
+                    + "for(const a of document.querySelectorAll('.note a')){const b=a.getBoundingClientRect();if(b.bottom>top+1)throw Error('covered '+JSON.stringify({locale:locale.code,bottom:b.bottom,top,scrollY,height:innerHeight,scrollHeight:document.documentElement.scrollHeight,decisionHeight:decision.getBoundingClientRect().height,reserved:getComputedStyle(document.documentElement).getPropertyValue('--plan-decision-space'),padding:getComputedStyle(document.querySelector('.commerce-main')).paddingBottom}));if(b.width<44||b.height<44)throw Error('touch target '+locale.code);}"
                     + "}window.subscribeResult='ok';}catch(e){window.subscribeResult=String(e);}})();");
                 String result = "\"pending\"";
                 for (int attempt=0;attempt<80 && "\"pending\"".equals(result);attempt++) {
