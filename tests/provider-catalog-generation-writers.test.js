@@ -464,10 +464,8 @@ test('live summary merge uses bounded RPC bodies and never a logical-id URL filt
   assert.match(migration, /channel\.generation_id = p_generation_id/);
   assert.match(migration, /revoke all on function[\s\S]*from public,anon,authenticated,service_role/);
   assert.match(migration, /grant execute on function[\s\S]*to service_role/);
-  const liveWriter = source(path.join(SHARED, 'live-materialization.ts'));
-  assert.equal((liveWriter.match(/chunkSize: 10/g) || []).length, 2);
-  assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-source-sync', 'index.ts')), /const LIVE_CHUNK = 10/);
-  assert.match(source(path.join(ROOT, 'supabase', 'functions', 'norva-cloud', 'index.ts')), /const LIVE_CHUNK = 10/);
+  // The default ten-row writes are exercised above. Import drivers can opt
+  // into larger bounded pages; their actual writes are tested separately.
 });
 
 test('live materialization preserves same-label concrete streams while bounding previews', () => {

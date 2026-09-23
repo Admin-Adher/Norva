@@ -3070,7 +3070,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const totalVod = counts.movies + counts.series;
       // Match the durable finalizer: large provider lists must not create a
       // multi-thousand-row materialization transaction in a client isolate.
-      const LIVE_CHUNK = 10;
+      const LIVE_CHUNK = 200;
       if (batchOffset === 0) {
         await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, generation);
@@ -3125,6 +3125,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         sourceId, userId, rows: liveChunk,
         country: options.country || stringOr(config.country, "FR"),
         generation,
+        writeBatchSize: 100,
       });
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({

@@ -97,13 +97,16 @@ export async function materializeLiveChunk(
     rows: LiveCatalogItem[];
     country?: string;
     generation: CatalogGenerationWriteContext;
+    writeBatchSize?: number;
+    withCurrentGeneration?: <T>(operation: () => Promise<T>) => Promise<T>;
   },
 ) {
   const plan = buildLiveMaterializationPlan(input);
   if (!plan.rawLive) return { rawLive: 0, logicalChannels: 0, liveVariants: 0 };
-  const insertedChannels = await upsertLiveChannelRows(db, plan.channelRows, input.generation);
+  const run = input.withCurrentGeneration || (async <T>(operation: () => Promise<T>) => await operation());
+  const insertedChannels = await run(() => upsertLiveChannelRows(db, plan.channelRows, input.generation, 0, plan.channelRows.length, undefined, input.writeBatchSize));
   const channelIdByLogicalId = new Map(insertedChannels.map((row) => [String(row.logical_id), String(row.id)]));
-  const liveVariants = await upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId, input.generation);
+  const liveVariants = await run(() => upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId, input.generation, 0, plan.variantRows.length, undefined, input.writeBatchSize));
   return { rawLive: plan.rawLive, logicalChannels: plan.channelRows.length, liveVariants };
 }
 
@@ -273,16 +276,16 @@ export async function upsertLiveChannelRows(
   offset = 0,
   limit = rows.length,
   heartbeat?: () => Promise<void>,
+  writeBatchSize = 10,
 ) {
   const slice = rows.slice(offset, offset + Math.max(0, limit));
   const merged = await mergeExistingLiveChannelSummaries(db, slice, generation, heartbeat);
   return await writeRows(db, "cloud_live_logical_channels", withCatalogGenerationRows(merged, generation), {
     selectColumns: "id,logical_id",
     onConflict: "source_id,generation_id,logical_id",
-    // One durable provider slice is exactly one 10-row SQL statement. The row-
-    // level generation/account-deletion fences make larger active-catalog
-    // statements exceed the Edge budget; the caller checkpoints after this slice.
-    chunkSize: 10,
+    // Callers may use larger bounded writes after measuring their database
+    // budget. Every row still carries the generation and deletion fences.
+    chunkSize: Math.max(1, Math.min(200, writeBatchSize)),
     heartbeat,
   });
 }
@@ -420,6 +423,7 @@ export async function upsertLiveVariantRows(
   offset = 0,
   limit = rows.length,
   heartbeat?: () => Promise<void>,
+  writeBatchSize = 10,
 ) {
   const slice = rows
     .slice(offset, offset + Math.max(0, limit))
@@ -430,7 +434,7 @@ export async function upsertLiveVariantRows(
     .filter((row) => row.logical_channel_id);
   await writeRows(db, "cloud_live_variants", withCatalogGenerationRows(slice, generation), {
     onConflict: "source_id,generation_id,logical_id,stream_id,label",
-    chunkSize: 10,
+    chunkSize: Math.max(1, Math.min(200, writeBatchSize)),
     heartbeat,
   });
   return slice.length;
