@@ -222,7 +222,7 @@ test('every existing-source M3U provider read shares the durable lease', () => {
 
   assert.match(liveMaterialization, /heartbeat\?: \(\) => Promise<void>/);
   assert.match(liveMaterialization, /clearLiveMaterialization\([\s\S]*input\.heartbeat/);
-  assert.match(liveMaterialization, /chunkSize: 10,[\s\S]*heartbeat/);
+  assert.match(liveMaterialization, /chunkSize: Math\.max\(1, Math\.min\(200, writeBatchSize\)\),\s*heartbeat/);
   assert.match(liveMaterialization, /for \(let index = 0; index < rows\.length; index \+= chunkSize\)[\s\S]*await options\.heartbeat\?\.\(\)/);
 });
 
