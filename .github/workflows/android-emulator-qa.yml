@@ -91,7 +91,7 @@ jobs:
         with:
           api-level: 34
           target: android-tv
-          arch: x86_64
+          arch: x86
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
           script: |
             set -eu
