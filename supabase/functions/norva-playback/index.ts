@@ -366,7 +366,8 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 82,
+        version: 83,
+        automaticOwnedEpisodeGatewayProtocol: 1,
         genericNativeMp4Protocol: 1,
         genericNativeMp4Enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
         nativeHeartbeatProtocol: 1,
@@ -2265,7 +2266,7 @@ async function createPlaybackSessionCore(
   assertHttpUrl(targetUrl);
 
   const clientMode = choosePlaybackMode(requestedMode, body);
-  const serverOwnedM3uEpisodeGateway = shouldUseOwnedM3uEpisodeBrowserGateway(
+  const serverOwnedEpisodeGateway = shouldUseOwnedEpisodeBrowserGateway(
     resolved, itemType, clientMode, body,
   );
   const serverDirectPublicHls = shouldUseSelectionLiveDirect({
@@ -2323,7 +2324,7 @@ async function createPlaybackSessionCore(
       // server-observed, a browser relay must be remuxed without requiring a
       // failed native attempt first. Direct/native clients retain their lane.
       || authoritativeVodContainer === "ts");
-  const mode = serverOwnedM3uEpisodeGateway
+  const mode = serverOwnedEpisodeGateway
     ? "transcode"
     : serverDirectPublicHls
     ? "direct"
@@ -2347,15 +2348,15 @@ async function createPlaybackSessionCore(
       gatewayMode: authoritativeVodTier === "video_transcode" ? "transcode" : "remux",
     });
   }
-  if (serverOwnedM3uEpisodeGateway) {
+  if (serverOwnedEpisodeGateway) {
     // This lane selects the gateway, not a codec. Its exact input probe decides
-    // whether video/audio can be copied or must be converted. The M3U extension
+    // whether video/audio can be copied or must be converted. The provider extension
     // and caller's codec hints are never native-playback proof.
     requestedPlaybackHint = mergePlaybackHints(requestedPlaybackHint, { gatewayMode: "remux" });
   }
   const gatewayVideoTranscodeExplicit = mode === "transcode" && (
     ((serverPromotedRelay || serverPromotedProviderMp4) && authoritativeVodTier === "video_transcode") ||
-    (!serverOwnedM3uEpisodeGateway && !serverPromotedRelay && !serverPromotedProviderMp4 && body.gatewayAutoMode !== true)
+    (!serverOwnedEpisodeGateway && !serverPromotedRelay && !serverPromotedProviderMp4 && body.gatewayAutoMode !== true)
   );
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
@@ -7458,7 +7459,9 @@ async function resolveExactEpisodePlaybackTarget(
     episodeId,
     db,
   );
-  const container = containerObservation?.container ?? stringOr(episodeCoordinates.container_extension, "mp4");
+  // The catalogue suffix identifies the provider resource. A byte observation
+  // describes that resource; it must never turn a working .mp4 URL into .ts.
+  const container = stringOr(episodeCoordinates.container_extension, "mp4");
   if (!episodeId || !container) {
     throw new HttpError(404, "Exact episode coordinates are incomplete");
   }
@@ -7481,6 +7484,7 @@ async function resolveExactEpisodePlaybackTarget(
       audioSeriesId: stringOr(episodeCoordinates.parent_series_id, ""),
     }),
     containerObservation,
+    ownedXtreamEpisode: true,
   };
 }
 
@@ -7559,7 +7563,7 @@ async function resolvePlaybackTarget(
     if (await isDiscoverySourceId(sourceId, userId)) throw new HttpError(404, "Media item not found");
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
-      const requestContainer = containerObservation?.container ?? stringOr(requestHint.container, "mp4");
+      const requestContainer = stringOr(requestHint.container, "mp4");
       return {
         targetUrl: xtreamStreamUrl({
           serverUrl: stringOr(sourceConfig.serverUrl, ""),
@@ -7577,6 +7581,7 @@ async function resolvePlaybackTarget(
           itemType: "series",
         })),
         containerObservation,
+        ownedXtreamEpisode: true,
       };
     }
     throw new HttpError(404, "Media item not found");
@@ -7656,7 +7661,8 @@ async function resolvePlaybackTarget(
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     const requestContainer = stringOrNull(requestHint.container);
     const streamType = stringOr(hint.streamType, "live");
-    const container = containerObservation?.container ?? xtreamPlaybackContainer(hint, streamType, requestContainer);
+    const providerContainer = xtreamPlaybackContainer(hint, streamType, requestContainer);
+    const container = streamType === "series" ? providerContainer : (containerObservation?.container ?? providerContainer);
     return {
       targetUrl: xtreamStreamUrl({
         serverUrl: stringOr(sourceConfig.serverUrl, ""),
@@ -7668,6 +7674,7 @@ async function resolvePlaybackTarget(
         streamId: stringOr(hint.streamId, ""),
         container,
       }),
+      ownedXtreamEpisode: itemType === "series" && streamType === "series",
       playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container })),
       itemCas,
       containerObservation,
@@ -10634,13 +10641,14 @@ async function hmacBase64Url(secret: string, payload: string) {
   return base64Url(new Uint8Array(signature));
 }
 
-function shouldUseOwnedM3uEpisodeBrowserGateway(
+function shouldUseOwnedEpisodeBrowserGateway(
   resolved: unknown,
   itemType: string,
   clientMode: string,
   body: JsonRecord,
 ) {
-  if (itemType !== "series" || recordOrEmpty(resolved).ownedM3uEpisode !== true) return false;
+  const target = recordOrEmpty(resolved);
+  if (itemType !== "series" || (target.ownedM3uEpisode !== true && target.ownedXtreamEpisode !== true)) return false;
   if (body.enginePipe === true || body.engine_pipe === true) return false;
   // Native direct playback and an explicit conversion keep their existing
   // modes. Browser relay and automatic gateway requests need an exact probe.

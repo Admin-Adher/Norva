@@ -248,13 +248,13 @@ test('the correction is a single mutually exclusive retry and HTTP 458 stays ter
   assert.doesNotMatch(gatewaySession, /while\s*\([^)]*containerCorrection|for\s*\([^)]*containerCorrection/);
 });
 
-test('a persisted observation overrides client and provider extensions for current and future accounts', () => {
+test('a persisted observation informs playback while series retain their provider resource extension', () => {
   const edge = read(EDGE_PATH);
   const resolver = sourceBetween(edge, 'async function resolvePlaybackTarget(', '\n// Series have no directly-playable');
   const observation = resolver.indexOf('resolveObservedVodContainer(');
   const xtreamFallback = resolver.indexOf('xtreamPlaybackContainer(');
   assert.ok(observation >= 0 && observation < xtreamFallback);
-  assert.match(resolver, /containerObservation\?\.container\s*\?\?\s*xtreamPlaybackContainer/);
+  assert.match(resolver, /streamType === "series" \? providerContainer : \(containerObservation\?\.container \?\? providerContainer\)/);
   assert.match(resolver, /playbackHintForObservedContainer\(storedPlaybackHintBase, containerObservation\.container\)/);
   assert.match(edge, /sourceContainerAuthorityFromObservation\([\s\S]*sourceContainerObservation[\s\S]*targetUrl/);
 });
@@ -430,8 +430,8 @@ test('Gateway emits only redacted hashes and recognizes MP4 or MPEG-TS before FF
   const edge = read(EDGE_PATH);
   const deploy = read(path.join(ROOT, 'ops/hetzner/scripts/04-deploy-edge-functions.sh'));
   assert.match(gateway, /version: GATEWAY_VERSION,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(edge, /version: 82,[\s\S]*vodContainerSelfHealProtocol: 1/);
-  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=82/);
+  assert.match(edge, /version: 83,[\s\S]*vodContainerSelfHealProtocol: 1/);
+  assert.match(deploy, /EXPECTED_PLAYBACK_VERSION=83/);
   assert.match(deploy, /EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL=1/);
   assert.match(deploy, /vodContainerSelfHealProtocol\\\":\$EXPECTED_VOD_CONTAINER_SELF_HEAL_PROTOCOL/);
   const classifier = sourceBetween(
