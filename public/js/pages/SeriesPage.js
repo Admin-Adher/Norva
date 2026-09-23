@@ -1245,7 +1245,8 @@ class SeriesPage {
     async loadCloudCategories() {
         const requestId = (this._categoryRequestId || 0) + 1;
         this._categoryRequestId = requestId;
-        const requestedSource = String(this.selectedCloudSourceId() || '').trim().toLowerCase();
+        const source = this.selectedCloudSourceId();
+        const requestedSource = String(source || '').trim().toLowerCase();
         const isCurrent = () => requestId === this._categoryRequestId
             && String(this.selectedCloudSourceId() || '').trim().toLowerCase() === requestedSource;
         if (this._categorySourceScope !== requestedSource) {
@@ -1261,8 +1262,7 @@ class SeriesPage {
             let payload;
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
-                    payload = await API.media.genreSummary({ type: 'series',
-                        ...(requestedSource ? { source: requestedSource } : {}) });
+                    payload = await API.media.genreSummary({ type: 'series', ...(source ? { source } : {}) });
                     break;
                 } catch (error) {
                     if (!isCurrent()) return;
