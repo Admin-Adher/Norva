@@ -126,6 +126,8 @@ Deno.serve(async (req) => {
         catalogFinalize: true,
         catalogFinalizeBatches: true,
         liveFinalizeBatches: true,
+        liveFinalizePageSize: 200,
+        liveFinalizeWriteBatchSize: 100,
         yearBackfill: true,
         dynamicEnrichmentFleet: true,
         enrichmentFleetCycle: 12,
@@ -3720,14 +3722,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
-      // Keep each live slice inside both the Edge lifetime and PostgreSQL's
-      // statement timeout. Channel/variant writes are further bounded to 100
-      // rows in live-materialization.ts. Generation guards are intentionally
-      // expensive per row, so keep the whole slice inside the 90-second Edge budget.
-      const LIVE_CHUNK = 10;
-      // Selection entries have already been normalized by the bounded registry.
-      // Keep its slice within the existing 100-row materialization write budget.
-      const liveChunkLimit = config.playlistUrl === DISCOVERY_PLAYLIST_URL ? 100 : LIVE_CHUNK;
+      // Checkpoint at most 200 raw channels per page; SQL writes remain bounded
+      // to 100 rows. Ten-row pages imposed a full background pause for every
+      // ten channels, adding hours to large imports despite fast SQL writes.
+      const liveChunkLimit = 200;
       if (batchOffset === 0) {
         await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot);
@@ -3783,6 +3781,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         sourceId, userId, rows: liveChunk,
         country: options.country || stringOr(config.country, "FR"),
         generation: accessSnapshot,
+        writeBatchSize: 100,
       });
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       const nextOffset = batchOffset + liveChunk.length;
