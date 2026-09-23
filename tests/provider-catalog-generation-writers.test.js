@@ -830,7 +830,7 @@ test('playback physical catalog patches carry generation plus the complete ABA p
 test('series-info episode writers use only complete generation-fenced overloads', () => {
   const seriesInfo = source(path.join(ROOT, 'supabase', 'functions', 'norva-series-info', 'index.ts'));
   assert.match(seriesInfo, /readActiveCatalogGenerationSnapshot/);
-  assert.match(seriesInfo, /assertActiveCatalogGenerationCurrent/);
+  assert.match(seriesInfo, /adoptActiveCatalogUserVisibilityEpoch/);
   for (const rpc of [
     'register_catalog_series_episodes',
     'hydrate_catalog_episode_file_tracks',
