@@ -18,6 +18,7 @@ import {
   publicEdgeErrorLog,
   publicEdgeErrorPayload,
 } from "../_shared/catalog-visibility-response.mjs";
+import { bindCompletedPlaybackReceipt, finalizePlaybackReceiptResponse } from "../_shared/playback-receipt-visibility.mjs";
 import {
   PLAYBACK_EVENT_PUBLIC_SELECT,
   PLAYBACK_SESSION_PUBLIC_SELECT,
@@ -53,6 +54,7 @@ import {
 } from "../_shared/media-gateway-canary-routing.mjs";
 import {
   type ActiveCatalogGeneration,
+  adoptActiveCatalogUserVisibilityEpoch,
   assertActiveCatalogGenerationCurrent,
   callActiveCatalogGenerationRpc,
   catalogGenerationFields,
@@ -339,12 +341,12 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
-  return await finalizeCatalogVisibilityResponse(
+  return await finalizePlaybackReceiptResponse(req, async () => finalizeCatalogVisibilityResponse(
     req,
     await handleRequest(req),
     supabase,
     { service: "norva-playback", corsHeaders },
-  );
+  ));
 });
 
 async function handleRequest(req: Request): Promise<Response> {
@@ -2217,7 +2219,9 @@ async function createPlaybackSessionCore(
       db,
       requestedPlaybackHint,
     );
-  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
+  // Progressive publication can advance the account-wide cache epoch without
+  // changing this source's generation, head, config or visibility authority.
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
   markStartup("targetResolutionMs");
   const targetUrl = resolved.targetUrl;
   const selectionFileSnapshot = (itemType === "movie" || itemType === "series") && !episodeCoordinates
@@ -2575,10 +2579,52 @@ async function createPlaybackSessionCore(
   markStartup("coordinatorMs");
   startupTrace.coordinatorWaitMs = startupWaitMs;
 
+  const bindPreparedSeriesReceipt = async (cleanupGateway?: () => Promise<unknown>) => {
+    if (itemType !== "series" || !parentSeriesId ||
+        !await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) return;
+    await bindCompletedPlaybackReceipt(req, {
+      refreshEpoch: async () => {
+        const before = catalogVisibilityEpochHeaders(req);
+        await bindCatalogVisibilityEpochShared(req, userId, db);
+        const after = catalogVisibilityEpochHeaders(req);
+        if (!before["X-Norva-Global-Visibility-Epoch"] ||
+            before["X-Norva-Global-Visibility-Epoch"] !== after["X-Norva-Global-Visibility-Epoch"]) {
+          throw new HttpError(409, "Catalog policy changed during playback preparation");
+        }
+      },
+      assertSourceCurrent: async () => {
+        await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
+        await assertSourceCatalogVisible(sourceId, userId, db);
+        if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+        if (!await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) {
+          throw new HttpError(409, "Playback episode is no longer visible");
+        }
+        const currentCoordinates = await resolveCatalogSeriesEpisodeCoordinates(
+          db, userId, sourceId, parentSeriesId, itemId,
+        );
+        if (episodeCoordinates && !currentCoordinates) {
+          throw new HttpError(409, "Playback episode coordinates changed");
+        }
+        const currentTarget = currentCoordinates
+          ? await resolveExactEpisodePlaybackTarget(sourceId, userId, currentCoordinates, requestedPlaybackHint, db)
+          : await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
+        if (await sha256Hex(currentTarget.targetUrl) !== targetUrlHash) {
+          throw new HttpError(409, "Playback episode changed during preparation");
+        }
+        await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
+      },
+      cleanup: async () => {
+        try { await expirePlaybackSession(session.id, userId, db); }
+        catch (_) { await cleanupGateway?.(); }
+      },
+    });
+  };
+
   if (mode === "direct") {
     // Direct playback gets exactly one transport. A hidden gateway fallback
     // would turn one provider refusal into a second concurrent connection and
     // obscure the original HTTP/network cause.
+    await bindPreparedSeriesReceipt();
     return {
       session: publicPlaybackSession(session),
       playback: {
@@ -2836,6 +2882,7 @@ async function createPlaybackSessionCore(
           });
         } catch (_) { /* exact-language union is best-effort; playback must continue */ }
       }
+      await bindPreparedSeriesReceipt();
       return {
         session: publicPlaybackSession(session),
         playback: {
@@ -2908,6 +2955,7 @@ async function createPlaybackSessionCore(
         });
       }
       if (relayCommit.waitMs) await sleep(relayCommit.waitMs);
+      await bindPreparedSeriesReceipt();
       return {
         session: publicPlaybackSession(session),
         playback: {
@@ -3119,6 +3167,7 @@ async function createPlaybackSessionCore(
   // Internal timing only: no account, source, target URL or access token.
   console.info(JSON.stringify({ event: "playback_gateway_startup_phases",
     startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
+  await bindPreparedSeriesReceipt(gateway.cleanupCreatedSession);
   return {
     session: publicPlaybackSession(session),
     playback: {
@@ -7142,6 +7191,51 @@ async function resolveCatalogSeriesEpisodeCoordinates(
     // Rolling-deploy safety: playback remains available before the exact episode
     // registry migration lands, but no episode cache/fanout is trusted.
     return null;
+  }
+}
+
+function seriesInfoPayloadContainsEpisode(payload: unknown, episodeId: string): boolean {
+  const raw = recordOrEmpty(payload).episodes;
+  const groups: unknown[] = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) ? Object.values(raw) : [];
+  return groups.some((group) => {
+    const episodes = Array.isArray(group) ? group : [group];
+    return episodes.some((episode) => stringOr(recordOrEmpty(episode).id, "") === episodeId);
+  });
+}
+
+async function hasVisibleSeriesEpisodeReceiptProof(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  parentSeriesId: string,
+  episodeId: string,
+): Promise<boolean> {
+  if (!parentSeriesId || !episodeId) return false;
+  try {
+  const { data: parent, error: parentError } = await db
+    .from("cloud_catalog_visible_title_variants").select("id")
+    .eq("user_id", userId).eq("source_id", sourceId)
+    .eq("item_type", "series").eq("external_id", parentSeriesId).limit(1);
+  if (parentError || !Array.isArray(parent) || parent.length !== 1) return false;
+
+  // A registered episode is the strongest proof. During a new provider import,
+  // inventory registration can lag its already-visible parent variant. In that
+  // case the provider's server-owned series-info cache proves the exact episode
+  // without a new provider request or trusting a client-supplied URL.
+  if (await resolveCatalogSeriesEpisodeCoordinates(db, userId, sourceId, parentSeriesId, episodeId)) {
+    return true;
+  }
+  const serverHost = await resolveSourceHost(sourceId, userId, db);
+  if (!serverHost) return false;
+  const { data: cached, error: cacheError } = await db
+    .from("cloud_series_info_cache").select("payload")
+    .eq("server_host", serverHost).eq("series_id", parentSeriesId).maybeSingle();
+  return !cacheError && seriesInfoPayloadContainsEpisode(cached?.payload, episodeId);
+  } catch (_) {
+    // An unavailable optional proof keeps the ordinary visibility fence.
+    return false;
   }
 }
 
