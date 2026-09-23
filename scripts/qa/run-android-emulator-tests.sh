@@ -31,4 +31,9 @@ case "$platform" in
     ;;
 esac
 
+collect_captures() {
+  mkdir -p app/build/outputs/androidTest-results/connected/captures
+  adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/ || true
+}
+trap collect_captures EXIT
 gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace

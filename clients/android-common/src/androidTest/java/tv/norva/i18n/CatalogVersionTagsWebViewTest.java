@@ -103,6 +103,7 @@ public class CatalogVersionTagsWebViewTest {
                 assertEquals("Packaged fonts settled", "true", fontsReady);
                 for (String locale : LOCALES) for (String kind : new String[] {"movie", "series"}) {
                     String result = evaluate(instrumentation, holder.get(), fixtureScript(locale, kind, width));
+                    if (!"\"ok\"".equals(result)) saveCapture(instrumentation, holder.get(), "catalog-tags-failure-"+kind+"-"+locale+"-"+width+"-"+zoom+".png");
                     assertEquals("locale="+locale+" media="+kind+" width="+width+" contextFontScale="+configuration.fontScale+" textZoom="+zoom,
                         "\"ok\"", result);
                     if (zoom == 130 && ("fr".equals(locale) || "hi".equals(locale) || "ar".equals(locale))) {
@@ -126,7 +127,7 @@ public class CatalogVersionTagsWebViewTest {
             + "const ordered='"+kind+"'==='movie'?fixtures:p._orderedVersions;const cards=Array.from(list.querySelectorAll('button'));if(cards.length!==8)return 'card count '+cards.length;const seen=new Set();"
             + "for(let i=0;i<cards.length;i++){const item=ordered[i],card=cards[i],d=M.versionDescriptor(item,{siblings:fixtures,index:i,providerLanguageHints:true,resolveSourceName:p.getSourceName}),headline=card.querySelector('.version-headline'),meta=card.querySelector('.version-meta'),prefix=item.raw_title.slice(0,2);"
             + "if(headline.textContent!==p.displayLanguageStatus(d.headline))return 'renderer headline';if(meta.textContent!==d.meta)return 'renderer meta';"
-            + "const hint=api.t('ui_web_38fc9a457587',{defaultValue:'{{p0}} · Provider label',p0:prefix});if(d.internalProviderLabel!==hint||!meta.textContent.startsWith(prefix+' · '))return 'missing qualification '+prefix;"
+            + "const hint=api.t('ui_web_38fc9a457587',{defaultValue:'{{p0}} · Provider label',p0:prefix});if(d.internalProviderLabel!==hint||!meta.textContent.startsWith(prefix+' · '))return 'missing qualification '+JSON.stringify({prefix,hint,actual:d.internalProviderLabel,meta:meta.textContent,headline:d.headline,verified:fixtures===verified});"
             + "if(fixtures===unknown){if(d.audioSource==='file')return 'hint promoted to evidence';if(M.analyzeLanguageCompatibility(item,{preferredAudioLanguage:'hu'}).audio.state!=='unknown')return 'hint promoted to compatibility';}"
             + "else {if(d.headline!==M.languageDisplayFull('en')||d.audioSource!=='file')return 'observed soundtrack lost';if(M.analyzeLanguageCompatibility(item,{preferredAudioLanguage:'hu'}).audio.state!=='confirmed_absent')return 'hint overrides observed audio';}"
             + "const rect=card.getBoundingClientRect();if(rect.width<44||rect.height<44||rect.left< -1||rect.right>innerWidth+1)return 'card bounds '+JSON.stringify({w:rect.width,h:rect.height,l:rect.left,r:rect.right,v:innerWidth});"
