@@ -6598,7 +6598,6 @@ async function deleteSource(sourceId: string, userId: string, db: SupabaseClient
   // request already in flight cannot recreate work after the soft deletion.
   let providerAffinityHash = "";
   let providerIdle = false;
-  let drainStartedAt = "";
   if (!source.deleted_at && source.source_type === "xtream" && source.config_ciphertext) {
     const runtimeConfig = await getRuntimeConfig(db);
     const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
@@ -6609,7 +6608,6 @@ async function deleteSource(sourceId: string, userId: string, db: SupabaseClient
       try { host = new URL(serverUrl).host.toLowerCase(); } catch { /* source can still be removed */ }
       if (host) {
         providerAffinityHash = await sha256Hex(`${host}/${username}`);
-        drainStartedAt = new Date().toISOString();
         providerIdle = await revokeSourceStoryboardsOnGateways(
           sourceId, userId, providerAffinityHash, runtimeConfig,
         );
@@ -6633,15 +6631,31 @@ async function deleteSource(sourceId: string, userId: string, db: SupabaseClient
     .maybeSingle();
   if (error) throwDb(error, "Unable to delete provider account");
 
-  // Clear only the old activity fence attested idle by every configured
-  // Gateway. A newer heartbeat wins the timestamp comparison and remains busy.
+  // An extraction may send its last heartbeat while the first drain is stopping
+  // FFmpeg. Read that final activity after deletion, attest both Gateways idle
+  // again, then compare the exact row version. A viewer or new job writes its
+  // presence before opening the provider; its newer heartbeat wins the CAS.
   if (data?.id && providerAffinityHash && providerIdle) {
-    const { error: activityError } = await db.from("provider_account_activity")
-      .update({ kind: "catalog-refresh" })
-      .eq("account_key", providerAffinityHash)
-      .in("kind", ["gateway", "language-validation"])
-      .lte("last_seen_at", drainStartedAt);
-    if (activityError) console.warn("[norva-cloud] source activity fence cleanup unavailable");
+    const { data: activity, error: readError } = await db.from("provider_account_activity")
+      .select("kind,last_seen_at").eq("account_key", providerAffinityHash).maybeSingle();
+    if (readError) console.warn("[norva-cloud] source activity fence read unavailable");
+    else if (activity && ["gateway", "language-validation"].includes(activity.kind)) {
+      try {
+        const runtimeConfig = await getRuntimeConfig(db);
+        if (await revokeSourceStoryboardsOnGateways(
+          sourceId, userId, providerAffinityHash, runtimeConfig,
+        )) {
+          const { error: activityError } = await db.from("provider_account_activity")
+            .update({ kind: "catalog-refresh" })
+            .eq("account_key", providerAffinityHash)
+            .eq("kind", activity.kind)
+            .eq("last_seen_at", activity.last_seen_at);
+          if (activityError) console.warn("[norva-cloud] source activity fence cleanup unavailable");
+        }
+      } catch {
+        console.warn("[norva-cloud] source activity fence recheck unavailable");
+      }
+    }
   }
 
   return {
