@@ -46,7 +46,7 @@ a partial preview; that is a remaining UX issue.
 - Console also reported a probe response containing HTML instead of JSON and a
   telemetry reconciliation warning. Full playback diagnosis remains open.
 
-## Import modal correction prepared locally
+## Import modal correction deployed
 
 The provider wizard left `provider-access-wizard-modal` on the shared modal and
 left its footer hidden when transitioning to import progress. The correction
@@ -65,21 +65,76 @@ fixture using the actual SourceManager, NorvaModal and CSS was inspected at
 counters, and closing restored focus to the trigger. This fixture is not an
 Android font-scale test and does not certify provider data or translations.
 
-The additional provider-access UX suite has two existing failures from hardcoded
-asset version expectations (including `provider-access-config.js?v=1` and an old
-CSS hash). No full-suite pass is claimed.
+The fix was integrated on current production main rather than deploying the
+older checkout. The full regression suite, generated locale checks, region
+model, JavaScript syntax and Pages Functions compilation passed in the
+[production deployment](https://github.com/Admin-Adher/Norva/actions/runs/35871527892).
+The deployed SourceManager and main.css hashes are `f397fee0df` and `42c9814c8c`.
 
-No Android SDK/adb was available locally. Repository AGENTS.md requires an Android
-emulator replay for WebView UI changes; that gate remains pending. The modal
-correction has **not been deployed**.
+The [Android replay](https://github.com/Admin-Adher/Norva/actions/runs/35870728161)
+passed on API 35 with three-button and gesture navigation, system font scale
+1.3, WebView text zoom 100/130%, and 390x844, 360x640 and 844x390 viewports. It
+checks counter wrapping, horizontal overflow, footer visibility, button targets,
+background inertness and focus restoration. This is a focused modal test, not
+certification of Android playback or the whole application.
+
+## Progressive cinema publication deployed
+
+The old one-time preview guard is removed: each discovered movie/series category
+now contributes a bounded early page. Once cinema discovery is complete, a
+durable database-only publisher walks all current-version cinema rows before
+starting the Live TV discovery. It does not open an extra provider connection.
+Publication checkpoints only after successful projection, is bound to the exact
+source generation and import run, and resumes within the Edge time budget.
+
+Existing title projection and exact-file cache guards are retained. The normal
+finalizer still enriches the visible catalogue after provider identity is
+resolved and performs Live materialization, pruning and the READY transition.
+No second bulk import was launched against this one-connection account.
+
+Verification: **60 focused tests passed**, including paging, failed writes,
+continuation, superseding and cache/generation contracts. Both production Edge
+containers were checked after sequential restart; source-sync and cloud health
+passed. The patch was applied to the exact live baseline, preserving its prior
+catalogue epoch fixes. Receipts: `ops/hetzner/media/max-ott-import-20260923/`.
+
+This MAX OTT import had already entered the existing finalizer when the patch
+landed. Its increasing counts must not be attributed to the new publisher, and
+a fresh large-provider onboarding latency measurement is still outstanding.
+
+| Time UTC | Raw movies | Visible movie titles | Visible movie variants | Stage |
+| --- | --- | --- | --- | --- |
+| 14:17:30 | 158,384 | 28,551 | 28,645 | building_titles, 77% |
+| 14:23:06 | 158,384 | 35,872 | 36,021 | building_titles, 78% |
+
+## Playback diagnosis and replay
+
+- The original Spanish Tokyo Drift entry consistently returned HTTP 403 from
+  the provider media endpoint, with no video bytes. The account API reports an
+  active, authenticated account with zero active connections before the probe;
+  its VOD metadata declares MKV. Range/no-Range, normal player user agents and
+  the existing CONNECT/forward paths did not change that result. No credentials,
+  proxy settings or provider restrictions were changed.
+- A different MAX OTT title, **FR| Iron Man 2**, returned HTTP 206 and Matroska
+  bytes through the same account route. Its first browser attempt failed before
+  a frame; the retry played successfully (`readyState=4`, videoWidth=640,
+  advancing media time above 31 seconds). The first failure is not fully
+  attributed; a one-off successful retry is not proof of universal reliability.
+- Seeking to about **6:13**, leaving the player and using **Resume** restored
+  that position. After pressing Play, the timeline advanced beyond 6:40 with
+  decoded video. Playback was closed afterwards to release the account slot.
+- Therefore the whole provider is not unplayable. The original entry remains
+  unavailable upstream and cannot be repaired by changing Norva's decoder.
 
 ## Remaining QA
 
 1. Observe completed import and compare final visible titles/variants with raw
    entries, accounting for grouping and catalogue exclusions.
 2. Verify source/category/language filters and refresh after publication.
-3. Diagnose the failed movie and replay successful movie/series/live playback.
-4. Android replay and deploy the scoped modal correction after validation.
+3. Replay another cold movie start and series/live playback; resolve the
+   provider-side Tokyo Drift refusal with the provider if that title is needed.
+4. Measure a fresh import with the progressive publisher; Android playback is
+   separate from the completed modal layout replay.
 5. Import the second new provider after the user enters its credentials.
 
 The 100-reader campaign remains deferred at the user's request.

@@ -49,6 +49,7 @@ import {
   fetchBoundedProviderJson,
 } from "./bounded-provider-response.mjs";
 import { xtreamLanguageDeclarations } from "./xtream-language-declarations.mjs";
+import { cinemaInventoryIsStable, cinemaPublicationState, publishCinemaPages } from "./xtream-progressive-vod.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
@@ -783,6 +784,58 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     const username = typeof config.username === "string" && config.username.trim() ? config.username : "";
     const password = typeof config.password === "string" && config.password.length ? config.password : "";
     if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+    // Publish the complete stable cinema inventory BEFORE fetching Live TV.
+    // This lane uses database/cache data only, so it can proceed even when a
+    // viewer owns the provider connection. Its cursor survives Edge restarts.
+    if (cinemaInventoryIsStable(cursor)) {
+      const state = cinemaPublicationState(cursor, accessSnapshot.generationId);
+      if (!state.complete) {
+        const publication = await publishCinemaPages({
+          state,
+          deadline: deadline - 1500,
+          load: async (afterId: string, limit: number) => {
+            await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+            let query = db.from("cloud_media_items")
+              .select("id,user_id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available")
+              .eq("source_id", sourceId).eq("user_id", userId)
+              .eq("generation_id", accessSnapshot.generationId)
+              .eq("catalog_version", Number(cursor.runVersion))
+              .in("item_type", ["movie", "series"]).order("id").limit(limit);
+            if (afterId) query = query.gt("id", afterId);
+            const { data, error } = await query;
+            if (error) throwDb(error, "Unable to load discovered cinema items");
+            return (data || []) as LiveCatalogItem[];
+          },
+          project: async (rows: LiveCatalogItem[]) => {
+            const result = await refreshVodTitleProjection({
+              sourceId, userId, rows, db, generation: accessSnapshot,
+              xtreamConfig: { serverUrl, username, password },
+              mediaGatewayUrl: null, mediaGatewayToken: null,
+              vodInfoLimit: 0, tmdbValidateLimit: 0,
+              assertSourceCurrent: () => assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot),
+            });
+            if (result.skipped) throw new HttpError(409, "Source is no longer visible");
+          },
+          checkpoint: async (next: JsonRecord) => {
+            cursor.cinemaPublication = next;
+            cursor.attempts = 0;
+            await persist({
+              stage: "publishing_cinema",
+              publishedVod: Number(next.movies) + Number(next.series),
+              ...(Number(next.movies) > 0 ? { moviesReady: true } : {}),
+              ...(Number(next.series) > 0 ? { seriesReady: true } : {}),
+              ...(Number(next.movies) + Number(next.series) > 0 ? { browseReady: true } : {}),
+            });
+            await new Promise(resolve => setTimeout(resolve, 150));
+            return !superseded;
+          },
+        });
+        if (superseded || publication.superseded) return;
+        // Always yield once after publication; discovery gets its own budget.
+        await selfInvokeSyncStep(sourceId);
+        return;
+      }
+    }
     // Playback always wins on mono-account providers.  The foreground presence
     // ledger is updated before a playback session starts, so consult it before
     // the first provider request and park this durable cursor instead of
@@ -949,10 +1002,10 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
 
     const projectFirstCinemaBatch = async (itemType: "movie" | "series", batchRows: JsonRecord[]) => {
       const readyFlag = itemType === "movie" ? "moviesReady" : "seriesReady";
-      if (!batchRows.length || progress[readyFlag] === true) return;
+      if (!batchRows.length) return;
       // A provider category can contain tens of thousands of titles. Only read
-      // back one bounded database batch for the early shelf projection; the
-      // durable finalizer will project the full catalogue afterwards.
+      // back one bounded database batch from EVERY category for diverse early
+      // shelves. The cinema publication cursor drains the rest before Live TV.
       const externalIds = batchRows
         .slice(0, IMPORT_BATCH_SIZE)
         .map((row) => stringOr(row.external_id, ""))
@@ -1047,6 +1100,10 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
 
     if (cinemaFirst) {
       while (Date.now() < deadline && walkIdx < cinemaWalk.length) {
+        // Switch to the database-only cinema publisher at the next isolate,
+        // instead of starting the slow Live TV discovery on this same budget.
+        if (cinemaWalk[walkIdx].type === "live" && cinemaInventoryIsStable(cursor)
+          && !cinemaPublicationState(cursor, accessSnapshot.generationId).complete) break;
         await importDiscoveryTarget(cinemaWalk[walkIdx]);
         walkIdx += DISCOVER_CONCURRENCY;
         cursor.walkIdx = walkIdx;
@@ -1215,6 +1272,8 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     // actually computed one, so a transient empty fetch never drops a prior key.
     const providerKey = await providerKeyFromCategoryMaps(nameMaps);
     const finalHint: JsonRecord = { ...freshHint, contentSignature, syncProgress: progress, syncCursor: undefined };
+    // Keep normal finalization: the provider identity is promoted below, so its
+    // exact-file shared caches can enrich the already-browsable cinema rows.
     if (providerKey) finalHint.providerKey = providerKey;
     await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     await recordProviderIdentity(db, sourceId, userId, providerKey);
