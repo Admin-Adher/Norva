@@ -5,7 +5,7 @@ import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId,
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
 import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
-import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
+import { adoptActiveCatalogUserVisibilityEpoch, withActiveCatalogEpochRetry } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -3126,6 +3126,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         country: options.country || stringOr(config.country, "FR"),
         generation,
         writeBatchSize: 100,
+        withCurrentGeneration: operation => withActiveCatalogEpochRetry(db, sourceId, userId, generation, operation),
       });
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({

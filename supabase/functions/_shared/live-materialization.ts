@@ -104,9 +104,18 @@ export async function materializeLiveChunk(
   const plan = buildLiveMaterializationPlan(input);
   if (!plan.rawLive) return { rawLive: 0, logicalChannels: 0, liveVariants: 0 };
   const run = input.withCurrentGeneration || (async <T>(operation: () => Promise<T>) => await operation());
-  const insertedChannels = await run(() => upsertLiveChannelRows(db, plan.channelRows, input.generation, 0, plan.channelRows.length, undefined, input.writeBatchSize));
+  // Each operation performs one bounded SQL write. Revalidate between writes:
+  // a newly visible row or another import can advance the account cache epoch.
+  const batchSize = Math.max(1, Math.min(200, Math.trunc(input.writeBatchSize || 10)));
+  const insertedChannels: JsonRecord[] = [];
+  for (let offset = 0; offset < plan.channelRows.length; offset += batchSize) {
+    insertedChannels.push(...await run(() => upsertLiveChannelRows(db, plan.channelRows, input.generation, offset, batchSize, undefined, batchSize)));
+  }
   const channelIdByLogicalId = new Map(insertedChannels.map((row) => [String(row.logical_id), String(row.id)]));
-  const liveVariants = await run(() => upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId, input.generation, 0, plan.variantRows.length, undefined, input.writeBatchSize));
+  let liveVariants = 0;
+  for (let offset = 0; offset < plan.variantRows.length; offset += batchSize) {
+    liveVariants += await run(() => upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId, input.generation, offset, batchSize, undefined, batchSize));
+  }
   return { rawLive: plan.rawLive, logicalChannels: plan.channelRows.length, liveVariants };
 }
 
@@ -506,5 +515,5 @@ function nullableNumber(value: unknown) {
 }
 
 function throwDb(error: DbError, message: string): never {
-  throw new Error(`${message}: ${error.message || "database error"}`);
+  throw Object.assign(new Error(`${message}: ${error.message || "database error"}`), { code: error.code });
 }

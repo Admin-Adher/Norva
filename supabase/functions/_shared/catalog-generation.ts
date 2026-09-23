@@ -123,6 +123,30 @@ export async function adoptActiveCatalogUserVisibilityEpoch(
   expected.userVisibilityEpoch = current.userVisibilityEpoch;
 }
 
+// Retry only an idempotent active write whose account cache epoch advanced.
+// Source/config/head/generation changes still fail closed through adopt().
+export async function withActiveCatalogEpochRetry<T>(
+  db: SupabaseGenerationClient,
+  sourceId: string,
+  userId: string,
+  expected: ActiveCatalogGeneration,
+  operation: () => Promise<T>,
+): Promise<T> {
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expected);
+  const epoch = expected.userVisibilityEpoch;
+  let result: T;
+  try {
+    result = await operation();
+  } catch (error) {
+    if (!isStaleDatabaseConflict(error as { code?: unknown })) throw error;
+    await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expected);
+    if (expected.userVisibilityEpoch === epoch) throw error;
+    result = await operation();
+  }
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expected);
+  return result;
+}
+
 export function catalogGenerationFields(
   context: CatalogGenerationWriteContext,
 ): JsonRecord {
