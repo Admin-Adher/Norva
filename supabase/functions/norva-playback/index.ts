@@ -12891,6 +12891,15 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   if (rec?.status === "failed" && ageMs < 24 * 3600 * 1000) return { status: "failed", error: stringOrNull(rec.error) };
   if (url.searchParams.get("enqueue") !== "1") return { status: rec ? stringOr(rec.status, "none") : "none", why: "not-enqueued" };
 
+  // A storyboard reads the entire film through the provider's single account slot.
+  // During initial discovery that can stall visible catalogue growth for up to 75 minutes.
+  // Keep ready sprites readable, but defer new extraction until the source is ready.
+  const { data: source, error: sourceError } = await db.from("cloud_sources")
+    .select("sync_status").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  if (sourceError) throwDb(sourceError, "Unable to check storyboard source");
+  if (!source) return { status: "none", why: "source-unavailable" };
+  if (source.sync_status === "syncing") return { status: "none", why: "catalog-syncing" };
+
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return { status: "none", why: "gateway-not-configured" };
   // Container of the episode being watched (player-provided) — keeps the direct
