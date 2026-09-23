@@ -58,7 +58,7 @@ test('a registered episode still needs its currently visible owned parent', asyn
 });
 
 test('series receipts recheck authority and exact target after a visibility advance', () => {
-  assert.match(source, /await adoptActiveCatalogUserVisibilityEpoch\(db, sourceId, userId, playbackGeneration\);\s*markStartup\("targetResolutionMs"\)/);
+  assert.match(source, /await adoptActiveCatalogUserVisibilityEpoch\(db, sourceId, userId, playbackGeneration\);\s*await assertActiveCatalogGenerationCurrent\(db, sourceId, userId, playbackGeneration\);\s*markStartup\("targetResolutionMs"\)/);
   assert.match(source, /const bindPreparedSeriesReceipt = async[\s\S]*hasVisibleSeriesEpisodeReceiptProof[\s\S]*bindCompletedPlaybackReceipt/);
   assert.match(source, /assertSourceCurrent: async \(\) => \{[\s\S]*assertSourceCatalogVisible[\s\S]*hasVisibleSeriesEpisodeReceiptProof[\s\S]*currentTarget\.targetUrl[\s\S]*targetUrlHash/);
   assert.match(source, /finalizePlaybackReceiptResponse\(req, async \(\) => finalizeCatalogVisibilityResponse/);

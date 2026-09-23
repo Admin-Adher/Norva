@@ -2222,6 +2222,7 @@ async function createPlaybackSessionCore(
   // Progressive publication can advance the account-wide cache epoch without
   // changing this source's generation, head, config or visibility authority.
   await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   markStartup("targetResolutionMs");
   const targetUrl = resolved.targetUrl;
   const selectionFileSnapshot = (itemType === "movie" || itemType === "series") && !episodeCoordinates
