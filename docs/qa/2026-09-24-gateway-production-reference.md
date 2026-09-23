@@ -30,3 +30,24 @@ The first complete Linux run reported 28 failures among 5,057 tests. These were 
 - Replay of the previously failing suites: 220 tests, 216 pass, zero fail, four skips. A subsequent retained-TS profile regression plus M3U parser run: 13 pass, zero fail, one native FFmpeg skip.
 
 No production deployment has been made for this follow-up. CI, build reconciliation, configuration harmonization, and the commercial end-to-end requirements remain open.
+
+## Rebuilt runtime reference
+
+`services/media-gateway/Dockerfile.production-reference` replaces the entire application source tree on the immutable production codec image. It rejects package/lock drift before replacing any source. This preserves the deployed native dependencies instead of silently switching to the different current generic Dockerfile toolchain.
+
+Build verified on the deployment host from Git archive `cfc5115c9e8631c06c95a2267e4463e646109405`:
+
+```sh
+DOCKER_BUILDKIT=0 docker build --pull=false --network=none \
+  --build-arg NORVA_SOURCE_REVISION=cfc5115c9e8631c06c95a2267e4463e646109405 \
+  -t norva-media-gateway:reference-cfc5115c \
+  -f services/media-gateway/Dockerfile.production-reference services/media-gateway
+```
+
+- Built image: `dbfaaea9a69b` (local tag above).
+- All 71 source files match the repository after LF normalization. The older count of 67 covered JavaScript files only; four Python files are also included.
+- Against the immutable base image, substantive changes are the runtime `index.js` snapshot and the three primary-headroom fixes. FFmpeg, ffprobe, whisper-cli and the Whisper model SHA256 values match the base exactly.
+- A fresh container, `--network=none --memory=512m --cpus=1`, successfully served health version167 with zero active sessions. No production configuration, owner data or mounts were passed to this startup check. This is not a playback/VAAPI validation.
+- The digest is a local Docker image ID, not a registry manifest. The host's classic builder resolves it without contacting a registry. The first BuildKit attempt correctly failed to resolve a registry manifest; it did not build or deploy an alternative image. Rebuilding on another host requires saving/loading this immutable base image. A future builder migration must preserve this dependency explicitly; the classic builder is deprecated.
+
+Production still runs the previous image. Main/pilot volume and feature configuration differences remain to be reconciled before rollout.
