@@ -1230,13 +1230,35 @@ class MoviesPage {
     }
 
     async loadCloudCategories() {
+        const requestId = (this._categoryRequestId || 0) + 1;
+        this._categoryRequestId = requestId;
+        const requestedSource = String(this.selectedCloudSourceId() || '').trim().toLowerCase();
+        const isCurrent = () => requestId === this._categoryRequestId
+            && String(this.selectedCloudSourceId() || '').trim().toLowerCase() === requestedSource;
+        if (this._categorySourceScope !== requestedSource) {
+            this._categorySourceScope = requestedSource;
+            this.categories = [];
+            this.categoryMulti.setOptions([]);
+        }
         try {
             this.hiddenCategoryIds = new Set();
             // Mirror Manage Content: the dropdown lists the clean, curated genre
             // buckets (with counts) instead of the raw provider category names.
             // Picking a genre opens that genre's full grid (see onFiltersChanged).
-            const source = this.selectedCloudSourceId();
-            const payload = await API.media.genreSummary({ type: 'movie', ...(source ? { source } : {}) });
+            let payload;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    payload = await API.media.genreSummary({ type: 'movie',
+                        ...(requestedSource ? { source: requestedSource } : {}) });
+                    break;
+                } catch (error) {
+                    if (!isCurrent()) return;
+                    const code = error?.payload?.details?.code || error?.payload?.code || error?.code;
+                    if (code !== 'CATALOG_VISIBILITY_EPOCH_CHANGED' || attempt === 2) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+                }
+            }
+            if (!isCurrent()) return;
             const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
             // The API exposes the profile mask at payload.hidden. Keep accepting
             // the per-row flag as well for compatibility with an older response
@@ -1259,6 +1281,9 @@ class MoviesPage {
             this.categoryMulti.setOptions(options);
             this.restoreSavedCategories(options);
         } catch (err) {
+            if (!isCurrent()) return;
+            this.categories = [];
+            this.categoryMulti.setOptions([]);
             console.error('Error loading cloud movie genres:', err);
         }
     }

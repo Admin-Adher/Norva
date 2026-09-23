@@ -1245,15 +1245,34 @@ class SeriesPage {
     async loadCloudCategories() {
         const requestId = (this._categoryRequestId || 0) + 1;
         this._categoryRequestId = requestId;
+        const requestedSource = String(this.selectedCloudSourceId() || '').trim().toLowerCase();
+        const isCurrent = () => requestId === this._categoryRequestId
+            && String(this.selectedCloudSourceId() || '').trim().toLowerCase() === requestedSource;
+        if (this._categorySourceScope !== requestedSource) {
+            this._categorySourceScope = requestedSource;
+            this.categories = [];
+            this.categoryMulti.setOptions([]);
+        }
         try {
             this.hiddenCategoryIds = new Set();
             // Mirror Manage Content: list the clean, curated genre buckets (with
             // counts) instead of raw provider category names. Picking a genre
             // opens that genre's full grid (see onFiltersChanged).
-            const source = this.selectedCloudSourceId();
-            const payload = await API.media.genreSummary({ type: 'series', ...(source ? { source } : {}) });
+            let payload;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    payload = await API.media.genreSummary({ type: 'series',
+                        ...(requestedSource ? { source: requestedSource } : {}) });
+                    break;
+                } catch (error) {
+                    if (!isCurrent()) return;
+                    const code = error?.payload?.details?.code || error?.payload?.code || error?.code;
+                    if (code !== 'CATALOG_VISIBILITY_EPOCH_CHANGED' || attempt === 2) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+                }
+            }
             // Source changes and later opens win over an older in-flight response.
-            if (requestId !== this._categoryRequestId || source !== this.selectedCloudSourceId()) return;
+            if (!isCurrent()) return;
             const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
             const hiddenBuckets = new Set([
                 ...(Array.isArray(payload?.hidden) ? payload.hidden.map(String) : []),
@@ -1280,6 +1299,9 @@ class SeriesPage {
                 (restored || this.categoryMulti.btn)?.focus({ preventScroll: true });
             }
         } catch (err) {
+            if (!isCurrent()) return;
+            this.categories = [];
+            this.categoryMulti.setOptions([]);
             console.error('Error loading cloud series genres:', err);
         }
     }

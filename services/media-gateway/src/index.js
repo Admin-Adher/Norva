@@ -3255,6 +3255,23 @@ app.post('/sessions/stop-provider-affinities', requireGatewayAuth, async (req, r
     });
 });
 
+// Source removal revokes only that owner's storyboard work. An affinity hash is
+// also supplied for jobs queued before source IDs were added to the protocol.
+app.post('/jobs/revoke-source-storyboards', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const sourceId = String(req.body?.sourceId || '');
+    const ownerId = String(req.body?.ownerId || '');
+    const affinityHash = String(req.body?.affinityHash || '').toLowerCase();
+    if (!/^[0-9a-f-]{36}$/i.test(sourceId) || !/^[0-9a-f-]{36}$/i.test(ownerId)
+        || !/^[0-9a-f]{64}$/.test(affinityHash)) {
+        return res.status(400).json({ error: 'Invalid source revocation' });
+    }
+    const outcome = await revokeSourceStoryboards({ sourceId, ownerId, affinityHash });
+    return res.status(outcome.providerDrained ? 200 : 409).json({
+        ok: outcome.providerDrained, protocol: 1, ...outcome,
+    });
+});
+
 app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
     try {
         const {
@@ -8715,7 +8732,7 @@ app.post('/ocr-async/:token', (req, res) => {
 // Supabase Storage upload URL, then POST the tile metadata to the edge callback. Rides the same
 // job queue as transcription (account lock, pregen gate, priority classes) — one provider
 // connection, deferred while the account is watching.
-app.post('/storyboard-async/:token', (req, res) => {
+app.post('/storyboard-async/:token', async (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
@@ -8724,9 +8741,22 @@ app.post('/storyboard-async/:token', (req, res) => {
     }
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const jobId = String(req.query.jobId || '');
+    const sourceId = String(req.query.sourceId || '');
     const callbackUrl = String(req.query.callback || '');
-    if (!jobId || !isBackendUrl(callbackUrl)) {
-        return res.status(400).json({ error: 'jobId and a valid backend callback are required' });
+    if (!jobId || !/^[0-9a-f-]{36}$/i.test(sourceId) || !isBackendUrl(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId, sourceId and a valid backend callback are required' });
+    }
+    if (sourceStoryboardRevoked(claims.uid, sourceId)) {
+        return res.status(410).json({ error: 'Source removed', code: 'source_removed' });
+    }
+    const admitted = await storyboardSourceActive(callbackUrl, claims.uid, sourceId);
+    if (admitted !== true) {
+        return res.status(admitted === false ? 410 : 503).json({
+            error: admitted === false ? 'Source removed' : 'Source validation unavailable',
+        });
+    }
+    if (sourceStoryboardRevoked(claims.uid, sourceId)) {
+        return res.status(410).json({ error: 'Source removed', code: 'source_removed' });
     }
     const uploadUrl = String(req.query.uploadUrl || '');
     if (!isBackendUrl(uploadUrl, '/storage/')) {
@@ -8736,7 +8766,7 @@ app.post('/storyboard-async/:token', (req, res) => {
     const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 1;
     const job = {
         kind: 'storyboard', url: claims.url, ua: claims.ua || FFMPEG_USER_AGENT,
-        jobId, callbackUrl, uploadUrl, duration, uid: claims.uid, prio,
+        jobId, sourceId, callbackUrl, uploadUrl, duration, uid: claims.uid, prio,
     };
     const ok = enqueueTranscribe(job);
     if (!ok) return res.status(429).json({ error: 'Job queue full' });
@@ -9936,6 +9966,85 @@ async function nextRunnableJob(queue, kind) {
 // whisper from starving the stream-proxying duties of this same instance.
 const transcribeQueue = [];
 let transcribeBusy = false;
+let activeStoryboardJob = null;
+const revokedStoryboardSources = new Map();
+const STORYBOARD_SOURCE_REVOCATION_MS = 2 * 60 * 60_000;
+
+function storyboardSourceRevocationKey(ownerId, sourceId) {
+    return `${ownerId}:${sourceId}`;
+}
+function sourceStoryboardRevoked(ownerId, sourceId) {
+    const key = storyboardSourceRevocationKey(ownerId, sourceId);
+    const until = revokedStoryboardSources.get(key) || 0;
+    if (until <= Date.now()) { revokedStoryboardSources.delete(key); return false; }
+    return true;
+}
+async function storyboardSourceActive(callbackUrl, ownerId, sourceId) {
+    try {
+        const response = await fetch(callbackUrl.replace(/\/[^/]*$/, '/storyboard-admission'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ ownerId, sourceId }),
+            signal: AbortSignal.timeout(8_000),
+        });
+        if (response.status === 410) return false;
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload?.active === true ? true : null;
+    } catch (_) { return null; }
+}
+
+function storyboardBelongsToRemovedSource(job, { sourceId, ownerId, affinityHash }) {
+    if (job?.kind !== 'storyboard' || job.uid !== ownerId) return false;
+    if (job.sourceId) return job.sourceId === sourceId;
+    return providerAffinityHashForGatewayKey(proxyKeyFromUrl(job.url)) === affinityHash;
+}
+
+async function revokeSourceStoryboards(target) {
+    const now = Date.now();
+    for (const [key, until] of revokedStoryboardSources) {
+        if (until <= now) revokedStoryboardSources.delete(key);
+    }
+    if (revokedStoryboardSources.size >= 4096) {
+        revokedStoryboardSources.delete(revokedStoryboardSources.keys().next().value);
+    }
+    revokedStoryboardSources.set(storyboardSourceRevocationKey(target.ownerId, target.sourceId),
+        now + STORYBOARD_SOURCE_REVOCATION_MS);
+    let queued = 0;
+    for (let index = transcribeQueue.length - 1; index >= 0; index--) {
+        const job = transcribeQueue[index];
+        if (!storyboardBelongsToRemovedSource(job, target)) continue;
+        job.cancelled = true;
+        transcribeQueue.splice(index, 1);
+        queued++;
+        void fetch(job.callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ jobId: job.jobId, ok: false, error: 'source_removed' }),
+            signal: AbortSignal.timeout(10_000),
+        }).catch(() => {});
+    }
+    const active = storyboardBelongsToRemovedSource(activeStoryboardJob, target)
+        ? activeStoryboardJob : null;
+    if (active) {
+        active.cancelled = true;
+        await stopChildProcess(active.activeChild);
+        await Promise.race([active.childClosed || Promise.resolve(),
+            new Promise(resolve => setTimeout(resolve, 5000))]);
+    }
+    wakeQueueDrain(transcribeWakeState);
+    const providerDrained = !active?.activeChild;
+    const providerIdle = providerDrained
+        && !Array.from(accountExtractions).some(([key, entries]) => (
+            providerAffinityHashForGatewayKey(key) === target.affinityHash && entries.size > 0
+        ))
+        && !Array.from(sessions.values()).some(session => session?.sourceUrl
+            && providerAffinityHashForGatewayKey(proxyKeyFromUrl(session.sourceUrl)) === target.affinityHash
+            && isSessionBlockingProviderSlot(session))
+        && !Array.from(rawPumps).some(pump =>
+            providerAffinityHashForGatewayKey(pump?.proxyKey || '') === target.affinityHash);
+    return { providerDrained, providerIdle, revokedQueued: queued, stoppedActive: active ? 1 : 0 };
+}
 function createQueueWakeState() { return { waiter: null, version: 0 }; }
 function wakeQueueDrain(state) {
     if (!state) return;
@@ -10003,7 +10112,11 @@ async function drainTranscribeQueue() {
     } finally { transcribeBusy = false; }
 }
 async function runTranscribeJob(job) {
-    if (job.kind === 'storyboard') return runStoryboardJob(job);
+    if (job.kind === 'storyboard') {
+        activeStoryboardJob = job;
+        try { return await runStoryboardJob(job); }
+        finally { if (activeStoryboardJob === job) activeStoryboardJob = null; }
+    }
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
@@ -10110,6 +10223,7 @@ function extractStoryboardSprite(
     timeoutMs,
     proxyKey = '',
     globalPreemptible = true,
+    job = null,
 ) {
     return new Promise((resolve) => {
         const args = [
@@ -10131,6 +10245,10 @@ function extractStoryboardSprite(
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        if (job) {
+            job.activeChild = child;
+            job.childClosed = new Promise(done => child.once('close', done));
+        }
         const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         let timedOut = false;
@@ -10138,6 +10256,7 @@ function extractStoryboardSprite(
         child.stderr.on('data', (d) => { stderr += d.toString(); });
         child.on('error', (e) => { clearTimeout(timer); reg.release?.(); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
+            if (job?.activeChild === child) job.activeChild = null;
             clearTimeout(timer);
             reg.release?.();
             if (reg.preempted) {
@@ -10165,6 +10284,15 @@ async function runStoryboardJob(job) {
     const outputPath = path.join(os.tmpdir(), `norva-sb-${Date.now()}-${crypto.randomUUID()}.jpg`);
     let payload;
     try {
+        const sourceActive = job.cancelled || sourceStoryboardRevoked(uid, job.sourceId) ? false
+            : (job.sourceId ? await storyboardSourceActive(callbackUrl, uid, job.sourceId) : false);
+        if (sourceActive !== true) {
+            payload = sourceActive === false
+                ? { jobId, ok: false, error: 'source_removed' }
+                : { requeue: true };
+        } else if (job.cancelled || sourceStoryboardRevoked(uid, job.sourceId)) {
+            payload = { jobId, ok: false, error: 'source_removed' };
+        } else {
         postJobHeartbeat(job, 'extracting');
         const dur = duration > 0 ? duration : 2 * 3600; // unknown duration → assume a 2h grid
         const intervalSec = Math.max(10, Math.ceil(dur / STORYBOARD_MAX_TILES));
@@ -10174,7 +10302,7 @@ async function runStoryboardJob(job) {
         // floored at 15 min for shorts and capped at 75 min for slow panels.
         const timeoutMs = Math.min(75 * 60_000, Math.max(15 * 60_000, Math.round(dur * 600)));
         const r = await withAccountJobLock(accountJobKey(uid, url), () =>
-            backgroundJobBlockedByViewer(job)
+            job.cancelled || sourceStoryboardRevoked(uid, job.sourceId) || backgroundJobBlockedByViewer(job)
                 ? { ok: false, preempted: true, error: 'preempted by viewer playback before storyboard extraction' }
                 : extractStoryboardSprite(
                 url,
@@ -10186,9 +10314,12 @@ async function runStoryboardJob(job) {
                 timeoutMs,
                 uid,
                 jobPrio(job) !== JOB_PRIORITY.viewer,
+                job,
             ));
         if (!r.preempted) markStoryboardRun(url); // only a real provider read starts the cooldown
-        if (r.preempted) {
+        if (job.cancelled || sourceStoryboardRevoked(uid, job.sourceId)) {
+            payload = { jobId, ok: false, error: 'source_removed' };
+        } else if (r.preempted) {
             payload = { requeue: true };
         } else if (!r.ok) {
             payload = { jobId, ok: false, error: ('Storyboard extraction failed: ' + r.error).slice(0, 300) };
@@ -10205,10 +10336,14 @@ async function runStoryboardJob(job) {
                 ? { jobId, ok: true, cols: STORYBOARD_COLS, rows, count, intervalSec, bytes: sprite.length }
                 : { jobId, ok: false, error: `Storage upload failed (${up.status})` };
         }
+        }
     } catch (e) {
         payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
     } finally {
         fsp.unlink(outputPath).catch(() => {});
+    }
+    if (job.cancelled || sourceStoryboardRevoked(uid, job.sourceId)) {
+        payload = { jobId, ok: false, error: 'source_removed' };
     }
     if (payload && payload.requeue) {
         console.log(`[media-gateway] storyboard job ${jobId} preempted by viewer — re-queued`);
