@@ -108,6 +108,7 @@ function loadFastStartHarness(overrides = {}) {
     '\nfunction multiAudioHlsEnabled(',
   );
   const context = {
+    retainedVodStartupPolicy: require('../services/media-gateway/src/finite-vod-startup').retainedVodStartupPolicy,
     crypto,
     TextDecoder,
     Buffer,
@@ -1360,7 +1361,7 @@ test('complete-cache continuation revokes playback, keeps the same owners, and r
     mkvCompleteHlsCacheProofFinalized: false,
     vodInputStrongValidator: { type: 'last-modified-sha256', digest: 'c'.repeat(64) },
   };
-  assert.equal(harness.assess(weakValidator).reason, 'strong-validator-required');
+  assert.equal(harness.assess(weakValidator).reason, 'content-attestation-pending');
 });
 
 test('a viewer preempts and drains a detached cache continuation before provider startup may continue', async () => {
@@ -1828,6 +1829,7 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
   };
   const startFfmpegSource = between(GATEWAY, 'function startFfmpeg(', '\nfunction seekArgsForSession(').trim();
   const startFfmpeg = vm.runInNewContext(`(${startFfmpegSource})`, {
+    boundedHlsArgs: require('../services/media-gateway/src/bounded-hls-output').boundedHlsArgs,
     path,
     multiAudioHlsEnabled: () => false,
     exactSubtitleHlsEnabled: () => false,

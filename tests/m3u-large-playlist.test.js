@@ -16,6 +16,27 @@ async function boundedModule() {
   return import('../supabase/functions/_shared/bounded-provider-response.mjs');
 }
 
+test('EXTINF quoted commas and series fields survive single-byte streaming with fractional duration', async () => {
+  const { readM3uPlaylistStream } = await streamModule();
+  const playlist = "#EXTM3U\n#EXTINF:125.5 tvg-name='Episode, one' group-title=Drama media-type=series series-name=Fixture season-number=2 episode-number=3,Episode title\nhttps://provider.invalid/episode.mp4\n";
+  const result = await readM3uPlaylistStream(chunkedStream(playlist, 1).stream);
+  assert.equal(result.items.length, 1);
+  const item = result.items[0];
+  assert.equal(item.title, 'Episode title');
+  assert.equal(item.tvgId, 'Episode, one');
+  assert.equal(item.group, 'Drama');
+  assert.equal(item.durationSeconds, 125.5);
+  assert.deepEqual(item.media, { mediaType: 'series', tvgType: '', seriesName: 'Fixture', seriesId: '', season: '2', episode: '3' });
+});
+
+test('EXTINF duration rejects sentinels, coercion and unbounded timelines', async () => {
+  const { m3uDurationSeconds } = await import('../supabase/functions/_shared/m3u-duration.mjs');
+  for (const value of [-1, 0, 86401, Infinity, NaN, true, {}, '1e3', '0x10', '125 seconds', '-1', 'Infinity', '']) {
+    assert.equal(m3uDurationSeconds(value), null);
+  }
+  for (const value of [0.5, 86400, ' 125.5 ', '.5']) assert.equal(m3uDurationSeconds(value), Number(value));
+});
+
 function chunkedStream(value, chunkSize = 1024) {
   const bytes = new TextEncoder().encode(value);
   let offset = 0;

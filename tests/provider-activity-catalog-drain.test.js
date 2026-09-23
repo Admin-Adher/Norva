@@ -159,7 +159,7 @@ test('Gateway reports short catalogue holders immediately and drains an active h
     registration,
     /Promise\.resolve\(\)\.then\(\(\) => reportAccountActivity\(\)\)/,
   );
-  assert.match(activityGroups, /if \(entry\.preempted \|\| entry\.reportActivity === false\) continue/);
+  assert.match(activityGroups, /if \(\(entry\.preempted && !isUndrainedProviderMetadata\(entry\)\) \|\| entry\.reportActivity === false\) continue/);
   assert.match(
     gateway,
     /const PROVIDER_CATALOG_REFRESH_SLOT_RELEASE_DELAY_MS = clampInt\([\s\S]*45_000[\s\S]*120_000/,

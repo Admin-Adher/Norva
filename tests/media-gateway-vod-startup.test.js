@@ -527,7 +527,10 @@ test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes
     const encoder = fs.readFileSync(path.join(ROOT, 'services/media-gateway/src/video-encoder.js'), 'utf8');
     assert.match(encoder, /'-force_key_frames',\s*`expr:gte\(t,n_forced\*\$\{boundedTargetSeconds\}\)`/);
     assert.match(source, /'-hls_time',\s*String\(session\.hlsTargetSeconds\s*\|\|\s*4\)/);
-    assert.match(source, /'-hls_flags',\s*'independent_segments\+temp_file'/);
+    assert.match(source, /\.\.\.boundedHlsArgs\(session\.boundedHlsOutput, outputAdmission\)/);
+    const { boundedHlsArgs } = require('../services/media-gateway/src/bounded-hls-output');
+    const flags = boundedHlsArgs(false);
+    assert.equal(flags[flags.indexOf('-hls_flags') + 1], 'independent_segments+temp_file');
     assert.doesNotMatch(source, /split_by_time/);
 });
 

@@ -164,10 +164,11 @@ test('local decoder has exactly one inherited pipe input, bounded output and har
     const controller=new AbortController();let killed=0,captured;
     const result=decodeStartupSegment('/ffmpeg',42,{signal:controller.signal,spawnImpl:(bin,args,opts)=>{
         captured={bin,args,opts};const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();
+        child.stdio=opts.stdio.map((kind,index)=>index===1?child.stdout:index===2?child.stderr:kind==='pipe'?new EventEmitter():null);
         child.kill=()=>{killed++;queueMicrotask(()=>child.emit('close',137));};return child;
     }});
     controller.abort();assert.equal(await result,false);assert.equal(killed,1);
-    assert.deepEqual(captured.opts.stdio,['ignore','pipe','pipe',42]);
+    assert.deepEqual(captured.opts.stdio,['ignore','pipe','pipe',42,'pipe']);
     assert.equal(captured.args.filter(a=>a==='-i').length,1);
     assert.equal(captured.args[captured.args.indexOf('-protocol_whitelist')+1],'pipe');
 });

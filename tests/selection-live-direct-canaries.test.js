@@ -201,6 +201,7 @@ test('the actual Edge resolver isolates canary circuits by exact public media wh
   const end = edge.indexOf('\n// Series have no directly-playable stream id', start);
   assert.ok(start >= 0 && end > start);
   const context = vm.createContext({
+    isM3uEpisodeId: (await import("../supabase/functions/_shared/m3u-series-info.mjs")).isM3uEpisodeId,
     resolveSelectionLiveDelivery: resolver, resolveDiscoveryTarget: async ({ targetUrl }) => targetUrl,
     resolveObservedVodContainer: async () => null, mediaReadFromCatalog: () => true,
     resolveSourceHost: async () => 'public.example', recordOrEmpty: value => value || {},

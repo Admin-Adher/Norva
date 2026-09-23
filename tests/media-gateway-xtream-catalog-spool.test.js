@@ -734,6 +734,7 @@ test('viewer playback preempts catalogue construction before any upstream fetch'
   const source = extractFunction('fetchProviderArrayToXtreamCatalogSpool');
   let fetchCalls = 0;
   const fetchProviderArrayToXtreamCatalogSpool = vm.runInNewContext(`(${source})`, {
+    createProviderMetadataTransport: require('../services/media-gateway/src/provider-metadata-transport').createProviderMetadataTransport,
     AbortController,
     String,
     accountExtractions: new Map(),
@@ -744,7 +745,7 @@ test('viewer playback preempts catalogue construction before any upstream fetch'
       return error;
     },
     viewerPlaybackActiveLocally: () => true,
-    fetch: async () => { fetchCalls += 1; },
+    openXtreamProviderResponse: async () => { fetchCalls += 1; throw new Error('viewer must prevent upstream opening'); },
     setTimeout,
     clearTimeout,
   });

@@ -229,6 +229,7 @@ test('actual Gateway excludes an out-of-cohort capture action BEFORE touching re
 test('actual Edge capability generator signs all capture modes, complete track list and opaque file scope',async()=>{
     const secret='fixture-secret-that-is-not-a-production-credential';
     const context=vm.createContext({HttpError,Date,Number,Set,encoder:new TextEncoder(),
+        Deno:{env:{get:()=>undefined}},
         PLAYBACK_SESSION_UUID_PATTERN:/^[a-f0-9-]{36}$/,LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL:1,
         getRuntimeConfig:async()=>({mediaGatewayRouting:{defaultRoute:{url:'https://gateway.invalid',token:secret}}}),
         hmacBase64Url:async(key,value)=>crypto.createHmac('sha256',key).update(value).digest('base64url'),

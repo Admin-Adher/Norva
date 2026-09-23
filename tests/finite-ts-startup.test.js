@@ -50,12 +50,26 @@ test('finite TS accepts a dated exact server probe without inventing in-band com
     assert.equal(finiteTsProfileEligible(session), true);
 });
 
+test('retained server-probed TS headers keep the finite-file gate on resume', () => {
+    const session = exact();
+    session.codecProfileSource = session.codecProfile.probeSource = 'gateway_inband';
+    assert.equal(finiteTsProfileEligible(session), true);
+    session.forceFullInputProbe = true;
+    assert.equal(finiteTsProfileEligible(session), false);
+    assert.equal(finiteTsProfileEligible(session, Date.now(), { allowFullProbe: true }), true);
+    for (const field of ['probedAt', 'fileSizeBytes', 'durationSeconds', 'audioTracks']) {
+        const incomplete = structuredClone(session);
+        delete incomplete.codecProfile[field];
+        assert.equal(finiteTsProfileEligible(incomplete, Date.now(), { allowFullProbe: true }), false, field);
+    }
+});
+
 test('finite TS rejects live TV, provider hints, incomplete or conflicting maps and containers', () => {
     const changes = [
         s => { s.playbackIdentity.itemType = 'live'; },
         s => { s.playbackIdentity = {}; },
         s => { s.codecProfileSource = 'request_flat'; },
-        s => { s.codecProfile.probeSource = 'gateway_inband'; },
+        s => { s.codecProfile.probeSource = 'provider'; },
         s => { delete s.codecProfile.probedAt; },
         s => { s.codecProfile.probedAt = '2099-01-01'; },
         s => { s.codecProfile.durationSeconds = 0; },
@@ -76,7 +90,7 @@ test('finite TS rejects live TV, provider hints, incomplete or conflicting maps 
     }
 });
 
-test('TS reduced probing suppresses only redundant tail duration discovery and resets on full fallback', () => {
+test('TS reduced probing suppresses only redundant tail duration discovery and retains exact duration on full stream-map fallback', () => {
     const h = probeHarness(); const session = exact();
     assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), [
         '-analyzeduration', '500000', '-probesize', '524288', '-skip_estimate_duration_from_pts', '1',
@@ -85,7 +99,7 @@ test('TS reduced probing suppresses only redundant tail duration discovery and r
     assert.equal(session.minHlsStartupSegments, 2);
     assert.equal(session.minHlsStartupBufferSeconds, 12);
     session.forceFullInputProbe = true;
-    assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), ['-analyzeduration', '8000000', '-probesize', '8000000']);
+    assert.deepEqual(Array.from(h.inputProbeArgsForSession(session)), ['-analyzeduration', '8000000', '-probesize', '8000000', '-skip_estimate_duration_from_pts', '1']);
     assert.equal(session.finiteTsFastInput, false);
     assert.equal(session.minHlsStartupSegments, 3);
     assert.equal(session.minHlsStartupBufferSeconds, 10);

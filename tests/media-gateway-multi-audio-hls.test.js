@@ -196,7 +196,7 @@ test('normal exact-size preflight freezes a reachable gateway-inband multi graph
     });
     h.freezeMultiAudioHlsTopology(resumed);
     assert.equal(resumed.minHlsStartupBufferSeconds, 4);
-    assert.equal(resumed.minHlsStartupSegments, 2);
+    assert.equal(resumed.minHlsStartupSegments, 3);
 
     const route = sourceBetween("app.post('/sessions'", "\n// Cross-device kill-switch");
     const boundedPumpIndex = route.indexOf('await ensureBoundedMkvInputPump(');
@@ -249,6 +249,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
     const startFfmpeg = vm.runInNewContext(
         `(${sourceBetween('function startFfmpeg(', '\nfunction seekArgsForSession(').trim()})`,
         {
+            boundedHlsArgs: require('../services/media-gateway/src/bounded-hls-output').boundedHlsArgs,
             path,
             multiAudioHlsEnabled: (value) => value?.multiAudioHls?.enabled === true,
             exactSubtitleHlsEnabled: () => false,
@@ -604,7 +605,7 @@ test('serialization, health and cleanup retain the bounded single-provider contr
     );
     assert.match(
         gatewaySource,
-        /session\.minHlsStartupSegments\s*=\s*MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS/,
+        /session\.minHlsStartupSegments\s*=\s*Math\.max\(3, MULTI_AUDIO_HLS_RESUME_STARTUP_SEGMENTS\)/,
     );
     assert.match(gatewaySource, /multiAudioHls:\s*\{\s*protocol:\s*MULTI_AUDIO_HLS_PROTOCOL[\s\S]*maxAudioRenditions:\s*MAX_MULTI_AUDIO_RENDITIONS/);
     assert.ok((gatewaySource.match(/audioRenditions:\s*audioRenditionsForSession\(session\)/g) || []).length >= 3);

@@ -16,8 +16,8 @@ const index = (value) => value !== null && value !== undefined && value !== ''
 // A .ts suffix alone also describes live TV. This optimization needs a finite,
 // dated server probe and its actual stream map, not a provider label. It does
 // not promote metadataComplete: that field has different in-band semantics.
-function finiteTsProfileEligible(session, now = Date.now()) {
-    if (!session || session.forceFullInputProbe === true) return false;
+function finiteTsProfileEligible(session, now = Date.now(), { allowFullProbe = false } = {}) {
+    if (!session || (session.forceFullInputProbe === true && !allowFullProbe)) return false;
     const hint = record(session.playbackHint);
     const identity = record(session.playbackIdentity);
     const kind = token(identity.itemType || hint.streamType || hint.stream_type || hint.itemType || hint.item_type);
@@ -26,8 +26,12 @@ function finiteTsProfileEligible(session, now = Date.now()) {
     if (!['ts', 'mpegts'].includes(token(profile.container))) return false;
     if (hint.container && !['ts', 'mpegts'].includes(token(hint.container))) return false;
     const origin = String(session.codecProfileSource || '').toLowerCase();
-    if (origin !== 'request' && !origin.split('+').includes('gateway_probe')) return false;
-    if (token(profile.probeSource ?? profile.probe_source) !== 'gatewayprobe') return false;
+    if (origin !== 'request' && origin !== 'gateway_inband' && !origin.split('+').includes('gateway_probe')) return false;
+    // Retained TS headers are probed by the same server ffprobe against the
+    // actual provider bytes. Their cached source label remains gateway_inband;
+    // rejecting it forced the next resume through libav's slow duration scan.
+    // The complete stream map, finite size and duration gates below still apply.
+    if (!['gatewayprobe', 'gatewayinband'].includes(token(profile.probeSource ?? profile.probe_source))) return false;
     const date = Date.parse(String(profile.probedAt ?? profile.probed_at ?? ''));
     const duration = Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
     const size = Number(profile.fileSizeBytes ?? profile.file_size_bytes);
@@ -103,9 +107,15 @@ function finiteTsStartupPolicy(session, pipeline) {
 }
 
 function decodeStartupSegment(bin, descriptor, { signal, spawnImpl = spawn, timeoutMs = 1500 } = {}) {
+    return decodeStartupSegments(bin, [descriptor], { signal, spawnImpl, timeoutMs });
+}
+
+function decodeStartupSegments(bin, descriptors, { signal, spawnImpl = spawn, timeoutMs = 1500 * descriptors.length } = {}) {
     return new Promise(resolve => {
-        if (signal?.aborted) return resolve(false);
-        let child, timer, killTimer, output = '', failed = false, settled = false;
+        if (signal?.aborted || descriptors.length < 1 || descriptors.length > 3) return resolve(false);
+        let child, timer, killTimer, failed = false, settled = false;
+        const outputs = Array(descriptors.length * 2).fill('');
+        const outputPipes = outputs.map((_, i) => i === 0 ? 1 : descriptors.length + 2 + i);
         const finish = value => {
             if (settled) return;
             settled = true; clearTimeout(timer); clearTimeout(killTimer);
@@ -117,27 +127,37 @@ function decodeStartupSegment(bin, descriptor, { signal, spawnImpl = spawn, time
             killTimer ||= setTimeout(() => finish(false), 1000);
         };
         try {
-            // The only input is an already-open local segment descriptor.
-            // No URL, playlist, extra provider read, or full-film analysis.
-            child = spawnImpl(bin, ['-hide_banner', '-v', 'error', '-nostdin', '-xerror',
+            // Each finalized local segment has its own input and two proof
+            // outputs. Sharing one process avoids repeatedly loading FFmpeg
+            // during a burst; no segment may borrow another's decoded frames.
+            const args = ['-hide_banner', '-v', 'error', '-nostdin', '-xerror',
+                // Codec threads alone do not bound libavfilter: each decoded
+                // output otherwise allocates a pool sized to the entire host.
+                '-filter_threads', '1', '-filter_complex_threads', '1'];
+            descriptors.forEach((_, i) => args.push(
                 '-err_detect', 'explode', '-threads', '1', '-protocol_whitelist', 'pipe',
-                '-format_whitelist', 'mpegts', '-f', 'mpegts', '-i', 'pipe:3',
-                // Simultaneous per-stream frame caps can finish the muxer
-                // before it emits audio. A tiny common time window preserves
-                // both streams; the independent decoded-frame check stays.
-                '-map', '0:V:0', '-map', '0:a:0', '-t', '0.5',
-                '-threads', '1', '-f', 'framehash', 'pipe:1'],
-            { stdio: ['ignore', 'pipe', 'pipe', descriptor], windowsHide: true });
+                '-format_whitelist', 'mpegts', '-f', 'mpegts', '-i', `pipe:${3 + i}`));
+                // Separate outputs let both decoders emit two real frames.
+                // A single muxer can stop at the video cap before audio is
+                // emitted; hashing a whole half-second wastes startup CPU.
+                // Keep the common half-second window: audio starting much
+                // later must not earn an accelerated-start certificate.
+            descriptors.forEach((_, i) => args.push(
+                '-map', `${i}:V:0`, '-frames:v', '2', '-t', '0.5', '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * 2]}`,
+                '-map', `${i}:a:0`, '-frames:a', '2', '-t', '0.5', '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * 2 + 1]}`));
+            child = spawnImpl(bin, args, { stdio: ['ignore', 'pipe', 'pipe', ...descriptors,
+                ...Array(outputs.length - 1).fill('pipe')], windowsHide: true });
         } catch (_) { finish(false); return; }
-        child.stdout.on('data', chunk => { output += chunk.toString(); if (output.length > 16384) stop(); });
+        outputPipes.forEach((pipe, i) => child.stdio[pipe].on('data', chunk => {
+            outputs[i] += chunk.toString(); if (outputs[i].length > 8192) stop();
+        }));
         child.stderr.on('data', chunk => { if (chunk.length) stop(); });
         child.once('error', () => { stop(); });
         child.once('close', code => {
-            const counts = [0, 0];
-            for (const line of output.split('\n')) {
-                const match = /^([01]),\s*-?\d+,\s*-?\d+,\s*\d+,\s*(\d+),\s*[a-f0-9]{64}\s*$/.exec(line);
-                if (match && Number(match[2]) > 0) counts[Number(match[1])]++;
-            }
+            const counts = outputs.map(output => output.split('\n').filter(line => {
+                const match = /^0,\s*-?\d+,\s*-?\d+,\s*\d+,\s*(\d+),\s*[a-f0-9]{64}\s*$/.exec(line);
+                return match && Number(match[1]) > 0;
+            }).length);
             finish(!failed && !signal?.aborted && code === 0 && counts.every(n => n >= 2));
         });
         signal?.addEventListener('abort', stop, { once: true });
@@ -153,6 +173,7 @@ async function verifyFiniteTsStartupSegments({ root, files, durations, bin, sign
         || !files.every(name => /^segment-\d{5,8}\.ts$/.test(name))) return reject('invalid-segment-scope');
     const chosen = files.slice(0, 3), lengths = durations.slice(0, 3);
     if (lengths.some(n => !Number.isFinite(n) || n <= 0 || n > 12.25)) return reject('segment-duration');
+    const handles = [];
     try {
         const resolved = path.resolve(root), directory = await fsp.lstat(resolved);
         if (!directory.isDirectory() || directory.isSymbolicLink() || await fsp.realpath(resolved) !== resolved) return reject('invalid-segment-root');
@@ -161,19 +182,25 @@ async function verifyFiniteTsStartupSegments({ root, files, durations, bin, sign
             const linked = await fsp.lstat(path.join(resolved, name));
             if (!linked.isFile() || linked.isSymbolicLink()) return reject('invalid-segment-file');
             const handle = await fsp.open(path.join(resolved, name), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-            try {
-                const before = await handle.stat();
-                if (!before.isFile() || before.nlink !== 1 || before.ino !== linked.ino || before.dev !== linked.dev
-                    || before.size <= 0 || before.size > 32 * 1024 * 1024) return reject('segment-size');
-                if (!await decode(bin, handle.fd, { signal })) return reject('segment-decode');
-                const after = await handle.stat();
-                if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.nlink !== 1) return reject('segment-changed');
-            } finally { await handle.close(); }
+            const held = { handle }; handles.push(held);
+            const before = held.before = await handle.stat();
+            if (!before.isFile() || before.nlink !== 1 || before.ino !== linked.ino || before.dev !== linked.dev
+                || before.size <= 0 || before.size > 32 * 1024 * 1024) return reject('segment-size');
+        }
+        if (decode === decodeStartupSegment) {
+            if (!await decodeStartupSegments(bin, handles.map(({ handle }) => handle.fd), { signal })) return reject('segment-decode');
+        } else {
+            for (const { handle } of handles) if (!await decode(bin, handle.fd, { signal })) return reject('segment-decode');
+        }
+        for (const { handle, before } of handles) {
+            const after = await handle.stat();
+            if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.nlink !== 1) return reject('segment-changed');
         }
         return { protocol: 1, verified: true, segmentCount: chosen.length, maxSegmentSeconds: Math.max(...lengths) };
     } catch (_) { return reject('segment-unavailable'); }
+    finally { await Promise.all(handles.map(({ handle }) => handle.close().catch(() => {}))); }
 }
 
 module.exports = { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs,
     FINITE_TS_PROBE_BYTES, FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
-    decodeStartupSegment, applyFiniteTsAccurateResume };
+    decodeStartupSegment, decodeStartupSegments, applyFiniteTsAccurateResume };

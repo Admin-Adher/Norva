@@ -1,4 +1,5 @@
 import { BoundedProviderResponseError } from "./bounded-provider-response.mjs";
+import { m3uDurationSeconds } from "./m3u-duration.mjs";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BYTES = 128 * 1024 * 1024;
@@ -10,18 +11,33 @@ function positiveSafeInteger(value, fallback) {
   return Number.isSafeInteger(number) && number > 0 ? number : fallback;
 }
 
-function attribute(value, name) {
-  const match = value.match(new RegExp(`${name}="([^"]*)"`, "i"));
-  return match?.[1]?.trim() ?? "";
-}
-
-function entryTitle(line) {
-  let quoted = false;
+function parseExtinf(line) {
+  let quote = null;
+  let separator = -1;
   for (let index = 0; index < line.length; index++) {
-    if (line[index] === '"') quoted = !quoted;
-    if (line[index] === ',' && !quoted) return line.slice(index + 1).trim();
+    const character = line[index];
+    if (quote) { if (character === quote) quote = null; }
+    else if (character === '"' || character === "'") quote = character;
+    else if (character === ',') { separator = index; break; }
   }
-  return 'Norva channel';
+  const attributes = {};
+  const prefix = separator >= 0 ? line.slice(0, separator) : line;
+  const durationSeconds = m3uDurationSeconds(prefix.match(/^#EXTINF:\s*([^\s,]+)/i)?.[1]);
+  for (const match of prefix.matchAll(/(?:^|\s)([a-z][a-z0-9_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/gi)) {
+    attributes[match[1].toLowerCase()] = (match[2] ?? match[3] ?? match[4] ?? '').trim();
+  }
+  return {
+    ...(durationSeconds !== null ? { durationSeconds } : {}),
+    title: separator >= 0 ? line.slice(separator + 1).trim() : attributes['tvg-name'] || 'Norva channel',
+    tvgId: attributes['tvg-id'] || attributes['tvg-name'] || '',
+    logo: attributes['tvg-logo'] || '', group: attributes['group-title'] || '',
+    media: {
+      mediaType: attributes['media-type'] || '', tvgType: attributes['tvg-type'] || '',
+      seriesName: attributes['series-name'] || '', seriesId: attributes['series-id'] || '',
+      season: attributes['season-number'] || attributes.season || '',
+      episode: attributes['episode-number'] || attributes.episode || '',
+    },
+  };
 }
 
 /**
@@ -77,12 +93,7 @@ export async function readM3uPlaylistStream(stream, options = {}) {
       headerDetected = true;
     }
     if (/^#EXTINF\b/i.test(line)) {
-      pending = {
-        title: entryTitle(line),
-        tvgId: attribute(line, "tvg-id") || attribute(line, "tvg-name"),
-        logo: attribute(line, "tvg-logo"),
-        group: attribute(line, "group-title"),
-      };
+      pending = parseExtinf(line);
       return false;
     }
     if (line.startsWith("#")) return false;

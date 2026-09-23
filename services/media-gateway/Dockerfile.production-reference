@@ -1,0 +1,24 @@
+# The production codec/model runtime is immutable. Rebuild all application
+# sources from the repository, rather than layering selected index.js patches.
+# This is a local image ID, not a registry manifest digest. Use the classic
+# builder (DOCKER_BUILDKIT=0), which accepts immutable local image IDs in FROM.
+# Export/restore this runtime image with docker image save/load on a new host.
+FROM sha256:6ab34980137d60f028d5ddbde6869987867178182f8a9f066cc0e7fd88c787e2
+
+ARG NORVA_SOURCE_REVISION
+COPY package.json package-lock.json /tmp/norva-gateway-reference/
+COPY src /tmp/norva-gateway-reference/src
+
+# Fail instead of silently using native/runtime dependencies from another lock.
+RUN node -e 'const fs=require("fs"); for(const f of ["package.json","package-lock.json"]) { const read=p=>fs.readFileSync(p,"utf8").replace(/\r\n/g,"\n"); if(read("/app/"+f)!==read("/tmp/norva-gateway-reference/"+f)) throw Error("Runtime dependency mismatch: "+f); }' \
+    && test -n "${NORVA_SOURCE_REVISION}" \
+    && test -d /app/src \
+    && rm -rf /app/src \
+    && mv /tmp/norva-gateway-reference/src /app/src \
+    && find /app/src -type f -name '*.js' -exec sh -ec 'for file do node --check "$file"; done' sh {} + \
+    && rm /tmp/norva-gateway-reference/package.json /tmp/norva-gateway-reference/package-lock.json \
+    && rmdir /tmp/norva-gateway-reference
+
+LABEL org.opencontainers.image.revision="${NORVA_SOURCE_REVISION}" \
+      norva.runtime.base-image="sha256:6ab34980137d60f028d5ddbde6869987867178182f8a9f066cc0e7fd88c787e2" \
+      norva.runtime.source-layout="complete-repository-src"
