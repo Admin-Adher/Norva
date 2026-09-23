@@ -145,7 +145,7 @@ test('native heartbeat is a versioned authenticated REST route with a bounded re
   const edge = read(edgePath);
   const router = section(edge, 'Deno.serve(async (req) => {', 'async function requireIdentity');
 
-  assert.match(router, /version:\s*81/);
+  assert.match(router, /version:\s*82/);
   assert.match(router, /nativeHeartbeatProtocol:\s*1/);
   assert.match(router, /providerCircuitProtocol:\s*1/);
   assert.match(
@@ -159,13 +159,13 @@ test('native heartbeat derives the source from an owned active session and never
   const heartbeat = section(
     edge,
     'async function heartbeatPlaybackSession(',
-    'async function expirePlaybackSession(',
+    'async function requestDemandDrivenMediaCacheContinuation(',
   );
 
   assert.match(heartbeat, /\.from\("cloud_playback_sessions"\)/);
   assert.match(
     heartbeat,
-    /\.select\("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at"\)/,
+    /\.select\("id,source_id,status,created_at,native_heartbeat_at,expires_at,superseded_at,native_mp4_session:playback_hint->__norvaNativeMp4SessionV1"\)/,
   );
   assert.doesNotMatch(heartbeat, /superseded_by/);
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
@@ -189,7 +189,9 @@ test('native heartbeat derives the source from an owned active session and never
 
   assert.doesNotMatch(heartbeat, /cloud_playback_events/);
   assert.doesNotMatch(heartbeat, /updated_at/);
-  assert.doesNotMatch(heartbeat, /target_url|playback_hint|config_hint|credential|password/i);
+  assert.doesNotMatch(heartbeat.replace("native_mp4_session:playback_hint->__norvaNativeMp4SessionV1", ""), /target_url|playback_hint|config_hint|credential|password/i);
+  assert.match(heartbeat, /session\.native_mp4_session === true/);
+  assert.match(heartbeat, /ownerKey: await sha256Hex\(userId\)/);
   assert.doesNotMatch(heartbeat, /console\.(?:log|warn|error)/);
 });
 

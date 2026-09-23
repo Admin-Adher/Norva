@@ -176,6 +176,7 @@ test('the actual Edge resolver trusts the visible owner row, never a global mirr
   const calls = [];
   let owned = input.ownedItem;
   const context = vm.createContext({
+    isM3uEpisodeId: (await import("../supabase/functions/_shared/m3u-series-info.mjs")).isM3uEpisodeId,
     resolveSelectionLiveDelivery, resolveDiscoveryTarget: async ({ targetUrl }) => targetUrl,
     resolveObservedVodContainer: async () => null, mediaReadFromCatalog: () => true,
     resolveSourceHost: async () => 'public.example', recordOrEmpty: value => value || {},
@@ -230,7 +231,7 @@ test('the direct public decision runs within existing authorization and session 
     '"claim_cloud_playback_session"', 'await releaseSupersededPlaybackSessions(']) {
     assert.ok(create.indexOf(guard) > routing && create.indexOf(guard) < direct, guard);
   }
-  assert.match(create, /const mode = serverDirectPublicHls\s*\? "direct"\s*: serverDemotedAutomaticMp4/);
+  assert.match(create, /const mode = serverOwnedM3uEpisodeGateway\s*\? "transcode"\s*: serverDirectPublicHls\s*\? "direct"\s*: serverNativeProviderMp4\s*\? "relay"\s*: serverPromotedProviderMp4\s*\? "transcode"\s*: serverDemotedAutomaticMp4/);
   assert.match(create.slice(direct), /serverDirectPublicHls \? \{ transport: "public-hls-direct" \} : \{\}/);
   assert.match(create.slice(direct), /session: publicPlaybackSession\(session\)[\s\S]*url: targetUrl,[\s\S]*fallbackUrl: null,[\s\S]*expiresAt,/);
 });

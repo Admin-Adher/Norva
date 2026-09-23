@@ -45,7 +45,12 @@ for(const closeFailure of [false,true])test(`route benchmark ${closeFailure?'fai
    assert.equal(controller.signal.aborted,true);assert.equal(settled,false);assert.equal(h.entries.size,1);
    closeGate.resolve();const drained=await stopping;const outcome=await running;await gone.promise;
    assert.equal(drained.providerDrained,!closeFailure);assert.equal(outcome.status,'preempted');
-   assert.equal(h.calls.filter(x=>x==='release').length,1);assert.equal(sockets.size,0);
+   assert.equal(h.calls.filter(x=>x==='release').length,1);
+   // The dispatcher has closed locally; the server observes each TCP close asynchronously.
+   // Undici may have opened an additional pooled socket while aborting the response.
+   const peerCloseDeadline=Date.now()+1000;
+   while(sockets.size && Date.now()<peerCloseDeadline)await new Promise(resolve=>setTimeout(resolve,10));
+   assert.equal(sockets.size,0,'all provider-side sockets must close within the bounded observation');
    assert.equal(h.entries.size,closeFailure?1:0);
    if(closeFailure)assert.equal(h.api.busy(job.affinityKey),true);
  }finally{
