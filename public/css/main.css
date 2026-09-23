@@ -7110,7 +7110,8 @@ kbd {
 
 /* Import progress has its own layout after the provider connection wizard. */
 .catalog-preparation-modal .modal-content {
-  max-width: 760px;
+  /* Four progress cards need room for translated states such as “Numérisation”. */
+  max-width: 880px;
   max-height: calc(100dvh - var(--space-xl));
 }
 
