@@ -801,6 +801,31 @@ test('a terminal cloud format failure offers one explicit conversion across brow
     'an incompatible browser relay must offer one explicit server-conversion action');
 });
 
+test('the media error event preserves conversion before async teardown clears its mode', () => {
+  const context = { window: {}, console: { error() {} }, setTimeout, clearTimeout };
+  vm.runInNewContext(watchSrc, context, { filename: 'WatchPage.js' });
+  const page = Object.create(context.window.WatchPage.prototype);
+  page.video = { error: { code: 4, message: '' }, dataset: { playbackAttemptId: '4' }, currentSrc: 'https://relay.test/stream' };
+  page._playbackAttemptId = 4;
+  page.content = { type: 'series', id: 'episode-1' };
+  page.currentPlaybackMode = 'direct';
+  page.isStalePlaybackAttempt = () => false;
+  page.hasCurrentMedia = () => false;
+  page.isCloudPlaybackMode = () => true;
+  page.retryGatewaySeekAfterFatalPlayback = () => false;
+  page.sendPlaybackEvent = () => {};
+  page.handlePlaybackFailure = async () => { page.currentPlaybackMode = null; };
+
+  page.onError();
+  assert.strictEqual(page._preferredExplicitCloudMode, 'transcode');
+
+  page._preferredExplicitCloudMode = null;
+  page.currentPlaybackMode = 'gateway-session';
+  page.onError();
+  assert.strictEqual(page._preferredExplicitCloudMode, null,
+    'a failed Gateway lane must not claim a new server conversion will repair it');
+});
+
 test('the visible server-conversion action starts one fresh cloud session and no fallback cascade', async () => {
   const calls = [];
   const context = {
