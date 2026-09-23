@@ -36,6 +36,7 @@ import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_s
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
 import {
   adoptActiveCatalogUserVisibilityEpoch,
+  withActiveCatalogEpochRetry,
   assertActiveCatalogGenerationCurrent,
   type ActiveCatalogGeneration,
   catalogGenerationRpcFence,
@@ -3782,6 +3783,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         country: options.country || stringOr(config.country, "FR"),
         generation: accessSnapshot,
         writeBatchSize: 100,
+        withCurrentGeneration: operation => withActiveCatalogEpochRetry(db, sourceId, userId, accessSnapshot, operation),
       });
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       const nextOffset = batchOffset + liveChunk.length;
