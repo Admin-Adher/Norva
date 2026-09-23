@@ -50,4 +50,29 @@ DOCKER_BUILDKIT=0 docker build --pull=false --network=none \
 - A fresh container, `--network=none --memory=512m --cpus=1`, successfully served health version167 with zero active sessions. No production configuration, owner data or mounts were passed to this startup check. This is not a playback/VAAPI validation.
 - The digest is a local Docker image ID, not a registry manifest. The host's classic builder resolves it without contacting a registry. The first BuildKit attempt correctly failed to resolve a registry manifest; it did not build or deploy an alternative image. Rebuilding on another host requires saving/loading this immutable base image. A future builder migration must preserve this dependency explicitly; the classic builder is deprecated.
 
-Production still runs the previous image. Main/pilot volume and feature configuration differences remain to be reconciled before rollout.
+This build-stage statement is superseded by the production rollout below. Feature configuration differences remain open.
+
+## Production rollout — 23 September 2026, 22:47–22:51 UTC
+
+Both production Gateways now run image `sha256:dbfaaea9a69b41d58543f00086427963a3d75e7bafd1e8e7718a27547ab67118`, built from the reference source above. PR #372 is merged. Health version 167, VAAPI availability and encoder capacity eight were verified after replacement. The previous containers are retained stopped for rollback.
+
+- Pilot replacement: `287fd8862e57c71507301de837adeaeda480a712ad330c86f02552bf6d958d93`.
+- Main replacement: `b460b3aa4225a0568331efab5439e3d71627402f689bd18598710adf0a14b67c`.
+- Environment and existing mounts were preserved. The pilot additionally persists `/tmp/resume-pilot` in a host bind mount; its old disk output was copied while stopped. This does not make the RAM-backed private HLS resume cache persistent across restarts.
+- Main Compose image was updated and its rendered environment and mount set compared exactly with the running container. Protected backups containing deployment credentials remain only on the server.
+- The deployment refused to stop main while a Whisper/LID worker was active, and proceeded after idle verification. The check-to-stop interval is not an atomic admission fence; do not claim a zero-race drain guarantee.
+
+### Real post-deployment private resume
+
+Two authorized internal owners were tested on each Gateway with their actual source profiles, without QA metadata overrides. All four cases passed private-cache validation, exact requested-offset reconstruction, cached-to-live segment continuity and cleanup of only the sessions created by these tests.
+
+| Gateway | Owner A resume API | Owner B resume API |
+| --- | ---: | ---: |
+| Pilot | 2,242 ms | 7,550 ms |
+| Main | 2,220 ms | 8,053 ms |
+
+These are Gateway API and segment checks, not ordinary-account UI playback or Android end-to-end certification. They do not establish multi-audio coverage (each tested target had one audio track), shared R2 use, full feature/configuration parity, or a new concurrency capacity claim.
+
+### Operational tools
+
+`ops/hetzner/media/rollout-reference-gateway.py` defaults to a read-only plan; `--apply` performs this exact baseline-to-reference replacement. It preserves the deployment configuration, checks positive idle evidence, retains the previous container and does not retry ambiguous mutations. Four safety tests cover configuration preservation, drift detection, missing/busy counters and active viewer/native grants. The separate Compose persistence script is a one-time operation for the existing protected override.
