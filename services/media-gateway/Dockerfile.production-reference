@@ -1,7 +1,9 @@
 # The production codec/model runtime is immutable. Rebuild all application
 # sources from the repository, rather than layering selected index.js patches.
-# This digest must be available in the deployment host's Docker image store.
-FROM norva-media-gateway@sha256:6ab34980137d60f028d5ddbde6869987867178182f8a9f066cc0e7fd88c787e2
+# This is a local image ID, not a registry manifest digest. Use the classic
+# builder (DOCKER_BUILDKIT=0), which accepts immutable local image IDs in FROM.
+# Export/restore this runtime image with docker image save/load on a new host.
+FROM sha256:6ab34980137d60f028d5ddbde6869987867178182f8a9f066cc0e7fd88c787e2
 
 ARG NORVA_SOURCE_REVISION
 COPY package.json package-lock.json /tmp/norva-gateway-reference/
