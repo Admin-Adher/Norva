@@ -826,7 +826,10 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
               ...(Number(next.series) > 0 ? { seriesReady: true } : {}),
               ...(Number(next.movies) + Number(next.series) > 0 ? { browseReady: true } : {}),
             });
-            await new Promise(resolve => setTimeout(resolve, 150));
+            // Keep the shared DB's established background duty cycle. Earlier
+            // visibility comes from publication order, not unbounded DB load.
+            const pauseMs = boundedInt(Deno.env.get("NORVA_FINALIZE_THROTTLE_MS"), 2500, 0, 30000);
+            if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs));
             return !superseded;
           },
         });
