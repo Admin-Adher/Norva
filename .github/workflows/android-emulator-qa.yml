@@ -8,6 +8,7 @@ on:
       - 'scripts/qa/run-android-emulator-tests.sh'
       - 'clients/android-phone/**'
       - 'clients/android-tv/**'
+      - 'clients/android-common/**'
 
 permissions:
   contents: read
@@ -83,6 +84,7 @@ jobs:
           api-level: 34
           target: android-tv
           arch: x86
+          profile: tv
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
           script: bash scripts/qa/run-android-emulator-tests.sh tv
       - name: Upload TV test reports
