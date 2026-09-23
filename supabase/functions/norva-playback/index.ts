@@ -18,6 +18,7 @@ import {
   publicEdgeErrorLog,
   publicEdgeErrorPayload,
 } from "../_shared/catalog-visibility-response.mjs";
+import { bindCompletedPlaybackReceipt, finalizePlaybackReceiptResponse } from "../_shared/playback-receipt-visibility.mjs";
 import {
   PLAYBACK_EVENT_PUBLIC_SELECT,
   PLAYBACK_SESSION_PUBLIC_SELECT,
@@ -53,6 +54,7 @@ import {
 } from "../_shared/media-gateway-canary-routing.mjs";
 import {
   type ActiveCatalogGeneration,
+  adoptActiveCatalogUserVisibilityEpoch,
   assertActiveCatalogGenerationCurrent,
   callActiveCatalogGenerationRpc,
   catalogGenerationFields,
@@ -339,12 +341,12 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
-  return await finalizeCatalogVisibilityResponse(
+  return await finalizePlaybackReceiptResponse(req, async () => finalizeCatalogVisibilityResponse(
     req,
     await handleRequest(req),
     supabase,
     { service: "norva-playback", corsHeaders },
-  );
+  ));
 });
 
 async function handleRequest(req: Request): Promise<Response> {
@@ -630,6 +632,9 @@ async function handleRequest(req: Request): Promise<Response> {
     }
     if (req.method === "POST" && segments[0] === "storyboard-callback") {
       return json(req, await runStoryboardCallback(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "storyboard-admission") {
+      return json(req, await checkStoryboardAdmission(req, supabase));
     }
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
@@ -2214,6 +2219,9 @@ async function createPlaybackSessionCore(
       db,
       requestedPlaybackHint,
     );
+  // Progressive publication can advance the account-wide cache epoch without
+  // changing this source's generation, head, config or visibility authority.
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, playbackGeneration);
   markStartup("targetResolutionMs");
   const targetUrl = resolved.targetUrl;
@@ -2572,10 +2580,52 @@ async function createPlaybackSessionCore(
   markStartup("coordinatorMs");
   startupTrace.coordinatorWaitMs = startupWaitMs;
 
+  const bindPreparedSeriesReceipt = async (cleanupGateway?: () => Promise<unknown>) => {
+    if (itemType !== "series" || !parentSeriesId ||
+        !await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) return;
+    await bindCompletedPlaybackReceipt(req, {
+      refreshEpoch: async () => {
+        const before = catalogVisibilityEpochHeaders(req);
+        await bindCatalogVisibilityEpochShared(req, userId, db);
+        const after = catalogVisibilityEpochHeaders(req);
+        if (!before["X-Norva-Global-Visibility-Epoch"] ||
+            before["X-Norva-Global-Visibility-Epoch"] !== after["X-Norva-Global-Visibility-Epoch"]) {
+          throw new HttpError(409, "Catalog policy changed during playback preparation");
+        }
+      },
+      assertSourceCurrent: async () => {
+        await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
+        await assertSourceCatalogVisible(sourceId, userId, db);
+        if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+        if (!await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId)) {
+          throw new HttpError(409, "Playback episode is no longer visible");
+        }
+        const currentCoordinates = await resolveCatalogSeriesEpisodeCoordinates(
+          db, userId, sourceId, parentSeriesId, itemId,
+        );
+        if (episodeCoordinates && !currentCoordinates) {
+          throw new HttpError(409, "Playback episode coordinates changed");
+        }
+        const currentTarget = currentCoordinates
+          ? await resolveExactEpisodePlaybackTarget(sourceId, userId, currentCoordinates, requestedPlaybackHint, db)
+          : await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
+        if (await sha256Hex(currentTarget.targetUrl) !== targetUrlHash) {
+          throw new HttpError(409, "Playback episode changed during preparation");
+        }
+        await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
+      },
+      cleanup: async () => {
+        try { await expirePlaybackSession(session.id, userId, db); }
+        catch (_) { await cleanupGateway?.(); }
+      },
+    });
+  };
+
   if (mode === "direct") {
     // Direct playback gets exactly one transport. A hidden gateway fallback
     // would turn one provider refusal into a second concurrent connection and
     // obscure the original HTTP/network cause.
+    await bindPreparedSeriesReceipt();
     return {
       session: publicPlaybackSession(session),
       playback: {
@@ -2833,6 +2883,7 @@ async function createPlaybackSessionCore(
           });
         } catch (_) { /* exact-language union is best-effort; playback must continue */ }
       }
+      await bindPreparedSeriesReceipt();
       return {
         session: publicPlaybackSession(session),
         playback: {
@@ -2905,6 +2956,7 @@ async function createPlaybackSessionCore(
         });
       }
       if (relayCommit.waitMs) await sleep(relayCommit.waitMs);
+      await bindPreparedSeriesReceipt();
       return {
         session: publicPlaybackSession(session),
         playback: {
@@ -3116,6 +3168,7 @@ async function createPlaybackSessionCore(
   // Internal timing only: no account, source, target URL or access token.
   console.info(JSON.stringify({ event: "playback_gateway_startup_phases",
     startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
+  await bindPreparedSeriesReceipt(gateway.cleanupCreatedSession);
   return {
     session: publicPlaybackSession(session),
     playback: {
@@ -7139,6 +7192,51 @@ async function resolveCatalogSeriesEpisodeCoordinates(
     // Rolling-deploy safety: playback remains available before the exact episode
     // registry migration lands, but no episode cache/fanout is trusted.
     return null;
+  }
+}
+
+function seriesInfoPayloadContainsEpisode(payload: unknown, episodeId: string): boolean {
+  const raw = recordOrEmpty(payload).episodes;
+  const groups: unknown[] = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) ? Object.values(raw) : [];
+  return groups.some((group) => {
+    const episodes = Array.isArray(group) ? group : [group];
+    return episodes.some((episode) => stringOr(recordOrEmpty(episode).id, "") === episodeId);
+  });
+}
+
+async function hasVisibleSeriesEpisodeReceiptProof(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  parentSeriesId: string,
+  episodeId: string,
+): Promise<boolean> {
+  if (!parentSeriesId || !episodeId) return false;
+  try {
+  const { data: parent, error: parentError } = await db
+    .from("cloud_catalog_visible_title_variants").select("id")
+    .eq("user_id", userId).eq("source_id", sourceId)
+    .eq("item_type", "series").eq("external_id", parentSeriesId).limit(1);
+  if (parentError || !Array.isArray(parent) || parent.length !== 1) return false;
+
+  // A registered episode is the strongest proof. During a new provider import,
+  // inventory registration can lag its already-visible parent variant. In that
+  // case the provider's server-owned series-info cache proves the exact episode
+  // without a new provider request or trusting a client-supplied URL.
+  if (await resolveCatalogSeriesEpisodeCoordinates(db, userId, sourceId, parentSeriesId, episodeId)) {
+    return true;
+  }
+  const serverHost = await resolveSourceHost(sourceId, userId, db);
+  if (!serverHost) return false;
+  const { data: cached, error: cacheError } = await db
+    .from("cloud_series_info_cache").select("payload")
+    .eq("server_host", serverHost).eq("series_id", parentSeriesId).maybeSingle();
+  return !cacheError && seriesInfoPayloadContainsEpisode(cached?.payload, episodeId);
+  } catch (_) {
+    // An unavailable optional proof keeps the ordinary visibility fence.
+    return false;
   }
 }
 
@@ -12888,6 +12986,15 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   if (rec?.status === "failed" && ageMs < 24 * 3600 * 1000) return { status: "failed", error: stringOrNull(rec.error) };
   if (url.searchParams.get("enqueue") !== "1") return { status: rec ? stringOr(rec.status, "none") : "none", why: "not-enqueued" };
 
+  // A storyboard reads the entire film through the provider's single account slot.
+  // During initial discovery that can stall visible catalogue growth for up to 75 minutes.
+  // Keep ready sprites readable, but defer new extraction until the source is ready.
+  const { data: source, error: sourceError } = await db.from("cloud_sources")
+    .select("sync_status").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  if (sourceError) throwDb(sourceError, "Unable to check storyboard source");
+  if (!source) return { status: "none", why: "source-unavailable" };
+  if (source.sync_status === "syncing") return { status: "none", why: "catalog-syncing" };
+
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return { status: "none", why: "gateway-not-configured" };
   // Container of the episode being watched (player-provided) — keeps the direct
@@ -12920,7 +13027,7 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   // The signed upload URL is minted against the internal SUPABASE_URL; rewrite its
   // origin to the public one so the external gateway can PUT to it (token stays valid).
   const uploadUrl = signed.signedUrl.replace(SUPABASE_URL, PUBLIC_ORIGIN);
-  const asyncUrl = `${pipe.url.replace("/raw/", "/storyboard-async/")}?jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&uploadUrl=${encodeURIComponent(uploadUrl)}&duration=${duration}&origin=service`;
+  const asyncUrl = `${pipe.url.replace("/raw/", "/storyboard-async/")}?jobId=${jobId}&sourceId=${encodeURIComponent(sourceId)}&callback=${encodeURIComponent(cbUrl)}&uploadUrl=${encodeURIComponent(uploadUrl)}&duration=${duration}&origin=service`;
   let gwStatus = 0;
   try { gwStatus = (await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) })).status; } catch (_) { gwStatus = 0; }
   if (gwStatus !== 202) {
@@ -12928,6 +13035,26 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
     return { status: "failed", error: `gateway ${gwStatus}` };
   }
   return { status: "processing", enqueued: true };
+}
+
+async function checkStoryboardAdmission(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!runtimeConfig.mediaGatewayToken || provided !== runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(401, "Unauthorized");
+  }
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const sourceId = stringOr(body.sourceId, "");
+  const ownerId = stringOr(body.ownerId, "");
+  if (!/^[0-9a-f-]{36}$/i.test(sourceId) || !/^[0-9a-f-]{36}$/i.test(ownerId)) {
+    throw new HttpError(400, "Invalid storyboard source");
+  }
+  const { data, error } = await db.from("cloud_sources").select("id")
+    .eq("id", sourceId).eq("user_id", ownerId)
+    .eq("enabled", true).is("deleted_at", null).maybeSingle();
+  if (error) throwDb(error, "Unable to check storyboard source");
+  if (!data) throw new HttpError(410, "Source removed");
+  return { active: true, protocol: 1 };
 }
 
 async function runStoryboardCallback(req: Request, db: SupabaseClient): Promise<JsonRecord> {
@@ -12942,6 +13069,10 @@ async function runStoryboardCallback(req: Request, db: SupabaseClient): Promise<
   if (body.heartbeat === true) {
     await db.from("catalog_storyboards").update({ updated_at: nowIso }).eq("job_id", jobId).eq("status", "processing");
     return { ok: true, heartbeat: true, jobId };
+  }
+  if (body.error === "source_removed") {
+    await db.from("catalog_storyboards").delete().eq("job_id", jobId).eq("status", "processing");
+    return { ok: true, cancelled: true };
   }
   if (body.ok === true) {
     await db.from("catalog_storyboards").update({

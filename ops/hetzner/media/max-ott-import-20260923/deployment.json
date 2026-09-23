@@ -1,0 +1,45 @@
+{
+  "startedAt": "20260923T143345Z",
+  "backup": "/home/adrien/.norva/max-ott-fixes-20260923-v3/before-20260923T143345Z",
+  "files": [
+    {
+      "path": "_shared/xtream-sync.ts",
+      "before": "ec608c835349361afb9cc25886fd46a28924fa20ecef710d73b800aa8b680029",
+      "after": "8f4ef919f7e490af5c890e5aa2d4fbab28b1974a6623996b9fd7e41103f856d1"
+    },
+    {
+      "path": "_shared/xtream-progressive-vod.mjs",
+      "before": "37a11111ea0c40661149b40193c0620b795f6815b86fe0a20e0ad2a1a7d2b49c",
+      "after": "37a11111ea0c40661149b40193c0620b795f6815b86fe0a20e0ad2a1a7d2b49c"
+    }
+  ],
+  "health": [
+    {
+      "container": "norva-edge-functions",
+      "services": [
+        {
+          "service": "norva-source-sync",
+          "ok": true
+        },
+        {
+          "service": "norva-cloud",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "container": "norva-edge-functions-2",
+      "services": [
+        {
+          "service": "norva-source-sync",
+          "ok": true
+        },
+        {
+          "service": "norva-cloud",
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "deployed": true
+}

@@ -7108,6 +7108,76 @@ kbd {
   border-top: 1px solid var(--color-border);
 }
 
+/* Import progress has its own layout after the provider connection wizard. */
+.catalog-preparation-modal .modal-content {
+  /* Four progress cards need room for translated states such as “Numérisation”. */
+  max-width: 880px;
+  max-height: calc(100dvh - var(--space-xl));
+}
+
+.catalog-preparation-modal .modal-body {
+  padding: var(--space-lg);
+}
+
+.catalog-preparation-modal .source-sync-step {
+  gap: var(--space-lg);
+}
+
+.catalog-preparation-modal .source-sync-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+.catalog-preparation-modal .source-sync-card,
+.catalog-preparation-modal .source-sync-milestone {
+  padding: var(--space-md);
+}
+
+.catalog-preparation-modal .source-sync-card strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.catalog-preparation-modal .source-sync-line {
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+}
+
+.catalog-preparation-modal .source-sync-found-note,
+.catalog-preparation-modal .source-sync-notify-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+@media (min-width: 960px) {
+  .catalog-preparation-modal .source-sync-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .catalog-preparation-modal .modal-body {
+    padding: var(--space-lg);
+  }
+
+  .catalog-preparation-modal .source-sync-step,
+  .catalog-preparation-modal .source-sync-grid {
+    gap: var(--space-lg);
+  }
+
+  .catalog-preparation-modal .source-sync-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  }
+}
+
+@media (max-width: 380px) {
+  .catalog-preparation-modal .source-sync-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* EPG Info Modal */
 .epg-info-modal .channel-details {
   display: flex;

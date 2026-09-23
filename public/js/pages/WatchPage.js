@@ -7848,6 +7848,15 @@ class WatchPage {
                 // skipped and playback dead-looped on retry-in-place. Tag codec codes so the transcode
                 // chain runs. Network (code 2) stays untagged (not a codec issue → no format transcode).
                 const isCodecError = error.code === 3 || error.code === 4;
+                // Record the conversion affordance at the media event itself.
+                // Teardown can clear the active mode before the async failure
+                // handler renders its banner; the browser already proved this
+                // native lane cannot decode the file.
+                if (isCodecError && this.isCloudPlaybackMode()
+                    && !['gateway-session', 'transcode-session', 'transcode'].includes(this.currentPlaybackMode)
+                    && (this.content?.type === 'movie' || this.content?.type === 'series')) {
+                    this._preferredExplicitCloudMode = 'transcode';
+                }
                 const message = (isCodecError ? (globalThis.NorvaI18n?.t("ui_web_714af210e14c", { defaultValue: "MEDIA_ELEMENT_ERROR: Format error — " }) ?? 'MEDIA_ELEMENT_ERROR: Format error — ') : '')
                     + (error.message || `code ${error.code}`);
                 if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
@@ -7915,7 +7924,7 @@ class WatchPage {
                 // first, then offer one explicit server-conversion action. The click
                 // starts a new attempt; this branch never creates a second session.
                 if (this.isFormatPlaybackError(message)
-                    && this.currentPlaybackMode === 'direct'
+                    && !['gateway-session', 'transcode-session', 'transcode'].includes(this.currentPlaybackMode)
                     && (this.content?.type === 'movie' || this.content?.type === 'series')) {
                     this._preferredExplicitCloudMode = 'transcode';
                 }
@@ -8397,6 +8406,9 @@ class WatchPage {
                     mode: 'transcode',
                     gatewayMode: 'remux',
                 } : {}),
+                ...(itemType === 'series' && (this.content.seriesId || this.content.series_id)
+                    ? { audioSeriesId: this.content.seriesId || this.content.series_id }
+                    : {}),
                 ...activeAudioOptions,
                 seekOffset: position,
                 startOffset: position,

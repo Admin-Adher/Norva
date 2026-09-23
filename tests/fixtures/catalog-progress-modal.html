@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/main.css"><title>Catalog progress QA</title></head><body>
+<main><button id="open" class="btn btn-primary">Ouvrir le suivi</button></main>
+<div id="modal" class="modal provider-access-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-content"><div class="modal-header"><h2 id="modal-title"></h2><button class="modal-close" aria-label="Fermer">×</button></div>
+    <div id="modal-body" class="modal-body"></div><div id="modal-footer" class="modal-footer" hidden></div></div>
+</div>
+<script src="/js/components/NorvaModal.js"></script><script src="/js/components/SourceManager.js"></script>
+<script>
+const manager = Object.create(SourceManager.prototype);
+manager.sourceStatuses = [];
+manager.loadSources = async () => {};
+manager.notifySourceHealthChanged = () => {};
+async function openProgress() {
+  document.getElementById('open').focus();
+  await manager.showCatalogPreparation({name:'Catalogue de test',sync_status:'syncing',syncProgress:{stage:'discovering',percent:22,counts:{movies:158384,series:63128,total:221512},steps:{connect:{status:'done'},movies:{status:'running'},series:{status:'running'},import:{status:'running'}}}});
+  document.getElementById('modal-title').textContent='Préparation de votre catalogue';
+  document.getElementById('catalog-background').textContent='Continuer en arrière-plan';
+}
+document.getElementById('open').onclick=openProgress;
+</script></body></html>

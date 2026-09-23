@@ -5,7 +5,7 @@ import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId,
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
 import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
-import { adoptActiveCatalogUserVisibilityEpoch } from "../_shared/catalog-generation.ts";
+import { adoptActiveCatalogUserVisibilityEpoch, withActiveCatalogEpochRetry } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -121,6 +121,8 @@ type RuntimeConfig = {
   relayTokenSecret: string;
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
+  mediaGatewayCanaryUrl: string;
+  mediaGatewayCanaryToken: string;
   sourceConfigKey: string;
 };
 type DirectFallbackLeaseContext = {
@@ -163,12 +165,16 @@ const ENV_RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL"
 const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_MEDIA_GATEWAY_CANARY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_URL") ?? "");
+const ENV_MEDIA_GATEWAY_CANARY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_CANARY_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const RUNTIME_CONFIG_KEYS = [
   "NORVA_RELAY_BASE_URL",
   "RELAY_TOKEN_SECRET",
   "NORVA_MEDIA_GATEWAY_URL",
   "NORVA_MEDIA_GATEWAY_TOKEN",
+  "NORVA_MEDIA_GATEWAY_CANARY_URL",
+  "NORVA_MEDIA_GATEWAY_CANARY_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
 ];
 const CONTENT_REGION_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;
@@ -3064,7 +3070,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const totalVod = counts.movies + counts.series;
       // Match the durable finalizer: large provider lists must not create a
       // multi-thousand-row materialization transaction in a client isolate.
-      const LIVE_CHUNK = 10;
+      const LIVE_CHUNK = 200;
       if (batchOffset === 0) {
         await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
         const cleared = await clearLiveMaterialization(db, sourceId, userId, generation);
@@ -3119,6 +3125,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         sourceId, userId, rows: liveChunk,
         country: options.country || stringOr(config.country, "FR"),
         generation,
+        writeBatchSize: 100,
+        withCurrentGeneration: operation => withActiveCatalogEpochRetry(db, sourceId, userId, generation, operation),
       });
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
@@ -5951,7 +5959,9 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_RELAY_TOKEN_SECRET ||
     !ENV_MEDIA_GATEWAY_URL ||
     !ENV_MEDIA_GATEWAY_TOKEN ||
-    !ENV_SOURCE_CONFIG_KEY;
+    !ENV_SOURCE_CONFIG_KEY ||
+    !ENV_MEDIA_GATEWAY_CANARY_URL ||
+    !ENV_MEDIA_GATEWAY_CANARY_TOKEN;
 
   if (needsDb) {
     const { data, error } = await db
@@ -5975,6 +5985,8 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     relayTokenSecret: ENV_RELAY_TOKEN_SECRET || fromDb.get("RELAY_TOKEN_SECRET") || "",
     mediaGatewayUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || ""),
     mediaGatewayToken: ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "",
+    mediaGatewayCanaryUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_CANARY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_URL") || ""),
+    mediaGatewayCanaryToken: ENV_MEDIA_GATEWAY_CANARY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_CANARY_TOKEN") || "",
     sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
   };
 
@@ -6577,7 +6589,33 @@ async function assertOwnedSource(sourceId: string, userId: string, db: SupabaseC
 }
 
 async function deleteSource(sourceId: string, userId: string, db: SupabaseClient) {
-  await assertOwnedSource(sourceId, userId, db);
+  const { data: source, error: sourceError } = await db.from("cloud_sources")
+    .select("id,source_type,config_ciphertext,deleted_at")
+    .eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  if (sourceError) throwDb(sourceError, "Unable to verify source");
+  if (!source) throw new HttpError(404, "Source not found");
+
+  // Revoke old thumbnail jobs while the source can still be identified. The
+  // Gateway checks source admission again before every provider read, so a
+  // request already in flight cannot recreate work after the soft deletion.
+  let providerAffinityHash = "";
+  let providerIdle = false;
+  if (!source.deleted_at && source.source_type === "xtream" && source.config_ciphertext) {
+    const runtimeConfig = await getRuntimeConfig(db);
+    const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+    const serverUrl = stringOr(config.serverUrl, "");
+    const username = stringOr(config.username, "");
+    if (serverUrl && username) {
+      let host = "";
+      try { host = new URL(serverUrl).host.toLowerCase(); } catch { /* source can still be removed */ }
+      if (host) {
+        providerAffinityHash = await sha256Hex(`${host}/${username}`);
+        providerIdle = await revokeSourceStoryboardsOnGateways(
+          sourceId, userId, providerAffinityHash, runtimeConfig,
+        );
+      }
+    }
+  }
   // Soft-delete: mark the source removed (instant, one row) so it leaves the user's list right away
   // and stops re-syncing. The heavy per-user child cascade — hundreds of thousands of rows for a big
   // panel, with a per-row rollup trigger on cloud_title_variants — is drained by the
@@ -6595,12 +6633,77 @@ async function deleteSource(sourceId: string, userId: string, db: SupabaseClient
     .maybeSingle();
   if (error) throwDb(error, "Unable to delete provider account");
 
+  // An extraction may send its last heartbeat while the first drain is stopping
+  // FFmpeg. Read that final activity after deletion, attest both Gateways idle
+  // again, then compare the exact row version. A viewer or new job writes its
+  // presence before opening the provider; its newer heartbeat wins the CAS.
+  if (data?.id && providerAffinityHash && providerIdle) {
+    const { data: activity, error: readError } = await db.from("provider_account_activity")
+      .select("kind,last_seen_at").eq("account_key", providerAffinityHash).maybeSingle();
+    if (readError) console.warn("[norva-cloud] source activity fence read unavailable");
+    else if (activity && ["gateway", "language-validation"].includes(activity.kind)) {
+      try {
+        const runtimeConfig = await getRuntimeConfig(db);
+        if (await revokeSourceStoryboardsOnGateways(
+          sourceId, userId, providerAffinityHash, runtimeConfig,
+        )) {
+          const { error: activityError } = await db.from("provider_account_activity")
+            .update({ kind: "catalog-refresh" })
+            .eq("account_key", providerAffinityHash)
+            .eq("kind", activity.kind)
+            .eq("last_seen_at", activity.last_seen_at);
+          if (activityError) console.warn("[norva-cloud] source activity fence cleanup unavailable");
+        }
+      } catch {
+        console.warn("[norva-cloud] source activity fence recheck unavailable");
+      }
+    }
+  }
+
   return {
     body: { success: true, sourceId },
     // A repeated idempotent DELETE updates no row and therefore owns no epoch
     // advance; do not acknowledge a concurrent cutover on its behalf.
     visibilityChanged: Boolean(data?.id),
   };
+}
+
+async function revokeSourceStoryboardsOnGateways(
+  sourceId: string,
+  ownerId: string,
+  affinityHash: string,
+  runtimeConfig: RuntimeConfig,
+): Promise<boolean> {
+  const routes = [
+    { url: runtimeConfig.mediaGatewayUrl, token: runtimeConfig.mediaGatewayToken },
+    { url: runtimeConfig.mediaGatewayCanaryUrl, token: runtimeConfig.mediaGatewayCanaryToken },
+  ].filter((route) => route.url);
+  if (!routes.length || routes.some((route) => !route.token)) {
+    throw new HttpError(503, "Source removal is temporarily unavailable");
+  }
+  let allIdle = true;
+  for (const route of routes) {
+    let response: Response;
+    try {
+      response = await fetch(`${route.url}/jobs/revoke-source-storyboards`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${route.token}`,
+        },
+        body: JSON.stringify({ sourceId, ownerId, affinityHash }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      throw new HttpError(503, "Source removal is temporarily unavailable");
+    }
+    const result = recordOrEmpty(await response.json().catch(() => ({})));
+    if (!response.ok || result.protocol !== 1 || result.providerDrained !== true) {
+      throw new HttpError(503, "Source removal is temporarily unavailable");
+    }
+    allIdle = allIdle && result.providerIdle === true;
+  }
+  return allIdle;
 }
 
 async function assertOwnedDevice(deviceId: string, userId: string, db: SupabaseClient) {

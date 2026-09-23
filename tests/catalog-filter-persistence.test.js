@@ -835,6 +835,47 @@ test('MoviesPage scopes cloud categories and removes hidden profile genres', asy
     assert.deepEqual(saves.at(-1).filters.categories, ['action']);
 });
 
+for (const [file, className, mediaType] of [
+    ['public/js/pages/MoviesPage.js', 'MoviesPage', 'movie'],
+    ['public/js/pages/SeriesPage.js', 'SeriesPage', 'series']
+]) {
+    test(`${className} clears previous-source counts and recovers after an epoch cutover`, async () => {
+        const { Page, context } = loadPage(file, className);
+        context.setTimeout = (callback) => { queueMicrotask(callback); return 0; };
+        let selectedSource = 'old-source';
+        const requests = [];
+        context.API = { media: { genreSummary: (params) => new Promise((resolve, reject) => {
+            requests.push({ params, resolve, reject });
+        }) } };
+        const page = Object.create(Page.prototype);
+        let options = [];
+        Object.assign(page, {
+            selectedCloudSourceId: () => selectedSource,
+            savedFilters: {},
+            restoreSavedCategories: () => {},
+            categoryMulti: { setOptions: next => { options = next; } }
+        });
+
+        const oldLoad = page.loadCloudCategories();
+        requests[0].resolve({ genres: [{ bucket: 'action', label: 'Action', count: 543 }] });
+        await oldLoad;
+        assert.equal(options[0].label, 'Action · 543');
+
+        selectedSource = 'new-source';
+        const newLoad = page.loadCloudCategories();
+        assert.equal(options.length, 0, 'the old count must disappear before the new response');
+        assert.deepEqual(JSON.parse(JSON.stringify(requests[1].params)), { type: mediaType, source: 'new-source' });
+        const cutover = new Error('catalogue changed');
+        cutover.payload = { details: { code: 'CATALOG_VISIBILITY_EPOCH_CHANGED' } };
+        requests[1].reject(cutover);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(requests.length, 3, 'a cutover must retry its scoped query');
+        requests[2].resolve({ genres: [{ bucket: 'action', label: 'Action', count: 21 }] });
+        await newLoad;
+        assert.equal(options[0].label, 'Action · 21');
+    });
+}
+
 test('MoviesPage forwards the selected provider to genre item queries', () => {
     const { Page } = loadPage('public/js/pages/MoviesPage.js', 'MoviesPage');
     const page = Object.create(Page.prototype);

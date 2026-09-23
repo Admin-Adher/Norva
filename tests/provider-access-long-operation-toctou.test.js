@@ -54,6 +54,9 @@ function loadPublicErrorCode(source, allowlistName) {
 test('series-info fences fresh cache, stale fallback, provider response, cache write, and final epoch header', () => {
   const source = read('supabase/functions/norva-series-info/index.ts');
   assertSnapshotContract(source);
+  const guard = section(source, 'async function assertSourceSnapshotCurrent(', '\nfunction catalogVisibilityUnavailable()');
+  assert.match(guard, /adoptActiveCatalogUserVisibilityEpoch\(db, sourceId, userId, expected\)/);
+  assert.doesNotMatch(guard, /assertActiveCatalogGenerationCurrent/);
 
   const lookup = section(source, 'async function getXtreamSeriesInfo(', '\nfunction providerAccountKey(');
   assert.match(
