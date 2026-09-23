@@ -1,0 +1,34 @@
+name: Prepare encrypted media-cache runtime configuration
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type SEAL_MEDIA_CACHE_RUNTIME to prepare the production server configuration
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  seal:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'SEAL_MEDIA_CACHE_RUNTIME'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Cloudflare
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22.22.3'
+      - name: Seal existing keys for the pinned production recipient
+        env:
+          NORVA_MEDIA_CACHE_TICKET_HMAC_KEY: ${{ secrets.NORVA_MEDIA_CACHE_TICKET_HMAC_KEY }}
+          NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY: ${{ secrets.NORVA_MEDIA_CACHE_COORDINATION_HMAC_KEY }}
+        run: node ops/cloudflare/seal-media-cache-runtime.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: media-cache-runtime-sealed-${{ github.run_id }}
+          path: artifacts/media-cache-runtime.sealed
+          if-no-files-found: error
+          retention-days: 1
