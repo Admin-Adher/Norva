@@ -1,0 +1,24 @@
+{
+  "manifest": [
+    {
+      "path": "_shared/xtream-sync.ts",
+      "before": "c91f3f3fb41e71fcb7981696859a4f863f6b85b2218cadcb4ce037877a9c9adc",
+      "after": "ec608c835349361afb9cc25886fd46a28924fa20ecef710d73b800aa8b680029"
+    },
+    {
+      "path": "_shared/xtream-progressive-vod.mjs",
+      "before": "37a11111ea0c40661149b40193c0620b795f6815b86fe0a20e0ad2a1a7d2b49c",
+      "after": "37a11111ea0c40661149b40193c0620b795f6815b86fe0a20e0ad2a1a7d2b49c"
+    }
+  ],
+  "health": [
+    {
+      "service": "norva-source-sync",
+      "ok": true
+    },
+    {
+      "service": "norva-cloud",
+      "ok": true
+    }
+  ]
+}
