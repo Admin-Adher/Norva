@@ -4,7 +4,7 @@ import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import {
   type ActiveCatalogGeneration,
-  assertActiveCatalogGenerationCurrent,
+  adoptActiveCatalogUserVisibilityEpoch,
   catalogGenerationRpcFence,
   isCatalogGenerationSuperseded,
   readActiveCatalogGenerationSnapshot,
@@ -392,7 +392,11 @@ async function assertSourceSnapshotCurrent(
   db: SupabaseClient,
 ): Promise<void> {
   try {
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
+    // Progressive publication advances the account-wide visibility epoch while
+    // this title's source, generation and config remain unchanged. Adopt only
+    // that monotone cache fence; the shared helper still rejects any authority
+    // change before provider/cache/episode work may continue.
+    await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expected);
   } catch (error) {
     if (!isCatalogGenerationSuperseded(error)) throw error;
     throw new HttpError(409, "Catalog access changed while series details were loading", {
