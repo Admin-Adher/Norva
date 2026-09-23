@@ -1,0 +1,107 @@
+name: Android emulator QA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/android-emulator-qa.yml'
+      - 'clients/android-phone/**'
+      - 'clients/android-tv/**'
+
+permissions:
+  contents: read
+
+jobs:
+  phone:
+    name: Phone API 35 (${{ matrix.navigation }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        navigation: [three-button, gesture]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run instrumented phone tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          script: |
+            set -eu
+            adb shell settings put system font_scale 1.3
+            if [ '${{ matrix.navigation }}' = gesture ]; then
+              adb shell cmd overlay enable --user 0 com.android.internal.systemui.navbar.gestural
+            else
+              adb shell cmd overlay enable --user 0 com.android.internal.systemui.navbar.threebutton
+            fi
+            adb shell cmd overlay list | grep -E '\[x\] com.android.internal.systemui.navbar.(gestural|threebutton)'
+            cd clients/android-phone
+            gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
+      - name: Upload phone test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-emulator-${{ matrix.navigation }}
+          path: clients/android-phone/app/build/outputs/androidTest-results/connected/
+          if-no-files-found: warn
+          retention-days: 14
+
+  tv:
+    name: Android TV API 34
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run instrumented TV tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: android-tv
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          script: |
+            set -eu
+            cd clients/android-tv
+            gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
+      - name: Upload TV test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tv-emulator
+          path: clients/android-tv/app/build/outputs/androidTest-results/connected/
+          if-no-files-found: warn
+          retention-days: 14
