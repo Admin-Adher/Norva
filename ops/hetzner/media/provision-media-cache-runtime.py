@@ -62,7 +62,7 @@ def provision(ciphertext_path, apply=False):
         raise RuntimeError('cache keys must be distinct')
     values = [url, token, data['ticketKey'], data['coordinationKey']]
     key_list = ','.join("'"+k+"'" for k in KEYS)
-    previous = json.loads(sql("select coalesce(json_agg(t),'[]'::json) from (select key,value from public.cloud_runtime_config where key in ("+key_list+")) t;"))
+    previous = json.loads(sql("select coalesce(json_agg(t),'[]'::json) from (select key,value,is_secret,description,updated_at from public.cloud_runtime_config where key in ("+key_list+")) t;"))
     if any(row['value'] for row in previous):
         raise RuntimeError('runtime keys already present; review before replacement')
     if not apply:
@@ -70,7 +70,7 @@ def provision(ciphertext_path, apply=False):
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     with os.fdopen(os.open(STAGE/('before-'+stamp+'.json'), os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600), 'w') as f:
         json.dump(previous, f)
-    rows = ','.join("('"+k+"','"+v+"')" for k,v in zip(KEYS, values))
+    rows = ','.join("('"+k+"','"+v+"',true)" for k,v in zip(KEYS, values))
     # Values are validated above and cannot contain SQL delimiters. Guard flags
     # and pre-existing key values again inside the transaction before changing keys.
     sql("""begin;
@@ -90,7 +90,7 @@ do $$ begin
   raise exception 'Runtime keys changed since validation';
  end if;
 end $$;
-insert into public.cloud_runtime_config(key,value) values """+rows+" on conflict(key) do update set value=excluded.value; commit;")
+insert into public.cloud_runtime_config(key,value,is_secret) values """+rows+" on conflict(key) do update set value=excluded.value,is_secret=true; commit;")
     receipt = {'applied': True, 'at': stamp, 'keys': KEYS, 'activationChanged': False,
                'sealedSha256': hashlib.sha256(sealed).hexdigest()}
     (STAGE/('receipt-'+stamp+'.json')).write_text(json.dumps(receipt, indent=2))
