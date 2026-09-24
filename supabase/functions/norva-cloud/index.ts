@@ -1074,7 +1074,10 @@ async function getOrCreateDefaultProfileId(userId: string, db: SupabaseClient): 
   if (existing?.id) return existing.id as string;
 
   const { data: account } = await db.from("cloud_profiles").select("display_name").eq("id", userId).maybeSingle();
-  const name = stringOrNull(account?.display_name) || "Profile 1";
+  // Account display names can be longer than the profile table's 40-character
+  // limit (for example, a new user signing up with a plus-address). Reuse the
+  // same normalization as manually created profiles so first login cannot fail.
+  const name = normalizeProfileName(account?.display_name) || "Profile 1";
   const { data, error } = await db
     .from("cloud_account_profiles")
     .insert({ user_id: userId, name, avatar_id: "avatar-01", is_default: true, sort_order: 0 })
