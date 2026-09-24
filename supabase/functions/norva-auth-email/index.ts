@@ -1,4 +1,5 @@
 import { renderEmailFrame } from "../_shared/email-frame.ts";
+import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 /**
  * norva-auth-email — Supabase "Send Email Hook".
  *
@@ -18,8 +19,6 @@ import { renderEmailFrame } from "../_shared/email-frame.ts";
  * Deploy with JWT verification OFF (it's a signed webhook, not a user call):
  *   [functions.norva-auth-email] verify_jwt = false   (see supabase/config.toml)
  */
-
-import { requestEmailProvider } from '../_shared/email-provider-request.mjs';
 
 const NORVA_POSTAL_WIRE_KEY = Deno.env.get("NORVA_POSTAL_WIRE_KEY") ?? "";
 const HOOK_SECRET_RAW = Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "";
@@ -421,12 +420,7 @@ export function buildOutboundEmails(payload: AuthEmailHookPayload): OutboundEmai
   return [{ to: newEmail, ...rendered }];
 }
 
-// The injectable adapter is used by the isolated Postal pair proof only. The
-// live entry point below supplies none: its provider remains Resend.
-export function createAuthEmailHandler({ postalPair = null }: {
-  postalPair?: null | ((input: { payload: AuthEmailHookPayload; rawBody: string; emails: OutboundEmail[] }) => Promise<Response | null>);
-} = {}) {
-return async (req: Request) => {
+Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   const body = await req.text();
@@ -449,16 +443,6 @@ return async (req: Request) => {
     return json({ error: detail }, 400);
   }
 
-  // Selected Postal requests never fall through to a second provider after a
-  // failure. Only an explicit null (not selected) retains the current path.
-  if (postalPair) {
-    try {
-      const response = await postalPair({ payload, rawBody: body, emails });
-      if (response !== null) return response;
-    } catch {
-      return json({ error: "Email queue unavailable", retryable: true }, 503, { "Retry-After": "2" });
-    }
-  }
   if (!NORVA_POSTAL_WIRE_KEY) return json({ error: "NORVA_POSTAL_WIRE_KEY not configured" }, 500);
 
   // GoTrue creates a fresh Standard Webhooks id for each retry, so webhook-id
@@ -514,7 +498,4 @@ return async (req: Request) => {
   }
 
   return json({});
-};
-}
-
-Deno.serve(createAuthEmailHandler());
+});
