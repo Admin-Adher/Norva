@@ -86,16 +86,29 @@ test('Gateway publishes manifest-last graph before one bounded Edge authority ca
     gateway.indexOf('async function registerSharedMediaCachePublication('),
     gateway.indexOf('async function maybePublishMkvCompleteHlsCache('),
   );
-  assert.match(publication, /publishSharedMediaCacheSession\(/);
+  assert.match(publication, /publishSharedMediaCacheSessionWithRetry\(/);
+  assert.match(publication, /beforeRetry: async \(\) =>/);
+  assert.match(publication, /sharedMediaCacheStats\.transientRetries \+= 1/);
   assert.match(publication, /registerPublication: async \(payload\) =>/);
   assert.match(publication, /return registerSharedMediaCachePublication\(payload\)/);
   assert.match(publication, /mediaCacheProducerControl\.pulse\(session, 'finalizing'\)/);
-  assert.equal((publication.match(/producerState !== 'renewed'/g) || []).length, 2);
+  assert.equal((publication.match(/(?:producerState|state) !== 'renewed'/g) || []).length, 3);
   assert.match(publication, /\/media-cache\/publication/);
   assert.match(publication, /AbortSignal\.timeout\(SHARED_MEDIA_CACHE_CALLBACK_TIMEOUT_MS\)/);
   assert.match(publication, /const delays = \[0, 1_000, 5_000, 15_000\]/);
   assert.match(publication, /64 \* 1024/);
   assert.doesNotMatch(publication, /sourceUrl|providerPassword|password/);
+});
+
+test('clean session teardown keeps producer renewal alive until publication settles', () => {
+  const stop = gateway.slice(
+    gateway.indexOf('async function stopSession('),
+    gateway.indexOf('function ', gateway.indexOf('async function stopSession(') + 20),
+  );
+  const publication = stop.indexOf('await session.sharedMediaCachePublicationPromise?.catch');
+  const detach = stop.indexOf('mediaCacheProducerControl.detach(session)');
+  const abandon = stop.indexOf('await mediaCacheProducerControl.abandon(session)');
+  assert.ok(publication >= 0 && detach > publication && abandon > detach);
 });
 
 test('shared completion after viewer exit is dark, demand-driven and immediately preemptable', () => {

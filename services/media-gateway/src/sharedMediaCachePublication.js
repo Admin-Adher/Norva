@@ -116,7 +116,34 @@ async function publishSharedMediaCacheSession(options = {}) {
     });
 }
 
+function retryableWorkerFailure(error) {
+    return error?.retryable === true && [
+        'MEDIA_CACHE_WORKER_UNAVAILABLE',
+        'MEDIA_CACHE_GET_FAILED',
+        'MEDIA_CACHE_PUT_FAILED',
+    ].includes(String(error?.code || ''));
+}
+
+async function publishSharedMediaCacheSessionWithRetry(options = {}) {
+    const delays = options.retryDelaysMs ?? [5_000, 20_000, 60_000];
+    const wait = options.wait ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+    if (!Array.isArray(delays) || delays.length > 3
+        || delays.some((delay) => !Number.isSafeInteger(delay) || delay < 0 || delay > 60_000)) {
+        throw new TypeError('SHARED_MEDIA_CACHE_RETRY_DELAYS_INVALID');
+    }
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await publishSharedMediaCacheSession(options);
+        } catch (error) {
+            if (!retryableWorkerFailure(error) || attempt >= delays.length) throw error;
+            await wait(delays[attempt]);
+            await options.beforeRetry?.(attempt + 1);
+        }
+    }
+}
+
 module.exports = {
     SharedMediaCachePublicationError,
     publishSharedMediaCacheSession,
+    publishSharedMediaCacheSessionWithRetry,
 };

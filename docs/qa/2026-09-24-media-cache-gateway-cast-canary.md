@@ -70,12 +70,61 @@ candidate retained output path. It produced six sequential segments, an EVENT
 playlist containing all six, and `ENDLIST` within a 64 MiB cap. Twenty-two
 focused local tests passed. A broader Windows Gateway test run was not usable:
 the worktree lacks the `undici` dependency required by several harnesses; Linux
-CI remains the regression gate. This candidate has not yet passed CI or a
-production rollout. **No application R2 hit is claimed.**
+CI was the remaining regression gate before deployment. At this point,
+**no application R2 hit had been observed**.
+
+## v169 rollout and live canary, 09:41 UTC
+
+PR #401 merged as `e44448a7a008733a86fe1457fd60bb91462d10e6`. Its second
+Build Norva run passed all jobs: 5,102 Node tests passed, zero failed, and 20
+were skipped. The complete Gateway source from that merge was archived and
+built without network access against the pinned production codec image. The
+resulting reference image is
+`sha256:5b11b77ae9c0af4397c764c627902bf362eb56bb21f96c8d1230ee92c8b7bcd6`.
+An isolated, networkless container served health v169 with zero sessions.
+
+The guarded rollout plan passed on both idle production nodes with no
+environment change. The pilot was replaced at 09:41:33 UTC and the main
+Gateway at 09:41:45 UTC. Both served healthy v169 after replacement, from the
+same image and source revision. Rollback receipts are respectively
+`/home/adrien/.norva/gateway-reference-rollout/20260924T094133716216Z` and
+`/home/adrien/.norva/gateway-reference-rollout/20260924T094145031318Z`.
+The main Compose override was pinned to the new image, with a protected backup
+at `/home/adrien/.norva/gateway-v169-e44448a7-20260924/override-before-v169.yml`;
+its SHA-256 changed from `4d206963e2ba2a1d295600f9d198db4f275ddd3f82d30365f8725137f692e415`
+to `afc791d304af6afeb8dcb3bb41b29172745a548686eb7392185e1243f4c2958d`.
+
+At the first ordinary QA replay, the browser decoded 1280×720 frames and
+advanced through the complete 48:11 film at 1.5×. The live health reported
+one admitted producer and one retained HLS session; 95 lease renewals succeeded
+without a lease failure. At 10:14:24 UTC the first R2 publication failed with
+`MEDIA_CACHE_WORKER_UNAVAILABLE`. The Gateway recorded one publication failure,
+abandoned the producer lease and cleaned up the output after the viewer ended.
+There is no ready `media_cache_objects` row and no cache-hit replay to claim.
+
+The Worker health endpoint was healthy afterwards. From the same Gateway
+container, a missing manifest lookup returned 404, and disposable synthetic
+40-byte and 4 MiB asset uploads returned 201; each was immediately purged
+with a verified one-object deletion. Thus the live endpoint and basic R2 write
+path work, but these probes do not establish why the earlier request failed.
+Its client retries only twice at 100 and 500 ms after the first attempt, and
+the one-shot publication does not resume after those attempts fail.
+
+A follow-up Gateway candidate retries only explicitly retryable Worker read or
+write failures after 5, 20 and 60 seconds. Every retry must renew the same
+producer lease, and teardown keeps the heartbeat alive until publication
+settles. Immutable asset names and manifest-last publication make a replay of
+the same graph safe after a partial upload. Terminal conflicts are never
+retried. Nineteen focused publication, wiring and producer-control tests pass.
+This candidate has not yet passed full CI or been deployed. The database still
+has exactly one account in stage `singleflight`; global read, singleflight and
+live-join flags remain false.
 
 ## Remaining checks
 
-- Observe full source EOF, Gateway publication and a ready R2 object.
+- Merge and deploy the bounded Worker retry candidate after CI and an isolated
+  runtime smoke, then repeat the ordinary QA full-file replay.
+- Observe Gateway publication and a ready R2 object.
 - Replay the film in the ordinary QA app and confirm decoded frames with a
   shared-cache session and no new provider-backed Gateway session.
 - Verify another owner cannot use this owner's source binding in production.
