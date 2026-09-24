@@ -305,12 +305,65 @@ passed. The unrelated strict-LID suite cannot run in this Windows worktree
 because its `undici` dependency is absent; cloud CI remains the regression
 gate. Live provider behavior and the R2 hit are still unverified.
 
+## Signed-query reconnect rollout and live observation
+
+PR #406 merged as `11016a17d967988ea241688dc06dc61f7bb865f6` after the
+cloud-contract, Android phone, Android TV and Windows CI jobs passed. Its exact
+Gateway source archive has SHA-256
+`134b4afd91648ea5df69bb431c862a44e61b48ecc03ea6e3a6db8a66ed76039c`.
+The networkless build from the pinned codec runtime produced image
+`sha256:c59ba2fc17046f4445fbb25f2bae50257e331f77318b554d89c0f5f9081b9f5e`.
+The guarded rollout replaced the idle pilot at 13:50:05 UTC. The main
+Gateway's first plan was refused because two audio brokers were active; after
+they ended, it was replaced at 13:51:47 UTC. Both nodes now run the same image
+and revision, serve healthy v169, and have zero restarts. Rollback receipts are
+`/home/adrien/.norva/gateway-reference-rollout/20260924T135005217548Z` and
+`/home/adrien/.norva/gateway-reference-rollout/20260924T135147290378Z`.
+The main Compose override is pinned to the image above, with backup at
+`/home/adrien/.norva/gateway-signed-reconnect-11016a17-20260924/override-before-signed-reconnect.yml`;
+its SHA-256 changed from
+`f84fcd21a454b3e7737628679d4fdd611d2d38d95b0cef9a5614dd2f5f507cef`
+to `cbdc9ca7dd9ab4064a9b93a14289e51299a6b0433505fab477ae001262a0b884`.
+No environment or global-cache flag changed.
+
+On the next ordinary QA film replay, a real reconnection logged
+`vod_input_reconnect_guard` with `accepted` and
+`same-identity-strong-etag`. The browser continued to decode 720p frames
+past the reconnect, and the producer heartbeat continued without expiration
+or abandonment. At 2× the browser reached the live playlist edge and paused
+despite new segments arriving; the play control resumed it, and the rate was
+reduced to 1.5×. This is a separate player experience issue. EOF publication
+and a cache-hit replay were then verified as follows.
+
+The browser reached 48:11 with decoded 1280×720 frames and no media error.
+The bounded input pump completed all 539,967,493 source bytes with one exact
+reconnect. FFmpeg ended and immutable publication began while the viewer was
+still finishing the buffered tail. During the upload, producer renewals grew
+from 95 to 159. The Gateway finished with `publications=1`,
+`completions=1`, `filesPublished=1447`, `failures=0`, `expirations=0`, and
+`abandons=0`. The R2 inventory listed 1,448 objects totaling 476,705,256
+bytes, including the manifest. Production SQL showed one `ready` object with
+1,447 media files, 476,256,257 media bytes and one active owner binding.
+
+The same ordinary QA account then opened the film from the catalogue in a
+separate browser tab. The player explicitly displayed `Norva Cache`, decoded
+1280×720 frames and advanced beyond three minutes without media error. SQL
+showed a recent, unrevoked media-cache playback grant for the ready object,
+with no provider account bound to its playback session. Both Gateways remained
+healthy with zero active provider sessions; the main bounded input pump stayed
+at one start and the pilot at zero. This is a real app-level R2 cache hit,
+not merely a successful object upload.
+
+For an owner-scope negative control, the protected claim RPC was invoked in a
+rolled-back transaction using a different, existing internal user's ID and
+this QA owner's exact source binding. It returned zero claim rows. A follow-up
+query found zero new grants for that other user. No cross-owner cache access or
+persistent test mutation occurred.
+
 ## Remaining checks
 
-- Validate and deploy the signed-query reconnect guard, then obtain one
-  successful EOF publication and ready R2 object on the ordinary QA film.
-- Replay the film in the ordinary QA app and confirm decoded frames with a
-  shared-cache session and no new provider-backed Gateway session.
-- Verify another owner cannot use this owner's source binding in production.
-- Keep global cache flags disabled until the owner-scope, concurrent-viewer,
-  fallback, and rollback paths have live evidence.
+- Keep global cache flags disabled until concurrent-viewer, failure fallback,
+  rollback and broader owner-scope paths have live evidence.
+- Investigate the browser's live-playlist-edge pause at 2×; new segments were
+  produced but the player needed its visible Play control to resume.
+- Replay real provider playback on Android phone and TV hardware or emulators.
