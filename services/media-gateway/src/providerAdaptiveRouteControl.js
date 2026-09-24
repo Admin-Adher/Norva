@@ -52,11 +52,14 @@ class ProviderAdaptiveRouteControl {
         this.fetchImpl = options.fetchImpl || globalThis.fetch;
         this.lookupTimeoutMs = Math.max(100, Math.min(2_000, Number(options.lookupTimeoutMs) || 500));
         this.slotIndexForKey = options.slotIndexForKey;
-        // Canary-only escape hatch: exercise the route selected by the control
-        // plane while the global policy remains observational. The default is
-        // deliberately false, so a normal production process can never turn a
-        // shadow recommendation into live egress by accident.
-        this.applyShadowForCanary = options.applyShadowForCanary === true;
+        // A shadow recommendation may be exercised only for an explicitly
+        // selected owner. Never store that decision in the provider-wide map:
+        // another Norva owner may use the same provider account affinity.
+        const canaryOwnerKeys = Array.isArray(options.canaryOwnerKeys) ? options.canaryOwnerKeys : [];
+        const validCanaryKeys = canaryOwnerKeys.length > 0 && canaryOwnerKeys.length <= 8
+            && canaryOwnerKeys.every((key) => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key));
+        this.canaryOwnerKeys = new Set(validCanaryKeys ? canaryOwnerKeys : []);
+        this.applyShadowForCanary = options.applyShadowForCanary === true && this.canaryOwnerKeys.size > 0;
         this.fallbackNodeTransport = options.fallbackNodeTransport === 'http'
             ? 'http'
             : (this.socksProxyUrls.length ? 'socks5' : 'http');
@@ -68,6 +71,7 @@ class ProviderAdaptiveRouteControl {
         this.stats = {
             resolves: 0,
             applied: 0,
+            canaryApplied: 0,
             shadows: 0,
             fallbacks: 0,
             timeouts: 0,
@@ -230,14 +234,15 @@ class ProviderAdaptiveRouteControl {
             if (decision) {
                 this.shadowByAffinity.set(String(affinityKey || ''), decision);
                 this.stats.shadows += 1;
-                if (this.applyShadowForCanary && payload.enabled === true) {
+                if (this.applyShadowForCanary && payload.enabled === true
+                    && this.canaryOwnerKeys.has(String(options.ownerKey || ''))) {
                     const canaryDecision = Object.freeze({
                         ...decision,
                         controlStatus: 'canary-shadow-applied',
                         selectionReason: `canary-${decision.selectionReason}`.slice(0, 64),
                     });
-                    this.appliedByAffinity.set(String(affinityKey || ''), canaryDecision);
                     this.stats.applied += 1;
+                    this.stats.canaryApplied += 1;
                     return canaryDecision;
                 }
             }

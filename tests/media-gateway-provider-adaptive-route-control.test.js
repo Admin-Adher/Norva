@@ -137,9 +137,12 @@ test('shadow decisions are observed but cannot alter the live route', async () =
   assert.equal(control.publicStatus().appliedAccounts, 0);
 });
 
-test('an explicit canary switch applies the observed shadow route without changing the default', async () => {
+test('a shadow route reaches only the allowlisted owner and never enters the provider-wide map', async () => {
+  const canaryOwner = 'a'.repeat(64);
+  const otherOwner = 'b'.repeat(64);
   const control = controller({
     applyShadowForCanary: true,
+    canaryOwnerKeys: [canaryOwner],
     fetchImpl: async () => response({
       protocol: 1,
       enabled: true,
@@ -154,14 +157,37 @@ test('an explicit canary switch applies the observed shadow route without changi
       },
     }),
   });
-  const decision = await control.resolveForPlayback(sourceUrl, 'provider/account');
+  const otherDecision = await control.resolveForPlayback(sourceUrl, 'provider/account', { ownerKey: otherOwner });
+  const decision = await control.resolveForPlayback(sourceUrl, 'provider/account', { ownerKey: canaryOwner });
 
+  assert.equal(otherDecision.id, '2:socks5');
+  assert.equal(otherDecision.controlStatus, 'fallback');
   assert.equal(decision.id, '1:http');
   assert.equal(decision.controlStatus, 'canary-shadow-applied');
   assert.equal(decision.selectionReason, 'canary-host-learned');
+  assert.equal(control.decisionForAffinity('provider/account').id, '2:socks5');
   assert.equal(control.publicStatus().canaryShadowApply, true);
   assert.equal(control.publicStatus().shadowAccounts, 1);
-  assert.equal(control.publicStatus().appliedAccounts, 1);
+  assert.equal(control.publicStatus().appliedAccounts, 0);
+  assert.equal(control.publicStatus().canaryApplied, 1);
+});
+
+test('an empty or malformed owner allowlist leaves shadow recommendations inert', async () => {
+  for (const canaryOwnerKeys of [[], ['a'.repeat(64), 'invalid']]) {
+    const control = controller({
+      applyShadowForCanary: true,
+      canaryOwnerKeys,
+      fetchImpl: async () => response({
+        protocol: 1, enabled: true, apply: false,
+        decision: { slot: 1, nodeTransport: 'http', score: 95, confidence: 0.95,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(), selectionReason: 'host-learned' },
+      }),
+    });
+    const decision = await control.resolveForPlayback(sourceUrl, 'provider/account', { ownerKey: 'a'.repeat(64) });
+    assert.equal(decision.id, '2:socks5');
+    assert.equal(control.publicStatus().canaryShadowApply, false);
+    assert.equal(control.publicStatus().canaryApplied, 0);
+  }
 });
 
 test('invalid, expired, unavailable, and timed-out control responses fail to the sticky route', async () => {

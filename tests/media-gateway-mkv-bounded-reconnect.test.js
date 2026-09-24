@@ -149,6 +149,7 @@ function pumpHarness(overrides = {}) {
         providerHttpProxyAgents: [],
         providerSocksProxyAgents: [],
         providerProxyAgents: [],
+        providerProxySlotOverrides: new Map(),
         vodInputPumpStats: {
             starts: 0,
             completed: 0,
