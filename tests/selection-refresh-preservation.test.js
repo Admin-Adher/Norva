@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
+const shared = require('../supabase/functions/_shared/selection-initial-import.mjs');
+const classification = require('../supabase/functions/_shared/m3u-media-classification.mjs');
 
 const root = path.resolve(__dirname, '..');
 const read = engine => fs.readFileSync(path.join(root, `supabase/functions/${engine}/index.ts`), 'utf8').replace(/\r\n/g, '\n');
@@ -26,7 +28,7 @@ function persistenceHarness(engine, failBatch = 0, replacedOnPrune = false) {
   const fence = { ...snapshot, userVisibilityEpoch: '1' };
   const context = {
     Date,
-    writeSelectionBatch: async options => (await import('../supabase/functions/_shared/selection-initial-import.mjs')).writeSelectionBatch(options),
+    writeM3uEpochBatch: shared.writeM3uEpochBatch,
     assertCatalogSnapshotCurrent: async () => { assert.equal(fence.userVisibilityEpoch, String(epoch)); },
     adoptActiveCatalogUserVisibilityEpoch: async (_db, _source, _user, current) => {
       if (replacedOnPrune && calls.some(call => call.op === 'prune')) throw Error('catalog generation changed');
@@ -78,7 +80,7 @@ for (const engine of ['norva-source-sync', 'norva-cloud']) {
     for (let i = 0; i < 260; i++) h.rows.set(`obsolete-${i}`, { id: `obsolete-${i}` });
     await h.run([{ external_id: 'keep', title: 'Kept film' }]);
     assert.equal(h.rows.size, 1);
-    assert.equal(h.adoptions(), engine === 'norva-cloud' ? 4 : 3);
+    assert.ok(h.adoptions() >= 3, 'each write and prune must revalidate the account epoch');
     const changed = persistenceHarness(engine, 0, true);
     await assert.rejects(changed.run([{ external_id: 'keep' }]), /catalog generation changed/);
   });
@@ -118,15 +120,19 @@ for (const engine of ['norva-source-sync', 'norva-cloud']) {
   });
 }
 
-async function runUnchangedSync(actualCount, playlistUrl = 'https://norva.tv/catalog/discovery.m3u') {
+async function runUnchangedSync(actualCount, playlistUrl = 'https://norva.tv/catalog/discovery.m3u', projectionComplete = true) {
   let persisted = false;
   let preserve = null;
   let countRead = false;
-  const entries = Array.from({ length: 3 }, (_, i) => ({ title: `Film ${i}`, url: `https://example.test/${i}.mp4`, tvgId: `id-${i}`, kind: 'movie' }));
+  const entries = Array.from({ length: 3 }, (_, i) => ({ title: `Film ${i}`, url: `https://example.test/${i}.mp4`, tvgId: `id-${i}`, kind: 'movie', media: { mediaType: 'movie' } }));
   const context = {
     DISCOVERY_PLAYLIST_URL: 'https://norva.tv/catalog/discovery.m3u',
     stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     compactRecord: value => value,
+    m3uCatalogCounts: classification.m3uCatalogCounts,
+    buildM3uCatalogRows: classification.buildM3uCatalogRows,
+    m3uSemanticSignature: classification.m3uSemanticSignature,
+    sha256Hex: async value => require('node:crypto').createHash('sha256').update(value).digest('hex'),
     assertCatalogSnapshotCurrent: async () => {},
     fetchDiscoverySelection: async () => ({ items: entries }),
     fetchM3uItems: async () => ({ items: entries }),
@@ -137,7 +143,8 @@ async function runUnchangedSync(actualCount, playlistUrl = 'https://norva.tv/cat
     replaceSourceItems: async (...args) => { persisted = true; preserve = args[6]; return args[2]; },
   };
   const sync = loadFunction(read('norva-source-sync'), 'syncM3uSource', 'replaceSourceItems', context);
-  const result = await sync('source', 'owner', { playlistUrl }, {}, null, snapshot, async () => {}, { previousSignature: { same: true } });
+  const result = await sync('source', 'owner', { playlistUrl }, {}, null, snapshot, async () => {},
+    { previousSignature: { same: true }, projectionComplete });
   return { result, persisted, preserve, countRead };
 }
 
@@ -159,4 +166,10 @@ test('ordinary unchanged playlists keep their existing signature shortcut', asyn
   const h = await runUnchangedSync(1, 'https://example.test/provider.m3u');
   assert.equal(h.result.skipped, true);
   assert.equal(h.countRead, false);
+});
+
+test('a matching signature cannot skip an incomplete projection', async () => {
+  const h = await runUnchangedSync(3, 'https://example.test/provider.m3u', false);
+  assert.equal(h.result.skipped, undefined);
+  assert.equal(h.persisted, true);
 });

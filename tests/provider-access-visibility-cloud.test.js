@@ -118,6 +118,7 @@ test('delayed gateway and direct series reads reject A after an interleaved tran
       'async function getXtreamShortEpg(',
       {
         HttpError,
+        isM3uSeriesId: () => false,
         console: { warn() {} },
         visibleSourceSnapshot: async () => ({ config_revision: '7' }),
         sourceSnapshotConfigRevision: (snapshot) => String(snapshot.config_revision),
