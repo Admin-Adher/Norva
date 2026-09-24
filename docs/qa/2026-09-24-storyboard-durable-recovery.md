@@ -4,7 +4,7 @@
 
 The Gateway writes HMAC-signed storyboard checkpoints but never called `StoryboardStore.load()` during startup. Stored records also omitted `sourceId`, which is required by source activity and revocation checks. Renewed grants did not restore it either.
 
-A separate integration gap remains: `renewDurableStoryboard` calls `POST /storyboard-renew`, but the current Edge router has no such endpoint. `catalog_storyboards` enqueue also does not persist enough owner/source/target context for safe renewal. **Do not activate durable storyboards until this backend dependency and the actual application journey are implemented and tested.**
+A separate integration gap was found: `renewDurableStoryboard` calls `POST /storyboard-renew`, but the current Edge router has no such endpoint. `catalog_storyboards` enqueue also does not persist enough owner/source/target context for safe renewal. The branch now adds that route and a migration for the renewal context. **Do not activate durable storyboards until the migration/runtime rollout and the actual application journey have been verified.**
 
 ## Recovery repair in this branch
 
@@ -23,3 +23,9 @@ These tests use actual disk checkpoints and extracted Gateway functions with con
 ## Next requirements
 
 Persist an owner/source/target-bound renewal context without provider credentials; authenticate the Gateway; recheck the current source and job before renewing short-lived transport/upload grants; invalidate frames on exact-target change; retain viewer/import priority. Exercise restart, source removal, changed credentials, terminal callback retry and actual app rendering on both Gateway routes before gradual activation.
+
+## Backend renewal implementation
+
+The branch now persists owner/source/container/duration at enqueue, without transport credentials. The authenticated renewal endpoint checks the live processing job, source ownership and enabled/deleted state, import and viewer gates, current provider identity and target. The returned grant expires after 15 minutes and hashes the exact URL plus encrypted source configuration into a frame binding. Source and job state are rechecked after grant creation. Temporary target resolution failure returns 503 for retry; revoked/replaced jobs return 410. New jobs use distinct sprite paths to prevent a delayed old upload overwriting the new artifact.
+
+28 targeted tests passed across renewal, disk recovery, source revocation and import priority. Migration and real Edge/Gateway restart remain unverified; no production activation or deployment performed. Migration must be applied before the new Edge enqueue code.
