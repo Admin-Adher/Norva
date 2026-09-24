@@ -147,3 +147,18 @@ can differ from a later database snapshot while publication continues.
 5. Import the second new provider after the user enters its credentials.
 
 The 100-reader campaign remains deferred at the user's request.
+
+## 24 September — final import and category projection check
+
+Read-only production SQL on the owner's account now shows both MAX OTT and Dino `ready`, 100% complete, and without a sync error. The original status at the start of this report is historical. Final raw movie/series entries equal their projected variant counts exactly; visible logical titles are fewer because variants are grouped by identity.
+
+| Source | Type | Raw entries = variants | Logical titles | Rows with category ID and name | Distinct category IDs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| MAX OTT | Films | 158,384 | 155,502 | 158,384 | 175 |
+| MAX OTT | Séries | 63,134 | 62,286 | 63,134 | 115 |
+| Dino | Films | 96,143 | 46,047 | 96,143 | 136 |
+| Dino | Séries | 24,951 | 13,273 | 24,951 | 97 |
+
+The Live TV raw rows also all have category IDs and names: MAX OTT 28,646 across 379 IDs; Dino 21,068 across 355 IDs. These counts verify stored category coverage, not the complete filter interactions in every client.
+
+Language evidence is more limited. Among logical titles reachable through each source, MAX OTT films have 4,200 titles with version-language tags and 4,976 with observed audio-language arrays; the corresponding series counts are 2,120 and 1,660. Dino films have 122 version-tagged titles and 22,868 with observed audio arrays; Dino series have 22 and 7,685. A title can be reachable through multiple sources, so these title-level language arrays cannot be attributed solely to one provider. Large unknown-language populations remain; a complete language-facet and playback-language check is still open.
