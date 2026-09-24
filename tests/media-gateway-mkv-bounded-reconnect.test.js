@@ -2566,6 +2566,89 @@ test('linear resume fault harness revalidates byte zero before accepting a rotat
     });
 });
 
+test('signed CDN query rotation resumes only the same strongly validated MKV', async (t) => {
+    const fixture = mkvFixture(64);
+    const cut = 23;
+    const originalUrl = 'https://cdn.example/media/title.mkv?signature=old&expires=100';
+    const rotatedUrl = 'https://cdn.example/media/title.mkv?expires=200&signature=new';
+    const identity = 'https://cdn.example/media/title.mkv?expires&signature';
+    const originalDigest = crypto.createHash('sha256').update(originalUrl).digest('hex');
+    const identityDigest = crypto.createHash('sha256').update(identity).digest('hex');
+
+    function sessionForRotation() {
+        const session = mkvSession(fixture.length);
+        session.vodInputValidator = { header: 'If-Range', value: '"stable-v1"', kind: 'etag' };
+        session.vodInputEffectiveUrlSha256 = originalDigest;
+        session.vodInputEffectiveUrlIdentitySha256 = identityDigest;
+        return session;
+    }
+
+    await t.test('same target identity, strong ETag and exact range complete the source', async () => {
+        const tracker = makeTracker();
+        const session = sessionForRotation();
+        const h = pumpHarness({
+            fetch: async (_url, options) => {
+                tracker.calls.push(options.headers);
+                const first = tracker.calls.length === 1;
+                return trackedResponse(tracker, {
+                    url: first ? originalUrl : rotatedUrl,
+                    chunks: [first ? fixture.subarray(0, cut) : fixture.subarray(cut)],
+                    headers: {
+                        'Content-Range': `bytes ${first ? 0 : cut}-${fixture.length - 1}/${fixture.length}`,
+                        'Content-Length': String(first ? fixture.length : fixture.length - cut),
+                        ETag: '"stable-v1"',
+                    },
+                });
+            },
+        });
+        const writable = new CapturingWritable();
+        const result = await h.runBoundedMkvInputPump(
+            session, writable, new AbortController().signal, null,
+        );
+        assert.equal(result.bytesForwarded, fixture.length);
+        assert.deepEqual(writable.bytes(), fixture);
+        assert.equal(tracker.calls[1]['If-Range'], '"stable-v1"');
+        assert.equal(session.vodInputEffectiveUrlSha256,
+            crypto.createHash('sha256').update(rotatedUrl).digest('hex'));
+        assert.equal(tracker.maxActive, 1);
+        assert.equal(tracker.active, 0);
+    });
+
+    for (const [label, nextUrl, nextEtag] of [
+        ['different CDN host', 'https://other-cdn.example/media/title.mkv?expires=200&signature=new', '"stable-v1"'],
+        ['different media path', 'https://cdn.example/media/other.mkv?expires=200&signature=new', '"stable-v1"'],
+        ['different query shape', 'https://cdn.example/media/title.mkv?expires=200&token=new', '"stable-v1"'],
+        ['changed ETag', rotatedUrl, '"stable-v2"'],
+    ]) {
+        await t.test(`${label} remains terminal before the resumed bytes`, async () => {
+            const tracker = makeTracker();
+            const h = pumpHarness({
+                fetch: async () => {
+                    const first = tracker.calls.length === 0;
+                    tracker.calls.push(first ? originalUrl : nextUrl);
+                    return trackedResponse(tracker, {
+                        url: first ? originalUrl : nextUrl,
+                        chunks: [first ? fixture.subarray(0, cut) : fixture.subarray(cut)],
+                        headers: {
+                            'Content-Range': `bytes ${first ? 0 : cut}-${fixture.length - 1}/${fixture.length}`,
+                            'Content-Length': String(first ? fixture.length : fixture.length - cut),
+                            ETag: first ? '"stable-v1"' : nextEtag,
+                        },
+                    });
+                },
+            });
+            const writable = new CapturingWritable();
+            await assert.rejects(
+                h.runBoundedMkvInputPump(sessionForRotation(), writable, new AbortController().signal, null),
+                (error) => error?.code === 'VOD_CHANGED' && error?.status === 502,
+            );
+            assert.equal(tracker.calls.length, 2);
+            assert.deepEqual(writable.bytes(), fixture.subarray(0, cut));
+            assert.equal(tracker.active, 0);
+        });
+    }
+});
+
 test('abort during FFmpeg backpressure closes the only upstream and removes every listener', async () => {
     const fixture = mkvFixture(32);
     const tracker = makeTracker();

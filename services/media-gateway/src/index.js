@@ -14297,24 +14297,55 @@ async function openBoundedVodInputAttempt(session, offset, parentSignal, dispatc
             Number(session.finiteMkvLinearFallbacks || 0) > 0
             && session.finiteMkvLinearFallbackIdentityVerified === true
         );
+        const observedValidator = boundedVodResponseValidator(attempt.response);
+        const effectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
+            attempt.response?.url || session.sourceUrl,
+        );
+        // A signed CDN query can rotate after a broken connection. Resume only
+        // when the provider honors the exact range with the same strong ETag
+        // and the redirect keeps the same host, path and query-key shape.
+        // A changed file, missing validator or different CDN target remains
+        // terminal before any resumed byte reaches FFmpeg or the cache digest.
+        const verifiedSignedQueryRotation = offset > 0
+            && effectiveUrlSha256 !== session.vodInputEffectiveUrlSha256
+            && attempt.response.status === 206
+            && session.vodInputValidator?.kind === 'etag'
+            && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(session.vodInputValidator.value || '')
+            && observedValidator?.kind === 'etag'
+            && observedValidator.value === session.vodInputValidator.value
+            && Boolean(session.vodInputEffectiveUrlIdentitySha256)
+            && effectiveUrlIdentitySha256 === session.vodInputEffectiveUrlIdentitySha256;
         if (
             session.vodInputEffectiveUrlSha256 &&
             effectiveUrlSha256 !== session.vodInputEffectiveUrlSha256 &&
-            !verifiedLinearFallback
+            !verifiedLinearFallback &&
+            !verifiedSignedQueryRotation
         ) {
+            try { console.info(JSON.stringify({
+                event: 'vod_input_reconnect_guard', outcome: 'rejected',
+                reason: 'target-changed',
+                sameTargetIdentity: Boolean(session.vodInputEffectiveUrlIdentitySha256)
+                    && effectiveUrlIdentitySha256 === session.vodInputEffectiveUrlIdentitySha256,
+                sameStrongEtag: session.vodInputValidator?.kind === 'etag'
+                    && observedValidator?.kind === 'etag'
+                    && observedValidator.value === session.vodInputValidator.value,
+            })); } catch (_) {}
             throw vodInputPumpError('VOD_CHANGED', 'The MKV provider target changed while it was playing.', { status: 502 });
         }
-        if (verifiedLinearFallback) {
+        if (verifiedLinearFallback || verifiedSignedQueryRotation) {
             // The source prefix and exact total were revalidated against byte
-            // zero before any byte reached FFmpeg. Bind the newest signed CDN
-            // target for observability while later reconnects remain fenced by
-            // the same total and If-Range validator when one is available.
+            // zero for a linear fallback. A query rotation instead has the same
+            // stable target identity, exact total and strong If-Range validator.
+            // Bind the newest signed URL digest for subsequent reconnects.
             session.vodInputEffectiveUrlSha256 = effectiveUrlSha256;
-            session.vodInputEffectiveUrlIdentitySha256 = strictLidEffectiveUrlIdentitySha256(
-                attempt.response?.url || session.sourceUrl,
-            );
+            session.vodInputEffectiveUrlIdentitySha256 = effectiveUrlIdentitySha256;
+            if (verifiedSignedQueryRotation) {
+                try { console.info(JSON.stringify({
+                    event: 'vod_input_reconnect_guard', outcome: 'accepted',
+                    reason: 'same-identity-strong-etag',
+                })); } catch (_) {}
+            }
         }
-        const observedValidator = boundedVodResponseValidator(attempt.response);
         if (offset > 0 && !session.vodInputValidator) {
             throw vodInputPumpError('VOD_CHANGED', 'The MKV file cannot be resumed without a stable validator.', { status: 502 });
         }
