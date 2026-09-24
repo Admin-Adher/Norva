@@ -18527,7 +18527,19 @@ function scheduleSharedMediaCachePublication(session) {
         .catch((error) => {
             const reason = String(error?.code || error?.message || 'validation-failed')
                 .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 120);
-            console.warn(`[media-gateway] shared HLS publication skipped for ${session.id}: ${reason}`);
+            const safeCode = (value) => String(value || 'none')
+                .toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 64);
+            const nestedCause = error?.cause?.cause || error?.cause;
+            const diagnostic = {
+                stage: safeCode(error?.publicationStage),
+                status: Number.isInteger(error?.status) ? error.status : 0,
+                cause: safeCode(nestedCause?.code || nestedCause?.name),
+                assetIndex: Number.isInteger(error?.publicationAssetIndex)
+                    ? error.publicationAssetIndex : null,
+                assetBytes: Number.isSafeInteger(error?.publicationAssetBytes)
+                    ? error.publicationAssetBytes : null,
+            };
+            console.warn(`[media-gateway] shared HLS publication skipped for ${session.id}: ${reason} ${JSON.stringify(diagnostic)}`);
             return null;
         });
     session.sharedMediaCachePublicationPromise = publication;
