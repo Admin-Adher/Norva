@@ -24,7 +24,7 @@ import {
   isTerminalSourceSyncStatus,
 } from "./source-sync-error.mjs";
 import {
-  assertActiveCatalogGenerationCurrent,
+  adoptActiveCatalogUserVisibilityEpoch,
   type ActiveCatalogGeneration,
   type BuildingCatalogGeneration,
   catalogGenerationFields,
@@ -140,7 +140,10 @@ async function assertCatalogSnapshotCurrent(
   expected: CatalogAccessSnapshot,
 ): Promise<void> {
   try {
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
+    // A background import can overlap account-wide cache invalidations from
+    // other sources. Join only that monotone cache field; source, configuration,
+    // head and generation authority must still match the original snapshot.
+    await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expected);
   } catch (_) {
     throw new HttpError(409, "Catalog access changed while catalog discovery was running", {
       code: "SOURCE_CATALOG_CHANGED",
@@ -412,6 +415,38 @@ async function withDbRetry<T extends { error: unknown }>(op: () => PromiseLike<T
   throw lastError; // unreachable (throwDb throws) — satisfies the Promise<T> return type
 }
 
+// xtreamConcurrentImportProtocol: 1
+// An epoch can advance between the preflight and PostgreSQL's write fence.
+// Recompose only idempotent writes after proving the complete source authority;
+// retry at most five times and only if the account epoch actually advanced.
+async function withActiveCatalogWriteRetry<T extends { error: unknown }>(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  generation: CatalogAccessSnapshot,
+  operation: () => PromiseLike<T>,
+  label: string,
+): Promise<T> {
+  let writes = 0;
+  return await withDbRetry(async () => {
+    for (;;) {
+      if (writes >= 5) {
+        // The discovery driver's existing 503 path persists its checkpoint and
+        // self-invokes. Never strand a syncing source after repeated cache races.
+        throw new HttpError(503, label, { transient: true });
+      }
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, generation);
+      const epoch = generation.userVisibilityEpoch;
+      writes++;
+      const result = await operation();
+      const code = String((result.error as { code?: string } | null)?.code ?? "");
+      if (!["42501", "PT409", "40001"].includes(code)) return result;
+      await assertCatalogSnapshotCurrent(db, sourceId, userId, generation);
+      if (generation.userVisibilityEpoch === epoch) return result;
+    }
+  }, label);
+}
+
 // Incremental import: insert a batch of rows (no select-back; finalize reloads rows from the table,
 // so peak memory stays tiny). Legacy runs delete the catalogue upfront so these are pure inserts;
 // Layer 3 runs keep the catalogue and additionally stamp each row's catalog_version (see below).
@@ -438,12 +473,12 @@ async function appendSourceItems(
   for (let index = 0; index < rows.length; index += IMPORT_BATCH_SIZE) {
     const chunk = rows.slice(index, index + IMPORT_BATCH_SIZE);
     if (!chunk.length) continue;
-    const payload = withCatalogGenerationRows(
-      runVersion == null ? chunk : chunk.map((r) => ({ ...r, catalog_version: runVersion })),
-      generation,
-    );
-    const res = await withDbRetry(
-      () => db.from("cloud_media_items").upsert(payload, {
+    const res = await withActiveCatalogWriteRetry(
+      db, sourceId, userId, generation,
+      () => db.from("cloud_media_items").upsert(withCatalogGenerationRows(
+        runVersion == null ? chunk : chunk.map((r) => ({ ...r, catalog_version: runVersion })),
+        generation,
+      ), {
         onConflict: "source_id,generation_id,item_type,external_id",
         ignoreDuplicates: true,
         count: "exact",
@@ -460,7 +495,8 @@ async function appendSourceItems(
       const itemType = stringOr(chunk[0].item_type, "");
       const ids = chunk.map((r) => stringOr(r.external_id, "")).filter(Boolean);
       if (itemType && ids.length) {
-        await withDbRetry(
+        await withActiveCatalogWriteRetry(
+          db, sourceId, userId, generation,
           () => db.from("cloud_media_items").update({
             catalog_version: runVersion,
             ...catalogGenerationFields(generation),
@@ -530,11 +566,15 @@ async function deleteSourceItems(
   generation: CatalogAccessSnapshot,
 ) {
   for (let guard = 0; guard < 5000; guard++) {
-    const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
-      p_source_id: sourceId, p_user_id: userId,
-      ...catalogGenerationRpcFence(generation),
-      p_limit: 2000,
-    });
+    const { data, error } = await withActiveCatalogWriteRetry(
+      db, sourceId, userId, generation,
+      () => db.rpc("norva_delete_catalog_generation_items_batch", {
+        p_source_id: sourceId, p_user_id: userId,
+        ...catalogGenerationRpcFence(generation),
+        p_limit: 2000,
+      }),
+      "Unable to clear old catalog items",
+    );
     if (error) throwDb(error, "Unable to clear old catalog items");
     const n = Number(Array.isArray(data) ? data[0] : data) || 0;
     if (n < 2000) return;
@@ -598,10 +638,12 @@ async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt:
   if (max <= 0) return true;     // cap disabled (env 0)
   if (!createdAt) return true;   // no ordering key (shouldn't happen) → don't strand it
   try {
-    const { count, error } = await db.from("cloud_sources")
+    const { count, error } = await db.from("cloud_catalog_visible_sources")
       .select("id", { count: "exact", head: true })
       .eq("sync_status", "syncing")
-      .eq("source_type", "xtream")
+      .in("source_type", ["xtream", "m3u"])
+      .eq("enabled", true)
+      .is("deleted_at", null) // a removed (soft-deleted) source must not hold an import slot ahead of others
       .lt("created_at", createdAt)
       .neq("id", sourceId);
     if (error) return false;     // fail CLOSED — defer; watchdog retries
@@ -645,6 +687,13 @@ export async function detectXtreamChange(
     await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
     let payload: unknown;
     try {
+      // Detection can also span several provider requests; do not resume
+      // network discovery after a viewer took ownership on another gateway.
+      const { data: viewerBusy, error: busyError } = await db.rpc("provider_account_busy_for_catalog_refresh", {
+        p_key: `${new URL(serverUrl).host}/${username}`,
+      });
+      if (busyError) throw new HttpError(503, "Provider scheduling is temporarily unavailable", { transient: true });
+      if (viewerBusy === true) throw new HttpError(409, "Account busy (active playback)", { code: "account_busy" });
       payload = await fetchProviderMetadata(
         runtimeConfig,
         { serverUrl, username, password, action, params, timeoutMs: 25000 },
@@ -895,6 +944,15 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     const fetchCatalog = async (action: string, params?: Record<string, string>) => {
       try {
         await assertCatalogSnapshotCurrent(db, sourceId, userId, accessSnapshot);
+        // The driver may spend seconds writing a completed provider batch.
+        // Recheck foreground ownership before every next network operation;
+        // the existing viewer-priority catch checkpoints without consuming its
+        // continuation/error budget. The gateway still closes the final race.
+        const { data: viewerBusy, error: busyError } = await db.rpc("provider_account_busy_for_catalog_refresh", {
+          p_key: `${new URL(serverUrl).host}/${username}`,
+        });
+        if (busyError) throw new HttpError(503, "Provider scheduling is temporarily unavailable", { transient: true });
+        if (viewerBusy === true) throw new HttpError(409, "Account busy (active playback)", { code: "account_busy" });
         const payload = await fetchProviderMetadata(
           runtimeConfig,
           { serverUrl, username, password, action, params, timeoutMs: 25000 },
