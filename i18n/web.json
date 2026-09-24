@@ -60993,20 +60993,20 @@
     "fil": "Ligtas na pagbabayad gamit ang card"
   },
   "ui_web_a9251f5aebe3": {
-    "source": "No charge today — we only verify your card.",
+    "source": "No subscription charge today — we only verify your card.",
     "refs": [
       "public/subscribe.html"
     ],
-    "en": "No charge today — we only verify your card.",
-    "fr": "Aucun frais aujourd'hui : nous vérifions uniquement votre carte.",
-    "pt-BR": "Sem custos hoje – apenas verificamos o seu cartão.",
-    "es": "Sin cargo hoy: solo verificamos su tarjeta.",
-    "hi": "आज कोई शुल्क नहीं - हम केवल आपका कार्ड सत्यापित करते हैं।",
-    "tr": "Bugün ücret alınmıyor; yalnızca kartınızı doğruluyoruz.",
-    "bn": "আজ কোন চার্জ নেই — আমরা শুধুমাত্র আপনার কার্ড যাচাই করি।",
-    "ar": "لا توجد رسوم اليوم - نحن فقط نتحقق من بطاقتك.",
-    "id": "Tidak ada biaya hari ini — kami hanya memverifikasi kartu Anda.",
-    "fil": "Walang bayad ngayon — ibe-verify lang namin ang iyong card."
+    "en": "No subscription charge today — we only verify your card.",
+    "fr": "Aucun paiement d’abonnement aujourd’hui : nous vérifions uniquement votre carte.",
+    "pt-BR": "Nenhuma cobrança de assinatura hoje — apenas verificamos seu cartão.",
+    "es": "Hoy no se cobra la suscripción: solo verificamos tu tarjeta.",
+    "hi": "आज सदस्यता शुल्क नहीं लिया जाएगा — हम केवल आपके कार्ड की जाँच करेंगे।",
+    "tr": "Bugün abonelik ücreti alınmaz; yalnızca kartınızı doğrularız.",
+    "bn": "আজ সাবস্ক্রিপশনের অর্থ নেওয়া হবে না — আমরা শুধু আপনার কার্ড যাচাই করি।",
+    "ar": "لا تُحصّل رسوم اشتراك اليوم؛ نتحقق من بطاقتك فقط.",
+    "id": "Tidak ada biaya langganan hari ini — kami hanya memverifikasi kartu Anda.",
+    "fil": "Walang singil sa subscription ngayon — ibe-verify lang namin ang iyong card."
   },
   "ui_web_d12b4243e7bc": {
     "source": "To open your free trial we place a small temporary authorization to confirm the card is valid. It may appear as a pending transaction and is",
@@ -61041,20 +61041,20 @@
     "fil": "kinakansela ng Norva pagkatapos ng matagumpay na pag-verify; maaaring mas matagal bago alisin ng iyong bangko ang hold."
   },
   "ui_web_c6f027b0bdd0": {
-    "source": "Your first real payment happens only after the trial if you do not cancel.",
+    "source": "Your first subscription payment happens only after the trial if you do not cancel.",
     "refs": [
       "public/subscribe.html"
     ],
-    "en": "Your first real payment happens only after the trial if you do not cancel.",
-    "fr": "Votre premier paiement réel n'a lieu qu'après l'essai si vous n'annulez pas.",
-    "pt-BR": "Seu primeiro pagamento real acontecerá somente após o teste, se você não cancelar.",
-    "es": "Su primer pago real ocurre solo después de la prueba si no cancela.",
-    "hi": "यदि आप रद्द नहीं करते हैं तो आपका पहला वास्तविक भुगतान परीक्षण के बाद ही होता है।",
-    "tr": "İptal etmediğiniz takdirde ilk gerçek ödemeniz ancak deneme süresi sonrasında gerçekleşir.",
-    "bn": "আপনি বাতিল না করলেই আপনার প্রথম আসল অর্থপ্রদান ট্রায়ালের পরেই হবে।",
-    "ar": "لن تتم دفعتك الحقيقية الأولى إلا بعد الفترة التجريبية إذا لم تقم بالإلغاء.",
-    "id": "Pembayaran nyata pertama Anda baru akan terjadi setelah masa percobaan jika Anda tidak membatalkan langganan.",
-    "fil": "Ang iyong unang totoong bayad ay mangyayari lamang pagkatapos ng trial kung hindi ka magkakansela."
+    "en": "Your first subscription payment happens only after the trial if you do not cancel.",
+    "fr": "Votre premier paiement d’abonnement n’a lieu qu’après l’essai si vous n’annulez pas.",
+    "pt-BR": "O primeiro pagamento da assinatura ocorre somente após o teste, caso você não cancele.",
+    "es": "El primer pago de la suscripción se realiza solo después de la prueba si no la cancelas.",
+    "hi": "यदि आप रद्द नहीं करते, तो पहला सदस्यता भुगतान परीक्षण के बाद ही होगा।",
+    "tr": "İptal etmezseniz ilk abonelik ödemeniz yalnızca deneme süresinden sonra yapılır.",
+    "bn": "আপনি বাতিল না করলে প্রথম সাবস্ক্রিপশন পেমেন্ট ট্রায়ালের পরেই হবে।",
+    "ar": "لن تُحصّل دفعة الاشتراك الأولى إلا بعد التجربة إذا لم تُلغِ.",
+    "id": "Pembayaran langganan pertama hanya dilakukan setelah masa uji coba jika Anda tidak membatalkan.",
+    "fil": "Ang unang bayad sa subscription ay pagkatapos lang ng trial kung hindi ka magkakansela."
   },
   "ui_web_e9b988aaa423": {
     "source": "We will email you a reminder before it ends.",
