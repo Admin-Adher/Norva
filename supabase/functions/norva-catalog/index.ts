@@ -102,10 +102,12 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-catalog",
-        version: 7,
+        version: 8,
         liveContract: "norva.live.logical.v1",
         materializedLive: true,
         flatCodecProfileProtocol: 1,
+        catalogLanguageFacetProtocol: 2,
+        boundedMediaHydrationProtocol: 1,
         exactTrackPersistenceProtocol: 2,
       });
     }
@@ -730,10 +732,10 @@ function prepareProviderMediaRow(row: Record<string, any>) {
 }
 
 async function listMediaItems(url: URL, userId: string) {
-  const sourceId = url.searchParams.get("sourceId");
+  const sourceId = stringOrNull(url.searchParams.get("sourceId"));
   const itemType = url.searchParams.get("type");
   const search = url.searchParams.get("q");
-  const categoryId = url.searchParams.get("categoryId");
+  const categoryId = stringOrNull(url.searchParams.get("categoryId"));
   const sort = url.searchParams.get("sort") || "default";
   const lang = railLang(url);
   const limit = boundedInt(url.searchParams.get("limit"), 1000, 1, 1000);
@@ -943,6 +945,7 @@ async function bindFlatMediaGenerationTitles(
   itemType: string | null,
   visibleTitles: JsonRecord[],
   lang: string | null,
+  hydratedTitles: JsonRecord[] | null = null,
 ): Promise<void> {
   if ((itemType !== "movie" && itemType !== "series") || !items.length || !visibleTitles.length) return;
   const titleIds = [...new Set(visibleTitles
@@ -953,7 +956,7 @@ async function bindFlatMediaGenerationTitles(
   let hydrated: JsonRecord[];
   try {
     const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
-    hydrated = await hydrateVisibleCatalogTitlesByIds(userId, titleIds, visibilityEpoch, false);
+    hydrated = hydratedTitles ?? await hydrateVisibleCatalogTitlesByIds(userId, titleIds, visibilityEpoch, false);
   } catch (_) {
     // Generation-owned rows remain globally isolated by generation_id. Losing
     // progressive title enrichment is safer than silently serving A over B.
@@ -1063,10 +1066,11 @@ function catalogTextStatusEligible(value: unknown): boolean {
 // waiting for legacy reconcile to copy the ID back into provider metadata.
 async function attachOwnedMediaEditorialMetadata(
   items: Array<Record<string, any>>, userId: string, itemType: string | null, lang: string | null,
-) {
-  if (itemType !== "movie" && itemType !== "series") return;
+): Promise<JsonRecord[]> {
+  if (itemType !== "movie" && itemType !== "series") return [];
   const media = items.filter((row) => /^[0-9a-f-]{36}$/i.test(String(row.id ?? "")) && row.source_id);
-  if (!media.length) return;
+  if (!media.length) return [];
+  const ownedTitles = new Map<string, JsonRecord>();
   try {
     for (let index = 0; index < media.length; index += 100) {
       const page = media.slice(index, index + 100);
@@ -1086,6 +1090,9 @@ async function attachOwnedMediaEditorialMetadata(
       const owners = new Map(titles.map((title) => [String(title.id), {
         sources: Array.isArray(title.visible_source_ids) ? [...title.visible_source_ids] : [],
         generation: stringOrNull(title.display_generation_id ?? title.displayGenerationId),
+        // Keep the exact owner-fenced hydration for the page after the public
+        // overlay strips its internal generation proof.
+        title: { ...title },
       }]));
       await applyCatalogOverlay(titles, itemType, lang);
       const byTitle = new Map(titles.map((title) => [String(title.id), title]));
@@ -1097,8 +1104,17 @@ async function attachOwnedMediaEditorialMetadata(
         const variant = exact[0];
         const title = byTitle.get(String(variant.title_id));
         const owner = owners.get(String(variant.title_id));
-        if (!title || !catalogTextStatusEligible(title.match_status) || !title.provider_tmdb_id ||
-            !owner?.sources.includes(row.source_id) || owner.generation !== flatMediaGenerationId(row)) continue;
+        if (!title || !owner?.sources.includes(row.source_id) ||
+            owner.generation !== flatMediaGenerationId(row)) continue;
+        ownedTitles.set(String(title.id), owner.title);
+        if (!catalogTextStatusEligible(title.match_status) || !title.provider_tmdb_id) continue;
+        if (flatMediaBlocksGlobalTitleOverlay(row)) {
+          // The generation binder below applies P's own thin/full overlay once.
+          // Copying a full public card here would manufacture rich fields while
+          // the full overlay flag is off and could outlive an epoch failure.
+          row.metadata = { ...recordOrEmpty(row.metadata), providerTmdbId: title.provider_tmdb_id };
+          continue;
+        }
         const editorial = titleRailItem(title, [{ ...variant, metadata: recordOrEmpty(row.metadata) }], lang);
         // Copy editorial fields only. Preserve the media/source/variant IDs,
         // provider routing, declared audio and exact per-file track evidence.
@@ -1113,9 +1129,11 @@ async function attachOwnedMediaEditorialMetadata(
         row.metadata = { ...recordOrEmpty(row.metadata), providerTmdbId: title.provider_tmdb_id,
           overview: editorial.overview, tmdb: row.tmdb };
         if (editorial.overview) row.plot = editorial.overview;
+        if (lang && stringOrNull(editorial.title)) flatMediaGlobalLocalizedTitle.add(row);
       }
     }
   } catch (_) { /* unavailable/stale ownership keeps the existing provider display */ }
+  return [...ownedTitles.values()];
 }
 
 async function attachMediaLanguages(
@@ -1130,7 +1148,7 @@ async function attachMediaLanguages(
   await attachFlatMediaFileLanguages(items, userId, itemType);
   await attachFlatSelectionSeriesLanguages(items, userId, itemType);
   await attachFlatOwnedProviderLanguages(items, userId, itemType);
-  await attachOwnedMediaEditorialMetadata(items, userId, itemType, lang);
+  const ownedTitles = await attachOwnedMediaEditorialMetadata(items, userId, itemType, lang);
   // Preserve provider-supplied summaries even when the title has no TMDB identity
   // and has never been probed. Promote the compact metadata field to the response
   // shape consumed by movie/series fiches before any catalogue lookup can return.
@@ -1167,51 +1185,41 @@ async function attachMediaLanguages(
   const catalogCandidateIds = new Set<string>();
   const weakCatalogIds = new Set<string>();
   const visibleTitles: JsonRecord[] = [];
-  for (let i = 0; i < tmdbIds.length; i += 500) {
-    let query = db
-      .from("cloud_catalog_visible_titles")
-      .select("id, provider_tmdb_id, audio_languages, version_languages, audio_tracks, poster_url, backdrop_url, match_status, visible_source_ids")
-      .eq("user_id", userId)
-      .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
-    if (itemType === "movie" || itemType === "series") query = query.eq("item_type", itemType);
-    const { data, error } = await query;
-    if (error) return; // best-effort; never fail the grid over the badge
-    for (const row of data ?? []) {
-      visibleTitles.push(row as JsonRecord);
-      const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
-      if (!id) continue;
-      if (String((row as JsonRecord).match_status) === "weak") weakCatalogIds.add(id);
-      if (catalogTextStatusEligible((row as JsonRecord).match_status) && !/^(tt)?0+$/i.test(id)) {
-        catalogCandidateIds.add(id);
-      }
-      const next = {
-        audio: titleAudioLanguages(row as JsonRecord),
-        version: titleVersionLanguages(row as JsonRecord),
-        tracks: titleAudioTracks(row as JsonRecord),
-      };
-      // Several per-user title rows can share a TMDB id (regional dedup leftovers).
-      // Keep the RICHEST so a row WITHOUT the crawled per-track map can't clobber a
-      // sibling that HAS it — otherwise the player loses the precomputed audio
-      // languages at random (the "Audio 1/2/3 one reload out of two" symptom).
-      const prev = byTmdb.get(id);
-      if (!prev
-        || next.tracks.length > prev.tracks.length
-        || (next.tracks.length === prev.tracks.length && next.audio.length > prev.audio.length)) {
-        byTmdb.set(id, next);
-      }
-      // Art: prefer a verified row's poster (freshest, TMDB-confirmed).
-      const poster = stringOrNull((row as JsonRecord).poster_url);
-      const verified = String((row as JsonRecord).match_status) === "provider_verified";
-      const prevArt = artByTmdb.get(id);
-      if (poster && (!prevArt || (verified && !prevArt.verified))) {
-        artByTmdb.set(id, { poster, backdrop: stringOrNull((row as JsonRecord).backdrop_url), verified });
-      }
+  // These titles already passed the exact owned-media and active-generation
+  // lookup above. Filtering the union view by TMDB ID scans a large account
+  // before narrowing a small page and can exceed the Edge request budget.
+  for (const row of ownedTitles) {
+    visibleTitles.push(row);
+    const id = stringOrNull(row.provider_tmdb_id);
+    if (!id) continue;
+    if (String(row.match_status) === "weak") weakCatalogIds.add(id);
+    if (catalogTextStatusEligible(row.match_status) && !/^(tt)?0+$/i.test(id)) {
+      catalogCandidateIds.add(id);
+    }
+    const next = {
+      audio: titleAudioLanguages(row),
+      version: titleVersionLanguages(row),
+      tracks: titleAudioTracks(row),
+    };
+    // Several per-user title rows can share a TMDB id. Keep the richest
+    // observed track map so a sparse sibling cannot erase playback labels.
+    const prev = byTmdb.get(id);
+    if (!prev
+      || next.tracks.length > prev.tracks.length
+      || (next.tracks.length === prev.tracks.length && next.audio.length > prev.audio.length)) {
+      byTmdb.set(id, next);
+    }
+    const poster = stringOrNull(row.poster_url);
+    const verified = String(row.match_status) === "provider_verified";
+    const prevArt = artByTmdb.get(id);
+    if (poster && (!prevArt || (verified && !prevArt.verified))) {
+      artByTmdb.set(id, { poster, backdrop: stringOrNull(row.backdrop_url), verified });
     }
   }
   // A duplicated provider id with even one failed title/year validation is
   // ambiguous for flat media rows (which carry no title_id). Fail closed.
   for (const id of weakCatalogIds) catalogCandidateIds.delete(id);
-  await bindFlatMediaGenerationTitles(items, userId, itemType, visibleTitles, lang);
+  await bindFlatMediaGenerationTitles(items, userId, itemType, visibleTitles, lang, ownedTitles);
   for (const row of items) {
     const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
     if (!id) continue;
@@ -1953,6 +1961,14 @@ function audioFacetIso(facet: string | null): string | null {
   if (providerAudioFacet(facet)) return facet;
   return canonicalFileLanguage(facet);
 }
+// Supplier subtitle declarations remain distinct from observed file tracks.
+function subtitleFacetIso(facet: string | null): string | null {
+  const match = /^catalog-([a-z]{2,3})$/.exec(String(facet || '').trim().toLowerCase());
+  const raw = match ? match[1] : facet;
+  const code = raw === 'yue' ? raw : canonicalFileLanguage(raw);
+  if (code === 'xx' || code === 'zz') return null;
+  return code ? (match ? `catalog-${code}` : code) : null;
+}
 function titleVersionLanguages(title: JsonRecord): string[] {
   const raw = (title as { version_languages?: unknown }).version_languages;
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
@@ -2115,7 +2131,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // sort. All additive: absent → the query and result are identical to before.
   const audioFacet = normalizeFacet(url.searchParams.get("audio"));
   const audioIso = audioFacetIso(audioFacet);
-  const subIso = canonicalFileLanguage(normalizeFacet(url.searchParams.get("subs")));
+  const subIso = subtitleFacetIso(normalizeFacet(url.searchParams.get("subs")));
   const sort = (url.searchParams.get("sort") || "default").trim() || "default";
   const langSort = sort === "lang-match";
   const prefAudioIso = langSort ? canonicalFileLanguage(normalizeFacet(url.searchParams.get("prefAudio"))) : null;
@@ -2136,6 +2152,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     audioIso === 'unidentified' ||
     (requestedBuckets.length > 0 && !langSort) ||
     providerAudioFacet(audioIso) ||
+    String(subIso || '').startsWith('catalog-') ||
     (sourceId && (hasStrictLanguageFilter || prefAudioIso || prefSubIso)) ||
       (!sourceId && hasStrictLanguageFilter && !langSort),
   );
@@ -2368,31 +2385,22 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     return hit.value;
   }
 
-  // The facet set math runs in Postgres over file_audio_languages and
-  // file_subtitle_languages. Counts are exact per title and deserialize as jsonb.
-  const rpcName = sourceId
-    ? "cloud_exact_language_counts_by_source"
-    : "cloud_exact_language_counts";
-  const rpcArgs = sourceId
-    ? { p_user_id: userId, p_item_type: itemType, p_source_id: sourceId }
-    : { p_user_id: userId, p_item_type: itemType };
-  const { data, error } = await db.rpc(rpcName, rpcArgs);
-  if (error) throwDb(error, "Unable to load exact language facets");
-  // A successful RPC may legitimately return no counts. Only that successful
-  // empty result is cacheable; transport/RPC failures must stay retryable.
-  const d = data && typeof data === "object"
-    ? data as { audio?: unknown; subtitles?: unknown }
-    : {};
-  const value: { audio: unknown[]; subtitles: unknown[] } = {
-    audio: exactLanguageFacetItems(d.audio, itemType),
-    subtitles: exactLanguageFacetItems(d.subtitles, itemType),
-  };
-  // One indexed, title-deduplicated union for ALL providers. The same relation
-  // drives paged filtering; never add separate counts for overlapping variants.
-  const { data: catalogCounts, error: catalogError } = await db.rpc('cloud_catalog_audio_language_counts', {
-    p_user_id: userId, p_item_type: itemType, p_source_id: sourceId,
-  });
+  // The indexed, tenant-visible unions include exact observations and supplier
+  // declarations. Fetch each independent count concurrently; all responses are
+  // fenced by the shared catalogue visibility epoch.
+  const rpcArgs = { p_user_id: userId, p_item_type: itemType, p_source_id: sourceId };
+  const [audioResult, unidentifiedResult, subtitleResult] = await Promise.all([
+    loadCatalogAudioFacetCount(rpcArgs, 'audio'),
+    loadCatalogAudioFacetCount(rpcArgs, 'unidentified'),
+    db.rpc('cloud_catalog_subtitle_language_counts', rpcArgs),
+  ]);
+  const { data: catalogCounts, error: catalogError } = audioResult;
+  const { data: unidentifiedCount, error: unidentifiedError } = unidentifiedResult;
+  const { data: subtitleCounts, error: subtitleError } = subtitleResult;
   if (catalogError) throwDb(catalogError, 'Unable to load catalogue language facets');
+  if (unidentifiedError) throwDb(unidentifiedError, 'Unable to load unidentified audio facet');
+  if (subtitleError) throwDb(subtitleError, 'Unable to load catalogue subtitle facets');
+  const value: { audio: unknown[]; subtitles: unknown[] } = { audio: [], subtitles: [] };
   value.audio = Object.entries(recordOrEmpty(catalogCounts)).flatMap(([language, rawCount]) => {
     const count = Number(rawCount) || 0;
     const code = providerAudioFacet(`catalog-${language}`);
@@ -2401,11 +2409,14 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
   });
   // Keep the audit choice available even at zero; counts and grid membership
   // share the exact same visible, account/source-scoped variant relation.
-  const { data: unidentifiedCount, error: unidentifiedError } = await db.rpc('cloud_catalog_unidentified_audio_count', {
-    p_user_id: userId, p_item_type: itemType, p_source_id: sourceId,
-  });
-  if (unidentifiedError) throwDb(unidentifiedError, 'Unable to load unidentified audio facet');
   value.audio.push({ value: 'unidentified', count: Math.max(0, Number(unidentifiedCount) || 0), label: 'Language unidentified' });
+
+  value.subtitles = Object.entries(recordOrEmpty(subtitleCounts)).flatMap(([language, rawCount]) => {
+    const value = subtitleFacetIso(`catalog-${language}`);
+    const count = Math.max(0, Number(rawCount) || 0);
+    return value && count > 0 ? [{ value, language: value.slice(8), count,
+      label: languageFacetLabel(value.slice(8), count, itemType) }] : [];
+  });
 
   if (cacheKey) {
     FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
@@ -2415,6 +2426,27 @@ async function listLanguageFacets(req: Request, url: URL, userId: string) {
     }
   }
   return value;
+}
+
+async function loadCatalogAudioFacetCount(
+  rpcArgs: { p_user_id: string; p_item_type: 'movie' | 'series'; p_source_id: string | null },
+  facet: 'audio' | 'unidentified',
+) {
+  const legacyRpc = facet === 'audio'
+    ? 'cloud_catalog_audio_language_counts' : 'cloud_catalog_unidentified_audio_count';
+  // Movie helpers bind their type and use a scoped planner setting. Series
+  // retain the existing query plan.
+  if (rpcArgs.p_item_type !== 'movie') return db.rpc(legacyRpc, rpcArgs);
+  const movieRpc = facet === 'audio'
+    ? 'norva_catalog_movie_audio_language_counts' : 'norva_catalog_movie_unidentified_audio_count';
+  const result = await db.rpc(movieRpc, {
+    p_user_id: rpcArgs.p_user_id,
+    p_source_id: rpcArgs.p_source_id,
+  });
+  if (result.error && ['PGRST202', '42883'].includes(String(result.error.code || ''))) {
+    return db.rpc(legacyRpc, rpcArgs);
+  }
+  return result;
 }
 
 function normalizeObservedSubtitleTracks(value: unknown): JsonRecord[] {

@@ -71,8 +71,10 @@ EXPECTED_BEHAVIORAL_LIFECYCLE_PROTOCOL=1
 EXPECTED_LIFECYCLE_VERSION=1
 EXPECTED_SOURCE_DESIRED_STATE_PROTOCOL=1
 EXPECTED_LEGACY_SOURCE_TOGGLE_BRIDGE=1
-EXPECTED_CATALOG_VERSION=7
+EXPECTED_CATALOG_VERSION=8
 EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1
+EXPECTED_CATALOG_LANGUAGE_FACET_PROTOCOL=2
+EXPECTED_BOUNDED_MEDIA_HYDRATION_PROTOCOL=1
 EXPECTED_EXACT_TRACK_PERSISTENCE_PROTOCOL=2
 EXPECTED_SOURCE_SYNC_VERSION=19
 EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1
@@ -557,6 +559,8 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
     }
     [[ "$catalog_health" == *"\"version\":$EXPECTED_CATALOG_VERSION"* \
         && "$catalog_health" == *"\"flatCodecProfileProtocol\":$EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL"* \
+        && "$catalog_health" == *"\"catalogLanguageFacetProtocol\":$EXPECTED_CATALOG_LANGUAGE_FACET_PROTOCOL"* \
+        && "$catalog_health" == *"\"boundedMediaHydrationProtocol\":$EXPECTED_BOUNDED_MEDIA_HYDRATION_PROTOCOL"* \
         && "$catalog_health" == *"\"exactTrackPersistenceProtocol\":$EXPECTED_EXACT_TRACK_PERSISTENCE_PROTOCOL"* ]] || {
       echo "ERROR: $service norva-catalog protocol marker mismatch" >&2
       exit 1
