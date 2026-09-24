@@ -248,13 +248,67 @@ The follow-up fix explicitly rearms the producer heartbeat when EOF publication
 starts and keeps it alive while that publication is pending, even though the
 viewer session has ended. It detaches the timer when publication settles. A
 focused test now observes multiple `uploading` renewals after session EOF;
-20 focused producer, wiring and publication tests pass locally. This fix needs
-CI, deployment and another real replay before a cache hit can be claimed.
+20 focused producer, wiring and publication tests pass locally.
+
+## EOF heartbeat rollout, 13:07 UTC
+
+The upload from the prior run reached all 1,448 objects (476,705,256 bytes),
+but the expired lease prevented ready registration: `publications=0`,
+`failures=1`, `expirations=1`, `abandons=1`. The complete orphan candidate was
+purged through the internal Worker endpoint; a subsequent inventory returned
+zero objects. The test did not leave an inaccessible cache copy in R2.
+
+PR #405 merged as `5cfc33e22d8ce3d67ad3dc5a52be68610183a9d8`. The cloud
+contracts, Android phone, Android TV and Windows CI jobs all passed. The exact
+merged Gateway source archive has SHA-256
+`fcc9881f7e869d6acae3e90a3534dc565b2e78af822c3eabbed9e381e3576083`.
+A networkless build from the pinned codec runtime produced image
+`sha256:e0951366033108b2152021c1379bd9d4f1f2611109e9dd82fe789e2ddae16b9a`.
+The guarded pilot and main replacements completed at 12:58:11 and 13:06:53
+UTC. Both Gateways now run the same image and revision, are healthy, and have
+zero restarts. Rollback receipts are
+`/home/adrien/.norva/gateway-reference-rollout/20260924T125811292798Z` and
+`/home/adrien/.norva/gateway-reference-rollout/20260924T130653345936Z`.
+The main Compose override is pinned to the new image; its protected backup is
+`/home/adrien/.norva/gateway-eof-heartbeat-5cfc33e2-20260924/override-before-eof-heartbeat.yml`.
+Its SHA-256 changed from
+`8d055ce74a3255d8b6d32c5d0264965ae55502cb5e7935edb5260366be85befd`
+to `f84fcd21a454b3e7737628679d4fdd611d2d38d95b0cef9a5614dd2f5f507cef`.
+The global shared-cache read, singleflight and live-join flags remain off.
+
+## Post-rollout replay, first attempt
+
+The ordinary QA film began from zero and decoded 720p frames at 2×. The
+producer lease renewed throughout the live session. At about 22 minutes of
+film time, the provider body ended after 250,900,821 of 539,967,493 bytes.
+The bounded input pump attempted one exact-range reopen, then stopped with
+`VOD_CHANGED`: the returned range could not be proved to represent the same
+file. Joining those byte streams would have violated both playback integrity
+and shared-cache ownership of the resulting object. FFmpeg reported a
+premature Matroska EOF and the browser showed a playback error. The producer
+lease was abandoned, no publication callback ran, and the R2 inventory
+remained at zero objects. A manual Retry started a new session at zero. That
+session also stopped with `VOD_CHANGED`, after 143,391,095 source bytes and one
+reopen. Its protected debug record specifies that the effective CDN target
+changed. The first response had a strong ETag; the existing check rejected a
+changed full redirect URL before comparing the resumed ETag. Signed CDN query
+rotation is a plausible cause, not yet a confirmed description of this
+provider's second response.
+
+The follow-up patch permits an exact resumed HTTP 206 response after a signed
+query rotation only when its host, path and query-key shape match the first
+target, its total size is unchanged, and its strong ETag matches the original
+`If-Range` validator. Changed hosts, paths, query shape and ETags still fail
+before resumed bytes reach FFmpeg or the cache digest. The focused bounded-MKV
+suite passed 113 tests, with one existing skipped test; Gateway syntax check
+passed. The unrelated strict-LID suite cannot run in this Windows worktree
+because its `undici` dependency is absent; cloud CI remains the regression
+gate. Live provider behavior and the R2 hit are still unverified.
 
 ## Remaining checks
 
-- Deploy the EOF heartbeat fix, then obtain one successful EOF publication and
-  ready R2 object on the ordinary QA film.
+- Validate and deploy the signed-query reconnect guard, then obtain one
+  successful EOF publication and ready R2 object on the ordinary QA film.
 - Replay the film in the ordinary QA app and confirm decoded frames with a
   shared-cache session and no new provider-backed Gateway session.
 - Verify another owner cannot use this owner's source binding in production.
