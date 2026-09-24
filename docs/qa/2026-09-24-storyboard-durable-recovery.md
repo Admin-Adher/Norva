@@ -29,3 +29,13 @@ Persist an owner/source/target-bound renewal context without provider credential
 The branch now persists owner/source/container/duration at enqueue, without transport credentials. The authenticated renewal endpoint checks the live processing job, source ownership and enabled/deleted state, import and viewer gates, current provider identity and target. The returned grant expires after 15 minutes and hashes the exact URL plus encrypted source configuration into a frame binding. Source and job state are rechecked after grant creation. Temporary target resolution failure returns 503 for retry; revoked/replaced jobs return 410. New jobs use distinct sprite paths to prevent a delayed old upload overwriting the new artifact.
 
 28 targeted tests passed across renewal, disk recovery, source revocation and import priority. Migration and real Edge/Gateway restart remain unverified; no production activation or deployment performed. Migration must be applied before the new Edge enqueue code.
+
+## Current production schema reconciliation and runtime proof
+
+The live database already has `job_user_id`, `job_source_id`, `job_container` and `job_duration`, including SET NULL owner/source foreign keys. The current deployed Edge has no corresponding enqueue writes or renewal route. The initial proposed new columns were replaced with these existing names, and the migration now also creates them on clean installations. No duplicate renewal columns are introduced.
+
+The versioned runner supports `storyboard-renewal` as its argument. It restores only the current production schema into an isolated PostgreSQL container, applies the migration, then executes `storyboard-renewal-runtime.sql`. Result: `STORYBOARD_RENEWAL_RUNTIME_PASS`. Validated RLS enabled with no client policy, context persistence, soft-deleted source exclusion, rejection of nonexistent owner/source references, and the two SET NULL constraint definitions. Physical deletion itself is not claimed: production lifecycle guards require bounded account-deletion preparation, so the fixture uses the actual soft-delete eligibility rule instead.
+
+The temporary container and volume were removed. Primary database healthy, restart count zero. A schema-only behavioral projection warning resulted from omitted business seed data; it did not affect these assertions. Receipt: `.codex-artifacts/commercial-readiness/storyboard-renewal/schema-runtime.log`.
+
+All 28 targeted JavaScript cases passed again after the schema-name reconciliation. Actual Edge/Gateway renewal, process restart and app rendering still require runtime validation before activation.

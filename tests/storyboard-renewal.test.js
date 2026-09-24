@@ -11,8 +11,8 @@ const code=stripTypeScriptTypes(full.slice(full.indexOf('async function renewSto
 const userId=crypto.randomUUID(),sourceId=crypto.randomUUID(),jobId=crypto.randomUUID();
 function harness(options={}) {
  const state={minted:0,sourceReads:0,jobReads:0,gateCalls:0};
- const row={job_id:jobId,renewal_owner_id:userId,status:'processing',provider_key:'provider',item_type:'movie',
-  external_id:'42',sprite_path:`provider/movie-42-${jobId}.jpg`,renewal_source_id:sourceId,renewal_container:'mkv',renewal_duration:120,...options.row};
+ const row={job_id:jobId,job_user_id:userId,status:'processing',provider_key:'provider',item_type:'movie',
+  external_id:'42',sprite_path:`provider/movie-42-${jobId}.jpg`,job_source_id:sourceId,job_container:'mkv',job_duration:120,...options.row};
  const db={from(table){const filters=[];return {
   select(){return this;},eq(k,v){filters.push([k,v]);return this;},is(k,v){filters.push([k,v]);return this;},
   async maybeSingle(){
@@ -42,7 +42,7 @@ for(const [name,opts,body,token,status] of [
  ['bad authentication',{}, {},'invalid',401],
  ['foreign owner',{}, {userId:crypto.randomUUID()},undefined,410],
  ['finished job',{row:{status:'ready'}},{},undefined,410],
- ['legacy unbound job',{row:{renewal_source_id:null}},{},undefined,410],
+ ['legacy unbound job',{row:{job_source_id:null}},{},undefined,410],
  ['disabled source',{source:{enabled:false}},{},undefined,410],
  ['removed source',{source:{deleted_at:'now'}},{},undefined,410],
  ['foreign source',{source:{user_id:crypto.randomUUID()}},{},undefined,410],

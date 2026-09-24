@@ -13307,8 +13307,8 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   const { error: upsertErr } = await db.from("catalog_storyboards").upsert({
     provider_key: pkey, item_type: itemType, external_id: externalId,
     status: "processing", sprite_path: spritePath, job_id: jobId, error: null,
-    renewal_owner_id: userId, renewal_source_id: sourceId, renewal_container: container,
-    renewal_duration: Math.max(0, Math.min(86400, Number(url.searchParams.get("duration")) || 0)),
+    job_user_id: userId, job_source_id: sourceId, job_container: container,
+    job_duration: Math.max(0, Math.min(86400, Number(url.searchParams.get("duration")) || 0)),
     updated_at: new Date().toISOString(),
   }, { onConflict: "provider_key,item_type,external_id" });
   if (upsertErr) throwDb(upsertErr, "storyboard upsert failed");
@@ -13348,11 +13348,11 @@ async function renewStoryboard(req: Request, db: SupabaseClient): Promise<JsonRe
     throw new HttpError(400, "Invalid storyboard renewal");
   }
   const { data: row, error } = await db.from("catalog_storyboards")
-    .select("provider_key,item_type,external_id,sprite_path,renewal_source_id,renewal_container,renewal_duration")
-    .eq("job_id", jobId).eq("renewal_owner_id", userId).eq("status", "processing").maybeSingle();
+    .select("provider_key,item_type,external_id,sprite_path,job_source_id,job_container,job_duration")
+    .eq("job_id", jobId).eq("job_user_id", userId).eq("status", "processing").maybeSingle();
   if (error) throwDb(error, "Unable to renew storyboard");
-  if (!row?.renewal_source_id || !row.sprite_path) throw new HttpError(410, "Storyboard no longer authorized");
-  const sourceId = stringOr(row.renewal_source_id, "");
+  if (!row?.job_source_id || !row.sprite_path) throw new HttpError(410, "Storyboard no longer authorized");
+  const sourceId = stringOr(row.job_source_id, "");
   const readSource = () => db.from("cloud_sources").select("id,sync_status,config_ciphertext")
     .eq("id", sourceId).eq("user_id", userId).eq("enabled", true).is("deleted_at", null).maybeSingle();
   const source = await readSource();
@@ -13365,7 +13365,7 @@ async function renewStoryboard(req: Request, db: SupabaseClient): Promise<JsonRe
   const identity = await resolveSourceIdentity(sourceId, userId, db);
   if (!identity.key || identity.key !== row.provider_key) throw new HttpError(410, "Source identity changed");
   const target = await resolveVariantUrl(db, userId, sourceId, stringOr(row.external_id, ""),
-    stringOr(row.item_type, "movie"), { container: stringOr(row.renewal_container, "") });
+    stringOr(row.item_type, "movie"), { container: stringOr(row.job_container, "") });
   if (!target) throw new HttpError(503, "Storyboard target temporarily unavailable");
   // URL/credential changes invalidate saved frames without storing either in checkpoints.
   const sourceBinding = await sha256Hex(JSON.stringify([userId, sourceId, row.item_type,
@@ -13383,12 +13383,12 @@ async function renewStoryboard(req: Request, db: SupabaseClient): Promise<JsonRe
   }
   if (currentSource.data.sync_status === "syncing") return { defer: true, reason: "catalog-syncing" };
   const current = await db.from("catalog_storyboards").select("job_id")
-    .eq("job_id", jobId).eq("renewal_owner_id", userId).eq("renewal_source_id", sourceId)
+    .eq("job_id", jobId).eq("job_user_id", userId).eq("job_source_id", sourceId)
     .eq("status", "processing").maybeSingle();
   if (current.error) throwDb(current.error, "Unable to recheck storyboard job");
   if (!current.data) throw new HttpError(410, "Storyboard replaced or completed");
   return { pipeUrl: pipe.url, uploadUrl: signed.signedUrl.replace(SUPABASE_URL, PUBLIC_ORIGIN),
-    sourceId, sourceBinding, duration: Number(row.renewal_duration) || 0 };
+    sourceId, sourceBinding, duration: Number(row.job_duration) || 0 };
 }
 
 async function checkStoryboardAdmission(req: Request, db: SupabaseClient): Promise<JsonRecord> {
