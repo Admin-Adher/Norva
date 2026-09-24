@@ -30,6 +30,30 @@ def empty_health():
 
 
 class RolloutSafety(unittest.TestCase):
+    def test_reviewed_image_parameters_require_exact_digests_and_revision(self):
+        base = 'sha256:' + 'a' * 64
+        image = 'sha256:' + 'b' * 64
+        revision = 'c' * 40
+        rollout.validate_rollout_parameters(base, image, revision, 167, 168)
+        for candidate in [(base, base, revision, 167, 168),
+                          ('tag:latest', image, revision, 167, 168),
+                          (base, image, 'main', 167, 168),
+                          (base, image, revision, 0, 168)]:
+            with self.subTest(candidate=candidate), self.assertRaises(AssertionError):
+                rollout.validate_rollout_parameters(*candidate)
+
+    def test_existing_pilot_output_mount_is_preserved_without_recopied_data(self):
+        current = container()
+        current['Mounts'] = [{'Destination': '/tmp/resume-pilot'}]
+        self.assertFalse(rollout.pilot_output_copy_needed(
+            'norva-resume-cache-pilot-20260916', current, True))
+        self.assertFalse(rollout.pilot_output_copy_needed('norva-media-gateway', current, False))
+        with self.assertRaises(AssertionError):
+            rollout.pilot_output_copy_needed('norva-media-gateway', current, True)
+        current['Mounts'] = []
+        with self.assertRaises(AssertionError):
+            rollout.pilot_output_copy_needed('norva-resume-cache-pilot-20260916', current, True)
+
     def test_clone_preserves_credentials_mounts_limits_and_dns_without_mutation(self):
         original = container()
         before = copy.deepcopy(original)
