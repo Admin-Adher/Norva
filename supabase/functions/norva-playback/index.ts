@@ -1909,6 +1909,11 @@ async function coordinateColdMediaCachePlayback(options: {
     itemType, itemId, targetUrlHash, streamMime, playbackHint, expiresAt, costScore,
   } = options;
   if (!runtimeConfig.mediaCacheSingleflightEnabled) return null;
+  // A cold producer starts at zero and its unfinished prefix cannot satisfy an
+  // arbitrary resume. Keep the complete-object lookup above this lane; a miss
+  // with an offset must use the normal measured Gateway seek, without claiming
+  // or joining a zero-origin producer under the same work fingerprint.
+  if (Number(gatewayPlaybackHints(playbackHint).seekOffset) > 0) return null;
   if (!mediaCachePlaybackWorkerUrl(runtimeConfig)
     || !mediaCacheCoordinationKeyIsValid(runtimeConfig.mediaCacheCoordinationHmacKey)) {
     // Shared-cache production is optional acceleration. A rolling or partial
