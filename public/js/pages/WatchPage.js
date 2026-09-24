@@ -6140,7 +6140,7 @@ class WatchPage {
             // already on disk, so a large forward buffer absorbs slow/erratic
             // upstream downloads on the encoder side
             maxBufferLength: (isTranscodeSession || isGatewaySession) ? 120 : 30,
-            maxMaxBufferLength: (isTranscodeSession || isGatewaySession) ? 600 : 60,
+            maxMaxBufferLength: isGatewaySession ? 120 : (isTranscodeSession ? 600 : 60),
             // Keep recent rewind media without retaining the full watched film.
             // hls.js applies this to both growing and completed VOD playlists.
             backBufferLength: 30,
@@ -9509,6 +9509,15 @@ class WatchPage {
                 || pending.streamIndex !== rendition.streamIndex) {
                 return false;
             }
+            const elapsed = pending.anchor?.autoplay ? (Date.now() - pending.requestedAt) / 1000 : 0;
+            const drift = this.getPlaybackPosition() - pending.anchor?.position;
+            if (Number.isFinite(drift) && (drift < -1 || drift > elapsed + 2)) {
+                clearTimeout(pending.timeoutId);
+                this._pendingHlsAudioSwitch = null;
+                this.restartGatewayAudioAtAnchor(activeHls, playbackAttemptId, rendition.streamIndex, pending.anchor)
+                    .then(pending.resolve, () => pending.resolve(false));
+                return false;
+            }
             this.directAudioStreamIndex = rendition.streamIndex;
             this.selectedAudioStreamIndex = rendition.streamIndex;
             this.selectedAudioTrackUserChoice = true;
@@ -9537,6 +9546,35 @@ class WatchPage {
         return true;
     }
 
+    gatewayAudioWindowExpired(activeHls, hlsIndex) {
+        const position = Number(this.video?.currentTime);
+        if (!Number.isFinite(position)) return false;
+        const details = [
+            activeHls.levels?.[activeHls.currentLevel]?.details,
+            activeHls.audioTracks?.[hlsIndex]?.details,
+        ];
+        return details.some((entry) => entry?.live === true
+            && Number.isFinite(entry.fragments?.[0]?.start)
+            && entry.fragments[0].start > position + 0.5);
+    }
+
+    restartGatewayAudioAtAnchor(activeHls, playbackAttemptId, streamIndex, anchor) {
+        if (this.hls !== activeHls || this.isStalePlaybackAttempt(playbackAttemptId)) {
+            return Promise.resolve(false);
+        }
+        if (this._latestHlsAudioSwitch) this._latestHlsAudioSwitch.acceptEvents = false;
+        this.cancelPendingHlsAudioSwitch(false);
+        this.selectedAudioStreamIndex = streamIndex;
+        this.selectedAudioTrackUserChoice = true;
+        this.clearPendingPreference('audio');
+        this.closeAudioMenu();
+        // The replacement lane must use the position before hls.js can seek to
+        // the live edge, including when a switch times out while paused.
+        this.video?.pause();
+        activeHls.stopLoad?.();
+        return this.queueSelectedAudioTrackRestart(anchor);
+    }
+
     selectGatewayHlsAudioTrack(hlsIndex, streamIndex) {
         const activeHls = this.hls;
         const playbackAttemptId = this._playbackAttemptId;
@@ -9556,18 +9594,23 @@ class WatchPage {
         }
 
         this.cancelPendingHlsAudioSwitch(false);
+        const anchor = { position: this.getPlaybackPosition(), autoplay: !this.video?.paused };
+        if (this.gatewayAudioWindowExpired(activeHls, hlsIndex)) {
+            return this.restartGatewayAudioAtAnchor(activeHls, playbackAttemptId, streamIndex, anchor);
+        }
         let resolveSwitch;
         const switchPromise = new Promise((resolve) => { resolveSwitch = resolve; });
         const timeoutId = setTimeout(() => {
             if (this._pendingHlsAudioSwitch?.hls === activeHls
                 && this._pendingHlsAudioSwitch?.hlsIndex === hlsIndex) {
-                console.warn('[WatchPage] HLS audio switch was not confirmed; keeping the prior absolute track.');
+                console.warn('[WatchPage] HLS audio switch was not confirmed; restoring the requested position.');
                 if (this._latestHlsAudioSwitch?.hls === activeHls
                     && this._latestHlsAudioSwitch?.hlsIndex === hlsIndex) {
                     this._latestHlsAudioSwitch.acceptEvents = false;
                 }
-                this.cancelPendingHlsAudioSwitch(false);
-                this.updateAudioTracks();
+                this._pendingHlsAudioSwitch = null;
+                this.restartGatewayAudioAtAnchor(activeHls, playbackAttemptId, streamIndex, anchor)
+                    .then(resolveSwitch, () => resolveSwitch(false));
             }
         }, 8000);
         this._pendingHlsAudioSwitch = {
@@ -9577,6 +9620,8 @@ class WatchPage {
             streamIndex,
             timeoutId,
             resolve: resolveSwitch,
+            anchor,
+            requestedAt: Date.now(),
         };
         this._latestHlsAudioSwitch = {
             hls: activeHls,
@@ -10472,13 +10517,13 @@ class WatchPage {
         await this.queueSelectedAudioTrackRestart();
     }
 
-    queueSelectedAudioTrackRestart() {
+    queueSelectedAudioTrackRestart(anchor = null) {
         const requestId = ++this._audioSwitchRequestId;
         const run = (this._audioSwitchPromise || Promise.resolve())
             .catch(() => { })
             .then(() => {
                 if (requestId !== this._audioSwitchRequestId) return false;
-                return this.restartWithSelectedAudioTrack(requestId);
+                return this.restartWithSelectedAudioTrack(requestId, anchor);
             });
 
         this._audioSwitchPromise = run.finally(() => {
@@ -10581,7 +10626,7 @@ class WatchPage {
         return this.getPlayingEngineAudioOptions();
     }
 
-    async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+    async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId, anchor = null) {
         if (this.isStaleAudioSwitch(requestId)) return false;
 
         // In-browser engine: switch audio client-side (zero-egress), no gateway.
@@ -10590,7 +10635,7 @@ class WatchPage {
         }
 
         if (this.isCloudPlaybackMode() && this.content?.sourceId && this.content?.id) {
-            return this.restartCloudGatewayWithSelectedAudioTrack(requestId);
+            return this.restartCloudGatewayWithSelectedAudioTrack(requestId, anchor);
         }
 
         const sourceUrl = this.baseStreamUrl || this.currentUrl;
@@ -10650,16 +10695,17 @@ class WatchPage {
         return true;
     }
 
-    async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+    async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId, anchor = null) {
         const selected = this.getSelectedAudioTrack();
         const playbackIdentity = this.captureVodPlaybackIdentity();
         if (!selected || !playbackIdentity) return false;
 
         const switchStartedAt = Date.now();
-        const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        const targetPosition = Math.max(0, Math.floor(Number.isFinite(anchor?.position)
+            ? anchor.position : this.getPlaybackPosition()));
         const preRoll = this.getGatewaySeekPreRoll(targetPosition, 0);
         const sessionStart = Math.max(0, targetPosition - preRoll);
-        const autoplay = !this.video?.paused;
+        const autoplay = typeof anchor?.autoplay === 'boolean' ? anchor.autoplay : !this.video?.paused;
         const { itemType, container } = playbackIdentity;
         const audioOptions = this.getAudioProcessingOptions({
             ...(this.currentStreamInfo || {}),
