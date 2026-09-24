@@ -2193,7 +2193,10 @@ async function createPlaybackSessionCore(
   if (mediaCacheReadPolicy !== "default" && mediaCacheReadPolicy !== "bypass-once") {
     throw new HttpError(400, "Invalid media cache read policy");
   }
-  const mediaCacheReadBypassOnce = mediaCacheReadPolicy === "bypass-once";
+  // Old native shells cannot attach private tickets. Capability negotiation
+  // must precede any cache claim, including a ready object or live follower.
+  const mediaCacheReadBypassOnce = mediaCacheReadPolicy === "bypass-once"
+    || body.privateMediaCacheProtocol !== 1;
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const parentSeriesId = itemType === "series"
     ? stringOr(

@@ -1344,6 +1344,9 @@ public class MainActivity extends Activity {
         // for the player's "Version" menu. Feature-detected: absent → the web uses the
         // fixed-signature methods above (no variant menu).
         @android.webkit.JavascriptInterface
+        public int privateMediaCacheProtocol() { return 1; }
+
+        @android.webkit.JavascriptInterface
         public void playVideoJson(final String json) {
             try {
                 org.json.JSONObject o = new org.json.JSONObject(json);
@@ -1370,7 +1373,8 @@ public class MainActivity extends Activity {
                         emptyToNull(o.optString("poster")),
                         emptyToNull(o.optString("previousTitle")),
                         emptyToNull(o.optString("nextTitle")),
-                        emptyToNull(o.optString("sessionId")));
+                        emptyToNull(o.optString("sessionId")),
+                    o.optJSONObject("mediaCache") == null ? null : o.getJSONObject("mediaCache").toString());
             } catch (Exception ignored) {
                 // Malformed payload → the web falls back to the fixed-signature methods.
             }
@@ -2430,7 +2434,7 @@ public class MainActivity extends Activity {
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson, final String posterUrl,
                             final String previousTitle, final String nextTitle,
-                            final String playbackSessionId) {
+                            final String playbackSessionId, final String mediaCacheJson) {
         // Variant picks and explicit Play actions are new intents. Retire the
         // previous retry token before the new Activity is launched.
         clearPendingPlayerRecovery(null);
@@ -2465,6 +2469,7 @@ public class MainActivity extends Activity {
             }
             if (playbackSessionId != null) {
                 intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID, playbackSessionId);
+                intent.putExtra(PlayerActivity.EXTRA_MEDIA_CACHE, mediaCacheJson);
             }
             launchPlayerWithEphemeralAuth(intent);
         });

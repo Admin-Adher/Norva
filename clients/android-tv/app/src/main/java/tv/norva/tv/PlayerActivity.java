@@ -221,6 +221,8 @@ public class PlayerActivity extends Activity {
     private boolean clarityPlaybackStarted = false;
     private boolean firstFrameRendered = false;
     private long playbackLaunchElapsedMs;
+    public static final String EXTRA_MEDIA_CACHE = "mediaCache";
+    private tv.norva.playback.NativeMediaCache nativeMediaCache;
     private String playbackAuthToken;
     private String playbackAuthChannelId;
     private String pendingPlaybackAuthRequestNonce;
@@ -727,7 +729,10 @@ public class PlayerActivity extends Activity {
                 .setReadTimeoutMs(30000);
         // Bound open-ended seek ranges so Resume jumps straight to the offset
         // instead of the provider replaying the file from byte 0 (a ~20s stall).
-        DataSource.Factory dataSourceFactory = new BoundedRangeDataSource.Factory(http);
+        nativeMediaCache = new tv.norva.playback.NativeMediaCache(new BoundedRangeDataSource.Factory(http));
+        nativeMediaCache.configure(getIntent().getStringExtra(EXTRA_MEDIA_CACHE), url, playbackSessionId);
+        getIntent().removeExtra(EXTRA_MEDIA_CACHE);
+        DataSource.Factory dataSourceFactory = nativeMediaCache;
 
         player = new ExoPlayer.Builder(this)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory)
@@ -828,6 +833,10 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                if (nativeMediaCache != null && nativeMediaCache.active()) {
+                    requestFreshStream("media_cache_unavailable");
+                    return;
+                }
                 NativeClarity.tag("failure_family", "unknown");
                 NativeClarity.event("journey_error");
                 handler.removeCallbacks(bufferWatchdog);
@@ -1047,6 +1056,7 @@ public class PlayerActivity extends Activity {
             return;
         }
         if ("heartbeat".equals(purpose)) {
+            if (nativeMediaCache != null) nativeMediaCache.renewIfDue(bearer);
             final String heartbeatSessionId = playbackSessionId;
             final long heartbeatGeneration = playbackHeartbeatGeneration;
             playbackHeartbeatRequestInFlight = true;
@@ -1709,6 +1719,9 @@ public class PlayerActivity extends Activity {
                     payload.optString("sessionId", ""));
             playbackHeartbeatFailurePolicy.reset();
             originalUrl = nextUrl;
+            if (nativeMediaCache != null) nativeMediaCache.configure(
+                    payload.optJSONObject("mediaCache") == null ? null : payload.getJSONObject("mediaCache").toString(),
+                    nextUrl, playbackSessionId);
             fallbackUrl = emptyToNull(payload.optString("fallbackUrl", ""));
             streamHost = hostOf(nextUrl);
             fallbackTried = false;
@@ -4001,6 +4014,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (nativeMediaCache != null) nativeMediaCache.close();
         stopPlaybackHeartbeat();
         playbackAuthToken = null;
         pendingPlaybackAuthRequestNonce = null;

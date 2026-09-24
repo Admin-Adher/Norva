@@ -2285,12 +2285,18 @@ const CloudAdapter = (() => {
                 }
                 const cloudSourceId = await resolveSourceId(sourceId);
                 const userAgent = resolveCloudUserAgent();
+                const privateMediaCacheProtocol = (() => {
+                    if (!nativePlayer) return 1;
+                    try { return Number(nativePlayer.privateMediaCacheProtocol?.()) === 1 ? 1 : 0; }
+                    catch (_) { return 0; }
+                })();
                 const baseSession = {
                     sourceId: cloudSourceId,
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint,
-                    ...(query.get('mediaCacheReadPolicy') === 'bypass-once'
+                    privateMediaCacheProtocol,
+                    ...((query.get('mediaCacheReadPolicy') === 'bypass-once' || privateMediaCacheProtocol !== 1)
                         ? { mediaCacheReadPolicy: 'bypass-once' }
                         : {}),
                     gatewayAutoMode: mode === 'transcode' && !forcedMode,
@@ -2378,6 +2384,7 @@ const CloudAdapter = (() => {
                     // Native-only: gateway byte-pipe URL the native player falls back
                     // to when the provider refuses the direct (residential-IP) request.
                     fallbackUrl: payload.playback?.fallbackUrl || null,
+                    mediaCache: payload.playback?.mediaCache || null,
                     cloud: true,
                     mode: payload.playback?.mode || mode,
                     sessionId: payload.session?.id,
@@ -3266,6 +3273,7 @@ const API = {
                 requestOptions = {}
             ) => {
                 const params = new URLSearchParams({ container });
+                if (options.mediaCacheReadPolicy === 'bypass-once') params.set('mediaCacheReadPolicy', 'bypass-once');
                 Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {
                     if (key === 'container') return;
                     params.set(key, value === true ? '1' : String(value));

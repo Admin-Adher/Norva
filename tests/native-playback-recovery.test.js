@@ -383,7 +383,7 @@ test('standalone native recovery is item-scoped, with bounded VOD and persistent
   assert.match(recovery, /if \(!isLiveRecovery && state\.count >= NATIVE_RECOVERY_MAX\)/);
   assert.match(recovery, /return 'exhausted'/);
   assert.match(recovery, /state\.count \+= 1/);
-  assert.match(recovery, /await entry\.launcher\(resume,\s*recoveryToken\)/);
+  assert.match(recovery, /await entry\.launcher\(resume,\s*recoveryToken,\s*reason\)/);
   assert.match(recovery, /nativeRecoveryLaunchers\.get\(key\) !== entry/);
   assert.match(recovery, /currentNativeRoute\(\) !== activeNativeIntentRoute/);
   assert.match(
@@ -458,7 +458,7 @@ test('standalone VOD recovery resolves a fresh provider session at the saved tim
   assert.match(nativeLaunch, /\.\.\.\(sessionId\s*\?\s*\{\s*sessionId\s*\}\s*:\s*\{\}\)/);
   assert.match(
     vodFlow,
-    /const launchResolved = async \(resumeAt, fresh = false, recoveryToken = ''\)/,
+    /const launchResolved = async \(resumeAt, fresh = false, recoveryToken = '', reason = ''\)/,
   );
   assert.match(vodFlow, /if \(fresh && meta && window\.API\?\.proxy\?\.xtream\?\.getStreamUrl\)/);
   assert.match(vodFlow, /await catalogPage\?\.prepareForPlaybackSession\?\.\(\)/);
@@ -469,10 +469,10 @@ test('standalone VOD recovery resolves a fresh provider session at the saved tim
   assert.match(vodFlow, /nativePlay\(resolved\.url,[\s\S]*?resumeAt,[\s\S]*?fallbackUrl/);
   assert.match(
     vodFlow,
-    /registerNativeRecovery\([\s\S]{0,100}\(resumeAt, recoveryToken\) => launchResolved\(resumeAt, true, recoveryToken\)/,
+    /registerNativeRecovery\([\s\S]{0,100}\(resumeAt, recoveryToken, reason\) => launchResolved\(resumeAt, true, recoveryToken, reason\)/,
   );
   assert.match(vodFlow, /registerNativeVodCloudSession\(this, playbackSessionId\)/);
-  assert.match(vodFlow, /sessionId:\s*playbackSessionId[\s\S]{0,260}recoveryToken/);
+  assert.match(vodFlow, /sessionId:\s*playbackSessionId[\s\S]{0,360}recoveryToken/);
 });
 
 test('standalone native close retries exact expiry after registry loss and acks only terminal success', async () => {
@@ -793,7 +793,7 @@ test('playback expiry aborts while a 401 token refresh remains unresolved', asyn
   await assert.rejects(expiry, (error) => error?.name === 'AbortError');
 });
 
-test('standalone native VOD owns, replaces, and closes cloud sessions exactly once', async () => {
+for (const cached of [false, true]) test(`standalone native VOD owns, replaces, and closes cloud sessions exactly once (cache=${cached})`, async () => {
   const launches = [];
   const lifecycle = [];
   const scheduled = [];
@@ -876,7 +876,8 @@ test('standalone native VOD owns, replaces, and closes cloud sessions exactly on
       history: { save() { return Promise.resolve(); } },
       proxy: {
         xtream: {
-          async getStreamUrl() {
+          async getStreamUrl(_source, _id, _type, _container, options) {
+            assert.equal(options.mediaCacheReadPolicy, cached ? 'bypass-once' : undefined);
             lifecycle.push(['resolve', freshSessionId]);
             return {
               url: 'https://provider.example/episode-fresh.mkv',
@@ -932,10 +933,12 @@ test('standalone native VOD owns, replaces, and closes cloud sessions exactly on
     url: 'https://provider.example/episode-3.mkv',
     fallbackUrl: 'https://gateway.example/session-initial/raw',
     sessionId: initialSessionId,
+    mediaCache: cached ? { protocol: 1, transport: 'private-r2-hls', authorization: { scheme: 'Bearer', token: 'mc1.fixture.signature' } } : null,
   }));
 
   assert.equal(launches.length, 1);
   assert.equal(launches[0].sessionId, initialSessionId);
+  assert.equal(launches[0].mediaCache?.authorization?.token, cached ? 'mc1.fixture.signature' : undefined);
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register'),
     [['register', initialSessionId]],
@@ -946,7 +949,7 @@ test('standalone native VOD owns, replaces, and closes cloud sessions exactly on
     'episode',
     'episode-3',
     120,
-    'no_data_timeout',
+    cached ? 'media_cache_unavailable' : 'no_data_timeout',
     'recovery-token-1',
   );
   assert.equal(retryResult, 'scheduled');
@@ -969,6 +972,8 @@ test('standalone native VOD owns, replaces, and closes cloud sessions exactly on
   );
   assert.equal(launches.length, 2);
   assert.equal(launches[1].sessionId, freshSessionId);
+  assert.equal(launches[1].resumeSeconds, 120);
+  assert.equal(launches[1].mediaCache, null);
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register'),
     [
@@ -1503,7 +1508,7 @@ test('standalone binds every recovered stream to the exact native recovery token
     /if \(recoveryToken && previousRecoveryToken !== recoveryToken\)[\s\S]{0,180}nativeRecoveryAttempts\.delete\(key\)/,
     'a new native token must get a fresh bounded retry budget',
   );
-  assert.match(recovery, /entry\.launcher\(resume,\s*recoveryToken\)/);
+  assert.match(recovery, /entry\.launcher\(resume,\s*recoveryToken,\s*reason\)/);
   assert.match(
     recovery,
     /retryPlayback\([\s\S]{0,240}reason \|\| 'resolve_failed',[\s\S]{0,80}recoveryToken/,
@@ -1515,10 +1520,10 @@ test('standalone binds every recovered stream to the exact native recovery token
     'playVideoJson must return a token only for native recovery responses',
   );
   assert.match(nativeLaunch, /activeNativeRecoveryTokens\.get\(key\) !== recoveryToken/);
-  assert.match(vodFlow, /launchResolved = async \(resumeAt, fresh = false, recoveryToken = ''\)/);
+  assert.match(vodFlow, /launchResolved = async \(resumeAt, fresh = false, recoveryToken = '', reason = ''\)/);
   assert.match(
     vodFlow,
-    /\(resumeAt, recoveryToken\) => launchResolved\(resumeAt, true, recoveryToken\)/,
+    /\(resumeAt, recoveryToken, reason\) => launchResolved\(resumeAt, true, recoveryToken, reason\)/,
   );
   assert.match(vodFlow, /playbackPreferences:[\s\S]{0,180}recoveryToken/);
   assert.match(liveFlow, /relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
