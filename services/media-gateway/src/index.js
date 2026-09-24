@@ -119,7 +119,7 @@ const { SharedPlaybackRanges, hybridPlaybackRanges } = require('./shared-playbac
 const { FiniteTsSeekIndex, indexedTsInputUrl } = require('./finite-ts-seek-index');
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
-const { publishSharedMediaCacheSession } = require('./sharedMediaCachePublication');
+const { publishSharedMediaCacheSessionWithRetry } = require('./sharedMediaCachePublication');
 const {
     MediaCacheProducerControl,
     normalizeMediaCacheProducerContext,
@@ -2338,6 +2338,7 @@ const sharedMediaCacheStats = {
     publications: 0,
     alreadyReady: 0,
     failures: 0,
+    transientRetries: 0,
     callbackFailures: 0,
     bytesPublished: 0,
     filesPublished: 0,
@@ -18464,7 +18465,7 @@ async function maybePublishSharedMediaCache(session) {
                 throw error;
             }
         }
-        const result = await publishSharedMediaCacheSession({
+        const result = await publishSharedMediaCacheSessionWithRetry({
             session,
             publisher: sharedMediaCachePublisher,
             pipelineBuild,
@@ -18473,6 +18474,15 @@ async function maybePublishSharedMediaCache(session) {
             rootPlaylist: graph.rootPlaylist,
             files: graph.files,
             ttlMs: session.mediaCacheProducer.admission.ttlSeconds * 1_000,
+            beforeRetry: async () => {
+                sharedMediaCacheStats.transientRetries += 1;
+                const state = await mediaCacheProducerControl.pulse(session, 'uploading').catch(() => null);
+                if (state !== 'renewed') {
+                    const error = new Error('shared media cache producer lease cannot retry upload');
+                    error.code = 'SHARED_MEDIA_CACHE_PRODUCER_LEASE_LOST';
+                    throw error;
+                }
+            },
             registerPublication: async (payload) => {
                 if (session.mediaCacheProducer) {
                     const producerState = await mediaCacheProducerControl.pulse(session, 'finalizing').catch(() => null);
@@ -21460,7 +21470,6 @@ async function stopSession(session, options = {}) {
     session.status = 'stopping';
     session.hlsOutputControl?.stop();
     session.startupAbortController?.abort();
-    mediaCacheProducerControl.detach(session);
     session.stoppingPromise = (async () => {
         session.primaryViewerAttached = false;
         session.completeCacheContinuationDemanded = false;
@@ -21497,6 +21506,7 @@ async function stopSession(session, options = {}) {
         releaseVideoEncoderAdmission(session);
         await session.completeHlsCachePromotionPromise?.catch(() => null);
         await session.sharedMediaCachePublicationPromise?.catch(() => null);
+        mediaCacheProducerControl.detach(session);
         try { await session.authoritativeSpool?.spool?.cleanup?.(); } catch (_) {}
         if (session.mediaCacheProducer && session.mediaCacheProducerCompleted !== true) {
             await mediaCacheProducerControl.abandon(session).catch(() => {
