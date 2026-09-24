@@ -132,9 +132,30 @@ test('an interrupted R2 upload leaves no readable manifest', async (t) => {
   const manifestKey = `media-cache/v1/${objectKey.slice(0, 2)}/${objectKey}/manifest.auth.json`;
   await assert.rejects(
     () => publisher(simulator).publish(completeOptions(fixture)),
-    (error) => error instanceof R2SimulatorError && error.code === 'R2_SIMULATOR_UNAVAILABLE',
+    (error) => error instanceof R2SimulatorError
+      && error.code === 'R2_SIMULATOR_UNAVAILABLE'
+      && error.publicationStage === 'asset-put'
+      && error.publicationAssetIndex === 1
+      && error.publicationAssetBytes > 0,
   );
   assert.equal(await simulator.head(manifestKey), null);
+});
+
+test('manifest lookup failure reports its publication stage without changing the error', async (t) => {
+  const fixture = await hlsFixture(t);
+  const failure = new Error('diagnostic fixture');
+  failure.code = 'MEDIA_CACHE_WORKER_UNAVAILABLE';
+  failure.retryable = true;
+  const store = {
+    get: async () => { throw failure; },
+    put: async () => { throw new Error('should not upload'); },
+  };
+  await assert.rejects(
+    () => publisher(store).publish(completeOptions(fixture)),
+    (error) => error === failure
+      && error.publicationStage === 'manifest-get'
+      && error.retryable === true,
+  );
 });
 
 test('republication is idempotent while a different graph under one immutable identity conflicts', async (t) => {

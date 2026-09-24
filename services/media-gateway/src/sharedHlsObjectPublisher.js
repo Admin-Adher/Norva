@@ -274,7 +274,15 @@ class SharedHlsObjectPublisher {
             totalBytes,
             completion: { kind: 'complete-hls', sourceEof: true, ffmpegExitCode: 0 },
         };
-        const existingManifest = await this.objectStore.get(manifestKey);
+        let existingManifest;
+        try {
+            existingManifest = await this.objectStore.get(manifestKey);
+        } catch (error) {
+            if (error && typeof error === 'object' && Object.isExtensible(error)) {
+                error.publicationStage = 'manifest-get';
+            }
+            throw error;
+        }
         if (existingManifest) {
             const nowMs = Number(this.now());
             const existingPayload = validateExistingManifest(
@@ -297,18 +305,27 @@ class SharedHlsObjectPublisher {
 
         // Immutable assets are uploaded first. If any write fails, no manifest
         // exists and the partial prefix is unreachable to readers.
-        for (const record of records) {
+        for (const [index, record] of records.entries()) {
             const { body } = await readStableAsset(sourceRoot, record.path, snapshots.get(record.path), this.maxFileBytes);
-            await this.objectStore.put(`${prefix}${record.objectName}`, body, {
-                sha256: record.sha256,
-                contentType: record.contentType,
-                metadata: {
-                    kind: 'hls-asset',
-                    'object-key': derived.key,
-                    'asset-sha256': record.sha256,
-                    'logical-path-sha256': sha256(record.path),
-                },
-            });
+            try {
+                await this.objectStore.put(`${prefix}${record.objectName}`, body, {
+                    sha256: record.sha256,
+                    contentType: record.contentType,
+                    metadata: {
+                        kind: 'hls-asset',
+                        'object-key': derived.key,
+                        'asset-sha256': record.sha256,
+                        'logical-path-sha256': sha256(record.path),
+                    },
+                });
+            } catch (error) {
+                if (error && typeof error === 'object' && Object.isExtensible(error)) {
+                    error.publicationStage = 'asset-put';
+                    error.publicationAssetIndex = index;
+                    error.publicationAssetBytes = body.length;
+                }
+                throw error;
+            }
         }
 
         const createdAtMs = Number(this.now());
@@ -341,6 +358,9 @@ class SharedHlsObjectPublisher {
                 },
             });
         } catch (error) {
+            if (error && typeof error === 'object' && Object.isExtensible(error) && !error.publicationStage) {
+                error.publicationStage = 'manifest-put';
+            }
             // A distributed peer may have won the manifest-last race. Accept
             // only its authenticated byte-for-byte graph; every other conflict
             // remains terminal and cannot replace the winner.

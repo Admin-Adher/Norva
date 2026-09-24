@@ -110,21 +110,70 @@ path work, but these probes do not establish why the earlier request failed.
 Its client retries only twice at 100 and 500 ms after the first attempt, and
 the one-shot publication does not resume after those attempts fail.
 
-A follow-up Gateway candidate retries only explicitly retryable Worker read or
+A follow-up Gateway revision retries only explicitly retryable Worker read or
 write failures after 5, 20 and 60 seconds. Every retry must renew the same
 producer lease, and teardown keeps the heartbeat alive until publication
 settles. Immutable asset names and manifest-last publication make a replay of
 the same graph safe after a partial upload. Terminal conflicts are never
 retried. Nineteen focused publication, wiring and producer-control tests pass.
-This candidate has not yet passed full CI or been deployed. The database still
-has exactly one account in stage `singleflight`; global read, singleflight and
-live-join flags remain false.
+The database still has exactly one account in stage `singleflight`; global
+read, singleflight and live-join flags remain false.
+
+## Retry revision rollout, 10:35–10:37 UTC
+
+PR #402 merged as `f70cbd90d7fe42d5bc81072568fa3da4f0a792ae` after all
+Build Norva jobs passed: cloud contracts, Android phone, Android TV and Windows
+portable. The complete Gateway source from this exact commit was archived
+(SHA-256 `b77181a61cc9b1a312d75a7314b4b100c49633a4d1a926ba7ccb7ea3e208c7c2`)
+and built without network access against the pinned codec runtime. The new
+image is `sha256:eaf0175bae3c65daeb5c5621c04351ea7e14c2695df6757cb03aa52b19fdde73`.
+A networkless cold container served healthy Gateway v169 with zero sessions;
+the health version did not change, so the source revision and image digest
+distinguish this deployment.
+
+The guarded rollout replaced the idle pilot at 10:35:33 UTC, then the main
+Gateway when its background audio brokers reached zero at 10:37:44 UTC. The
+main guard refused earlier attempts while those brokers were active. Both
+nodes now run the same image and source revision, with no environment change,
+zero restarts and rollback receipts at
+`/home/adrien/.norva/gateway-reference-rollout/20260924T103533457940Z` and
+`/home/adrien/.norva/gateway-reference-rollout/20260924T103744363103Z`.
+The main Compose override is pinned to this image. Its SHA-256 changed from
+`afc791d304af6afeb8dcb3bb41b29172745a548686eb7392185e1243f4c2958d`
+to `527d1ae67c16891033fe6852fecea0d052a5a1ad8f1b6a2cb9a1a6f5b3a322b9`;
+the protected backup is
+`/home/adrien/.norva/gateway-retry-f70cbd90-20260924/override-before-retry.yml`.
+
+The ordinary QA account restarted the same film from zero. Immediately after
+the Gateway replacement, the existing watch page showed an HLS load error on
+the first restart; its visible **Retry** action recovered. The new session
+decoded 1280×720 frames, reached the full 48:11 at 2× playback, and ended
+without a browser media error. The Gateway retained about 476 MiB of HLS,
+renewed the producer lease without failure and attempted three delayed
+publication retries. At 11:04:48 UTC, publication still ended with
+`MEDIA_CACHE_WORKER_UNAVAILABLE`; its counters were `publications=0`,
+`failures=1`, `transientRetries=3`, `callbackFailures=0`. No ready database row
+or R2 object remained. This retry revision has therefore **not** established
+a usable shared-cache hit.
+
+A synthetic complete HLS graph of 31 files was published from the same main
+Gateway container through the production Worker to R2 in 22.3 seconds, then
+all 32 objects, including the signed manifest, were purged. A separate
+60,888-byte playlist containing 1,900 segment references also passed a
+missing-manifest lookup and one immutable R2 upload; its test object was
+purged. These tests isolate the failure to the real publication context or a
+specific asset/operation. They are not a substitute for the real film replay.
+
+A narrow follow-up adds sanitized failure diagnostics: publication stage,
+HTTP status, nested network error code or name, and asset ordinal/byte count.
+No URL, token, object key, provider title or asset name is logged. Twelve
+focused tests and syntax checks pass locally; this diagnostic change still
+needs CI and deployment before a further QA replay can identify the root.
 
 ## Remaining checks
 
-- Merge and deploy the bounded Worker retry candidate after CI and an isolated
-  runtime smoke, then repeat the ordinary QA full-file replay.
-- Observe Gateway publication and a ready R2 object.
+- Identify the actual Worker failure stage and cause on the ordinary QA film,
+  repair it, then obtain one successful EOF publication and ready R2 object.
 - Replay the film in the ordinary QA app and confirm decoded frames with a
   shared-cache session and no new provider-backed Gateway session.
 - Verify another owner cannot use this owner's source binding in production.
