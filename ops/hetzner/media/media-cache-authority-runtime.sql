@@ -13,6 +13,42 @@ begin
  if ok is distinct from true then raise exception 'Cache authority failed: %',label; end if;
  insert into cache_checks values(label);
 end $$;
+-- The production Gateway stores its external session id as text. Guard every
+-- UUID-accepting cache callback against losing the explicit comparison cast.
+do $gateway_cast_checks$
+declare
+  signature text;
+begin
+  foreach signature in array array[
+    'public.norva_abandon_media_cache_producer_for_gateway(uuid,uuid)',
+    'public.norva_commit_admitted_media_cache_publication(uuid,uuid,uuid,text,text,bigint,text,text,text,bigint,text,text,text,text,text,bigint,integer,timestamptz)',
+    'public.norva_commit_media_cache_publication(uuid,uuid,uuid,text,text,bigint,text,text,text,bigint,text,text,text,text,text,bigint,integer,timestamptz)',
+    'public.norva_complete_media_cache_producer_for_gateway(uuid,uuid,uuid,text)',
+    'public.norva_pulse_media_cache_continuation_for_gateway(uuid,uuid,text,integer)',
+    'public.norva_pulse_media_cache_producer_for_gateway(uuid,uuid,text,integer)',
+    'public.norva_request_media_cache_continuation_for_gateway(uuid,uuid,integer)'
+  ] loop
+    perform pg_temp.check_cache(
+      pg_catalog.strpos(
+        pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure(signature)),
+        'gateway.external_session_id = p_gateway_session_id::text'
+      ) > 0,
+      'Gateway RPC text session id cast: ' || signature
+    );
+  end loop;
+  perform pg_temp.check_cache(
+    public.norva_pulse_media_cache_producer_for_gateway(
+      gen_random_uuid(), gen_random_uuid(), 'producing', 120
+    ) = 'missing',
+    'Gateway producer pulse accepts UUID against text id'
+  );
+  perform pg_temp.check_cache(
+    public.norva_abandon_media_cache_producer_for_gateway(
+      gen_random_uuid(), gen_random_uuid()
+    ) = 'missing',
+    'Gateway producer abandon accepts UUID against text id'
+  );
+end $gateway_cast_checks$;
 create temp table cache_fixture(i int,owner_id uuid,source_id uuid,item_id uuid,variant_id uuid,session_id uuid,binding_id uuid);
 
 insert into public.media_cache_objects(
