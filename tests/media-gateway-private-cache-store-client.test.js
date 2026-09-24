@@ -135,6 +135,24 @@ test('private Worker transport retries bounded 5xx responses with the identical 
   assert.equal(server.objects.get(key).body.equals(body), true);
 });
 
+test('private Worker transport lets fetch compute the upload length', async (t) => {
+  const server = await startStoreServer(t);
+  const body = Buffer.alloc(50_753, 65);
+  const key = 'media-cache/v1/ee/'.concat('e'.repeat(64), '/assets/', 'f'.repeat(64));
+  let calls = 0;
+  const store = client(server.baseUrl, {
+    fetch: (url, init) => {
+      calls += 1;
+      assert.equal(Object.hasOwn(init.headers, 'content-length'), false);
+      return globalThis.fetch(url, init);
+    },
+  });
+  assert.equal((await store.put(key, body, { sha256: digest(body) })).status, 'created');
+  assert.equal(calls, 1);
+  assert.equal(server.requests[0].headers['content-length'], String(body.length));
+  assert.equal(server.objects.get(key).body.equals(body), true);
+});
+
 test('private Worker transport fails closed on immutable conflict, wrong auth and response digest drift', async (t) => {
   const server = await startStoreServer(t);
   const key = 'media-cache/v1/dd/'.concat('d'.repeat(64), '/assets/', 'e'.repeat(64));

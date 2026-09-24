@@ -167,13 +167,56 @@ specific asset/operation. They are not a substitute for the real film replay.
 A narrow follow-up adds sanitized failure diagnostics: publication stage,
 HTTP status, nested network error code or name, and asset ordinal/byte count.
 No URL, token, object key, provider title or asset name is logged. Twelve
-focused tests and syntax checks pass locally; this diagnostic change still
-needs CI and deployment before a further QA replay can identify the root.
+focused tests and syntax checks pass locally.
+
+## Diagnostic revision rollout, 11:32–11:34 UTC
+
+PR #403 merged as `851274a7c3780dd07b43e5bfbbe15c07fcd1cd64` after the
+cloud-contract, Android phone, Android TV and Windows jobs all passed. The
+complete Gateway source archive from this commit has SHA-256
+`3dea7977506c64f55db41a7c0dd5a18acb375ca8c921da3b04b276d7f7feba39`.
+The networkless build against the pinned codec runtime produced image
+`sha256:dd204d8000334d46caf6581ebc46d173f2bbce84b4baeff3ef0aceb6867378d1`.
+A cold container with no network served healthy Gateway v169 with zero
+sessions. The guarded rollout replaced the idle pilot at 11:32:40 UTC and the
+main Gateway at 11:34:00 UTC, after its background audio broker became idle.
+Both now run the same image and revision, with no environment change and zero
+restarts. Rollback receipts are
+`/home/adrien/.norva/gateway-reference-rollout/20260924T113240542060Z` and
+`/home/adrien/.norva/gateway-reference-rollout/20260924T113400032955Z`.
+The main Compose override is pinned to the new image, with a protected backup
+at `/home/adrien/.norva/gateway-diagnostic-851274a7-20260924/override-before-diagnostic.yml`;
+its SHA-256 changed from `527d1ae67c16891033fe6852fecea0d052a5a1ad8f1b6a2cb9a1a6f5b3a322b9`
+to `f2fc75aaa6364474706410812bf3cc6f35d4921a7af3a3fbf6e7bfc6f3b4e880`.
+
+One disposable R2 asset was confirmed visible to the production inventory
+endpoint (`listedObjects=1`) before its verified purge. Inventory zero after
+the two real failures is therefore not an artifact of this inventory query.
+The ordinary QA film was restarted after rollout; the stale watch page again
+showed an initial HLS fragment-load error, then its visible Retry action
+recovered. The full 48:11 played at 2× to the browser's ended state with no
+media error. Source EOF and FFmpeg completion were observed, but publication
+failed at the first immutable asset PUT: 50,753-byte root playlist, HTTP status
+zero, nested `UND_ERR_INVALID_ARG`. No object reached R2, and the publication
+counters remained `publications=0`, `failures=1`, `transientRetries=3`,
+`callbackFailures=0`.
+
+An isolated reproduction from the exact production container loaded the same
+`undici` package as the running Gateway, then called the private store client
+with a disposable 50,753-byte asset. It failed immediately with the nested
+message `invalid content-length header`. Sending the same body and metadata
+without an explicit `content-length` header returned HTTP 201; an orphan purge
+returned HTTP 200. Node fetch computes the correct length for this fixed Buffer.
+The client now omits that redundant header. The local transport test asserts
+that the request options omit it while the receiving server sees the correct
+50,753-byte length and exact body. Seventeen focused transport and publication
+tests pass. A real EOF publication and later shared-cache hit remain to be
+verified after deployment.
 
 ## Remaining checks
 
-- Identify the actual Worker failure stage and cause on the ordinary QA film,
-  repair it, then obtain one successful EOF publication and ready R2 object.
+- Deploy the upload-header fix, then obtain one successful EOF publication and
+  ready R2 object on the ordinary QA film.
 - Replay the film in the ordinary QA app and confirm decoded frames with a
   shared-cache session and no new provider-backed Gateway session.
 - Verify another owner cannot use this owner's source binding in production.
