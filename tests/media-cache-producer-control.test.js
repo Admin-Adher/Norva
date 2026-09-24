@@ -70,6 +70,34 @@ test('Gateway pulse carries only session ids, action and stage', async () => {
   assert.equal(control.publicStatus().renewals, 1);
 });
 
+test('EOF publication keeps renewing its producer lease after the viewer session ends', async () => {
+  const requests = [];
+  const control = new MediaCacheProducerControl({
+    edgeBase: 'https://edge.example',
+    gatewayToken: 'g'.repeat(32),
+    initialDelayMs: 60_000,
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ protocol: 1, state: 'renewed' }));
+    },
+  });
+  const current = session();
+  control.attach(current, context);
+  current.status = 'ended';
+  current.mediaCacheProducerStage = 'uploading';
+  current.sharedMediaCachePublicationPending = true;
+  control.heartbeatMs = 10;
+  control.schedule(current, 1);
+  const deadline = Date.now() + 500;
+  while (requests.length < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  control.markCompleted(current);
+  assert.ok(requests.length >= 2, 'lease renewal must continue during the long upload');
+  assert.equal(requests.every((request) => request.action === 'pulse' && request.stage === 'uploading'), true);
+  assert.equal(current.mediaCacheProducerHeartbeatTimer, null);
+});
+
 test('preemption stops only detached continuation, never an active foreground viewer', async () => {
   const preempted = [];
   const control = new MediaCacheProducerControl({
