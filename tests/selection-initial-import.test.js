@@ -11,7 +11,7 @@ function handoffHarness({ missing = false, writeFails = false, superseded = fals
     const events = [], filters = [];
     let written;
     const hint = { unrelated: 'preserved', lastSync: { total: 80 },
-        syncProgress: { counts: { total: 7697 }, moviesReady: starterReady,
+        syncProgress: { startedAt: '2026-09-24T03:00:00Z', counts: { total: 7697, movies: 20, series: 2, live: 7675 }, moviesReady: starterReady,
             steps: { import: { status: imported ? 'done' : 'running' } } } };
     const db = { from(table) {
         assert.equal(table, 'cloud_sources');
@@ -29,7 +29,9 @@ function handoffHarness({ missing = false, writeFails = false, superseded = fals
             } };
         return query;
     } };
-    const options = { db, sourceId: 'source', userId: 'owner', generation: { configRevision: '3', sourceVisibilityEpoch: '5' },
+    const options = { db, sourceId: 'source', userId: 'owner', generation: {
+        generationId: 'generation', headRevision: '2', configRevision: '3', sourceVisibilityEpoch: '5',
+    },
         assertCurrent: async () => { events.push('fence'); if (superseded && written) throw Error('superseded'); },
         releaseTransport: async () => events.push('release'), invokeFinalizer: async () => events.push('invoke') };
     return { options, events, filters, written: () => written };
@@ -79,11 +81,14 @@ test('durable handoff preserves the actual starter page without claiming complet
     assert.equal(h.written().sync_status, 'syncing');
 });
 
-test('only the first Selection title slice uses the small batch', async () => {
+test('all first title slices are small and concurrent finalizers reduce later batches', async () => {
     const { initialTitleBatchLimit } = await shared;
     assert.equal(initialTitleBatchLimit(true, false), 60);
-    assert.equal(initialTitleBatchLimit(true, true), 300);
-    assert.equal(initialTitleBatchLimit(false, false), 300);
+    assert.equal(initialTitleBatchLimit(false, false, 1), 60);
+    assert.equal(initialTitleBatchLimit(true, true, 1), 150);
+    assert.equal(initialTitleBatchLimit(false, true, 2), 100);
+    assert.equal(initialTitleBatchLimit(false, true, 3), 60);
+    assert.equal(initialTitleBatchLimit(false, true, null), 60);
 });
 
 test('a concurrent metadata epoch advance retries the raw batch once with a fresh fence', async () => {
@@ -136,6 +141,7 @@ test('starter titles are bounded, identifiable, illustrated and deduplicated by 
 
 test('the real activation importer hands off Selection before any whole-catalogue projection', async () => {
     const { selectionStarterRows } = await shared;
+    const { m3uCatalogCounts } = await import('../supabase/functions/_shared/m3u-media-classification.mjs');
     const source = read('supabase/functions/norva-cloud/index.ts');
     const fn = source.slice(source.indexOf('async function syncM3uSource('), source.indexOf('\nasync function replaceSourceItems('));
     const projected = [], reports = [], saved = [];
@@ -145,8 +151,10 @@ test('the real activation importer hands off Selection before any whole-catalogu
     const context = vm.createContext({
         DISCOVERY_PLAYLIST_URL: selectionUrl, stringOr: (value, fallback) => value || fallback,
         selectionStarterRows,
+        m3uCatalogCounts,
         compactRecord: value => value, sha256Hex: async () => 'unused',
         assertActiveCatalogGenerationCurrent: async () => {},
+        adoptActiveCatalogUserVisibilityEpoch: async () => {},
         fetchDiscoverySelection: async () => ({ items, sources: ['selection'] }),
         discoveryCatalogFields: (_, item) => ({ item_type: item.item_type, metadata: item.metadata }),
         replaceSourceItems: async (id, owner, rows) => { saved.push(...rows); return rows; },
@@ -176,5 +184,72 @@ test('activation and durable worker use the same handoff protocol without an ear
     assert.doesNotMatch(branch, /sync_status:\s*"ready"/);
     const worker = read('supabase/functions/norva-source-sync/index.ts');
     assert.match(worker, /isDiscoverySourceId\(sourceId, userId\)/);
-    assert.match(worker, /initialTitleBatchLimit\(isSelection, firstSliceReady\)/);
+    assert.match(worker, /initialTitleBatchLimit\(isSelection, firstSliceReady, await activeFinalizeLeaseCount\(db\)\)/);
+});
+
+test('M3U finalization cannot reuse a cursor from another generation or refresh', async () => {
+    const { m3uFinalizeProof, resolveM3uFinalizeCursor } = await shared;
+    const generation = { generationId: 'generation-a', headRevision: '7',
+        configRevision: '3', sourceVisibilityEpoch: '8' };
+    const progress = { startedAt: '2026-09-24T03:00:00Z',
+        counts: { total: 12, live: 10, movies: 1, series: 1 }, steps: { import: { status: 'done' } } };
+    const hint = { syncProgress: progress, m3uFinalize: m3uFinalizeProof(generation, progress),
+        finalizeCursor: { phase: 'complete', offset: 0 } };
+    assert.deepEqual(resolveM3uFinalizeCursor(hint, generation),
+        { phase: 'live', offset: 0, afterId: '' }, 'a legacy complete cursor must rebuild live coverage');
+    assert.deepEqual(resolveM3uFinalizeCursor({ ...hint, syncProgress: { ...progress, m3uLiveCompleted: 10 } }, generation),
+        { phase: 'complete', offset: 0, afterId: '' });
+    assert.throws(() => resolveM3uFinalizeCursor(hint, { ...generation, sourceVisibilityEpoch: '9' }),
+        { code: 'CATALOG_GENERATION_SUPERSEDED' });
+    assert.throws(() => resolveM3uFinalizeCursor({ ...hint,
+        syncProgress: { ...progress, startedAt: '2026-09-24T03:01:00Z' } }, generation),
+        { code: 'CATALOG_GENERATION_SUPERSEDED' });
+});
+
+test('a browser finalize request joins the owned M3U worker without executing its supplied cursor', async () => {
+    const { joinM3uFinalizer } = await shared;
+    const events = [];
+    const source = { source_type: 'm3u', sync_status: 'syncing',
+        config_hint: { syncProgress: { counts: { total: 100 }, steps: { import: { status: 'done' } } } } };
+    const db = { from(table) { assert.equal(table, 'cloud_sources'); return {
+        select() { return this; }, eq() { return this; }, is() { return this; },
+        async maybeSingle() { return { data: source }; },
+    }; } };
+    const options = { db, sourceId: 'source', userId: 'owner',
+        assertCurrent: async () => events.push('authority'),
+        invokeFinalizer: async () => events.push('worker') };
+    const deferred = await joinM3uFinalizer(options);
+    assert.deepEqual(events, ['authority', 'worker']);
+    assert.equal(deferred.done, false);
+    assert.equal(deferred.nextPhase, 'live');
+    assert.equal(deferred.nextOffset, 0);
+    source.sync_status = 'ready';
+    events.length = 0;
+    assert.deepEqual(await joinM3uFinalizer(options), { sourceId: 'source', status: 'ready', done: true });
+    assert.deepEqual(events, ['authority']);
+});
+
+test('projection lease releases only its own token and rejects a competing import', async () => {
+    const { claimM3uProjectionLease, releaseM3uProjectionLease } = await shared;
+    let owner = null;
+    const db = { async rpc(name, args) {
+        assert.equal(args.p_source_id, 'source');
+        assert.equal(args.p_user_id, 'owner');
+        if (name === 'norva_claim_source_finalize_lease') {
+            if (owner) return { data: false };
+            owner = args.p_lease_token;
+            return { data: true };
+        }
+        if (name === 'norva_release_source_finalize_lease') {
+            if (owner === args.p_lease_token) owner = null;
+            return { data: true };
+        }
+        throw Error(`unexpected RPC: ${name}`);
+    } };
+    assert.equal(await claimM3uProjectionLease(db, 'source', 'owner', 'first'), true);
+    assert.equal(await claimM3uProjectionLease(db, 'source', 'owner', 'second'), false);
+    await releaseM3uProjectionLease(db, 'source', 'owner', 'second');
+    assert.equal(owner, 'first');
+    await releaseM3uProjectionLease(db, 'source', 'owner', 'first');
+    assert.equal(owner, null);
 });
