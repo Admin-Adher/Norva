@@ -221,7 +221,6 @@ class PrivateMediaCacheStoreClient {
             signal,
             headers: {
                 authorization: `Bearer ${this.serviceToken}`,
-                'content-length': String(body.length),
                 'content-type': contentType,
                 'if-none-match': '*',
                 'x-norva-content-sha256': digest,
