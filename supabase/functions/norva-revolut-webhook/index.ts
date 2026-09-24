@@ -654,6 +654,31 @@ Deno.serve(async (req) => {
             }`,
           );
         }
+        if (journal.kind !== "resubscribe" && orderId && remoteState === "AUTHORISED") {
+          if (!await cancelValidationHold(orderId)) {
+            throw new Error("validation hold cancel failed after checkout integrity mismatch");
+          }
+          const cancelledAt = new Date().toISOString();
+          const { error: cancelWriteError } = await admin.from("cloud_revolut_orders").update({
+            state: "CANCELLED",
+            expired_at: cancelledAt,
+            public_id: null,
+            checkout_url: null,
+            last_reconciled_at: cancelledAt,
+            finalization_result: { outcome: "integrity_failed", hold_released: true },
+          }).eq("order_id", orderId).eq("user_id", userId).is("finalized_at", null);
+          if (cancelWriteError) throw new Error(`validation hold cancellation journal failed: ${cancelWriteError.message}`);
+          await recordProcessedEvent(admin, userId, eventId, eventType, {
+            event: body, order, skipped_checkout: "integrity_mismatch", hold_released: true,
+          });
+          return json({ ok: true, skipped: "integrity_mismatch", hold_released: true });
+        }
+        if (journal.kind !== "resubscribe" && remoteState === "CANCELLED") {
+          await recordProcessedEvent(admin, userId, eventId, eventType, {
+            event: body, order, skipped_checkout: "integrity_mismatch_cancelled",
+          });
+          return json({ ok: true, skipped: "integrity_mismatch_cancelled" });
+        }
         throw new Error(
           "checkout order metadata does not match immutable journal",
         );

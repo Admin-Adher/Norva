@@ -1161,6 +1161,20 @@ Deno.serve(async (req) => {
           reason: resolution?.exception_reason ?? "commercial_terms_invalid",
         }, 409);
       }
+      // The journal owns this exact order even when provider metadata cannot be
+      // trusted. A validation-only AUTHORISED order has no captured revenue:
+      // release its hold before reporting the failed checkout to the browser.
+      if (journal.kind !== "resubscribe" && state === "AUTHORISED") {
+        const cancelled = await revolut("POST", `/api/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { "Revolut-Api-Version": "2024-09-01" });
+        if (!cancelled.ok) return json({ error: "Could not release card verification hold", retryable: true }, 503);
+        const cancelledAt = new Date().toISOString();
+        const { error: cancelWriteError } = await db.from("cloud_revolut_orders").update({
+          state: "CANCELLED", expired_at: cancelledAt,
+          public_id: null, checkout_url: null, last_reconciled_at: cancelledAt,
+          finalization_result: { outcome: "integrity_failed", hold_released: true },
+        }).eq("order_id", orderId).eq("user_id", user.id).is("finalized_at", null);
+        if (cancelWriteError) return json({ error: "Could not record card verification cancellation", retryable: true }, 503);
+      }
       return json({ error: "Checkout order failed integrity validation" }, 409);
     }
 

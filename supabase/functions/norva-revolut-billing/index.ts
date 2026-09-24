@@ -1288,10 +1288,16 @@ interface OpenCheckoutRow {
   kind: string;
 }
 
+interface FinalizedValidationHoldRow {
+  order_id: string;
+  kind: string;
+  finalization_result: Record<string, unknown> | null;
+}
+
 // Reconcile a bounded set of checkout/setup orders without applying entitlement
 // business state here.  In particular, AUTHORISED is a setup/authorisation state,
-// never revenue.  Expiration is claimed locally before the one remote cancel call,
-// so overlapping cron isolates cannot send duplicate cancellation requests.
+// never revenue. Expiration is claimed locally before the first remote cancel.
+// A failed or ambiguous release is retried after re-reading the provider state.
 async function reconcileOpenCheckouts(db: SupabaseClient): Promise<{
   checkout_reconciled: number;
   checkout_authorised: number;
@@ -1352,15 +1358,20 @@ async function reconcileOpenCheckouts(db: SupabaseClient): Promise<{
     if (stateError) throw new Error(`checkout_reconcile_write_failed:${stateError.message}`);
     result.checkout_reconciled++;
 
-    if (remoteState === "AUTHORISED" || remoteState === "AUTHORIZED" || remoteState === "AUTHORISATION_PASSED" || remoteState === "AUTHORIZATION_PASSED") {
+    const authorised = ["AUTHORISED", "AUTHORIZED", "AUTHORISATION_PASSED", "AUTHORIZATION_PASSED"].includes(remoteState);
+    if (authorised) {
       result.checkout_authorised++;
-      continue;
+      // A resubscription may still settle into a captured payment and must be
+      // reconciled as money. A validation-only order that outlived its checkout
+      // has no entitlement, so release its hold even if /confirm and the
+      // webhook both failed before reaching their immediate cancel path.
+      if (checkout.kind === "resubscribe") continue;
     }
 
     const isExpired = checkout.expires_at != null && Date.parse(checkout.expires_at) <= now.getTime();
-    if (!isExpired || (remoteState !== "PENDING" && remoteState !== "PROCESSING")) continue;
+    if (!isExpired || (!authorised && remoteState !== "PENDING" && remoteState !== "PROCESSING")) continue;
 
-    // This UPDATE is the exactly-once cancel claim.  It also immediately revokes
+    // This UPDATE claims the first cancel attempt. It also immediately revokes
     // the browser token, so a stale tab cannot reopen an expired checkout.
     const { data: claimed, error: claimError } = await db.from("cloud_revolut_orders").update({
       expired_at: nowIso,
@@ -1372,7 +1383,7 @@ async function reconcileOpenCheckouts(db: SupabaseClient): Promise<{
     }).eq("order_id", checkout.order_id)
       .is("finalized_at", null)
       .is("expired_at", null)
-      .in("state", ["PENDING", "PROCESSING"])
+      .in("state", ["PENDING", "PROCESSING", "AUTHORISED", "AUTHORIZED", "AUTHORISATION_PASSED", "AUTHORIZATION_PASSED"])
       .select("order_id");
     if (claimError) throw new Error(`checkout_expire_claim_failed:${claimError.message}`);
     if (!Array.isArray(claimed) || claimed.length !== 1) continue;
@@ -1402,6 +1413,85 @@ async function reconcileOpenCheckouts(db: SupabaseClient): Promise<{
     if (cancelWriteError) throw new Error(`checkout_cancel_journal_failed:${cancelWriteError.message}`);
     if (cancelled.ok) result.checkout_cancelled++;
     else result.checkout_unknown++;
+  }
+  // A provider timeout after the expiration claim must not strand a validation
+  // hold. Retry only orders whose last observed state is still nonterminal.
+  const { data: pendingCancels, error: retryReadError } = await db.from("cloud_revolut_orders")
+    .select("order_id,state,kind")
+    .in("kind", ["trial_setup", "plan_change", "resubscribe", "card_update"])
+    .is("finalized_at", null)
+    .not("expired_at", "is", null)
+    .lt("last_reconciled_at", nowIso)
+    .in("state", ["PENDING", "PROCESSING", "AUTHORISED", "AUTHORIZED", "AUTHORISATION_PASSED", "AUTHORIZATION_PASSED"])
+    .order("last_reconciled_at", { ascending: true, nullsFirst: true })
+    .limit(CHECKOUT_RECONCILE_BATCH);
+  if (retryReadError) throw new Error(`checkout_cancel_retry_read_failed:${retryReadError.message}`);
+  for (const checkout of (pendingCancels ?? []) as OpenCheckoutRow[]) {
+    const fetched = await retrieveRemoteOrder(checkout.order_id);
+    if (!fetched.order) { result.checkout_unknown++; continue; }
+    const remoteState = fetched.order.state || "UNKNOWN";
+    const authorised = ["AUTHORISED", "AUTHORIZED", "AUTHORISATION_PASSED", "AUTHORIZATION_PASSED"].includes(remoteState);
+    if (checkout.kind === "resubscribe" && authorised) continue;
+    const canCancel = authorised || remoteState === "PENDING" || remoteState === "PROCESSING";
+    const cancelled = canCancel ? await revolut(
+      "POST", `/api/orders/${encodeURIComponent(checkout.order_id)}/cancel`,
+      undefined, { "Revolut-Api-Version": "2024-09-01" },
+    ) : null;
+    const nowReconciled = new Date().toISOString();
+    const { error: retryWriteError } = await db.from("cloud_revolut_orders").update({
+      state: cancelled?.ok ? (remoteStateOf(cancelled.body) || "CANCELLED") : remoteState,
+      last_reconciled_at: nowReconciled,
+      finalization_result: {
+        outcome: "expired_checkout",
+        cancel: cancelled?.ok ? "cancelled" : cancelled?.ambiguous ? "cancel_unknown"
+          : cancelled ? "cancel_failed" : "remote_terminal",
+        http_status: cancelled?.status ?? fetched.response.status,
+      },
+      updated_at: nowReconciled,
+    }).eq("order_id", checkout.order_id).is("finalized_at", null);
+    if (retryWriteError) throw new Error(`checkout_cancel_retry_write_failed:${retryWriteError.message}`);
+    if (cancelled?.ok) result.checkout_cancelled++;
+    else if (canCancel) result.checkout_unknown++;
+  }
+
+  // Finalization may have succeeded while the immediate cancel timed out.
+  // Preserve the entitlement and retry only the uncaptured card check; never
+  // mistake a captured resubscription for a voidable validation hold.
+  const { data: finalizedHolds, error: finalizedReadError } = await db.from("cloud_revolut_orders")
+    .select("order_id,kind,finalization_result")
+    .in("kind", ["trial_setup", "plan_change", "card_update"])
+    .not("finalized_at", "is", null)
+    .contains("finalization_result", { hold_released: false })
+    .order("last_reconciled_at", { ascending: true, nullsFirst: true })
+    .limit(CHECKOUT_RECONCILE_BATCH);
+  if (finalizedReadError) throw new Error(`checkout_finalized_hold_read_failed:${finalizedReadError.message}`);
+  for (const checkout of (finalizedHolds ?? []) as FinalizedValidationHoldRow[]) {
+    const fetched = await retrieveRemoteOrder(checkout.order_id);
+    if (!fetched.order) { result.checkout_unknown++; continue; }
+    const remoteState = fetched.order.state || "UNKNOWN";
+    const alreadyReleased = ["CANCELLED", "VOIDED", "REVERSED", "EXPIRED"].includes(remoteState);
+    const authorised = ["AUTHORISED", "AUTHORIZED", "AUTHORISATION_PASSED", "AUTHORIZATION_PASSED"].includes(remoteState);
+    const cancelled = authorised ? await revolut(
+      "POST", `/api/orders/${encodeURIComponent(checkout.order_id)}/cancel`,
+      undefined, { "Revolut-Api-Version": "2024-09-01" },
+    ) : null;
+    const released = alreadyReleased || cancelled?.ok === true;
+    const nowReconciled = new Date().toISOString();
+    const { error: finalizedWriteError } = await db.from("cloud_revolut_orders").update({
+      state: cancelled?.ok ? (remoteStateOf(cancelled.body) || "CANCELLED") : remoteState,
+      last_reconciled_at: nowReconciled,
+      finalization_result: {
+        ...(checkout.finalization_result ?? {}),
+        hold_released: released,
+        hold_release_reconciled_at: released ? nowReconciled : null,
+      },
+      updated_at: nowReconciled,
+    }).eq("order_id", checkout.order_id).eq("kind", checkout.kind)
+      .not("finalized_at", "is", null)
+      .contains("finalization_result", { hold_released: false });
+    if (finalizedWriteError) throw new Error(`checkout_finalized_hold_write_failed:${finalizedWriteError.message}`);
+    if (cancelled?.ok) result.checkout_cancelled++;
+    else if (!released) result.checkout_unknown++;
   }
   return result;
 }
