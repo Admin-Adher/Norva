@@ -8,7 +8,7 @@
 // norva-catalog/index.ts. Keep in sync with upstream on stack upgrades.
 import * as jose from 'jsr:@panva/jose@6'
 
-console.log('main function started')
+console.log('main function started; sourceSyncCpuBudgetProtocol: 1')
 
 const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const SUPABASE_JWKS = parseJwks(Deno.env.get('SUPABASE_JWKS'))
@@ -42,6 +42,16 @@ const LONG_RUNNING_WORKER_TIMEOUT_MS: Record<string, number> = {
   // playback task, including one accepted immediately before retirement.
   'norva-playback': 20 * 60 * 1000,
   'norva-source-sync': 12 * 60 * 1000,
+}
+// CPU time is cumulative across requests sharing an isolate. Retire source-sync
+// early, then let admitted bounded jobs persist and release their leases before
+// the hard stop: finalize runs 45s (at most 50s), Xtream discovery runs 90s.
+// The 110s CPU grace also leaves room for an in-flight batch and hand-off.
+// Keep normal path-based reuse; polling must never force a fresh isolate.
+function sourceSyncCpuLimits(serviceName: string) {
+  return serviceName === 'norva-source-sync'
+    ? { cpuTimeSoftLimitMs: 10_000, cpuTimeHardLimitMs: 120_000, forceCreate: false }
+    : {}
 }
 const rrCounters = new Map<string, number>()
 // Hoisted une fois : l'env ne change pas pendant la vie du conteneur (l'ancien
@@ -198,8 +208,8 @@ Deno.serve(async (req: Request) => {
   const servicePath = `/home/deno/functions/${laneName}`
 
   // The default must comfortably exceed the sync engine's per-isolate work budget
-  // (SYNC_DRIVE_BUDGET_MS = 90s in _shared/xtream-sync.ts, and the 90s finalize
-  // loop deadline in norva-source-sync). Those loops run ~90s of work and THEN
+  // (SYNC_DRIVE_BUDGET_MS = 90s in _shared/xtream-sync.ts, and the 45s default /
+  // 50s maximum finalize loop in norva-source-sync). Those loops checkpoint then
   // self-invoke the next isolate; if the worker is recycled before that hand-off
   // lands, the discover/finalize chain breaks and the watchdog re-runs the same
   // slice forever (observed on a 275k catalogue: "wall clock duration warning"
@@ -224,6 +234,7 @@ Deno.serve(async (req: Request) => {
       noModuleCache,
       importMapPath,
       envVars: ENV_VARS,
+      ...sourceSyncCpuLimits(service_name),
     })
     return await worker.fetch(req)
   } catch (e) {
