@@ -16308,20 +16308,20 @@
     "fil": "Maaaring pinoproseso pa rin ang iyong bayad. Huwag na itong isumite muli; subukang muli ang kumpirmasyon upang ma-verify ng Norva ang resulta."
   },
   "ui_web_0b53db41b3bf": {
-    "source": "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization.",
+    "source": "We couldn't confirm this card check yet. A temporary hold may appear on your card, but no subscription payment was captured. Please retry verification without submitting another payment.",
     "refs": [
       "public/checkout-revolut.html"
     ],
-    "en": "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization.",
-    "fr": "Nous n'avons pas pu confirmer cette vérification de carte pour le moment. Aucun débit n'a été effectué. Veuillez réessayer.",
-    "pt-BR": "Ainda não foi possível confirmar a verificação do cartão. Nenhum valor foi cobrado. Tente finalizar a compra novamente.",
-    "es": "Aún no hemos podido confirmar la verificación de esta tarjeta. No se ha realizado ningún cargo. Intente finalizar la transacción nuevamente.",
-    "hi": "हम अभी तक इस कार्ड चेक की पुष्टि नहीं कर पाए हैं। कोई शुल्क नहीं लिया गया है। कृपया प्रक्रिया पूरी करने का पुनः प्रयास करें।",
-    "tr": "Kart doğrulama işlemini henüz tamamlayamadık. Herhangi bir ücretlendirme yapılmadı. Lütfen işlemi tekrar deneyin.",
-    "bn": "আমরা এখনও এই কার্ড যাচাই নিশ্চিত করতে পারিনি। কোনো অর্থ কাটা হয়নি। অনুগ্রহ করে চূড়ান্ত করার জন্য আবার চেষ্টা করুন।",
-    "ar": "لم نتمكن من تأكيد عملية التحقق من البطاقة بعد. لم يتم خصم أي مبلغ. يرجى إعادة المحاولة.",
-    "id": "Kami belum dapat mengkonfirmasi pengecekan kartu ini. Belum ada transaksi yang dilakukan. Silakan coba lagi untuk menyelesaikan transaksi.",
-    "fil": "Hindi pa namin makumpirma ang pagsusuri sa card na ito. Wala pang nasingil. Pakisubukang muli ang pagtatapos."
+    "en": "We couldn't confirm this card check yet. A temporary hold may appear on your card, but no subscription payment was captured. Please retry verification without submitting another payment.",
+    "fr": "Nous n'avons pas encore pu confirmer cette vérification de carte. Une empreinte temporaire peut apparaître sur votre carte, mais aucun paiement d'abonnement n'a été encaissé. Réessayez la confirmation sans soumettre un nouveau paiement.",
+    "pt-BR": "Ainda não foi possível confirmar a verificação do cartão. Uma retenção temporária pode aparecer no seu cartão, mas nenhum pagamento da assinatura foi cobrado. Tente confirmar novamente sem enviar outro pagamento.",
+    "es": "Aún no pudimos confirmar la verificación de la tarjeta. Puede aparecer una retención temporal, pero no se ha cobrado ningún pago de suscripción. Vuelve a intentar la confirmación sin enviar otro pago.",
+    "hi": "हम अभी कार्ड जाँच की पुष्टि नहीं कर पाए हैं। आपके कार्ड पर अस्थायी रोक दिख सकती है, लेकिन सदस्यता का कोई भुगतान नहीं लिया गया है। नया भुगतान किए बिना पुष्टि फिर से आज़माएँ।",
+    "tr": "Kart doğrulamasını henüz onaylayamadık. Kartınızda geçici bir provizyon görünebilir, ancak abonelik ödemesi tahsil edilmedi. Yeni ödeme göndermeden onayı yeniden deneyin.",
+    "bn": "আমরা এখনও কার্ড যাচাই নিশ্চিত করতে পারিনি। আপনার কার্ডে সাময়িক অর্থ আটকে থাকতে পারে, তবে সাবস্ক্রিপশনের কোনো অর্থ নেওয়া হয়নি। নতুন পেমেন্ট না করে আবার নিশ্চিত করার চেষ্টা করুন।",
+    "ar": "لم نتمكن بعد من تأكيد التحقق من البطاقة. قد يظهر حجز مؤقت على بطاقتك، لكن لم يتم تحصيل أي دفعة اشتراك. أعد محاولة التأكيد من دون إرسال دفعة جديدة.",
+    "id": "Kami belum dapat mengonfirmasi pemeriksaan kartu ini. Penahanan dana sementara mungkin terlihat di kartu Anda, tetapi pembayaran langganan belum ditagih. Coba konfirmasi lagi tanpa mengirim pembayaran baru.",
+    "fil": "Hindi pa namin makumpirma ang pagsusuri sa card. Maaaring may pansamantalang hold sa iyong card, ngunit walang nakolektang bayad sa subscription. Subukang kumpirmahin muli nang hindi nagsusumite ng panibagong bayad."
   },
   "ui_web_97d6fea0315f": {
     "source": "Norva access is active.",

@@ -28,6 +28,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getCatalog, getPrices } from "../_shared/prices.ts";
+import { revolutOrderMoney } from "../_shared/revolut-order-money.mjs";
 import {
   claimPaywallExperiment,
   normalizePaywallPlacement,
@@ -229,7 +230,8 @@ type ExpectedCheckoutOrder = {
 
 function checkoutOrderMatches(order: JsonRecord, expected: ExpectedCheckoutOrder): boolean {
   if (String(order.merchant_order_ext_ref ?? "") !== expected.extRef) return false;
-  if (Number(order.amount) !== expected.orderAmountCents || String(order.currency ?? "").toUpperCase() !== "USD") return false;
+  const money = revolutOrderMoney(order);
+  if (money.amountCents !== expected.orderAmountCents || money.currency !== "USD") return false;
   const meta = (order.metadata && typeof order.metadata === "object") ? order.metadata as JsonRecord : {};
   return String(meta.user_id ?? "") === expected.userId
     && String(meta.intent_key ?? "") === expected.intentKey
@@ -1095,8 +1097,9 @@ Deno.serve(async (req) => {
     const remoteAmount = Number(meta.amount_cents);
     const remoteIntent = String(meta.intent_key ?? "");
     const remoteExtRef = String(order.merchant_order_ext_ref ?? "");
-    const remoteCurrency = String(order.currency ?? meta.price_currency ?? "").toUpperCase();
-    const remoteOrderAmount = Number(order.amount);
+    const remoteMoney = revolutOrderMoney(order);
+    const remoteCurrency = remoteMoney.currency ?? "";
+    const remoteOrderAmount = remoteMoney.amountCents;
     const state = String(order.state ?? "").toUpperCase();
     const observedIso = new Date().toISOString();
     const { error: observedError } = await db.from("cloud_revolut_orders").update({
@@ -1135,7 +1138,7 @@ Deno.serve(async (req) => {
             p_order_id: orderId,
             p_user_id: user.id,
             p_provider_payment_id: providerPaymentId,
-            p_captured_amount_cents: Number.isFinite(remoteOrderAmount) ? Math.round(remoteOrderAmount) : null,
+            p_captured_amount_cents: remoteOrderAmount,
             p_captured_currency: remoteCurrency || null,
             p_provider_integrity_valid: false,
           },
@@ -1407,7 +1410,7 @@ Deno.serve(async (req) => {
           p_order_id: orderId,
           p_user_id: user.id,
           p_provider_payment_id: providerPaymentId,
-          p_captured_amount_cents: Number.isFinite(remoteOrderAmount) ? Math.round(remoteOrderAmount) : null,
+          p_captured_amount_cents: remoteOrderAmount,
           p_captured_currency: remoteCurrency || null,
           p_provider_integrity_valid: true,
           p_customer_id: customerId,
