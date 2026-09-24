@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { verifyUserJwtLocally } from "../_shared/local-auth.ts";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
+import { isM3uSeriesId, loadM3uSeriesInfo } from "../_shared/m3u-series-info.mjs";
 import {
   type ActiveCatalogGeneration,
   adoptActiveCatalogUserVisibilityEpoch,
@@ -438,6 +439,15 @@ async function getXtreamSeriesInfo(
 ) {
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
+
+  if (isM3uSeriesId(seriesId)) {
+    const payload = await loadM3uSeriesInfo({ db, userId, sourceId, seriesId, generationId: expectedSnapshot.generationId });
+    await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
+    if (!payload) throw new HttpError(404, "Series details are unavailable");
+    // M3U identities and URLs remain private to the imported catalogue. They
+    // are never registered in Xtream's shared exact-episode inventory.
+    return { payload, exactInventorySafe: false };
+  }
 
   const selection = await loadSelectionSeriesInfo({ db, userId, sourceId, seriesId, generationId: expectedSnapshot.generationId });
   if (selection) {

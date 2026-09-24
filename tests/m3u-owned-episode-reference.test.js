@@ -2,6 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const api = import('../supabase/functions/_shared/m3u-series-info.mjs');
 const targetUrl = 'https://provider.invalid/owned-episode.mp4';
 const itemId = 'norva-m3u:episode:' + crypto.createHash('sha256').update(targetUrl).digest('hex');
@@ -72,4 +74,18 @@ test('database failure fails closed instead of returning an imported URL', async
   const f = fixture({ error: true });
   await assert.rejects(resolveOwnedM3uEpisode({ db: f.db, userId: 'owner', sourceId: 'source', itemId }),
     /Unable to verify M3U source/);
+});
+
+test('series-info routes M3U through its owned generation before provider fallback', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'norva-series-info', 'index.ts'), 'utf8');
+  assert.match(src, /import \{ isM3uSeriesId, loadM3uSeriesInfo \} from/);
+  const start = src.indexOf('async function getXtreamSeriesInfo(');
+  const m3u = src.indexOf('if (isM3uSeriesId(seriesId))', start);
+  const selection = src.indexOf('const selection = await loadSelectionSeriesInfo(', start);
+  assert.ok(start >= 0 && m3u > start && selection > m3u);
+  const branch = src.slice(m3u, selection);
+  assert.match(branch, /loadM3uSeriesInfo\(\{ db, userId, sourceId, seriesId, generationId: expectedSnapshot\.generationId \}\)/);
+  const fence = branch.indexOf('await assertSourceSnapshotCurrent(sourceId, userId, expectedSnapshot, db)');
+  const returned = branch.indexOf('return { payload, exactInventorySafe: false }');
+  assert.ok(fence >= 0 && returned > fence);
 });
