@@ -367,6 +367,7 @@ function startRetryHarness(overrides = {}) {
     return vm.runInNewContext(`(() => { ${retrySource}; return startSessionWithProviderRetry; })()`, {
         STARTUP_TIMEOUT_MS: 100,
         BOUNDED_HLS_OUTPUT_ENABLED: false,
+        HLS_OUTPUT_SESSION_MAX_BYTES: 512 * 1024 ** 2,
         prepareWeakAuthoritativeSpool: async () => false,
         PROVIDER_SLOT_RELEASE_DELAY_MS: 0,
         sessionStartupStats: { fastInputProbeFallbacks: 0 },

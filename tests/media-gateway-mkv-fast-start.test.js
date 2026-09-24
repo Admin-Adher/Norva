@@ -1228,7 +1228,7 @@ test('complete-cache promotion waits for both drained media and the final enrich
   assert.deepEqual(calls, ['hevc-enriched', 'h264-enriched']);
   assert.match(GATEWAY, /completeHlsCacheProfileReady = true;[\s\S]{0,160}scheduleMkvCompleteHlsCachePromotion\(session\)/);
   const ffmpegBlock = between(GATEWAY, 'function startFfmpeg(', '\nfunction seekArgsForSession(');
-  const closeAt = ffmpegBlock.indexOf("child.on('close', () => {");
+  const closeAt = ffmpegBlock.indexOf("child.on('close', async () => {");
   const graphFinalizationAt = ffmpegBlock.indexOf('finalizeSessionExactHlsTrackGraph(session)', closeAt);
   const mediaReadyAt = ffmpegBlock.indexOf('session.completeHlsCacheMediaReady = true;', graphFinalizationAt);
   const promotionAt = ffmpegBlock.indexOf('scheduleMkvCompleteHlsCachePromotion(session)', mediaReadyAt);
