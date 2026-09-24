@@ -6231,13 +6231,16 @@ class WatchPage {
                     || this.hls !== activeHls) return;
                 gatewayRecoveryRunning = false;
                 if (!this._gatewayAutomaticRebuffering) return;
-                this._gatewayAutomaticRebuffering = false;
                 if (bufferReady) {
+                    this._gatewayAutomaticRebuffering = false;
                     this._stallSince = Date.now();
                     this.video?.play().catch(e => this.handleAutoplayError(e, (globalThis.NorvaI18n?.t("ui_web_9cbe3245df72", { defaultValue: "Recovery autoplay error" }) ?? 'Recovery autoplay error')));
                 } else {
                     // Keep the prepared session available for an explicit retry;
                     // a slow fill is not a terminal provider/playback failure.
+                    // Preserve automatic recovery intent: a paused media element
+                    // no longer emits stall errors. A later append must be able
+                    // to resume it after the provider finally returns.
                     this.hideLoading();
                     this.centerPlayBtn?.classList.add('show');
                     this.showOverlay();
@@ -6266,6 +6269,10 @@ class WatchPage {
             this.hls.on(bufferAppendedEvent, () => {
                 if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
                 this.updateBufferedTimeline();
+                if (isGatewaySession && this._gatewayAutomaticRebuffering
+                    && !gatewayRecoveryRunning && !this._gatewayUserPaused) {
+                    resumeAfterHlsRecovery();
+                }
             });
         }
 

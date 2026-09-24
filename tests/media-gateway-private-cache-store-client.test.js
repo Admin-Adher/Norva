@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const http = require('node:http');
+const { brotliCompressSync } = require('node:zlib');
 const {
   PrivateMediaCacheStoreClient,
 } = require('../services/media-gateway/src/privateMediaCacheStoreClient');
@@ -66,12 +67,15 @@ async function startStoreServer(t, options = {}) {
         response.writeHead(404).end();
         return;
       }
+      const compressed = options.compressGet && request.headers['accept-encoding'] !== 'identity';
+      const responseBody = compressed ? brotliCompressSync(object.body) : object.body;
       response.writeHead(200, {
         'content-type': object.contentType,
-        'content-length': String(object.body.length),
+        'content-length': String(responseBody.length),
+        ...(compressed ? { 'content-encoding': 'br' } : {}),
         'x-norva-content-sha256': object.sha256,
         'x-norva-object-metadata': object.metadata,
-      }).end(object.body);
+      }).end(responseBody);
       return;
     }
     response.writeHead(405).end();
@@ -118,6 +122,26 @@ test('private Worker transport binds every immutable PUT and GET to auth, key, b
   assert.deepEqual(server.requests.map((request) => request.method), ['PUT', 'PUT', 'GET']);
   assert.equal(server.requests.every((request) => request.headers.authorization === `Bearer ${SERVICE_TOKEN}`), true);
   assert.equal(server.requests[0].headers['if-none-match'], '*');
+});
+
+test('reading an existing manifest survives CDN compression negotiation without weakening size or digest checks', async (t) => {
+  const server = await startStoreServer(t, { compressGet: true });
+  const key = 'media-cache/v1/aa/'.concat('a'.repeat(64), '/manifest.auth.json');
+  const body = Buffer.from(JSON.stringify({ files: Array(100).fill({ sha256: 'a'.repeat(64), size: 1000 }) }));
+  const store = client(server.baseUrl);
+  await store.put(key, body, { sha256: digest(body), contentType: 'application/json' });
+  const oldNegotiation = client(server.baseUrl, {
+    fetch: (url, options) => {
+      const headers = { ...options.headers };
+      delete headers['accept-encoding'];
+      return fetch(url, { ...options, headers });
+    },
+  });
+  await assert.rejects(oldNegotiation.get(key), { code: 'MEDIA_CACHE_RESPONSE_INVALID' });
+  const restored = await store.get(key);
+  assert.deepEqual(restored.body, body);
+  assert.equal(restored.sha256, digest(body));
+  assert.equal(restored.size, body.length);
 });
 
 test('private Worker transport retries bounded 5xx responses with the identical body', async (t) => {

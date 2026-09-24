@@ -255,7 +255,10 @@ class PrivateMediaCacheStoreClient {
         const response = await this._fetchWithRetry(url, (signal) => ({
             method: 'GET',
             signal,
-            headers: { authorization: `Bearer ${this.serviceToken}` },
+            // fetch transparently decompresses CDN responses but retains their
+            // wire headers. Request the immutable representation so its length
+            // and digest can both be checked against the bytes we consume.
+            headers: { authorization: `Bearer ${this.serviceToken}`, 'accept-encoding': 'identity' },
         }));
         if (response.status === 404) {
             await response.body?.cancel().catch(() => {});
