@@ -7,6 +7,7 @@ import org.junit.runner.RunWith;
 import org.json.JSONObject;
 
 @RunWith(AndroidJUnit4.class)
+@androidx.media3.common.util.UnstableApi
 public final class NativeMediaCacheInstrumentedTest {
     private static final String KEY = new String(new char[64]).replace('\0', 'a');
     private static final String URL = "https://cache.norva.tv/v1/hls/" + KEY + "/master.m3u8";

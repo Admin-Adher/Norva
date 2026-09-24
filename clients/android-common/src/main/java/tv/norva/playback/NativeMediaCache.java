@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 /** Per-player cache authority. Credentials never enter a URL, disk or provider request. */
+@androidx.media3.common.util.UnstableApi
 public final class NativeMediaCache implements DataSource.Factory {
     private final DataSource.Factory provider;
     private volatile Access access;

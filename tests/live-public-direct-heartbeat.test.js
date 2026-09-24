@@ -325,17 +325,20 @@ test('terminal playback errors cancel the monitor while an outgoing stale overla
 
 test('API advertises the guard only for live web sessions with a capable loaded player', () => {
   const api = fs.readFileSync(path.join(__dirname, '../public/js/api.js'), 'utf8');
-  const start = api.indexOf('const baseSession = {');
+  const start = api.indexOf('const privateMediaCacheProtocol = (() => {');
   const end = api.indexOf('\n                };', start);
   assert.ok(start > 0 && end > start);
   const build = api.slice(start, end + '\n                };'.length) + '\nbaseSession;';
   for (const [type, nativePlayer, capability, expected] of [
     ['live', false, true, true], ['live', false, false, false], ['live', false, undefined, false],
     ['live', true, true, false], ['movie', false, true, false], ['series', false, true, false],
+    ['movie', { privateMediaCacheProtocol: () => 1 }, true, false],
   ]) {
     const result = vm.runInNewContext(build, { type, nativePlayer, window: { app: { player: { supportsPublicHlsDirectSessionGuard: capability } } },
       cloudSourceId: 'source', streamId: 'item', playbackHint: {}, query: new URLSearchParams(),
       mode: 'transcode', forcedMode: false, userAgent: '', _cloudClientTelemetryMetadata: () => ({}) });
     assert.equal(result.publicHlsDirectSessionGuard, expected);
+    assert.equal(result.privateMediaCacheProtocol, nativePlayer === true ? 0 : 1);
+    assert.equal(result.mediaCacheReadPolicy, nativePlayer === true ? 'bypass-once' : undefined);
   }
 });

@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Opt-in live QA. The short-lived session is supplied through app-private storage, never the APK. */
 @RunWith(AndroidJUnit4.class)
+@androidx.media3.common.util.UnstableApi
 public final class NativeMediaCachePlaybackInstrumentedTest {
     private static Object field(Object target, String name) throws Exception {
         Field field = target.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(target);
@@ -83,7 +84,13 @@ public final class NativeMediaCachePlaybackInstrumentedTest {
                 if (evidence[1] >= 55000) break;
                 SystemClock.sleep(500);
             }
-            assertTrue("Seek/2x playback did not advance", evidence[1] >= 55000);
+            AtomicReference<String> state = new AtomicReference<>();
+            instrumentation.runOnMainSync(() -> state.set("position=" + player.getCurrentPosition()
+                    + ", buffered=" + player.getBufferedPosition() + ", state=" + player.getPlaybackState()
+                    + ", play=" + player.getPlayWhenReady() + ", loading=" + player.isLoading()
+                    + ", suppression=" + player.getPlaybackSuppressionReason()
+                    + ", error=" + (player.getPlayerError() == null ? "none" : player.getPlayerError().getErrorCodeName())));
+            assertTrue("Seek/2x playback did not advance: " + state.get(), evidence[1] >= 55000);
             instrumentation.runOnMainSync(() -> { player.pause(); evidence[1] = player.getCurrentPosition(); });
             long pausedAt = evidence[1];
             SystemClock.sleep(3000);
