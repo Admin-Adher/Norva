@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const root = path.resolve(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
@@ -39,12 +40,13 @@ test('checkout API reuses orders, recovers ambiguous creates, and confirms only 
   assert.doesNotMatch(source, /\.order\("created_at"[^\n]+\.limit\(1\).*maybeSingle\(\)/);
 });
 
-test('recovery accepts only the exact external reference and immutable owner metadata', () => {
+test('recovery accepts only the exact external reference, owner, and provider money', async () => {
   const source = read('supabase/functions/norva-revolut/index.ts');
+  const { revolutOrderMoney } = await import(pathToFileURL(path.join(root, 'supabase/functions/_shared/revolut-order-money.mjs')).href);
   const match = source.match(/function checkoutOrderMatches\([^)]*\): boolean \{([\s\S]*?)\n\}/);
   assert.ok(match, 'checkoutOrderMatches must remain extractable');
   const body = match[1].replace(/\s+as JsonRecord/g, '');
-  const matches = new Function('order', 'expected', body);
+  const matches = new Function('order', 'expected', 'revolutOrderMoney', body);
   const expected = {
     extRef: 'checkout-abc', userId: 'user-a', intentKey: 'intent-a',
     kind: 'trial_setup', plan: 'plus', period: 'monthly', amountCents: 899,
@@ -62,9 +64,12 @@ test('recovery accepts only the exact external reference and immutable owner met
       paywall_placement: 'subscribe', paywall_surface: 'web',
     },
   };
-  assert.equal(matches(valid, expected), true);
-  assert.equal(matches({ ...valid, merchant_order_ext_ref: 'checkout-other' }, expected), false);
-  assert.equal(matches({ ...valid, metadata: { ...valid.metadata, user_id: 'user-b' } }, expected), false);
+  const check = (order) => matches(order, expected, revolutOrderMoney);
+  assert.equal(check(valid), true);
+  assert.equal(check({ ...valid, amount: undefined, currency: undefined, order_amount: { value: 50, currency: 'USD' } }), true);
+  assert.equal(check({ ...valid, merchant_order_ext_ref: 'checkout-other' }), false);
+  assert.equal(check({ ...valid, metadata: { ...valid.metadata, user_id: 'user-b' } }), false);
+  assert.equal(check({ ...valid, amount: undefined, currency: undefined, order_amount: { value: 500, currency: 'USD' } }), false);
   const finder = source.slice(source.indexOf('async function findOrderByExtRef'), source.indexOf('// The widget token'));
   assert.match(finder, /list\.find\(\(o\) => String\(o\.merchant_order_ext_ref/);
   assert.doesNotMatch(finder, /list\[0\]/);

@@ -29,6 +29,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { getPrices } from "../_shared/prices.ts";
+import { revolutOrderMoney } from "../_shared/revolut-order-money.mjs";
 import {
   enqueuePartnerChargebackReversal,
   ingestPartnerFinancialFact,
@@ -289,13 +290,13 @@ Deno.serve(async (req) => {
       // the original checkout metadata; provider_refund_id is the durable local
       // correlation anchor and related_order_id links back to the capture.
       const relatedOrderId = stringOrNull(order.related_order_id);
-      const providerAmount = Number(order.amount);
-      const providerCurrency = String(order.currency ?? "").toUpperCase();
+      const providerMoney = revolutOrderMoney(order);
+      const providerAmount = providerMoney.amountCents;
+      const providerCurrency = providerMoney.currency;
       const integrityValid =
         String(order.type ?? "").toLowerCase() === "refund" &&
         relatedOrderId === refundAttempt.order_id &&
-        Number.isFinite(providerAmount) &&
-        Math.round(providerAmount) === refundAttempt.amount_cents &&
+        providerAmount === refundAttempt.amount_cents &&
         providerCurrency === refundAttempt.currency;
       if (!integrityValid) {
         throw new Error("provider refund order failed integrity validation");
@@ -576,9 +577,9 @@ Deno.serve(async (req) => {
       const remoteExtRef = stringOrNull(order.merchant_order_ext_ref) ??
         stringOrNull(order.merchant_ext_ref);
       const remoteAmount = Number(meta.amount_cents);
-      const remoteOrderAmount = Number(order.amount);
-      const remoteCurrency = String(order.currency ?? meta.price_currency ?? "")
-        .toUpperCase();
+      const remoteMoney = revolutOrderMoney(order);
+      const remoteOrderAmount = remoteMoney.amountCents;
+      const remoteCurrency = remoteMoney.currency ?? "";
       const expectedOrderAmount = journal.kind === "resubscribe"
         ? Number(journal.requested_amount_cents)
         : Number(journal.amount);
@@ -621,9 +622,7 @@ Deno.serve(async (req) => {
               p_order_id: orderId,
               p_user_id: userId,
               p_provider_payment_id: payment.providerPaymentId,
-              p_captured_amount_cents: Number.isFinite(remoteOrderAmount)
-                ? Math.round(remoteOrderAmount)
-                : null,
+              p_captured_amount_cents: remoteOrderAmount,
               p_captured_currency: remoteCurrency || null,
               p_provider_integrity_valid: false,
             },
@@ -1009,9 +1008,9 @@ function projectionPatch(
     const days = period === "annual" ? 365 : 30;
     patch.current_period_end = new Date(eventMs + days * 86_400_000)
       .toISOString();
-    const cents = Number(recordOrEmpty(order.order_amount).value);
-    if (Number.isFinite(cents) && cents > 0) {
-      patch.mrr_cents = Math.round(cents);
+    const cents = revolutOrderMoney(order).amountCents;
+    if (cents != null && cents > 0) {
+      patch.mrr_cents = cents;
     }
   }
 
@@ -1222,18 +1221,15 @@ async function finalizeCheckoutEntitlement(
       return "payment_processing";
     }
     const payment = paymentSnapshotFromOrder(order);
+    const orderMoney = revolutOrderMoney(order);
     const { data: reconciled, error: reconcileError } = await db.rpc(
       "reconcile_completed_revolut_resubscribe",
       {
         p_order_id: orderId,
         p_user_id: userId,
         p_provider_payment_id: payment.providerPaymentId,
-        p_captured_amount_cents: Number.isFinite(Number(order.amount))
-          ? Math.round(Number(order.amount))
-          : null,
-        p_captured_currency:
-          String(order.currency ?? meta.price_currency ?? "").toUpperCase() ||
-          null,
+        p_captured_amount_cents: orderMoney.amountCents,
+        p_captured_currency: orderMoney.currency,
         p_provider_integrity_valid: true,
         p_customer_id: customerId,
         p_payment_method_id: payment.paymentMethodId,

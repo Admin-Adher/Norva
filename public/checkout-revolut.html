@@ -2,7 +2,7 @@
 <html lang="en" class="quote-pending">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=68c3ed7e5c"></script>
+    <script src="/js/i18n.js?v=498cb9b828"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_6f36bcfd9969">Norva — Secure checkout</title>
@@ -909,7 +909,7 @@
           loading.classList.add('hide');
           setStatus(checkoutKind === 'resubscribe'
             ? (globalThis.NorvaI18n?.t("ui_web_b4318296e649", { defaultValue: "Your payment may still be processing. Don't submit it again; retry confirmation so Norva can verify the result." }) ?? "Your payment may still be processing. Don't submit it again; retry confirmation so Norva can verify the result.")
-            : (globalThis.NorvaI18n?.t("ui_web_0b53db41b3bf", { defaultValue: "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization." }) ?? "We couldn't confirm this card check yet. Nothing has been charged. Please retry finalization."), true);
+            : (globalThis.NorvaI18n?.t("ui_web_0b53db41b3bf", { defaultValue: "We couldn't confirm this card check yet. A temporary hold may appear on your card, but no subscription payment was captured. Please retry verification without submitting another payment." }) ?? "We couldn't confirm this card check yet. A temporary hold may appear on your card, but no subscription payment was captured. Please retry verification without submitting another payment."), true);
           const retryFinalize = document.createElement('button');
           retryFinalize.className = 'btn ghost';
           retryFinalize.style.marginTop = '10px';
