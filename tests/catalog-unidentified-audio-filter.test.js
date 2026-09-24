@@ -56,7 +56,7 @@ for (const name of ['MoviesPage', 'SeriesPage']) {
 test('server keeps unidentified audio in bounded SQL for every sort, never subtitle or preference ISO', () => {
     const edge = read('supabase/functions/norva-catalog/index.ts');
     assert.match(edge, /audioIso === 'unidentified' \|\|/);
-    assert.match(edge, /const subIso = canonicalFileLanguage\(/);
+    assert.match(edge, /const subIso = subtitleFacetIso\(/);
     assert.match(edge, /const prefAudioIso = langSort \? canonicalFileLanguage\(/);
     assert.match(edge, /value\.audio\.push\(\{ value: 'unidentified', count: Math\.max\(0/);
     assert.match(edge, /requiredAudioIso === 'unidentified'\) return catalogVariantMatchesAudio/);

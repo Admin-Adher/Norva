@@ -69,11 +69,15 @@ test('catalog rollout proves the exact-file codec protocol on every Edge replica
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
   const app = read('public/app.html');
 
-  assert.match(catalog, /version:\s*7/);
+  assert.match(catalog, /version:\s*8/);
   assert.match(catalog, /flatCodecProfileProtocol:\s*1/);
+  assert.match(catalog, /catalogLanguageFacetProtocol:\s*2/);
+  assert.match(catalog, /boundedMediaHydrationProtocol:\s*1/);
   assert.match(catalog, /exactTrackPersistenceProtocol:\s*2/);
-  assert.match(deploy, /EXPECTED_CATALOG_VERSION=7/);
+  assert.match(deploy, /EXPECTED_CATALOG_VERSION=8/);
   assert.match(deploy, /EXPECTED_FLAT_CODEC_PROFILE_PROTOCOL=1/);
+  assert.match(deploy, /EXPECTED_CATALOG_LANGUAGE_FACET_PROTOCOL=2/);
+  assert.match(deploy, /EXPECTED_BOUNDED_MEDIA_HYDRATION_PROTOCOL=1/);
   assert.match(deploy, /EXPECTED_EXACT_TRACK_PERSISTENCE_PROTOCOL=2/);
   assert.match(deploy, /function_health_in_service "\$service" norva-catalog/);
   assert.match(deploy, /norva-catalog source digest mismatch/);

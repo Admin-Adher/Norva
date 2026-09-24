@@ -328,27 +328,6 @@ test('flat media grid and search keep P display data isolated from global A unde
   const globalCalls = [];
   let catalogFlag = true;
   let hydrationFails = false;
-  const visibleRows = [{
-    id: pTitleId,
-    provider_tmdb_id: '100',
-    audio_languages: ['ja'],
-    version_languages: ['ja'],
-    audio_tracks: [{ index: 0, lang: 'ja' }],
-    poster_url: 'https://images.example/b-visible.jpg',
-    backdrop_url: 'https://images.example/b-visible-bg.jpg',
-    match_status: 'provider_verified',
-    visible_source_ids: ['source-b'],
-  }, {
-    id: gTitleId,
-    provider_tmdb_id: '200',
-    audio_languages: ['en'],
-    version_languages: ['en'],
-    audio_tracks: [],
-    poster_url: 'https://images.example/g-visible.jpg',
-    backdrop_url: 'https://images.example/g-visible-bg.jpg',
-    match_status: 'provider_verified',
-    visible_source_ids: ['source-g'],
-  }];
   const hydratedP = {
     id: pTitleId,
     user_id: 'user-1',
@@ -375,6 +354,12 @@ test('flat media grid and search keep P display data isolated from global A unde
     visible_source_ids: ['source-b'],
     variant_count: 1,
   };
+  const hydratedG = {
+    id: gTitleId, user_id: 'user-1', provider_tmdb_id: '200',
+    match_status: 'provider_verified', visible_source_ids: ['source-g'],
+    display_generation_id: null, audio_languages: ['en'], version_languages: ['en'],
+    audio_tracks: [], poster_url: 'https://images.example/g-visible.jpg',
+  };
 
   function queryFor(table) {
     const state = { table, select: '', ids: [] };
@@ -382,12 +367,23 @@ test('flat media grid and search keep P display data isolated from global A unde
       select(value) { state.select = String(value); return query; },
       eq() { return query; },
       in(_field, ids) { state.ids = [...ids]; return query; },
+      async limit() {
+        assert.equal(table, 'cloud_catalog_visible_title_variants');
+        return { data: [{
+          id: 'variant-b', media_item_id: '11111111-1111-4111-8111-111111111111',
+          title_id: pTitleId, source_id: 'source-b', generation_id: generationId,
+          item_type: 'movie',
+        }, {
+          id: 'variant-g', media_item_id: '22222222-2222-4222-8222-222222222222',
+          title_id: gTitleId, source_id: 'source-g', generation_id: null,
+          item_type: 'movie',
+        }], error: null };
+      },
       then(resolve, reject) {
         let data;
         if (table === 'cloud_catalog_visible_titles') {
-          data = state.select.includes('audio_languages')
-            ? visibleRows.filter((row) => state.ids.includes(row.provider_tmdb_id))
-            : [{ provider_tmdb_id: '200', loc: 'Titre G visible' }];
+          assert.deepEqual(state.ids, ['200'], 'P must not trigger the global visible-title scan');
+          data = [{ provider_tmdb_id: '200', loc: 'Titre G visible' }];
         } else {
           assert.equal(table, 'catalog_titles');
           globalCalls.push({ select: state.select, ids: [...state.ids] });
@@ -416,10 +412,15 @@ test('flat media grid and search keep P display data isolated from global A unde
     attachFlatMediaFileLanguages: async () => {},
     attachFlatSelectionSeriesLanguages: async () => {},
     attachFlatOwnedProviderLanguages: async () => {},
+    applyCatalogOverlay: async () => {},
+    titleRailItem: (title) => title.id === gTitleId ? { title: 'Provider G raw', name: 'Provider G raw' } :
+      ({ title: 'Titre B', name: 'Titre B', overview: 'Synopsis B',
+      poster_url: 'https://images.example/b.jpg', backdrop_url: 'https://images.example/b-bg.jpg',
+      runtime: 123, runtimeMinutes: 123, rating: 8.8, tmdb: { runtime: 123, overview: 'Synopsis B' } }),
     requiredCatalogTitleVisibilityEpoch: () => '7',
     hydrateVisibleCatalogTitlesByIds: async () => {
       if (hydrationFails) throw new Error('visibility epoch moved');
-      return [structuredClone(hydratedP)];
+      return [structuredClone(hydratedP), structuredClone(hydratedG)];
     },
     titleAudioLanguages: (row) => Array.isArray(row.audio_languages) ? row.audio_languages : [],
     titleVersionLanguages: (row) => Array.isArray(row.version_languages) ? row.version_languages : [],
@@ -437,13 +438,13 @@ test('flat media grid and search keep P display data isolated from global A unde
     catalogFlag = flag;
     globalCalls.length = 0;
     const p = {
-      id: 'media-b', source_id: 'source-b', item_type: 'movie', external_id: 'stream-100',
+      id: '11111111-1111-4111-8111-111111111111', source_id: 'source-b', item_type: 'movie', external_id: 'stream-100',
       generation_id: generationId,
       title: 'Provider B raw', poster_url: 'https://images.example/provider-b.jpg',
       overview: 'Provider B overview', metadata: { providerTmdbId: '100', categoryName: 'Provider B' },
     };
     const g = {
-      id: 'media-g', source_id: 'source-g', item_type: 'movie', external_id: 'stream-200',
+      id: '22222222-2222-4222-8222-222222222222', source_id: 'source-g', item_type: 'movie', external_id: 'stream-200',
       title: 'Provider G raw', metadata: { providerTmdbId: '200' },
     };
     await runtime.attachMediaLanguages([p, g], 'user-1', 'movie', 'fr');

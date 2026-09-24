@@ -23,16 +23,19 @@ test('provider facet RPC counts exact observed titles only inside the owned sour
     assert.match(migration, /grant execute on function[\s\S]*to service_role/);
 });
 
-test('catalog facets route scopes RPC, memo and labels to provider plus media type', () => {
+test('catalog facets share the indexed owner-scoped union used by filtering', () => {
     const catalog = read('supabase/functions/norva-catalog/index.ts');
 
     assert.match(catalog, /url\.searchParams\.get\("source"\)/);
-    assert.match(catalog, /cloud_exact_language_counts_by_source/);
+    assert.match(catalog, /cloud_catalog_subtitle_language_counts/);
+    assert.match(catalog, /norva_catalog_movie_audio_language_counts/);
+    assert.match(catalog, /norva_catalog_movie_unidentified_audio_count/);
     assert.match(catalog, /p_source_id: sourceId/);
     assert.match(catalog, /`\$\{userId\}:\$\{cacheEpoch\}:\$\{itemType\}:\$\{sourceId \|\| "all"\}`/);
     assert.match(catalog, /itemType === "series" \? "series" : "movies"/);
     assert.match(catalog, /`\$\{name\} · \$\{FACET_NUMBER\.format\(count\)\} \$\{noun\}`/);
-    assert.match(catalog, /if \(error\) throwDb\(error, "Unable to load exact language facets"\)/);
+    assert.match(catalog, /if \(subtitleError\) throwDb\(subtitleError, 'Unable to load catalogue subtitle facets'\)/);
+    assert.match(catalog, /String\(subIso \|\| ''\)\.startsWith\('catalog-'\)/);
     assert.doesNotMatch(catalog, /else if \(!sourceId\)/);
     assert.doesNotMatch(catalog, /cloud_language_facets/);
 });

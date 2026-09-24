@@ -68,7 +68,8 @@ test('flat grids avoid movie-series id collisions and support localized synopsis
   assert.match(block, /catalogCandidateIds = new Set<string>/);
   assert.match(block, /weakCatalogIds = new Set<string>/);
   assert.match(block, /for \(const id of weakCatalogIds\) catalogCandidateIds\.delete\(id\)/);
-  assert.match(block, /catalogTextStatusEligible\(\(row as JsonRecord\)\.match_status\)/);
+  assert.match(block, /for \(const row of ownedTitles\)/);
+  assert.match(block, /catalogTextStatusEligible\(row\.match_status\)/);
   assert.match(block, /trusted:metadata->tmdbValidation->>valid/);
   assert.match(block, /\.eq\("item_type", itemType\)/);
   assert.match(block, /loc_overview:metadata->i18n->\$\{lang\}->>overview/);
