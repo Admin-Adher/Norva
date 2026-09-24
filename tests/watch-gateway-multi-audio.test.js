@@ -167,10 +167,12 @@ function makePage(WatchPage, { validationStatus = 'verified' } = {}) {
         audioLanguageValidationStatus: validationStatus,
         video: {
             currentTime: 0,
+            pause() { this.paused = true; },
             canPlayType: () => '',
             play: () => { playCalls += 1; return Promise.resolve(); },
         },
         isGatewayPlaybackUrl: () => true,
+        getPlaybackPosition() { return (this.streamStartOffset || 0) + this.video.currentTime; },
         isStalePlaybackAttempt(attemptId) { return attemptId !== this._playbackAttemptId; },
         updateAudioTracks() {},
         updateCaptionsTracks() {},
@@ -1050,4 +1052,80 @@ test('a stale playback attempt cannot confirm or mutate a pending HLS audio swit
     assert.equal(harness.page.selectedAudioTrackUserChoice, false);
     assert.equal(harness.savedPreferences.length, 0);
     assert.equal(harness.page._pendingHlsAudioSwitch, null);
+});
+
+test('expired alternate audio restarts at the viewer position, preserving paused or playing intent', async () => {
+    for (const paused of [true, false]) {
+        const harness = makePage(loadWatchPage());
+        const hls = configureAndAttach(harness);
+        const { page } = harness;
+        page.streamStartOffset = 300;
+        Object.assign(page.video, { currentTime: 40, paused });
+        hls.currentLevel = 0;
+        hls.levels = [{ details: { live: true, fragments: [{ start: 600 }] } }];
+        let stopped = 0, anchor;
+        hls.stopLoad = () => { stopped++; };
+        page.queueSelectedAudioTrackRestart = async value => { anchor = value; return true; };
+        const previousRequests = hls.audioTrackRequests.length;
+        assert.equal(await page.selectAudioTrack('hls', 0, 2), true);
+        assert.equal(anchor.position, 340);
+        assert.equal(anchor.autoplay, !paused);
+        assert.equal(page.selectedAudioStreamIndex, 2);
+        assert.equal(page.directAudioStreamIndex, 5, 'unconfirmed selection must not claim the active track');
+        assert.equal(hls.audioTrackRequests.length, previousRequests, 'do not let hls.js jump to the rolling edge');
+        assert.equal(stopped, 1);
+    }
+});
+
+test('unconfirmed audio switch recovers the captured anchor even if hls.js has already jumped', async () => {
+    const harness = makePage(loadWatchPage());
+    const hls = configureAndAttach(harness);
+    const { page } = harness;
+    Object.assign(page.video, { currentTime: 40, paused: true });
+    let anchor;
+    page.queueSelectedAudioTrackRestart = async value => { anchor = value; return true; };
+    const pending = page.selectAudioTrack('hls', 0, 2);
+    page.video.currentTime = 604;
+    assert.equal(await pending, true);
+    assert.equal(anchor.position, 40);
+    assert.equal(anchor.autoplay, false);
+    hls.emit(FakeHls.Events.AUDIO_TRACK_SWITCHED, { id: 0 });
+    assert.equal(page.directAudioStreamIndex, 5, 'late events from the rejected switch remain ignored');
+});
+
+test('a confirmed track event cannot certify a jump to the live edge', async () => {
+    const harness = makePage(loadWatchPage());
+    const hls = configureAndAttach(harness);
+    const { page } = harness;
+    Object.assign(page.video, { currentTime: 40, paused: true });
+    let anchor;
+    page.queueSelectedAudioTrackRestart = async value => { anchor = value; return true; };
+    const pending = page.selectAudioTrack('hls', 0, 2);
+    page.video.currentTime = 604;
+    hls.emit(FakeHls.Events.AUDIO_TRACK_SWITCHED, { id: 0 });
+    assert.equal(await pending, true);
+    assert.equal(anchor.position, 40);
+    assert.equal(anchor.autoplay, false);
+    assert.equal(page.directAudioStreamIndex, 5);
+    assert.equal(page._pendingHlsAudioSwitch, null);
+});
+
+test('a rolling audio jump cannot be persisted while the switch or recovery is pending', () => {
+    const page = Object.create(loadWatchPage().prototype);
+    Object.assign(page, {
+        streamStartOffset: 300,
+        video: { currentTime: 604, paused: true },
+        getDisplayDuration: () => 7200,
+        _lastKnownPlaybackPosition: 904,
+        _pendingHlsAudioSwitch: { anchor: { position: 340, autoplay: false } },
+    });
+    assert.equal(page.getPlaybackPosition(), 340);
+    assert.equal(page.getResumeSnapshotPosition(), 340);
+    assert.equal(page.trackPlaybackPosition(), 340);
+    assert.equal(page._lastKnownPlaybackPosition, 340);
+    page._recoveringHlsAudioAnchor = page._pendingHlsAudioSwitch.anchor;
+    page._pendingHlsAudioSwitch = null;
+    assert.equal(page.getResumeSnapshotPosition(), 340, 'the anchor survives the old pipeline release');
+    page._recoveringHlsAudioAnchor = null;
+    assert.equal(page.getPlaybackPosition(), 904, 'ordinary media time resumes after recovery');
 });

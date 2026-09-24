@@ -54,7 +54,7 @@ function watchHlsConfig(url) {
 
 test('WatchPage bounds HLS rewind retention while preserving each forward-buffer policy', () => {
     for (const [url, forward, maximum] of [
-        ['/gateway/session/master.m3u8', 120, 600],
+        ['/gateway/session/master.m3u8', 120, 120],
         ['/api/transcode/session/master.m3u8', 120, 600],
         ['https://example.invalid/movie.m3u8', 30, 60],
     ]) {

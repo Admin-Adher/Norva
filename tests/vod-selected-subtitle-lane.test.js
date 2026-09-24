@@ -317,7 +317,7 @@ test('Watch freezes episode identity before every serialized subtitle or audio l
   );
   const audioRestart = section(
     watch,
-    '    async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {',
+    '    async restartCloudGatewayWithSelectedAudioTrack(',
     '    updateGatewayAudioSwitchMetrics(',
   );
 

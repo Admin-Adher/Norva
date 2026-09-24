@@ -868,6 +868,15 @@ test('Gateway audio switch expires the prior lane, creates once, and delegates a
         metrics.map(metric => metric.status),
         ['provider_cooldown', 'creating_session', 'attaching_gateway_lane', 'waiting_gateway_gate'],
     );
+    page.getPlaybackPosition = () => 604;
+    assert.equal(await restartCloudGatewayWithSelectedAudioTrack.call(page, 11, {
+        position: 125, autoplay: false,
+    }), true);
+    assert.equal(attached.options.requestedSeekOffset, 125,
+        'the captured position survives a jump before the replacement lane is requested');
+    assert.equal(attached.options.autoplay, false,
+        'the captured viewer pause survives the replacement pipeline');
+    assert.equal(page.resumeTime, 125);
 });
 
 test('Gateway audio switch resolver does not retry an ambiguous session create', async () => {
