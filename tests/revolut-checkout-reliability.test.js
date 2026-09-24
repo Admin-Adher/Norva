@@ -128,6 +128,18 @@ test('Revolut webhook rejects validation holds over a hard block and quarantines
   assert.doesNotMatch(source, /checkoutSuccess && \[[^\]]*rejected_account_blocked/);
 });
 
+test('integrity rejection releases an authorised card hold without treating a captured resubscription as voidable', () => {
+  const endpoint = read('supabase/functions/norva-revolut/index.ts');
+  const webhook = read('supabase/functions/norva-revolut-webhook/index.ts');
+  const endpointMismatch = endpoint.slice(endpoint.indexOf('if (integrityMismatch) {'), endpoint.indexOf('const paid = remoteKind'));
+  const webhookMismatchStart = webhook.indexOf('if (immutableMismatch) {');
+  const webhookMismatch = webhook.slice(webhookMismatchStart, webhook.indexOf('const partnersObservation', webhookMismatchStart));
+  assert.ok(endpointMismatch.indexOf('journal.kind === "resubscribe" && state === "COMPLETED"') < endpointMismatch.indexOf('journal.kind !== "resubscribe" && state === "AUTHORISED"'));
+  assert.match(endpointMismatch, /journal\.kind !== "resubscribe" && state === "AUTHORISED"[\s\S]*\/cancel`/);
+  assert.match(webhookMismatch, /journal\.kind !== "resubscribe" && orderId && remoteState === "AUTHORISED"[\s\S]*cancelValidationHold\(orderId\)/);
+  assert.match(webhookMismatch, /remoteState === "CANCELLED"[\s\S]*integrity_mismatch_cancelled/);
+});
+
 test('Revolut webhook preserves internal and terminal accounts for every event kind', () => {
   const source = read('supabase/functions/norva-revolut-webhook/index.ts');
   assert.match(

@@ -95,9 +95,70 @@ test('stale checkout reconciliation is bounded, non-destructive, and claims befo
   assert.match(reconcile, /\.limit\(CHECKOUT_RECONCILE_BATCH\)/);
   assert.match(reconcile, /\.lte\("expires_at", nowIso\)/);
   assert.match(reconcile, /\.order\("last_reconciled_at", \{ ascending: true, nullsFirst: true \}\)/);
-  assert.match(reconcile, /remoteState === "AUTHORISED"[\s\S]*continue/);
+  assert.match(reconcile, /if \(checkout\.kind === "resubscribe"\) continue/);
+  assert.match(reconcile, /!authorised && remoteState !== "PENDING" && remoteState !== "PROCESSING"/);
+  assert.match(reconcile, /\.in\("state", \["PENDING", "PROCESSING", "AUTHORISED"/);
+  assert.match(reconcile, /\.not\("expired_at", "is", null\)[\s\S]*\.lt\("last_reconciled_at", nowIso\)/);
+  assert.match(reconcile, /for \(const checkout of \(pendingCancels \?\? \[\]\)[\s\S]*retrieveRemoteOrder\(checkout\.order_id\)[\s\S]*canCancel \? await revolut/);
+  assert.match(reconcile, /\.in\("kind", \["trial_setup", "plan_change", "card_update"\]\)[\s\S]*\.contains\("finalization_result", \{ hold_released: false \}\)/);
+  assert.match(reconcile, /for \(const checkout of \(finalizedHolds \?\? \[\]\)[\s\S]*retrieveRemoteOrder\(checkout\.order_id\)[\s\S]*const released = alreadyReleased \|\| cancelled\?\.ok === true/);
   assert.match(reconcile, /expired_at: nowIso/);
   assert.match(reconcile, /public_id: null/);
   assert.ok(reconcile.indexOf('select("order_id")') < reconcile.indexOf('/cancel`'));
   assert.doesNotMatch(reconcile, /\.delete\(/);
+});
+
+test('expired card holds are cancelled and failed releases are retried without cancelling paid resubscriptions', async () => {
+  const { transformSync } = require('esbuild');
+  const source = read(billingPath);
+  const reconcile = source.slice(source.indexOf('async function reconcileOpenCheckouts'), source.indexOf('async function run'));
+  const { code } = transformSync(`${reconcile}\nmodule.exports = reconcileOpenCheckouts;`, { loader: 'ts', format: 'cjs' });
+  const cancelCalls = [];
+  const run = new Function('CHECKOUT_RECONCILE_BATCH', 'retrieveRemoteOrder', 'revolut', 'remoteStateOf', 'errorText',
+    `const module = { exports: null }; ${code}; return module.exports;`)(
+    10,
+    async () => ({ order: { state: 'AUTHORISED' }, response: { status: 200 } }),
+    async (_method, path) => { cancelCalls.push(path); return { ok: true, body: { state: 'CANCELLED' }, status: 200 }; },
+    (body) => body.state,
+    () => '',
+  );
+  function dbFor(open, pending = [], finalized = []) {
+    const batches = [open, pending, finalized];
+    const updates = [];
+    let batch = 0;
+    return {
+      updates,
+      from() {
+        let updating = false;
+        const query = {
+          select() { return updating ? Promise.resolve({ data: [{ order_id: 'order-1' }], error: null }) : query; },
+          update(patch) { updates.push(patch); updating = true; return query; },
+          in() { return query; }, is() { return query; }, not() { return query; },
+          lte() { return query; }, lt() { return query; }, eq() { return query; },
+          contains() { return query; }, order() { return query; },
+          limit() { return Promise.resolve({ data: batches[batch++] ?? [], error: null }); },
+          then(resolve, reject) { return Promise.resolve({ data: null, error: null }).then(resolve, reject); },
+        };
+        return query;
+      },
+    };
+  }
+  const expired = { order_id: 'order-1', state: 'AUTHORISED', expires_at: '2000-01-01T00:00:00Z', kind: 'trial_setup' };
+  const first = dbFor([expired]);
+  assert.equal((await run(first)).checkout_cancelled, 1);
+  assert.equal(cancelCalls.length, 1);
+  assert.ok(first.updates.some((patch) => patch.expired_at && patch.public_id === null));
+
+  const paid = dbFor([{ ...expired, kind: 'resubscribe' }]);
+  assert.equal((await run(paid)).checkout_cancelled, 0);
+  assert.equal(cancelCalls.length, 1);
+
+  const retry = dbFor([], [{ ...expired }]);
+  assert.equal((await run(retry)).checkout_cancelled, 1);
+  assert.equal(cancelCalls.length, 2);
+
+  const finalized = dbFor([], [], [{ order_id: 'order-1', kind: 'trial_setup', finalization_result: { result: 'trial_started', hold_released: false } }]);
+  assert.equal((await run(finalized)).checkout_cancelled, 1);
+  assert.equal(cancelCalls.length, 3);
+  assert.ok(finalized.updates.some((patch) => patch.finalization_result?.hold_released === true && patch.finalization_result?.result === 'trial_started'));
 });
