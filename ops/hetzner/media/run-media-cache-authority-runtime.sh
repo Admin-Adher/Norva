@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+readonly RUNTIME_SUITE="${1:-authority}"
+case "${RUNTIME_SUITE}" in
+  authority|storyboard-renewal) ;;
+  *) printf 'Unknown runtime suite\n' >&2; exit 1 ;;
+esac
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly RELEASE_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)"
@@ -126,6 +131,14 @@ docker exec -i "${CANARY_CONTAINER}" psql \
   -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" \
   < "${CANARY_DIR}/schema.sql" >/dev/null
 
+
+if [[ "${RUNTIME_SUITE}" == 'storyboard-renewal' ]]; then
+  docker exec -i "${CANARY_CONTAINER}" psql -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" < "${MIGRATION_DIR}/20260924010000_storyboard_renewal_context.sql"
+  docker exec -i "${CANARY_CONTAINER}" psql -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" < "${SCRIPT_DIR}/storyboard-renewal-runtime.sql"
+  [[ "$(docker inspect "${PRIMARY_DB_CONTAINER}" --format '{{.RestartCount}}')" == "${PRIMARY_RESTARTS}" ]] || die 'primary-restarted'
+  printf 'STORYBOARD_RENEWAL_RUNTIME_PASS\n'
+  exit 0
+fi
 
 printf '===MEDIA_CACHE_AUTHORITY_RUNTIME===\n'
 docker exec -i "${CANARY_CONTAINER}" psql -X -v ON_ERROR_STOP=1 -U "${CANARY_DB_ADMIN}" -d "${CANARY_DATABASE}" < "${SCRIPT_DIR}/media-cache-authority-runtime.sql"

@@ -653,6 +653,9 @@ async function handleRequest(req: Request): Promise<Response> {
     if (req.method === "POST" && segments[0] === "storyboard-callback") {
       return json(req, await runStoryboardCallback(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "storyboard-renew") {
+      return json(req, await renewStoryboard(req, supabase));
+    }
     if (req.method === "POST" && segments[0] === "storyboard-admission") {
       return json(req, await checkStoryboardAdmission(req, supabase));
     }
@@ -13300,10 +13303,12 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   if (!tUrl) return { status: "none", why: "no-playback-target" };
 
   const jobId = crypto.randomUUID();
-  const spritePath = storyboardPath(pkey, itemType, externalId);
+  const spritePath = storyboardPath(pkey, itemType, externalId).replace(/\.jpg$/, `-${jobId}.jpg`);
   const { error: upsertErr } = await db.from("catalog_storyboards").upsert({
     provider_key: pkey, item_type: itemType, external_id: externalId,
     status: "processing", sprite_path: spritePath, job_id: jobId, error: null,
+    job_user_id: userId, job_source_id: sourceId, job_container: container,
+    job_duration: Math.max(0, Math.min(86400, Number(url.searchParams.get("duration")) || 0)),
     updated_at: new Date().toISOString(),
   }, { onConflict: "provider_key,item_type,external_id" });
   if (upsertErr) throwDb(upsertErr, "storyboard upsert failed");
@@ -13331,6 +13336,59 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
     return { status: "failed", error: `gateway ${gwStatus}` };
   }
   return { status: "processing", enqueued: true };
+}
+
+async function renewStoryboard(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const config = await getRuntimeConfig(db);
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!config.mediaGatewayToken || provided !== config.mediaGatewayToken) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const jobId = stringOr(body.jobId, ""), userId = stringOr(body.userId, "");
+  if (!/^[0-9a-f-]{36}$/i.test(jobId) || !/^[0-9a-f-]{36}$/i.test(userId)) {
+    throw new HttpError(400, "Invalid storyboard renewal");
+  }
+  const { data: row, error } = await db.from("catalog_storyboards")
+    .select("provider_key,item_type,external_id,sprite_path,job_source_id,job_container,job_duration")
+    .eq("job_id", jobId).eq("job_user_id", userId).eq("status", "processing").maybeSingle();
+  if (error) throwDb(error, "Unable to renew storyboard");
+  if (!row?.job_source_id || !row.sprite_path) throw new HttpError(410, "Storyboard no longer authorized");
+  const sourceId = stringOr(row.job_source_id, "");
+  const readSource = () => db.from("cloud_sources").select("id,sync_status,config_ciphertext")
+    .eq("id", sourceId).eq("user_id", userId).eq("enabled", true).is("deleted_at", null).maybeSingle();
+  const source = await readSource();
+  if (source.error) throwDb(source.error, "Unable to check storyboard source");
+  if (!source.data) throw new HttpError(410, "Source removed");
+  if (source.data.sync_status === "syncing") return { defer: true, reason: "catalog-syncing" };
+  const gate = await runPregenGate(new Request(req.url, { method: "POST", headers: req.headers,
+    body: JSON.stringify({ userId }) }), db);
+  if (gate.defer) return gate;
+  const identity = await resolveSourceIdentity(sourceId, userId, db);
+  if (!identity.key || identity.key !== row.provider_key) throw new HttpError(410, "Source identity changed");
+  const target = await resolveVariantUrl(db, userId, sourceId, stringOr(row.external_id, ""),
+    stringOr(row.item_type, "movie"), { container: stringOr(row.job_container, "") });
+  if (!target) throw new HttpError(503, "Storyboard target temporarily unavailable");
+  // URL/credential changes invalidate saved frames without storing either in checkpoints.
+  const sourceBinding = await sha256Hex(JSON.stringify([userId, sourceId, row.item_type,
+    row.external_id, target, source.data.config_ciphertext]));
+  const { data: signed, error: signError } = await db.storage.from(STORYBOARD_BUCKET)
+    .createSignedUploadUrl(row.sprite_path, { upsert: true });
+  if (signError || !signed?.signedUrl) throw new HttpError(503, "Storyboard upload unavailable");
+  const pipe = await createBytePipeAccess("storyboard-job", userId, target,
+    new Date(Date.now() + 15 * 60_000).toISOString(), db, null);
+  // Fence revocation/replacement that happened while resolving or minting grants.
+  const currentSource = await readSource();
+  if (currentSource.error) throwDb(currentSource.error, "Unable to recheck storyboard source");
+  if (!currentSource.data || currentSource.data.config_ciphertext !== source.data.config_ciphertext) {
+    throw new HttpError(410, "Source changed during renewal");
+  }
+  if (currentSource.data.sync_status === "syncing") return { defer: true, reason: "catalog-syncing" };
+  const current = await db.from("catalog_storyboards").select("job_id")
+    .eq("job_id", jobId).eq("job_user_id", userId).eq("job_source_id", sourceId)
+    .eq("status", "processing").maybeSingle();
+  if (current.error) throwDb(current.error, "Unable to recheck storyboard job");
+  if (!current.data) throw new HttpError(410, "Storyboard replaced or completed");
+  return { pipeUrl: pipe.url, uploadUrl: signed.signedUrl.replace(SUPABASE_URL, PUBLIC_ORIGIN),
+    sourceId, sourceBinding, duration: Number(row.job_duration) || 0 };
 }
 
 async function checkStoryboardAdmission(req: Request, db: SupabaseClient): Promise<JsonRecord> {

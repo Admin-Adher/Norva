@@ -10636,6 +10636,27 @@ function extractStoryboardSprite(
     });
 }
 
+// Restore only signed checkpoints; transport credentials are renewed by the
+// normal scheduler before any provider read. Queue overflow stays on disk for
+// the next sweep, and active jobs are never inserted twice.
+async function restoreDurableStoryboards() {
+    if (!storyboardStore) return 0;
+    let restored = 0;
+    for (const job of await storyboardStore.load()) {
+        if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) break;
+        if (durableStoryboardIds.has(job.jobId) || !isBackendUrl(job.callbackUrl)) continue;
+        if (job.sourceId && !storyboardPilotSourceIds.has(job.sourceId)) continue;
+        durableStoryboardIds.add(job.jobId);
+        insertByPriority(transcribeQueue, job);
+        restored++;
+    }
+    if (restored) {
+        wakeQueueDrain(transcribeWakeState);
+        queueMicrotask(drainTranscribeQueue);
+    }
+    return restored;
+}
+
 async function renewDurableStoryboard(job) {
     if (!storyboardStore || !isBackendUrl(job.callbackUrl)) return false;
     try {
@@ -10652,13 +10673,15 @@ async function renewDurableStoryboard(job) {
         if (!claims || claims.uid !== job.uid || !bytePipeAllowsPurpose(claims, 'storyboard-job') ||
             Number(claims.exp) * 1000 < Date.now() + 120_000 || !isBackendUrl(grant.uploadUrl, '/storage/') ||
             !/^[0-9a-f]{64}$/.test(grant.sourceBinding || '')) return false;
-        if (!storyboardPilotSourceIds.has(grant.sourceId)) return false;
+        if (!storyboardPilotSourceIds.has(grant.sourceId) ||
+            (job.sourceId && job.sourceId !== grant.sourceId)) return false;
         if (job.storyboardProgress && job.storyboardProgress.sourceBinding !== grant.sourceBinding) {
             job.progress = { ...job.storyboardProgress };
             delete job.storyboardProgress;
         }
         Object.assign(job, { url: claims.url, ua: claims.ua || FFMPEG_USER_AGENT,
-            uploadUrl: grant.uploadUrl, duration: Number(grant.duration) || 0, sourceBinding: grant.sourceBinding,
+            uploadUrl: grant.uploadUrl, sourceId: grant.sourceId,
+            duration: Number(grant.duration) || 0, sourceBinding: grant.sourceBinding,
             expiresAt: Number(claims.exp) * 1000, durableDir: storyboardStore.dir(job.jobId) });
         return true;
     } catch (_) { return false; }
@@ -12841,6 +12864,18 @@ async function bootstrap() {
         setInterval(() => strictLidCaptureStore.sweep().catch(() => {
             console.warn('[media-gateway] private capture sweep failed');
         }), 30000).unref();
+    }
+    if (storyboardStore) {
+        await restoreDurableStoryboards();
+        // A bounded queue may not admit every persisted job in one pass.
+        let restoring = false;
+        setInterval(async () => {
+            if (restoring) return;
+            restoring = true;
+            try { await restoreDurableStoryboards(); }
+            catch (_) { console.warn('[media-gateway] storyboard checkpoint restore deferred'); }
+            finally { restoring = false; }
+        }, 60_000).unref();
     }
     gatewayHttpServer = app.listen(PORT, () => {
         console.log(`Norva Media Gateway listening on ${PORT}`);
