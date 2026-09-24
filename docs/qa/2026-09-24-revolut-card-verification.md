@@ -16,3 +16,11 @@ Both checkout and webhook now read provider money from the nested response or th
 - Norva production journal: trial order `CANCELLED`, `finalized_at` empty, entitlement absent.
 - Local test suite: 71 Revolut-focused tests passed, including nested/flat response compatibility, contradictory amounts, and exact owner/reference/amount recovery.
 - The original canceled order cannot start a trial. A new customer-initiated checkout is required after deploying the fix. Do not infer that an issuer has removed the pending hold from Revolut's USD 0 merchant balance; verify the card statement separately.
+
+## Deployment and customer copy
+
+PR #381 merged to main as `321cb2f870f2d9e2479e0ceac6e866f290a5f850`. Cloudflare Pages workflow `35949281178` succeeded. The live checkout page serves the new pending-hold message and `i18n.js?v=498cb9b828`; the old false error message is absent. Both Edge replicas passed guarded preflight and were restarted successfully at 02:55:33 UTC with checkout and webhook modules healthy. The protected backup is under `/home/adrien/.norva/revolut-order-fix-20260924/backup-20260924T025533Z`.
+
+A subsequent read-only comparison of the canceled provider order with its local journal, using the nested provider amount and currency, found zero immutable-field mismatches. It cannot establish that a fresh authorization will finalize because this order is already canceled. A new real checkout remains the required end-to-end proof.
+
+The subscription-choice page still overstated the speed at which a pending bank hold disappears. A follow-up copy change now says that Norva cancels the authorization after successful verification and that the bank can display it for longer. It also corrects the saved-card and payment-calendar text in all ten supported UI languages. The copy change does not alter payment behavior.

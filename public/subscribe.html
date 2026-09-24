@@ -2,7 +2,7 @@
 <html lang="en" class="prices-pending">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=498cb9b828"></script>
+    <script src="/js/i18n.js?v=7c0e89e3cf"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_c42bfdada7d3">Choose your Norva plan</title>
@@ -416,7 +416,7 @@
 
         <div class="assurance" id="trial-assurance" role="note">
           <svg class="assurance-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 018 0v3"></path></svg>
-          <div><strong data-i18n="ui_web_a9251f5aebe3">No charge today — we only verify your card.</strong><norva-i18n data-i18n="ui_web_d12b4243e7bc"> To open your free trial we place a tiny temporary authorization to confirm the card is valid. It may appear briefly in your local currency and is </norva-i18n><b data-i18n="ui_web_bd891aa62fc4">released right away and never debited.</b><norva-i18n data-i18n="ui_web_c6f027b0bdd0"> Your first real payment happens only after the trial if you do not cancel. </norva-i18n><b data-i18n="ui_web_e9b988aaa423">We will email you a reminder before it ends.</b></div>
+          <div><strong data-i18n="ui_web_a9251f5aebe3">No charge today — we only verify your card.</strong><norva-i18n data-i18n="ui_web_d12b4243e7bc"> To open your free trial we place a small temporary authorization to confirm the card is valid. It may appear as a pending transaction and is </norva-i18n><b data-i18n="ui_web_bd891aa62fc4">canceled by Norva after successful verification; your bank may take longer to remove the hold.</b><norva-i18n data-i18n="ui_web_c6f027b0bdd0"> Your first real payment happens only after the trial if you do not cancel. </norva-i18n><b data-i18n="ui_web_e9b988aaa423">We will email you a reminder before it ends.</b></div>
         </div>
 
         <div class="status" id="status" role="status" aria-live="polite"></div>
@@ -1438,7 +1438,7 @@
               const body = el.querySelector('div');
               if (body) {
                 body.innerHTML = '<strong data-i18n="ui_web_4577368599d2">Secure card check first.</strong> ' +
-                  '<span data-i18n="ui_sub_card_check">We verify your card with a small temporary authorization that is released immediately and never debited. Your exact billing terms appear on the next screen before confirmation. Every payment comes with an email receipt.</span>';
+                  '<span data-i18n="ui_sub_card_check">We verify your card with a small temporary authorization. Norva cancels it after successful verification, but your bank may show the hold for longer. Your exact billing terms appear on the next screen before confirmation. Every subscription payment comes with an email receipt.</span>';
               }
             }
             if (el) el.classList.add('show');

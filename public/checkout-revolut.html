@@ -2,7 +2,7 @@
 <html lang="en" class="quote-pending">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=498cb9b828"></script>
+    <script src="/js/i18n.js?v=7c0e89e3cf"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_6f36bcfd9969">Norva — Secure checkout</title>
@@ -287,7 +287,7 @@
               <li class="bd-row">
                 <span class="timeline-dot" aria-hidden="true"></span>
                 <span class="bd-k"><strong id="bd-today-label" data-i18n="ui_web_2b065c7c9ce4">Today</strong><small id="bd-today-note" data-i18n="ui_web_c1b771d3d9e9">Temporary card check only</small></span>
-                <span class="bd-v"><strong id="bd-today-value" data-i18n="ui_web_6e95e081b543">US$0.00</strong><small id="bd-today-suffix" data-i18n="ui_web_d32a799b659b">released immediately</small></span>
+                <span class="bd-v"><strong id="bd-today-value" data-i18n="ui_web_6e95e081b543">US$0.00</strong><small id="bd-today-suffix" data-i18n="ui_web_d32a799b659b">canceled after verification</small></span>
               </li>
               <li class="bd-row">
                 <span class="timeline-dot" aria-hidden="true"></span>
@@ -791,7 +791,7 @@
           if (compactPlan) compactPlan.textContent = (globalThis.NorvaI18n?.t("ui_web_aea89318764f", { defaultValue: "Payment method update" }) ?? 'Payment method update');
           if (compactDate) compactDate.textContent = (globalThis.NorvaI18n?.t("ui_web_766209c7a9c0", { defaultValue: "Temporary card verification only" }) ?? 'Temporary card verification only');
           if (compactPrice) compactPrice.textContent = (globalThis.NorvaI18n?.t("ui_web_a10d5be4e97b", { defaultValue: "No plan charge" }) ?? 'No plan charge');
-          if (commitment) commitment.textContent = (globalThis.NorvaI18n?.t("ui_web_1d4d4aa78e7e", { defaultValue: "By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update." }) ?? 'By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update.');
+          if (commitment) commitment.textContent = (globalThis.NorvaI18n?.t("ui_web_1d4d4aa78e7e", { defaultValue: "By selecting “Save card”, you authorize a temporary card verification. Norva cancels the authorization after verification, but your bank may take longer to remove the hold. This update does not charge your subscription." }) ?? 'By selecting “Save card”, you authorize a temporary card verification. Norva cancels the authorization after verification, but your bank may take longer to remove the hold. This update does not charge your subscription.');
           payBtn.textContent = (globalThis.NorvaI18n?.t("ui_web_27528dd8916e", { defaultValue: "Save card" }) ?? 'Save card');
         } else if (checkoutKind === 'plan_change') {
           h1.textContent = (globalThis.NorvaI18n?.t("ui_web_0d7761373186", { defaultValue: "Change your plan" }) ?? 'Change your plan');
@@ -820,7 +820,7 @@
           const trialDays = serverTrialDays || 7;
           if (todayValue) todayValue.textContent = displayMoney('0.00') + (globalThis.NorvaI18n?.t("ui_web_6cb5f2bbb6be", { defaultValue: " — temporary card check only" }) ?? ' — temporary card check only');
           if (todayNote) todayNote.textContent = (globalThis.NorvaI18n?.t("ui_web_c1b771d3d9e9", { defaultValue: "Temporary card check only" }) ?? 'Temporary card check only');
-          if (todaySuffix) todaySuffix.textContent = (globalThis.NorvaI18n?.t("ui_web_d32a799b659b", { defaultValue: "released immediately" }) ?? 'released immediately');
+          if (todaySuffix) todaySuffix.textContent = (globalThis.NorvaI18n?.t("ui_web_d32a799b659b", { defaultValue: "canceled after verification" }) ?? 'canceled after verification');
           if (firstLabel) firstLabel.textContent = (globalThis.NorvaI18n?.t("ui_web_b0332ed00235", { defaultValue: "First payment on" }) ?? 'First payment on');
           if (finalLabel) finalLabel.textContent = (globalThis.NorvaI18n?.t("ui_web_a48130f7a6a3", { defaultValue: "Cancel anytime before then" }) ?? 'Cancel anytime before then');
           if (finalNote) finalNote.textContent = (globalThis.NorvaI18n?.t("ui_web_ceccdb05ed73", { defaultValue: "From your Norva subscription settings" }) ?? 'From your Norva subscription settings');
