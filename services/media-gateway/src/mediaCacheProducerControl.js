@@ -141,7 +141,8 @@ class MediaCacheProducerControl {
             this.pulse(session, session.mediaCacheProducerStage || 'producing')
                 .catch(() => null)
                 .finally(() => {
-                    if (!session.mediaCacheProducerCompleted && session.status !== 'ended') {
+                    if (!session.mediaCacheProducerCompleted
+                        && (session.status !== 'ended' || session.sharedMediaCachePublicationPending === true)) {
                         const nextDelay = session.backgroundCacheContinuation === true
                             ? Math.min(this.heartbeatMs, 5_000)
                             : this.heartbeatMs;

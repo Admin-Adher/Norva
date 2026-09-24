@@ -213,9 +213,47 @@ that the request options omit it while the receiving server sees the correct
 tests pass. A real EOF publication and later shared-cache hit remain to be
 verified after deployment.
 
+## Upload-header fix rollout, 12:20 UTC
+
+PR #404 merged as `99a98a4a1c222cb00e9b923e4877440cc961c452`. Its CI
+cloud-contract, Android phone, Android TV and Windows jobs passed. The in-process Worker
+test bridge was updated to model the Content-Length inserted by real fetch;
+its 14 end-to-end tests pass. The exact merged Gateway source archive has
+SHA-256 `e8ec2f02ad1995904fc727c84529db531c2d7a8d417ceeb56ebdd559502677ec`.
+A networkless build against the pinned codec runtime produced image
+`sha256:4601ebac4ed3e0abb71a96c5688594924c410e6ad137b37519f2bbb4821c89d7`.
+The guarded pilot and main replacements completed at 12:20:22 and 12:20:42 UTC,
+with no environment changes; both now run that image and revision with zero
+restarts. Rollback receipts are
+`/home/adrien/.norva/gateway-reference-rollout/20260924T122022322251Z` and
+`/home/adrien/.norva/gateway-reference-rollout/20260924T122042827858Z`.
+The main Compose override is pinned to the new image. Its protected backup is
+`/home/adrien/.norva/gateway-upload-length-99a98a4a-20260924/override-before-upload-length.yml`;
+its SHA-256 changed from `f2fc75aaa6364474706410812bf3cc6f35d4921a7af3a3fbf6e7bfc6f3b4e880`
+to `8d055ce74a3255d8b6d32c5d0264965ae55502cb5e7935edb5260366be85befd`.
+
+The ordinary QA film was restarted from zero after rollout. The stale watch
+page again needed its visible Retry action before playback resumed. Decoded
+720p playback ran at 2× to the full 48:11 browser ended state without a media
+error. The Gateway retained 1,447 output files and began the immutable R2
+upload after source EOF. Inventory advanced from zero to 41, then 119, 205
+and 276 objects; this proves that the formerly failing first asset PUT now
+succeeds in the real publication process. The upload continued past 385
+objects, but the producer pulse counter froze at 72 when FFmpeg marked the
+session `ended`. The authority's lease TTL is 120 seconds; a guarded pulse
+for this exact QA session returned `expired`. Therefore this run cannot
+register a ready cache object even if every R2 asset finishes uploading.
+
+The follow-up fix explicitly rearms the producer heartbeat when EOF publication
+starts and keeps it alive while that publication is pending, even though the
+viewer session has ended. It detaches the timer when publication settles. A
+focused test now observes multiple `uploading` renewals after session EOF;
+20 focused producer, wiring and publication tests pass locally. This fix needs
+CI, deployment and another real replay before a cache hit can be claimed.
+
 ## Remaining checks
 
-- Deploy the upload-header fix, then obtain one successful EOF publication and
+- Deploy the EOF heartbeat fix, then obtain one successful EOF publication and
   ready R2 object on the ordinary QA film.
 - Replay the film in the ordinary QA app and confirm decoded frames with a
   shared-cache session and no new provider-backed Gateway session.

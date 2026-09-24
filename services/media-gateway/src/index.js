@@ -18522,6 +18522,7 @@ function scheduleSharedMediaCachePublication(session) {
         session.completeHlsCacheMediaReady !== true
         || session.completeHlsCacheProfileReady !== true
     ) return null;
+    session.sharedMediaCachePublicationPending = true;
     const publication = Promise.resolve()
         .then(() => maybePublishSharedMediaCache(session))
         .catch((error) => {
@@ -18541,8 +18542,12 @@ function scheduleSharedMediaCachePublication(session) {
             };
             console.warn(`[media-gateway] shared HLS publication skipped for ${session.id}: ${reason} ${JSON.stringify(diagnostic)}`);
             return null;
+        }).finally(() => {
+            session.sharedMediaCachePublicationPending = false;
+            mediaCacheProducerControl.detach(session);
         });
     session.sharedMediaCachePublicationPromise = publication;
+    if (session.mediaCacheProducer) mediaCacheProducerControl.schedule(session, 1);
     return publication;
 }
 
