@@ -51,6 +51,19 @@ test('only fixed nested info/movie_data fields and track-language fields are pre
   assert.doesNotMatch(JSON.stringify(result), /secret|private|aac|https/);
 });
 
+test('provider track tags with common uppercase language keys retain their original role', async () => {
+  const { xtreamLanguageDeclarations: capture } = await helper;
+  assert.deepEqual(fields(capture({
+    info: {
+      audio_tracks: [{ tags: { LANGUAGE: 'eng', title: 'private' } }],
+      subtitle_tracks: [{ tags: { LANG: 'fr' } }],
+    },
+  })), {
+    'info.audio_tracks[0].tags.LANGUAGE': { role: 'audio', values: ['eng'] },
+    'info.subtitle_tracks[0].tags.LANG': { role: 'subtitle', values: ['fr'] },
+  });
+});
+
 test('track declarations cannot impersonate observed tracks or import codec/profile objects', async () => {
   const { xtreamLanguageDeclarations: capture } = await helper;
   const result = capture({
