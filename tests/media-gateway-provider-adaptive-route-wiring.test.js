@@ -10,8 +10,8 @@ const gateway = fs.readFileSync(path.join(
   '../services/media-gateway/src/index.js',
 ), 'utf8');
 
-test('Gateway v166 keeps adaptive routing behind dedicated route and benchmark gates', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 167;/);
+test('Gateway v168 keeps adaptive routing behind dedicated route and benchmark gates', () => {
+  assert.match(gateway, /const GATEWAY_VERSION = 168;/);
   assert.match(gateway, /process\.env\.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_BENCHMARK_ENABLED === 'true'/);
   assert.match(gateway, /process\.env\.PROVIDER_ROUTE_FINGERPRINT_HMAC_KEY/);
@@ -38,6 +38,7 @@ test('Node chooses HTTP, forward or SOCKS5 without changing the child process ac
     providerHttpProxyUrls: ['http://slot-one.invalid', 'http://slot-two.invalid'],
     providerSocksProxyUrls: ['socks5://slot-one.invalid', 'socks5://slot-two.invalid'],
     providerRouteForKey: key => { assert.equal(key, 'owned-account'); return { slot: 2, nodeTransport: transport }; },
+    providerNodeRouteForSession: ({ canaryProviderRoute }) => canaryProviderRoute,
     poolIndexForKey: key => { assert.equal(key, 'owned-account'); return 1; },
     createProviderProxyAgent: url => ({ url }), process: { env: {} },
   };
@@ -56,6 +57,38 @@ test('Node chooses HTTP, forward or SOCKS5 without changing the child process ac
     const child = context.proxyEnvFor('owned-account');
     for (const name of ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']) assert.equal(child[name], 'http://slot-two.invalid');
   }
+  const canary = { slot: 1, nodeTransport: 'http', controlStatus: 'canary-shadow-applied' };
+  assert.equal(context.pickProxyAgent('owned-account', 'https://provider.invalid/a.mp4', canary), 'http-one');
+  const canaryChild = context.proxyEnvFor('owned-account', { ...canary, ffmpegSlot: 1 });
+  for (const name of ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']) {
+    assert.equal(canaryChild[name], 'http://slot-one.invalid');
+  }
+});
+
+test('canary route stays on its playback session and an operator override wins', () => {
+  const vm = require('node:vm');
+  const staticRoute = { slot: 2, ffmpegSlot: 2, nodeTransport: 'socks5' };
+  const canaryRoute = { slot: 1, ffmpegSlot: 1, nodeTransport: 'http', controlStatus: 'canary-shadow-applied' };
+  const overrides = new Set();
+  const context = {
+    providerNodeRouteIsAvailable: route => Number.isInteger(route?.slot),
+    proxyKeyFromUrl: () => 'shared-provider-account',
+    providerRouteForKey: () => staticRoute,
+    providerProxySlotOverrides: overrides,
+    sha256Hex: () => 'affinity-hash',
+    useProviderHttpForward: () => false,
+    providerHttpForwardAccounts: new Set(),
+    providerHttpForwardPolicy: {},
+  };
+  const start = gateway.indexOf('function providerNodeRouteForSession(');
+  const end = gateway.indexOf('function providerProxyAgentForRoute(', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInNewContext(gateway.slice(start, end), context);
+  const sourceUrl = 'https://provider.invalid/movie/shared-account/file.mkv';
+  assert.equal(context.providerNodeRouteForSession({ sourceUrl, canaryProviderRoute: canaryRoute }).slot, 1);
+  assert.equal(context.providerNodeRouteForSession({ sourceUrl }).slot, 2);
+  overrides.add('affinity-hash');
+  assert.equal(context.providerNodeRouteForSession({ sourceUrl, canaryProviderRoute: canaryRoute }).slot, 2);
 });
 test('complete cache hit avoids route control while every provider-backed session resolves before I/O', () => {
   const sessionRoute = gateway.slice(
@@ -70,6 +103,9 @@ test('complete cache hit avoids route control while every provider-backed sessio
   assert.ok(providerCleanup > resolve, 'route resolution and benchmark preemption must finish before provider cleanup/I/O');
   assert.match(sessionRoute, /adaptiveRouteLookupMs/);
   assert.match(sessionRoute, /adaptiveRouteControlStatus/);
+  assert.match(sessionRoute, /ownerKey: normalizedOwnerKey/);
+  assert.match(sessionRoute, /canaryProviderRoute: adaptiveRouteDecision\?\.controlStatus === 'canary-shadow-applied'/);
+  assert.match(gateway, /proxyEnvFor\(\s*proxyKeyFromUrl\(session\.sourceUrl\), providerNodeRouteForSession\(session\)\)/);
 });
 
 test('raw playback preempts route benchmarking before freezing its one dispatcher', () => {
@@ -79,9 +115,10 @@ test('raw playback preempts route benchmarking before freezing its one dispatche
   );
   const localPreemption = rawRoute.indexOf('preemptBackgroundWorkGlobally(');
   const routeResolution = rawRoute.indexOf('providerAdaptiveRouteControl.resolveForPlayback');
-  const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url)');
+  const dispatcherFreeze = rawRoute.indexOf('const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url, rawAdaptiveDecision)');
   assert.ok(localPreemption >= 0 && routeResolution > localPreemption && dispatcherFreeze > routeResolution);
   assert.match(rawRoute, /if \(ac\.signal\.aborted \|\| res\.destroyed \|\| res\.writableEnded\) return;/);
+  assert.match(rawRoute, /ownerKey: pumpOwnerHash/);
   assert.ok(rawRoute.indexOf('scheduleProviderRouteBenchmark(', routeResolution) < dispatcherFreeze);
 });
 

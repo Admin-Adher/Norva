@@ -295,7 +295,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   assert.doesNotMatch(gateway, /proxyEnvFor\(proxyKey\s*\|\|/);
   assert.doesNotMatch(gateway, /proxyEnvFor\(session\.userId\s*\|\|/);
 
-  assert.match(gateway, /const rawProxyAgent = pickProxyAgent\(pumpProxyKey, claims\.url\);/);
+  assert.match(gateway, /const rawProxyAgent = pickProxyAgent\(pumpProxyKey, claims\.url, rawAdaptiveDecision\);/);
   assert.match(gateway, /dispatcher: rawProxyAgent \|\| undefined/);
   assert.match(
     gateway,
@@ -324,7 +324,7 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /const inputEnv = pumpedMkvInput \|\| localSpoolInput[\s\S]{0,180}\? loopbackOnlyEnv\(\)[\s\S]{0,120}: proxyEnvFor\(proxyKeyFromUrl\(session\.sourceUrl\)\)/,
+    /const inputEnv = pumpedMkvInput \|\| localSpoolInput[\s\S]{0,180}\? loopbackOnlyEnv\(\)[\s\S]{0,120}: proxyEnvFor\(\s*proxyKeyFromUrl\(session\.sourceUrl\), providerNodeRouteForSession\(session\)\)/,
     'seek-broker transcodes must stay loopback-only while direct provider inputs retain account proxy affinity',
   );
   assert.match(gateway, /env: outputAdmission \? loopbackOutputEnv\(inputEnv\) : inputEnv/,
@@ -346,17 +346,17 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /function pickProxyAgent\(key, sourceUrl = ''\) \{[\s\S]{0,160}providerRouteForKey\(key\)/,
+    /function pickProxyAgent\(key, sourceUrl = '', sessionDecision = null\) \{[\s\S]{0,300}providerRouteForKey\(key\)/,
     'HTTP lanes must resolve their operator override through the shared sticky slot selector',
   );
   assert.match(
     gateway,
-    /function proxyEnvFor\(key\) \{[\s\S]{0,160}poolIndexForKey\(key\)/,
+    /function proxyEnvFor\(key, pinnedRoute = null\) \{[\s\S]{0,400}poolIndexForKey\(key\)/,
     'FFmpeg and FFprobe lanes must resolve the same targeted slot as HTTP',
   );
   assert.match(
     gateway,
-    /function proxyEnvFor\(key\) \{[\s\S]{0,220}providerHttpProxyUrls\[poolIndexForKey\(key\)\]/,
+    /function proxyEnvFor\(key, pinnedRoute = null\) \{[\s\S]{0,400}providerHttpProxyUrls\[pinnedIndex \?\? poolIndexForKey\(key\)\]/,
     'FFmpeg and FFprobe must retain the matching HTTP proxy slot',
   );
 });
@@ -513,7 +513,7 @@ test('gateway fails proxy 407 safely before provider 458 handling', () => {
 });
 
 test('gateway advertises targeted operator override support without identities or secrets', () => {
-  assert.match(gateway, /const GATEWAY_VERSION = 167;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 168;/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityKey:\s*'provider-account'/);
   assert.match(gateway, /providerProxySlotOverrideProtocol:\s*1/);
@@ -572,11 +572,11 @@ test('service-only session diagnostics expose only the proxy slot and one-way af
 test('service-only diagnostics retain the last proxy selection before a session exists', () => {
   assert.match(
     gateway,
-    /function observeProviderProxySelection\(key\)[\s\S]{0,500}slot:\s*route\.slot,[\s\S]{0,300}affinitySha256,[\s\S]{0,180}overridden:\s*providerProxySlotOverrides\.has\(affinitySha256\)/,
+    /function observeProviderProxySelection\(key, selectedRoute = null\)[\s\S]{0,650}slot:\s*route\.slot,[\s\S]{0,300}affinitySha256,[\s\S]{0,180}overridden:\s*providerProxySlotOverrides\.has\(affinitySha256\)/,
   );
   assert.match(
     gateway,
-    /resolveForPlayback\([\s\S]{0,180}sourceUrl,[\s\S]{0,180}playbackProxyKey,[\s\S]{0,300}observeProviderProxySelection\(playbackProxyKey\);/,
+    /resolveForPlayback\([\s\S]{0,180}sourceUrl,[\s\S]{0,180}playbackProxyKey,[\s\S]{0,550}observeProviderProxySelection\(playbackProxyKey, providerNodeRouteForSession\(/,
   );
   assert.match(
     gateway,

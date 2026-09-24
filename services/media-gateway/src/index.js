@@ -274,11 +274,12 @@ function poolIndexForKey(key) {
     return providerRouteForKey(key).slot - 1;
 }
 let lastProviderProxySelection = null;
-function observeProviderProxySelection(key) {
+function observeProviderProxySelection(key, selectedRoute = null) {
     const affinity = String(key || '');
     if (!providerProxyAgents.length || !affinity) return;
     const affinitySha256 = sha256Hex(affinity);
-    const route = providerRouteForKey(affinity);
+    const route = providerNodeRouteIsAvailable(selectedRoute)
+        ? selectedRoute : providerRouteForKey(affinity);
     lastProviderProxySelection = {
         protocol: 2,
         transport: route.nodeTransport,
@@ -924,10 +925,13 @@ function viewerPlaybackActiveLocally() {
         || Array.from(sessions.values()).some((session) => isSessionBlockingProviderSlot(session));
 }
 
-function pickProxyAgent(key, sourceUrl = '') {
+function pickProxyAgent(key, sourceUrl = '', sessionDecision = null) {
     if (!providerProxyAgents.length) return null;
-    const route = providerRouteForKey(key);
-    if (useProviderHttpForward(key, sourceUrl, providerHttpForwardAccounts, providerHttpForwardPolicy)) {
+    const route = sessionDecision?.controlStatus === 'canary-shadow-applied'
+        ? providerNodeRouteForSession({ sourceUrl, canaryProviderRoute: sessionDecision })
+        : providerRouteForKey(key);
+    if (route?.httpProxyMode === 'forward'
+        || useProviderHttpForward(key, sourceUrl, providerHttpForwardAccounts, providerHttpForwardPolicy)) {
         return providerHttpForwardAgents[route.slot - 1] || null;
     }
     const agents = route.nodeTransport === 'socks5'
@@ -949,9 +953,12 @@ function pinnedProxyAgentFactory(key) {
     return () => createProviderProxyAgent(proxyUrl);
 }
 // Spawn env routing a child (ffmpeg/ffprobe) through this key's sticky pool IP.
-function proxyEnvFor(key) {
+function proxyEnvFor(key, pinnedRoute = null) {
     if (!providerHttpProxyUrls.length) return undefined;
-    const url = providerHttpProxyUrls[poolIndexForKey(key)];
+    const pinnedSlot = Number(pinnedRoute?.ffmpegSlot || pinnedRoute?.slot);
+    const pinnedIndex = Number.isInteger(pinnedSlot) && pinnedSlot >= 1
+        && pinnedSlot <= providerHttpProxyUrls.length ? pinnedSlot - 1 : null;
+    const url = providerHttpProxyUrls[pinnedIndex ?? poolIndexForKey(key)];
     return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
 }
 // A strict LID ffmpeg reads only the private 127.0.0.1 broker. Explicitly remove every
@@ -999,6 +1006,9 @@ function decodeProviderRouteFingerprintKey(value) {
 const PROVIDER_ADAPTIVE_ROUTE_REQUESTED = process.env.PROVIDER_ADAPTIVE_ROUTE_ENABLED === 'true';
 const PROVIDER_ADAPTIVE_ROUTE_CANARY_APPLY_SHADOW =
     process.env.PROVIDER_ADAPTIVE_ROUTE_CANARY_APPLY_SHADOW === 'true';
+const PROVIDER_ADAPTIVE_ROUTE_CANARY_OWNER_KEYS = String(
+    process.env.PROVIDER_ADAPTIVE_ROUTE_CANARY_OWNER_KEYS || '',
+).split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
 const PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS = clampInt(
     process.env.PROVIDER_ADAPTIVE_ROUTE_LOOKUP_TIMEOUT_MS,
     500,
@@ -1050,6 +1060,7 @@ providerAdaptiveRouteControl = new ProviderAdaptiveRouteControl({
     slotIndexForKey: staticPoolIndexForKey,
     fallbackNodeTransport: providerProxyTransport,
     applyShadowForCanary: PROVIDER_ADAPTIVE_ROUTE_CANARY_APPLY_SHADOW,
+    canaryOwnerKeys: PROVIDER_ADAPTIVE_ROUTE_CANARY_OWNER_KEYS,
 });
 if (PROVIDER_ADAPTIVE_ROUTE_REQUESTED) {
     const adaptiveStatus = providerAdaptiveRouteControl.publicStatus();
@@ -2399,7 +2410,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 167;
+const GATEWAY_VERSION = 168;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -4109,12 +4120,16 @@ const nativeMp4Sessions = createNativeMp4Sessions({
             preemptBackgroundWorkGlobally(proxyKey, reason);
             if (handoff && !await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, entry.ac.signal))
                 throw new Error('NATIVE_MP4_ABORTED');
-            await providerAdaptiveRouteControl.resolveForPlayback(claims.url, proxyKey, { signal: entry.ac.signal });
+            const nativeAdaptiveDecision = await providerAdaptiveRouteControl.resolveForPlayback(
+                claims.url, proxyKey, { signal: entry.ac.signal, ownerKey: entry.ownerHash },
+            );
             if (entry.ac.signal.aborted) throw new Error('NATIVE_MP4_ABORTED');
-            const route = providerNodeRouteForSession({ sourceUrl: claims.url });
+            const route = providerNodeRouteForSession({ sourceUrl: claims.url,
+                canaryProviderRoute: nativeAdaptiveDecision?.controlStatus === 'canary-shadow-applied'
+                    ? nativeAdaptiveDecision : null });
             const dispatcherFactory = pinnedProxyAgentFactoryForRoute(route);
             if (!dispatcherFactory) throw new Error('NATIVE_MP4_PINNED_ROUTE_UNAVAILABLE');
-            observeProviderProxySelection(proxyKey);
+            observeProviderProxySelection(proxyKey, route);
             const privateRanges = canUsePrivateResumeCache(entry.ownerHash) && claims.resumeSourceId && claims.resumeSourceRevision
                 ? privateResumeByteRanges.begin({ ownerKey: entry.ownerHash, sourceUrl: claims.url,
                     fileSizeBytes: claims.fileSizeBytes, sourceId: claims.resumeSourceId,
@@ -4259,11 +4274,14 @@ app.get('/raw/:token', async (req, res) => {
         if (activeAttemptGuard) activeAttemptGuard.dispose();
         releaseRawPump(pump);
     });
-    await providerAdaptiveRouteControl.resolveForPlayback(claims.url, pumpProxyKey, {
-        signal: ac.signal,
+    const rawAdaptiveDecision = await providerAdaptiveRouteControl.resolveForPlayback(claims.url, pumpProxyKey, {
+        signal: ac.signal, ownerKey: pumpOwnerHash,
     });
     if (ac.signal.aborted || res.destroyed || res.writableEnded) return;
-    observeProviderProxySelection(pumpProxyKey);
+    const rawRoute = providerNodeRouteForSession({ sourceUrl: claims.url,
+        canaryProviderRoute: rawAdaptiveDecision?.controlStatus === 'canary-shadow-applied'
+            ? rawAdaptiveDecision : null });
+    observeProviderProxySelection(pumpProxyKey, rawRoute);
     scheduleProviderRouteBenchmark(claims.url, pumpProxyKey, claims.ua);
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
@@ -4272,7 +4290,7 @@ app.get('/raw/:token', async (req, res) => {
     const startupDeadlineAt = Date.now() + RAW_STARTUP_DEADLINE_MS;
     // Resolve once for the whole byte-pipe request. Retries keep the same static
     // egress and can never rotate this provider account to another IP.
-    const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url);
+    const rawProxyAgent = pickProxyAgent(pumpProxyKey, claims.url, rawAdaptiveDecision);
 
     // Retry only transient network/server failures and empty responses. Every 4xx,
     // especially the provider's single-account 458, is terminal on its first response
@@ -11633,11 +11651,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             adaptiveRouteDecision = await providerAdaptiveRouteControl.resolveForPlayback(
                 sourceUrl,
                 playbackProxyKey,
-                { signal: sessionRequestAbortController.signal },
+                { signal: sessionRequestAbortController.signal, ownerKey: normalizedOwnerKey },
             );
             adaptiveRouteLookupMs = Math.max(0, Date.now() - adaptiveRouteLookupStartedAt);
             if (sessionRequestAbortController.signal.aborted) return;
-            observeProviderProxySelection(playbackProxyKey);
+            observeProviderProxySelection(playbackProxyKey, providerNodeRouteForSession({ sourceUrl,
+                canaryProviderRoute: adaptiveRouteDecision?.controlStatus === 'canary-shadow-applied'
+                    ? adaptiveRouteDecision : null }));
             scheduleProviderRouteBenchmark(
                 sourceUrl,
                 playbackProxyKey,
@@ -11816,6 +11836,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             sourceUrl,
             sourceKey,
             ownerKey: normalizedOwnerKey,
+            canaryProviderRoute: adaptiveRouteDecision?.controlStatus === 'canary-shadow-applied'
+                ? adaptiveRouteDecision : null,
             providerSlotKey: playbackProviderSlotKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             userAgent: sanitizeUserAgent(userAgent),
@@ -13867,7 +13889,10 @@ function providerNodeRouteForSession(session) {
         return session.providerNodeRoute;
     }
     const affinityKey = proxyKeyFromUrl(session?.sourceUrl || '');
-    const route = affinityKey ? providerRouteForKey(affinityKey) : null;
+    const fallbackRoute = affinityKey ? providerRouteForKey(affinityKey) : null;
+    const operatorOverride = affinityKey && providerProxySlotOverrides.has(sha256Hex(affinityKey));
+    const route = !operatorOverride && providerNodeRouteIsAvailable(session?.canaryProviderRoute)
+        ? session.canaryProviderRoute : fallbackRoute;
     if (providerNodeRouteIsAvailable(route)
         && useProviderHttpForward(affinityKey, session?.sourceUrl, providerHttpForwardAccounts, providerHttpForwardPolicy)) {
         return { ...route, nodeTransport: 'http', httpProxyMode: 'forward' };
@@ -16544,7 +16569,8 @@ function startFfmpeg(session) {
         }
         const inputEnv = pumpedMkvInput || localSpoolInput
             ? undefined
-            : (seekableMkvInput ? loopbackOnlyEnv() : proxyEnvFor(proxyKeyFromUrl(session.sourceUrl)));
+            : (seekableMkvInput ? loopbackOnlyEnv() : proxyEnvFor(
+                proxyKeyFromUrl(session.sourceUrl), providerNodeRouteForSession(session)));
         child = spawn(FFMPEG_PATH, args, {
             stdio: [pumpedMkvInput ? 'pipe' : 'ignore', 'ignore', 'pipe'],
             // Keep the provider's sticky proxy for the input, but the private
