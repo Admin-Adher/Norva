@@ -7,6 +7,22 @@ const { pathToFileURL } = require('node:url');
 const root = path.resolve(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
 
+test('entitlement event conflict target has an unconditional unique index', () => {
+  const migration = read('supabase/migrations/20260924090000_entitlement_event_conflict_target.sql');
+  const declaration = migration.match(/create unique index if not exists cloud_entitlement_events_provider_event_full_uidx\s+on public\.cloud_entitlement_events\s*\(provider, provider_event_id\)\s*;/i);
+  assert.ok(declaration, 'PostgREST upserts need an index inferable by ON CONFLICT (provider, provider_event_id)');
+  const historical = read('supabase/migrations/20260616122103_cloud_entitlements.sql');
+  assert.match(historical, /where provider_event_id is not null;/i);
+  for (const file of [
+    'supabase/functions/norva-revolut/index.ts',
+    'supabase/functions/norva-revolut-webhook/index.ts',
+    'supabase/functions/norva-revolut-billing/index.ts',
+    'supabase/functions/norva-lifecycle/index.ts',
+  ]) {
+    assert.match(read(file), /onConflict: "provider,provider_event_id", ignoreDuplicates: true/);
+  }
+});
+
 test('checkout schema provides single-flight leases and one current intent per user', () => {
   const sql = read('supabase/migrations/20260721110000_revolut_checkout_reliability.sql');
   assert.match(sql, /cloud_revolut_checkout_intents/);
