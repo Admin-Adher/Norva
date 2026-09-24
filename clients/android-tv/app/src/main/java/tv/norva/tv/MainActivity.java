@@ -1256,6 +1256,9 @@ public class MainActivity extends Activity {
         // Extensible launch: one JSON payload instead of ever-longer signatures.
         // Carries poster (Play Next artwork) and nextTitle ("À suivre" overlay).
         @android.webkit.JavascriptInterface
+        public int privateMediaCacheProtocol() { return 1; }
+
+        @android.webkit.JavascriptInterface
         public void playVideoJson(final String json) {
             MainActivity.this.playFromJson(json);
         }
@@ -1301,6 +1304,9 @@ public class MainActivity extends Activity {
 
         // Extensible launch: one JSON payload instead of ever-longer signatures.
         // Carries poster (Play Next artwork) and nextTitle ("À suivre" overlay).
+        @android.webkit.JavascriptInterface
+        public int privateMediaCacheProtocol() { return 1; }
+
         @android.webkit.JavascriptInterface
         public void playVideoJson(final String json) {
             MainActivity.this.playFromJson(json);
@@ -1405,7 +1411,7 @@ public class MainActivity extends Activity {
                             final String playbackPreferencesJson) {
         openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl,
                 poster, nextTitle, variantsJson, activeStreamId, trackMetadataJson,
-                preferenceScopeJson, playbackPreferencesJson, null);
+                preferenceScopeJson, playbackPreferencesJson, null, null);
     }
 
     private void openPlayer(final String url, final String title, final String sourceId,
@@ -1414,7 +1420,7 @@ public class MainActivity extends Activity {
                             final String variantsJson, final String activeStreamId,
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson,
-                            final String playbackSessionId) {
+                            final String playbackSessionId, final String mediaCacheJson) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -1443,6 +1449,7 @@ public class MainActivity extends Activity {
                 }
                 if (playbackSessionId != null && !playbackSessionId.isEmpty()) {
                     intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID, playbackSessionId);
+                intent.putExtra(PlayerActivity.EXTRA_MEDIA_CACHE, mediaCacheJson);
                 }
                 launchPlayerWithEphemeralAuth(intent);
             }
@@ -1508,7 +1515,8 @@ public class MainActivity extends Activity {
                     trackMetadata == null ? null : trackMetadata.toString(),
                     preferenceScope == null ? null : preferenceScope.toString(),
                     playbackPreferences == null ? null : playbackPreferences.toString(),
-                    emptyToNull(o.optString("sessionId")));
+                    emptyToNull(o.optString("sessionId")),
+                    o.optJSONObject("mediaCache") == null ? null : o.getJSONObject("mediaCache").toString());
         } catch (Exception ignored) {
             // A malformed payload simply doesn't start playback; the web side
             // falls back to the legacy fixed-signature bridge methods.

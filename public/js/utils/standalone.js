@@ -775,7 +775,7 @@
                 }
                 try {
                     window.__norvaResetPlayThrottle?.();
-                    await entry.launcher(resume, recoveryToken);
+                    await entry.launcher(resume, recoveryToken, reason);
                 } catch (error) {
                     if (recoveryToken && activeNativeRecoveryTokens.get(key) !== recoveryToken) {
                         console.info('[Native] Ignored superseded playback recovery for', key);
@@ -936,6 +936,7 @@
                     trackMetadata: extras?.trackMetadata || null,
                     preferenceScope: extras?.preferenceScope || null,
                     playbackPreferences: extras?.playbackPreferences || null,
+                    mediaCache: extras?.mediaCache || null,
                     // Binds this resolved URL to the exact native recovery that
                     // requested it. Initial user launches intentionally carry
                     // no token and remain normal PlayerActivity launches.
@@ -1009,7 +1010,8 @@
                 return {
                     url: resolved && resolved.url ? resolved.url : null,
                     fallbackUrl: resolved && resolved.fallbackUrl ? resolved.fallbackUrl : null,
-                    sessionId: resolved && resolved.sessionId ? String(resolved.sessionId) : null
+                    sessionId: resolved && resolved.sessionId ? String(resolved.sessionId) : null,
+                    mediaCache: resolved?.mediaCache || resolved?.playback?.mediaCache || null
                 };
             } catch (err) {
                 console.warn('[Native] Could not resolve stream URL:', err?.message || err);
@@ -1242,7 +1244,9 @@
                     })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
                 const meta = initialMeta;
-                const launchResolved = async (resumeAt, fresh = false, recoveryToken = '') => {
+                let bypassNativeCache = false;
+                const launchResolved = async (resumeAt, fresh = false, recoveryToken = '', reason = '') => {
+                    if (reason === 'media_cache_unavailable') bypassNativeCache = true;
                     let resolved;
                     if (fresh && meta && window.API?.proxy?.xtream?.getStreamUrl) {
                         await stopNativeVodCloudSessions(this);
@@ -1260,7 +1264,7 @@
                             content.id,
                             streamType,
                             container,
-                            hint
+                            { ...hint, ...(bypassNativeCache ? { mediaCacheReadPolicy: 'bypass-once' } : {}) }
                         );
                     } else {
                         resolved = await resolveStreamPayload(streamUrl);
@@ -1282,6 +1286,7 @@
                         trackMetadata: buildNativeTrackMetadata(content),
                         preferenceScope: nativePreferenceScope(content),
                         sessionId: playbackSessionId,
+                        mediaCache: resolved.mediaCache || resolved.playback?.mediaCache || null,
                         playbackPreferences: content.playbackPreferences
                             || content.playback_preferences
                             || null,
@@ -1293,7 +1298,7 @@
                 };
                 registerNativeRecovery(
                     meta,
-                    (resumeAt, recoveryToken) => launchResolved(resumeAt, true, recoveryToken)
+                    (resumeAt, recoveryToken, reason) => launchResolved(resumeAt, true, recoveryToken, reason)
                 );
                 await launchResolved(effectiveResume);
             };
