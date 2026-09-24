@@ -158,7 +158,7 @@ test('manifest lookup failure reports its publication stage without changing the
   );
 });
 
-test('republication is idempotent while a different graph under one immutable identity conflicts', async (t) => {
+test('another complete encode of the exact input reuses the authenticated winner and its byte counts', async (t) => {
   const simulator = new PrivateR2Simulator({ root: await temporary(t, 'norva-shared-hls-r2-idempotent-') });
   const first = await hlsFixture(t, 'same-segment');
   const cache = publisher(simulator);
@@ -166,10 +166,11 @@ test('republication is idempotent while a different graph under one immutable id
   assert.equal((await cache.publish(completeOptions(first))).manifestSha256, published.manifestSha256);
 
   const changed = await hlsFixture(t, 'changed-output-under-same-source-identity');
-  await assert.rejects(
-    () => cache.publish(completeOptions(changed)),
-    (error) => error.code === 'SHARED_HLS_OBJECT_COLLISION',
-  );
+  const reused = await cache.publish(completeOptions(changed));
+  assert.equal(reused.status, 'already-ready');
+  assert.equal(reused.manifestSha256, published.manifestSha256);
+  assert.equal(reused.totalBytes, published.totalBytes);
+  assert.equal(reused.fileCount, published.fileCount);
   assert.equal((await simulator.get(published.manifestKey)).sha256, published.manifestSha256);
 });
 
@@ -201,6 +202,21 @@ test('two distributed publishers converge on the first valid manifest without ov
   assert.equal(results[0].objectKey, results[1].objectKey);
   assert.equal(results[0].manifestSha256, results[1].manifestSha256);
   assert.equal(simulator.snapshot().conflicts >= 1, true, 'one conditional manifest write loses safely');
+});
+
+test('reuse rejects a signed manifest for another exact input and an unauthenticated manifest', async (t) => {
+  const simulator = new PrivateR2Simulator({ root: await temporary(t, 'norva-shared-hls-r2-authority-') });
+  const fixture = await hlsFixture(t);
+  const first = await publisher(simulator).publish(completeOptions(fixture));
+  const existing = await simulator.get(first.manifestKey);
+  const store = { get: async () => existing, put: async () => { throw new Error('must not write'); } };
+  await assert.rejects(() => publisher(store).publish(completeOptions(fixture, {
+    identity: identity({ contentSha256: 'e1'.repeat(32) }),
+  })), error => error.code === 'SHARED_HLS_OBJECT_COLLISION');
+  const damaged = Buffer.from(existing.body);
+  damaged[damaged.length - 10] ^= 1;
+  await assert.rejects(() => publisher({ ...store, get: async () => ({ body: damaged }) })
+    .publish(completeOptions(fixture)), error => error.code === 'INVALID_SHARED_HLS_MANIFEST');
 });
 
 test('prefix-only, live and failed FFmpeg outputs never start an object publication', async (t) => {

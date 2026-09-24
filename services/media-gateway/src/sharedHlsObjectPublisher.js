@@ -155,7 +155,7 @@ function decodeSharedManifest(body, key) {
     return payload;
 }
 
-function validateExistingManifest(payload, expected, nowMs) {
+function validateExistingManifest(payload, expected, nowMs, limits) {
     const keys = [
         'schema', 'identityKind', 'objectKey', 'components', 'rootPlaylist', 'files',
         'totalBytes', 'createdAtMs', 'expiresAtMs', 'completion',
@@ -167,8 +167,6 @@ function validateExistingManifest(payload, expected, nowMs) {
         || payload.objectKey !== expected.objectKey
         || canonicalJson(payload.components) !== canonicalJson(expected.components)
         || payload.rootPlaylist !== expected.rootPlaylist
-        || canonicalJson(payload.files) !== canonicalJson(expected.files)
-        || payload.totalBytes !== expected.totalBytes
         || canonicalJson(payload.completion) !== canonicalJson(expected.completion)
         || !Number.isSafeInteger(payload.createdAtMs)
         || !Number.isSafeInteger(payload.expiresAtMs)
@@ -179,6 +177,30 @@ function validateExistingManifest(payload, expected, nowMs) {
     }
     if (payload.expiresAtMs <= nowMs) {
         throw new SharedHlsPublicationError('SHARED_HLS_OBJECT_EXPIRED', 'existing shared HLS object requires coordinated eviction before replacement');
+    }
+    // The identity describes the fully hashed input and encoding topology.
+    // A second encoder can emit different bytes (timestamps/encoder state).
+    // Reuse the authenticated, immutable winner, never mix its graph with ours.
+    if (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > limits.maxFiles) {
+        throw new SharedHlsPublicationError('SHARED_HLS_OBJECT_COLLISION', 'existing shared HLS file list is invalid');
+    }
+    const paths = new Set();
+    let total = 0;
+    for (const file of payload.files) {
+        if (!file || Object.keys(file).sort().join(',') !== 'contentType,objectName,path,sha256,size'
+            || safeRelativeAsset(file.path) !== file.path || paths.has(file.path)
+            || file.objectName !== `assets/${sha256(`asset-path\0${file.path}`)}`
+            || file.contentType !== contentTypeForAsset(file.path)
+            || !/^[0-9a-f]{64}$/.test(file.sha256)
+            || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > limits.maxFileBytes) {
+            throw new SharedHlsPublicationError('SHARED_HLS_OBJECT_COLLISION', 'existing shared HLS asset is invalid');
+        }
+        paths.add(file.path);
+        total += file.size;
+    }
+    if (!paths.has(payload.rootPlaylist) || !Number.isSafeInteger(total)
+        || total > limits.maxEntryBytes || total !== payload.totalBytes) {
+        throw new SharedHlsPublicationError('SHARED_HLS_OBJECT_COLLISION', 'existing shared HLS graph is invalid');
     }
     return payload;
 }
@@ -289,6 +311,7 @@ class SharedHlsObjectPublisher {
                 decodeSharedManifest(existingManifest.body, this.manifestKey),
                 expectedGraph,
                 nowMs,
+                this,
             );
             return Object.freeze({
                 status: 'already-ready',
@@ -297,8 +320,8 @@ class SharedHlsObjectPublisher {
                 objectPrefix: prefix,
                 manifestKey,
                 manifestSha256: sha256(existingManifest.body),
-                totalBytes,
-                fileCount: records.length,
+                totalBytes: existingPayload.totalBytes,
+                fileCount: existingPayload.files.length,
                 expiresAtMs: existingPayload.expiresAtMs,
             });
         }
@@ -362,7 +385,7 @@ class SharedHlsObjectPublisher {
                 error.publicationStage = 'manifest-put';
             }
             // A distributed peer may have won the manifest-last race. Accept
-            // only its authenticated byte-for-byte graph; every other conflict
+            // only its authenticated graph for the same exact input identity; every other conflict
             // remains terminal and cannot replace the winner.
             const winner = await this.objectStore.get(manifestKey).catch(() => null);
             if (!winner) throw error;
@@ -370,6 +393,7 @@ class SharedHlsObjectPublisher {
                 decodeSharedManifest(winner.body, this.manifestKey),
                 expectedGraph,
                 createdAtMs,
+                this,
             );
             return Object.freeze({
                 status: 'already-ready',
@@ -378,8 +402,8 @@ class SharedHlsObjectPublisher {
                 objectPrefix: prefix,
                 manifestKey,
                 manifestSha256: sha256(winner.body),
-                totalBytes,
-                fileCount: records.length,
+                totalBytes: winnerPayload.totalBytes,
+                fileCount: winnerPayload.files.length,
                 expiresAtMs: winnerPayload.expiresAtMs,
             });
         }
