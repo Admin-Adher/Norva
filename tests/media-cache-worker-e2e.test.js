@@ -267,7 +267,15 @@ async function publishedFixture(t, env, identityOverrides = {}) {
 }
 
 function workerFetch(env) {
-  return (url, init) => worker.fetch(new Request(url, init), env);
+  return (url, init) => {
+    // This in-process bridge bypasses the HTTP transport. Model the length
+    // that fetch sends on the wire for the client's fixed Buffer uploads.
+    const headers = new Headers(init.headers);
+    if (Buffer.isBuffer(init.body) && !headers.has('content-length')) {
+      headers.set('content-length', String(init.body.length));
+    }
+    return worker.fetch(new Request(url, { ...init, headers }), env);
+  };
 }
 
 test('Gateway publication through the private Worker yields an authenticated HLS hit and no public bucket access', async (t) => {
