@@ -144,7 +144,7 @@
 <thead><tr><th scope="col">Component</th><th scope="col">Observed or planned space</th></tr></thead>
 <tbody><tr><td>Current free storage</td><td></td></tr><tr><td>Largest normal variation</td><td></td></tr><tr><td>Pending update or travel needs</td><td></td></tr><tr><td>Extra conservative buffer</td><td></td></tr><tr><td>Selected reserve</td><td></td></tr><tr><td>Planned offline items</td><td></td></tr><tr><td>Projected free space</td><td></td></tr></tbody>
 </table></div>
-<p>Add a stop rule: “No new item when projected space reaches the reserve.” If unexpected use appears, follow the storage diagnostic before deleting broadly.</p>
+<p>Add a stop rule: “No new item when projected space reaches the reserve.” If unexpected use appears, follow the <a href="/blog/find-unexpected-offline-storage-use/">storage diagnostic</a> before deleting broadly.</p>
 <h2 id="review-after-the-real-event">Review after the real event</h2>
 <p>Compare the projected result with actual free space, whether any transfer failed, and whether the device remained usable. Increase the reserve when the plan was too tight. Reduce it only after repeated evidence and without compromising expected device needs.</p>
 <p>The <a href="/blog/offline-storage-management-handbook/">offline storage handbook</a> connects this reserve to cleanup, category distinctions, and multiple devices.</p>
@@ -171,6 +171,12 @@
           <div class="card-title">How Much Storage Should You Reserve for Offline Video?</div>
 
           <p>Measure one representative download, scale from observed sizes, and preserve enough free space for the operating system and app to work normally.</p>
+        </a>
+        <a class="card" href="/blog/find-unexpected-offline-storage-use/">
+          <span class="tag">Offline Storage</span>
+          <div class="card-title">How to Find Unexpected Offline Storage Use</div>
+
+          <p>A layered storage diagnostic compares item-level offline media with app code, cache, data, partial transfers, system accounting, and unrelated device changes.</p>
         </a>
       </div>
     </section>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=1893cafe50"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Find Unexpected Offline Storage Use | Norva Blog</title>
+  <meta name="description" content="Diagnose unexpected storage growth by comparing app and device views, completed items, partial transfers, cache, app data, and unrelated changes safely.">
+  <link rel="canonical" href="https://norva.tv/blog/find-unexpected-offline-storage-use/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Find Unexpected Offline Storage Use | Norva Blog">
+  <meta property="og:description" content="Diagnose unexpected storage growth by comparing app and device views, completed items, partial transfers, cache, app data, and unrelated changes safely.">
+  <meta property="og:url" content="https://norva.tv/blog/find-unexpected-offline-storage-use/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Find Unexpected Offline Storage Use | Norva Blog">
+  <meta name="twitter:description" content="Diagnose unexpected storage growth by comparing app and device views, completed items, partial transfers, cache, app data, and unrelated changes safely.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How to Find Unexpected Offline Storage Use",
+  "description": "Diagnose unexpected storage growth by comparing app and device views, completed items, partial transfers, cache, app data, and unrelated changes safely.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-24T20:00:00+02:00",
+  "dateModified": "2026-09-24T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/find-unexpected-offline-storage-use/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How to Find Unexpected Offline Storage Use",
+      "item": "https://norva.tv/blog/find-unexpected-offline-storage-use/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">How to Find Unexpected Offline Storage Use</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="find-unexpected-offline-storage-use" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">Offline Storage</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-24T20:00:00+02:00">24 September 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>How to Find Unexpected Offline Storage Use</h1>
+      <p class="lede">A layered storage diagnostic compares item-level offline media with app code, cache, data, partial transfers, system accounting, and unrelated device changes.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#preserve-the-starting-evidence">Preserve the starting evidence</a></li><li><a href="#compare-the-two-storage-views">Compare the two storage views</a></li><li><a href="#review-recent-changes">Review recent changes</a></li><li><a href="#test-one-known-item">Test one known item</a></li><li><a href="#distinguish-cache-from-persistent-app-data">Distinguish cache from persistent app data</a></li><li><a href="#check-whether-the-device-total-changed-elsewhere">Check whether the device total changed elsewhere</a></li><li><a href="#original-evidence-diagnostic-log">Original evidence: diagnostic log</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Capture the device and app storage views before changing anything. Compare completed offline items with partial transfers, cache, app data, temporary files, recent updates, and unrelated device growth. Remove one known local item through the app, wait for storage reporting to refresh, and measure again. Avoid clearing all app storage or reinstalling until evidence is preserved.</blockquote>
+<p>Unexpected storage use is a symptom, not a diagnosis. A larger app footprint can include playable local media, app code, settings, cache, indexes, temporary transfer data, or reporting delay.</p>
+<h2 id="preserve-the-starting-evidence">Preserve the starting evidence</h2>
+<p>Record the date, device, operating-system version, Norva app version, current free storage, and the app's reported size. Then list completed, queued, failed, and recently removed offline items.</p>
+<p>Take screenshots only when they do not expose account details or source credentials. Do not start cleanup before this baseline exists, because the before state is needed to judge any change.</p>
+<h2 id="compare-the-two-storage-views">Compare the two storage views</h2>
+<p>The app may list completed local items, while the operating system reports the app package and several data categories together. Apple notes that cached and temporary data can be accounted for differently. Android distinguishes storage from memory and explains that clearing cache and clearing storage have different effects.</p>
+<p>Use the app data versus offline media guide to label each observed category without treating the totals as identical.</p>
+<h2 id="review-recent-changes">Review recent changes</h2>
+<p>Build a short timeline:</p>
+<ul><li>offline items prepared, retried, or removed;</li><li>an interrupted transfer;</li><li>app or operating-system updates;</li><li>profile or account changes;</li><li>photos, messages, maps, or other app downloads;</li><li>device backup or restore activity;</li><li>storage optimisation or unused-app features.</li></ul>
+<p>Correlation does not prove cause, but the timeline identifies the next layer to inspect.</p>
+<h2 id="test-one-known-item">Test one known item</h2>
+<p>Choose a completed local item that is no longer needed. Record its displayed or observed size, remove it through Norva's own offline control, and leave the app stable. Wait for the operating system's storage view to refresh, then record both views again.</p>
+<p>Norva states that eligible offline media is encrypted and stored on the device. Use the offline removal workflow instead of manipulating internal files.</p>
+<p>If storage falls roughly as expected, repeat item-level cleanup only as needed. If it does not, do not immediately clear all app storage; proceed to the next layer.</p>
+<h2 id="distinguish-cache-from-persistent-app-data">Distinguish cache from persistent app data</h2>
+<p>On Android, clearing cache removes temporary data, while clearing storage permanently removes all app data. Apple offers app offloading and deletion with different consequences. Platform labels and effects vary, so read the exact current warning.</p>
+<p>Uninstalling is not a neutral test. Norva's privacy policy says downloaded media is removed when the app is uninstalled. Preserve account and support evidence first.</p>
+<h2 id="check-whether-the-device-total-changed-elsewhere">Check whether the device total changed elsewhere</h2>
+<p>Compare other storage categories. A coincidental photo import, system update, or another app's download can make free space shrink while the media app remains stable. Use the <a href="/blog/set-free-space-reserve-offline-media/">free-space reserve worksheet</a> to see whether the unexplained change crosses your planning boundary.</p>
+<h2 id="original-evidence-diagnostic-log">Original evidence: diagnostic log</h2>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Time</th><th scope="col">App total</th><th scope="col">Device free space</th><th scope="col">Offline item state</th><th scope="col">One action</th><th scope="col">Result</th></tr></thead>
+<tbody><tr><td>Before</td><td></td><td></td><td></td><td>None</td><td>Baseline</td></tr><tr><td>After</td><td></td><td></td><td></td><td></td><td>Expected / Unclear</td></tr></tbody>
+</table></div>
+<p>Add recent changes and screenshots by filename, not sensitive content. If escalation is needed, provide the log to Norva support without passwords or source credentials.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Clearing data before recording a baseline.</li><li>Assuming every app byte is offline media.</li><li>Deleting multiple categories at once.</li><li>Expecting storage reporting to update instantly.</li><li>Using uninstall as the first diagnostic step.</li><li>Ignoring another app or system update.</li><li>Sending sensitive account information in a support report.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="why-did-free-space-not-change-immediately-after-removal">Why did free space not change immediately after removal?</h3>
+<p>Storage accounting can refresh later, and temporary data may remain. Wait, recheck both views, and avoid repeating broad actions rapidly.</p>
+<h3 id="is-it-safe-to-clear-cache">Is it safe to clear cache?</h3>
+<p>Read the current platform and app guidance. Cache is intended as temporary data, but clearing it is not the same as removing a known offline item and may affect performance temporarily.</p>
+<h3 id="when-should-i-contact-support">When should I contact support?</h3>
+<p>Escalate after preserving a baseline, reproducing the change with one item, and ruling out obvious device-wide growth. Share observations, not credentials.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="find-unexpected-offline-storage-use">Get Norva support for a documented issue</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/privacy">Norva privacy policy</a></li><li><a href="https://support.apple.com/en-gb/108429" target="_blank" rel="noopener">Apple: Check storage on iPhone and iPad</a></li><li><a href="https://support.google.com/android/answer/7431795?hl=en" target="_blank" rel="noopener">Android Help: Free up storage</a></li><li><a href="https://support.google.com/android/answer/13627979?hl=en" target="_blank" rel="noopener">Android Help: Manage unused apps</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/set-free-space-reserve-offline-media/">
+          <span class="tag">Offline Storage</span>
+          <div class="card-title">How to Set a Free-Space Reserve for Offline Media</div>
+
+          <p>A useful free-space reserve reflects the actual device, normal activity, pending updates, measured item sizes, and a boundary tested before travel.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
