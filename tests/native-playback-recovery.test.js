@@ -1040,6 +1040,21 @@ for (const cached of [false, true]) test(`standalone native VOD owns, replaces, 
   );
   assert.deepEqual(acknowledgements, [freshSessionId]);
   assert.equal(launches[2].sessionId, nextSessionId);
+
+  // Each failed native replacement emits a NEW UUID. Those UUIDs must still
+  // consume one viewer-intent budget (the physical-phone HTML response case).
+  const timersBefore = scheduled.length;
+  for (let index = 0; index < 3; index += 1) {
+    assert.equal(window.__norvaNative.retryPlayback(
+      'atlas-pro', 'episode', 'episode-4', 120,
+      'ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED', `new-native-token-${index}`,
+    ), 'scheduled');
+  }
+  assert.equal(window.__norvaNative.retryPlayback(
+    'atlas-pro', 'episode', 'episode-4', 120,
+    'ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED', 'new-native-token-3',
+  ), 'exhausted');
+  assert.equal(scheduled.length - timersBefore, 3);
 });
 
 test('standalone Live recovery re-resolves the channel instead of replaying a stale URL', () => {
@@ -1503,10 +1518,10 @@ test('standalone binds every recovered stream to the exact native recovery token
   const liveFlow = section(source, 'if (window.VideoPlayer)', '// Logout makes no sense');
 
   assert.match(recovery, /recoveryToken\s*=\s*''/);
-  assert.match(
+  assert.doesNotMatch(
     recovery,
-    /if \(recoveryToken && previousRecoveryToken !== recoveryToken\)[\s\S]{0,180}nativeRecoveryAttempts\.delete\(key\)/,
-    'a new native token must get a fresh bounded retry budget',
+    /nativeRecoveryAttempts\.delete\(key\)/,
+    'replacement request tokens must not reset the viewer intent retry budget',
   );
   assert.match(recovery, /entry\.launcher\(resume,\s*recoveryToken,\s*reason\)/);
   assert.match(

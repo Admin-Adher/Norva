@@ -744,9 +744,11 @@
             const now = Date.now();
             const previousRecoveryToken = activeNativeRecoveryTokens.get(key);
             if (recoveryToken && previousRecoveryToken !== recoveryToken) {
-                // A new native request gets its own retry budget. Recursive
-                // retries keep the same token and therefore keep their count.
-                nativeRecoveryAttempts.delete(key);
+                // Tokens correlate individual native requests, not viewer actions.
+                // Android issues another token when a replacement URL fails too;
+                // resetting here would turn an unreadable response into an endless
+                // sequence of fresh provider sessions. Only a new Play intention
+                // (or the existing healthy interval) renews the VOD retry budget.
                 activeNativeRecoveryTokens.set(key, recoveryToken);
             }
             let state = nativeRecoveryAttempts.get(key);
