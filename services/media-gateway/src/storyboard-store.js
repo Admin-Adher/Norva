@@ -21,9 +21,9 @@ class StoryboardStore {
         const exists = await fs.stat(dir).catch(() => null);
         if (!exists && (await fs.readdir(this.root)).filter(validId).length >= this.maxJobs) throw new Error('Storyboard durable queue full');
         await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-        const p = job.storyboardProgress;
+        const p = job.storyboardProgress || job.progress;
         // Never persist transport URLs, upload grants, provider passwords or tokens.
-        const body = JSON.stringify({ version: 1, jobId: job.jobId, uid: job.uid,
+        const body = JSON.stringify({ version: 1, jobId: job.jobId, uid: job.uid, sourceId: job.sourceId,
             callbackUrl: job.callbackUrl, duration: job.duration, durable: true,
             storyboardNotBefore: job.storyboardNotBefore || 0, terminal: job.terminal || null,
             progress: p ? { plan: p.plan, next: p.next, failures: p.failures,
