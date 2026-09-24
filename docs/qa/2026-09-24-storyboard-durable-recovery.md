@@ -39,3 +39,17 @@ The versioned runner supports `storyboard-renewal` as its argument. It restores 
 The temporary container and volume were removed. Primary database healthy, restart count zero. A schema-only behavioral projection warning resulted from omitted business seed data; it did not affect these assertions. Receipt: `.codex-artifacts/commercial-readiness/storyboard-renewal/schema-runtime.log`.
 
 All 28 targeted JavaScript cases passed again after the schema-name reconciliation. Actual Edge/Gateway renewal, process restart and app rendering still require runtime validation before activation.
+
+## Real Gateway restart replay
+
+`ops/hetzner/media/storyboard-restart-runtime.cjs` ran inside the production Gateway image `sha256:dbfaaea9a69b41d58543f00086427963a3d75e7bafd1e8e7718a27547ab67118`, with this branch's `index.js` and `storyboard-store.js` mounted read-only. The disposable container had no external network (`--network none`), one CPU, 2 GiB RAM and 128 PIDs. A local HTTP fixture supplied a generated 30-second clip and signed test grants; no customer source or production secret was used.
+
+Three actual Gateway process starts succeeded:
+
+1. The restored job renewed its grant, extracted two frames and committed the checkpoint. The process group was killed with SIGKILL.
+2. A new Gateway process restored and renewed the same job, reused byte-identical frames, assembled/uploaded one sprite, and persisted its successful terminal result when the callback returned HTTP 503. The process group was killed again.
+3. A third Gateway process replayed the pending terminal callback successfully and removed the durable record, without reading the media again or uploading the sprite again.
+
+Receipt: 3 process starts, 3 media HTTP requests total (unchanged after the first extraction), 2 renewals, 1 upload, 2 terminal callbacks. Initial fixture failure was traced to missing HTTP Range support in the synthetic server and corrected there; no product workaround was added. The runner kills the complete child process group so FFmpeg cannot survive a simulated server crash.
+
+This proves actual Gateway/FFmpeg restart and outbox behavior against a synthetic backend. It does **not** prove the deployed Edge renewal endpoint, provider access, app rendering, or global activation. Production remains unchanged. Receipt: `.codex-artifacts/commercial-readiness/storyboard-restart/runtime.log`.
