@@ -1109,3 +1109,23 @@ test('a confirmed track event cannot certify a jump to the live edge', async () 
     assert.equal(page.directAudioStreamIndex, 5);
     assert.equal(page._pendingHlsAudioSwitch, null);
 });
+
+test('a rolling audio jump cannot be persisted while the switch or recovery is pending', () => {
+    const page = Object.create(loadWatchPage().prototype);
+    Object.assign(page, {
+        streamStartOffset: 300,
+        video: { currentTime: 604, paused: true },
+        getDisplayDuration: () => 7200,
+        _lastKnownPlaybackPosition: 904,
+        _pendingHlsAudioSwitch: { anchor: { position: 340, autoplay: false } },
+    });
+    assert.equal(page.getPlaybackPosition(), 340);
+    assert.equal(page.getResumeSnapshotPosition(), 340);
+    assert.equal(page.trackPlaybackPosition(), 340);
+    assert.equal(page._lastKnownPlaybackPosition, 340);
+    page._recoveringHlsAudioAnchor = page._pendingHlsAudioSwitch.anchor;
+    page._pendingHlsAudioSwitch = null;
+    assert.equal(page.getResumeSnapshotPosition(), 340, 'the anchor survives the old pipeline release');
+    page._recoveringHlsAudioAnchor = null;
+    assert.equal(page.getPlaybackPosition(), 904, 'ordinary media time resumes after recovery');
+});

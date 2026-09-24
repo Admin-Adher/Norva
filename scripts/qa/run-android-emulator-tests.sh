@@ -20,6 +20,10 @@ case "$platform" in
     esac
     adb shell cmd overlay enable --user 0 "$overlay"
     adb shell cmd overlay list | grep -F "[x] $overlay"
+    # The first immersive player launch otherwise puts an Android tutorial over
+    # the decoded frame and takes focus from WebView touch/IME verification.
+    adb shell settings put secure immersive_mode_confirmations confirmed
+    test "$(adb shell settings get secure immersive_mode_confirmations | tr -d '\r')" = confirmed
     cd clients/android-phone
     ;;
   tv)

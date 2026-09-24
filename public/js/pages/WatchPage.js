@@ -1202,6 +1202,10 @@ class WatchPage {
         if (Number.isFinite(this._pendingSeekTarget)) {
             return Math.max(0, Math.floor(this._pendingSeekTarget));
         }
+        const audioAnchor = this._recoveringHlsAudioAnchor || this._pendingHlsAudioSwitch?.anchor;
+        if (Number.isFinite(audioAnchor?.position)) {
+            return Math.max(0, Math.floor(audioAnchor.position));
+        }
         this.trackPlaybackPosition();
         const position = Math.max(
             this._lastKnownPlaybackPosition || 0,
@@ -1213,6 +1217,10 @@ class WatchPage {
     }
 
     trackPlaybackPosition(options = {}) {
+        const audioAnchor = this._recoveringHlsAudioAnchor || this._pendingHlsAudioSwitch?.anchor;
+        if (Number.isFinite(audioAnchor?.position)) {
+            options = { ...options, position: audioAnchor.position, force: true };
+        }
         const rawDuration = this.getStablePlaybackDuration?.()
             || this.getDisplayDuration?.()
             || this.durationHint
@@ -7394,6 +7402,8 @@ class WatchPage {
     }
 
     getPlaybackPosition() {
+        const audioAnchor = this._recoveringHlsAudioAnchor || this._pendingHlsAudioSwitch?.anchor;
+        if (Number.isFinite(audioAnchor?.position)) return audioAnchor.position;
         const displayDuration = this.getDisplayDuration();
         const position = this.streamStartOffset + this.getCurrentTime();
         return displayDuration ? Math.min(position, displayDuration) : position;
@@ -9510,7 +9520,8 @@ class WatchPage {
                 return false;
             }
             const elapsed = pending.anchor?.autoplay ? (Date.now() - pending.requestedAt) / 1000 : 0;
-            const drift = this.getPlaybackPosition() - pending.anchor?.position;
+            const drift = (Number(this.streamStartOffset || 0) + Number(this.video?.currentTime))
+                - pending.anchor?.position;
             if (Number.isFinite(drift) && (drift < -1 || drift > elapsed + 2)) {
                 clearTimeout(pending.timeoutId);
                 this._pendingHlsAudioSwitch = null;
@@ -9562,6 +9573,7 @@ class WatchPage {
         if (this.hls !== activeHls || this.isStalePlaybackAttempt(playbackAttemptId)) {
             return Promise.resolve(false);
         }
+        this._recoveringHlsAudioAnchor = anchor;
         if (this._latestHlsAudioSwitch) this._latestHlsAudioSwitch.acceptEvents = false;
         this.cancelPendingHlsAudioSwitch(false);
         this.selectedAudioStreamIndex = streamIndex;
@@ -9572,7 +9584,9 @@ class WatchPage {
         // the live edge, including when a switch times out while paused.
         this.video?.pause();
         activeHls.stopLoad?.();
-        return this.queueSelectedAudioTrackRestart(anchor);
+        return Promise.resolve(this.queueSelectedAudioTrackRestart(anchor)).finally(() => {
+            if (this._recoveringHlsAudioAnchor === anchor) this._recoveringHlsAudioAnchor = null;
+        });
     }
 
     selectGatewayHlsAudioTrack(hlsIndex, streamIndex) {
