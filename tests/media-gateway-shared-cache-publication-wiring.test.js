@@ -14,13 +14,40 @@ const producerControl = fs.readFileSync(path.join(
   '../services/media-gateway/src/mediaCacheProducerControl.js',
 ), 'utf8');
 
-test('Gateway v168 keeps global R2 publication dark and behind private dedicated credentials', () => {
+test('Gateway v169 keeps global R2 publication dark and behind private dedicated credentials', () => {
   assert.match(gateway, /NORVA_SHARED_MEDIA_CACHE_ENABLED === 'true'/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_URL/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_WORKER_TOKEN/);
   assert.match(gateway, /NORVA_MEDIA_CACHE_MANIFEST_HMAC_KEY/);
-  assert.match(gateway, /const GATEWAY_VERSION = 168/);
+  assert.match(gateway, /const GATEWAY_VERSION = 169/);
   assert.doesNotMatch(gateway, /R2_ACCESS_KEY|R2_SECRET|AWS_ACCESS_KEY/);
+});
+
+test('only an admitted, exact, short MKV can retain its complete HLS output', () => {
+  const start = gateway.indexOf('function retainedSharedCacheHlsOutputEligible(');
+  const end = gateway.indexOf('function sharedMediaCachePipelineBuildForSession(', start);
+  assert.ok(start >= 0 && end > start);
+  const choose = new Function(
+    'BOUNDED_HLS_OUTPUT_ENABLED',
+    'SHARED_CACHE_RETAINED_SOURCE_MAX_BYTES',
+    'SHARED_CACHE_RETAINED_DURATION_MAX_SECONDS',
+    'sharedMediaCacheStaticContext',
+    `return (${gateway.slice(start, end).trim()});`,
+  )(true, 768 * 1024 ** 2, 3600, session => session.context);
+  const admitted = { mediaCacheProducer: { admission: { admitted: true } },
+    context: { eligible: true, fileSizeBytes: 539967493, profile: { durationSeconds: 2891.477 } } };
+  assert.equal(choose(admitted), true);
+  assert.equal(choose({ ...admitted, mediaCacheProducer: null }), false);
+  assert.equal(choose({ ...admitted, context: { eligible: false } }), false);
+  assert.equal(choose({ ...admitted, context: { ...admitted.context, fileSizeBytes: 769 * 1024 ** 2 } }), false);
+  assert.equal(choose({ ...admitted, context: { ...admitted.context,
+    profile: { durationSeconds: 3601 } } }), false);
+  assert.match(gateway, /session\.retainCompleteHlsOutput = session\.boundedHlsOutput\s*&& retainedSharedCacheHlsOutputEligible\(session\)/);
+  assert.match(gateway, /boundedHlsArgs\(session\.boundedHlsOutput, outputAdmission, session\.retainCompleteHlsOutput\)/);
+  assert.match(gateway, /maxBytes: session\.hlsOutputMaxBytes/);
+  assert.match(gateway, /!session\.boundedHlsOutput \|\| session\.retainCompleteHlsOutput === true/);
+  assert.match(gateway, /child\.on\('exit', async \(code, signal\) => \{[\s\S]*?await session\.hlsOutputDrainPromise;[\s\S]*?resolveExitFinalization\(\)/);
+  assert.match(gateway, /child\.on\('close', async \(\) => \{\s*await exitFinalization;/);
 });
 
 test('subtitle-heavy playback and shared-cache limits remain independently bounded', () => {

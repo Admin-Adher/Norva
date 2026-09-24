@@ -519,7 +519,7 @@ test('an exact finite Matroska H264 profile selects the 2s keyframe encode plan 
 test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes and no split-by-time', () => {
     const source = readGateway();
 
-    assert.match(source, /const GATEWAY_VERSION = 168;/);
+    assert.match(source, /const GATEWAY_VERSION = 169;/);
     assert.match(source, /exactMatroskaH264ReencodeProtocol:\s*1/);
     assert.match(source, /exactMatroskaH264HlsTargetSeconds:\s*EXACT_MATROSKA_H264_HLS_TARGET_SECONDS/);
     assert.match(source, /exactMatroskaH264MaxPixels:\s*EXACT_MATROSKA_H264_MAX_PIXELS/);
@@ -527,7 +527,7 @@ test('exact Matroska H264 uses independent 2s HLS segments with forced keyframes
     const encoder = fs.readFileSync(path.join(ROOT, 'services/media-gateway/src/video-encoder.js'), 'utf8');
     assert.match(encoder, /'-force_key_frames',\s*`expr:gte\(t,n_forced\*\$\{boundedTargetSeconds\}\)`/);
     assert.match(source, /'-hls_time',\s*String\(session\.hlsTargetSeconds\s*\|\|\s*4\)/);
-    assert.match(source, /\.\.\.boundedHlsArgs\(session\.boundedHlsOutput, outputAdmission\)/);
+    assert.match(source, /\.\.\.boundedHlsArgs\(session\.boundedHlsOutput, outputAdmission, session\.retainCompleteHlsOutput\)/);
     const { boundedHlsArgs } = require('../services/media-gateway/src/bounded-hls-output');
     const flags = boundedHlsArgs(false);
     assert.equal(flags[flags.indexOf('-hls_flags') + 1], 'independent_segments+temp_file');
