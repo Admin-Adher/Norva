@@ -6,7 +6,15 @@ const path = require('node:path');
 // VOD clients start at the first segment and use a new gateway session for
 // seeks outside their buffered/seekable range. Bound the generated window and
 // pause the producer when the client stops fetching (including viewer pause).
-function boundedHlsArgs(enabled, admission = null) {
+function boundedHlsArgs(enabled, admission = null, retainComplete = false) {
+    if (retainComplete) {
+        if (!enabled || !admission) throw new Error('RETAINED_HLS_ADMISSION_REQUIRED');
+        // Keep the admitted, viewer-paced HTTP writer and its byte ceiling,
+        // but retain every segment until clean EOF for manifest-last cache
+        // publication. Ordinary viewers still use the rolling 64-segment path.
+        return ['-hls_list_size', '0', '-hls_playlist_type', 'event',
+            '-hls_flags', 'independent_segments', '-method', 'PUT', '-http_persistent', '0'];
+    }
     return enabled
         ? ['-hls_list_size', '64', '-hls_delete_threshold', '16',
             '-hls_flags', admission ? 'independent_segments+delete_segments' : 'independent_segments+temp_file+delete_segments',

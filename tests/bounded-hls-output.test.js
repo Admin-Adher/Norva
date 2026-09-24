@@ -34,3 +34,12 @@ test('rolling output is explicit and never declares an EVENT playlist or a compl
     assert(boundedHlsArgs(true).includes('independent_segments+temp_file+delete_segments'));
     assert(boundedHlsArgs(false).includes('event'));
 });
+
+test('admitted complete output retains all segments while keeping the paced HTTP writer', () => {
+    const args = boundedHlsArgs(true, { urlFor() {} }, true);
+    assert.deepEqual(args.slice(0, 4), ['-hls_list_size', '0', '-hls_playlist_type', 'event']);
+    assert(args.includes('PUT'));
+    assert(!args.some(value => String(value).includes('delete_segments')));
+    assert.throws(() => boundedHlsArgs(true, null, true), /RETAINED_HLS_ADMISSION_REQUIRED/);
+    assert.throws(() => boundedHlsArgs(false, { urlFor() {} }, true), /RETAINED_HLS_ADMISSION_REQUIRED/);
+});

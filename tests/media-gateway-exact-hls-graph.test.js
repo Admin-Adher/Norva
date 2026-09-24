@@ -88,7 +88,8 @@ test('complete graph collection follows every audio and WebVTT rendition before 
 });
 
 test('Gateway finalizes the exact graph before any local or shared cache becomes ready', () => {
-  const closeHandler = between("child.on('close', () => {", '\n\n    if (pumpedMkvInput)');
+  const closeHandler = between("child.on('close', async () => {", '\n\n    if (pumpedMkvInput)');
+  assert.match(closeHandler, /await exitFinalization;/);
   const finalize = closeHandler.indexOf('finalizeSessionExactHlsTrackGraph(session)');
   const ready = closeHandler.indexOf('session.completeHlsCacheMediaReady = true');
   const localPublish = closeHandler.indexOf('scheduleMkvCompleteHlsCachePromotion(session)');

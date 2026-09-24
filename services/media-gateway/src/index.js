@@ -33,6 +33,11 @@ const { HLS_OUTPUT_ADMISSION_PROTOCOL, createHlsOutputAdmission, loopbackOutputE
 const { reserveSpoolDisk } = require('./spool-disk-budget');
 const BOUNDED_HLS_OUTPUT_ENABLED = process.env.BOUNDED_HLS_OUTPUT_ENABLED === 'true';
 const HLS_OUTPUT_SESSION_MAX_BYTES = clampInt(process.env.HLS_OUTPUT_SESSION_MAX_BYTES, 512 * 1024 ** 2, 64 * 1024 ** 2, 4 * 1024 ** 3);
+// One admitted shared-cache producer may retain a complete, short MKV. The
+// same HTTP output writer still paces segments and enforces this disk ceiling.
+const SHARED_CACHE_RETAINED_HLS_MAX_BYTES = 4 * 1024 ** 3;
+const SHARED_CACHE_RETAINED_SOURCE_MAX_BYTES = 768 * 1024 ** 2;
+const SHARED_CACHE_RETAINED_DURATION_MAX_SECONDS = 60 * 60;
 const { parseWhisperLid, runWhisperDetectOnly } = require('./whisper-lid');
 const { createStrictLidInference } = require('./strict-lid-inference');
 const strictLidInference = createStrictLidInference();
@@ -2410,7 +2415,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 168;
+const GATEWAY_VERSION = 169;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3286,6 +3291,10 @@ app.get('/health', (req, res) => {
             admittedProducers: [...sessions.values()].filter(s => s.hlsOutputAdmission && !s.hlsOutputAdmission.snapshot().stopped).length,
             waitingOutputRequests: [...sessions.values()].reduce((n, s) => n + (s.hlsOutputAdmission?.snapshot().pending || 0), 0),
             sessionMaxBytes: HLS_OUTPUT_SESSION_MAX_BYTES, playlistSegments: 64, retainedExtraSegments: 16,
+            retainedSharedCacheMaxBytes: SHARED_CACHE_RETAINED_HLS_MAX_BYTES,
+            retainedSharedCacheSourceMaxBytes: SHARED_CACHE_RETAINED_SOURCE_MAX_BYTES,
+            retainedSharedCacheDurationMaxSeconds: SHARED_CACHE_RETAINED_DURATION_MAX_SECONDS,
+            retainedSharedCacheSessions: [...sessions.values()].filter(s => s.retainCompleteHlsOutput).length,
             sessions: [...sessions.values()].filter(s => s.boundedHlsOutput).length,
             bytes: [...sessions.values()].reduce((n, s) => n + (s.hlsOutputControl?.snapshot().bytes || 0), 0),
             peakSessionBytes: Math.max(0, ...[...sessions.values()].map(s => s.hlsOutputControl?.snapshot().peakBytes || 0)),
@@ -13106,10 +13115,16 @@ async function prepareWeakAuthoritativeSpool(session, abortSignal = null) {
 
 async function startSessionWithProviderRetry(session, abortSignal = null) {
     session.boundedHlsOutput = BOUNDED_HLS_OUTPUT_ENABLED && !isLiveSession(session);
+    session.retainCompleteHlsOutput = session.boundedHlsOutput
+        && retainedSharedCacheHlsOutputEligible(session);
+    session.hlsOutputMaxBytes = session.retainCompleteHlsOutput
+        ? SHARED_CACHE_RETAINED_HLS_MAX_BYTES : HLS_OUTPUT_SESSION_MAX_BYTES;
+    session.startupTimings ||= {};
+    session.startupTimings.retainedSharedCacheHlsOutput = session.retainCompleteHlsOutput;
     if (session.boundedHlsOutput && !session.hlsOutputReservation) {
         const diskReservationStartedAt = Date.now();
         const lease = await reserveSpoolDisk({ root: WEAK_VALIDATOR_SPOOL_ROOT,
-            name: `spool-hls-${crypto.randomBytes(16).toString('hex')}`, bytes: HLS_OUTPUT_SESSION_MAX_BYTES,
+            name: `spool-hls-${crypto.randomBytes(16).toString('hex')}`, bytes: session.hlsOutputMaxBytes,
             maxBytes: WEAK_VALIDATOR_SPOOL_TOTAL_MAX_BYTES, minFreeBytes: WEAK_VALIDATOR_SPOOL_MIN_FREE_BYTES });
         session.startupTimings ||= {};
         session.startupTimings.hlsDiskReservationMs = Math.max(0, Date.now() - diskReservationStartedAt);
@@ -13153,7 +13168,7 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
         if (session.boundedHlsOutput) {
             session.hlsOutputAdmission = await createHlsOutputAdmission({
                 root: session.outputDir, targetSeconds: session.hlsTargetSeconds || 4,
-                maxBytes: HLS_OUTPUT_SESSION_MAX_BYTES,
+                maxBytes: session.hlsOutputMaxBytes,
                 onFailure: code => {
                     session.lastError = code;
                     session.inputFailure = { code, status: 503 };
@@ -16528,7 +16543,7 @@ function startFfmpeg(session) {
             : []),
         '-f', 'hls',
         '-hls_time', String(session.hlsTargetSeconds || 4),
-        ...boundedHlsArgs(session.boundedHlsOutput, outputAdmission),
+        ...boundedHlsArgs(session.boundedHlsOutput, outputAdmission, session.retainCompleteHlsOutput),
         '-hls_segment_type', 'mpegts',
         // No `append_list`: it injected a spurious leading #EXT-X-DISCONTINUITY
         // that stalled hls.js fragment indexing. Local temp_file or the admitted
@@ -16596,7 +16611,7 @@ function startFfmpeg(session) {
     session.status = 'starting';
     if (session.boundedHlsOutput) {
         session.hlsOutputControl = createHlsOutputControl({ root: session.outputDir, child, admission: outputAdmission,
-            targetSeconds: session.hlsTargetSeconds || 4, maxBytes: HLS_OUTPUT_SESSION_MAX_BYTES,
+            targetSeconds: session.hlsTargetSeconds || 4, maxBytes: session.hlsOutputMaxBytes,
             minFreeBytes: WEAK_VALIDATOR_SPOOL_MIN_FREE_BYTES,
             onFailure: code => {
                 session.lastError = code;
@@ -16665,7 +16680,12 @@ function startFfmpeg(session) {
         if (text.trim()) console.warn(`[ffmpeg:${session.id}] ${text.trim()}`);
     });
 
+    // `exit` listeners may await the final admitted HTTP PUTs. EventEmitter
+    // does not wait for an async listener before emitting `close`.
+    let resolveExitFinalization;
+    const exitFinalization = new Promise(resolve => { resolveExitFinalization = resolve; });
     child.on('error', (err) => {
+        resolveExitFinalization();
         session.hlsOutputControl?.stop();
         outputAdmission?.stop();
         try { inputPump?.controller.abort(); } catch (_) {}
@@ -16682,48 +16702,52 @@ function startFfmpeg(session) {
     });
 
     child.on('exit', async (code, signal) => {
-        releaseVideoEncoderAdmission(session);
-        applyFiniteMkvSeekBrokerFailure(session);
-        let plannedStop = Boolean(session.stoppingPromise) || session.status === 'stopping';
-        const inputEndedEarly = pumpedMkvInput && inputPump && inputPump.completed !== true;
-        let completedCleanly = !plannedStop && code === 0 && !inputEndedEarly && !session.inputFailure && !session.lastError;
-        if (completedCleanly && outputAdmission) {
-            session.hlsOutputDrainPromise = session.hlsOutputControl.finish();
-            try { await session.hlsOutputDrainPromise; }
-            catch (_) {
-                completedCleanly = false;
-                if (session.stoppingPromise || session.status === 'stopping' || session.status === 'ended') plannedStop = true;
-                else {
-                    session.lastError = 'HLS_OUTPUT_DRAIN_FAILED';
-                    session.inputFailure = { code: session.lastError, status: 503 };
-                    session.status = 'failed';
+        try {
+            releaseVideoEncoderAdmission(session);
+            applyFiniteMkvSeekBrokerFailure(session);
+            let plannedStop = Boolean(session.stoppingPromise) || session.status === 'stopping';
+            const inputEndedEarly = pumpedMkvInput && inputPump && inputPump.completed !== true;
+            let completedCleanly = !plannedStop && code === 0 && !inputEndedEarly && !session.inputFailure && !session.lastError;
+            if (completedCleanly && outputAdmission) {
+                session.hlsOutputDrainPromise = session.hlsOutputControl.finish();
+                try { await session.hlsOutputDrainPromise; }
+                catch (_) {
+                    completedCleanly = false;
+                    if (session.stoppingPromise || session.status === 'stopping' || session.status === 'ended') plannedStop = true;
+                    else {
+                        session.lastError = 'HLS_OUTPUT_DRAIN_FAILED';
+                        session.inputFailure = { code: session.lastError, status: 503 };
+                        session.status = 'failed';
+                    }
                 }
+            } else session.hlsOutputControl?.stop();
+            plannedStop ||= Boolean(session.stoppingPromise) || session.status === 'stopping';
+            session.completeHlsCacheFfmpegCompletedCleanly = completedCleanly
+                && (!session.boundedHlsOutput || session.retainCompleteHlsOutput === true);
+            try { inputPump?.controller.abort(); } catch (_) {}
+            if (linearSeekBridge) stopFiniteMkvLinearSeekBridge(session).catch(() => {});
+            // Explicit viewer exit terminates FFmpeg on purpose. Do not turn that
+            // teardown into a media error which discards already-finalized resume
+            // segments. It is not EOF proof for the complete-film cache either.
+            if (plannedStop) {
+                wakePlaybackBlockedQueues();
+                return;
             }
-        } else session.hlsOutputControl?.stop();
-        plannedStop ||= Boolean(session.stoppingPromise) || session.status === 'stopping';
-        session.completeHlsCacheFfmpegCompletedCleanly = completedCleanly && !session.boundedHlsOutput;
-        try { inputPump?.controller.abort(); } catch (_) {}
-        if (linearSeekBridge) stopFiniteMkvLinearSeekBridge(session).catch(() => {});
-        // Explicit viewer exit terminates FFmpeg on purpose. Do not turn that
-        // teardown into a media error which discards already-finalized resume
-        // segments. It is not EOF proof for the complete-film cache either.
-        if (plannedStop) {
+            if (session.status !== 'ended' && (code !== 0 || inputEndedEarly)) {
+                session.status = 'failed';
+                if (!session.inputFailure) {
+                    const reason = lastNonEmptyLine(session.logTail);
+                    session.lastError = `FFmpeg exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${reason ? `: ${reason}` : ''}`;
+                }
+            } else if (session.status !== 'failed') {
+                session.status = 'ended';
+            }
             wakePlaybackBlockedQueues();
-            return;
-        }
-        if (session.status !== 'ended' && (code !== 0 || inputEndedEarly)) {
-            session.status = 'failed';
-            if (!session.inputFailure) {
-                const reason = lastNonEmptyLine(session.logTail);
-                session.lastError = `FFmpeg exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${reason ? `: ${reason}` : ''}`;
-            }
-        } else if (session.status !== 'failed') {
-            session.status = 'ended';
-        }
-        wakePlaybackBlockedQueues();
+        } finally { resolveExitFinalization(); }
     });
 
-    child.on('close', () => {
+    child.on('close', async () => {
+        await exitFinalization;
         if (outputAdmission) {
             const finalText = sanitizeLog(outputAdmission.redactLogChunk('', true), session.sourceUrl);
             appendLogTail(session, finalText);
@@ -17529,6 +17553,17 @@ function sharedMediaCacheStaticContext(session) {
         audioTopology: audioTopology.topology,
         subtitleTopology: subtitleTopology.topology,
     };
+}
+
+function retainedSharedCacheHlsOutputEligible(session) {
+    if (!BOUNDED_HLS_OUTPUT_ENABLED || session?.mediaCacheProducer?.admission?.admitted !== true) return false;
+    const context = sharedMediaCacheStaticContext(session);
+    if (!context.eligible || context.fileSizeBytes > SHARED_CACHE_RETAINED_SOURCE_MAX_BYTES) return false;
+    const durationSeconds = Number(
+        context.profile.durationSeconds ?? context.profile.duration_seconds ?? context.profile.duration,
+    );
+    return Number.isFinite(durationSeconds) && durationSeconds > 0
+        && durationSeconds <= SHARED_CACHE_RETAINED_DURATION_MAX_SECONDS;
 }
 
 function sharedMediaCachePipelineBuildForSession(session, staticContext = null) {
@@ -18470,7 +18505,7 @@ async function maybePublishSharedMediaCache(session) {
 }
 
 function scheduleSharedMediaCachePublication(session) {
-    if (session?.boundedHlsOutput) return null;
+    if (session?.boundedHlsOutput && session?.retainCompleteHlsOutput !== true) return null;
     if (!session || session.assetSource === 'complete-hls-cache') return null;
     if (session.sharedMediaCachePublicationPromise) return session.sharedMediaCachePublicationPromise;
     if (
@@ -18592,7 +18627,7 @@ function providerAccountFreeForBackgroundContinuation(session) {
 
 function assessMkvCompleteHlsBackgroundContinuation(session) {
     const reject = (reason) => ({ eligible: false, reason });
-    if (session?.boundedHlsOutput) return reject('bounded-viewer-output');
+    if (session?.boundedHlsOutput && session?.retainCompleteHlsOutput !== true) return reject('bounded-viewer-output');
     if (!mkvCompleteHlsBackgroundContinuationEnabled(session)) return reject('continuation-disabled');
     if (!session || session.stoppingPromise) return reject('session-stopping');
     if (session.backgroundCacheContinuation === true) return reject('already-running');

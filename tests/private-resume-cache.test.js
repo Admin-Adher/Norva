@@ -63,6 +63,7 @@ test('intentional FFmpeg stop retains finalized resume segments but never certif
         if (scenario === 'stopping-error') session.lastError = 'real upstream failure';
         vm.runInNewContext(source.slice(start, end), { child: { on: (_, callback) => { handler = callback; } },
             session, pumpedMkvInput: false, inputPump: null, linearSeekBridge: null, outputAdmission: null,
+            resolveExitFinalization() {},
             releaseVideoEncoderAdmission() {}, applyFiniteMkvSeekBrokerFailure() {}, wakePlaybackBlockedQueues() {},
             lastNonEmptyLine: () => 'encoder failure' });
         await handler(scenario === 'complete' ? 0 : 255, scenario.startsWith('stopping') ? 'SIGTERM' : null);
