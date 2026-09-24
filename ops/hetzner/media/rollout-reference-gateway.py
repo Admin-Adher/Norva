@@ -1,4 +1,4 @@
-"""Replace an idle Gateway with the reviewed complete image; keep rollback.
+"""Replace an idle Gateway with a reviewed complete image; keep rollback.
 
 Run on the existing host. No secrets are printed: the private receipt directory
 contains the original Docker configuration and must remain owned/mode 0700.
@@ -12,6 +12,7 @@ import http.client
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import time
@@ -21,6 +22,8 @@ import urllib.request
 BASE = 'sha256:6ab34980137d60f028d5ddbde6869987867178182f8a9f066cc0e7fd88c787e2'
 IMAGE = 'sha256:dbfaaea9a69b41d58543f00086427963a3d75e7bafd1e8e7718a27547ab67118'
 REVISION = 'cfc5115c9e8631c06c95a2267e4463e646109405'
+CURRENT_VERSION = 167
+TARGET_VERSION = 167
 NODES = {'norva-media-gateway': 8081, 'norva-resume-cache-pilot-20260916': 18086}
 DATA = pathlib.Path('/home/adrien/.norva/gateway-data/resume-cache-pilot')
 ENDPOINT_FIELDS = ('IPAMConfig', 'Links', 'Aliases', 'DriverOpts', 'GwPriority')
@@ -76,6 +79,22 @@ def env(container):
     return dict(value.split('=', 1) for value in container['Config']['Env'])
 
 
+def validate_rollout_parameters(base, image, revision, current_version, target_version):
+    for digest in (base, image):
+        assert re.fullmatch(r'sha256:[0-9a-f]{64}', digest), 'image_digest_invalid'
+    assert base != image, 'image_must_change'
+    assert re.fullmatch(r'[0-9a-f]{40}', revision), 'revision_invalid'
+    assert 1 <= current_version <= 10_000 and 1 <= target_version <= 10_000, 'version_invalid'
+
+
+def pilot_output_copy_needed(node, original, already_persistent):
+    pilot = node == 'norva-resume-cache-pilot-20260916'
+    assert not already_persistent or pilot, 'pilot_mount_flag_on_main'
+    if pilot and already_persistent:
+        assert any(m['Destination'] == '/tmp/resume-pilot' for m in original['Mounts']), 'pilot_mount_missing'
+    return pilot and not already_persistent
+
+
 def health(name, original, debug=False):
     route = '/debug/sessions' if debug else '/health'
     request = urllib.request.Request('http://127.0.0.1:' + str(NODES[name]) + route)
@@ -90,7 +109,7 @@ def idle(name, original):
     assert current['Id'] == original['Id'], 'container_identity_changed'
     assert contract(clone(current)) == contract(clone(original)), 'configuration_changed'
     h = health(name, original)
-    assert h.get('ok') is True and h.get('version') == 167, 'unexpected_health'
+    assert h.get('ok') is True and h.get('version') == CURRENT_VERSION, 'unexpected_health'
     debug = health(name, original, True)
     assert isinstance(debug.get('sessions'), list) and len(debug['sessions']) == 0, 'viewer_sessions_active_or_unknown'
     for key in ('activeSessions', 'rawPumpCount',
@@ -117,7 +136,7 @@ def verify(name, original, expected):
         assert contract(clone(current)) == contract(expected), 'configuration_changed'
         try:
             h = health(name, original)
-            assert h.get('ok') and h.get('version') == 167
+            assert h.get('ok') and h.get('version') == TARGET_VERSION
             assert h['videoEncoder']['ready'] and h['videoEncoder']['backend'] == 'vaapi'
             assert h['playbackStartupWindows']['scope'] == 'all-authenticated-owners'
             assert h['privateResumeHlsCache']['enabled'] and not h['privateResumeHlsCache']['ownerScoped']
@@ -134,10 +153,21 @@ class UncertainAction(RuntimeError):
 
 
 def main():
+    global BASE, IMAGE, REVISION, CURRENT_VERSION, TARGET_VERSION
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('node', choices=NODES)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--base-image', default=BASE)
+    parser.add_argument('--image', default=IMAGE)
+    parser.add_argument('--revision', default=REVISION)
+    parser.add_argument('--current-version', type=int, default=CURRENT_VERSION)
+    parser.add_argument('--target-version', type=int, default=TARGET_VERSION)
+    parser.add_argument('--pilot-output-already-persistent', action='store_true')
     args = parser.parse_args()
+    validate_rollout_parameters(args.base_image, args.image, args.revision,
+                                args.current_version, args.target_version)
+    BASE, IMAGE, REVISION = args.base_image, args.image, args.revision
+    CURRENT_VERSION, TARGET_VERSION = args.current_version, args.target_version
     os.umask(0o077)
     original = inspect(args.node)
     assert original['Image'] == BASE, 'baseline_image_changed'
@@ -149,7 +179,7 @@ def main():
     prepared['Labels']['org.opencontainers.image.revision'] = REVISION
     prepared['Labels']['norva.runtime.source-layout'] = 'complete-repository-src'
     prepared['Labels'].pop('norva.bundle.sha256', None)
-    persist = args.node == 'norva-resume-cache-pilot-20260916'
+    persist = pilot_output_copy_needed(args.node, original, args.pilot_output_already_persistent)
     if persist:
         assert env(original)['OUTPUT_DIR'] == '/tmp/resume-pilot'
         assert not any(m['Destination'] == '/tmp/resume-pilot' for m in original['Mounts'])
@@ -158,6 +188,7 @@ def main():
         prepared['HostConfig']['Binds'].append(str(DATA) + ':/tmp/resume-pilot:rw')
     idle(args.node, original)
     summary = {'node': args.node, 'image': IMAGE, 'sourceRevision': REVISION,
+               'currentVersion': CURRENT_VERSION, 'targetVersion': TARGET_VERSION,
                'environmentChanges': False, 'persistentOutputAdded': persist,
                'configurationSha256': contract(prepared), 'applied': False}
     if not args.apply:
