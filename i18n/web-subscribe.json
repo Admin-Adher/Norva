@@ -51,21 +51,21 @@
     "fil": "Hindi ma-load ang mga presyo sa Google Play. Suriin ang koneksyon o i-update ang Norva, saka subukang muli. Hindi maaaring magsimula ang pagbili hangga’t walang presyo."
   },
   "ui_sub_card_check": {
-    "source": "We verify your card with a small temporary authorization that is released immediately and never debited. Your exact billing terms appear on the next screen before confirmation. Every payment comes with an email receipt.",
+    "source": "We verify your card with a small temporary authorization. Norva cancels it after successful verification, but your bank may show the hold for longer. Your exact billing terms appear on the next screen before confirmation. Every subscription payment comes with an email receipt.",
     "refs": [
       "public/subscribe.html",
       "public/js/plan-selection-ui.js"
     ],
-    "en": "We verify your card with a small temporary authorization that is released immediately and never debited. Your exact billing terms appear on the next screen before confirmation. Every payment comes with an email receipt.",
-    "fr": "Nous vérifions votre carte au moyen d’une petite autorisation temporaire, immédiatement libérée et jamais débitée. Les conditions exactes de facturation figurent sur l’écran suivant, avant confirmation. Chaque paiement donne lieu à un reçu par e-mail.",
-    "pt-BR": "Verificamos seu cartão com uma pequena autorização temporária, liberada imediatamente e nunca debitada. As condições exatas de cobrança aparecem na próxima tela, antes da confirmação. Cada pagamento inclui um recibo por e-mail.",
-    "es": "Verificamos tu tarjeta con una pequeña autorización temporal que se libera de inmediato y nunca se cobra. Las condiciones exactas de facturación aparecen en la siguiente pantalla, antes de confirmar. Cada pago incluye un recibo por correo electrónico.",
-    "hi": "हम एक छोटी अस्थायी प्राधिकरण राशि से आपके कार्ड की पुष्टि करते हैं। यह तुरंत मुक्त कर दी जाती है और कभी डेबिट नहीं होती। पुष्टि से पहले अगली स्क्रीन पर बिलिंग की सटीक शर्तें दिखाई देंगी। हर भुगतान की रसीद ईमेल से मिलेगी।",
-    "tr": "Kartını, hemen serbest bırakılan ve hiçbir zaman tahsil edilmeyen küçük bir geçici provizyonla doğrularız. Kesin faturalandırma koşulları onaylamadan önce sonraki ekranda gösterilir. Her ödeme için e-posta ile makbuz gönderilir.",
-    "bn": "একটি ছোট অস্থায়ী অনুমোদনের মাধ্যমে আপনার কার্ড যাচাই করা হয়। এটি সঙ্গে সঙ্গে ছেড়ে দেওয়া হয় এবং কখনো কেটে নেওয়া হয় না। নিশ্চিত করার আগে পরের পর্দায় বিলিংয়ের সঠিক শর্ত দেখানো হবে। প্রতিটি পেমেন্টের রসিদ ইমেইলে পাবেন।",
-    "ar": "نتحقّق من بطاقتك عبر حجز مؤقت لمبلغ صغير يُحرّر فورًا ولا يُخصم أبدًا. تظهر شروط الفوترة الدقيقة في الشاشة التالية قبل التأكيد. يصلك إيصال بالبريد الإلكتروني عن كل دفعة.",
-    "id": "Kami memverifikasi kartu melalui otorisasi sementara bernilai kecil yang langsung dilepas dan tidak pernah didebit. Ketentuan penagihan yang tepat ditampilkan pada layar berikutnya sebelum konfirmasi. Setiap pembayaran disertai tanda terima melalui email.",
-    "fil": "Bineberipika namin ang iyong card gamit ang maliit na pansamantalang awtorisasyon na agad na inaalis at hindi kailanman sinisingil. Makikita ang eksaktong mga tuntunin ng pagsingil sa susunod na screen bago kumpirmahin. May resibo sa email ang bawat bayad."
+    "en": "We verify your card with a small temporary authorization. Norva cancels it after successful verification, but your bank may show the hold for longer. Your exact billing terms appear on the next screen before confirmation. Every subscription payment comes with an email receipt.",
+    "fr": "Nous vérifions votre carte avec une petite autorisation temporaire. Norva l’annule après une vérification réussie, mais votre banque peut afficher l’empreinte plus longtemps. Les conditions exactes de facturation figurent sur l’écran suivant avant confirmation. Chaque paiement d’abonnement donne lieu à un reçu par e-mail.",
+    "pt-BR": "Verificamos seu cartão com uma pequena autorização temporária. A Norva a cancela após a verificação, mas seu banco pode exibir a retenção por mais tempo. As condições exatas de cobrança aparecem na próxima tela antes da confirmação. Cada pagamento da assinatura gera um recibo por e-mail.",
+    "es": "Verificamos tu tarjeta con una pequeña autorización temporal. Norva la cancela tras verificarla, pero tu banco puede mostrar la retención durante más tiempo. Las condiciones exactas de facturación aparecen en la siguiente pantalla antes de confirmar. Cada pago de suscripción incluye un recibo por correo.",
+    "hi": "हम एक छोटे अस्थायी प्राधिकरण से आपके कार्ड की जाँच करते हैं। सफल जाँच के बाद Norva इसे रद्द करता है, लेकिन आपका बैंक रोक को अधिक समय तक दिखा सकता है। पुष्टि से पहले अगली स्क्रीन पर बिलिंग की सटीक शर्तें दिखेंगी। हर सदस्यता भुगतान की रसीद ईमेल से मिलेगी।",
+    "tr": "Kartınızı küçük bir geçici provizyonla doğrularız. Norva başarılı doğrulamadan sonra bunu iptal eder, ancak bankanız provizyonu daha uzun süre gösterebilir. Kesin faturalandırma koşulları onaydan önce sonraki ekranda görünür. Her abonelik ödemesi için e-posta makbuzu gönderilir.",
+    "bn": "একটি ছোট অস্থায়ী অনুমোদন দিয়ে আপনার কার্ড যাচাই করা হয়। সফল যাচাইয়ের পর Norva এটি বাতিল করে, তবে আপনার ব্যাংক আরও কিছু সময় আটকে থাকা অর্থ দেখাতে পারে। নিশ্চিত করার আগে পরের পর্দায় সঠিক বিলিং শর্ত থাকবে। প্রতিটি সাবস্ক্রিপশন পেমেন্টের রসিদ ইমেইলে পাবেন।",
+    "ar": "نتحقق من بطاقتك بتفويض مؤقت صغير. تلغيه Norva بعد نجاح التحقق، لكن مصرفك قد يواصل إظهار الحجز مدة أطول. تظهر شروط الفوترة الدقيقة على الشاشة التالية قبل التأكيد. يُرسل إيصال بالبريد الإلكتروني لكل دفعة اشتراك.",
+    "id": "Kami memverifikasi kartu Anda dengan otorisasi sementara bernilai kecil. Norva membatalkannya setelah verifikasi berhasil, tetapi bank Anda mungkin menampilkan penahanan dana lebih lama. Ketentuan penagihan yang tepat muncul di layar berikutnya sebelum konfirmasi. Setiap pembayaran langganan disertai tanda terima melalui email.",
+    "fil": "Vine-verify namin ang iyong card gamit ang maliit na pansamantalang awtorisasyon. Kinakansela ito ng Norva pagkatapos ng matagumpay na pag-verify, ngunit maaaring mas matagal itong ipakita ng iyong bangko. Makikita ang eksaktong tuntunin sa pagsingil sa susunod na screen bago kumpirmahin. May resibo sa email ang bawat bayad sa subscription."
   },
   "ui_sub_compare": {
     "source": "Both plans include all Norva features. Norva includes 2 profiles and Norva Family includes 5, each with separate favorites and viewing progress.",

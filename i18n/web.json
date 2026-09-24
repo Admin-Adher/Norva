@@ -50919,20 +50919,20 @@
     "fil": "US$0.00"
   },
   "ui_web_d32a799b659b": {
-    "source": "released immediately",
+    "source": "canceled after verification",
     "refs": [
       "public/checkout-revolut.html"
     ],
-    "en": "released immediately",
-    "fr": "libéré immédiatement",
-    "pt-BR": "liberado imediatamente",
-    "es": "liberado inmediatamente",
-    "hi": "तुरंत रिहा कर दिया गया",
-    "tr": "derhal serbest bırakıldı",
-    "bn": "অবিলম্বে মুক্তি",
-    "ar": "أطلق سراحه على الفور",
-    "id": "segera dirilis",
-    "fil": "agad na inilabas"
+    "en": "canceled after verification",
+    "fr": "annulée après vérification",
+    "pt-BR": "cancelada após a verificação",
+    "es": "cancelada tras la verificación",
+    "hi": "सत्यापन के बाद रद्द",
+    "tr": "doğrulamadan sonra iptal edilir",
+    "bn": "যাচাইয়ের পর বাতিল",
+    "ar": "يُلغى بعد التحقق",
+    "id": "dibatalkan setelah verifikasi",
+    "fil": "kinakansela pagkatapos ng pag-verify"
   },
   "ui_web_b0332ed00235": {
     "source": "First payment on",
@@ -51487,20 +51487,20 @@
     "fil": "Walang bayad sa plano"
   },
   "ui_web_1d4d4aa78e7e": {
-    "source": "By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update.",
+    "source": "By selecting “Save card”, you authorize a temporary card verification. Norva cancels the authorization after verification, but your bank may take longer to remove the hold. This update does not charge your subscription.",
     "refs": [
       "public/checkout-revolut.html"
     ],
-    "en": "By selecting “Save card”, you authorize a temporary card verification. It is released immediately; your subscription is not charged by this update.",
-    "fr": "En sélectionnant « Enregistrer la carte », vous autorisez une vérification temporaire de la carte. Il est libéré immédiatement ; votre abonnement n'est pas facturé par cette mise à jour.",
-    "pt-BR": "Ao selecionar “Salvar cartão”, você autoriza uma verificação temporária do cartão. É liberado imediatamente; sua assinatura não é cobrada por esta atualização.",
-    "es": "Al seleccionar “Guardar tarjeta”, autorizas una verificación temporal de la tarjeta. Se libera inmediatamente; Esta actualización no cobra su suscripción.",
-    "hi": "\"कार्ड सहेजें\" का चयन करके, आप एक अस्थायी कार्ड सत्यापन को अधिकृत करते हैं। यह तुरंत जारी हो जाता है; इस अद्यतन द्वारा आपकी सदस्यता से कोई शुल्क नहीं लिया जाएगा.",
-    "tr": "“Kartı kaydet”i seçerek geçici bir kart doğrulama işlemine izin vermiş olursunuz. Hemen serbest bırakılır; aboneliğiniz bu güncelleme tarafından ücretlendirilmez.",
-    "bn": "\"কার্ড সংরক্ষণ করুন\" নির্বাচন করে, আপনি একটি অস্থায়ী কার্ড যাচাইকরণ অনুমোদন করেন৷ এটি অবিলম্বে মুক্তি হয়; আপনার সদস্যতা এই আপডেট দ্বারা চার্জ করা হয় না.",
-    "ar": "من خلال تحديد \"حفظ البطاقة\"، فإنك تسمح بالتحقق المؤقت من البطاقة. يتم إطلاقه على الفور؛ لا يتم فرض رسوم على اشتراكك بواسطة هذا التحديث.",
-    "id": "Dengan memilih “Simpan kartu”, Anda mengotorisasi verifikasi kartu sementara. Ini segera dirilis; langganan Anda tidak dikenakan biaya oleh pembaruan ini.",
-    "fil": "Sa pamamagitan ng pagpili ng “I-save ang card,” pinahihintulutan mo ang pansamantalang pag-verify ng card. Agad itong ilalabas; hindi sisingilin ang iyong subscription ng update na ito."
+    "en": "By selecting “Save card”, you authorize a temporary card verification. Norva cancels the authorization after verification, but your bank may take longer to remove the hold. This update does not charge your subscription.",
+    "fr": "En sélectionnant « Enregistrer la carte », vous autorisez une vérification temporaire. Norva annule cette autorisation après vérification, mais votre banque peut mettre plus de temps à faire disparaître l’empreinte. Cette mise à jour ne facture pas votre abonnement.",
+    "pt-BR": "Ao selecionar “Salvar cartão”, você autoriza uma verificação temporária. A Norva cancela a autorização após a verificação, mas seu banco pode demorar mais para remover a retenção. Esta atualização não cobra sua assinatura.",
+    "es": "Al seleccionar «Guardar tarjeta», autorizas una verificación temporal. Norva cancela la autorización tras verificarla, pero tu banco puede tardar más en retirar la retención. Esta actualización no cobra tu suscripción.",
+    "hi": "“कार्ड सहेजें” चुनकर आप अस्थायी कार्ड सत्यापन की अनुमति देते हैं। Norva सत्यापन के बाद प्राधिकरण रद्द करता है, लेकिन आपका बैंक रोक हटाने में अधिक समय ले सकता है। इस अपडेट से सदस्यता शुल्क नहीं लिया जाता।",
+    "tr": "“Kartı kaydet”i seçerek geçici kart doğrulamasına izin verirsiniz. Norva doğrulamadan sonra provizyonu iptal eder, ancak bankanız provizyonu daha geç kaldırabilir. Bu güncelleme aboneliğinizden ücret almaz.",
+    "bn": "“কার্ড সংরক্ষণ করুন” নির্বাচন করলে আপনি সাময়িক কার্ড যাচাইয়ের অনুমতি দেন। যাচাইয়ের পরে Norva অনুমোদন বাতিল করে, তবে আপনার ব্যাংক আটকে থাকা অর্থ ছাড়তে বেশি সময় নিতে পারে। এই আপডেটে সাবস্ক্রিপশন চার্জ নেওয়া হয় না।",
+    "ar": "باختيار «حفظ البطاقة»، تسمح بتحقق مؤقت منها. تلغي Norva التفويض بعد التحقق، لكن مصرفك قد يستغرق وقتًا أطول لإزالة الحجز. لا يفرض هذا التحديث رسومًا على اشتراكك.",
+    "id": "Dengan memilih “Simpan kartu”, Anda menyetujui verifikasi kartu sementara. Norva membatalkan otorisasi setelah verifikasi, tetapi bank Anda mungkin lebih lama menghapus penahanan dana. Pembaruan ini tidak menagih langganan Anda.",
+    "fil": "Sa pagpili ng “I-save ang card,” pinapahintulutan mo ang pansamantalang pag-verify. Kinakansela ng Norva ang awtorisasyon pagkatapos ng pag-verify, ngunit maaaring mas matagal bago alisin ng iyong bangko ang hold. Walang singil sa subscription para sa update na ito."
   },
   "ui_web_27528dd8916e": {
     "source": "Save card",
@@ -60993,68 +60993,68 @@
     "fil": "Ligtas na pagbabayad gamit ang card"
   },
   "ui_web_a9251f5aebe3": {
-    "source": "No charge today — we only verify your card.",
+    "source": "No subscription charge today — we only verify your card.",
     "refs": [
       "public/subscribe.html"
     ],
-    "en": "No charge today — we only verify your card.",
-    "fr": "Aucun frais aujourd'hui : nous vérifions uniquement votre carte.",
-    "pt-BR": "Sem custos hoje – apenas verificamos o seu cartão.",
-    "es": "Sin cargo hoy: solo verificamos su tarjeta.",
-    "hi": "आज कोई शुल्क नहीं - हम केवल आपका कार्ड सत्यापित करते हैं।",
-    "tr": "Bugün ücret alınmıyor; yalnızca kartınızı doğruluyoruz.",
-    "bn": "আজ কোন চার্জ নেই — আমরা শুধুমাত্র আপনার কার্ড যাচাই করি।",
-    "ar": "لا توجد رسوم اليوم - نحن فقط نتحقق من بطاقتك.",
-    "id": "Tidak ada biaya hari ini — kami hanya memverifikasi kartu Anda.",
-    "fil": "Walang bayad ngayon — ibe-verify lang namin ang iyong card."
+    "en": "No subscription charge today — we only verify your card.",
+    "fr": "Aucun paiement d’abonnement aujourd’hui : nous vérifions uniquement votre carte.",
+    "pt-BR": "Nenhuma cobrança de assinatura hoje — apenas verificamos seu cartão.",
+    "es": "Hoy no se cobra la suscripción: solo verificamos tu tarjeta.",
+    "hi": "आज सदस्यता शुल्क नहीं लिया जाएगा — हम केवल आपके कार्ड की जाँच करेंगे।",
+    "tr": "Bugün abonelik ücreti alınmaz; yalnızca kartınızı doğrularız.",
+    "bn": "আজ সাবস্ক্রিপশনের অর্থ নেওয়া হবে না — আমরা শুধু আপনার কার্ড যাচাই করি।",
+    "ar": "لا تُحصّل رسوم اشتراك اليوم؛ نتحقق من بطاقتك فقط.",
+    "id": "Tidak ada biaya langganan hari ini — kami hanya memverifikasi kartu Anda.",
+    "fil": "Walang singil sa subscription ngayon — ibe-verify lang namin ang iyong card."
   },
   "ui_web_d12b4243e7bc": {
-    "source": "To open your free trial we place a tiny temporary authorization to confirm the card is valid. It may appear briefly in your local currency and is",
+    "source": "To open your free trial we place a small temporary authorization to confirm the card is valid. It may appear as a pending transaction and is",
     "refs": [
       "public/subscribe.html"
     ],
-    "en": "To open your free trial we place a tiny temporary authorization to confirm the card is valid. It may appear briefly in your local currency and is",
-    "fr": "Pour ouvrir votre essai gratuit, nous plaçons une petite autorisation temporaire pour confirmer que la carte est valide. Il peut apparaître brièvement dans votre devise locale et est",
-    "pt-BR": "Para abrir seu teste gratuito, colocamos uma pequena autorização temporária para confirmar se o cartão é válido. Pode aparecer brevemente na sua moeda local e é",
-    "es": "Para abrir su prueba gratuita, colocamos una pequeña autorización temporal para confirmar que la tarjeta es válida. Puede aparecer brevemente en su moneda local y es",
-    "hi": "आपका नि:शुल्क परीक्षण शुरू करने के लिए हम कार्ड के वैध होने की पुष्टि करने के लिए एक छोटा सा अस्थायी प्राधिकरण देते हैं। यह आपकी स्थानीय मुद्रा में संक्षिप्त रूप से दिखाई दे सकता है और है",
-    "tr": "Ücretsiz denemenizi başlatmak için kartın geçerli olduğunu onaylamak amacıyla küçük bir geçici yetkilendirme yapıyoruz. Kısa süreliğine yerel para biriminizde görünebilir ve",
-    "bn": "আপনার বিনামূল্যের ট্রায়াল খুলতে আমরা কার্ডটি বৈধ তা নিশ্চিত করার জন্য একটি ক্ষুদ্র অস্থায়ী অনুমোদন দিই। এটি আপনার স্থানীয় মুদ্রায় সংক্ষিপ্তভাবে প্রদর্শিত হতে পারে এবং হয়",
-    "ar": "لفتح النسخة التجريبية المجانية، نقوم بوضع تفويض مؤقت صغير للتأكد من صلاحية البطاقة. قد تظهر لفترة وجيزة بعملتك المحلية وهي كذلك",
-    "id": "Untuk memulai uji coba gratis Anda, kami akan melakukan otorisasi sementara kecil untuk memastikan kartu Anda valid. Otorisasi ini mungkin akan muncul sebentar dalam mata uang lokal Anda dan akan",
-    "fil": "Para mabuksan ang iyong libreng pagsubok, naglalagay kami ng isang maliit na pansamantalang awtorisasyon upang kumpirmahin na ang card ay balido. Maaari itong lumitaw sandali sa iyong lokal na pera at"
+    "en": "To open your free trial we place a small temporary authorization to confirm the card is valid. It may appear as a pending transaction and is",
+    "fr": "Pour ouvrir votre essai gratuit, nous plaçons une petite autorisation temporaire pour vérifier la carte. Elle peut apparaître comme une opération en attente et est",
+    "pt-BR": "Para iniciar seu teste gratuito, fazemos uma pequena autorização temporária para verificar o cartão. Ela pode aparecer como transação pendente e é",
+    "es": "Para iniciar tu prueba gratuita, hacemos una pequeña autorización temporal para verificar la tarjeta. Puede aparecer como operación pendiente y es",
+    "hi": "मुफ़्त परीक्षण शुरू करने के लिए हम कार्ड की जाँच हेतु एक छोटा अस्थायी प्राधिकरण करते हैं। यह लंबित लेनदेन के रूप में दिख सकता है और इसे",
+    "tr": "Ücretsiz denemeyi başlatmak için kartı doğrulayan küçük bir geçici provizyon uygularız. Bekleyen işlem olarak görünebilir ve",
+    "bn": "বিনামূল্যের ট্রায়াল শুরু করতে কার্ড যাচাইয়ের জন্য একটি ছোট অস্থায়ী অনুমোদন নেওয়া হয়। এটি অপেক্ষমাণ লেনদেন হিসেবে দেখা যেতে পারে এবং",
+    "ar": "لبدء التجربة المجانية نضع تفويضًا مؤقتًا صغيرًا للتحقق من البطاقة. قد يظهر كعملية معلقة ثم",
+    "id": "Untuk memulai uji coba gratis, kami melakukan otorisasi sementara kecil untuk memeriksa kartu. Ini dapat muncul sebagai transaksi tertunda dan",
+    "fil": "Para simulan ang libreng trial, naglalagay kami ng maliit na pansamantalang awtorisasyon upang beripikahin ang card. Maaari itong lumabas bilang nakabinbing transaksyon at"
   },
   "ui_web_bd891aa62fc4": {
-    "source": "released right away and never debited.",
+    "source": "canceled by Norva after successful verification; your bank may take longer to remove the hold.",
     "refs": [
       "public/subscribe.html"
     ],
-    "en": "released right away and never debited.",
-    "fr": "libéré immédiatement et jamais débité.",
-    "pt-BR": "liberado imediatamente e nunca debitado.",
-    "es": "liberado de inmediato y nunca debitado.",
-    "hi": "तुरंत जारी कर दिया गया और कभी भी डेबिट नहीं किया गया।",
-    "tr": "hemen serbest bırakıldı ve asla borçlandırılmadı.",
-    "bn": "অবিলম্বে মুক্তি এবং ডেবিট করা হয় না.",
-    "ar": "أطلق سراحه على الفور ولم يتم خصمه أبدًا.",
-    "id": "Langsung dicairkan dan tidak pernah didebit.",
-    "fil": "inilabas agad at hindi na binawasan."
+    "en": "canceled by Norva after successful verification; your bank may take longer to remove the hold.",
+    "fr": "annulée par Norva après une vérification réussie ; votre banque peut mettre plus de temps à faire disparaître cette empreinte.",
+    "pt-BR": "cancelada pela Norva após a verificação bem-sucedida; seu banco pode demorar mais para remover a retenção.",
+    "es": "cancelada por Norva tras una verificación correcta; tu banco puede tardar más en retirar la retención.",
+    "hi": "सफल सत्यापन के बाद Norva रद्द करता है; आपका बैंक अस्थायी रोक हटाने में अधिक समय ले सकता है।",
+    "tr": "başarılı doğrulamadan sonra Norva tarafından iptal edilir; bankanız provizyonu daha geç kaldırabilir.",
+    "bn": "সফল যাচাইয়ের পর Norva এটি বাতিল করে; আপনার ব্যাংক সাময়িক আটকে থাকা অর্থ ছাড়তে বেশি সময় নিতে পারে।",
+    "ar": "تلغيه Norva بعد نجاح التحقق؛ وقد يستغرق مصرفك وقتًا أطول لإزالة الحجز.",
+    "id": "dibatalkan Norva setelah verifikasi berhasil; bank Anda mungkin memerlukan waktu lebih lama untuk menghapus penahanan dana.",
+    "fil": "kinakansela ng Norva pagkatapos ng matagumpay na pag-verify; maaaring mas matagal bago alisin ng iyong bangko ang hold."
   },
   "ui_web_c6f027b0bdd0": {
-    "source": "Your first real payment happens only after the trial if you do not cancel.",
+    "source": "Your first subscription payment happens only after the trial if you do not cancel.",
     "refs": [
       "public/subscribe.html"
     ],
-    "en": "Your first real payment happens only after the trial if you do not cancel.",
-    "fr": "Votre premier paiement réel n'a lieu qu'après l'essai si vous n'annulez pas.",
-    "pt-BR": "Seu primeiro pagamento real acontecerá somente após o teste, se você não cancelar.",
-    "es": "Su primer pago real ocurre solo después de la prueba si no cancela.",
-    "hi": "यदि आप रद्द नहीं करते हैं तो आपका पहला वास्तविक भुगतान परीक्षण के बाद ही होता है।",
-    "tr": "İptal etmediğiniz takdirde ilk gerçek ödemeniz ancak deneme süresi sonrasında gerçekleşir.",
-    "bn": "আপনি বাতিল না করলেই আপনার প্রথম আসল অর্থপ্রদান ট্রায়ালের পরেই হবে।",
-    "ar": "لن تتم دفعتك الحقيقية الأولى إلا بعد الفترة التجريبية إذا لم تقم بالإلغاء.",
-    "id": "Pembayaran nyata pertama Anda baru akan terjadi setelah masa percobaan jika Anda tidak membatalkan langganan.",
-    "fil": "Ang iyong unang totoong bayad ay mangyayari lamang pagkatapos ng trial kung hindi ka magkakansela."
+    "en": "Your first subscription payment happens only after the trial if you do not cancel.",
+    "fr": "Votre premier paiement d’abonnement n’a lieu qu’après l’essai si vous n’annulez pas.",
+    "pt-BR": "O primeiro pagamento da assinatura ocorre somente após o teste, caso você não cancele.",
+    "es": "El primer pago de la suscripción se realiza solo después de la prueba si no la cancelas.",
+    "hi": "यदि आप रद्द नहीं करते, तो पहला सदस्यता भुगतान परीक्षण के बाद ही होगा।",
+    "tr": "İptal etmezseniz ilk abonelik ödemeniz yalnızca deneme süresinden sonra yapılır.",
+    "bn": "আপনি বাতিল না করলে প্রথম সাবস্ক্রিপশন পেমেন্ট ট্রায়ালের পরেই হবে।",
+    "ar": "لن تُحصّل دفعة الاشتراك الأولى إلا بعد التجربة إذا لم تُلغِ.",
+    "id": "Pembayaran langganan pertama hanya dilakukan setelah masa uji coba jika Anda tidak membatalkan.",
+    "fil": "Ang unang bayad sa subscription ay pagkatapos lang ng trial kung hindi ka magkakansela."
   },
   "ui_web_e9b988aaa423": {
     "source": "We will email you a reminder before it ends.",
