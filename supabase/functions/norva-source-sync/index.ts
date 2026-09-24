@@ -1,9 +1,11 @@
+import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
+import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { maintainCatalogBackgroundOwners } from "../_shared/catalog-background-owner-workflow.mjs";
 import { acceptAutomaticTmdbSearchMatch, isMissingTmdbTitle } from "../_shared/tmdb-enrichment-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
-import { initialTitleBatchLimit } from "../_shared/selection-initial-import.mjs";
+import { initialTitleBatchLimit, activeFinalizeLeaseCount, writeSelectionBatch, registerM3uEpochSnapshot, mayAdoptM3uUserEpoch, retryM3uEpochOperation } from "../_shared/selection-initial-import.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   buildLiveMaterializationPlan,
@@ -31,6 +33,7 @@ import {
   fetchBoundedProviderText,
 } from "../_shared/bounded-provider-response.mjs";
 import { fetchM3uPlaylistStream } from "../_shared/m3u-playlist-stream.mjs";
+import { buildM3uCatalogRows, m3uCatalogCounts, m3uSemanticSignature } from "../_shared/m3u-media-classification.mjs";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
@@ -141,7 +144,12 @@ Deno.serve(async (req) => {
         sourceReenableResumeProtocol: 1,
         m3uSyncLeaseProtocol: 2,
         m3uStreamingImportProtocol: 1,
-        m3uFinalizeResumeProtocol: 1,
+        m3uFinalizeResumeProtocol: 2,
+        m3uBoundedFinalizeProtocol: 2,
+        m3uProjectionLeaseProtocol: 1,
+        m3uAccountEpochJoinProtocol: 1,
+        m3uConcurrentImportProtocol: 1,
+        xtreamConcurrentImportProtocol: 1,
         m3uCompleteLiveVariantsProtocol: 1,
         fileAudioRepairCohortProtocol: 2,
         tmdbSearchPolicy: TMDB_SEARCH_POLICY_VERSION,
@@ -195,7 +203,7 @@ Deno.serve(async (req) => {
         const { data: src } = await supabase.from("cloud_catalog_visible_sources").select("user_id").eq("id", segments[2]).maybeSingle();
         if (!src) return json(req, { error: "source not found" }, 404);
         const responseSnapshot = await readCatalogAccessSnapshot(segments[2], String(src.user_id), supabase, false);
-        const result = await finalizeCloudSource(segments[2], String(src.user_id), supabase, {
+        const result = await finalizeCloudSourceAdapter(segments[2], String(src.user_id), supabase, {
           country: url.searchParams.get("country"),
           phase: stringOr(url.searchParams.get("phase"), "titles"),
           offset: Number(url.searchParams.get("offset")) || 0,
@@ -278,15 +286,14 @@ Deno.serve(async (req) => {
       const force = url.searchParams.get("force") === "1";
       const responseSnapshot = await readCatalogAccessSnapshot(segments[1], user.id, supabase, false);
       const result = await syncCloudSource(segments[1], user.id, supabase, url.searchParams.get("country"), { force });
-      await adoptActiveCatalogUserVisibilityEpoch(supabase, segments[1], user.id, responseSnapshot);
-      await assertCatalogSnapshotCurrent(segments[1], user.id, responseSnapshot, supabase);
+      await assertCatalogSnapshotCurrent(segments[1], user.id, responseSnapshot, supabase, { allowUserEpochAdvance: true });
       catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, result);
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "finalize") {
       const user = await requireUser(req, supabase);
       const responseSnapshot = await readCatalogAccessSnapshot(segments[1], user.id, supabase, false);
-      const result = await finalizeCloudSource(segments[1], user.id, supabase, {
+      const result = await finalizeCloudSourceAdapter(segments[1], user.id, supabase, {
         country: url.searchParams.get("country"),
         phase: stringOr(url.searchParams.get("phase"), "titles"),
         offset: boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000),
@@ -322,8 +329,7 @@ Deno.serve(async (req) => {
       if (!src) throw new HttpError(404, "Source not found");
       const responseSnapshot = await readCatalogAccessSnapshot(sourceId, String(src.user_id), supabase, false);
       const result = await syncCloudSource(sourceId, String(src.user_id), supabase, url.searchParams.get("country"), { force: true });
-      await adoptActiveCatalogUserVisibilityEpoch(supabase, sourceId, String(src.user_id), responseSnapshot);
-      await assertCatalogSnapshotCurrent(sourceId, String(src.user_id), responseSnapshot, supabase);
+      await assertCatalogSnapshotCurrent(sourceId, String(src.user_id), responseSnapshot, supabase, { allowUserEpochAdvance: true });
       catalogVisibilityEpochs.set(req, responseSnapshot.userVisibilityEpoch);
       return json(req, { adminResync: true, sourceId, ...(result as JsonRecord) });
     }
@@ -416,9 +422,13 @@ async function assertCatalogSnapshotCurrent(
   userId: string,
   expected: CatalogAccessSnapshot,
   db: SupabaseClient,
+  options: { allowUserEpochAdvance?: boolean } = {},
 ): Promise<void> {
   try {
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
+    // Joining the cache epoch still proves the same visible owner/source,
+    // active generation, head, configuration and source visibility revision.
+    if (options.allowUserEpochAdvance || mayAdoptM3uUserEpoch(expected)) await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expected);
+    else await assertActiveCatalogGenerationCurrent(db, sourceId, userId, expected);
   } catch (_) {
     throw new HttpError(409, "Catalog access changed while background work was running", {
       code: "SOURCE_CATALOG_CHANGED",
@@ -646,6 +656,7 @@ async function syncCloudSource(
     throw error;
   }
   const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
+  if (source.source_type === "m3u") registerM3uEpochSnapshot(accessSnapshot);
   if (!source.config_ciphertext && (source.source_type !== "m3u" || opts.rawOnly)) {
     throw new HttpError(400, "Source has no managed cloud configuration");
   }
@@ -785,11 +796,11 @@ async function syncCloudSource(
     const inDiscovery = cur.active === true && stringOr(cur.phase, "") === "discover";
     if (!opts.force && inDiscovery && String(source.sync_status) === "syncing") {
       if (Date.now() - heartbeat < 75_000) {
-        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+        await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db, { allowUserEpochAdvance: true });
         return { sourceId, status: "syncing", started: false, joined: true };
       }
       // Heartbeat went stale → the chain died mid-run; resume without wiping.
-      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db, { allowUserEpochAdvance: true });
       runInBackground(driveXtreamSyncToReady(sourceId, userId, db));
       return { sourceId, status: "syncing", started: true, resumed: true };
     }
@@ -799,7 +810,7 @@ async function syncCloudSource(
     // background (it self-continues across isolates to the finalize-pending
     // handoff). Return immediately so the caller/route isn't held open.
     const cursor = freshSyncCursor(startedAt, { country, force: Boolean(opts.force), previousSignature });
-    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db, { allowUserEpochAdvance: true });
     await db
       .from("cloud_sources")
       .update({
@@ -810,7 +821,7 @@ async function syncCloudSource(
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
-    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db, { allowUserEpochAdvance: true });
     runInBackground(driveXtreamSyncToReady(sourceId, userId, db));
     return { sourceId, status: "syncing", started: true };
   }
@@ -854,7 +865,9 @@ async function syncCloudSource(
     }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-    const syncOpts = { previousSignature, force: opts.force, rawOnly: false };
+    const syncOpts = { previousSignature, force: opts.force, rawOnly: false,
+      projectionComplete: recordOrEmpty(recordOrEmpty(recordOrEmpty(baseHint.syncProgress).steps).finalize).status === "done",
+    };
     const result = source.source_type === "m3u"
       ? await syncM3uSource(
         sourceId,
@@ -889,6 +902,7 @@ async function syncCloudSource(
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       await persistM3uFinalizeHandoff(db, sourceId, userId, {
         contentSignature: resultRecord.contentSignature ?? previousSignature,
+        generation: accessSnapshot,
         handoffAt,
       });
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
@@ -3219,7 +3233,8 @@ async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt:
     const { count, error } = await db.from("cloud_catalog_visible_sources")
       .select("id", { count: "exact", head: true })
       .eq("sync_status", "syncing")
-      .eq("source_type", "xtream")
+      .in("source_type", ["xtream", "m3u"])
+      .eq("enabled", true)
       .is("deleted_at", null) // a removed (soft-deleted) source must not hold an import slot ahead of others
       .lt("created_at", createdAt)
       .neq("id", sourceId);
@@ -3251,8 +3266,11 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   // isolate before that boundary instead of dying with a four-minute lease.
   const runBudgetMs = boundedInt(Deno.env.get("NORVA_FINALIZE_RUN_BUDGET_MS"), 45_000, 15_000, 50_000);
   const deadline = Date.now() + runBudgetMs;
-  const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status,created_at").eq("id", sourceId).maybeSingle();
+  let { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status,created_at,source_type").eq("id", sourceId).maybeSingle();
   if (src0 && String(src0.sync_status) === "ready") return; // already done
+  // Both long-lived import drivers may join account cache invalidations; the
+  // canonical helper still rejects source/configuration/head/generation changes.
+  if (["m3u", "xtream"].includes(String(src0?.source_type))) registerM3uEpochSnapshot(accessSnapshot);
 
   // Global admission control (discovery + finalize share ONE budget): defer if too many
   // older imports run ahead. Deferring just returns — the source stays "syncing" with its
@@ -3270,11 +3288,24 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   const leaseTtlMs = boundedInt(Deno.env.get("NORVA_FINALIZE_LEASE_TTL_MS"), 240_000, 30_000, 900_000);
   const leaseToken = crypto.randomUUID();
   if (!(await claimFinalizeLease(db, sourceId, userId, leaseToken, leaseTtlMs))) return;
-  await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+  // Re-read only after winning CAS: the previous owner may have completed a
+  // raw refresh while this worker was waiting to enter.
+  const claimed = await db.from("cloud_sources").select("config_hint,sync_status,created_at,source_type").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  if (claimed.error || !claimed.data || claimed.data.sync_status === "ready") {
+    await releaseFinalizeLease(db, sourceId, userId, leaseToken);
+    return;
+  }
+  src0 = claimed.data;
+  try { await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db); }
+  catch (error) {
+    if (isCatalogAccessGuardError(error)) { await releaseFinalizeLease(db, sourceId, userId, leaseToken); return; }
+    throw error;
+  }
   await stampFinalizeLease(db, sourceId, leaseTtlMs); // cover the first batch immediately
 
   const fc = recordOrEmpty(recordOrEmpty(src0?.config_hint).finalizeCursor);
-  let phase = stringOr(fc.phase, "titles");
+  const initialCounts = recordOrEmpty(recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).counts);
+  let phase = stringOr(fc.phase, src0?.source_type === "m3u" && !(Number(initialCounts.movies) + Number(initialCounts.series)) ? "live" : "titles");
   let offset = Number(fc.offset) || 0;
   let afterId = stringOr(fc.afterId, "");
   let guard = 0;
@@ -3292,21 +3323,22 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   while (Date.now() < deadline && guard++ < 400) {
     try {
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      if (src0?.source_type === "m3u") await assertM3uFinalizeRunCurrent(db, sourceId, userId, recordOrEmpty(src0.config_hint));
     } catch (guardError) {
-      if (isCatalogAccessGuardError(guardError)) return;
+      if (isCatalogAccessGuardError(guardError)) { await releaseFinalizeLease(db, sourceId, userId, leaseToken); return; }
       throw guardError;
     }
     let result: JsonRecord;
     try {
-      // Smaller titles batch: the per-batch cloud_titles/title_variant upserts must finish
-      // inside the authenticator's 8s statement_timeout even under concurrent read load AND
-      // a re-walk that re-fires the keep-best / mirror triggers on already-built rows. The
-      // upsert of 500 rows measured ~6.4s under load — too close to the ceiling — so 300
-      // buys headroom; the cost is just more (cheap) self-invocations.
-      const batchLimit = phase === "titles" ? initialTitleBatchLimit(isSelection, firstSliceReady) : 1500;
+      // Bound title work across current lease holders. Recount every batch so a
+      // newly arriving import reduces the next batch; errors use 60, never 150.
+      // The count is advisory: CAS leases and all catalogue/run guards stay authoritative.
+      const batchLimit = phase === "titles"
+        ? initialTitleBatchLimit(isSelection, firstSliceReady, await activeFinalizeLeaseCount(db))
+        : 1500;
       result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, afterId, limit: batchLimit }) as unknown as JsonRecord;
     } catch (e) {
-      if (isCatalogAccessGuardError(e)) return;
+      if (isCatalogAccessGuardError(e)) { await releaseFinalizeLease(db, sourceId, userId, leaseToken); return; }
       // Transient contention/compute spike → continue in a fresh isolate; a real
       // error (e.g. 422 no items) surfaces and stops the chain. A statement timeout
       // surfaces as a PLAIN Error (not HttpError), so match the message regardless of
@@ -3347,7 +3379,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       return hint;
     });
     if (result.browseReady === true || result.usable === true) firstSliceReady = true;
-    const throttleMs = firstSliceReady ? longThrottleMs : firstSliceThrottleMs;
+    const throttleMs = src0?.source_type === "m3u" && phase === "live" ? firstSliceThrottleMs : firstSliceReady ? longThrottleMs : firstSliceThrottleMs;
     if (throttleMs > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, throttleMs));
   }
   // Budget/guard hit before ready → continue in a fresh isolate.
@@ -3417,7 +3449,7 @@ async function persistM3uFinalizeHandoff(
   db: SupabaseClient,
   sourceId: string,
   userId: string,
-  input: { contentSignature: unknown; handoffAt: string },
+  input: { contentSignature: unknown; generation: CatalogAccessSnapshot; handoffAt: string },
 ) {
   const { data: source, error: readError } = await db
     .from("cloud_sources")
@@ -3448,6 +3480,7 @@ async function persistM3uFinalizeHandoff(
       config_hint: compactRecord({
         ...hint,
         contentSignature: input.contentSignature,
+        m3uFinalize: m3uFinalizeProof(input.generation, progress),
         syncProgress: progress,
         finalizeCursor: { phase: hasVod ? "titles" : "live", offset: 0, afterId: "" },
       }),
@@ -3533,6 +3566,11 @@ async function claimM3uSyncLease(
   });
   if (error) throwDb(error, "Unable to claim M3U sync lease");
   const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  if (result.claimed === true && !(await claimM3uProjectionLease(db, sourceId, userId, leaseToken))) {
+    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "cancelled", null);
+    result.claimed = false;
+    result.reason = "leased";
+  }
   return {
     claimed: result.claimed === true,
     reason: stringOr(result.reason, ""),
@@ -3555,6 +3593,8 @@ async function assertM3uSyncLeaseCurrent(
     p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
   });
   if (error) throwDb(error, "Unable to renew M3U sync lease");
+  try { await renewM3uProjectionLease(db, sourceId, userId, leaseToken); }
+  catch (_) { throw new HttpError(409, "M3U projection ownership changed", { code: "M3U_SYNC_LEASE_LOST" }); }
   if (data !== true) {
     throw new HttpError(409, "M3U sync ownership changed", {
       code: "M3U_SYNC_LEASE_LOST",
@@ -3577,6 +3617,7 @@ async function settleM3uSyncLease(
     p_outcome: outcome,
     p_error_kind: errorKind,
   });
+  await releaseM3uProjectionLease(db, sourceId, userId, leaseToken);
   if (error) {
     console.error("[norva-source-sync] Unable to settle M3U sync lease", error.message);
     return { settled: false, state: "unknown" };
@@ -3629,6 +3670,15 @@ type FinalizeCloudSourceOptions = {
   limit: number;
 };
 
+async function finalizeCloudSourceAdapter(sourceId: string, userId: string, db: SupabaseClient, options: FinalizeCloudSourceOptions) {
+  const joined = await joinM3uFinalizer({ db, sourceId, userId,
+    assertCurrent: () => readCatalogAccessSnapshot(sourceId, userId, db, false),
+    invokeFinalizer: async () => { runInBackground(driveFinalizeToReady(db, sourceId, userId, options.country)); },
+  });
+  if (joined) return joined;
+  return await finalizeCloudSource(sourceId, userId, db, options);
+}
+
 async function finalizeCloudSource(sourceId: string, userId: string, db: SupabaseClient, options: FinalizeCloudSourceOptions) {
   const { data: source, error } = await db
     .from("cloud_sources")
@@ -3641,10 +3691,13 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const versionedCatalog = stringOr(source.source_type, "") === "xtream";
   await assertCatalogVisible(sourceId, userId, db);
   const accessSnapshot = await readCatalogAccessSnapshot(sourceId, userId, db, false);
+  if (["m3u", "xtream"].includes(String(source.source_type))) registerM3uEpochSnapshot(accessSnapshot);
 
   const baseHint = recordOrEmpty(source.config_hint);
   const existingProgress = recordOrEmpty(baseHint.syncProgress);
   const startedAt = stringOr(existingProgress.startedAt ?? source.last_synced_at, new Date().toISOString());
+  const m3uCursor = source.source_type === "m3u" ? resolveM3uFinalizeCursor(baseHint, accessSnapshot) : null;
+  if (m3uCursor) options = { ...options, ...m3uCursor };
   const phase = normalizeFinalizePhase(options.phase);
   // A live/titles cursor written before the cinema-first rollout must finish in
   // its historical order. New progress carries section-specific cinema flags,
@@ -3672,6 +3725,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
     progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    if (source.source_type === "m3u") await assertM3uFinalizeRunCurrent(db, sourceId, userId, baseHint);
     await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
   };
 
@@ -3723,13 +3777,11 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
       const totalVod = counts.movies + counts.series;
-      // Checkpoint at most 200 raw channels per page; SQL writes remain bounded
-      // to 100 rows. Ten-row pages imposed a full background pause for every
-      // ten channels, adding hours to large imports despite fast SQL writes.
+      // Checkpoint at most 200 raw channels; SQL writes stay bounded to 100 rows.
       const liveChunkLimit = 200;
       if (batchOffset === 0) {
         await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
-        const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot);
+        const cleared = await clearLiveMaterialization(db, sourceId, userId, accessSnapshot, source.source_type === "m3u" ? () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, accessSnapshot) : undefined);
         if (!cleared.complete) {
           return {
             sourceId, status: "syncing", phase: "live",
@@ -3764,7 +3816,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       });
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
       if (!liveChunk.length) {
+        if (source.source_type === "m3u" && batchOffset !== counts.live) throw new Error("M3U live finalization has missing rows");
         await reportProgress({
+          ...(source.source_type === "m3u" ? { m3uLiveCompleted: counts.live } : {}),
           stage: "finalizing",
           percent: 99,
           liveReady: true,
@@ -3786,6 +3840,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         withCurrentGeneration: operation => withActiveCatalogEpochRetry(db, sourceId, userId, accessSnapshot, operation),
       });
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+      if (source.source_type === "m3u" && (mat.rawLive !== liveChunk.length || mat.liveVariants !== liveChunk.length)) throw new Error("Incomplete M3U live page");
       const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
         stage: "building_live_channels",
@@ -3888,6 +3943,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     }
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
+    if (source.source_type === "m3u" && counts.live > 0 && Number(existingProgress.m3uLiveCompleted) !== counts.live) {
+      throw new Error("M3U live finalization is not complete");
+    }
 
     // Prune only after the complete cinema-first → Live-last walk, under the
     // source-row lock immediately before READY. This keeps partial sections
@@ -3947,6 +4005,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     const syncedAt = new Date().toISOString();
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    if (source.source_type === "m3u") await assertM3uFinalizeRunCurrent(db, sourceId, userId, baseHint);
     const { error: updateError } = await db
       .from("cloud_sources")
       .update({
@@ -4131,22 +4190,31 @@ async function countSourceItems(
   // to counting only when no trustworthy persisted total exists (e.g. legacy rows).
   const persisted = recordOrEmpty(progress.counts);
   const pLive = Number(persisted.live), pMovies = Number(persisted.movies), pSeries = Number(persisted.series);
-  let live: number, movies: number, series: number;
-  if (Number(persisted.total) > 0 && [pLive, pMovies, pSeries].every(Number.isFinite)) {
-    live = pLive || 0; movies = pMovies || 0; series = pSeries || 0;
+  const pTotal = Number(persisted.total);
+  let live: number, movies: number, series: number, total: number;
+  if (Number.isSafeInteger(pTotal) && pTotal > 0
+      && [pLive, pMovies, pSeries].every(value => Number.isSafeInteger(value) && value >= 0)
+      && pTotal >= pLive + pMovies + pSeries) {
+    live = pLive; movies = pMovies; series = pSeries;
+    // The immutable M3U handoff counts every raw row, including episodes.
+    // Replacing that total with the three browse lanes invalidates its own run.
+    total = pTotal;
   } else {
-    [live, movies, series] = await Promise.all([
+    let episodes: number;
+    [live, movies, series, episodes] = await Promise.all([
       countRowsByType(sourceId, userId, db, generation, "live"),
       countRowsByType(sourceId, userId, db, generation, "movie"),
       countRowsByType(sourceId, userId, db, generation, "series"),
+      countRowsByType(sourceId, userId, db, generation, "episode"),
     ]);
+    total = live + movies + series + episodes;
   }
   const categories = recordOrEmpty(progress.categories);
   return {
     live,
     movies,
     series,
-    total: live + movies + series,
+    total,
     categories: {
       live: Number(categories.live ?? 0) || 0,
       movies: Number(categories.movies ?? 0) || 0,
@@ -4359,7 +4427,7 @@ async function syncM3uSource(
   country: string | null,
   expectedSnapshot: CatalogAccessSnapshot,
   reportProgress: SyncProgressReporter = async () => {},
-  opts: { previousSignature?: unknown; force?: boolean; rawOnly?: boolean } = {},
+  opts: { previousSignature?: unknown; force?: boolean; rawOnly?: boolean; projectionComplete?: boolean } = {},
   heartbeat: () => Promise<void> = async () => {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
@@ -4382,14 +4450,15 @@ async function syncM3uSource(
     steps: {
       connect: { status: "done" },
       channels: { status: "running" },
-      movies: { status: "skipped" },
-      series: { status: "skipped" },
+      movies: { status: "running" },
+      series: { status: "running" },
       categories: { status: "running" },
     },
   });
   const items = playlist.items as M3uPlaylistItem[];
-  const rows: JsonRecord[] = [];
-  for (let index = 0; index < items.length; index += 500) {
+  const rows: JsonRecord[] = playlistUrl === DISCOVERY_PLAYLIST_URL ? []
+    : await buildM3uCatalogRows(items, { userId, sourceId, hash: sha256Hex, heartbeat });
+  for (let index = 0; playlistUrl === DISCOVERY_PLAYLIST_URL && index < items.length; index += 500) {
     await heartbeat();
     const chunk = await Promise.all(items.slice(index, index + 500).map(async (item) => ({
       user_id: userId,
@@ -4412,11 +4481,15 @@ async function syncM3uSource(
   const movieCount = rows.filter(row => row.item_type === "movie").length;
   const seriesCount = rows.filter(row => row.item_type === "series").length;
   const liveCount = rows.filter(row => row.item_type === "live").length;
-  const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
+  const { categories } = m3uCatalogCounts(rows);
+  const categoryCount = categories.total;
 
   // Change-detection (same as Xtream): skip the rebuild when the playlist's
   // channel set is unchanged since the last completed import.
   const contentSignature = await computeContentSignature(rows);
+  if (playlistUrl !== DISCOVERY_PLAYLIST_URL) {
+    contentSignature.m3uSemanticsV1 = await m3uSemanticSignature(rows, { hash: sha256Hex, heartbeat });
+  }
 
   if (opts.rawOnly) {
     // Detection-only (cron) path — see the matching note in syncXtreamSource.
@@ -4441,7 +4514,7 @@ async function syncM3uSource(
   // signature is not proof that the active Selection still contains every row.
   const persistedSelectionComplete = !unchangedSignature || playlistUrl !== DISCOVERY_PLAYLIST_URL
     || await countRowsInTable("cloud_media_items", sourceId, userId, db, expectedSnapshot) === rows.length;
-  if (unchangedSignature && persistedSelectionComplete) {
+  if (unchangedSignature && persistedSelectionComplete && opts.projectionComplete === true) {
     await reportProgress({
       stage: "unchanged",
       percent: 100,
@@ -4466,7 +4539,7 @@ async function syncM3uSource(
     stage: "importing",
     percent: 62,
     counts: { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length },
-    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: seriesCount ? categoryCount : 0, total: categoryCount },
+    categories,
     steps: {
       channels: { status: "done", count: liveCount },
       movies: { status: "done", count: movieCount },
@@ -4496,8 +4569,9 @@ async function syncM3uSource(
     movies: movieCount,
     series: seriesCount,
     total: rows.length,
-    liveCategories: liveCount ? categoryCount : 0,
-    movieCategories: movieCount ? categoryCount : 0,
+    liveCategories: categories.live,
+    movieCategories: categories.movies,
+    seriesCategories: categories.series,
     finalizePending: true,
     liveCatalog: { rawLive: liveCount, pending: true },
     contentSignature,
@@ -4519,30 +4593,35 @@ async function replaceSourceItems(
   const savedRows: LiveCatalogItem[] = [];
   const catalogVersion = preserveUntilSaved ? Date.now() : null;
   await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-  for (let guard = 0; !preserveUntilSaved && guard < 100; guard += 1) {
+  // Up to 100k URLs can add one series parent each. After 100 full delete
+  // batches, one bounded empty batch is needed to prove the 200k rows are gone.
+  for (let guard = 0; !preserveUntilSaved && guard < 101; guard += 1) {
     await heartbeat();
-    const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
-      p_source_id: sourceId,
-      p_user_id: userId,
-      ...catalogGenerationRpcFence(expectedSnapshot),
-      p_limit: 2000,
+    const { data, error } = await writeM3uEpochBatch({ generation: expectedSnapshot,
+      adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expectedSnapshot),
+      write: () => db.rpc("norva_delete_catalog_generation_items_batch", {
+        p_source_id: sourceId, p_user_id: userId,
+        ...catalogGenerationRpcFence(expectedSnapshot), p_limit: 2000,
+      }),
     });
     if (error) throwDb(error, "Unable to clear old catalog items");
     const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
     if (removed < 2000) break;
-    if (guard === 99) throw new Error("Catalog generation clear exceeded its bounded batch budget");
+    if (guard === 100) throw new Error("Catalog generation clear exceeded its bounded batch budget");
   }
   for (let index = 0; index < rows.length; index += 500) {
     await heartbeat();
     await assertCatalogSnapshotCurrent(sourceId, userId, expectedSnapshot, db);
-    const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
-      preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
-    ), expectedSnapshot);
-    if (!chunk.length) continue;
-    const { data, error } = await db
-      .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
-      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+    const write = async () => {
+      const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
+        preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
+      ), expectedSnapshot);
+      return await db.from("cloud_media_items")
+        .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
+        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+    };
+    const { data, error } = await writeM3uEpochBatch({ generation: expectedSnapshot, write,
+      adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expectedSnapshot) });
     if (error) throwDb(error, "Unable to save cloud catalog items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
   }

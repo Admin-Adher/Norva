@@ -1,10 +1,14 @@
 import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
+import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
+import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
 import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
+import { isM3uSeriesId, isM3uEpisodeId, loadM3uSeriesInfo, resolveOwnedM3uEpisode } from "../_shared/m3u-series-info.mjs";
+import { buildM3uCatalogRows, m3uCatalogCounts } from "../_shared/m3u-media-classification.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch, withActiveCatalogEpochRetry } from "../_shared/catalog-generation.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
@@ -440,6 +444,11 @@ async function route(
         sourceCreationReceiptProtocol: 1,
         m3uSyncLeaseProtocol: 2,
         m3uStreamingImportProtocol: 1,
+        m3uFinalizeResumeProtocol: 2,
+        m3uBoundedFinalizeProtocol: 2,
+        m3uProjectionLeaseProtocol: 1,
+        m3uAccountEpochJoinProtocol: 1,
+        m3uConcurrentImportProtocol: 1,
         playbackCreationProtocol: 1,
         relayTakeoverProtocol: 1,
         relayCoordinatorLockTtlMs: EDGE_SESSION_COORDINATOR_LOCK_TTL_MS,
@@ -1074,9 +1083,6 @@ async function getOrCreateDefaultProfileId(userId: string, db: SupabaseClient): 
   if (existing?.id) return existing.id as string;
 
   const { data: account } = await db.from("cloud_profiles").select("display_name").eq("id", userId).maybeSingle();
-  // Account display names can be longer than the profile table's 40-character
-  // limit (for example, a new user signing up with a plus-address). Reuse the
-  // same normalization as manually created profiles so first login cannot fail.
   const name = normalizeProfileName(account?.display_name) || "Profile 1";
   const { data, error } = await db
     .from("cloud_account_profiles")
@@ -2103,9 +2109,15 @@ async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
     .maybeSingle();
   if (currentError) throwDb(currentError, "Unable to read source rebuild state");
   if (!cur) throw new HttpError(404, "Source not found");
+  const projectionToken = cur.source_type === "m3u" ? crypto.randomUUID() : null;
+  if (projectionToken && !(await claimM3uProjectionLease(db, id, userId, projectionToken))) {
+    throw new HttpError(409, "This source is still preparing its catalogue", { code: "M3U_SYNC_BUSY" });
+  }
+  let dispatch: { id: string; legacyRestore: LegacyM3uClaimRestore | null };
+  try {
   const priorHint = recordOrEmpty((cur as JsonRecord).config_hint);
   const hint = { ...priorHint };
-  for (const k of ["contentSignature", "syncCursor", "finalizeCursor", "finalizeLease", "syncProgress"]) delete hint[k];
+  for (const k of ["contentSignature", "syncCursor", "finalizeCursor", "finalizeLease", "syncProgress", "m3uFinalize"]) delete hint[k];
   const { data, error } = await db
     .from("cloud_sources")
     .update({ sync_status: "syncing", sync_error: null, config_hint: compactRecord(hint) })
@@ -2128,8 +2140,12 @@ async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
       },
     }
     : null;
-  waitUntil(syncCloudSource(id, userId, db, legacyRestore));
-  return { source: await managedSourceSnapshot(data.id, userId, db), syncStarted: true, hard: true };
+  dispatch = { id: data.id, legacyRestore };
+  } finally {
+    if (projectionToken) await releaseM3uProjectionLease(db, id, userId, projectionToken);
+  }
+  waitUntil(syncCloudSource(id, userId, db, dispatch.legacyRestore));
+  return { source: await managedSourceSnapshot(dispatch.id, userId, db), syncStarted: true, hard: true };
 }
 
 function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
@@ -2446,6 +2462,11 @@ async function claimM3uSyncLease(
   });
   if (error) throwDb(error, "Unable to claim M3U sync lease");
   const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  if (result.claimed === true && !(await claimM3uProjectionLease(db, sourceId, userId, leaseToken))) {
+    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "cancelled", null);
+    result.claimed = false;
+    result.reason = "leased";
+  }
   return {
     claimed: result.claimed === true,
     reason: stringOr(result.reason, ""),
@@ -2469,6 +2490,11 @@ async function claimM3uDiagnosticLease(
   });
   if (error) throwDb(error, "Unable to claim M3U diagnostic lease");
   const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
+  if (result.claimed === true && !(await claimM3uProjectionLease(db, sourceId, userId, leaseToken))) {
+    await settleM3uSyncLease(db, sourceId, userId, leaseToken, "cancelled", null);
+    result.claimed = false;
+    result.reason = "leased";
+  }
   return {
     claimed: result.claimed === true,
     reason: stringOr(result.reason, ""),
@@ -2491,6 +2517,8 @@ async function assertM3uSyncLeaseCurrent(
     p_ttl_seconds: M3U_SYNC_LEASE_TTL_SECONDS,
   });
   if (error) throwDb(error, "Unable to renew M3U sync lease");
+  try { await renewM3uProjectionLease(db, sourceId, userId, leaseToken); }
+  catch (_) { throw new HttpError(409, "M3U projection ownership changed", { code: "M3U_SYNC_LEASE_LOST" }); }
   if (data !== true) {
     throw new HttpError(409, "M3U sync ownership changed", {
       code: "M3U_SYNC_LEASE_LOST",
@@ -2513,6 +2541,7 @@ async function settleM3uSyncLease(
     p_outcome: outcome,
     p_error_kind: errorKind,
   });
+  await releaseM3uProjectionLease(db, sourceId, userId, leaseToken);
   if (error) {
     console.error("[norva-cloud] Unable to settle M3U sync lease", error.message);
     return { settled: false, state: "unknown" };
@@ -2608,7 +2637,7 @@ async function syncCloudSource(
     if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
     generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
     const selection = await isDiscoverySourceId(sourceId, userId);
-    const assertCurrent = () => selection
+    const assertCurrent = () => source.source_type === "m3u"
       ? adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation!)
       : assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation!);
 
@@ -2753,7 +2782,7 @@ async function syncCloudSource(
 
     if (recordOrEmpty(result).finalizePending === true) {
       await handoffSelectionFinalization({
-        db, sourceId, userId,
+        db, sourceId, userId, generation,
         assertCurrent,
         releaseTransport: async () => {
           if (!m3uLeaseToken) return;
@@ -2876,6 +2905,15 @@ async function finalizeCloudSourceWithLease(
   db: SupabaseClient,
   options: FinalizeCloudSourceOptions,
 ) {
+  const joined = await joinM3uFinalizer({ db, sourceId, userId,
+    assertCurrent: () => readActiveCatalogGenerationSnapshot(db, sourceId, userId),
+    invokeFinalizer: async () => {
+      try { await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}`, {
+        method: "POST", headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }, signal: AbortSignal.timeout(5000),
+      }); } catch (_) { /* persisted handoff is resumed by the watchdog */ }
+    },
+  });
+  if (joined) return joined;
   const ttlMs = boundedInt(Deno.env.get("NORVA_FINALIZE_LEASE_TTL_MS"), 240_000, 30_000, 900_000);
   const leaseToken = crypto.randomUUID();
   const claimed = await claimCloudFinalizeLease(db, sourceId, userId, leaseToken, ttlMs);
@@ -3551,14 +3589,14 @@ async function syncM3uSource(
     percent: 10,
     steps: { connect: { status: "running" } },
   });
-  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
   const playlist = playlistUrl === DISCOVERY_PLAYLIST_URL
     ? await fetchDiscoverySelection({ heartbeat })
     : await fetchM3uItems(playlistUrl, 60_000, {
       maxBytes: 128 * 1024 * 1024,
       maxItems: 100_000,
     });
-  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
   await reportProgress({
     stage: "discovered",
     percent: 42,
@@ -3571,41 +3609,42 @@ async function syncM3uSource(
     },
   });
   const items = playlist.items as M3uPlaylistItem[];
-  const rows: JsonRecord[] = [];
-  for (let index = 0; index < items.length; index += 500) {
-    await heartbeat();
-    const chunk = await Promise.all(items.slice(index, index + 500).map(async (item) => ({
-      user_id: userId,
-      source_id: sourceId,
-      item_type: "live",
-      external_id: item.tvgId || await sha256Hex(item.url),
-      parent_external_id: item.group || null,
-      title: item.title,
-      subtitle: item.group || null,
-      poster_url: item.logo || null,
-      backdrop_url: null,
-      metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
-      playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
-      available: true,
-      ...discoveryCatalogFields(playlistUrl, item),
-    })));
-    rows.push(...chunk);
+  const rows: JsonRecord[] = playlistUrl === DISCOVERY_PLAYLIST_URL ? []
+    : await buildM3uCatalogRows(items, { userId, sourceId, hash: sha256Hex, heartbeat });
+  if (playlistUrl === DISCOVERY_PLAYLIST_URL) {
+    for (let index = 0; index < items.length; index += 500) {
+      await heartbeat();
+      const chunk = await Promise.all(items.slice(index, index + 500).map(async (item) => ({
+        user_id: userId,
+        source_id: sourceId,
+        item_type: "live",
+        external_id: item.tvgId || await sha256Hex(item.url),
+        parent_external_id: item.group || null,
+        title: item.title,
+        subtitle: item.group || null,
+        poster_url: item.logo || null,
+        backdrop_url: null,
+        metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
+        playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
+        available: true,
+        ...discoveryCatalogFields(playlistUrl, item),
+      })));
+      rows.push(...chunk);
+    }
   }
 
-  const movieCount = rows.filter(row => row.item_type === "movie").length;
-  const seriesCount = rows.filter(row => row.item_type === "series").length;
-  const liveCount = rows.filter(row => row.item_type === "live").length;
-  const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
+  const { counts, categories } = m3uCatalogCounts(rows);
+  const { movies: movieCount, series: seriesCount, live: liveCount } = counts;
   await reportProgress({
     stage: "importing",
     percent: 62,
-    counts: { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length },
-    categories: { live: liveCount ? categoryCount : 0, movies: movieCount ? categoryCount : 0, series: seriesCount ? categoryCount : 0, total: categoryCount },
+    counts,
+    categories,
     steps: {
       channels: { status: "done", count: liveCount },
       movies: { status: "done", count: movieCount },
       series: { status: "done", count: seriesCount },
-      categories: { status: "done", count: categoryCount },
+      categories: { status: "done", count: categories.total },
       import: { status: "running", count: rows.length },
     },
   });
@@ -3624,13 +3663,13 @@ async function syncM3uSource(
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
   if (playlistUrl === DISCOVERY_PLAYLIST_URL && (movieCount > 0 || seriesCount > 0)) {
-    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
     const starterRows = selectionStarterRows(savedRows);
     if (starterRows.length) {
       await refreshVodTitleProjection({
         sourceId, userId, db, generation, rows: starterRows,
         xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
-        assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
+        assertSourceCurrent: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation),
       });
       await reportProgress({
         moviesReady: starterRows.some(row => row.item_type === "movie"),
@@ -3638,27 +3677,11 @@ async function syncM3uSource(
         browseReady: true,
       });
     }
-    return { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length,
-      finalizePending: true, liveCatalog: { rawLive: liveCount, pending: true },
-      discoverySources: "sources" in playlist ? playlist.sources : undefined };
-  }
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, {
-    sourceId, userId, rows: savedRows.filter(row => row.item_type === "live"), generation, heartbeat,
-  });
-  if (movieCount > 0 || seriesCount > 0) {
-    await refreshVodTitleProjection({
-      sourceId, userId, db, generation,
-      rows: savedRows.filter(row => row.item_type === "movie" || row.item_type === "series"),
-      xtreamConfig: null, vodInfoLimit: 0, tmdbValidateLimit: 0,
-      assertSourceCurrent: () => assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation),
-    });
   }
   return {
-    live: liveCount,
-    movies: movieCount,
-    series: seriesCount,
-    total: rows.length,
-    liveCatalog,
+    live: liveCount, movies: movieCount, series: seriesCount, total: rows.length,
+    finalizePending: true,
+    liveCatalog: { rawLive: liveCount, pending: true },
     discoverySources: "sources" in playlist ? playlist.sources : undefined,
     importTruncated: playlist.truncated || undefined,
     importLimitReason: playlist.truncated ? playlist.truncationReason : undefined,
@@ -3688,10 +3711,8 @@ async function replaceSourceItems(
         .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
         .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     };
-    const { data, error } = preserveUntilSaved
-      ? await writeSelectionBatch({ generation, write,
-        adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation) })
-      : await write();
+    const { data, error } = await writeM3uEpochBatch({ generation, write,
+      adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation) });
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
   }
@@ -3720,13 +3741,16 @@ async function clearCatalogGenerationMediaItems(
   generation: ActiveCatalogGeneration,
   heartbeat: () => Promise<void> = async () => {},
 ) {
-  for (let guard = 0; guard < 100; guard += 1) {
+  // 100,000 imported URLs may create 100,000 parent series as well. Allow
+  // one final empty batch after exactly 200,000 rows were removed.
+  for (let guard = 0; guard < 101; guard += 1) {
     await heartbeat();
-    const { data, error } = await db.rpc("norva_delete_catalog_generation_items_batch", {
-      p_source_id: sourceId,
-      p_user_id: userId,
-      ...catalogGenerationRpcFence(generation),
-      p_limit: 2000,
+    const { data, error } = await writeM3uEpochBatch({ generation: generation,
+      adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation),
+      write: () => db.rpc("norva_delete_catalog_generation_items_batch", {
+        p_source_id: sourceId, p_user_id: userId,
+        ...catalogGenerationRpcFence(generation), p_limit: 2000,
+      }),
     });
     if (error) throwDb(error, "Unable to clear old catalog items");
     const removed = Number(Array.isArray(data) ? data[0] : data) || 0;
@@ -3763,6 +3787,15 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   const configRevision = sourceSnapshotConfigRevision(visibleSource);
   const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
   if (!seriesId) throw new HttpError(400, "series_id is required");
+
+  if (isM3uSeriesId(seriesId)) {
+    const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+    const info = await loadM3uSeriesInfo({ db, userId, sourceId, seriesId, generationId: generation.generationId });
+    await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+    await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+    if (!info) throw new HttpError(404, "Series details are unavailable");
+    return info;
+  }
 
   if (seriesId.startsWith("norva-selection:series:") && await isDiscoverySourceId(sourceId, userId)) {
     const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
@@ -6049,6 +6082,13 @@ async function resolvePlaybackTarget(
   exactEpisodeCoordinates: JsonRecord | null = null,
 ) {
   await assertVisibleSource(sourceId, userId, db);
+  if (isM3uEpisodeId(itemId)) {
+    if (itemType !== "series" && itemType !== "episode") throw new HttpError(404, "Media item not found");
+    const episode = await resolveOwnedM3uEpisode({ db, userId, sourceId, itemId,
+      parentId: stringOrNull(requestHint.audioSeriesId ?? requestHint.audio_series_id ?? requestHint.parentSeriesId ?? requestHint.seriesId ?? requestHint.series_id) });
+    if (!episode) throw new HttpError(404, "Media item not found");
+    return episode.playback_hint.targetUrl;
+  }
   if (exactEpisodeCoordinates) {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     return xtreamStreamUrl({

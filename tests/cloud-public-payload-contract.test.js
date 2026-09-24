@@ -273,7 +273,12 @@ test('base source mutations return only internal ids or a CAS timestamp before t
   for (const [start, end, mutation] of cases) {
     const source = section(start, end);
     assert.match(source, mutation);
-    assert.match(source, /managedSourceSnapshot\(data\.id, userId, db\)/);
+    if (start === 'async function hardSyncSource(') {
+      assert.match(source, /dispatch = \{ id: data\.id, legacyRestore \}/);
+      assert.match(source, /managedSourceSnapshot\(dispatch\.id, userId, db\)/);
+    } else {
+      assert.match(source, /managedSourceSnapshot\(data\.id, userId, db\)/);
+    }
     assert.doesNotMatch(source, /select\([^)]*(?:lifecycle_state|provider_access_|config_revision|catalog_visibility)/);
   }
 });

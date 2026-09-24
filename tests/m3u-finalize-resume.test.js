@@ -15,6 +15,7 @@ const section = (source, startMarker, endMarker) => {
 };
 
 const worker = read('supabase/functions/norva-source-sync/index.ts');
+const cloud = read('supabase/functions/norva-cloud/index.ts');
 const migration = read('supabase/migrations/20260903160000_m3u_finalize_resume_v1.sql');
 const completeVariantsMigration = read('supabase/migrations/20260903173000_m3u_complete_live_variants_v1.sql');
 const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
@@ -80,9 +81,14 @@ test('READY is a fail-safe settlement boundary for the M3U transport lease', () 
 });
 
 test('every Edge replica must prove the M3U finalization protocol', () => {
-  assert.match(worker, /version:\s*19[\s\S]*m3uFinalizeResumeProtocol:\s*1[\s\S]*m3uCompleteLiveVariantsProtocol:\s*1/);
+  assert.match(worker, /version:\s*19[\s\S]*m3uFinalizeResumeProtocol:\s*2[\s\S]*m3uCompleteLiveVariantsProtocol:\s*1/);
+  assert.match(cloud, /version:\s*28[\s\S]*m3uFinalizeResumeProtocol:\s*2[\s\S]*m3uConcurrentImportProtocol:\s*1/);
   assert.match(deploy, /EXPECTED_SOURCE_SYNC_VERSION=19/);
-  assert.match(deploy, /EXPECTED_M3U_FINALIZE_RESUME_PROTOCOL=1/);
+  assert.match(deploy, /EXPECTED_M3U_FINALIZE_RESUME_PROTOCOL=2/);
+  assert.match(deploy, /EXPECTED_M3U_BOUNDED_FINALIZE_PROTOCOL=2/);
+  assert.match(deploy, /EXPECTED_M3U_PROJECTION_LEASE_PROTOCOL=1/);
+  assert.match(deploy, /EXPECTED_M3U_ACCOUNT_EPOCH_JOIN_PROTOCOL=1/);
+  assert.match(deploy, /EXPECTED_M3U_CONCURRENT_IMPORT_PROTOCOL=1/);
   assert.match(deploy, /EXPECTED_M3U_COMPLETE_LIVE_VARIANTS_PROTOCOL=1/);
   assert.match(deploy, /m3uFinalizeResumeProtocol/);
   assert.match(deploy, /m3uCompleteLiveVariantsProtocol/);

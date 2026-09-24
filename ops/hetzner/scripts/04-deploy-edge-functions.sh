@@ -79,7 +79,11 @@ EXPECTED_CLOUD_AUTO_REFRESH_CLAIM_PROTOCOL=1
 EXPECTED_SOURCE_REENABLE_RESUME_PROTOCOL=1
 EXPECTED_M3U_SYNC_LEASE_PROTOCOL=2
 EXPECTED_M3U_STREAMING_IMPORT_PROTOCOL=1
-EXPECTED_M3U_FINALIZE_RESUME_PROTOCOL=1
+EXPECTED_M3U_FINALIZE_RESUME_PROTOCOL=2
+EXPECTED_M3U_BOUNDED_FINALIZE_PROTOCOL=2
+EXPECTED_M3U_PROJECTION_LEASE_PROTOCOL=1
+EXPECTED_M3U_ACCOUNT_EPOCH_JOIN_PROTOCOL=1
+EXPECTED_M3U_CONCURRENT_IMPORT_PROTOCOL=1
 EXPECTED_M3U_COMPLETE_LIVE_VARIANTS_PROTOCOL=1
 EXPECTED_FILE_AUDIO_REPAIR_COHORT_PROTOCOL=2
 EXPECTED_TMDB_SEARCH_POLICY=catalog-title-tags-v3
@@ -535,6 +539,11 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$cloud_health" == *"\"legacySourceToggleBridge\":$EXPECTED_LEGACY_SOURCE_TOGGLE_BRIDGE"* \
         && "$cloud_health" == *"\"m3uSyncLeaseProtocol\":$EXPECTED_M3U_SYNC_LEASE_PROTOCOL"* \
         && "$cloud_health" == *"\"m3uStreamingImportProtocol\":$EXPECTED_M3U_STREAMING_IMPORT_PROTOCOL"* \
+        && "$cloud_health" == *"\"m3uFinalizeResumeProtocol\":$EXPECTED_M3U_FINALIZE_RESUME_PROTOCOL"* \
+        && "$cloud_health" == *"\"m3uBoundedFinalizeProtocol\":$EXPECTED_M3U_BOUNDED_FINALIZE_PROTOCOL"* \
+        && "$cloud_health" == *"\"m3uProjectionLeaseProtocol\":$EXPECTED_M3U_PROJECTION_LEASE_PROTOCOL"* \
+        && "$cloud_health" == *"\"m3uAccountEpochJoinProtocol\":$EXPECTED_M3U_ACCOUNT_EPOCH_JOIN_PROTOCOL"* \
+        && "$cloud_health" == *"\"m3uConcurrentImportProtocol\":$EXPECTED_M3U_CONCURRENT_IMPORT_PROTOCOL"* \
         && "$cloud_health" == *"\"relayTakeoverProtocol\":$EXPECTED_RELAY_TAKEOVER_PROTOCOL"* \
         && "$cloud_health" == *"\"relayCoordinatorLockTtlMs\":$EXPECTED_RELAY_COORDINATOR_LOCK_TTL_MS"* ]] || {
       echo "ERROR: $service norva-cloud protocol marker mismatch" >&2
@@ -558,6 +567,10 @@ if command -v docker >/dev/null 2>&1 && [[ -f "$COMPOSE" ]]; then
         && "$source_sync_health" == *"\"m3uSyncLeaseProtocol\":$EXPECTED_M3U_SYNC_LEASE_PROTOCOL"* \
         && "$source_sync_health" == *"\"m3uStreamingImportProtocol\":$EXPECTED_M3U_STREAMING_IMPORT_PROTOCOL"* \
         && "$source_sync_health" == *"\"m3uFinalizeResumeProtocol\":$EXPECTED_M3U_FINALIZE_RESUME_PROTOCOL"* \
+        && "$source_sync_health" == *"\"m3uBoundedFinalizeProtocol\":$EXPECTED_M3U_BOUNDED_FINALIZE_PROTOCOL"* \
+        && "$source_sync_health" == *"\"m3uProjectionLeaseProtocol\":$EXPECTED_M3U_PROJECTION_LEASE_PROTOCOL"* \
+        && "$source_sync_health" == *"\"m3uAccountEpochJoinProtocol\":$EXPECTED_M3U_ACCOUNT_EPOCH_JOIN_PROTOCOL"* \
+        && "$source_sync_health" == *"\"m3uConcurrentImportProtocol\":$EXPECTED_M3U_CONCURRENT_IMPORT_PROTOCOL"* \
         && "$source_sync_health" == *"\"m3uCompleteLiveVariantsProtocol\":$EXPECTED_M3U_COMPLETE_LIVE_VARIANTS_PROTOCOL"* \
         && "$source_sync_health" == *"\"fileAudioRepairCohortProtocol\":$EXPECTED_FILE_AUDIO_REPAIR_COHORT_PROTOCOL"* \
         && "$source_sync_health" == *"\"tmdbSearchPolicy\":\"$EXPECTED_TMDB_SEARCH_POLICY\""* ]] || {
