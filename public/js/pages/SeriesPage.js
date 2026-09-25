@@ -74,6 +74,7 @@ class SeriesPage {
         this.groupDuplicates = true;
         this.startedSeriesIds = new Set(); // source-aware series keys with a resumable episode
         this.historyItems = [];
+        this._watchStateRequestId = 0;
         this.serverSettings = {};
         this._genreFilterHydrated = false;
         this._categoriesRestored = false;
@@ -123,6 +124,8 @@ class SeriesPage {
         });
 
         this.sourceSelect?.addEventListener('change', async () => {
+            this.renderContinueWatching();
+            if (this.continueList) this.continueList.scrollLeft = 0;
             // The provider is catalogue scope, not a disposable filter. Persist it
             // before async facet/category work so refresh cannot jump back to All.
             this.persistFilters();
@@ -1118,9 +1121,15 @@ class SeriesPage {
         }
     }
 
-    async loadWatchState() {
+    async loadWatchState({ fresh = false } = {}) {
+        const requestId = this._watchStateRequestId = (this._watchStateRequestId || 0) + 1;
+        const profile = window.NorvaCloud?.profiles?.getActiveId?.();
+        const owner = this.app?.currentUser?.id;
         try {
-            const history = await API.history.getAll(5000);
+            const history = await API.history.getAll(5000, { fresh });
+            if (requestId !== this._watchStateRequestId || owner !== this.app?.currentUser?.id
+                || profile !== window.NorvaCloud?.profiles?.getActiveId?.()) return false;
+            if (!Array.isArray(history)) return false;
             const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
             this.historyItems = (history || []).filter(item => {
                 const sourceId = this.historySourceId(item);
@@ -1135,10 +1144,15 @@ class SeriesPage {
                 );
                 if (key) this.startedSeriesIds.add(key);
             }
+            return true;
         } catch (err) {
+            if (requestId !== this._watchStateRequestId || owner !== this.app?.currentUser?.id
+                || profile !== window.NorvaCloud?.profiles?.getActiveId?.()) return false;
             console.warn('Error loading watch history:', err);
+            if (fresh) return false;
             this.historyItems = [];
             this.startedSeriesIds = new Set();
+            return true;
         }
     }
 
@@ -2113,7 +2127,7 @@ class SeriesPage {
         // have no safe cross-provider identity and therefore remain separate.
         const seenTitleIds = new Set();
         const inProgress = [];
-        for (const h of (this.historyItems || [])) {
+        for (const h of MediaUtils.recentHistory(this.historyItems, this.sourceSelect?.value)) {
             if (h.item_type !== 'episode' || !this.isEpisodeInProgress(h)) continue;
             const titleId = this.historyTitleId(h);
             if (titleId != null && titleId !== '') {
@@ -2127,10 +2141,11 @@ class SeriesPage {
 
         if (inProgress.length === 0) {
             this.continueRow.classList.add('hidden');
+            this.continueList.innerHTML = '';
             return;
         }
 
-        this.continueList.innerHTML = inProgress.map(h => {
+        const markup = inProgress.map(h => {
             const ratio = h.duration > 0 ? Math.round((h.progress / h.duration) * 100) : 0;
             const historyKey = this.historyEpisodeProgressKey(h);
             const title = MediaUtils.cleanReleaseName(h.data?.title || '') || (globalThis.NorvaI18n?.t("ui_web_b764cdc0eab7", { defaultValue: "Unknown" }) ?? 'Unknown');
@@ -2150,8 +2165,11 @@ class SeriesPage {
             </div>`;
         }).join('');
 
+        this.continueHistoryItems = inProgress;
+        this.continueRow.classList.remove('hidden');
+        if (!MediaUtils.updateHistoryMarkup(this.continueList, markup)) return;
         this.continueList.querySelectorAll('.continue-card').forEach(card => {
-            const historyForCard = () => inProgress.find(x =>
+            const historyForCard = () => this.continueHistoryItems.find(x =>
                 this.historyEpisodeProgressKey(x) === card.dataset.historyKey);
             const activate = () => {
                 const h = historyForCard();

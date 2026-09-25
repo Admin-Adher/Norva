@@ -4887,8 +4887,11 @@
         },
 
         history: {
-            list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
-                () => request('GET', `/history${query(params)}`)),
+            list: (params = {}, { fresh = false } = {}) => {
+                if (fresh) invalidateCache('hist');
+                return cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
+                    () => request('GET', `/history${query(params)}`));
+            },
             // Targeted single-title lookup is the authoritative cross-device
             // resume read. Never cache it in one tab: another device cannot
             // invalidate this process-local cache and would otherwise leave a
@@ -5051,8 +5054,11 @@
                 set: (body) => request('POST', '/device/ratings', body, { token: getDeviceToken() })
             },
             history: {
-                list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
-                    () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
+                list: (params = {}, { fresh = false } = {}) => {
+                    if (fresh) invalidateCache('hist');
+                    return cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
+                        () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() }));
+                },
                 // Same authoritative uncached read for paired TVs: a phone/web
                 // save cannot invalidate the TV process's local cache.
                 getItem: (params = {}) => request(

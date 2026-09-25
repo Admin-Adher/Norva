@@ -88,6 +88,10 @@ function loadPage(file, className) {
       safeImageUrl: (value, fallback = '') => value || fallback,
     },
   };
+  const utilities = { window: {}, console };
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'public/js/utils/mediaUtils.js'), 'utf8'), utilities);
+  context.MediaUtils.recentHistory = utilities.window.MediaUtils.recentHistory;
+  context.MediaUtils.updateHistoryMarkup = utilities.window.MediaUtils.updateHistoryMarkup;
   const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
   vm.runInNewContext(source, context, { filename: file });
   return context.window[className];
@@ -186,6 +190,48 @@ for (const spec of [
     resumeMethod: 'resumeEpisodeFromHistory',
   },
 ]) {
+  test(`${spec.name} uses capture time and scopes before deduplication, including returning to all sources`, () => {
+    const Page = loadPage(spec.file, spec.className);
+    const old = spec.history({ ...spec.stableOverrides('old'), source_id: '1',
+      watched_at: '2026-09-24T10:00:00Z', updated_at: '2026-09-25T12:00:00Z',
+      data: { ...spec.stableOverrides('old').data, titleId: 'shared' } });
+    const latest = spec.history({ ...spec.stableOverrides('latest'), source_id: '2',
+      watched_at: '2026-09-25T11:00:00Z', updated_at: '2026-09-25T11:00:00Z',
+      data: { ...spec.stableOverrides('latest').data, titleId: 'shared' } });
+    const { page, continueList } = renderContinue(Page, [old, latest]);
+    let resumed;
+    page[spec.resumeMethod] = value => { resumed = value; };
+    continueList.cards[0].click();
+    assert.equal(resumed, latest, 'delayed upload is not a newer viewing');
+    page.sourceSelect = { value: '1' };
+    page.renderContinueWatching();
+    continueList.cards[0].click();
+    assert.equal(resumed, old, 'the selected provider version remains resumable');
+    page.sourceSelect.value = 'missing';
+    page.renderContinueWatching();
+    assert.equal(continueList.cards.length, 0);
+    assert.equal(page.continueRow.classList.contains('hidden'), true);
+    page.sourceSelect.value = '';
+    page.renderContinueWatching();
+    continueList.cards[0].click();
+    assert.equal(resumed, latest);
+  });
+
+  test(`${spec.name} unchanged card markup still resumes the latest history snapshot`, () => {
+    const Page = loadPage(spec.file, spec.className);
+    const old = spec.history({ progress: 200, duration: 10000 });
+    const { page, continueList } = renderContinue(Page, [old]);
+    const card = continueList.cards[0];
+    const fresh = { ...old, progress: 201 };
+    page.historyItems = [fresh];
+    page.renderContinueWatching();
+    assert.equal(continueList.cards[0], card, 'heartbeat keeps the existing focusable element');
+    let resumed;
+    page[spec.resumeMethod] = value => { resumed = value; };
+    card.click();
+    assert.equal(resumed.progress, 201);
+  });
+
   test(`${spec.name} Continue Watching deduplicates stable title ids before the 12-row limit`, () => {
     const Page = loadPage(spec.file, spec.className);
     const duplicateFirst = spec.history({

@@ -2600,7 +2600,7 @@ const CloudAdapter = (() => {
                 return { item: row ? mapHistory(row) : null };
             }
             const itemType = query.get('itemType') ? cloudTypeFromLocal(query.get('itemType')) : '';
-            const payload = await hist.list({ limit: query.get('limit') || 200, ...(itemType ? { itemType } : {}) });
+            const payload = await hist.list({ limit: query.get('limit') || 200, ...(itemType ? { itemType } : {}) }, { fresh: query.get('fresh') === '1' });
             return (payload.history || []).map(mapHistory);
         }
         if (method === 'POST') {
@@ -2833,9 +2833,15 @@ const API = {
      * Make API request
      */
     async request(method, endpoint, data = null, options = {}) {
+        const notifyHistory = () => {
+            if (!['POST', 'DELETE'].includes(method) || !/^\/history(?:[/?]|$)/.test(endpoint)) return;
+            try { window.dispatchEvent(new CustomEvent('norva:history-changed')); } catch (_) { /* older shell */ }
+        };
         if (_shouldUseCloud()) {
             try {
-                return await CloudAdapter.request(method, endpoint, data, options);
+                const result = await CloudAdapter.request(method, endpoint, data, options);
+                notifyHistory();
+                return result;
             } catch (error) {
                 if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
                     routeToSubscribeWall(error);
@@ -2894,6 +2900,7 @@ const API = {
             throw error;
         }
 
+        notifyHistory();
         return result;
     },
 
@@ -3313,7 +3320,7 @@ const API = {
 
     // Watch history
     history: {
-        getAll: (limit = 200) => API.request('GET', `/history?limit=${limit}`),
+        getAll: (limit = 200, { fresh = false } = {}) => API.request('GET', `/history?limit=${limit}${fresh ? '&fresh=1' : ''}`),
         save: (data) => API.request('POST', '/history', data),
         // keys {sourceId,itemType,itemId} → keyed server-side delete (reliable cross-device);
         // without keys, legacy row-id/list-then-find path.
