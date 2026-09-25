@@ -1515,15 +1515,46 @@
     "bn": "এই সিরিজটিকে রেট করুন"
   },
   "ui_web_d506d4a34939": {
-    "fr": "Fin de l’essai"
+    "fr": "Fin de l’essai gratuit",
+    "en": "Free trial ends",
+    "pt-BR": "Fim do teste gratuito",
+    "es": "Fin de la prueba gratuita",
+    "hi": "मुफ़्त ट्रायल की समाप्ति",
+    "tr": "Ücretsiz deneme bitişi",
+    "bn": "বিনামূল্যের ট্রায়াল শেষ হবে",
+    "ar": "نهاية الفترة التجريبية المجانية",
+    "id": "Uji coba gratis berakhir",
+    "fil": "Katapusan ng libreng pagsubok"
   },
   "ui_web_c05a75e0f571": {
-    "fr": "Réactiver le renouvellement"
+    "fr": "Réactiver le renouvellement",
+    "en": "Reactivate renewal",
+    "pt-BR": "Reativar a renovação",
+    "es": "Reactivar la renovación",
+    "hi": "नवीनीकरण फिर से चालू करें",
+    "tr": "Yenilemeyi yeniden etkinleştir",
+    "bn": "নবায়ন আবার চালু করুন",
+    "ar": "إعادة تفعيل التجديد",
+    "id": "Aktifkan kembali perpanjangan",
+    "fil": "Muling paganahin ang pag-renew"
   },
   "ui_web_309e5b1f7b55": {
-    "fr": "Conserver mon forfait"
+    "fr": "Conserver mon forfait",
+    "id": "Pertahankan paket saya"
   },
   "ui_web_fa8ed0bdabdd": {
     "fr": "Forfait"
+  },
+  "ui_web_c494e3ca3e3b": {
+    "en": "Reactivating…",
+    "fr": "Réactivation…",
+    "pt-BR": "Reativando…",
+    "es": "Reactivando…",
+    "hi": "फिर से चालू किया जा रहा है…",
+    "tr": "Yeniden etkinleştiriliyor…",
+    "bn": "আবার চালু করা হচ্ছে…",
+    "ar": "جارٍ إعادة التفعيل…",
+    "id": "Mengaktifkan kembali…",
+    "fil": "Muling pinapagana…"
   }
 }
