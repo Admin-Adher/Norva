@@ -89,12 +89,12 @@ test('generic gateway admission keeps signed scope and exact movie binding', () 
     assert.equal(allowsNativeMp4Capability(claims(), { publicBaseUrl: 'http://internal:8081' }), false);
 });
 
-test('new-provider native sessions remain single-opening, owner-scoped and irrevocable', async () => {
+for (const scope of ['native-browser-mp4', 'native-vod-recovery']) test(`${scope} sessions remain single-opening, owner-scoped and irrevocable`, async () => {
     let opens = 0, closes = 0;
     const sessions = createNativeMp4Sessions({ now: () => now,
         allows: value => allowsNativeMp4Capability(value, { publicBaseUrl }),
         open: async () => { opens += 1; return { close: async () => { closes += 1; } }; } });
-    const entry = sessions.grant(claims());
+    const entry = sessions.grant(claims({scope}));
     assert.throws(() => sessions.authorize(sid, 'b'.repeat(43)), { code: 'NATIVE_MP4_ACCESS_DENIED' });
     assert.equal(sessions.authorize(sid, entry.token), entry);
     await Promise.all([sessions.resource(entry), sessions.resource(entry)]);
@@ -103,7 +103,21 @@ test('new-provider native sessions remain single-opening, owner-scoped and irrev
     assert.equal(await sessions.revoke(entry.ownerHash, sid), 1);
     assert.equal(closes, 1);
     assert.throws(() => sessions.authorize(sid, entry.token), { code: 'NATIVE_MP4_SESSION_EXPIRED' });
-    assert.throws(() => sessions.grant(claims()), { code: 'NATIVE_MP4_SESSION_EXPIRED' });
+    assert.throws(() => sessions.grant(claims({scope})), { code: 'NATIVE_MP4_SESSION_EXPIRED' });
+});
+
+test('native finite recovery accepts exact MKV or TS proof without relaxing browser codec proof', async () => {
+    const { nativeVodFileProof, browserNativeMp4Proof } = await edge;
+    for (const container of ['matroska,webm', 'mpegts', 'avi', 'mp4']) {
+        const owned = profile({container,videoCodec:'hevc'});
+        assert.deepEqual(nativeVodFileProof(owned, now), {fileSizeBytes:123456,durationSeconds:120});
+        assert.equal(browserNativeMp4Proof(owned, {}, now), null);
+    }
+    for (const patch of [{probeSource:'caller'}, {probedAt:new Date(now-15*86400_000).toISOString()},
+        {fileSizeBytes:0}, {fileSizeBytes:'123456'}, {container:'hls'}, {container:'unknown'}]) {
+        assert.equal(nativeVodFileProof(profile(patch), now), null);
+    }
+    assert.equal(nativeVodFileProof({}, now), null);
 });
 
 test('native generalization cannot force HTTP forwarding for unrelated accounts or HTTPS', () => {
@@ -113,4 +127,18 @@ test('native generalization cannot force HTTP forwarding for unrelated accounts 
     assert.equal(useProviderHttpForward(selected, 'https://provider.example.test/123.mp4', accounts), false);
     assert.equal(useProviderHttpForward('new-provider-account', 'http://provider.example.test/123.mp4', accounts), false);
     assert.equal(useProviderHttpForward(selected, 'http://provider.example.test/123.mkv', accounts), false);
+});
+
+test('native recovery accepts complete exact playback-produced profiles and rejects partial evidence', async () => {
+    const { nativeVodFileProof } = await edge;
+    for (const container of ['mov,mp4,m4a,3gp,3g2,mj2', 'matroska,webm']) {
+        const observed = profile({container, probeSource:'gateway_inband', metadataComplete:true});
+        assert.deepEqual(nativeVodFileProof(observed, now), {fileSizeBytes:123456,durationSeconds:120});
+        for (const metadataComplete of [false, undefined]) {
+            assert.deepEqual(nativeVodFileProof(profile({...observed.codecProfile, metadataComplete}), now), {fileSizeBytes:123456,durationSeconds:120});
+        }
+        for (const fileSizeBytes of [0, undefined, '123456']) {
+            assert.equal(nativeVodFileProof(profile({...observed.codecProfile, fileSizeBytes}), now), null);
+        }
+    }
 });

@@ -44,7 +44,7 @@ import {
   shouldOpenCircuitForProviderBusy,
 } from "../_shared/provider-playback-circuit-policy.mjs";
 import { sealRelayCoordinatorRoute } from "../_shared/relay-coordinator-route.mjs";
-import { useNativeMp4Gateway, browserNativeMp4Proof, validNativeMp4Grant } from "../_shared/native-mp4-gateway-policy.mjs";
+import { useNativeMp4Gateway, browserNativeMp4Proof, nativeVodFileProof, validNativeMp4Grant } from "../_shared/native-mp4-gateway-policy.mjs";
 import { renderSubtitleReadyEmail } from "../_shared/subtitle-ready-email.ts";
 import { cleanupMediaGatewaySession } from "../_shared/media-gateway-session-lifecycle.mjs";
 import { bindCompletedPlaybackReceipt, finalizePlaybackReceiptResponse } from "../_shared/playback-receipt-visibility.mjs";
@@ -2395,7 +2395,7 @@ async function createPlaybackSessionCore(
   requestedPlaybackHint = compactRecord({
     ...stripMkvH264FastStartInternalHints(requestedPlaybackHint),
     // Override caller input; this internal marker controls the liveness lease.
-    __norvaNativeMp4SessionV1: serverNativeProviderMp4 ? true : undefined,
+    __norvaNativeMp4SessionV1: (serverNativeProviderMp4 || nativeNetworkRecovery) ? true : undefined,
     ...(itemType === "movie" && itemCasId && itemCasUpdatedAt
       ? {
         __norvaMkvH264FastStartItemCasV2: {
@@ -2718,7 +2718,13 @@ async function createPlaybackSessionCore(
   }
 
   if (mode === "relay") {
-    if (serverNativeProviderMp4 && nativeMp4Proof) {
+    const nativeAccessProof = nativeNetworkRecovery && itemType === "movie"
+      ? nativeVodFileProof(resolved.playbackHint) : nativeMp4Proof;
+    if (nativeNetworkRecovery && !nativeAccessProof) {
+      await expirePlaybackSession(session.id, userId, db);
+      throw new HttpError(503, "Exact native media profile is not yet available");
+    }
+    if ((serverNativeProviderMp4 || nativeNetworkRecovery) && nativeAccessProof) {
       const nativeCoordination = await prepareEdgeSessionCoordinator({
         userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
         playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
@@ -2732,8 +2738,8 @@ async function createPlaybackSessionCore(
         markStartup("nativeCoordinatorMs");
         startupTrace.nativeCoordinatorWaitMs = nativeCoordination.waitMs || 0;
         const capability = await createBytePipeCapability(session.id, userId, targetUrl,
-          transportExpiresAt, db, userAgent, "native-browser-mp4", nativeMp4Proof.fileSizeBytes,
-          nativeMp4Proof.durationSeconds, null, true,
+          transportExpiresAt, db, userAgent, nativeNetworkRecovery ? "native-vod-recovery" : "native-browser-mp4", nativeAccessProof.fileSizeBytes,
+          nativeAccessProof.durationSeconds, null, true,
           { sourceId, sourceRevision: await loadSourceConfigRevision(sourceId, userId, db),
             sharedFragmentGrant: await createSharedFragmentGrant(sourceId, userId, itemType, itemId, transportExpiresAt, db) });
         const response = await fetch(`${capability.gatewayUrl}/native-sessions`, {
@@ -2772,7 +2778,8 @@ async function createPlaybackSessionCore(
         markStartup("nativeGrantAndCommitMs");
         console.info(JSON.stringify({ event: "playback_native_mp4_startup_phases",
           startedAt: startupTraceAt, elapsedMs: Math.round(performance.now() - startupTraceStarted), phases: startupTrace }));
-        return { session: publicPlaybackSession(session), playback: { mode, transport: "native-mp4-session",
+        return { session: publicPlaybackSession(session), playback: { mode,
+          transport: nativeNetworkRecovery ? "native-raw-recovery" : "native-mp4-session",
           url: access.toString(), tokenExpiresAt: transportExpiresAt } };
       } catch (error) {
         await expirePlaybackSession(session.id, userId, db).catch(() => {});
@@ -2809,10 +2816,6 @@ async function createPlaybackSessionCore(
         // playback start evicts this source-scoped record immediately.
         expiresAt: rawTokenExpiresAt,
       }, db);
-      if (nativeNetworkRecovery && !rawCoordination?.lockId) {
-        await expirePlaybackSession(session.id, userId, db);
-        throw new HttpError(503, "Playback session coordinator is unavailable");
-      }
       if (rawCoordination?.waitMs) await sleep(rawCoordination.waitMs);
       const pipe = await createBytePipeAccess(
         session.id,
@@ -2825,27 +2828,13 @@ async function createPlaybackSessionCore(
         null,
         true,
       );
-      const rawCommit = await commitEdgeSessionCoordinator(rawCoordination, {
+      await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
         gatewaySessionId: null,
         lane: "raw",
         itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds,
         expiresAt: rawTokenExpiresAt,
       });
-      if (nativeNetworkRecovery) {
-        if (!rawCommit?.ok) {
-          await expirePlaybackSession(session.id, userId, db);
-          await abortEdgeSessionCoordinator(rawCoordination);
-          throw new HttpError(503, "Playback session coordinator did not accept the native relay");
-        }
-        // Native reads its tracks from this same connection. Avoid an extra
-        // header probe competing with playback on one-connection accounts.
-        await bindPreparedPlaybackReceipt(() => expirePlaybackSession(session.id, userId, db));
-        return { session: publicPlaybackSession(session), playback: {
-          ...selectionFileSnapshot, mode: "relay", transport: "native-raw-recovery",
-          url: pipe.url, tokenExpiresAt: rawTokenExpiresAt, sessionExpiresAt: expiresAt,
-        } };
-      }
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
       // returns both (the container header carries both → zero extra provider round-trips).
@@ -8026,7 +8015,7 @@ async function createBytePipeCapability(
     url: targetUrl,
     ...(userAgent ? { ua: userAgent } : {}),
     ...(scope ? { scope } : {}),
-    ...(scope === "native-browser-mp4" && resumeBinding ? {
+    ...((scope === "native-browser-mp4" || scope === "native-vod-recovery") && resumeBinding ? {
       resumeSourceId: resumeBinding.sourceId,
       resumeSourceRevision: resumeBinding.sourceRevision,
       ...(resumeBinding.sharedFragmentGrant ? { sharedFragmentGrant: resumeBinding.sharedFragmentGrant } : {}),
