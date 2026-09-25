@@ -112,6 +112,8 @@ class MoviesPage {
 
         // Source change reloads everything
         this.sourceSelect?.addEventListener('change', async () => {
+            this.renderContinueWatching();
+            if (this.continueList) this.continueList.scrollLeft = 0;
             // Save immediately: a refresh while the scoped facets are loading must
             // keep the provider the user just selected.
             this.persistFilters();
@@ -1088,11 +1090,15 @@ class MoviesPage {
         }
     }
 
-    async loadWatchState() {
+    async loadWatchState({ fresh = false } = {}) {
         const requestId = ++this._watchStateRequestId;
+        const profile = window.NorvaCloud?.profiles?.getActiveId?.();
+        const owner = this.app?.currentUser?.id;
         try {
-            const history = await API.history.getAll(5000);
-            if (requestId !== this._watchStateRequestId) return false;
+            const history = await API.history.getAll(5000, { fresh });
+            if (requestId !== this._watchStateRequestId || owner !== this.app?.currentUser?.id
+                || profile !== window.NorvaCloud?.profiles?.getActiveId?.()) return false;
+            if (!Array.isArray(history)) return false;
             const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
             this.watchState = new Map();
             this.historyItems = (history || []).filter(item => {
@@ -1115,8 +1121,10 @@ class MoviesPage {
             }
             return true;
         } catch (err) {
-            if (requestId !== this._watchStateRequestId) return false;
+            if (requestId !== this._watchStateRequestId || owner !== this.app?.currentUser?.id
+                || profile !== window.NorvaCloud?.profiles?.getActiveId?.()) return false;
             console.warn('Error loading watch history:', err);
+            if (fresh) return false;
             this.watchState = new Map();
             this.historyItems = [];
             return true;
@@ -2101,8 +2109,8 @@ class MoviesPage {
         if (!this.continueRow || !this.continueList) return;
         const seenTitleIds = new Set();
         const inProgress = [];
-        for (const h of (this.historyItems || [])) {
-            if (h.item_type !== 'movie' || !(h.duration > 0) ||
+        for (const h of MediaUtils.recentHistory(this.historyItems, this.sourceSelect?.value)) {
+            if (h.item_type !== 'movie' || h.completed === true || !(h.duration > 0) ||
                 this.getResumeOffset(h.progress, h.duration) <= 0) continue;
             // titleId is the only cross-provider identity stable enough to merge.
             // Legacy rows deliberately remain separate until a future playback saves
@@ -2119,10 +2127,11 @@ class MoviesPage {
 
         if (inProgress.length === 0) {
             this.continueRow.classList.add('hidden');
+            this.continueList.innerHTML = '';
             return;
         }
 
-        this.continueList.innerHTML = inProgress.map(h => {
+        const markup = inProgress.map(h => {
             const ratio = Math.round((h.progress / h.duration) * 100);
             return `
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}"
@@ -2136,8 +2145,11 @@ class MoviesPage {
             </div>`;
         }).join('');
 
+        this.continueHistoryItems = inProgress;
+        this.continueRow.classList.remove('hidden');
+        if (!MediaUtils.updateHistoryMarkup(this.continueList, markup)) return;
         this.continueList.querySelectorAll('.continue-card').forEach(card => {
-            const historyForCard = () => inProgress.find(x =>
+            const historyForCard = () => this.continueHistoryItems.find(x =>
                 String(x.item_id) === card.dataset.itemId &&
                 String(this.historySourceId(x) ?? '') === card.dataset.sourceId);
             const h = historyForCard();

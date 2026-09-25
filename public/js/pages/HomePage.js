@@ -125,6 +125,21 @@ class HomePage {
         this.loadDashboardData();
     }
 
+    async refreshWatchStateAfterSave() {
+        this.lastLoadedAt = 0;
+        const requestId = this._historyRequestId = (this._historyRequestId || 0) + 1;
+        const profile = window.NorvaCloud?.profiles?.getActiveId?.();
+        const owner = this.app?.currentUser?.id;
+        try {
+            const history = await window.API.history.getAll(60, { fresh: true });
+            if (requestId !== this._historyRequestId || this.app?.currentPage !== 'home'
+                || owner !== this.app?.currentUser?.id || !Array.isArray(history)
+                || profile !== window.NorvaCloud?.profiles?.getActiveId?.()) return false;
+            this.renderHistory(history);
+            return true;
+        } catch (_) { return false; } // Keep the last usable rail on a transient failure.
+    }
+
     invalidateRatingRecommendations() {
         this.lastLoadedAt = 0;
         this._freshRailsPending = true;
@@ -537,6 +552,7 @@ class HomePage {
                 // limit=60 (not 18): finished/too-short rows are filtered CLIENT-side, so a
                 // user who recently completed a dozen titles used to get an under-filled (or
                 // empty) Continue Watching while resumable older titles sat beyond the window.
+                const historyRequestId = this._historyRequestId = (this._historyRequestId || 0) + 1;
                 const historyP = this.boundedHomeTask(
                     window.API.request('GET', '/history?limit=60'),
                     'history'
@@ -642,7 +658,7 @@ class HomePage {
                     ? historyResult.value
                     : [];
 
-                this.renderHistory(history);
+                if (historyRequestId === this._historyRequestId) this.renderHistory(history);
 
                 if (railsResult.status === 'fulfilled' && (!paintedEarlyRails || hasRailItems(railsResult.value))) {
                     this.renderCloudRails(railsResult.value);
@@ -2768,13 +2784,13 @@ class HomePage {
         const entries = [];
         const seenSeries = new Set();
         const seenMovies = new Set();
-        for (const item of (items || [])) {
+        for (const item of MediaUtils.recentHistory(items)) {
             const data = item.data || {};
             const progress = Number(item.progress || item.progress_seconds || data.progress || 0);
             const duration = Number(item.duration || item.duration_seconds || data.duration || 0);
             const type = item.item_type || item.itemType || item.type || 'movie';
             const isEpisode = type === 'episode' || !!(data.seriesId || item.parent_item_id);
-            const finished = duration > 0 && progress >= duration * 0.95;
+            const finished = item.completed === true || (duration > 0 && progress >= duration * 0.95);
             if (isEpisode) {
                 const sKey = `${item.source_id || item.sourceId || ''}:${data.seriesId || item.parent_item_id || item.item_id || ''}`;
                 if (seenSeries.has(sKey)) continue; // most recent episode wins (server sorts DESC)
@@ -2789,8 +2805,9 @@ class HomePage {
                 entries.push(item);
                 continue;
             }
-            if (this.getResumeOffset(progress, duration) <= 0) continue;
-            const mKey = data.titleId ? `t:${data.titleId}` : `n:${String(this.displayTitle(item) || '').toLowerCase()}`;
+            if (finished || this.getResumeOffset(progress, duration) <= 0) continue;
+            const titleId = item.title_id || item.titleId || data.titleId || data.title_id;
+            const mKey = titleId ? `t:${titleId}` : `s:${item.source_id || item.sourceId || data.sourceId}:${item.item_id || item.itemId}`;
             if (seenMovies.has(mKey)) continue;
             seenMovies.add(mKey);
             entries.push(item);
@@ -2799,11 +2816,13 @@ class HomePage {
 
         if (!this.historyItems.length) {
             section.classList.add('hidden');
+            list.innerHTML = '';
             return;
         }
 
         section.classList.remove('hidden');
-        list.innerHTML = this.historyItems.map((item, index) => this.createHistoryCard(item, index)).join('');
+        const markup = this.historyItems.map((item, index) => this.createHistoryCard(item, index)).join('');
+        if (!MediaUtils.updateHistoryMarkup(list, markup)) return;
 
         list.querySelectorAll('.dashboard-card').forEach(card => {
             card.addEventListener('click', () => {
@@ -2905,7 +2924,7 @@ class HomePage {
         const showBar = duration > 0 && !item._upNext;
 
         return `
-            <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(item._upNext ? `Play next episode of ${title}` : `Resume ${title}`)}" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
+            <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(item._upNext ? `Play next episode of ${title}` : `Resume ${title}`)}" data-id="${this.escapeAttr(itemId)}" data-source-id="${this.escapeAttr(item.source_id || item.sourceId || item.data?.sourceId || '')}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
                 <div class="card-image">
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching" data-i18n-aria-label="ui_web_5b5aa26efd59">✕</button>

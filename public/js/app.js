@@ -160,6 +160,7 @@ class App {
             if (top > 0 && this.pages[page]) this.pages[page]._savedScrollTop = top;
         }
         this.installNativeContinuityListeners();
+        this.installHistoryRefreshListeners();
         this._accountMenuRequest = (event) => this.openAccountMenu(event?.detail?.opener || null);
         window.addEventListener('norva:account-menu-request', this._accountMenuRequest);
 
@@ -170,6 +171,40 @@ class App {
         });
 
         this.init();
+    }
+
+    installHistoryRefreshListeners() {
+        const schedule = () => {
+            // A save may finish while the native Activity hides its WebView.
+            // Invalidate Home now; refresh the visible rail on return.
+            if (this.pages?.home) this.pages.home.lastLoadedAt = 0;
+            clearTimeout(this._historyRefreshTimer);
+            this._historyRefreshTimer = setTimeout(() => { void this.refreshVisibleHistory(); }, 150);
+        };
+        window.addEventListener('norva:history-changed', schedule);
+        window.addEventListener('focus', schedule);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') schedule();
+        });
+        // Another device cannot invalidate this WebView's cache. Only refresh
+        // history while a catalogue page is visible; never reload its catalogue.
+        this._historyPollTimer = setInterval(() => { void this.refreshVisibleHistory(); }, 30000);
+    }
+
+    async refreshVisibleHistory() {
+        const name = this.currentPage;
+        const page = this.pages?.[name];
+        if (document.visibilityState !== 'visible' || !this.currentUser
+            || !['home', 'movies', 'series'].includes(name) || !page) return false;
+        if (name === 'home') return page.refreshWatchStateAfterSave();
+        // Pages guard request generations and profile changes: a pre-save GET
+        // must never replace a newer post-save result.
+        const applied = await page.loadWatchState({ fresh: true });
+        if (!applied || this.currentPage !== name) return false;
+        page.renderContinueWatching();
+        page.syncCurrentMovieWatchUi?.();
+        page.repaintEpisodeWatchState?.();
+        return true;
     }
 
     isNativePhoneShell() {

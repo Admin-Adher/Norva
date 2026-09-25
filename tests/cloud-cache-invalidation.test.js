@@ -23,7 +23,8 @@ function jsonResponse(body) {
   };
 }
 
-test('history mutation prevents an older in-flight GET from rejoining or repopulating cache', async () => {
+for (const cause of ['mutation', 'foreground refresh']) {
+test(`history ${cause} prevents an older in-flight GET from rejoining or repopulating cache`, async () => {
   const firstGet = deferred();
   const secondGet = deferred();
   let historyGets = 0;
@@ -78,12 +79,12 @@ test('history mutation prevents an older in-flight GET from rejoining or repopul
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(historyGets, 1);
 
-  await window.NorvaCloud.history.save({
+  if (cause === 'mutation') await window.NorvaCloud.history.save({
     sourceId: 'source-a', itemId: 'movie-42', itemType: 'movie',
     progressSeconds: 181, durationSeconds: 7450,
   });
 
-  const freshRead = window.NorvaCloud.history.list({ limit: 5000 });
+  const freshRead = window.NorvaCloud.history.list({ limit: 5000 }, { fresh: cause === 'foreground refresh' });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(historyGets, 2, 'post-save refresh must not join the pre-save GET');
 
@@ -97,3 +98,4 @@ test('history mutation prevents an older in-flight GET from rejoining or repopul
   assert.equal(historyGets, 2, 'the fresh response remains cached');
   assert.equal(cachedRead.history[0].progress_seconds, 181, 'stale completion cannot repopulate the cache');
 });
+}
