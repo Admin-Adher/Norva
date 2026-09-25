@@ -61,6 +61,18 @@ public class NorvaMessagingService extends FirebaseMessagingService {
             showProviderAccessNotification(data);
             return;
         }
+        if ("play_retention".equals(data.get("kind"))) {
+            String id = bounded(data.get("deliveryId"), 36);
+            String title = bounded(data.get("title"), 80), body = bounded(data.get("body"), 500);
+            String link = "https://norva.tv/app.html?mobile=1#settings/account";
+            try {
+                long expires = Long.parseLong(data.get("expiresAt"));
+                if (!isLifecycleDeliveryId(id) || title == null || body == null || !link.equals(data.get("deepLink"))
+                        || expires <= System.currentTimeMillis() || expires > System.currentTimeMillis() + 3600_000L) return;
+                if (rememberLifecycleNotification(id)) showNotification(title, body, LIFECYCLE_CHANNEL, Uri.parse(link), null, id.hashCode());
+            } catch (Exception ignored) { }
+            return;
+        }
         if ("behavioral_lifecycle".equals(data.get("kind"))) {
             showLifecycleNotification(data);
             return;

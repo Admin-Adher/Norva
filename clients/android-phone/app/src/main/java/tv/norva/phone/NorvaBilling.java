@@ -289,6 +289,129 @@ final class NorvaBilling {
         }
     }
 
+    // A separate flow keeps personal offers out of the standard/free-trial catalog.
+    // The same operation lock covers account login, server authorization and Play.
+    static void retentionForUser(final Activity activity, final String userId, final String accessToken,
+                                 final JSONObject expected, final PurchaseResultCallback cb) {
+        final boolean purchase = expected != null;
+        final long operation = beginOperation(userId, purchase ? OPERATION_TIMEOUT_MS : RESTORE_TIMEOUT_MS,
+                () -> cb.onResult("error", "billing_timeout", null));
+        if (operation == 0L) { cb.onResult("error", "billing_account_busy", null); return; }
+        PlayRetentionApi.request(accessToken, null, response -> OPERATION_HANDLER.post(() -> {
+            if (!isOperationActive(operation)) return;
+            if (response == null) { finishPurchaseError(operation, cb, "retention_unavailable"); return; }
+            JSONObject quote = response.optJSONObject("offer");
+            if (quote == null || quote.optBoolean("support")) {
+                if (purchase) { finishPurchaseError(operation, cb, "retention_unavailable"); return; }
+                try {
+                    response.put("appUserId", userId);
+                    response.put("playRetentionContract", 1);
+                    if (completeOperation(operation)) cb.onResult("success", null, response.toString());
+                } catch (Exception ignored) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                return;
+            }
+            withLoggedInUser(userId, new AccountCallback() {
+                @Override public void onError(String error) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                @Override public void onReady(Purchases purchases) {
+                    if (!isOperationActive(operation)) return;
+                    purchases.getOfferings(new ReceiveOfferingsCallback() {
+                        @Override public void onError(PurchasesError error) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                        @Override public void onReceived(Offerings offerings) {
+                            if (!isOperationActive(operation)) return;
+                            SubscriptionOption option = retentionOption(offerings == null ? null : offerings.getCurrent(), quote);
+                            if (option == null) { finishPurchaseError(operation, cb, "retention_store_unavailable"); return; }
+                            try {
+                                Price intro = option.getIntroPhase().getPrice();
+                                Price regular = option.getFullPricePhase().getPrice();
+                                quote.put("priceString", intro.getFormatted()).put("priceMicros", intro.getAmountMicros());
+                                quote.put("regularPriceString", regular.getFormatted()).put("regularPriceMicros", regular.getAmountMicros());
+                                quote.put("currencyCode", intro.getCurrencyCode());
+                                response.put("appUserId", userId).put("playRetentionContract", 1);
+                                if (!purchase) {
+                                    if (completeOperation(operation)) cb.onResult("success", null, response.toString());
+                                    return;
+                                }
+                                if (!quote.getString("id").equals(expected.optString("id"))
+                                        || intro.getAmountMicros() != expected.optLong("priceMicros", -1)
+                                        || regular.getAmountMicros() != expected.optLong("regularPriceMicros", -1)
+                                        || !intro.getCurrencyCode().equals(expected.optString("currencyCode"))) {
+                                    finishPurchaseError(operation, cb, "retention_price_changed"); return;
+                                }
+                                purchases.getCustomerInfo(new ReceiveCustomerInfoCallback() {
+                                    @Override public void onError(PurchasesError error) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                                    @Override public void onReceived(CustomerInfo info) {
+                                        if (!isOperationActive(operation)) return;
+                                        String oldProduct = activePlayProductId(info);
+                                        boolean preserve = quote.optBoolean("preserveAccess");
+                                        // Never start a second subscription if store ownership/state disagrees.
+                                        if ((preserve && !baseProductId(quote.optString("productId")).equals(baseProductId(oldProduct)))
+                                                || (!preserve && oldProduct != null)) {
+                                            finishPurchaseError(operation, cb, "retention_store_state_changed"); return;
+                                        }
+                                        try {
+                                            JSONObject action = new JSONObject().put("action", "claim").put("offerId", quote.getString("id"));
+                                            PlayRetentionApi.request(accessToken, action, claimed -> OPERATION_HANDLER.post(() -> {
+                                                if (!isOperationActive(operation)) return;
+                                                JSONObject fresh = claimed == null ? null : claimed.optJSONObject("offer");
+                                                if (fresh == null || !quote.optString("id").equals(fresh.optString("id"))
+                                                        || !quote.optString("productId").equals(fresh.optString("productId"))
+                                                        || !quote.optString("offerId").equals(fresh.optString("offerId"))
+                                                        || preserve != fresh.optBoolean("preserveAccess")) {
+                                                    finishPurchaseError(operation, cb, "retention_unavailable"); return;
+                                                }
+                                                try {
+                                                    PurchaseParams.Builder builder = new PurchaseParams.Builder(activity, option);
+                                                    if (preserve) builder.oldProductId(oldProduct)
+                                                            .googleReplacementMode(GoogleReplacementMode.WITHOUT_PRORATION);
+                                                    purchases.purchase(builder.build(), new PurchaseCallback() {
+                                                        @Override public void onCompleted(StoreTransaction transaction, CustomerInfo customerInfo) {
+                                                            if (!completeOperation(operation)) return;
+                                                            // The webhook is the authority. No local success grants access.
+                                                            cb.onResult("success", null, "{\"playRetentionContract\":1,\"confirmationPending\":true}");
+                                                        }
+                                                        @Override public void onError(PurchasesError error, boolean cancelled) {
+                                                            if (!completeOperation(operation)) return;
+                                                            cb.onResult(cancelled ? "cancelled" : "error", cancelled ? null : "retention_purchase_pending", null);
+                                                        }
+                                                    });
+                                                } catch (Exception ignored) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                                            }));
+                                        } catch (Exception ignored) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                                    }
+                                });
+                            } catch (Exception ignored) { finishPurchaseError(operation, cb, "retention_unavailable"); }
+                        }
+                    });
+                }
+            });
+        }));
+    }
+
+    private static SubscriptionOption retentionOption(Offering current, JSONObject quote) {
+        if (current == null) return null;
+        String productId = quote.optString("productId");
+        String period = productId.endsWith(":monthly") ? "P1M" : "P1Y";
+        String expectedOffer = "P1M".equals(period) ? "retention-monthly-20" : "retention-annual-10";
+        if (!expectedOffer.equals(quote.optString("offerId"))) return null;
+        for (Package pkg : current.getAvailablePackages()) {
+            StoreProduct product = pkg.getProduct();
+            if (!productId.equals(product.getId()) || product.getSubscriptionOptions() == null) continue;
+            for (SubscriptionOption option : product.getSubscriptionOptions()) {
+                if (!(productId.split(":")[1] + ":" + expectedOffer).equals(option.getId())
+                        || !option.getTags().contains("rc-ignore-offer") || option.getPricingPhases().size() != 2
+                        || option.getFreePhase() != null || option.getIntroPhase() == null || option.getFullPricePhase() == null) continue;
+                PricingPhase intro = option.getIntroPhase(), regular = option.getFullPricePhase();
+                if (intro.getBillingPeriod() == null || regular.getBillingPeriod() == null
+                        || !period.equals(intro.getBillingPeriod().getIso8601()) || !period.equals(regular.getBillingPeriod().getIso8601())
+                        || intro.getBillingCycleCount() == null || intro.getPrice() == null || regular.getPrice() == null
+                        || !intro.getPrice().getCurrencyCode().equals(regular.getPrice().getCurrencyCode())) continue;
+                if (PlayRetentionTerms.valid(period, intro.getBillingCycleCount(), intro.getPrice().getAmountMicros(),
+                        regular.getPrice().getAmountMicros(), regular.getPrice().getCurrencyCode())) return option;
+            }
+        }
+        return null;
+    }
+
     static void restoreForUser(final String userId, final ResultCallback cb) {
         if (cb == null) return;
         final long operationToken = beginOperation(userId, RESTORE_TIMEOUT_MS, new Runnable() {

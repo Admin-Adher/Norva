@@ -1,3 +1,4 @@
+import { playRetention } from "../_shared/play-retention.ts";
 import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
 import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
 import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
@@ -625,6 +626,10 @@ async function route(
   }
 
   const user = await requireUser(req, db);
+
+  if (scope === "billing" && id === "play-retention" && !action) {
+    return await playRetention(req, user.id, db);
+  }
 
   // Presence gate: the user is actively using the app/site — stand their probes
   // down now, before the first play attempt of the session (see helper above).

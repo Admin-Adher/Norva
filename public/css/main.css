@@ -26675,3 +26675,17 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
     animation: none;
   }
 }
+
+/* Personal Play offer: compact, visible at the top of Account, touch safe. */
+.play-retention-card { border: 1px solid var(--color-accent); border-radius: 16px; padding: 24px; background: var(--color-bg-secondary); }
+.play-retention-card[hidden] { display: none; }
+.play-retention-content { display: grid; gap: 16px; }
+.play-retention-content h3, .play-retention-content p { margin: 0; }
+.play-retention-price { font-size: 1.125rem; font-weight: 600; color: var(--color-text-primary); }
+.play-retention-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.play-retention-card .btn { min-height: 48px; white-space: normal; }
+.play-retention-preference { display: flex; align-items: center; gap: 16px; min-height: 48px; font-size: .875rem; color: var(--color-text-secondary); }
+.play-retention-preference input { width: 24px; height: 24px; flex-shrink: 0; accent-color: var(--color-accent); }
+.play-retention-card [role=status]:empty { display: none; }
+.play-retention-card .btn:focus-visible, .play-retention-preference input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
+@media (max-width: 480px) { .play-retention-card { padding: 16px; } .play-retention-actions .btn { flex: 1 1 100%; } }
