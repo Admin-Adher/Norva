@@ -593,7 +593,6 @@ export async function projectVodTitleGenerationIsolated(options: {
 
   const titleByTypedKey = new Map<string, JsonRecord>();
   const variants: Array<{ typedKey: string; row: JsonRecord }> = [];
-  const syncedAt = new Date().toISOString();
   for (const row of rows) {
     const itemType = row.item_type === "series" ? "series" : "movie";
     const title = stringOr(row.title, "Norva");
@@ -702,7 +701,7 @@ export async function projectVodTitleGenerationIsolated(options: {
   const saved = withCatalogGenerationRows(
     variants.flatMap(({ typedKey, row }) => {
       const titleId = titleIdByTypedKey.get(typedKey);
-      return titleId ? [{ ...row, title_id: titleId, synced_at: syncedAt }] : [];
+      return titleId ? [{ ...row, title_id: titleId }] : [];
     }),
     options.generation,
   );
