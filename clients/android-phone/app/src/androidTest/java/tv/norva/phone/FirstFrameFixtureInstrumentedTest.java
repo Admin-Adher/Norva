@@ -111,6 +111,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                 ContextCompat.RECEIVER_NOT_EXPORTED);
         try (FixtureHttpServer server = new FixtureHttpServer(
                 Files.readAllBytes(fixture.toPath()), contentType, hls)) {
+            if (resumeSeconds > 0) server.allowResponse = new CountDownLatch(1);
             Intent launch = new Intent(target, PlayerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     // Exercise the real VOD path: DefaultHttpDataSource,
@@ -124,6 +125,22 @@ public final class FirstFrameFixtureInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token);
             target.startActivity(launch);
             activityRef.set(instrumentation.waitForMonitorWithTimeout(monitor, 5_000));
+
+            if (resumeSeconds > 0) {
+                try {
+                    Activity opened = activityRef.get();
+                    assertNotNull(opened);
+                    java.lang.reflect.Field field = PlayerActivity.class.getDeclaredField("player");
+                    field.setAccessible(true);
+                    androidx.media3.exoplayer.ExoPlayer player =
+                            (androidx.media3.exoplayer.ExoPlayer) field.get(opened);
+                    instrumentation.runOnMainSync(() -> {
+                        assertTrue("The provider is withheld: READY must not be needed to apply Resume",
+                                player.getPlaybackState() != androidx.media3.common.Player.STATE_READY);
+                        assertEquals(resumeSeconds * 1000L, player.getCurrentPosition());
+                    });
+                } finally { server.allowResponse.countDown(); }
+            }
 
             assertTrue(
                     "Media3 did not render the deterministic H.264/AAC fixture in 45 seconds",
@@ -589,6 +606,7 @@ public final class FirstFrameFixtureInstrumentedTest {
         private final ServerSocket server;
         private final Thread thread;
         private volatile boolean closed;
+        volatile CountDownLatch allowResponse;
 
         FixtureHttpServer(byte[] media) throws Exception {
             this(media, "video/x-matroska");
@@ -647,6 +665,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                 }
                 requests.incrementAndGet();
                 firstRequestAt.compareAndSet(0, SystemClock.elapsedRealtime());
+                if (allowResponse != null) allowResponse.await(10, TimeUnit.SECONDS);
                 if (status != 200) {
                     write(output, "HTTP/1.1 " + status + " Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     output.flush();
