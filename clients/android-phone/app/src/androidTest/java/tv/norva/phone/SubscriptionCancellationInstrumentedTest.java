@@ -60,7 +60,7 @@ public class SubscriptionCancellationInstrumentedTest {
             assertTrue(loaded.await(45, TimeUnit.SECONDS));
             evaluate(i, holder.get(), "window.cancelResult='pending';(async()=>{try{"
                 + "const pause=()=>new Promise(r=>setTimeout(r,100));for(let j=0;j<30&&!document.querySelector('#content .plan-name');j++)await pause();"
-                + "if(!document.querySelector('#content').textContent.includes('Norva Plus'))throw Error('plan missing');"
+                + "if(!document.querySelector('#content').textContent.includes(NorvaI18n.t('ui_web_acc74895bf2b')))throw Error('localized plan missing');"
                 + "const button=Array.from(document.querySelectorAll('#content button')).find(b=>b.textContent===NorvaI18n.t('ui_web_2e5d129831b6'));if(!button)throw Error('cancel missing');button.click();await pause();"
                 + "let modal=document.querySelector('[role=dialog]');if(!modal||!modal.contains(document.activeElement))throw Error('dialog focus');"
                 + "if(document.documentElement.scrollWidth>innerWidth+2)throw Error('horizontal overflow');"
