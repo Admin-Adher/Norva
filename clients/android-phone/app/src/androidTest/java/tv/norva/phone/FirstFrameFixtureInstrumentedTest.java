@@ -69,11 +69,19 @@ public final class FirstFrameFixtureInstrumentedTest {
         assertFixtureFirstFrame("application/vnd.apple.mpegurl");
     }
 
+    @Test public void nativeResumeStartsAtTheRequestedPositionBeforeTheFirstReady() throws Exception {
+        assertFixtureFirstFrame("video/x-matroska", false, 3);
+    }
+
     private void assertFixtureFirstFrame(String contentType) throws Exception {
         assertFixtureFirstFrame(contentType, false);
     }
 
     private void assertFixtureFirstFrame(String contentType, boolean hls) throws Exception {
+        assertFixtureFirstFrame(contentType, hls, hls ? 3 : 0);
+    }
+
+    private void assertFixtureFirstFrame(String contentType, boolean hls, int resumeSeconds) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Context target = instrumentation.getTargetContext();
         Context testContext = instrumentation.getContext();
@@ -103,6 +111,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                 ContextCompat.RECEIVER_NOT_EXPORTED);
         try (FixtureHttpServer server = new FixtureHttpServer(
                 Files.readAllBytes(fixture.toPath()), contentType, hls)) {
+            if (resumeSeconds > 0) server.allowResponse = new CountDownLatch(1);
             Intent launch = new Intent(target, PlayerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     // Exercise the real VOD path: DefaultHttpDataSource,
@@ -112,10 +121,26 @@ public final class FirstFrameFixtureInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
                     .putExtra(PlayerActivity.EXTRA_ITEM_ID, "fixture-h264-aac")
                     .putExtra(PlayerActivity.EXTRA_CONTAINER, "mkv")
-                    .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, hls ? 3 : 0)
+                    .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds)
                     .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token);
             target.startActivity(launch);
             activityRef.set(instrumentation.waitForMonitorWithTimeout(monitor, 5_000));
+
+            if (resumeSeconds > 0) {
+                try {
+                    Activity opened = activityRef.get();
+                    assertNotNull(opened);
+                    java.lang.reflect.Field field = PlayerActivity.class.getDeclaredField("player");
+                    field.setAccessible(true);
+                    androidx.media3.exoplayer.ExoPlayer player =
+                            (androidx.media3.exoplayer.ExoPlayer) field.get(opened);
+                    instrumentation.runOnMainSync(() -> {
+                        assertTrue("The provider is withheld: READY must not be needed to apply Resume",
+                                player.getPlaybackState() != androidx.media3.common.Player.STATE_READY);
+                        assertEquals(resumeSeconds * 1000L, player.getCurrentPosition());
+                    });
+                } finally { server.allowResponse.countDown(); }
+            }
 
             assertTrue(
                     "Media3 did not render the deterministic H.264/AAC fixture in 45 seconds",
@@ -133,15 +158,15 @@ public final class FirstFrameFixtureInstrumentedTest {
                     result.getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_AUDIO_MIME));
             assertTrue(result.getBooleanExtra(
                     PlayerActivity.EXTRA_FIRST_FRAME_TEST_CONTRACT_OK, false));
-            if (hls) {
+            if (resumeSeconds > 0) {
                 Activity opened = activityRef.get();
                 java.lang.reflect.Field playerField = PlayerActivity.class.getDeclaredField("player");
                 playerField.setAccessible(true);
                 androidx.media3.exoplayer.ExoPlayer player =
                         (androidx.media3.exoplayer.ExoPlayer) playerField.get(opened);
                 instrumentation.runOnMainSync(() -> {
-                    assertTrue("HLS recovery keeps the original resume point", player.getCurrentPosition() >= 3000);
-                    assertEquals("application/x-mpegURL", player.getCurrentMediaItem().localConfiguration.mimeType);
+                    assertTrue("The first decoded route must use the requested resume point", player.getCurrentPosition() >= resumeSeconds * 1000L);
+                    if (hls) assertEquals("application/x-mpegURL", player.getCurrentMediaItem().localConfiguration.mimeType);
                 });
             }
         } finally {
@@ -233,6 +258,14 @@ public final class FirstFrameFixtureInstrumentedTest {
     }
 
     @Test public void ownedHtmlRefusalRecoversThroughOneRawRouteAtTheRequestedPosition() throws Exception {
+        assertOwnedRefusalRecovers(200, "provider_html_response");
+    }
+
+    @Test public void ownedHttp460RecoversWithoutRepeatingTheRefusedRequest() throws Exception {
+        assertOwnedRefusalRecovers(460, "ERROR_CODE_IO_BAD_HTTP_STATUS");
+    }
+
+    private void assertOwnedRefusalRecovers(int refusalStatus, String expectedReason) throws Exception {
         Instrumentation ins = InstrumentationRegistry.getInstrumentation();
         Context target = ins.getTargetContext();
         File fixture = new File(target.getCacheDir(), "norva-network-recovery.mkv");
@@ -245,7 +278,7 @@ public final class FirstFrameFixtureInstrumentedTest {
         Instrumentation.ActivityMonitor monitor = ins.addMonitor(PlayerActivity.class.getName(), null, false);
         AtomicReference<Activity> activity = new AtomicReference<>();
         try (FixtureHttpServer blocked = new FixtureHttpServer(
-                "<!DOCTYPE html><html>Unavailable</html>".getBytes(StandardCharsets.UTF_8), "text/html");
+                "<!DOCTYPE html><html>Unavailable</html>".getBytes(StandardCharsets.UTF_8), "text/html", false, refusalStatus);
              FixtureHttpServer raw = new FixtureHttpServer(Files.readAllBytes(fixture.toPath()))) {
             BroadcastReceiver receiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context context, Intent intent) {
@@ -257,7 +290,9 @@ public final class FirstFrameFixtureInstrumentedTest {
                     }
                     if (!"network-fixture".equals(intent.getStringExtra(PlayerActivity.EXTRA_ITEM_ID))) return;
                     try {
-                        assertEquals("provider_html_response", intent.getStringExtra("retryReason"));
+                        assertEquals(expectedReason, intent.getStringExtra("retryReason"));
+                        assertTrue("Refusal must reach the resolver promptly, without timed retries",
+                                SystemClock.elapsedRealtime() - blocked.firstRequestAt.get() < 1500);
                         assertEquals(3L, intent.getLongExtra("positionSeconds", -1));
                         assertEquals(1, recoveries.incrementAndGet());
                         String payload = new org.json.JSONObject().put("url", raw.url())
@@ -565,11 +600,13 @@ public final class FirstFrameFixtureInstrumentedTest {
         private final byte[] media;
         private final String contentType;
         private final boolean hls;
+        private final int status;
         final java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
         final java.util.concurrent.atomic.AtomicLong firstRequestAt = new java.util.concurrent.atomic.AtomicLong();
         private final ServerSocket server;
         private final Thread thread;
         private volatile boolean closed;
+        volatile CountDownLatch allowResponse;
 
         FixtureHttpServer(byte[] media) throws Exception {
             this(media, "video/x-matroska");
@@ -580,9 +617,14 @@ public final class FirstFrameFixtureInstrumentedTest {
         }
 
         FixtureHttpServer(byte[] media, String contentType, boolean hls) throws Exception {
+            this(media, contentType, hls, 200);
+        }
+
+        FixtureHttpServer(byte[] media, String contentType, boolean hls, int status) throws Exception {
             this.media = media;
             this.contentType = contentType;
             this.hls = hls;
+            this.status = status;
             this.server = new ServerSocket(
                     0, 8, InetAddress.getByName("127.0.0.1"));
             this.thread = new Thread(this::serve, "norva-first-frame-origin");
@@ -623,6 +665,12 @@ public final class FirstFrameFixtureInstrumentedTest {
                 }
                 requests.incrementAndGet();
                 firstRequestAt.compareAndSet(0, SystemClock.elapsedRealtime());
+                if (allowResponse != null) allowResponse.await(10, TimeUnit.SECONDS);
+                if (status != 200) {
+                    write(output, "HTTP/1.1 " + status + " Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    output.flush();
+                    return;
+                }
                 boolean head = request.startsWith("HEAD ");
                 long start = 0;
                 long end = media.length - 1L;

@@ -12,6 +12,7 @@ final class ProviderLoadErrorHandlingPolicy extends DefaultLoadErrorHandlingPoli
     @Override
     public long getRetryDelayMsFor(LoadErrorHandlingPolicy.LoadErrorInfo loadErrorInfo) {
         if (BoundedRangeDataSource.isHtmlResponse(loadErrorInfo.exception)
+                || ProviderPlaybackPolicy.httpStatus(loadErrorInfo.exception) == 460
                 || ProviderPlaybackPolicy.isProviderBusyHttpStatus(
                 ProviderPlaybackPolicy.httpStatus(loadErrorInfo.exception))) {
             return C.TIME_UNSET;
