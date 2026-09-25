@@ -259,6 +259,10 @@ class SettingsPage {
             const st = String(ent?.status || '').toLowerCase();
             const hasSub =
                 ['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) !== -1;
+            if (isNativeShell() && ent?.projection?.provider === 'google_play') {
+                window.location.href = 'https://play.google.com/store/account/subscriptions?package=tv.norva.phone';
+                return;
+            }
             const dest = hasSub ? '/subscription.html' : '/subscribe.html';
             window.location.href = dest + '?returnTo=' + encodeURIComponent(returnTo);
         });
@@ -606,6 +610,7 @@ class SettingsPage {
     }
 
     async refreshAccessCard() {
+        window.NorvaPlayRetentionCard?.refresh(this.app, null);
         const plan = document.getElementById('settings-access-plan');
         const hint = document.getElementById('settings-access-hint');
         const button = document.getElementById('settings-manage-plan-btn');
@@ -678,6 +683,12 @@ class SettingsPage {
                 button.style.display = '';
                 button.textContent = (globalThis.NorvaI18n?.t("ui_web_2d5ab37c33fc", { defaultValue: "Manage plan" }) ?? 'Manage plan');
             }
+
+            if (provider === 'google_play' && isNativeShell() && !isTvSettingsShell() && button) {
+                button.style.display = '';
+                button.textContent = String(window.NorvaI18n?.language || '').startsWith('fr') ? 'Gérer dans Google Play' : 'Manage in Google Play';
+            }
+            window.NorvaPlayRetentionCard?.refresh(this.app, decision);
 
             if (decision.failOpen && !observing) {
                 hint.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b016cf047253", {defaultValue: "{{p0}} Last known access is being honored while billing is checked.", p0:(hint.textContent)}) : `${hint.textContent} Last known access is being honored while billing is checked.`);

@@ -537,7 +537,41 @@
     return CONFIG.webCustomerPortalUrl || '';
   }
 
+  function hasPlayRetention() {
+    const version = (navigator.userAgent || '').match(/NorvaTV-AndroidPhone\/(\d+)\.(\d+)\.(\d+)/);
+    return hasNativeBilling() && !!version && (Number(version[1]) > 1
+      || (Number(version[1]) === 1 && (Number(version[2]) > 3 || (Number(version[2]) === 3 && Number(version[3]) >= 24))));
+  }
+
+  async function playRetentionAction(body) {
+    const token = await sessionToken();
+    if (!token) throw err('Sign in required', 'auth_required');
+    const res = await fetch('https://api.norva.tv/functions/v1/norva-cloud/billing/play-retention', {
+      method: body ? 'POST' : 'GET', headers: { 'Authorization': 'Bearer ' + token,
+        'apikey': (window.NorvaAuth && NorvaAuth.publishableKey) || '', 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw err('Offer temporarily unavailable', 'retention_unavailable');
+    return res.json();
+  }
+
+  async function playRetentionOffer(userId) {
+    if (!hasPlayRetention()) return null;
+    const uid = normalizedUserId(userId);
+    if (!uid) throw err('Sign in required', 'auth_required');
+    const data = await callNative('getRetentionForUser', [uid], 40000);
+    if (data.appUserId !== uid || data.playRetentionContract !== 1) throw err('Reload offer', 'retention_unavailable');
+    return data;
+  }
+
+  async function purchasePlayRetention(userId, offer) {
+    if (!hasPlayRetention() || !normalizedUserId(userId) || !offer?.id) throw err('Reload offer', 'retention_unavailable');
+    return callNative('purchaseRetentionForUser', [normalizedUserId(userId), offer.id,
+      offer.priceMicros, offer.regularPriceMicros, offer.currencyCode]);
+  }
+
   window.NorvaBilling = {
+    hasPlayRetention, playRetentionAction, playRetentionOffer, purchasePlayRetention,
     isNative: isNative,
     isTvShell: isTvShell,
     hasNativeBilling: hasNativeBilling,

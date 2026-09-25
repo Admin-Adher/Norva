@@ -23,6 +23,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { renderRetentionOffer, type RetentionOffer } from "../_shared/retention-email.ts";
+import { renderPlayRetention, playRetentionCopy, PLAY_RETENTION_LINK } from "../_shared/play-retention-email.ts";
 import {
   renderWelcome, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
   renderCancellationConfirmed, renderSubscriptionResumed,
@@ -188,7 +189,7 @@ async function queueUserEmail(
   opts: {
     dedupeKey: string;
     marketing?: boolean;
-    markerKind: "welcome" | "dunning" | "winback" | "abandoned" | "billing_event" | "retention";
+    markerKind: "welcome" | "dunning" | "winback" | "abandoned" | "billing_event" | "retention" | "play_retention";
     markerReference?: string;
     markerStage?: number;
   },
@@ -458,6 +459,38 @@ async function runRetentionOffers(db: SupabaseClient): Promise<number> {
     }
   }
   return queuedCount;
+}
+
+async function runPlayRetention(db: SupabaseClient): Promise<number> {
+  const { data, error } = await db.rpc("norva_play_retention_deliveries", { p_push_configured: fcmConfigured() });
+  if (error) throw new Error("play_retention_selection_failed");
+  let count = 0;
+  for (const offer of data ?? []) {
+    if (offer.channel === "email") {
+      const queued = await queueUserEmail(db, offer.user_id, (_name, context) => renderPlayRetention(offer, context), {
+        dedupeKey: `lifecycle:play-retention:${offer.deliveryId}`, marketing: true,
+        markerKind: "play_retention", markerReference: offer.deliveryId,
+      });
+      if (queued.durable) await db.from("cloud_play_retention_deliveries")
+        .update({ dispatched_at: new Date().toISOString() }).eq("id", offer.deliveryId);
+      if (queued.created) count++;
+    } else if (offer.channel === "push") {
+      const { data: authorization, error: authError } = await db.rpc("norva_play_retention_claim_push", { p_delivery: offer.deliveryId });
+      if (authError || !authorization?.token) continue;
+      const { data: account } = await db.auth.admin.getUserById(authorization.user_id);
+      const copy = playRetentionCopy(offer.period, account?.user?.user_metadata?.language || "en");
+      const expires = Math.min(Date.now() + 3600_000, new Date(offer.expiresAt).getTime());
+      const sent = await sendFcmPush(authorization.token, {
+        title: copy.title, body: copy.terms, dataOnly: true,
+        data: { kind: "play_retention", deliveryId: offer.deliveryId, deepLink: PLAY_RETENTION_LINK, expiresAt: String(expires) },
+        ttlSeconds: Math.max(1, Math.floor((expires - Date.now()) / 1000)),
+        collapseKey: `play-retention-${offer.stage}`, analyticsLabel: "play_retention",
+      });
+      if (sent.ok) count++;
+      if (sent.unregistered) await db.from("cloud_push_tokens").delete().eq("token", authorization.token);
+    }
+  }
+  return count;
 }
 
 async function runWinback(db: SupabaseClient): Promise<number> {
@@ -1037,6 +1070,7 @@ Deno.serve(async (req) => {
     if (BILLING_LIVE && LC_DUNNING && LC_EXPIRE) out.expired_past_due = await runExpirePastDue(db);
     if (BILLING_LIVE && LC_WINBACK) {
       out.retention = await runRetentionOffers(db);
+      out.playRetention = await runPlayRetention(db);
       out.winback = await runWinback(db);
     }
     if (BILLING_LIVE && LC_ABANDONED) out.abandoned = await runAbandoned(db);

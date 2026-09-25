@@ -58,11 +58,11 @@ test('every billing request is answered exactly once, on its own channel', () =>
   const main = read(MAIN);
   const dispatch = block(main, 'private void dispatchBillingMessage', 'private void finishBillingRequest');
 
-  // One latch guards all four outcomes: catalog, purchase, restore, watchdog.
-  assert.equal((dispatch.match(/answered\.compareAndSet\(false, true\)/g) || []).length, 4);
+  // One latch guards catalog, purchase, retention, restore, and watchdog.
+  assert.equal((dispatch.match(/answered\.compareAndSet\(false, true\)/g) || []).length, 5);
   assert.equal((dispatch.match(/billingHandler\.removeCallbacks\(expire\)/g) || []).length, 3);
   assert.match(dispatch, /"native_timeout_" \+ stage\[0\]/);
-  for (const stage of ['session', 'offerings', 'purchase', 'restore']) {
+  for (const stage of ['session', 'offerings', 'purchase', 'restore', 'retention_offer', 'retention_purchase']) {
     assert.match(dispatch, new RegExp(`"${stage}"`), `unnamed stage: ${stage}`);
   }
 

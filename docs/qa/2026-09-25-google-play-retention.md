@@ -74,3 +74,26 @@ Ce document décrit une stratégie réalisable et les travaux nécessaires. Les 
 - [RevenueCat — offres Google Play et sélection automatique](https://www.revenuecat.com/docs/subscription-guidance/subscription-offers/google-play-offers)
 - [RevenueCat — modes de remplacement](https://www.revenuecat.com/docs/subscription-guidance/managing-subscriptions)
 - [RevenueCat — offres Customer Center](https://www.revenuecat.com/docs/tools/customer-center/customer-center-promo-offers-google) : solution existante, mais son déclenchement lors de l’intention de résilier ne réalise pas à lui seul le parcours J−3 retenu pour Norva.
+
+## Implémentation après accord du propriétaire — 25 septembre
+
+PR 416 implémente le parcours approuvé. La politique et les communications mobiles sont initialement désactivées ; ce réglage ne change pas la campagne Revolut publiée.
+
+- Contrat natif 1.3.24 (37), prix et devise lus dans Google Play, offre précise `rc-ignore-offer`, comparaison du produit, du forfait, du renouvellement désactivé et du prix avant confirmation. `WITHOUT_PRORATION` demandé avant expiration pour préserver l’échéance. L’effet réel sur l’échéancier reste à contrôler dans Google Play.
+- Offre autorisée par l’API authentifiée, J−3 à J+7, un rappel au plus après J+3. Réservation concurrente de dix minutes ; limite glissante de douze mois partagée avec le web ; achat confirmé seul consommateur de la remise, y compris après une livraison tardive du webhook ou un refus intervenu pendant l’achat.
+- Carte en haut du compte ; gestion dans Google Play, refus, erreur et attente explicites. Montants Google Play affichés avec le tarif suivant. Préférence commerciale push distincte de la permission Android.
+- Une livraison par étape, push sur un appareil récent autorisé ou e-mail consenti. Pas de repli e-mail après une tentative FCM ambiguë. Consentement recontrôlé à la mise en file et dans les contrôles de livraison, dont Postal.
+- Quatre offres enregistrées en **brouillon** et relues par l’API officielle : Plus et Family, mensuel P1M × 3 à −20 %, annuel P1Y × 1 à −10 %. Éligibilité déterminée par Norva ; tag `rc-ignore-offer`. Exemples France : Plus 3,99 €/mois au lieu de 4,99 €, annuel 39,59 € au lieu de 43,99 € ; Family 7,59 €/mois au lieu de 9,49 €, annuel 71,99 € au lieu de 79,99 €.
+
+### Preuves disponibles
+
+- Suite de régression : 5 135 réussites, zéro échec (5 155 cas au total, reste ignoré), workflow Build 36139148991.
+- Android : 43 tests instrumentés réussis dans chaque mode de navigation, API 35 ; TV API 34 réussi, workflow 36139149017. Le nouveau scénario couvre la carte à 360 × 800, textes 100/130 %, prix, action visible, cibles tactiles, erreur/reprise, confirmation en attente, refus/focus et exclusion de Revolut. Un ancien test de clavier intermittent a échoué sur deux exécutions précédentes puis réussi dans les deux modes ; aucun changement des filtres n’a été effectué ici.
+- SQL : clone du schéma dans un conteneur sans réseau, données synthétiques annulées. Propriété, consentement, contrôle Postal, choix push/e-mail, tentative push unique, double clic, séparation des canaux, provenance du webhook, achat tardif après refus et horloge des renouvellements vérifiés.
+- AAB signé 37 compilé au commit `8b232380161f0fb9538394a27af32d5c929b0e53`, workflow Release 36139477538. Archive vérifiée SHA-256 `6f2ed8811d4b59b403ee56c50b7dcfc38fdc4029b33b1dd58b5ab654e43e42fa`.
+
+### Limites de validation
+
+Les tests utilisent des réponses simulées pour l’UI et des événements synthétiques pour SQL. Ils ne prouvent pas encore un achat Google Play, l’absence de débit anticipé, les trois échéances réelles, ni la présence de `offer_code` dans le webhook réel de ce remplacement. Aucun achat ni envoi commercial n’a été déclenché par ces tests. Le téléphone connecté porte encore 1.3.22 (35) au contrôle.
+
+L’éligibilité des offres Google Play « choix du développeur » n’est pas vérifiée par le Store. Le serveur contrôle le parcours Norva officiel ; cela ne doit pas être présenté comme une garantie absolue contre une application modifiée ou plusieurs identités. Toute activation doit conserver cette limite explicite et vérifier les événements réels.

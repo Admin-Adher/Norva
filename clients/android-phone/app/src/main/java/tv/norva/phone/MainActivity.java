@@ -1901,6 +1901,26 @@ public class MainActivity extends Activity {
                                 billingHandler.removeCallbacks(expire);
                                 sendBillingResult(requestId, status, planCode, error, detailsJson);
                             });
+                } else if (("getRetentionForUser".equals(method) && args.length() == 1)
+                        || ("purchaseRetentionForUser".equals(method) && args.length() == 5)) {
+                    JSONObject expected = null;
+                    if ("purchaseRetentionForUser".equals(method)) {
+                        try {
+                            expected = new JSONObject().put("id", args.optString(1))
+                                    .put("priceMicros", args.optLong(2, -1))
+                                    .put("regularPriceMicros", args.optLong(3, -1))
+                                    .put("currencyCode", args.optString(4));
+                        } catch (Exception ignored) {
+                            finishBillingRequest(answered, expire, method, requestId, claimedUserId, "invalid_billing_request");
+                            return;
+                        }
+                    }
+                    stage[0] = expected == null ? "retention_offer" : "retention_purchase";
+                    NorvaBilling.retentionForUser(MainActivity.this, verifiedUserId, accessToken, expected,
+                            (status, error, detailsJson) -> {
+                                if (!answered.compareAndSet(false, true)) return;
+                                sendBillingResult(requestId, status, null, error, detailsJson);
+                            });
                 } else if ("restoreForUser".equals(method) && args.length() == 1) {
                     stage[0] = "restore";
                     NorvaBilling.restoreForUser(verifiedUserId,
