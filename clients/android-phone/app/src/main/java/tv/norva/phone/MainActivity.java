@@ -843,7 +843,15 @@ public class MainActivity extends Activity {
                         + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId)
                         + "," + position + "," + jsStr(reason) + "," + jsStr(token) + ");";
                 runOnUiThread(() -> {
-                    try { webView.evaluateJavascript(retry, null); } catch (Exception ignored) { }
+                    try {
+                        webView.evaluateJavascript(retry, result -> {
+                            if (!"\"scheduled\"".equals(result)) {
+                                rejectPlayerRecovery(token, sourceId, itemType, itemId);
+                            }
+                        });
+                    } catch (Exception ignored) {
+                        rejectPlayerRecovery(token, sourceId, itemType, itemId);
+                    }
                 });
                 loadHandler.postDelayed(() -> {
                     synchronized (playerRecoveryLock) {
@@ -900,6 +908,19 @@ public class MainActivity extends Activity {
                 .putExtra(PlayerActivity.EXTRA_RECOVERY_PAYLOAD, payload.toString());
         sendBroadcast(response);
         return true;
+    }
+
+    private void rejectPlayerRecovery(String token, String sourceId, String itemType, String itemId) {
+        try {
+            // Use the same token/owner-item checks as a successful resolution.
+            // An explicit rejection must close the native wait immediately;
+            // the 60 s timeout is only for a missing/unfinished bridge response.
+            JSONObject failure = new JSONObject()
+                    .put("recoveryToken", token).put("sourceId", sourceId)
+                    .put("itemType", itemType).put("itemId", itemId)
+                    .put("recoveryError", "resolution_unavailable");
+            deliverRecoveredStreamToPlayer(failure);
+        } catch (Exception ignored) { /* Native timeout still covers bridge failure. */ }
     }
 
     // ---- Build UI ----

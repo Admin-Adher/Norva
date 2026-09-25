@@ -271,6 +271,7 @@ public class PlayerActivity extends Activity {
     private boolean gracefulResultEmitted = false;
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
+    private long requestedRoutePositionMs = 0L;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
     // A manual episode hand-off is returned to MainActivity only after this
     // Activity has stopped playback. MainActivity then waits for the exact
@@ -1264,6 +1265,10 @@ public class PlayerActivity extends Activity {
 
     private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state) {
         if (player == null || item == null) return;
+        // Media3 can still report zero when an origin fails before READY. Keep
+        // the requested position separately until this route renders a frame.
+        requestedRoutePositionMs = positionMs > 0L ? positionMs
+                : (!resumeApplied ? Math.max(0L, resumeSeconds * 1000L) : 0L);
         stopPlaybackHeartbeat();
         clearPendingDelayedRecovery();
         engineReady = false;
@@ -3349,8 +3354,14 @@ public class PlayerActivity extends Activity {
     /** Preserve the current VOD position across direct/fallback reconnects. */
     private long recoverPositionMs() {
         if (player == null || isLiveContent()) return 0L;
-        long duration = player.getDuration();
-        long position = Math.max(0, player.getCurrentPosition());
+        return recoveryPositionMs(firstFrameForCurrentRoute,
+                player.getCurrentPosition(), requestedRoutePositionMs, player.getDuration());
+    }
+
+    static long recoveryPositionMs(boolean routeRendered, long currentPosition,
+                                   long requestedPosition, long duration) {
+        long position = Math.max(0L, currentPosition);
+        if (!routeRendered && position == 0L) position = Math.max(0L, requestedPosition);
         return duration > 0
                 ? Math.min(position, Math.max(0, duration - 1_000L))
                 : position;
@@ -3455,6 +3466,7 @@ public class PlayerActivity extends Activity {
                     false);
             return;
         }
+        long position = recoverPositionMs();
         freshStreamRequested = true;
         freshStreamTimeoutDeferred = false;
         recoveryInProgress = true;
@@ -3463,7 +3475,6 @@ public class PlayerActivity extends Activity {
         freshStreamReason = reason == null ? "playback_interrupted" : reason;
         rememberRecoverySignal(freshStreamReason, "fresh", false);
         recoveryToken = UUID.randomUUID().toString();
-        long position = recoverPositionMs();
         long duration = player != null && player.getDuration() > 0
                 ? player.getDuration() : 0L;
         transitionTo(PlaybackUiState.RECOVERING, true);
