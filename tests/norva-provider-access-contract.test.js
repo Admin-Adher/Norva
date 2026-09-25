@@ -611,6 +611,19 @@ test('post-switch completion is fenced by a durable active refresh proof', () =>
   assert.match(workerFailure, /failure\.queueCode !== "stale"/);
 });
 
+test('post-switch snapshot permits hidden access renewal but still rejects another generation', () => {
+  const snapshot = vm.runInNewContext(`(${functionExpression('activeRefreshSnapshot', 'function activeRefreshRun')})`, {
+    rpcObject: value => value, uuidValue: value => value,
+    nonNegativeInteger: value => { assert.ok(Number.isInteger(value) && value >= 0); return value; },
+    WorkerFault: class WorkerFault extends Error {},
+  });
+  const row = { generationId: 'candidate', isCatalogVisible: false,
+    headRevision: 2, configRevision: 1, sourceVisibilityEpoch: 3, userVisibilityEpoch: 3 };
+  assert.equal(snapshot(row, 'candidate').configRevision, 1);
+  assert.throws(() => snapshot(row, 'other'));
+  assert.throws(() => snapshot({ ...row, headRevision: -1 }, 'candidate'));
+});
+
 test('identity validation is bounded, complete and persists only comparator metrics', () => {
   const validation = section('async function validateCredentialCandidateJob', '\nasync function failCredentialValidation');
   assert.match(validation, /gatewayAccountInfo/);

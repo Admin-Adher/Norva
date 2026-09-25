@@ -2755,7 +2755,10 @@ function rpcObject(value) {
 function activeRefreshSnapshot(value, expectedGenerationId) {
   const row = rpcObject(value);
   const generationId = uuidValue(row.generationId ?? row.generation_id, true);
-  if (generationId !== expectedGenerationId || row.isCatalogVisible !== true && row.is_catalog_visible !== true) {
+  // Public visibility is intentionally false while expired access is being
+  // renewed. The SQL refresh writers authorize the exact transition, head and
+  // worker lease; this snapshot supplies their CAS values, not permission.
+  if (generationId !== expectedGenerationId) {
     throw new WorkerFault("catalog_unhealthy", false);
   }
   return {

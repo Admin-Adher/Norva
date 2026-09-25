@@ -504,6 +504,30 @@ select extensions.is(
   'cancel replay returns the stable original result'
 );
 
+\if :{?phase3_expired_refresh_test}
+reset role;
+-- Test-only clock setup inside this savepoint, as in catalog_cache_epoch_v2.sql.
+-- The migration itself never changes an observation deadline or rollout flag.
+update public.cloud_catalog_cache_epoch_v2_rollout
+set installed_at=least(installed_at,now()-interval '8 days') where singleton and phase='installed';
+set local role service_role;
+select public.norva_complete_catalog_cache_epoch_v2_rollout('catalog-cache-epoch-v2',
+  '23c0fa2cdaf09c08d9de4378d1a82f0f631ce71d6f955a0bdbb2c786b8ff98d3');
+reset role;
+update public.admin_feature_flags set enabled=true
+where key in ('provider_access_v1_enabled','provider_access_visibility_v1_enabled');
+do $membership$ begin
+  if to_regclass('public.cloud_provider_access_rollout_internal_users') is not null then
+    insert into public.cloud_provider_access_rollout_internal_users(user_id,reason,added_by)
+    values('93000000-0000-4000-8000-000000000001','Transactional expired refresh proof','test:expired-refresh')
+    on conflict (user_id) do nothing;
+  end if;
+end $membership$;
+update public.cloud_source_provider_access set provider_access_status='expired_confirmed',
+  provider_access_hidden_at=now(),provider_access_restored_at=null
+where source_id='93000000-0000-4000-8000-000000000102';
+set local role service_role;
+\endif
 insert into phase3_ctx values ('create2', public.norva_create_credential_transition(
   '93000000-0000-4000-8000-000000000001',
   '93000000-0000-4000-8000-000000000102',
@@ -780,7 +804,8 @@ set local role service_role;
 select extensions.is(
   (select count(*)::integer from public.cloud_catalog_visible_media_items
    where source_id='93000000-0000-4000-8000-000000000102'),
-  32,
+  case when public.norva_source_catalog_visible(
+    '93000000-0000-4000-8000-000000000102','93000000-0000-4000-8000-000000000001') then 32 else 0 end,
   'BUILDING candidate rows remain hidden behind the active A head'
 );
 
@@ -1091,7 +1116,8 @@ from public.norva_claim_credential_transition_jobs(
   'phase3-post-2',1,120,
   'credential-transition-worker-v3-active-catalog-refresh'
 ) claim;
-do $post_switch_refresh_proof$
+create function pg_temp.phase3_refresh_proof() returns void
+language plpgsql as $post_switch_refresh_proof$
 declare
   v_user_id uuid := '93000000-0000-4000-8000-000000000001';
   v_source_id uuid := '93000000-0000-4000-8000-000000000102';
@@ -1333,6 +1359,87 @@ begin
   insert into phase3_ctx values ('refresh2',jsonb_build_object('refreshRunId',v_run_id));
 end
 $post_switch_refresh_proof$;
+\if :{?phase3_expired_refresh_test}
+reset role;
+select extensions.ok(not public.norva_source_catalog_visible_internal(
+  '93000000-0000-4000-8000-000000000102','93000000-0000-4000-8000-000000000001'),
+  'expired source is publicly hidden before post-switch refresh');
+select extensions.ok(not public.norva_source_post_switch_refresh_allowed(
+  '93000000-0000-4000-8000-000000000102','93000000-0000-4000-8000-000000000001',
+  (select (value->>'generationId')::uuid from phase3_ctx where key='allocate2'),
+  (select (value->>'job_id')::uuid from phase3_ctx where key='postclaim2'),'other-worker',1),
+  'hidden refresh rejects the wrong worker');
+select extensions.ok(not public.norva_source_post_switch_refresh_allowed(
+  '93000000-0000-4000-8000-000000000102','93000000-0000-4000-8000-000000000001',
+  (select (value->>'generationId')::uuid from phase3_ctx where key='allocate2'),
+  (select (value->>'job_id')::uuid from phase3_ctx where key='postclaim2'),'phase3-post-2',999),
+  'hidden refresh rejects a stale lease');
+select extensions.ok(not public.norva_source_post_switch_refresh_allowed(
+  '93000000-0000-4000-8000-000000000102',gen_random_uuid(),
+  (select (value->>'generationId')::uuid from phase3_ctx where key='allocate2'),
+  (select (value->>'job_id')::uuid from phase3_ctx where key='postclaim2'),'phase3-post-2',1),
+  'hidden refresh rejects another owner');
+set local role service_role;
+select public.norva_settle_credential_transition_job(
+  (select (value->>'job_id')::uuid from phase3_ctx where key='postclaim2'),'phase3-post-2',
+  (select (value->>'lease_sequence')::integer from phase3_ctx where key='postclaim2'),
+  'dead','catalog_unhealthy',1);
+insert into phase3_ctx select 'expired-dead-job',value from phase3_ctx where key='postclaim2';
+select extensions.throws_ok(format($sql$select public.norva_retry_unstarted_credential_refresh(
+  %L,%L,%L,null,1,'Stale operator retry regression')$sql$,
+  (select value->>'transitionId' from phase3_ctx where key='create2'),
+  '93000000-0000-4000-8000-000000000001',
+  (select value->>'job_id' from phase3_ctx where key='expired-dead-job')),
+  'PT409','unstarted refresh transition CAS failed','repair requires an exact transition revision');
+select extensions.throws_ok(format($sql$select public.norva_retry_unstarted_credential_refresh(
+  %L,%L,%L,%s,999,'Stale source retry regression')$sql$,
+  (select value->>'transitionId' from phase3_ctx where key='create2'),
+  '93000000-0000-4000-8000-000000000001',
+  (select value->>'job_id' from phase3_ctx where key='expired-dead-job'),
+  (select revision from public.cloud_source_transitions where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2'))),
+  'PT409','unstarted refresh job CAS failed','repair rejects a changed source configuration');
+insert into phase3_ctx values('expired-retry',to_jsonb(public.norva_retry_unstarted_credential_refresh(
+  (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
+  '93000000-0000-4000-8000-000000000001',
+  (select (value->>'job_id')::uuid from phase3_ctx where key='expired-dead-job'),
+  (select revision from public.cloud_source_transitions where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2')),
+  1,'Regression proof of repaired hidden refresh')));
+select extensions.is(public.norva_retry_unstarted_credential_refresh(
+  (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
+  '93000000-0000-4000-8000-000000000001',
+  (select (value->>'job_id')::uuid from phase3_ctx where key='expired-dead-job'),
+  (select revision from public.cloud_source_transitions where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2')),
+  1,'Regression proof of repaired hidden refresh')::text,
+  (select value#>>'{}' from phase3_ctx where key='expired-retry'),
+  'operator retry is idempotent and appends just one replacement job');
+insert into phase3_ctx
+select 'postclaim2',to_jsonb(claim)
+from public.norva_claim_credential_transition_jobs('phase3-post-2',1,120,
+  'credential-transition-worker-v3-active-catalog-refresh') claim
+on conflict(key) do update set value=excluded.value;
+select pg_temp.phase3_refresh_proof();
+select public.norva_complete_credential_transition(
+  (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
+  '93000000-0000-4000-8000-000000000001',
+  (select (value->>'job_id')::uuid from phase3_ctx where key='postclaim2'),
+  'phase3-post-2',(select (value->>'lease_sequence')::integer from phase3_ctx where key='postclaim2'),
+  (select revision from public.cloud_source_transitions where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2')),
+  1,(select (value->>'refreshRunId')::uuid from phase3_ctx where key='refresh2'));
+reset role;
+select extensions.ok(not public.norva_source_catalog_visible_internal(
+  '93000000-0000-4000-8000-000000000102','93000000-0000-4000-8000-000000000001'),
+  'successful credential completion does not bypass the separate access check');
+select extensions.is((select state from public.cloud_source_credential_transition_jobs where id=
+  (select (value->>'job_id')::uuid from phase3_ctx where key='expired-dead-job')),'dead',
+  'recovery preserves immutable failure evidence');
+select extensions.ok(not has_function_privilege('authenticated',
+  'public.norva_retry_unstarted_credential_refresh(uuid,uuid,uuid,bigint,bigint,text)','execute'),
+  'ordinary clients cannot perform operator repairs');
+select * from extensions.finish();
+rollback;
+\quit
+\endif
+select pg_temp.phase3_refresh_proof();
 savepoint phase3_happy_completion_probe;
 select public.norva_complete_credential_transition(
   (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
