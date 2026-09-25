@@ -1915,6 +1915,7 @@ public class MainActivity extends Activity {
                             return;
                         }
                     }
+                    stage[0] = expected == null ? "retention_offer" : "retention_purchase";
                     NorvaBilling.retentionForUser(MainActivity.this, verifiedUserId, accessToken, expected,
                             (status, error, detailsJson) -> {
                                 if (!answered.compareAndSet(false, true)) return;
