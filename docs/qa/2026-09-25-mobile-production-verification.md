@@ -28,7 +28,7 @@ Verification: **38 JVM tests passed**, plus four API 35 instrumentation tests, a
 
 This native fix is prepared as **1.3.23 (36)** in [PR #414](https://github.com/Admin-Adher/Norva/pull/414), separate from the installed Play version 35; publication has not yet been completed.
 
-## Cache verification: concrete remaining blocker
+## Cache verification and relay recovery
 
 The current phone account has no active real-film R2 binding. Its previous synthetic test binding was revoked during prior cleanup. The direct South Park results therefore do **not** validate R2 playback on this phone.
 
@@ -36,6 +36,12 @@ An owned synthetic source **Test mobile Norva** was imported through ordinary so
 
 Preparation requests fail with `PROVIDER_CONNECT_TIMEOUT` (502). The same public synthetic asset is readable directly from both Gateway containers (HTTP 200, 2,848,920 bytes, Matroska magic verified). Through the configured HTTP relay, both requests time out; a TCP connection to that relay also fails. There is currently one configured relay endpoint. The relay needs recovery before this can be counted as a physical shared-cache success.
 
-The runtime Compose labels identify the September 19 NodeMaven deployment. The existing NodeMaven console confirms one active HTTP proxy subscription, due October 16, 2026. Its own **Check proxy** action also reports **Timed out connecting to the proxy or probe host**. The configured endpoint matches the subscribed endpoint. One free IP swap is available; replacing it is pending the owner's decision. No proxy credentials or routing configuration have been changed.
+The runtime Compose labels identify the September 19 NodeMaven deployment. The existing NodeMaven console confirms one active HTTP proxy subscription, due October 16, 2026. Its own **Check proxy** action also reported **Timed out connecting to the proxy or probe host**. The configured endpoint matched the subscribed endpoint.
+
+The owner explicitly authorized the single free IP replacement. The new relay returned HTTP 206 with the complete requested 128 bytes in 922 ms before deployment. Both idle Gateways were recreated with only the proxy hostname changed, preserving the credentials, image, mounts and all other settings. The existing Compose environment and override were updated and verified against the main runtime. Background schedulers and the audio worker were restored. Both nodes passed health and proxy-read verification. Private rollback receipts are retained on the server.
+
+The ordinary preparation request then decoded all 30 synthetic HLS segments to EOF and obtained a ready cache binding. On the physical phone, the subsequent session at **11:34:13 UTC** received a cache playback grant, reserved **no provider slot**, and created **no Gateway session**. A native rendered first frame was recorded at **11:34:16 UTC**, **1,455 ms from native launch**. The moving image was observed through 58.583 seconds. This validates real cache delivery to the Play-installed phone for this owned fixture; it is not a throughput or provider catalogue coverage claim.
+
+The extended CI identified an intermittent gesture-navigation test harness failure: app-targeted touch injection could reject the gesture when the IME window belonged to another UID. The test now injects through Android UiAutomation, while retaining its visible-keyboard, DOM-focus and both filter-reset-order assertions. No production filter behavior was changed for this issue.
 
 The temporary source is retained only while the active test is being resolved. Native Google Play promotion campaigns remain deferred, and no paid subscription or renewal was activated.
