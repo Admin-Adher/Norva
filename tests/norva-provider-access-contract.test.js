@@ -645,7 +645,8 @@ test('post-switch category paging respects the default Gateway limit and checkpo
         headRevision: 1, configRevision: 1, sourceVisibilityEpoch: 3, userVisibilityEpoch: 3,
         isCatalogVisible: false };
       if (name === 'norva_begin_active_catalog_title_projection_refresh') return {
-        refreshRunId: 'run', checkpointRevision: 1, generationRevision: 8, visibilityEpoch: 3,
+        refreshRunId: 'run', checkpointRevision: 1, generationRevision: 8, catalogVersion: 8,
+        actionCategoryCount: 0, visibilityEpoch: 3,
         checkpoint: progress };
       assert.equal(name, 'norva_checkpoint_active_catalog_title_refresh');
       assert.equal(params.p_requeue, true);
@@ -656,6 +657,59 @@ test('post-switch category paging respects the default Gateway limit and checkpo
   assert.equal((await run({ sourceId: 'source', userId: 'owner', jobId: 'job', leaseSequence: 1 },
     'worker', {}, {})).complete, false);
   assert.equal(calls.length, 4);
+});
+
+test('active refresh carries durable category counts and resumes after generation revision changes', async () => {
+  let progress = { version: 1, catalogVersion: 9, action: 'vod_streams', actionComplete: false,
+    cursor: '', spoolToken: '', contentSha256: '', processedCategories: 0, processedItems: 0,
+    observedItems: 0, categoryCount: 0 };
+  let checkpointRevision = 12;
+  let generationRevision = 9;
+  let pruned = false;
+  const digest = 'a'.repeat(64);
+  const token = `${Buffer.from(JSON.stringify({ d: digest })).toString('base64url')}.signature`;
+  const source = section('const ACTIVE_REFRESH_ACTIONS', '\nasync function restoreAfterPostSwitchFailure');
+  const run = vm.runInNewContext(`(() => { ${source}; return runActivePostSwitchRefresh; })()`, {
+    atob, requiredJobGenerationId: () => 'generation', isRecord: value => value && typeof value === 'object',
+    uuidValue: value => value, nonNegativeInteger: value => { assert.ok(Number.isInteger(value) && value >= 0); return value; },
+    WorkerFault: class WorkerFault extends Error {}, xtreamLanguageDeclarations: () => null,
+    gatewayMetadataPage: async () => ({ done: true, spoolToken: token,
+      items: [{ stream_id: 'qa1', name: 'QA Film', category_id: 'qa-category' }] }),
+    workerRpc: async (name, params) => {
+      if (name === 'norva_get_catalog_write_snapshot') return { generationId: 'generation',
+        headRevision: 1, configRevision: 1, sourceVisibilityEpoch: 3, userVisibilityEpoch: 3 };
+      if (name === 'norva_begin_active_catalog_title_projection_refresh') return {
+        refreshRunId: 'run', checkpointRevision, generationRevision, catalogVersion: 9,
+        actionCategoryCount: 2, visibilityEpoch: 3, checkpoint: progress };
+      if (name === 'norva_checkpoint_active_catalog_title_refresh') {
+        assert.equal(params.p_expected_checkpoint_revision, checkpointRevision);
+        progress = params.p_progress;
+        return { checkpointRevision: ++checkpointRevision, visibilityEpoch: 3, checkpoint: progress, requeued: params.p_requeue };
+      }
+      if (name === 'norva_upsert_active_catalog_media_items') return {
+        items: [{ itemType: 'movie', externalId: 'qa1', mediaItemId: 'media' }] };
+      if (name === 'norva_upsert_active_catalog_title_payloads') {
+        generationRevision += 4;
+        return { titles: [{ itemType: 'movie', identityKey: 'norm:qa-film', titleId: 'title', payloadUpdatedAt: '2026-09-25T22:00:00Z' }] };
+      }
+      if (name === 'norva_upsert_active_catalog_title_variants' || name === 'norva_confirm_active_catalog_title_projection_batch') return {};
+      assert.equal(name, 'norva_prune_active_catalog_refresh_action_batch');
+      assert.equal(params.p_catalog_version, 9);
+      assert.equal(progress.categoryCount, 2);
+      assert.equal(progress.processedCategories, 2);
+      assert.equal(progress.observedItems, 1);
+      pruned = true;
+      return { complete: true, visibilityEpoch: 3 };
+    },
+  });
+  const job = { sourceId: 'source', userId: 'owner', jobId: 'job', leaseSequence: 1 };
+  assert.equal((await run(job, 'worker', {}, {})).complete, false);
+  assert.equal(generationRevision, 13);
+  assert.equal(progress.categoryCount, 2);
+  assert.equal((await run(job, 'worker', {}, {})).complete, false);
+  assert.equal(pruned, true);
+  assert.equal(progress.action, 'series_streams');
+  assert.equal(progress.catalogVersion, 9);
 });
 
 test('identity validation is bounded, complete and persists only comparator metrics', () => {

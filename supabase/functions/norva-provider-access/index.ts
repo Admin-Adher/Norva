@@ -2593,7 +2593,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     p_source_visibility_epoch: snapshot.sourceVisibilityEpoch,
     p_user_visibility_epoch: snapshot.userVisibilityEpoch,
   }));
-  const state = activeRefreshProgress(run.checkpoint, run.generationRevision);
+  const state = activeRefreshProgress(run.checkpoint, run.catalogVersion);
   const fence = {
     p_source_id: job.sourceId, p_user_id: job.userId,
     p_generation_id: expectedGenerationId, p_refresh_run_id: run.refreshRunId,
@@ -2742,6 +2742,9 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     actionComplete: page.done,
     processedItems: state.processedItems + media.length,
     observedItems: state.observedItems + media.length,
+    // Category pages ran in earlier leases. SQL owns their durable count.
+    processedCategories: run.actionCategoryCount,
+    categoryCount: run.actionCategoryCount,
   };
   await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next, true, 1);
   return { complete: false };
@@ -2775,17 +2778,18 @@ function activeRefreshRun(value) {
   return {
     refreshRunId: uuidValue(row.refreshRunId ?? row.refresh_run_id, true),
     checkpointRevision: nonNegativeInteger(row.checkpointRevision ?? row.checkpoint_revision, "INVARIANT_VIOLATION"),
-    generationRevision: nonNegativeInteger(row.generationRevision ?? row.generation_revision, "INVARIANT_VIOLATION"),
+    catalogVersion: nonNegativeInteger(row.catalogVersion ?? row.catalog_version, "INVARIANT_VIOLATION"),
+    actionCategoryCount: nonNegativeInteger(row.actionCategoryCount ?? row.action_category_count, "INVARIANT_VIOLATION"),
     userVisibilityEpoch: nonNegativeInteger(row.visibilityEpoch ?? row.visibility_epoch, "INVARIANT_VIOLATION"),
     checkpoint: rpcObject(row.checkpoint),
   };
 }
 
-function activeRefreshProgress(value, generationRevision) {
+function activeRefreshProgress(value, catalogVersionProof) {
   const action = String(value.action ?? "");
   const known = ACTIVE_REFRESH_ACTIONS.some((entry) => entry.action === action) || action === "complete";
   const catalogVersion = nonNegativeInteger(value.catalogVersion ?? value.catalog_version, "INVARIANT_VIOLATION");
-  if (!known || catalogVersion !== generationRevision || typeof value.actionComplete !== "boolean") {
+  if (!known || catalogVersion !== catalogVersionProof || typeof value.actionComplete !== "boolean") {
     throw new WorkerFault("catalog_unhealthy", false);
   }
   const stringField = (name) => {

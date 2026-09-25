@@ -1116,6 +1116,9 @@ from public.norva_claim_credential_transition_jobs(
   'phase3-post-2',1,120,
   'credential-transition-worker-v3-active-catalog-refresh'
 ) claim;
+\if :{?phase3_renewal_access_test}
+insert into phase3_ctx values('refresh-nonempty-categories','true'::jsonb);
+\endif
 create function pg_temp.phase3_refresh_proof() returns void
 language plpgsql as $post_switch_refresh_proof$
 declare
@@ -1144,6 +1147,8 @@ declare
   v_confirmations jsonb;
   v_item_count bigint;
   v_digest text;
+  v_category_count bigint;
+  v_with_categories boolean := exists(select 1 from phase3_ctx where key='refresh-nonempty-categories');
 begin
   select head.head_revision,lifecycle.config_revision,lifecycle.visibility_epoch,
     epoch.visibility_epoch
@@ -1162,9 +1167,10 @@ begin
   v_checkpoint_revision := (v_run->>'checkpointRevision')::bigint;
 
 
-  -- The synthetic provider fixture has no categories.  Each empty response is
-  -- nevertheless recorded through the same fenced RPC as production.
+  -- The renewal wrapper adds a VOD category to exercise cross-lease counts.
+  -- All responses pass through the same fenced RPC as production.
   foreach v_kind in array array['live','vod','series'] loop
+    v_category_count:=case when v_with_categories and v_kind='vod' then 1 else 0 end;
     v_action := v_kind || '_categories';
     v_digest := case v_kind when 'live' then repeat('a',64)
       when 'vod' then repeat('b',64) else repeat('c',64) end;
@@ -1180,7 +1186,8 @@ begin
     v_checkpoint_revision := (v_result->>'checkpointRevision')::bigint;
     select public.norva_upsert_active_catalog_refresh_categories(
       v_source_id,v_user_id,v_generation_id,v_run_id,v_job_id,v_worker,v_lease_sequence,
-      v_head_revision,v_config_revision,v_source_epoch,v_user_epoch,v_kind,'[]'::jsonb
+      v_head_revision,v_config_revision,v_source_epoch,v_user_epoch,v_kind,
+      case when v_category_count=1 then '[{"category_ordinal":0,"provider_category_id":"qa-vod","category_name":"QA VOD"}]'::jsonb else '[]'::jsonb end
     ) into v_result;
     v_user_epoch := coalesce((v_result->>'visibilityEpoch')::bigint,v_user_epoch);
     v_action := v_kind || '_categories';
@@ -1188,8 +1195,8 @@ begin
       when 'vod' then repeat('b',64) else repeat('c',64) end;
     v_progress := jsonb_build_object('version',1,'catalogVersion',v_catalog_version,
       'action',v_action,'actionComplete',true,'cursor','','spoolToken','proof_'||v_action,
-      'contentSha256',v_digest,'processedCategories',0,'processedItems',0,
-      'observedItems',0,'categoryCount',0);
+      'contentSha256',v_digest,'processedCategories',v_category_count,'processedItems',0,
+      'observedItems',0,'categoryCount',v_category_count);
     select public.norva_checkpoint_active_catalog_title_refresh(
       v_source_id,v_user_id,v_generation_id,v_run_id,v_job_id,v_worker,v_lease_sequence,
       v_checkpoint_revision,v_head_revision,v_config_revision,v_source_epoch,v_user_epoch,
@@ -1211,6 +1218,19 @@ begin
   end loop;
 
   foreach v_kind in array array['live','vod','series'] loop
+    v_category_count:=case when v_with_categories and v_kind='vod' then 1 else 0 end;
+    if v_with_categories then
+      v_run:=public.norva_begin_active_catalog_title_projection_refresh(
+        v_source_id,v_user_id,v_generation_id,v_job_id,v_worker,v_lease_sequence,
+        v_head_revision,v_config_revision,v_source_epoch,v_user_epoch);
+      if (v_run->>'catalogVersion')::bigint is distinct from v_catalog_version
+        or (v_run->>'actionCategoryCount')::bigint is distinct from v_category_count then
+        raise exception 'refresh replay lost its immutable version or durable categories';
+      end if;
+      if v_kind='series' and (v_run->>'generationRevision')::bigint<=v_catalog_version then
+        raise exception 'fixture did not advance the mutable generation revision';
+      end if;
+    end if;
     select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
       'item_type',item.item_type,'external_id',item.external_id,'title',item.title,
       'subtitle',item.subtitle,'poster_url',item.poster_url,'backdrop_url',item.backdrop_url,
@@ -1319,8 +1339,8 @@ begin
       when 'vod' then repeat('b',64) else repeat('c',64) end;
     v_progress := jsonb_build_object('version',1,'catalogVersion',v_catalog_version,
       'action',v_action,'actionComplete',true,'cursor','','spoolToken','proof_'||v_action,
-      'contentSha256',v_digest,'processedCategories',0,'processedItems',v_item_count,
-      'observedItems',v_item_count,'categoryCount',0);
+      'contentSha256',v_digest,'processedCategories',v_category_count,'processedItems',v_item_count,
+      'observedItems',v_item_count,'categoryCount',v_category_count);
     select public.norva_checkpoint_active_catalog_title_refresh(
       v_source_id,v_user_id,v_generation_id,v_run_id,v_job_id,v_worker,v_lease_sequence,
       v_checkpoint_revision,v_head_revision,v_config_revision,v_source_epoch,v_user_epoch,
@@ -1499,6 +1519,9 @@ select extensions.is((select state from public.cloud_source_credential_transitio
 select extensions.ok(not has_function_privilege('authenticated',
   'public.norva_retry_unstarted_credential_refresh(uuid,uuid,uuid,bigint,bigint,text)','execute'),
   'ordinary clients cannot perform operator repairs');
+\if :{?phase3_renewal_access_test}
+\ir provider_renewal_access_assertions.sql
+\endif
 select * from extensions.finish();
 rollback;
 \quit
