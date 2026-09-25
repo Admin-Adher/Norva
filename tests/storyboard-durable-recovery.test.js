@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const vm = require('node:vm');
 const { StoryboardStore } = require('../services/media-gateway/src/storyboard-store');
+const { createStoryboardDurabilityPolicy } = require('../services/media-gateway/src/storyboard-durability');
 const { createProgress } = require('../services/media-gateway/src/storyboard-progress');
 const crypto = require('node:crypto');
 const sourceId = crypto.randomUUID();
@@ -28,7 +29,8 @@ async function harness(store, capacity = 1) {
         source.indexOf('async function renewDurableStoryboard(job)'));
     assert.match(source, /await restoreDurableStoryboards\(\);[\s\S]*gatewayHttpServer = app.listen/);
     const state = { storyboardStore: store, transcribeQueue: [], MAX_TRANSCRIBE_QUEUE: capacity,
-        durableStoryboardIds: new Set(), storyboardPilotSourceIds: new Set([sourceId]),
+        durableStoryboardIds: new Set(), storyboardDurability: createStoryboardDurabilityPolicy({
+            STORYBOARD_PRIVATE_DIR: store.root, STORYBOARD_DURABLE_SOURCE_IDS: sourceId }),
         isBackendUrl: value => value === callbackUrl,
         insertByPriority: (queue, value) => queue.push(value),
         transcribeWakeState: {}, wakeQueueDrain() {}, queueMicrotask() {}, drainTranscribeQueue() {} };
@@ -107,7 +109,8 @@ test('renewal pins the original source and fills legacy source identity from a v
     let grantSource = otherSource;
     const context = { storyboardStore: store, isBackendUrl: () => true, GATEWAY_TOKEN: 'test',
         AbortSignal, URL, Date, FFMPEG_USER_AGENT: 'test',
-        storyboardPilotSourceIds: new Set([sourceId, otherSource]),
+        storyboardDurability: createStoryboardDurabilityPolicy({
+            STORYBOARD_PRIVATE_DIR: store.root, STORYBOARD_DURABLE_ROLLOUT_BPS: '10000' }),
         fetch: async () => ({ ok: true, status: 200, json: async () => ({
             pipeUrl: 'https://gateway.invalid/raw/signed', uploadUrl: 'https://api.norva.tv/storage/fresh',
             sourceId: grantSource, duration: 120, sourceBinding: 'b'.repeat(64) }) }),
