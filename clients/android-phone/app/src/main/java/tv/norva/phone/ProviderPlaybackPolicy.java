@@ -29,6 +29,16 @@ final class ProviderPlaybackPolicy {
         return status == HTTP_PROVIDER_BUSY;
     }
 
+    static boolean refreshUnprovenVodRoute(String reason, boolean renderedFrame,
+            boolean localOrLive, boolean ownedItem) {
+        if (renderedFrame || localOrLive || !ownedItem) return false;
+        return "ERROR_CODE_IO_BAD_HTTP_STATUS".equals(reason)
+                || "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED".equals(reason)
+                || "ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT".equals(reason)
+                || "ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED".equals(reason)
+                || "no_data_timeout".equals(reason);
+    }
+
     static boolean isPlaybackSuperseded(String code) {
         return PLAYBACK_SUPERSEDED.equals(code);
     }

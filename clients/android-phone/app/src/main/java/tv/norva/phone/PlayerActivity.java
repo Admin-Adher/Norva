@@ -271,7 +271,6 @@ public class PlayerActivity extends Activity {
     // pending position to cloud history on its next foreground.
     private boolean gracefulResultEmitted = false;
     private int resumeSeconds = 0;
-    private boolean resumeApplied = false;
     private long requestedRoutePositionMs = 0L;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
     // A manual episode hand-off is returned to MainActivity only after this
@@ -717,14 +716,6 @@ public class PlayerActivity extends Activity {
                         // retire the no-data watchdog.
                         errHandler.removeCallbacks(bufferWatchdog);
                     }
-                    if (!resumeApplied && resumeSeconds > 0) {
-                        resumeApplied = true;
-                        long target = resumeSeconds * 1000L;
-                        long duration = player.getDuration();
-                        if (duration <= 0 || target < duration - 5000) {
-                            player.seekTo(target);
-                        }
-                    }
                     // READY means the decoder can start, not that a picture has
                     // actually reached the display. Keep the honest poster/status
                     // layer until onRenderedFirstFrame proves the route.
@@ -909,7 +900,10 @@ public class PlayerActivity extends Activity {
                     getString(R.string.player_state_offline_message),
                     false);
         } else {
-            prepareMediaItem(originalMediaItem, 0L, PlaybackUiState.PREPARING);
+            // Give the extractor the requested position before it buffers or
+            // decodes. Seeking only after READY needlessly loaded the opening
+            // scene, then started a second network/buffering cycle for Resume.
+            prepareMediaItem(originalMediaItem, Math.max(0L, resumeSeconds * 1000L), PlaybackUiState.PREPARING);
         }
     }
 
@@ -1284,8 +1278,7 @@ public class PlayerActivity extends Activity {
         if (player == null || item == null) return;
         // Media3 can still report zero when an origin fails before READY. Keep
         // the requested position separately until this route renders a frame.
-        requestedRoutePositionMs = positionMs > 0L ? positionMs
-                : (!resumeApplied ? Math.max(0L, resumeSeconds * 1000L) : 0L);
+        requestedRoutePositionMs = Math.max(0L, positionMs);
         stopPlaybackHeartbeat();
         clearPendingDelayedRecovery();
         engineReady = false;
@@ -1299,7 +1292,7 @@ public class PlayerActivity extends Activity {
         String routeId = "norva-route-" + (++playbackRouteGeneration);
         activePlaybackRouteId = routeId;
         MediaItem routedItem = item.buildUpon().setMediaId(routeId).build();
-        player.setMediaItem(routedItem, Math.max(0L, positionMs));
+        player.setMediaItem(routedItem, requestedRoutePositionMs);
         player.prepare();
         boolean mayPlay = shouldAllowPlayback(playbackActive, isInPipMode());
         player.setPlayWhenReady(mayPlay);
@@ -3449,6 +3442,15 @@ public class PlayerActivity extends Activity {
         // already-good route once before moving traffic to the datacenter.
         if (!everReady && !fallbackTried && fallbackUrl != null && !fallbackUrl.isEmpty()) {
             switchToFallback();
+            return;
+        }
+        // A refused first request has never proved this route usable. Resolve
+        // its replacement once instead of repeating that same request after a
+        // fixed delay. Healthy playback keeps the existing reconnect budget.
+        if (ProviderPlaybackPolicy.refreshUnprovenVodRoute(reason,
+                firstFrameForCurrentRoute, isLocal || isLiveContent(),
+                sourceId != null && !sourceId.isEmpty() && itemId != null && !itemId.isEmpty())) {
+            requestFreshStream(reason);
             return;
         }
         if (playRetries < 1) {
