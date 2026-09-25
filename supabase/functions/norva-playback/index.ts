@@ -2277,6 +2277,11 @@ async function createPlaybackSessionCore(
   assertHttpUrl(targetUrl);
 
   const clientMode = choosePlaybackMode(requestedMode, body);
+  // This selects an existing authenticated raw transport, never a new target
+  // or entitlement. Android still decodes the original file after direct I/O
+  // failed; browser codec promotion must not turn this recovery into encoding.
+  const nativeNetworkRecovery = body.nativeNetworkRecovery === true && body.enginePipe === true &&
+    clientMode === "relay" && (itemType === "movie" || itemType === "series");
   const serverOwnedEpisodeGateway = shouldUseOwnedEpisodeBrowserGateway(
     resolved, itemType, clientMode, body,
   );
@@ -2329,6 +2334,7 @@ async function createPlaybackSessionCore(
     clientMode === "transcode" &&
     body.gatewayAutoMode === true;
   const serverPromotedRelay = clientMode === "relay" &&
+    !nativeNetworkRecovery &&
     !browserNativeMp4 &&
     (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode"
       // A finite .ts object is not an HLS manifest. Once its container is
@@ -2803,6 +2809,10 @@ async function createPlaybackSessionCore(
         // playback start evicts this source-scoped record immediately.
         expiresAt: rawTokenExpiresAt,
       }, db);
+      if (nativeNetworkRecovery && !rawCoordination?.lockId) {
+        await expirePlaybackSession(session.id, userId, db);
+        throw new HttpError(503, "Playback session coordinator is unavailable");
+      }
       if (rawCoordination?.waitMs) await sleep(rawCoordination.waitMs);
       const pipe = await createBytePipeAccess(
         session.id,
@@ -2815,13 +2825,27 @@ async function createPlaybackSessionCore(
         null,
         true,
       );
-      await commitEdgeSessionCoordinator(rawCoordination, {
+      const rawCommit = await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
         gatewaySessionId: null,
         lane: "raw",
         itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds,
         expiresAt: rawTokenExpiresAt,
       });
+      if (nativeNetworkRecovery) {
+        if (!rawCommit?.ok) {
+          await expirePlaybackSession(session.id, userId, db);
+          await abortEdgeSessionCoordinator(rawCoordination);
+          throw new HttpError(503, "Playback session coordinator did not accept the native relay");
+        }
+        // Native reads its tracks from this same connection. Avoid an extra
+        // header probe competing with playback on one-connection accounts.
+        await bindPreparedPlaybackReceipt(() => expirePlaybackSession(session.id, userId, db));
+        return { session: publicPlaybackSession(session), playback: {
+          ...selectionFileSnapshot, mode: "relay", transport: "native-raw-recovery",
+          url: pipe.url, tokenExpiresAt: rawTokenExpiresAt, sessionExpiresAt: expiresAt,
+        } };
+      }
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
       // returns both (the container header carries both → zero extra provider round-trips).

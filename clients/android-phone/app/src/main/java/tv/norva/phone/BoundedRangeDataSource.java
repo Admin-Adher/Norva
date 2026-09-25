@@ -34,6 +34,7 @@ public final class BoundedRangeDataSource implements DataSource {
     /** Factory that wraps every DataSource produced by {@code upstreamFactory}. */
     public static final class Factory implements DataSource.Factory {
         private final DataSource.Factory upstreamFactory;
+        private volatile Uri observedHlsUri;
 
         public Factory(DataSource.Factory upstreamFactory) {
             this.upstreamFactory = upstreamFactory;
@@ -41,11 +42,14 @@ public final class BoundedRangeDataSource implements DataSource {
 
         @Override
         public DataSource createDataSource() {
-            return new BoundedRangeDataSource(upstreamFactory.createDataSource());
+            return new BoundedRangeDataSource(upstreamFactory.createDataSource(), this);
         }
+
+        boolean observedHls(Uri uri) { return uri != null && uri.equals(observedHlsUri); }
     }
 
     private final DataSource upstream;
+    private final Factory factory;
     private long totalLength = C.LENGTH_UNSET;
     private final byte[] prefix = new byte[256];
     private int prefixLength;
@@ -70,13 +74,21 @@ public final class BoundedRangeDataSource implements DataSource {
                 || (start.startsWith("<?xml") && start.matches("(?s).*<html(?:\\s|>).*"));
     }
 
-    private BoundedRangeDataSource(DataSource upstream) {
+    static boolean isHlsDocument(byte[] bytes, int length) {
+        String start = new String(bytes, 0, length, StandardCharsets.UTF_8)
+                .replace("\uFEFF", "").trim();
+        return start.startsWith("#EXTM3U") && start.contains("#EXT-X-");
+    }
+
+    private BoundedRangeDataSource(DataSource upstream, Factory factory) {
         this.upstream = upstream;
+        this.factory = factory;
     }
 
     @Override
     public long open(DataSpec dataSpec) throws IOException {
         prefixLength = prefixPosition = 0;
+        factory.observedHlsUri = null;
         DataSpec effective = dataSpec;
         // An open-ended seek past the start: bound it to the end of the file so
         // the provider honors the Range (206 from `position`) instead of
@@ -92,15 +104,18 @@ public final class BoundedRangeDataSource implements DataSource {
         // 200/206. Confirm the body before rejecting it: mislabeled playable
         // bytes must still reach Media3. Ordinary media requests incur no peek.
         boolean htmlContentType = false;
+        boolean hlsContentType = false;
         for (Map.Entry<String, List<String>> header : upstream.getResponseHeaders().entrySet()) {
             if (!"content-type".equalsIgnoreCase(header.getKey()) || header.getValue() == null) continue;
             for (String value : header.getValue()) {
                 if (value == null) continue;
                 String type = value.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
                 htmlContentType |= "text/html".equals(type) || "application/xhtml+xml".equals(type);
+                hlsContentType |= "application/vnd.apple.mpegurl".equals(type)
+                        || "application/x-mpegurl".equals(type) || "audio/mpegurl".equals(type);
             }
         }
-        if (htmlContentType) {
+        if (htmlContentType || (hlsContentType && effective.position == 0)) {
             try {
                 int limit = opened == C.LENGTH_UNSET ? prefix.length : (int) Math.min(opened, prefix.length);
                 while (prefixLength < limit) {
@@ -108,6 +123,12 @@ public final class BoundedRangeDataSource implements DataSource {
                     if (read == C.RESULT_END_OF_INPUT || read == 0) break;
                     prefixLength += read;
                     if (isHtmlDocument(prefix, prefixLength)) throw new HtmlResponseException();
+                }
+                // Extensionless relays can return a real HLS manifest. Record
+                // confirmed response bytes so a failed progressive extractor
+                // can switch once to HLS, without a separate network probe.
+                if (hlsContentType && isHlsDocument(prefix, prefixLength)) {
+                    factory.observedHlsUri = dataSpec.uri;
                 }
             } catch (IOException error) {
                 try { upstream.close(); } catch (IOException ignored) { }

@@ -231,6 +231,7 @@ public class PlayerActivity extends Activity {
     private long playbackLaunchElapsedMs;
     public static final String EXTRA_MEDIA_CACHE = "mediaCache";
     private tv.norva.playback.NativeMediaCache nativeMediaCache;
+    private BoundedRangeDataSource.Factory providerDataSources;
     private String playbackAuthToken;
     private String playbackAuthChannelId;
     private String pendingPlaybackAuthRequestNonce;
@@ -271,6 +272,7 @@ public class PlayerActivity extends Activity {
     private boolean gracefulResultEmitted = false;
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
+    private long requestedRoutePositionMs = 0L;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
     // A manual episode hand-off is returned to MainActivity only after this
     // Activity has stopped playback. MainActivity then waits for the exact
@@ -621,7 +623,8 @@ public class PlayerActivity extends Activity {
                     .setReadTimeoutMs(30000);
             // Bound open-ended seek ranges so Resume jumps straight to the offset
             // instead of the provider replaying the file from byte 0 (a ~20s stall).
-            nativeMediaCache = new tv.norva.playback.NativeMediaCache(new BoundedRangeDataSource.Factory(http));
+            providerDataSources = new BoundedRangeDataSource.Factory(http);
+            nativeMediaCache = new tv.norva.playback.NativeMediaCache(providerDataSources);
             nativeMediaCache.configure(getIntent().getStringExtra(EXTRA_MEDIA_CACHE), url, playbackSessionId);
             getIntent().removeExtra(EXTRA_MEDIA_CACHE);
             dataSourceFactory = nativeMediaCache;
@@ -758,11 +761,12 @@ public class PlayerActivity extends Activity {
                 engineReady = false;
                 if (BoundedRangeDataSource.isHtmlResponse(error)) {
                     rememberRecoverySignal("provider_html_response", "direct", false);
-                    showPlaybackFailure(
-                            PlaybackUiState.TERMINAL,
-                            R.string.player_error_title,
-                            getString(R.string.player_no_data),
-                            false);
+                    if (sourceId != null && !sourceId.isEmpty() && itemId != null && !itemId.isEmpty()) {
+                        requestFreshStream("provider_html_response");
+                    } else {
+                        showPlaybackFailure(PlaybackUiState.TERMINAL, R.string.player_error_title,
+                                getString(R.string.player_no_data), false);
+                    }
                     return;
                 }
                 int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
@@ -772,6 +776,20 @@ public class PlayerActivity extends Activity {
                     return;
                 }
                 MediaItem currentItem = player == null ? null : player.getCurrentMediaItem();
+                if (currentItem != null && currentItem.localConfiguration != null
+                        && providerDataSources != null
+                        && providerDataSources.observedHls(currentItem.localConfiguration.uri)
+                        && !"application/x-mpegURL".equals(currentItem.localConfiguration.mimeType)
+                        && hasUnrecognizedContainer(error)) {
+                    MediaItem manifest = currentItem.buildUpon()
+                            .setMimeType("application/x-mpegURL").build();
+                    if (originalMediaItem != null && originalMediaItem.localConfiguration != null
+                            && originalMediaItem.localConfiguration.uri.equals(currentItem.localConfiguration.uri)) {
+                        originalMediaItem = manifest;
+                    }
+                    prepareMediaItem(manifest, recoverPositionMs(), PlaybackUiState.RECOVERING);
+                    return;
+                }
                 if (currentItem != null && currentItem.localConfiguration != null
                         && liveWindowRecovery.tryAcquire(error.errorCode,
                                 currentItem.localConfiguration.uri.toString(), itemType)) {
@@ -1264,6 +1282,10 @@ public class PlayerActivity extends Activity {
 
     private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state) {
         if (player == null || item == null) return;
+        // Media3 can still report zero when an origin fails before READY. Keep
+        // the requested position separately until this route renders a frame.
+        requestedRoutePositionMs = positionMs > 0L ? positionMs
+                : (!resumeApplied ? Math.max(0L, resumeSeconds * 1000L) : 0L);
         stopPlaybackHeartbeat();
         clearPendingDelayedRecovery();
         engineReady = false;
@@ -3349,11 +3371,24 @@ public class PlayerActivity extends Activity {
     /** Preserve the current VOD position across direct/fallback reconnects. */
     private long recoverPositionMs() {
         if (player == null || isLiveContent()) return 0L;
-        long duration = player.getDuration();
-        long position = Math.max(0, player.getCurrentPosition());
+        return recoveryPositionMs(firstFrameForCurrentRoute,
+                player.getCurrentPosition(), requestedRoutePositionMs, player.getDuration());
+    }
+
+    static long recoveryPositionMs(boolean routeRendered, long currentPosition,
+                                   long requestedPosition, long duration) {
+        long position = Math.max(0L, currentPosition);
+        if (!routeRendered && position == 0L) position = Math.max(0L, requestedPosition);
         return duration > 0
                 ? Math.min(position, Math.max(0, duration - 1_000L))
                 : position;
+    }
+
+    private static boolean hasUnrecognizedContainer(Throwable error) {
+        for (int depth = 0; error != null && depth < 8; depth++, error = error.getCause()) {
+            if (error instanceof androidx.media3.exoplayer.source.UnrecognizedInputFormatException) return true;
+        }
+        return false;
     }
 
     private void clearPendingDelayedRecovery() {
@@ -3455,6 +3490,7 @@ public class PlayerActivity extends Activity {
                     false);
             return;
         }
+        long position = recoverPositionMs();
         freshStreamRequested = true;
         freshStreamTimeoutDeferred = false;
         recoveryInProgress = true;
@@ -3463,7 +3499,6 @@ public class PlayerActivity extends Activity {
         freshStreamReason = reason == null ? "playback_interrupted" : reason;
         rememberRecoverySignal(freshStreamReason, "fresh", false);
         recoveryToken = UUID.randomUUID().toString();
-        long position = recoverPositionMs();
         long duration = player != null && player.getDuration() > 0
                 ? player.getDuration() : 0L;
         transitionTo(PlaybackUiState.RECOVERING, true);

@@ -2237,6 +2237,8 @@ const CloudAdapter = (() => {
                 // RAW lane for MKV: every browser MKV has exactly one Gateway lane.
                 const mode = browserMkv
                     ? 'transcode'
+                    : nativePlayer && isVodPlayback && query.get('nativeNetworkRecovery') === '1'
+                    ? 'engine'
                     : forcedMode
                     || (nativePlayer
                         ? 'direct'
@@ -2318,7 +2320,9 @@ const CloudAdapter = (() => {
                         ...baseSession,
                         mode: 'relay',
                         requiresRelay: true,
-                        enginePipe: true
+                        enginePipe: true,
+                        ...(nativePlayer && isVodPlayback && query.get('nativeNetworkRecovery') === '1'
+                            ? { nativeNetworkRecovery: true } : {})
                     }, options);
                     const engineUrl = enginePayload.playback?.url || enginePayload.url;
                     if (!engineUrl) {

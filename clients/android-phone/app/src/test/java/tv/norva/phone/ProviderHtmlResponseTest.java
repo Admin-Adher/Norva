@@ -23,11 +23,22 @@ public final class ProviderHtmlResponseTest {
         assertFalse(html("<?xml version='1.0'?><MPD>"));
     }
 
-    @Test public void onlyConfirmedHtmlStopsRecoveryAndDiagnosticsContainNoBody() {
+    @Test public void onlyConfirmedHtmlIdentifiesTheRefusalAndDiagnosticsContainNoBody() {
         IOException error = new BoundedRangeDataSource.HtmlResponseException();
         assertTrue(BoundedRangeDataSource.isHtmlResponse(new IOException("wrapped", error)));
         assertFalse(BoundedRangeDataSource.isHtmlResponse(new IOException("network")));
         assertFalse(BoundedRangeDataSource.isHtmlResponse(null));
         assertEquals("Provider returned an HTML document", error.getMessage());
+    }
+
+    @Test public void hlsRequiresManifestEvidenceRatherThanAMediaLabel() {
+        for (String value : new String[]{"#EXTM3U\n#EXT-X-VERSION:3\n", "\uFEFF#EXTM3U\r\n#EXT-X-STREAM-INF:BANDWIDTH=1000\r\nchild"}) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            assertTrue(BoundedRangeDataSource.isHlsDocument(bytes, bytes.length));
+        }
+        for (String value : new String[]{"#EXTM3U\n#EXTINF:10,Title\nfile.mp4", "<!DOCTYPE html>", "#EXT-X-VERSION:3", "WEBVTT"}) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            assertFalse(BoundedRangeDataSource.isHlsDocument(bytes, bytes.length));
+        }
     }
 }
