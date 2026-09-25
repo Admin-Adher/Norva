@@ -86,13 +86,14 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
         include "css/main.css", "js/utils/mediaUtils.js", "js/pages/WatchPage.js"
         include "js/pages/Settings.js"
         include "js/components/SourceManager.js", "js/components/NorvaModal.js"
+        include "js/components/RetentionOffer.js"
         include "app.html", "js/app.js", "js/utils/GenreTaxonomy.js", "js/components/TitleRatingControl.js"
         include "js/components/MultiSelect.js", "js/pages/MoviesPage.js", "js/pages/SeriesPage.js"
         include "js/utils/GenreRails.js", "js/utils/CatalogQueryParams.js", "js/pages/HomePage.js", "js/icons.js"
         include "js/i18n.js", "js/consent-banner.js", "js/plan-selection-ui.js", "js/promo-ui.js", "js/navigation-safety.js"
         include "fonts/**", "assets/fonts/**", "img/**", "assets/landing/norva-every-screen-premium.webp"
     }
-    from("../../../tests/fixtures") { include "i18n-context.html", "i18n-context.js", "provider-version-cards.js", "catalog-language-surfaces.js", "catalog-progress-modal.html", "gateway-late-recovery.js", "subscription-cancellation.js" }
+    from("../../../tests/fixtures") { include "i18n-context.html", "i18n-context.js", "provider-version-cards.js", "catalog-language-surfaces.js", "catalog-progress-modal.html", "gateway-late-recovery.js", "subscription-cancellation.js", "subscription-retention.js" }
     into("$buildDir/generated/i18nTestAssets")
 }
 tasks.configureEach { task ->

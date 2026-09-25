@@ -126,6 +126,7 @@
       period: opts.period === 'annual' ? 'annual' : 'monthly',
       returnTo: opts.returnTo || '',
       intent: opts.intent || undefined, // 'update_card' → token swap flow
+      retention_offer_id: opts.retentionOfferId || undefined,
       placement: opts.placement === 'locked_profile' ? 'locked_profile' : 'subscribe_plans',
     });
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -182,6 +183,21 @@
   }
   function revolutCancel(reason) { return revolutAction('cancel', reason ? { reason: reason } : null); }
   function revolutResume() { return revolutAction('resume'); }
+  function revolutRetentionAction(offerId, action) {
+    return revolutAction('retention-offer', { offer_id: offerId, action: action });
+  }
+  async function revolutRetentionOffer() {
+    if (!isRevolutEnabled()) return null;
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
+    const token = await sessionToken();
+    if (!token) return null;
+    const response = await fetch(base + '/functions/v1/norva-revolut/retention-offer', {
+      headers: { apikey: (window.NorvaAuth && NorvaAuth.publishableKey) || '', Authorization: 'Bearer ' + token }
+    });
+    if (!response.ok) throw err('Could not load this offer', 'retention_unavailable');
+    const result = await response.json();
+    return result.offer || null;
+  }
 
   // Current web catalog from the single price source (billing_prices, served by
   // norva-revolut GET /prices — public, no auth). NB: any edit here changes the
@@ -535,6 +551,8 @@
     loadNativeOffers: nativeOfferings,
     revolutCancel: revolutCancel,
     revolutResume: revolutResume,
+    revolutRetentionOffer: revolutRetentionOffer,
+    revolutRetentionAction: revolutRetentionAction,
     purchase: purchase,
     restore: restore,
     login: login,

@@ -222,7 +222,7 @@ test('contact projection is retired from public lifecycle and owned by the priva
 
 test('winback and abandoned sends are gated before email and before push', () => {
   const winback = lifecycle.slice(lifecycle.indexOf('async function runWinback'), lifecycle.indexOf('async function runAbandoned'));
-  assert.match(winback, /select\("user_id,last_event_at,status"\)/);
+  assert.match(winback, /select\("user_id,last_event_at,status,provider"\)/);
   assert.match(winback, /gte\("last_event_at", lo\)\.lte\("last_event_at", hi\)/);
   assert.ok((winback.match(/marketingEmailAllowed/g) || []).length >= 1);
   assert.match(winback, /marketing: true/);

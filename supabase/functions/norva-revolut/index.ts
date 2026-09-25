@@ -79,13 +79,15 @@ async function checkoutIntentKey(
   amount: number,
   promoBase: number | null,
   promoCycles: number | null,
+  retentionOfferId: string | null = null,
 ): Promise<string> {
-  const fingerprint = [
+  let fingerprint = [
     // UI route, placement, surface and experiment context are deliberately not
     // monetary identity. A retry from another Norva surface must recover the
     // exact same provider order instead of opening a second debit.
     "v4", userId, kind, plan, period, amount, promoBase ?? "", promoCycles ?? "", "USD",
   ].join("|");
+  if (retentionOfferId) fingerprint += `|retention:${retentionOfferId}`;
   return `rvi_${userId.replace(/-/g, "").slice(0, 16)}_${(await sha256Hex(fingerprint)).slice(0, 24)}`;
 }
 
@@ -495,6 +497,7 @@ Deno.serve(async (req) => {
       intent?: string;
       placement?: string;
       surface?: string;
+      retention_offer_id?: string;
       // `variant` may be sent by an old/hostile client but is intentionally not
       // part of this type nor read below. Assignment is server-authoritative.
     } = {};
@@ -511,21 +514,21 @@ Deno.serve(async (req) => {
         ? Number.isFinite(cachedPromoEndMs) && cachedPromoEndMs > checkoutRequestedAtMs
         : Boolean(cachedPromo);
     const expiredPromoBase = cachedPromo && !promoIsActive ? Number(cachedPromo.base_cents) : null;
-    const amount = expiredPromoBase ?? cachedAmount;
+    let amount = expiredPromoBase ?? cachedAmount;
     if (!Number.isInteger(amount) || amount <= 0) return json({ error: "Unknown plan" }, 400);
     // Promo « N premières périodes » : le prix de base et le décompte voyagent
     // avec l'engagement (mapping + metadata) — le cron rebascule au prix de base
     // une fois les cycles promo épuisés. cycles null = réduction à vie.
     const promoInfo = promoIsActive ? cachedPromo : null;
-    const promoCycles = promoInfo?.cycles ?? null;
-    const promoBase = promoCycles ? promoInfo!.base_cents : null;
+    let promoCycles = promoInfo?.cycles ?? null;
+    let promoBase = promoCycles ? promoInfo!.base_cents : null;
     const quotedPromoBase = promoInfo && typeof promoInfo.base_cents === "number" ? promoInfo.base_cents : null;
     if (promoInfo && (quotedPromoBase === null || !Number.isInteger(quotedPromoBase)
         || quotedPromoBase <= amount || quotedPromoBase > 99_999
         || (promoCycles != null && (!Number.isInteger(promoCycles) || promoCycles < 1 || promoCycles > 24)))) {
       return json({ error: "Checkout promotion is not configured safely", code: "promotion_terms_invalid" }, 503);
     }
-    const promotionTerms: CheckoutPromotionTerms | null = promoBase && promoCycles
+    let promotionTerms: CheckoutPromotionTerms | null = promoBase && promoCycles
       ? { base_amount_minor: promoBase, billing_cycles: promoCycles }
       : null;
     let placement: string;
@@ -611,6 +614,26 @@ Deno.serve(async (req) => {
       }, 409);
     }
 
+    let retentionOfferId: string | null = null;
+    if (payload.retention_offer_id != null) {
+      if (kind !== "resubscribe" || currentProvider !== "revolut"
+          || typeof payload.retention_offer_id !== "string"
+          || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(payload.retention_offer_id)) {
+        return json({ error: "This offer is unavailable", code: "retention_offer_unavailable" }, 409);
+      }
+      const { data: offer, error: offerError } = await db.rpc("norva_retention_action", {
+        p_user: user.id, p_offer: payload.retention_offer_id, p_action: "checkout",
+      });
+      if (offerError || !offer || offer.plan !== plan || offer.period !== period) {
+        return json({ error: "This offer is unavailable", code: "retention_offer_unavailable" }, 409);
+      }
+      retentionOfferId = offer.id;
+      amount = offer.amount_cents;
+      promoBase = offer.base_amount_cents;
+      promoCycles = offer.cycles;
+      promotionTerms = { base_amount_minor: promoBase!, billing_cycles: promoCycles! };
+    }
+
     // This is the complete, server-owned quote returned to the UI. It is also
     // copied into provider metadata and the local order journal so creation,
     // refresh/reuse, webhook finalization and the first recurring debit all
@@ -650,7 +673,7 @@ Deno.serve(async (req) => {
       typeof payload.returnTo === "string" && /^\/(?!\/)/.test(payload.returnTo) && !payload.returnTo.includes("\\")
     ) ? payload.returnTo : "";
     const intentKey = await checkoutIntentKey(
-      user.id, kind, plan, period, amount, promoBase, promoCycles,
+      user.id, kind, plan, period, amount, promoBase, promoCycles, retentionOfferId,
     );
     const leaseToken = crypto.randomUUID();
     type CheckoutClaim = {
@@ -851,6 +874,7 @@ Deno.serve(async (req) => {
       metadata: revolutMetadata({
         user_id: user.id, plan, period, kind, amount_cents: amount,
         base_amount_cents: promoBase, promo_cycles: promoCycles,
+        retention_offer_id: retentionOfferId,
         intent_key: intentKey, intent_generation: Number(intent.generation || 1),
         price_currency: "USD", price_source: "billing_prices",
         billing_cadence: commercialTerms.cadence,
@@ -955,6 +979,7 @@ Deno.serve(async (req) => {
       plan, period, requested_amount_cents: amount,
       amount: immediateCharge ? amount : VALIDATION_CENTS, currency: "USD",
       base_amount_cents: promoBase, promo_cycles: promoCycles,
+      retention_offer_id: retentionOfferId,
       price_source: "billing_prices",
       charge_mode: commercialTerms.charge_mode,
       trial_days: commercialTerms.trial_days,
@@ -1498,6 +1523,30 @@ Deno.serve(async (req) => {
     return json({ ok: true, status: "trialing", kind, trial_days: TRIAL_DAYS, trial_ends_at: trialEnd, first_charge_at: trialEnd });
   }
 
+  // Personal retention terms are scoped by the authenticated owner. GET never
+  // renews a subscription; only explicit POST acceptance can restore renewal.
+  if ((req.method === "GET" || req.method === "POST") && path === "/retention-offer") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    if (!u?.user?.id) return json({ error: "Not signed in" }, 401);
+    const billingGuard = await guardInternalBilling(db, u.user.id);
+    if (billingGuard) return billingGuard;
+    if (req.method === "GET") {
+      const { data, error } = await db.rpc("norva_retention_offer", { p_user: u.user.id });
+      if (error) return json({ error: "Could not load this offer" }, 503);
+      return json({ ok: true, offer: data });
+    }
+    const payload = await req.json().catch(() => ({}));
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(payload.offer_id || ""))
+      || !["accept", "decline"].includes(payload.action)) return json({ error: "Invalid offer action" }, 400);
+    const { data, error } = await db.rpc("norva_retention_action", {
+      p_user: u.user.id, p_offer: payload.offer_id, p_action: payload.action,
+    });
+    if (error) return json({ error: "This offer is no longer available. Refresh your subscription page.", code: "retention_offer_unavailable" }, 409);
+    return json(data);
+  }
+
   // ── /profile — user-authed: read-only billing profile for display ──────────
   if (req.method === "GET" && path === "/profile") {
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
@@ -1508,7 +1557,7 @@ Deno.serve(async (req) => {
     const billingGuard = await guardInternalBilling(db, user.id, true);
     if (billingGuard) return billingGuard;
     const { data: row } = await db.from("cloud_revolut_customers")
-      .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct,pending_plan,pending_period,pending_amount_cents,pending_effective_at")
+      .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,base_amount_cents,promo_cycles_left,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct,pending_plan,pending_period,pending_amount_cents,pending_effective_at")
       .eq("user_id", user.id).maybeSingle();
     let profile = row as JsonRecord | null;
     // Lazy card capture: /confirm may have run before Revolut attached the saved

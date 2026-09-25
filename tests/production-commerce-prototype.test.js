@@ -54,7 +54,7 @@ test('production checkout keeps the real payment action before optional schedule
     'the real Revolut action precedes the schedule in DOM and reading order');
   assert.match(checkout, /<details class="schedule-details"[\s\S]*?id="bill-breakdown"/);
   assert.match(checkout, /id="card-field"/);
-  assert.match(checkout, /revolutCreateOrder\(\{ plan, period, returnTo, intent, placement \}\)/);
+  assert.match(checkout, /revolutCreateOrder\(\{ plan, period, returnTo, intent, placement, retentionOfferId \}\)/);
   assert.match(checkout, /applyServerCommercialTerms\(data\)/);
   assert.doesNotMatch(checkout, /\.timeline-value\s*\{[^}]*margin-top:\s*-\d/i);
   assert.match(checkout, /toLocaleDateString\('en-US'/,

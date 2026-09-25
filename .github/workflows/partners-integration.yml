@@ -237,6 +237,8 @@ jobs:
           supabase/functions/norva-billing-webhook/index.ts
           supabase/functions/norva-revolut-webhook/index.ts
           supabase/functions/norva-revolut-billing/index.ts
+            supabase/functions/norva-revolut/index.ts
+            supabase/functions/norva-lifecycle/index.ts
 
       - name: Test the Didit Partners boundary
         run: >-

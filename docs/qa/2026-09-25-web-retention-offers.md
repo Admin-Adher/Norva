@@ -1,0 +1,32 @@
+# Offres de retour après résiliation — web Revolut
+
+## Règles validées par le propriétaire
+
+- Résiliation immédiate ; accès restant conservé.
+- Offre personnelle à partir de J−3 : −20 % sur trois paiements mensuels, ou −10 % sur le prochain paiement annuel.
+- Confirmation explicite ; prix réduit, durée, tarif suivant et date de paiement affichés avant acceptation.
+- Aucun paiement anticipé avant la fin d’accès. Après expiration, passage par le checkout existant et activation après paiement confirmé.
+- Une utilisation sur douze mois, aucune combinaison avec une autre promotion ou un changement de forfait en attente.
+- E-mail uniquement avec consentement commercial, vérifié à la sélection puis juste avant l’envoi. Un message avant expiration ; au plus un rappel à J+3, offre valable jusqu’à J+7. Un refus arrête les rappels.
+- Motif technique : assistance proposée, sans remise.
+- Google Play et les interfaces natives exclus. La stratégie mobile sera traitée séparément.
+
+## Vérifications réalisées
+
+- Tests API : identité authentifiée, absence d’action sur GET, refus des prix/propriétaires envoyés par le navigateur, erreurs sans détail technique.
+- SQL exécuté sur une copie **du schéma uniquement**, dans un conteneur PostgreSQL sans réseau. Toutes les données sont fictives et annulées à la fin du test. Aucun paiement fournisseur n’est appelé.
+- Moteur réel de renouvellement : trois cycles mensuels puis retour au tarif normal ; un cycle annuel puis retour au tarif normal ; répétition idempotente.
+- Réabonnement expiré : paiement initial synthétique consommant un seul cycle, webhook répété sans nouvelle consommation, commande non payée ne consommant pas l’offre.
+- Consentement, refus, compte interne, Google Play, changement de forfait, cumul promotionnel, limite temporelle, facturation en cours et reprise d’essai testés.
+- Défaut préexistant corrigé : un événement de suivi commercial absent ne doit pas faire échouer la reprise d’un essai.
+- Navigateur Codex sur fixture locale : erreur simulée, nouvelle tentative, réactivation, affichage des trois échéances réduites et du tarif suivant ; offre annuelle après expiration ; refus confirmé.
+- Texte web traduit dans les dix langues du produit. E-mails français ou anglais selon la langue connue du compte.
+- Test System WebView ajouté : français à 100 % et 130 %, arabe à 130 %, erreur/réessai, absence de débordement, taille des boutons et confirmation après rechargement.
+
+## Déploiement
+
+La migration crée une politique désactivée par défaut. Ordre : migration, API Revolut et lifecycle avec le nouveau template, web, contrôles, puis activation de `cloud_retention_policy`.
+
+Le compte QA réellement annulé n’est pas réactivé pour les tests. Son échéance reste le 1 octobre 2026 ; aucune date n’est avancée pour forcer l’offre.
+
+Les références de publication et résultats de CI seront ajoutés après exécution.

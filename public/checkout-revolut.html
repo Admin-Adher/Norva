@@ -2,7 +2,7 @@
 <html lang="en" class="quote-pending">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=2ea9dede80"></script>
+    <script src="/js/i18n.js?v=78a93ecacb"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_6f36bcfd9969">Norva — Secure checkout</title>
@@ -358,6 +358,7 @@
       const plan = params.get('plan') === 'family' ? 'family' : 'plus';
       const period = params.get('period') === 'annual' ? 'annual' : 'monthly';
       const intent = params.get('intent') === 'update_card' ? 'update_card' : '';
+      const retentionOfferId = params.get('retentionOffer') || '';
       const placement = params.get('placement') === 'locked_profile'
         ? 'locked_profile'
         : 'subscribe_plans';
@@ -1012,7 +1013,7 @@
           // Start the authenticated quote immediately. The optional public
           // catalog gets at most 1.2 s in parallel; it can enrich a promo but
           // can never hold the payment flow hostage.
-          const pendingOrder = window.NorvaBilling.revolutCreateOrder({ plan, period, returnTo, intent, placement });
+          const pendingOrder = window.NorvaBilling.revolutCreateOrder({ plan, period, returnTo, intent, placement, retentionOfferId });
           const results = await Promise.all([pendingOrder, waitForOptionalCatalog()]);
           data = results[0];
           const catalog = results[1];

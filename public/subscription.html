@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=2ea9dede80"></script>
+    <script src="/js/i18n.js?v=78a93ecacb"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_72d0c37fff0b">Your Norva subscription</title>
@@ -30,6 +30,11 @@
       border: 1px solid rgba(255,255,255,.1); }
     .ecosystem-proof strong { display: block; margin-bottom: 3px; color: var(--text); font-size: 15px; }
     .card { border: 1px solid var(--line); border-radius: 14px; padding: 24px; background: var(--panel); }
+    #content .retention-offer { grid-column: 1 / -1; margin-top: 16px; }
+    #content .retention-offer .actions { position: static; margin-top: 24px; gap: 16px; flex-direction: row; flex-wrap: wrap; }
+    #content .retention-offer .btn { width: auto; padding: 12px 24px; }
+    .retention-offer h2 { font-size: 20px; line-height: 1.4; }
+    .retention-offer .btn:disabled { opacity: .65; cursor: wait; }
     .pill { display: inline-block; padding: 5px 12px; border-radius: 999px; font-size: 12px;
       font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
     .pill.ok { background: rgba(52,211,153,.15); color: var(--green); }
@@ -177,6 +182,7 @@
   <script src="/js/authApi.js?v=be61dee633"></script>
   <script src="/js/billing-config.js?v=8"></script>
   <script src="/js/billing.js?v=17"></script>
+  <script src="/js/components/RetentionOffer.js?v=1"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
@@ -385,13 +391,21 @@
               const period = p.period === 'annual' ? copy('ui_web_2c5e81714652', 'Annual') : copy('ui_web_9b11f6b707d2', 'Monthly');
               d0.appendChild(el('b', null, amount + ' · ' + period));
               slot(d0);
+              if (Number(p.promo_cycles_left) > 0 && Number(p.base_amount_cents) > Number(p.amount_cents)) {
+                const base = new Intl.NumberFormat(document.documentElement.lang || undefined, { style: 'currency', currency: 'USD' }).format(p.base_amount_cents / 100);
+                const key = p.period === 'annual' ? 'ui_ret_remaining_annual' : 'ui_ret_remaining_monthly';
+                const fallback = p.period === 'annual'
+                  ? '{{cycles}} discounted annual payment(s) remaining, then {{base}}/year.'
+                  : '{{cycles}} discounted monthly payment(s) remaining, then {{base}}/month.';
+                slot(el('p', 'msg', copy(key, fallback, { cycles: p.promo_cycles_left, base })));
+              }
             }
             // Honest annual upsell for a monthly subscriber in good standing: the
             // real yearly saving, straight into the plan-change checkout (which
             // charges nothing today — the annual price starts at the next renewal).
             // Savings come from the live catalog (single source billing_prices),
             // with the static config as fallback — a promo shows its real numbers.
-            if (String(decision.status || '') === 'active' && p.period === 'monthly'
+            if (String(decision.status || '') === 'active' && !p.promo_cycles_left && p.period === 'monthly'
                 && (p.plan === 'plus' || p.plan === 'family')) {
               const renderSave = function (mCents, yCents) {
                 if (!(isFinite(mCents) && isFinite(yCents) && mCents * 12 > yCents)) return;
@@ -904,6 +918,9 @@
 
       getDecision().then(function (decision) {
         render(decision);
+        if (entProvider(decision) === 'revolut' && ['cancelled_at_period_end', 'expired'].includes(decision.status)) {
+          window.NorvaRetentionOffer?.mount(content);
+        }
         initMarketingPreference();
       }).catch(function () { render(null); });
     })();
