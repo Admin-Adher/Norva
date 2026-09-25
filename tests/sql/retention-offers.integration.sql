@@ -167,4 +167,56 @@ begin
   raise notice 'RETENTION_CONSENT_PRICING_TRIAL_BOUNDARIES_OK';
 end;
 $boundaries$;
+do $abuse$
+declare u uuid:='00000000-0000-4000-8000-000000000015'; o jsonb; old_id uuid; other_id uuid;
+  rejected boolean; attack text; accepted_time timestamptz;
+begin
+  o:=norva_retention_offer(u); old_id:=(o->>'id')::uuid;
+  perform norva_retention_action(u,old_id,'accept');
+  select accepted_at into accepted_time from cloud_retention_offers where id=old_id;
+  -- Simulate completion of all discounted cycles and a fresh cancellation.
+  -- Neither another cancellation nor a changed email resets the allowance.
+  update cloud_revolut_customers set amount_cents=499,promo_cycles_left=0 where user_id=u;
+  update cloud_entitlement_projection set status='cancelled_at_period_end' where user_id=u;
+  update auth.users set email='changed-retention@example.test' where id=u;
+  insert into cloud_entitlement_events(user_id,provider,event_type,provider_event_id,created_at,processed_at,payload)
+    values(u,'revolut','CANCELLATION_CONFIRMED','qa-repeat-cancel',now(),now(),'{}');
+  if norva_retention_offer(u) is not null then raise exception 'cancel/resume/email loop reset allowance'; end if;
+  perform norva_retention_action(u,old_id,'accept');
+  if (select promo_cycles_left from cloud_revolut_customers where user_id=u)<>0
+    or (select accepted_at from cloud_retention_offers where id=old_id)<>accepted_time then
+    raise exception 'replaying old acceptance restored consumed discounts'; end if;
+  update cloud_retention_offers set accepted_at=now()-interval '11 months' where id=old_id;
+  if norva_retention_offer(u) is not null then raise exception 'eleven-month cooldown bypass'; end if;
+  update cloud_retention_offers set accepted_at=now()-interval '13 months' where id=old_id;
+  if norva_retention_offer(u) is null then raise exception 'eligible return after twelve months blocked'; end if;
+  u:='00000000-0000-4000-8000-000000000016';
+  update cloud_entitlement_projection set status='expired',current_period_end=now()-interval '1 day' where user_id=u;
+  insert into cloud_entitlement_events(user_id,provider,event_type,provider_event_id,created_at,processed_at,payload)
+    values(u,'revolut','CANCELLATION_CONFIRMED','qa-abuse-expired-cancel',now(),now(),'{}');
+  o:=norva_retention_offer(u); other_id:=(o->>'id')::uuid;
+  if other_id is null then raise exception 'missing expired abuse fixture'; end if;
+  foreach attack in array array['accept','checkout','decline'] loop
+    rejected:=false;
+    begin perform norva_retention_action('00000000-0000-4000-8000-000000000015',other_id,attack);
+      exception when others then rejected:=true; end;
+    if not rejected then raise exception 'foreign offer accepted action %',attack; end if;
+  end loop;
+  rejected:=false;
+  begin
+    insert into cloud_revolut_orders(order_id,user_id,kind,plan,period,state,amount,currency,requested_amount_cents,base_amount_cents,promo_cycles,retention_offer_id)
+      values('tampered-retention-price',u,'resubscribe','plus','monthly','PENDING',100,'USD',100,499,3,other_id);
+    exception when others then rejected:=true; end;
+  if not rejected then raise exception 'tampered order price accepted'; end if;
+  rejected:=false;
+  begin
+    insert into cloud_revolut_orders(order_id,user_id,kind,plan,period,state,amount,currency,requested_amount_cents,base_amount_cents,promo_cycles,retention_offer_id)
+      values('tampered-retention-cycles',u,'resubscribe','plus','monthly','PENDING',399,'USD',399,499,12,other_id);
+    exception when others then rejected:=true; end;
+  if not rejected then raise exception 'tampered discounted duration accepted'; end if;
+  if has_table_privilege('anon','cloud_retention_offers','select') or has_table_privilege('authenticated','cloud_retention_offers','delete')
+    or has_table_privilege('authenticated','cloud_retention_policy','update') then raise exception 'client can erase history or change policy'; end if;
+  raise notice 'RETENTION_ABUSE_CANCEL_EMAIL_REPLAY_PRICE_DURATION_OWNERSHIP_OK';
+end;
+$abuse$;
 rollback;

@@ -30,3 +30,11 @@ La migration crée une politique désactivée par défaut. Ordre : migration, AP
 Le compte QA réellement annulé n’est pas réactivé pour les tests. Son échéance reste le 1 octobre 2026 ; aucune date n’est avancée pour forcer l’offre.
 
 Les références de publication et résultats de CI seront ajoutés après exécution.
+
+## Correction ergonomique et contrôle des abus (25 septembre)
+
+L’offre remplace l’illustration dans le résumé de l’abonnement. Prix, durée, tarif suivant, date du premier paiement et renouvellement automatique restent visibles avant le bouton. La réactivation au tarif normal est masquée lorsqu’une offre valide est présentée, puis rétablie après refus ou indisponibilité. Les conditions secondaires sont dépliables. Sur la surface contrôlée de 1280 × 720 pixels CSS, le bouton termine à y=443 px. Le navigateur conserve un zoom hôte de 50 % : la dimension CSS réelle est mesurée, sans prétendre que le zoom a été réinitialisé. Le test WebView impose séparément 360 × 800 dp avec agrandissement du texte à 100 et 130 %.
+
+Les tests SQL supplémentaires prouvent : nouveau motif/événement de résiliation et changement d’e-mail sans remise à zéro du délai ; ancienne acceptation rejouée sans restaurer les cycles consommés ; exclusion à onze mois et retour possible après treize ; refus des actions accept/checkout/decline d’un autre propriétaire ; rejet des prix et du nombre de mensualités modifiés. Les clients anonymes et authentifiés ne peuvent ni modifier la politique, ni effacer l’historique.
+
+La règle des douze mois porte sur le compte Norva (UUID). Elle ne certifie pas l’identité d’une personne derrière plusieurs comptes. Aucune déduplication fondée sur les quatre derniers chiffres d’une carte ou une adresse IP n’est introduite : ces indices ne sont pas des identifiants fiables.

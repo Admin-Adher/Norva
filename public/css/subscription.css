@@ -741,3 +741,48 @@ html.tv .reasons label {
     transform: rotate(360deg);
   }
 }
+
+/* A cancellation is an account task: keep the decision in the first screen. */
+.has-retention-offer .wrap { max-width: 1080px; padding-top: var(--space-xl); }
+.has-retention-offer h1 { max-width: none; margin-bottom: var(--space-xl); font-size: 36px; line-height: 1.15; }
+.has-retention-offer .subscription-stage { display: block; }
+.has-retention-offer .ecosystem-proof { display: none; }
+.has-retention-offer .account-panel { max-width: none; padding: 0; border: 0; }
+.has-retention-offer #content { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 0 var(--space-2xl); align-items: start; }
+.has-retention-offer #content > .card:first-child { grid-column: 1; grid-row: 1; }
+.has-retention-offer #content > .actions { grid-column: 1; grid-row: 2; margin-top: var(--space-md); }
+.has-retention-offer .plan-name { font-size: 32px; margin-block: var(--space-md); }
+.has-retention-offer .msg { font-size: 15px; line-height: 1.55; }
+.has-retention-offer .retention-redundant,
+#content [hidden] { display: none; }
+#content .retention-offer { margin-top: var(--space-lg); }
+.has-retention-offer #content .retention-offer { grid-column: 2; grid-row: 1 / 3; margin: 0; padding: var(--space-lg); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); background: var(--color-bg-secondary); }
+.retention-title { margin: 0 0 var(--space-md); font-family: Inter, sans-serif; font-size: 16px; font-weight: 600; color: var(--color-text-secondary); }
+.retention-price { margin: 0; font-size: 32px; font-weight: 750; line-height: 1.2; letter-spacing: -.025em; }
+.retention-duration { margin: var(--space-sm) 0 0; color: var(--color-text-primary); font-size: 15px; line-height: 1.5; }
+.retention-timing { margin: var(--space-lg) 0 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.5; }
+.retention-renewal { margin: var(--space-xs) 0 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.5; }
+#content .retention-offer .actions { max-width: none; margin-top: var(--space-md); gap: var(--space-xs); }
+#content .retention-offer .btn { width: 100%; padding: var(--space-sm) var(--space-md); }
+#content .retention-offer .retention-decline { border-color: transparent; color: var(--color-text-secondary); background: transparent; font-weight: 500; }
+#content .retention-offer .retention-decline:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.retention-conditions { border-top: 1px solid var(--color-border); margin-top: var(--space-sm); color: var(--color-text-secondary); font-size: 13px; line-height: 1.55; }
+.retention-conditions summary { min-height: 44px; padding-block: 12px; cursor: pointer; }
+.retention-conditions p { margin: 0 0 var(--space-sm); }
+.retention-conditions summary:focus-visible,
+.retention-offer .btn:focus-visible { outline: 2px solid var(--color-accent-hover); outline-offset: 3px; }
+.retention-status { color: var(--color-text-secondary); }
+.has-retention-offer .preference-card { margin-top: var(--space-xl); }
+@media (max-width: 700px) {
+  .has-retention-offer .wrap { padding-top: var(--space-lg); }
+  .has-retention-offer h1 { margin-bottom: var(--space-lg); font-size: 28px; }
+  .has-retention-offer #content { display: block; }
+  .has-retention-offer #content > .card:first-child { margin-bottom: var(--space-md); }
+  .has-retention-offer #content > .card:first-child > .msg { display: none; }
+  .has-retention-offer .plan-name { font-size: 24px; margin-block: var(--space-sm); }
+  .has-retention-offer .detail { flex-direction: row; padding-block: var(--space-sm); font-size: 13px; }
+  .has-retention-offer #content .retention-offer { padding: var(--space-md); }
+  .retention-title { margin-bottom: var(--space-sm); }
+  .retention-price { font-size: 28px; }
+  .retention-timing { margin-top: var(--space-md); }
+}

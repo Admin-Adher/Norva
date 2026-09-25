@@ -689,21 +689,20 @@
     "fil": "Makipag-ugnayan sa suporta"
   },
   "ui_ret_title": {
-    "source": "A personal offer to continue",
+    "source": "Your personal offer",
     "refs": [
-      "public/js/components/RetentionOffer.js",
-      "public/subscription.html"
+      "public/js/components/RetentionOffer.js"
     ],
-    "en": "A personal offer to continue",
-    "fr": "Une offre personnelle pour continuer",
-    "pt-BR": "Uma oferta pessoal para continuar",
-    "es": "Una oferta personal para continuar",
-    "hi": "जारी रखने के लिए व्यक्तिगत ऑफ़र",
-    "tr": "Devam etmek için kişisel teklif",
-    "bn": "চালিয়ে যাওয়ার জন্য ব্যক্তিগত অফার",
-    "ar": "عرض شخصي للاستمرار",
-    "id": "Penawaran pribadi untuk melanjutkan",
-    "fil": "Personal na alok para magpatuloy"
+    "en": "Your personal offer",
+    "fr": "Votre offre personnelle",
+    "pt-BR": "Sua oferta pessoal",
+    "es": "Tu oferta personal",
+    "hi": "आपका व्यक्तिगत ऑफ़र",
+    "tr": "Size özel teklif",
+    "bn": "আপনার ব্যক্তিগত অফার",
+    "ar": "عرضك الشخصي",
+    "id": "Penawaran pribadi Anda",
+    "fil": "Ang personal mong alok"
   },
   "ui_ret_monthly": {
     "source": "{{amount}}/month for {{cycles}} months, then {{base}}/month.",
@@ -757,38 +756,36 @@
     "fil": "Magbabayad ng {{amount}} kapag kinumpirma mo ang checkout."
   },
   "ui_ret_later": {
-    "source": "Nothing charged today. First discounted payment on {{date}}. Your remaining access is preserved.",
+    "source": "Nothing charged today. First payment on {{date}}.",
     "refs": [
-      "public/js/components/RetentionOffer.js",
-      "public/subscription.html"
+      "public/js/components/RetentionOffer.js"
     ],
-    "en": "Nothing charged today. First discounted payment on {{date}}. Your remaining access is preserved.",
-    "fr": "Aucun paiement aujourd’hui. Premier paiement réduit le {{date}}. Votre accès restant est conservé.",
-    "pt-BR": "Nada cobrado hoje. Primeiro pagamento com desconto em {{date}}. Seu acesso restante é mantido.",
-    "es": "Hoy no se cobra nada. Primer pago reducido el {{date}}. Conservas tu acceso restante.",
-    "hi": "आज कोई शुल्क नहीं। पहला रियायती भुगतान {{date}} को। आपकी बची हुई पहुँच बनी रहेगी।",
-    "tr": "Bugün ücret alınmaz. İlk indirimli ödeme {{date}} tarihinde. Kalan erişim süreniz korunur.",
-    "bn": "আজ কোনো চার্জ নয়। প্রথম ছাড়যুক্ত পেমেন্ট {{date}} তারিখে। অবশিষ্ট প্রবেশাধিকার বজায় থাকবে।",
-    "ar": "لا يُخصم شيء اليوم. أول دفعة مخفّضة في {{date}}. تحتفظ بمدة الوصول المتبقية.",
-    "id": "Tidak ada tagihan hari ini. Pembayaran diskon pertama pada {{date}}. Sisa akses Anda tetap berlaku.",
-    "fil": "Walang singil ngayon. Unang may-diskuwentong bayad sa {{date}}. Mananatili ang natitirang access mo."
+    "en": "Nothing charged today. First payment on {{date}}.",
+    "fr": "Rien à payer aujourd’hui. Premier paiement le {{date}}.",
+    "pt-BR": "Nada cobrado hoje. Primeiro pagamento em {{date}}.",
+    "es": "Hoy no pagas nada. Primer pago el {{date}}.",
+    "hi": "आज कोई शुल्क नहीं। पहला भुगतान {{date}} को।",
+    "tr": "Bugün ödeme yok. İlk ödeme {{date}} tarihinde.",
+    "bn": "আজ কোনো অর্থ কাটা হবে না। প্রথম পেমেন্ট {{date}} তারিখে।",
+    "ar": "لا دفع اليوم. الدفعة الأولى في {{date}}.",
+    "id": "Tidak ada tagihan hari ini. Pembayaran pertama pada {{date}}.",
+    "fil": "Walang bayad ngayon. Unang bayad sa {{date}}."
   },
   "ui_ret_terms": {
-    "source": "Renews automatically at the stated price. Cancel anytime. Offer available until {{date}}.",
+    "source": "Your remaining access is preserved. Offer available until {{date}}.",
     "refs": [
-      "public/js/components/RetentionOffer.js",
-      "public/subscription.html"
+      "public/js/components/RetentionOffer.js"
     ],
-    "en": "Renews automatically at the stated price. Cancel anytime. Offer available until {{date}}.",
-    "fr": "Renouvellement automatique aux tarifs indiqués. Résiliable à tout moment. Offre valable jusqu’au {{date}}.",
-    "pt-BR": "Renovação automática pelos preços indicados. Cancele a qualquer momento. Oferta válida até {{date}}.",
-    "es": "Renovación automática a los precios indicados. Cancela cuando quieras. Oferta válida hasta el {{date}}.",
-    "hi": "बताई गई कीमत पर स्वतः नवीनीकरण। कभी भी रद्द करें। ऑफ़र {{date}} तक उपलब्ध है।",
-    "tr": "Belirtilen fiyatla otomatik yenilenir. İstediğiniz zaman iptal edin. Teklif {{date}} tarihine kadar geçerlidir.",
-    "bn": "উল্লিখিত মূল্যে স্বয়ংক্রিয় নবায়ন। যেকোনো সময় বাতিল করুন। অফার {{date}} পর্যন্ত।",
-    "ar": "يتجدد تلقائيًا بالأسعار الموضحة. يمكنك الإلغاء في أي وقت. العرض متاح حتى {{date}}.",
-    "id": "Diperpanjang otomatis dengan harga yang tertera. Batalkan kapan saja. Penawaran berlaku hingga {{date}}.",
-    "fil": "Awtomatikong magre-renew sa nakasaad na presyo. Kanselahin anumang oras. Alok hanggang {{date}}."
+    "en": "Your remaining access is preserved. Offer available until {{date}}.",
+    "fr": "Votre accès restant est conservé. Offre valable jusqu’au {{date}}.",
+    "pt-BR": "Seu acesso restante é preservado. Oferta válida até {{date}}.",
+    "es": "Conservas tu acceso restante. Oferta válida hasta el {{date}}.",
+    "hi": "आपकी शेष पहुँच सुरक्षित रहती है। ऑफ़र {{date}} तक उपलब्ध है।",
+    "tr": "Kalan erişim süreniz korunur. Teklif {{date}} tarihine kadar geçerlidir.",
+    "bn": "আপনার অবশিষ্ট অ্যাক্সেস বহাল থাকবে। অফার {{date}} পর্যন্ত উপলব্ধ।",
+    "ar": "تبقى مدة وصولك المتبقية محفوظة. العرض متاح حتى {{date}}.",
+    "id": "Sisa akses Anda tetap berlaku. Penawaran tersedia hingga {{date}}.",
+    "fil": "Mananatili ang natitirang access mo. May bisa ang alok hanggang {{date}}."
   },
   "ui_ret_personal": {
     "source": "Personal offer, cannot be combined with other discounts. Once every 12 months.",
@@ -959,5 +956,101 @@
     "ar": "الدفعات السنوية المخفّضة المتبقية: {{cycles}}، ثم {{base}} سنويًا.",
     "id": "Sisa pembayaran tahunan diskon: {{cycles}}, lalu {{base}}/tahun.",
     "fil": "{{cycles}} may-diskuwentong taunang bayad ang natitira, pagkatapos {{base}}/taon."
+  },
+  "ui_ret_price_monthly": {
+    "source": "{{amount}}/month",
+    "refs": [
+      "public/js/components/RetentionOffer.js"
+    ],
+    "en": "{{amount}}/month",
+    "fr": "{{amount}}/mois",
+    "pt-BR": "{{amount}}/mês",
+    "es": "{{amount}}/mes",
+    "hi": "{{amount}}/माह",
+    "tr": "{{amount}}/ay",
+    "bn": "{{amount}}/মাস",
+    "ar": "{{amount}} شهريًا",
+    "id": "{{amount}}/bulan",
+    "fil": "{{amount}}/buwan"
+  },
+  "ui_ret_price_annual": {
+    "source": "{{amount}}/year",
+    "refs": [
+      "public/js/components/RetentionOffer.js"
+    ],
+    "en": "{{amount}}/year",
+    "fr": "{{amount}}/an",
+    "pt-BR": "{{amount}}/ano",
+    "es": "{{amount}}/año",
+    "hi": "{{amount}}/वर्ष",
+    "tr": "{{amount}}/yıl",
+    "bn": "{{amount}}/বছর",
+    "ar": "{{amount}} سنويًا",
+    "id": "{{amount}}/tahun",
+    "fil": "{{amount}}/taon"
+  },
+  "ui_ret_duration_monthly": {
+    "source": "For {{cycles}} months, then {{base}}/month.",
+    "refs": [
+      "public/js/components/RetentionOffer.js"
+    ],
+    "en": "For {{cycles}} months, then {{base}}/month.",
+    "fr": "Pendant {{cycles}} mois, puis {{base}}/mois.",
+    "pt-BR": "Por {{cycles}} meses, depois {{base}}/mês.",
+    "es": "Durante {{cycles}} meses, después {{base}}/mes.",
+    "hi": "{{cycles}} महीनों के लिए, फिर {{base}}/माह।",
+    "tr": "{{cycles}} ay boyunca, ardından {{base}}/ay.",
+    "bn": "{{cycles}} মাসের জন্য, তারপর {{base}}/মাস।",
+    "ar": "لمدة {{cycles}} أشهر، ثم {{base}} شهريًا.",
+    "id": "Selama {{cycles}} bulan, lalu {{base}}/bulan.",
+    "fil": "Sa loob ng {{cycles}} buwan, pagkatapos {{base}}/buwan."
+  },
+  "ui_ret_duration_annual": {
+    "source": "For one year, then {{base}}/year.",
+    "refs": [
+      "public/js/components/RetentionOffer.js"
+    ],
+    "en": "For one year, then {{base}}/year.",
+    "fr": "Pendant un an, puis {{base}}/an.",
+    "pt-BR": "Por um ano, depois {{base}}/ano.",
+    "es": "Durante un año, después {{base}}/año.",
+    "hi": "एक वर्ष के लिए, फिर {{base}}/वर्ष।",
+    "tr": "Bir yıl boyunca, ardından {{base}}/yıl.",
+    "bn": "এক বছরের জন্য, তারপর {{base}}/বছর।",
+    "ar": "لمدة سنة، ثم {{base}} سنويًا.",
+    "id": "Selama satu tahun, lalu {{base}}/tahun.",
+    "fil": "Sa loob ng isang taon, pagkatapos {{base}}/taon."
+  },
+  "ui_ret_renewal": {
+    "source": "Automatic renewal. Cancel anytime.",
+    "refs": [
+      "public/js/components/RetentionOffer.js"
+    ],
+    "en": "Automatic renewal. Cancel anytime.",
+    "fr": "Renouvellement automatique. Résiliable à tout moment.",
+    "pt-BR": "Renovação automática. Cancele quando quiser.",
+    "es": "Renovación automática. Cancela cuando quieras.",
+    "hi": "अपने आप नवीनीकरण। कभी भी रद्द करें।",
+    "tr": "Otomatik yenilenir. İstediğiniz zaman iptal edin.",
+    "bn": "স্বয়ংক্রিয় নবায়ন। যেকোনো সময় বাতিল করুন।",
+    "ar": "تجديد تلقائي. يمكنك الإلغاء في أي وقت.",
+    "id": "Perpanjangan otomatis. Batalkan kapan saja.",
+    "fil": "Awtomatikong pag-renew. Kanselahin anumang oras."
+  },
+  "ui_ret_conditions": {
+    "source": "Offer conditions",
+    "refs": [
+      "public/js/components/RetentionOffer.js"
+    ],
+    "en": "Offer conditions",
+    "fr": "Conditions de l’offre",
+    "pt-BR": "Condições da oferta",
+    "es": "Condiciones de la oferta",
+    "hi": "ऑफ़र की शर्तें",
+    "tr": "Teklif koşulları",
+    "bn": "অফারের শর্তাবলি",
+    "ar": "شروط العرض",
+    "id": "Ketentuan penawaran",
+    "fil": "Mga kondisyon ng alok"
   }
 }
