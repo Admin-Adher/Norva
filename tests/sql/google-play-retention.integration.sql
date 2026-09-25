@@ -34,11 +34,19 @@ begin
  if claim->>'claimId' is null then raise exception 'claim failed'; end if;
  if public.norva_play_retention_action(u,o,'claim')->>'pending'<>'true' then raise exception 'double tap'; end if;
  if exists(select 1 from public.cloud_play_retention_offers where id=o and accepted_at is not null) then raise exception 'claim consumed'; end if;
- -- A forged or unmapped client result is not an authority.
+ -- Missing webhook provenance must never consume the offer.
+ insert into public.cloud_entitlement_events(user_id,provider,provider_event_id,event_type,payload,processed_at)
+ values(u,'revenuecat','play-proof-unverified','INITIAL_PURCHASE',jsonb_build_object('store','PLAY_STORE','environment','PRODUCTION',
+   'offer_code','retention-monthly-20','product_id','norva_plus:monthly','original_transaction_id','GPA.synthetic',
+   'purchased_at_ms',floor(extract(epoch from now())*1000)),now());
+ if (select accepted_at from public.cloud_play_retention_offers where id=o) is not null then raise exception 'missing provenance consumed'; end if;
+ perform public.norva_play_retention_action(u,o,'decline');
+ if public.norva_play_retention_delivery_allowed(u,delivery->>'deliveryId') then raise exception 'declined still contacted'; end if;
+ -- A real purchase arriving after decline/newer projection still counts.
  insert into public.cloud_entitlement_events(user_id,provider,provider_event_id,event_type,payload,processed_at)
  values(u,'revenuecat','play-proof-purchase','INITIAL_PURCHASE',jsonb_build_object('store','PLAY_STORE','environment','PRODUCTION',
    'offer_code','retention-monthly-20','product_id','norva_plus:monthly','original_transaction_id','GPA.synthetic',
-   'purchased_at_ms',floor(extract(epoch from now())*1000),'_norva',jsonb_build_object('projection_applied',true)),now());
+   'purchased_at_ms',floor(extract(epoch from now())*1000),'_norva',jsonb_build_object('projection_applied',false)),now());
  select accepted_at into used_at from public.cloud_play_retention_offers where id=o;
  if used_at is null or public.norva_play_retention_offer(u) is not null then raise exception 'verified consumption'; end if;
  if public.norva_play_retention_delivery_allowed(u,delivery->>'deliveryId') then raise exception 'accepted still contacted'; end if;

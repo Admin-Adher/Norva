@@ -87,6 +87,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
         include "js/pages/Settings.js"
         include "js/components/SourceManager.js", "js/components/NorvaModal.js"
         include "js/components/RetentionOffer.js"
+        include "js/components/PlayRetentionCard.js"
         include "app.html", "js/app.js", "js/utils/GenreTaxonomy.js", "js/components/TitleRatingControl.js"
         include "js/components/MultiSelect.js", "js/pages/MoviesPage.js", "js/pages/SeriesPage.js"
         include "js/utils/GenreRails.js", "js/utils/CatalogQueryParams.js", "js/pages/HomePage.js", "js/icons.js"
@@ -95,6 +96,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
     }
     from("../../../tests/fixtures") { include "i18n-context.html", "i18n-context.js", "provider-version-cards.js", "catalog-language-surfaces.js", "catalog-progress-modal.html", "gateway-late-recovery.js", "subscription-cancellation.js", "subscription-retention.js" }
     into("$buildDir/generated/i18nTestAssets")
+    from("../../../tests/fixtures") { include "play-retention.html" }
 }
 tasks.configureEach { task ->
     if (task.name.contains("AndroidTest") && (task.name.startsWith("merge") || task.name.contains("Lint") || task.name.startsWith("lint"))) task.dependsOn(copyI18nTestBundle)

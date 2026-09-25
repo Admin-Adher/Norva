@@ -344,7 +344,7 @@ final class NorvaBilling {
                                         String oldProduct = activePlayProductId(info);
                                         boolean preserve = quote.optBoolean("preserveAccess");
                                         // Never start a second subscription if store ownership/state disagrees.
-                                        if ((preserve && !baseProductId(quote.optString("productId")).equals(baseProductId(oldProduct)))
+                                        if ((preserve && !retentionStoreMatches(info, quote.optString("productId")))
                                                 || (!preserve && oldProduct != null)) {
                                             finishPurchaseError(operation, cb, "retention_store_state_changed"); return;
                                         }
@@ -735,8 +735,23 @@ final class NorvaBilling {
     }
 
     private static String baseProductId(String value) {
+        if (value == null) return "";
         int separator = value.indexOf(':');
         return separator > 0 ? value.substring(0, separator) : value;
+    }
+
+    private static boolean retentionStoreMatches(CustomerInfo info, String expected) {
+        if (info == null || expected == null || !expected.contains(":")) return false;
+        String[] parts = expected.split(":", 2);
+        for (EntitlementInfo entitlement : info.getEntitlements().getActive().values()) {
+            if (entitlement != null && entitlement.getStore() == Store.PLAY_STORE
+                    && !entitlement.getWillRenew() && entitlement.getBillingIssueDetectedAt() == null
+                    && parts[0].equals(entitlement.getProductIdentifier())
+                    && parts[1].equals(entitlement.getProductPlanIdentifier())
+                    && entitlement.getExpirationDate() != null
+                    && entitlement.getExpirationDate().getTime() > System.currentTimeMillis()) return true;
+        }
+        return false;
     }
 
     private static String activePlayProductId(CustomerInfo customerInfo) {

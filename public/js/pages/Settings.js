@@ -610,6 +610,7 @@ class SettingsPage {
     }
 
     async refreshAccessCard() {
+        window.NorvaPlayRetentionCard?.refresh(this.app, null);
         const plan = document.getElementById('settings-access-plan');
         const hint = document.getElementById('settings-access-hint');
         const button = document.getElementById('settings-manage-plan-btn');

@@ -141,12 +141,14 @@ begin
  if new.provider is distinct from 'revenuecat' or new.processed_at is null or new.event_type not in ('INITIAL_PURCHASE','RENEWAL')
    or new.payload->>'store' is distinct from 'PLAY_STORE' or new.payload->>'environment' is distinct from 'PRODUCTION'
    or coalesce(new.payload->>'offer_code','') not in ('retention-monthly-20','retention-annual-10')
-   or new.payload#>>'{_norva,projection_applied}' is distinct from 'true'
+   or not (coalesce(new.payload->'_norva','{}'::jsonb) ? 'projection_applied')
    or coalesce(new.payload->>'original_transaction_id','')='' then return new; end if;
  if coalesce(new.payload->>'purchased_at_ms','') !~ '^[0-9]{10,16}$' then return new; end if;
  bought:=to_timestamp((new.payload->>'purchased_at_ms')::numeric/1000);
  perform pg_advisory_xact_lock(hashtextextended('norva:revolut:money:'||new.user_id::text,0));
- select * into o from public.cloud_play_retention_offers where user_id=new.user_id and state='offered'
+ -- A late, verified purchase still consumes the benefit even after a decline
+ -- or a newer entitlement event. Projection ordering cannot erase a purchase.
+ select * into o from public.cloud_play_retention_offers where user_id=new.user_id and state in ('offered','declined')
    and product_id=new.payload->>'product_id' and offer_id=new.payload->>'offer_code'
    and claimed_at is not null and bought>=claimed_at-interval '5 minutes'
    and bought<=expires_at+interval '1 day' order by claimed_at desc limit 1 for update;
@@ -182,4 +184,18 @@ end;
 $permissions$;
 revoke all on function public.norva_retention_offer_eligible(uuid,uuid) from public,anon,authenticated;
 grant execute on function public.norva_retention_offer_eligible(uuid,uuid) to service_role;
+-- Serialize web order creation with the mobile claim before its final guard.
+do $guard$
+declare definition text;
+begin
+ select pg_get_functiondef('public.norva_retention_order_guard()'::regprocedure) into definition;
+ if position('if new.retention_offer_id is null then return new; end if;' in definition)=0 then
+   raise exception 'retention_order_guard_contract_changed';
+ end if;
+ definition:=replace(definition,'if new.retention_offer_id is null then return new; end if;',
+   'if new.retention_offer_id is null then return new; end if;
+    perform pg_advisory_xact_lock(hashtextextended(''norva:revolut:money:''||new.user_id::text,0));');
+ execute definition;
+end;
+$guard$;
 commit;
