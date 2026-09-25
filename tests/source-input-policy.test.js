@@ -122,3 +122,10 @@ test('localized required-field errors are mapped from bounded codes/messages, ne
   assert.equal(manager.sourceFormErrorMessage(new Error('private provider response')), 'translated:ui_web_47783937825b');
   assert.equal(manager.sourceFormErrorMessage({ code: 'INVALID_SOURCE_ADDRESS', inputProblem: 'email_or_login' }), 'translated:ui_web_source_email_not_url');
 });
+
+test('a source topology conflict is localized without blaming credentials or exposing database details', () => {
+  const { manager } = harness({ NorvaI18n: { t: key => `translated:${key}` } });
+  const error = { status: 409, message: 'private database diagnostic', payload: { details: { code: 'SOURCE_CATALOG_BUSY' } } };
+  assert.equal(manager.sourceFormErrorMessage(error), 'translated:ui_web_7cbd1c9b753c. translated:ui_web_2dfd888fdd5e');
+  assert.equal(manager.sourceFormErrorMessage({ ...error, payload: { details: { code: 'PT409' } } }), 'translated:ui_web_47783937825b');
+});

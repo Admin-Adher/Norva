@@ -2328,6 +2328,12 @@ class SourceManager {
         if (error?.code === 'INVALID_SOURCE_ADDRESS') {
             return this.sourceInputProblemMessage(error.inputProblem, error.sourceType);
         }
+        const code = error?.payload?.details?.code || error?.code;
+        if (code === 'SOURCE_CATALOG_BUSY') {
+            const updating = globalThis.NorvaI18n?.t('ui_web_7cbd1c9b753c', { defaultValue: 'Catalog update in progress' }) ?? 'Catalog update in progress';
+            const wait = globalThis.NorvaI18n?.t('ui_web_2dfd888fdd5e', { defaultValue: 'Please wait...' }) ?? 'Please wait...';
+            return `${updating}. ${wait}`;
+        }
         const message = String(error?.message || '');
         const allowed = new Map([
             ['Provider URL is required.', 'ui_web_baf76e6a65bf'],
@@ -3295,7 +3301,9 @@ class SourceManager {
             this.trackProduct('journey_error', {
                 journey: 'provider_onboarding', step: 'provider_connect', outcome: 'error', failureFamily: this.productFailureFamily(err)
             });
-            NorvaModal.toast((globalThis.NorvaI18n?.t("ui_web_424333ad49d8", { defaultValue: "Could not add this source. Check the details and try again." }) ?? 'Could not add this source. Check the details and try again.'), 'error');
+            const busy = (err?.payload?.details?.code || err?.code) === 'SOURCE_CATALOG_BUSY';
+            NorvaModal.toast(busy ? this.sourceFormErrorMessage(err)
+                : (globalThis.NorvaI18n?.t("ui_web_424333ad49d8", { defaultValue: "Could not add this source. Check the details and try again." }) ?? 'Could not add this source. Check the details and try again.'), 'error');
         }
     }
 

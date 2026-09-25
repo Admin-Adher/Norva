@@ -19,6 +19,7 @@ export const CLOUD_PUBLIC_ERROR_CODES = Object.freeze([
   "profile_unavailable",
   "SOURCE_CATALOG_NOT_VISIBLE",
   "SOURCE_CATALOG_CHANGED",
+  "SOURCE_CATALOG_BUSY",
   "ambiguous_title_identity",
   "rating_identity_invalid",
   "rating_request_invalid",

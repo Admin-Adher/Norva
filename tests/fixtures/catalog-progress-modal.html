@@ -6,7 +6,7 @@
   <div class="modal-content"><div class="modal-header"><h2 id="modal-title"></h2><button class="modal-close" aria-label="Fermer">×</button></div>
     <div id="modal-body" class="modal-body"></div><div id="modal-footer" class="modal-footer" hidden></div></div>
 </div>
-<script src="/js/components/NorvaModal.js"></script><script src="/js/components/SourceManager.js"></script>
+<script src="/js/i18n.js"></script><script src="/js/components/NorvaModal.js"></script><script src="/js/components/SourceManager.js"></script>
 <script>
 const manager = Object.create(SourceManager.prototype);
 manager.sourceStatuses = [];
@@ -19,4 +19,23 @@ async function openProgress() {
   document.getElementById('catalog-background').textContent='Continuer en arrière-plan';
 }
 document.getElementById('open').onclick=openProgress;
+async function verifySourceConflict() {
+  let calls=0;
+  const original=NorvaModal.toast;
+  const messages=[];
+  NorvaModal.toast=(message)=>messages.push(message);
+  const failed=Object.create(SourceManager.prototype);
+  failed.readSourceForm=()=>({name:'QA',url:'https://fixture.test',username:'qa',password:'qa'});
+  failed.providerAccessUiEnabled=()=>false;
+  failed.confirmLargePlaylistIfNeeded=async()=>true;
+  failed.trackProduct=()=>{};
+  window.API={sources:{create:async()=>{calls++;throw {status:409,message:'private database diagnostic',payload:{details:{code:'SOURCE_CATALOG_BUSY'}}};}}};
+  try {
+    await failed.saveNewSource('xtream');
+    if(calls!==1)throw Error('source creation repeated');
+    if(messages.length!==1||messages[0]!==manager.sourceFormErrorMessage({code:'SOURCE_CATALOG_BUSY'}))throw Error('conflict copy missing');
+    if(/private|credentials|details/i.test(messages[0]))throw Error('unsafe conflict copy');
+    return 'ok';
+  } finally { NorvaModal.toast=original; }
+}
 </script></body></html>

@@ -26,6 +26,7 @@ const PUBLIC_EDGE_ERROR_CODES = new Set([
   "rating_storage_unavailable",
   "title_identity_unavailable",
   "SOURCE_CATALOG_NOT_VISIBLE",
+  "SOURCE_CATALOG_BUSY",
   "SOURCE_CONFIG_REVISION_CHANGED",
   "PLAYBACK_CREATION_MOVED",
   "PLAYBACK_COORDINATOR_UNAVAILABLE",

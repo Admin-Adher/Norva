@@ -7136,6 +7136,14 @@ function copyString(source: JsonRecord, target: JsonRecord, from: string, to: st
 }
 
 function throwDb(error: { message?: string; code?: string; details?: string }, fallback: string): never {
+  // These two guards deliberately reject topology changes before any insert.
+  // Keep their protection and expose a bounded conflict, never SQL diagnostics.
+  if ((error.code === "PT409" && error.message === "user catalog topology is fenced during credential cutover")
+    || (error.code === "55P03" && error.message === "provider account already has a non-terminal transition")) {
+    throw new HttpError(409, "Catalog update in progress. Try again when it finishes.", {
+      code: "SOURCE_CATALOG_BUSY",
+    });
+  }
   throw new HttpError(500, fallback, {
     code: error.code,
     message: error.message,

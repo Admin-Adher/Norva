@@ -162,6 +162,7 @@ test('receipt re-read continues to fail closed on stale epochs or a revoked auth
 
 test('absent/malformed receipts and other errors cannot trigger reconciliation or a retry', async () => {
   for (const fail of [
+    response(409, { error: 'Catalog update in progress', details: { code: 'SOURCE_CATALOG_BUSY' } }),
     response(409, { details: { code } }),
     ambiguous({ contract: 'other', sourceId }),
     ambiguous({ contract: receipt.contract, sourceId: 'Same provider' }),
