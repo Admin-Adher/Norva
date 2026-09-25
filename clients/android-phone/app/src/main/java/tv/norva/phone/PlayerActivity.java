@@ -231,6 +231,7 @@ public class PlayerActivity extends Activity {
     private long playbackLaunchElapsedMs;
     public static final String EXTRA_MEDIA_CACHE = "mediaCache";
     private tv.norva.playback.NativeMediaCache nativeMediaCache;
+    private BoundedRangeDataSource.Factory providerDataSources;
     private String playbackAuthToken;
     private String playbackAuthChannelId;
     private String pendingPlaybackAuthRequestNonce;
@@ -622,7 +623,8 @@ public class PlayerActivity extends Activity {
                     .setReadTimeoutMs(30000);
             // Bound open-ended seek ranges so Resume jumps straight to the offset
             // instead of the provider replaying the file from byte 0 (a ~20s stall).
-            nativeMediaCache = new tv.norva.playback.NativeMediaCache(new BoundedRangeDataSource.Factory(http));
+            providerDataSources = new BoundedRangeDataSource.Factory(http);
+            nativeMediaCache = new tv.norva.playback.NativeMediaCache(providerDataSources);
             nativeMediaCache.configure(getIntent().getStringExtra(EXTRA_MEDIA_CACHE), url, playbackSessionId);
             getIntent().removeExtra(EXTRA_MEDIA_CACHE);
             dataSourceFactory = nativeMediaCache;
@@ -773,6 +775,20 @@ public class PlayerActivity extends Activity {
                     return;
                 }
                 MediaItem currentItem = player == null ? null : player.getCurrentMediaItem();
+                if (currentItem != null && currentItem.localConfiguration != null
+                        && providerDataSources != null
+                        && providerDataSources.observedHls(currentItem.localConfiguration.uri)
+                        && !"application/x-mpegURL".equals(currentItem.localConfiguration.mimeType)
+                        && hasUnrecognizedContainer(error)) {
+                    MediaItem manifest = currentItem.buildUpon()
+                            .setMimeType("application/x-mpegURL").build();
+                    if (originalMediaItem != null && originalMediaItem.localConfiguration != null
+                            && originalMediaItem.localConfiguration.uri.equals(currentItem.localConfiguration.uri)) {
+                        originalMediaItem = manifest;
+                    }
+                    prepareMediaItem(manifest, recoverPositionMs(), PlaybackUiState.RECOVERING);
+                    return;
+                }
                 if (currentItem != null && currentItem.localConfiguration != null
                         && liveWindowRecovery.tryAcquire(error.errorCode,
                                 currentItem.localConfiguration.uri.toString(), itemType)) {
@@ -3365,6 +3381,13 @@ public class PlayerActivity extends Activity {
         return duration > 0
                 ? Math.min(position, Math.max(0, duration - 1_000L))
                 : position;
+    }
+
+    private static boolean hasUnrecognizedContainer(Throwable error) {
+        for (int depth = 0; error != null && depth < 8; depth++, error = error.getCause()) {
+            if (error instanceof androidx.media3.exoplayer.source.UnrecognizedInputFormatException) return true;
+        }
+        return false;
     }
 
     private void clearPendingDelayedRecovery() {

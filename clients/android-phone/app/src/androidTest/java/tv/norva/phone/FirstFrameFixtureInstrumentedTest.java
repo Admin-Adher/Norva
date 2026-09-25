@@ -61,12 +61,24 @@ public final class FirstFrameFixtureInstrumentedTest {
         assertFixtureFirstFrame("text/html; charset=utf-8");
     }
 
+    @Test public void extensionlessHlsRecoversItsFormatAndResumePosition() throws Exception {
+        assertFixtureFirstFrame("video/mp2t", true);
+    }
+
+    @Test public void hlsContentTypeWithoutManifestDoesNotOverridePlayableBytes() throws Exception {
+        assertFixtureFirstFrame("application/vnd.apple.mpegurl");
+    }
+
     private void assertFixtureFirstFrame(String contentType) throws Exception {
+        assertFixtureFirstFrame(contentType, false);
+    }
+
+    private void assertFixtureFirstFrame(String contentType, boolean hls) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Context target = instrumentation.getTargetContext();
         Context testContext = instrumentation.getContext();
         File fixture = new File(target.getCacheDir(), "norva-first-frame-h264-aac.mkv");
-        copyFixture(testContext, fixture);
+        copyFixture(testContext, fixture, hls ? "extensionless-hls.ts" : "s_h264_aac.mkv");
 
         String token = UUID.randomUUID().toString();
         CountDownLatch resultLatch = new CountDownLatch(1);
@@ -90,7 +102,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                 new IntentFilter(PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
         try (FixtureHttpServer server = new FixtureHttpServer(
-                Files.readAllBytes(fixture.toPath()), contentType)) {
+                Files.readAllBytes(fixture.toPath()), contentType, hls)) {
             Intent launch = new Intent(target, PlayerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     // Exercise the real VOD path: DefaultHttpDataSource,
@@ -100,6 +112,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
                     .putExtra(PlayerActivity.EXTRA_ITEM_ID, "fixture-h264-aac")
                     .putExtra(PlayerActivity.EXTRA_CONTAINER, "mkv")
+                    .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, hls ? 3 : 0)
                     .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token);
             target.startActivity(launch);
             activityRef.set(instrumentation.waitForMonitorWithTimeout(monitor, 5_000));
@@ -120,6 +133,17 @@ public final class FirstFrameFixtureInstrumentedTest {
                     result.getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_AUDIO_MIME));
             assertTrue(result.getBooleanExtra(
                     PlayerActivity.EXTRA_FIRST_FRAME_TEST_CONTRACT_OK, false));
+            if (hls) {
+                Activity opened = activityRef.get();
+                java.lang.reflect.Field playerField = PlayerActivity.class.getDeclaredField("player");
+                playerField.setAccessible(true);
+                androidx.media3.exoplayer.ExoPlayer player =
+                        (androidx.media3.exoplayer.ExoPlayer) playerField.get(opened);
+                instrumentation.runOnMainSync(() -> {
+                    assertTrue("HLS recovery keeps the original resume point", player.getCurrentPosition() >= 3000);
+                    assertEquals("application/x-mpegURL", player.getCurrentMediaItem().localConfiguration.mimeType);
+                });
+            }
         } finally {
             try {
                 Activity activity = activityRef.get();
@@ -445,7 +469,11 @@ public final class FirstFrameFixtureInstrumentedTest {
     }
 
     private static void copyFixture(Context testContext, File destination) throws Exception {
-        try (InputStream input = testContext.getAssets().open("s_h264_aac.mkv");
+        copyFixture(testContext, destination, "s_h264_aac.mkv");
+    }
+
+    private static void copyFixture(Context testContext, File destination, String asset) throws Exception {
+        try (InputStream input = testContext.getAssets().open(asset);
              FileOutputStream output = new FileOutputStream(destination, false)) {
             byte[] buffer = new byte[32 * 1024];
             int read;
@@ -465,6 +493,7 @@ public final class FirstFrameFixtureInstrumentedTest {
     private static final class FixtureHttpServer implements AutoCloseable {
         private final byte[] media;
         private final String contentType;
+        private final boolean hls;
         final java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
         final java.util.concurrent.atomic.AtomicLong firstRequestAt = new java.util.concurrent.atomic.AtomicLong();
         private final ServerSocket server;
@@ -476,8 +505,13 @@ public final class FirstFrameFixtureInstrumentedTest {
         }
 
         FixtureHttpServer(byte[] media, String contentType) throws Exception {
+            this(media, contentType, false);
+        }
+
+        FixtureHttpServer(byte[] media, String contentType, boolean hls) throws Exception {
             this.media = media;
             this.contentType = contentType;
+            this.hls = hls;
             this.server = new ServerSocket(
                     0, 8, InetAddress.getByName("127.0.0.1"));
             this.thread = new Thread(this::serve, "norva-first-frame-origin");
@@ -487,7 +521,7 @@ public final class FirstFrameFixtureInstrumentedTest {
 
         String url() {
             return "http://127.0.0.1:" + server.getLocalPort()
-                    + "/s_h264_aac.mkv";
+                    + (hls ? "/stream" : "/s_h264_aac.mkv");
         }
 
         private void serve() {
@@ -508,6 +542,14 @@ public final class FirstFrameFixtureInstrumentedTest {
                  InputStream input = client.getInputStream();
                  OutputStream output = client.getOutputStream()) {
                 String request = readHeaders(input);
+                byte[] media = this.media;
+                String contentType = this.contentType;
+                if (hls && request.startsWith("GET /stream ")) {
+                    media = ("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:7\n"
+                            + "#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
+                            + "#EXTINF:6.0,\n/segment.ts\n#EXT-X-ENDLIST\n").getBytes(StandardCharsets.UTF_8);
+                    contentType = "application/vnd.apple.mpegurl";
+                }
                 requests.incrementAndGet();
                 firstRequestAt.compareAndSet(0, SystemClock.elapsedRealtime());
                 boolean head = request.startsWith("HEAD ");
