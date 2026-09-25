@@ -100,7 +100,7 @@ test('a server-observed container overrides a stale open-tab label without trust
 test('a confirmed finite TS browser relay is promoted without forcing a direct native client through Gateway',()=>{
   const source=read(EDGE_PATH);
   const expression=source.match(/const serverPromotedRelay =([\s\S]*?);/)[1];
-  const decide=input=>vm.runInNewContext(`(${expression})`,{clientMode:'relay',browserNativeMp4:false,
+  const decide=input=>vm.runInNewContext(`(${expression})`,{clientMode:'relay',browserNativeMp4:false,nativeNetworkRecovery:false,
     authoritativeVodTier:null,authoritativeVodContainer:null,...input});
   assert.equal(decide({authoritativeVodContainer:'ts'}),true);
   assert.equal(decide({clientMode:'direct',authoritativeVodContainer:'ts'}),false);
@@ -108,6 +108,7 @@ test('a confirmed finite TS browser relay is promoted without forcing a direct n
   assert.equal(decide({authoritativeVodContainer:'mp4',browserNativeMp4:true}),false);
   assert.equal(decide({authoritativeVodTier:'audio_transcode'}),true);
   assert.equal(decide({authoritativeVodTier:'video_transcode'}),true);
+  assert.equal(decide({authoritativeVodContainer:'ts',nativeNetworkRecovery:true}),false);
 });
 
 function containerUrlRewriter() {
