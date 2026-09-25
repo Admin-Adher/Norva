@@ -111,7 +111,6 @@ const {
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
 const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
-const { nativeFileStartupOptions } = require('./native-file-startup-policy');
 const { privateResumeBinding, createPrivateResumeOwnerGate } = require('./private-resume-binding');
 const { privateResumeProfile } = require('./private-resume-profile');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
@@ -4165,9 +4164,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // A repeat visit validates a small fresh range before releasing
                 // the retained index/seek bytes. Cold startup keeps its 8 MiB
                 // streamed window and incurs no extra validation request.
-                ...nativeFileStartupOptions(claims.scope,
-                    Boolean(resumeRanges?.hasPriorRanges || resumeRanges?.requiresValidation)),
-                finiteResumeRanges: resumeRanges,
+                finiteWarmupWindowBytes: (resumeRanges?.hasPriorRanges || resumeRanges?.requiresValidation) ? 64 * 1024 : 0,
+                finiteWarmupCueGraceMs: 0, finiteResumeRanges: resumeRanges,
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                 finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 300,

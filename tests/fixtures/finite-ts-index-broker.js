@@ -8,7 +8,6 @@ module.exports = function brokerHarness() {
     return vm.runInNewContext(`(() => {${source.slice(start, end)};return {createStrictLidBroker};})()`, {
         AbortController, Buffer, Date, Error, Number, Object, Promise, String, URL,
         clearTimeout, setTimeout, setImmediate, fetch, console,
-        sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
         crypto: require('node:crypto'), http: require('node:http'),
         undiciRequest: require('undici').request, Readable: require('node:stream').Readable,
         createStrictRangeCollector: require('../../services/media-gateway/src/strict-lid-range-reuse').createStrictRangeCollector,
