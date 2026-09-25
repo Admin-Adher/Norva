@@ -11,8 +11,8 @@ const targets = [
     main: 'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
     manifest: 'clients/android-phone/app/src/main/AndroidManifest.xml',
     gradle: 'clients/android-phone/app/build.gradle',
-    versionCode: 38,
-    versionName: '1.3.25',
+    versionCode: 39,
+    versionName: '1.3.26',
     bridgeCount: 0,
   },
 ];
