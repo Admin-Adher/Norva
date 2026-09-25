@@ -38,6 +38,55 @@ function functionExpression(name, nextName) {
   return declaration.replace(new RegExp(`^(async\\s+)?function\\s+${name}`), (_all, asyncPrefix) => `${asyncPrefix || ''}function`);
 }
 
+function accessCycleHarness(body) {
+  const calls = [];
+  const context = {
+    ContractError: class ContractError extends Error { constructor(code) { super(code); this.code = code; } },
+    requireIdempotencyKey: () => 'cycle-request', parseEntityTag: () => 2,
+    readJsonObject: async () => body,
+    getRuntimeConfig: async () => { calls.push('runtime'); return { sourceConfigKey: 'fixture' }; },
+    keyedFingerprint: async () => 'a'.repeat(64),
+    rpc: async (name, input) => { calls.push({ name, input }); return {}; },
+    sanitizeProviderAccess: () => ({ revision: 3, activeCycle: { cycleId: 'cycle' } }),
+    successResponse: (_req, _id, _kind, data) => data,
+    providerAccessTag: () => '"provider-access-rev-3"',
+  };
+  const functions = [
+    section('async function createProviderAccessCycle', '\nasync function endProviderAccessCycle'),
+    section('function normalizeAccessCycleBody', '\nfunction sanitizeProviderAccess'),
+    section('function nullableDateKey', '\nfunction nullablePositiveInteger'),
+    section('function enumValue', '\nfunction nonNegativeInteger'),
+  ].join('\n');
+  return { calls, ...vm.runInNewContext(`(() => { ${functions}; return { createProviderAccessCycle, updateProviderAccessCycle }; })()`, context) };
+}
+
+test('conflicting calendar inputs are rejected before cycle create or update reaches business services', async () => {
+  for (const method of ['createProviderAccessCycle', 'updateProviderAccessCycle']) {
+    const harness = accessCycleHarness({ startedOn: '2026-09-20', expiresOn: '2026-09-28',
+      termValue: 8, termUnit: 'DAY', remindersEnabled: false });
+    await assert.rejects(harness[method]({}, 'request', { id: 'owner', actor: 'owner' }, { id: 'source' }, 'cycle'),
+      error => error.code === 'INVALID_REQUEST');
+    assert.deepEqual(harness.calls, []);
+  }
+});
+
+test('duration and explicit-date cycle requests retain separate PostgreSQL inputs', async () => {
+  for (const method of ['createProviderAccessCycle', 'updateProviderAccessCycle']) {
+    for (const duration of [true, false]) {
+      const body = { startedOn: '2026-09-20', expiresOn: duration ? null : '2026-09-28',
+        termValue: duration ? 8 : null, termUnit: duration ? 'DAY' : null, remindersEnabled: false };
+      const harness = accessCycleHarness(body);
+      await harness[method]({}, 'request', { id: 'owner', actor: 'owner' }, { id: 'source' }, 'cycle');
+      assert.equal(harness.calls.length, 2);
+      const input = harness.calls[1].input;
+      assert.equal(input.p_expires_on, body.expiresOn);
+      assert.equal(input.p_term_value, body.termValue);
+      assert.equal(input.p_term_unit, duration ? 'day' : null);
+      assert.equal(input.p_started_on, '2026-09-20');
+    }
+  }
+});
+
 test('Provider Access Edge surface exposes credential candidates and durable catalog replacements', () => {
   assert.match(EDGE, /const API_VERSION = "provider-access\.norva\/v1"/);
   assert.match(EDGE, /parts\[0\] !== "v1"/);

@@ -805,6 +805,9 @@ function normalizeAccessCycleBody(body, requireComplete) {
     ? null
     : enumValue(String(body.termUnit), ["DAY", "WEEK", "MONTH", "YEAR"], "INVALID_REQUEST").toLowerCase();
   if ((termValue === null) !== (termUnit === null)) throw new ContractError("INVALID_REQUEST");
+  // PostgreSQL owns calendar arithmetic. A supplied duration and an explicit
+  // end date are competing inputs, including when their dates happen to agree.
+  if (expiresOn !== null && termValue !== null) throw new ContractError("INVALID_REQUEST");
   const remindersEnabled = body.remindersEnabled === undefined ? false : body.remindersEnabled;
   if (typeof remindersEnabled !== "boolean") throw new ContractError("INVALID_REQUEST");
   return Object.freeze({ startedOn, expiresOn, termValue, termUnit, remindersEnabled });
