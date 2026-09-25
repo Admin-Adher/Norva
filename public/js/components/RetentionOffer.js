@@ -32,13 +32,19 @@
       card.replaceChildren(element('p', 'msg', text('ui_ret_loading', 'Checking available offers…')));
       try {
         const offer = await billing.revolutRetentionOffer();
-        if (!offer) { showOffer(false); card.remove(); return; }
+        if (!offer) {
+          showOffer(false); card.remove();
+          if (restoreFocus) standardActions[0]?.focus();
+          return;
+        }
         card.replaceChildren();
         if (offer.support) {
+          showOffer(false);
           card.appendChild(element('p', 'msg', text('ui_ret_support', 'A playback problem? We can help you resolve it.')));
           const help = element('a', 'btn ghost', text('ui_ret_contact', 'Contact support'));
           help.href = 'mailto:support@norva.tv';
           card.appendChild(help);
+          if (restoreFocus) help.focus();
           return;
         }
         if (!Number.isInteger(offer.amount_cents) || !Number.isInteger(offer.base_amount_cents)
