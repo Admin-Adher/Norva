@@ -756,6 +756,15 @@ public class PlayerActivity extends Activity {
                 errHandler.removeCallbacks(bufferWatchdog);
                 errHandler.removeCallbacks(longStartNotice);
                 engineReady = false;
+                if (BoundedRangeDataSource.isHtmlResponse(error)) {
+                    rememberRecoverySignal("provider_html_response", "direct", false);
+                    showPlaybackFailure(
+                            PlaybackUiState.TERMINAL,
+                            R.string.player_error_title,
+                            getString(R.string.player_no_data),
+                            false);
+                    return;
+                }
                 int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
                 if (ProviderPlaybackPolicy.isProviderBusyHttpStatus(httpStatus)) {
                     android.util.Log.w("NorvaPlayer", "Provider account busy (HTTP 458)");
