@@ -53,6 +53,15 @@ public final class FirstFrameFixtureInstrumentedTest {
 
     @Test
     public void h264AacFixtureRendersARealFirstFrame() throws Exception {
+        assertFixtureFirstFrame("video/x-matroska");
+    }
+
+    @Test
+    public void playableVideoMislabeledAsHtmlStillRendersARealFirstFrame() throws Exception {
+        assertFixtureFirstFrame("text/html; charset=utf-8");
+    }
+
+    private void assertFixtureFirstFrame(String contentType) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Context target = instrumentation.getTargetContext();
         Context testContext = instrumentation.getContext();
@@ -81,7 +90,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                 new IntentFilter(PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
         try (FixtureHttpServer server = new FixtureHttpServer(
-                Files.readAllBytes(fixture.toPath()))) {
+                Files.readAllBytes(fixture.toPath()), contentType)) {
             Intent launch = new Intent(target, PlayerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     // Exercise the real VOD path: DefaultHttpDataSource,
@@ -122,6 +131,80 @@ public final class FirstFrameFixtureInstrumentedTest {
             try { target.unregisterReceiver(receiver); } catch (Exception ignored) { }
             //noinspection ResultOfMethodCallIgnored
             fixture.delete();
+        }
+    }
+
+    @Test
+    public void htmlProviderRefusalStopsPromptlyWithoutAutomaticRetries() throws Exception {
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        Context target = instrumentation.getTargetContext();
+        String token = UUID.randomUUID().toString();
+        CountDownLatch terminal = new CountDownLatch(1);
+        AtomicReference<Intent> result = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicLong terminalAt = new java.util.concurrent.atomic.AtomicLong();
+        Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
+                PlayerActivity.class.getName(), null, false);
+        Activity activity = null;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                if (token.equals(intent.getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN))) {
+                    result.set(intent);
+                    terminalAt.set(SystemClock.elapsedRealtime());
+                    terminal.countDown();
+                }
+            }
+        };
+        ContextCompat.registerReceiver(target, receiver,
+                new IntentFilter(PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+        byte[] body = "<!DOCTYPE html><html><body>Service unavailable</body></html>"
+                .getBytes(StandardCharsets.UTF_8);
+        try (FixtureHttpServer origin = new FixtureHttpServer(body, "text/html")) {
+            target.startActivity(new Intent(target, PlayerActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(PlayerActivity.EXTRA_URL, origin.url())
+                    .putExtra(PlayerActivity.EXTRA_TITLE, "Norva unavailable provider fixture")
+                    .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
+                    .putExtra(PlayerActivity.EXTRA_ITEM_ID, "fixture-html-refusal")
+                    .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token));
+            activity = instrumentation.waitForMonitorWithTimeout(monitor, 5000);
+            assertNotNull(activity);
+            assertTrue("HTML refusal did not become terminal within 5 seconds", terminal.await(5, TimeUnit.SECONDS));
+            assertEquals("terminal", result.get().getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_OUTCOME));
+            long refusalDelay = terminalAt.get() - origin.firstRequestAt.get();
+            assertTrue("HTML response to terminal took " + refusalDelay + "ms",
+                    origin.firstRequestAt.get() > 0 && refusalDelay >= 0 && refusalDelay < 2000);
+            SystemClock.sleep(2000);
+            assertEquals("Provider refusal was retried automatically", 1, origin.requests.get());
+            final Activity opened = activity;
+            java.lang.reflect.Field messageField = PlayerActivity.class.getDeclaredField("errorView");
+            java.lang.reflect.Field retryField = PlayerActivity.class.getDeclaredField("retryButton");
+            messageField.setAccessible(true);
+            retryField.setAccessible(true);
+            android.widget.TextView message = (android.widget.TextView) messageField.get(opened);
+            View retry = (View) retryField.get(opened);
+            instrumentation.runOnMainSync(() -> {
+                assertEquals(target.getString(R.string.player_no_data), message.getText().toString());
+                assertTrue(retry.isShown());
+                assertTrue(retry.performClick());
+            });
+            long retryDeadline = SystemClock.elapsedRealtime() + 5000;
+            while (origin.requests.get() < 2 && SystemClock.elapsedRealtime() < retryDeadline) SystemClock.sleep(50);
+            SystemClock.sleep(2000);
+            assertEquals("Explicit retry must make exactly one new request", 2, origin.requests.get());
+            instrumentation.runOnMainSync(() -> {
+                assertTrue(message.isShown());
+                opened.onBackPressed();
+            });
+            instrumentation.waitForIdleSync();
+            assertTrue(activity.isFinishing() || activity.isDestroyed());
+        } finally {
+            if (activity != null && !activity.isDestroyed()) {
+                Activity opened = activity;
+                instrumentation.runOnMainSync(opened::finish);
+            }
+            instrumentation.removeMonitor(monitor);
+            target.unregisterReceiver(receiver);
         }
     }
 
@@ -381,12 +464,20 @@ public final class FirstFrameFixtureInstrumentedTest {
      */
     private static final class FixtureHttpServer implements AutoCloseable {
         private final byte[] media;
+        private final String contentType;
+        final java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicLong firstRequestAt = new java.util.concurrent.atomic.AtomicLong();
         private final ServerSocket server;
         private final Thread thread;
         private volatile boolean closed;
 
         FixtureHttpServer(byte[] media) throws Exception {
+            this(media, "video/x-matroska");
+        }
+
+        FixtureHttpServer(byte[] media, String contentType) throws Exception {
             this.media = media;
+            this.contentType = contentType;
             this.server = new ServerSocket(
                     0, 8, InetAddress.getByName("127.0.0.1"));
             this.thread = new Thread(this::serve, "norva-first-frame-origin");
@@ -417,6 +508,8 @@ public final class FirstFrameFixtureInstrumentedTest {
                  InputStream input = client.getInputStream();
                  OutputStream output = client.getOutputStream()) {
                 String request = readHeaders(input);
+                requests.incrementAndGet();
+                firstRequestAt.compareAndSet(0, SystemClock.elapsedRealtime());
                 boolean head = request.startsWith("HEAD ");
                 long start = 0;
                 long end = media.length - 1L;
@@ -441,7 +534,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                         .append(partial
                                 ? "HTTP/1.1 206 Partial Content\r\n"
                                 : "HTTP/1.1 200 OK\r\n")
-                        .append("Content-Type: video/x-matroska\r\n")
+                        .append("Content-Type: ").append(contentType).append("\r\n")
                         .append("Accept-Ranges: bytes\r\n")
                         .append("Content-Length: ").append(length).append("\r\n");
                 if (partial) {

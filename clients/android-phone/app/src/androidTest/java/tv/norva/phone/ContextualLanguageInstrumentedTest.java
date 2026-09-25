@@ -39,7 +39,13 @@ public class ContextualLanguageInstrumentedTest {
         for(int action:new int[]{android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP}) {
             android.view.MotionEvent event=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,x,y,0);
             event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-            instrumentation.sendPointerSync(event);event.recycle();
+            try {
+                // The IME is a different UID and can take the window between
+                // DOWN and UP. Inject through the system automation connection,
+                // then keep the focus/IME assertions below as the outcome gate.
+                assertTrue("Search touch delivered", instrumentation.getUiAutomation()
+                        .injectInputEvent(event, true));
+            } finally { event.recycle(); }
             if(action==android.view.MotionEvent.ACTION_DOWN)Thread.sleep(40);
         }
     }
