@@ -2499,7 +2499,47 @@ const MediaUtils = (() => {
         };
     }
 
+    // Capture time wins over delivery time (an offline device can upload later).
+    // Scope before deduplication so another provider cannot hide the selected copy.
+    function recentHistory(items = [], sourceId = '') {
+        const source = item => item?.source_id ?? item?.sourceId ?? item?.data?.sourceId ?? item?.data?.source_id ?? '';
+        const timestamp = item => Date.parse(item?.watched_at || item?.watchedAt || item?.updated_at || item?.updatedAt || '') || 0;
+        return (items || []).filter(item => item && (!sourceId || String(source(item)) === String(sourceId)))
+            .map((item, index) => ({ item, index, at: timestamp(item) }))
+            .sort((a, b) => b.at - a.at || a.index - b.index)
+            .map(entry => entry.item);
+    }
+
+    // Avoid replacing a focused rail on every heartbeat. When the order changes
+    // off-focus (notably on return from native playback), show the latest card.
+    function updateHistoryMarkup(list, markup) {
+        // DOM setup adds roles/tabindex after insertion, so innerHTML alone is
+        // not a stable comparison with the original template.
+        if (list.innerHTML && list._historyMarkup === markup) return false;
+        const active = typeof document !== 'undefined' ? document.activeElement : null;
+        const focused = active?.closest?.('.continue-card, .dashboard-card');
+        const key = card => card ? JSON.stringify(Object.entries(card.dataset || {}).filter(([name]) => name !== 'historyIndex')) : '';
+        const identity = focused && list.contains?.(focused) ? key(focused) : null;
+        const oldFirst = key(list.firstElementChild);
+        list.innerHTML = markup;
+        list._historyMarkup = markup;
+        const newFirst = key(list.firstElementChild);
+        if (identity) {
+            const target = Array.from(list.children || []).find(card => key(card) === identity);
+            const restore = active?.classList?.contains('ch-remove')
+                ? target?.querySelector('.ch-remove') : (target || list.firstElementChild);
+            if (restore) {
+                restore.tabIndex = 0;
+                restore.focus?.({ preventScroll: true });
+            }
+        } else if (oldFirst !== newFirst) {
+            list.scrollLeft = 0;
+        }
+        return true;
+    }
+
     return {
+        recentHistory, updateHistoryMarkup,
         skeletonCards,
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
         cleanEpisodeReleaseName, formatEpisodeDisplayLabel, selectionUnitLabel,
