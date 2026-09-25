@@ -128,3 +128,14 @@ test('native generalization cannot force HTTP forwarding for unrelated accounts 
     assert.equal(useProviderHttpForward('new-provider-account', 'http://provider.example.test/123.mp4', accounts), false);
     assert.equal(useProviderHttpForward(selected, 'http://provider.example.test/123.mkv', accounts), false);
 });
+
+test('native recovery accepts complete exact playback-produced profiles and rejects partial evidence', async () => {
+    const { nativeVodFileProof } = await edge;
+    for (const container of ['mov,mp4,m4a,3gp,3g2,mj2', 'matroska,webm']) {
+        const observed = profile({container, probeSource:'gateway_inband', metadataComplete:true});
+        assert.deepEqual(nativeVodFileProof(observed, now), {fileSizeBytes:123456,durationSeconds:120});
+        for (const metadataComplete of [false, undefined, 'true']) {
+            assert.equal(nativeVodFileProof(profile({...observed.codecProfile, metadataComplete}), now), null);
+        }
+    }
+});

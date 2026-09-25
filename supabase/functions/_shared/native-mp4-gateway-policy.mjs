@@ -8,7 +8,8 @@ export function nativeVodFileProof(ownedHint = {}, now = Date.now()) {
   const p = ownedHint.codecProfile || ownedHint.codec_profile || {};
   const probedAt = Date.parse(p.probedAt || p.probed_at || '');
   const kind = String(p.container || '').toLowerCase().split(',')[0];
-  if (String(p.probeSource || '').toLowerCase().replace(/[^a-z0-9]/g, '') !== 'gatewayprobe'
+  const origin = String(p.probeSource || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!(origin === 'gatewayprobe' || (origin === 'gatewayinband' && p.metadataComplete === true))
     || !Number.isFinite(probedAt) || probedAt > now || now - probedAt > 14 * 86400_000
     || !['matroska', 'mkv', 'mov', 'mp4', 'mpegts', 'ts', 'avi', 'mpeg', 'ogg', 'flv'].includes(kind)
     || !Number.isSafeInteger(p.fileSizeBytes) || p.fileSizeBytes < 1024) return null;
