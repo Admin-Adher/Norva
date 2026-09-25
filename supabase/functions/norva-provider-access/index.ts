@@ -3156,7 +3156,10 @@ async function assertProviderReadAllowed(job, config) {
   if (Array.isArray(sessions) && sessions.length) throw new WorkerFault("rate_limited", true);
 
   const accountKey = providerAccountActivityKey(config);
-  const { data: busy, error: busyError } = await admin.rpc("provider_account_busy", { p_key: accountKey });
+  // A released metadata request must not fence the next page of this workflow
+  // for five minutes. The catalogue-specific fence still blocks viewers,
+  // language validation and unknown activity; Gateway admission owns live I/O.
+  const { data: busy, error: busyError } = await admin.rpc("provider_account_busy_for_catalog_refresh", { p_key: accountKey });
   if (busyError) throw new WorkerFault("internal_error", false);
   if (busy !== false) throw new WorkerFault("rate_limited", true);
 }

@@ -87,6 +87,35 @@ test('duration and explicit-date cycle requests retain separate PostgreSQL input
   }
 });
 
+test('credential metadata uses the catalogue activity fence and still fails closed for viewers or unknown activity', async () => {
+  const source = section('async function assertProviderReadAllowed', '\nasync function credentialAccountAffinityHash');
+  for (const scenario of [
+    { sessions: [], busy: false, allowed: true },
+    { sessions: [{ id: 'viewer' }], busy: false, error: 'rate_limited', noRpc: true },
+    { sessions: [], busy: true, error: 'rate_limited' },
+    { sessions: [], busy: null, error: 'rate_limited' },
+    { sessions: [], busy: false, rpcError: {}, error: 'internal_error' },
+  ]) {
+    const calls = [];
+    const query = { select() { return this; }, eq() { return this; }, in() { return this; },
+      gt() { return this; }, limit: async () => ({ data: scenario.sessions, error: null }) };
+    const guard = vm.runInNewContext(`(() => { ${source}; return assertProviderReadAllowed; })()`, {
+      URL, WorkerFault: class WorkerFault extends Error {},
+      admin: { from: () => query, rpc: async (name, input) => {
+        calls.push({ name, input }); return { data: scenario.busy, error: scenario.rpcError || null };
+      } },
+    });
+    const request = guard({ userId: 'owner' }, { serverUrl: 'https://provider.example.test', username: 'qa' });
+    if (scenario.allowed) await request;
+    else await assert.rejects(request, error => error.message === scenario.error);
+    assert.equal(calls.length, scenario.noRpc ? 0 : 1);
+    if (!scenario.noRpc) {
+      assert.equal(calls[0].name, 'provider_account_busy_for_catalog_refresh');
+      assert.equal(calls[0].input.p_key, 'provider.example.test/qa');
+    }
+  }
+});
+
 test('Provider Access Edge surface exposes credential candidates and durable catalog replacements', () => {
   assert.match(EDGE, /const API_VERSION = "provider-access\.norva\/v1"/);
   assert.match(EDGE, /parts\[0\] !== "v1"/);
