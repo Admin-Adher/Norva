@@ -2,6 +2,20 @@
 // proof are still mandatory at the call site. A provider name is not evidence.
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
+// Native decoders support finite containers beyond browser MP4. Size authority
+// must still come from an exact server probe, never a caller's playback hint.
+export function nativeVodFileProof(ownedHint = {}, now = Date.now()) {
+  const p = ownedHint.codecProfile || ownedHint.codec_profile || {};
+  const probedAt = Date.parse(p.probedAt || p.probed_at || '');
+  const kind = String(p.container || '').toLowerCase().split(',')[0];
+  if (String(p.probeSource || '').toLowerCase().replace(/[^a-z0-9]/g, '') !== 'gatewayprobe'
+    || !Number.isFinite(probedAt) || probedAt > now || now - probedAt > 14 * 86400_000
+    || !['matroska', 'mkv', 'mov', 'mp4', 'mpegts', 'ts', 'avi', 'mpeg', 'ogg', 'flv'].includes(kind)
+    || !Number.isSafeInteger(p.fileSizeBytes) || p.fileSizeBytes < 1024) return null;
+  return { fileSizeBytes: p.fileSizeBytes,
+    durationSeconds: Number.isFinite(p.durationSeconds) ? p.durationSeconds : null };
+}
+
 export function validNativeMp4Grant(grant, sessionId, publicBase = '') {
   try {
     if (grant?.protocol !== 1 || !UUID.test(sessionId) || !publicBase) return false;

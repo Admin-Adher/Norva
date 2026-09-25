@@ -62,6 +62,6 @@ test('series receipts recheck authority and exact target after a visibility adva
   assert.match(source, /const bindPreparedPlaybackReceipt = async[\s\S]*hasVisibleSeriesEpisodeReceiptProof[\s\S]*bindCompletedPlaybackReceipt/);
   assert.match(source, /assertSourceCurrent: async \(\) => \{[\s\S]*assertSourceCatalogVisible[\s\S]*hasVisibleSeriesEpisodeReceiptProof[\s\S]*currentTarget\.targetUrl[\s\S]*targetUrlHash/);
   assert.match(source, /finalizePlaybackReceiptResponse\(req, async \(\) => finalizeCatalogVisibilityResponse/);
-  // Native raw recovery adds a sixth response path; it must bind the same receipt.
-  assert.equal((source.match(/await bindPreparedPlaybackReceipt\(/g) || []).length, 6);
+  // Native recovery shares the opaque session's existing bound receipt path.
+  assert.equal((source.match(/await bindPreparedPlaybackReceipt\(/g) || []).length, 5);
 });

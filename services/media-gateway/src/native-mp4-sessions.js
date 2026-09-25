@@ -43,7 +43,7 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
     }
     return {
         grant(claims) {
-            if (!claims || claims.v !== 1 || claims.scope !== 'native-browser-mp4'
+            if (!claims || claims.v !== 1 || !['native-browser-mp4', 'native-vod-recovery'].includes(claims.scope)
                 || !UUID.test(claims.sid) || !UUID.test(claims.uid)
                 || !Number.isSafeInteger(claims.fileSizeBytes) || claims.fileSizeBytes < 1024
                 || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= now()
@@ -51,7 +51,7 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
                 || !allows?.(claims)) throw failure(403, 'NATIVE_MP4_CAPABILITY_REJECTED');
             const ownerHash = hash(claims.uid);
             const identity = hash(JSON.stringify([ownerHash, claims.url, claims.fileSizeBytes, claims.exp, claims.ua || '',
-                claims.resumeSourceId || '', claims.resumeSourceRevision || '', claims.sharedFragmentGrant || null]));
+                claims.resumeSourceId || '', claims.resumeSourceRevision || '', claims.sharedFragmentGrant || null, claims.scope]));
             const prior = entries.get(claims.sid);
             if (prior) {
                 if (prior.identity !== identity) throw failure(409, 'NATIVE_MP4_SESSION_CONFLICT');
@@ -123,7 +123,8 @@ function pipeNativeMp4(req, res, entry, resource) {
             for (const name of ['content-length', 'content-range', 'accept-ranges']) {
                 if (response.headers[name]) res.setHeader(name, response.headers[name]);
             }
-            res.setHeader('Content-Type', response.statusCode < 400 ? 'video/mp4' : 'application/octet-stream');
+            res.setHeader('Content-Type', response.statusCode < 400 && entry.claims.scope === 'native-browser-mp4'
+                ? 'video/mp4' : 'application/octet-stream');
             res.setHeader('Cache-Control', 'private, no-store');
             res.setHeader('Referrer-Policy', 'no-referrer');
             res.setHeader('X-Content-Type-Options', 'nosniff');

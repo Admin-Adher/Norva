@@ -6,7 +6,8 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 // attests that Edge resolved the owned movie and proved its exact browser codec
 // compatibility. This policy never changes provider routing or slot ownership.
 function allowsNativeMp4Capability(claims, { publicBaseUrl, enabled = true } = {}) {
-    if (enabled !== true || !claims || claims.v !== 1 || claims.scope !== 'native-browser-mp4'
+    if (enabled !== true || !claims || claims.v !== 1
+        || !['native-browser-mp4', 'native-vod-recovery'].includes(claims.scope)
         || !UUID.test(claims.sid) || !UUID.test(claims.uid) || !UUID.test(claims.resumeSourceId)
         || !Number.isSafeInteger(claims.fileSizeBytes) || claims.fileSizeBytes < 1024) return false;
     try {
