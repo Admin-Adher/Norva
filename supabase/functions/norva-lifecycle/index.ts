@@ -467,6 +467,7 @@ async function runWinback(db: SupabaseClient): Promise<number> {
   const hi = new Date(Date.now() - 3 * 86400_000).toISOString();
   const { data } = await db.from("cloud_entitlement_projection")
     .select("user_id,last_event_at,status,provider")
+    .eq("provider", "revolut")
     .in("status", ["expired", "canceled", "cancelled"])
     .is("winback_email_at", null)
     .gte("last_event_at", lo).lte("last_event_at", hi)
@@ -475,7 +476,9 @@ async function runWinback(db: SupabaseClient): Promise<number> {
   for (const row of (data ?? []) as (Proj & { last_event_at: string; provider?: string })[]) {
     // The personal-offer journey owns Revolut follow-ups when enabled. Never
     // send the older generic email in addition to a declined or accepted offer.
-    if (row.provider === "revolut" && (retentionPolicyError || retentionPolicy?.enabled)) continue;
+    // This legacy template links to the web checkout. Store subscribers need
+    // their own offer and destination, even when marketing consent is present.
+    if (row.provider !== "revolut" || retentionPolicyError || retentionPolicy?.enabled !== false) continue;
     if (!await marketingEmailAllowed(db, row.user_id)) continue;
     try {
       const queued = await queueUserEmail(
