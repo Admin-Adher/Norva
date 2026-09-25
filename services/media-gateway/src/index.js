@@ -1,4 +1,5 @@
 const { StoryboardStore } = require('./storyboard-store');
+const { createStoryboardDurabilityPolicy } = require('./storyboard-durability');
 const { storyboardEncodingArgs } = require('./storyboard-encoding');
 const { createProgress, disposeProgress, runProgressBatch } = require('./storyboard-progress');
 const crypto = require('crypto');
@@ -1085,9 +1086,9 @@ function isBackendUrl(url, pathPrefix = '/') {
     return BACKEND_ORIGINS.some((origin) => s.startsWith(origin + pathPrefix));
 }
 const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(), 'norva-media-gateway'));
-const storyboardPilotSourceIds = new Set(String(process.env.STORYBOARD_DURABLE_SOURCE_IDS || '').split(',').map(s => s.trim()).filter(Boolean));
-const storyboardStore = process.env.STORYBOARD_PRIVATE_DIR && storyboardPilotSourceIds.size
-    ? new StoryboardStore(path.resolve(process.env.STORYBOARD_PRIVATE_DIR), GATEWAY_TOKEN) : null;
+const storyboardDurability = createStoryboardDurabilityPolicy(process.env);
+const storyboardStore = storyboardDurability.enabled
+    ? new StoryboardStore(storyboardDurability.directory, GATEWAY_TOKEN) : null;
 const durableStoryboardIds = new Set();
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
@@ -2874,8 +2875,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        storyboardDurability: { protocol: 1, enabled: Boolean(storyboardStore),
-            providerScoped: storyboardPilotSourceIds.size > 0, pending: durableStoryboardIds.size },
+        storyboardDurability: { ...storyboardDurability.publicStatus(), pending: durableStoryboardIds.size },
         version: GATEWAY_VERSION,
         providerCircuitProtocol: 1,
         providerProbeDrainProtocol: 1,
@@ -9097,7 +9097,7 @@ app.post('/storyboard-async/:token', async (req, res) => {
         jobId, sourceId, callbackUrl, uploadUrl, duration, uid: claims.uid, prio: JOB_PRIORITY.service,
         expiresAt: Math.min(Number(claims.exp) * 1000, Date.now() + 90 * 60_000),
     };
-    if (storyboardStore && storyboardPilotSourceIds.has(sourceId)) {
+    if (storyboardStore && storyboardDurability.admits(claims.uid, sourceId)) {
         if (durableStoryboardIds.has(jobId)) return res.status(202).json({ queued: true });
         if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) return res.status(429).json({ error: 'Job queue full' });
         job.durable = true;
@@ -10673,7 +10673,7 @@ async function restoreDurableStoryboards() {
     for (const job of await storyboardStore.load()) {
         if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) break;
         if (durableStoryboardIds.has(job.jobId) || !isBackendUrl(job.callbackUrl)) continue;
-        if (job.sourceId && !storyboardPilotSourceIds.has(job.sourceId)) continue;
+        if (job.sourceId && !storyboardDurability.admits(job.uid, job.sourceId)) continue;
         durableStoryboardIds.add(job.jobId);
         insertByPriority(transcribeQueue, job);
         restored++;
@@ -10701,7 +10701,7 @@ async function renewDurableStoryboard(job) {
         if (!claims || claims.uid !== job.uid || !bytePipeAllowsPurpose(claims, 'storyboard-job') ||
             Number(claims.exp) * 1000 < Date.now() + 120_000 || !isBackendUrl(grant.uploadUrl, '/storage/') ||
             !/^[0-9a-f]{64}$/.test(grant.sourceBinding || '')) return false;
-        if (!storyboardPilotSourceIds.has(grant.sourceId) ||
+        if (!storyboardDurability.admits(job.uid, grant.sourceId) ||
             (job.sourceId && job.sourceId !== grant.sourceId)) return false;
         if (job.storyboardProgress && job.storyboardProgress.sourceBinding !== grant.sourceBinding) {
             job.progress = { ...job.storyboardProgress };
