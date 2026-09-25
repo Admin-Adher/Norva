@@ -624,6 +624,40 @@ test('post-switch snapshot permits hidden access renewal but still rejects anoth
   assert.throws(() => snapshot({ ...row, headRevision: -1 }, 'candidate'));
 });
 
+test('post-switch category paging respects the default Gateway limit and checkpoints a pending spool', async () => {
+  const calls = [];
+  const progress = { version: 1, catalogVersion: 8, action: 'live_categories', actionComplete: false,
+    cursor: '', spoolToken: '', contentSha256: '', processedCategories: 0, processedItems: 0,
+    observedItems: 0, categoryCount: 0 };
+  const source = section('const ACTIVE_REFRESH_ACTIONS', '\nasync function restoreAfterPostSwitchFailure');
+  const run = vm.runInNewContext(`(() => { ${source}; return runActivePostSwitchRefresh; })()`, {
+    requiredJobGenerationId: () => 'generation', isRecord: value => value && typeof value === 'object',
+    uuidValue: value => value, nonNegativeInteger: value => { assert.ok(Number.isInteger(value) && value >= 0); return value; },
+    WorkerFault: class WorkerFault extends Error {}, boundedGatewayRetryAfter: value => value,
+    gatewayMetadataPage: async (_runtime, _config, _job, _generation, request) => {
+      assert.ok(request.maxItems <= 250, 'production Gateway defaults to at most 250 items');
+      calls.push({ gateway: request });
+      return { pending: true, retryAfterSeconds: 2 };
+    },
+    workerRpc: async (name, params) => {
+      calls.push({ name, params });
+      if (name === 'norva_get_catalog_write_snapshot') return { generationId: 'generation',
+        headRevision: 1, configRevision: 1, sourceVisibilityEpoch: 3, userVisibilityEpoch: 3,
+        isCatalogVisible: false };
+      if (name === 'norva_begin_active_catalog_title_projection_refresh') return {
+        refreshRunId: 'run', checkpointRevision: 1, generationRevision: 8, visibilityEpoch: 3,
+        checkpoint: progress };
+      assert.equal(name, 'norva_checkpoint_active_catalog_title_refresh');
+      assert.equal(params.p_requeue, true);
+      assert.equal(params.p_progress.contentSha256, '');
+      return { checkpointRevision: 2, visibilityEpoch: 3, checkpoint: params.p_progress, requeued: true };
+    },
+  });
+  assert.equal((await run({ sourceId: 'source', userId: 'owner', jobId: 'job', leaseSequence: 1 },
+    'worker', {}, {})).complete, false);
+  assert.equal(calls.length, 4);
+});
+
 test('identity validation is bounded, complete and persists only comparator metrics', () => {
   const validation = section('async function validateCredentialCandidateJob', '\nasync function failCredentialValidation');
   assert.match(validation, /gatewayAccountInfo/);

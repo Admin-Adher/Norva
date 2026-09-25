@@ -1417,6 +1417,70 @@ select 'postclaim2',to_jsonb(claim)
 from public.norva_claim_credential_transition_jobs('phase3-post-2',1,120,
   'credential-transition-worker-v3-active-catalog-refresh') claim
 on conflict(key) do update set value=excluded.value;
+\if :{?phase3_empty_refresh_test}
+do $empty_refresh$
+declare
+  v_user uuid:='93000000-0000-4000-8000-000000000001';
+  v_source uuid:='93000000-0000-4000-8000-000000000102';
+  v_transition uuid:=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2');
+  v_generation uuid:=(select (value->>'generationId')::uuid from phase3_ctx where key='allocate2');
+  v_job uuid:=(select (value->>'job_id')::uuid from phase3_ctx where key='postclaim2');
+  v_lease integer:=(select (value->>'lease_sequence')::integer from phase3_ctx where key='postclaim2');
+  v_revision bigint;
+  v_snapshot jsonb; v_run jsonb; v_new_job uuid; v_claim record;
+begin
+  select revision into v_revision from public.cloud_source_transitions where id=v_transition;
+  v_snapshot:=public.norva_get_catalog_write_snapshot(v_source,v_user);
+  v_run:=public.norva_begin_active_catalog_title_projection_refresh(
+    v_source,v_user,v_generation,v_job,'phase3-post-2',v_lease,
+    (v_snapshot->>'headRevision')::bigint,(v_snapshot->>'configRevision')::bigint,
+    (v_snapshot->>'sourceVisibilityEpoch')::bigint,(v_snapshot->>'userVisibilityEpoch')::bigint);
+  begin
+    perform public.norva_checkpoint_active_catalog_title_refresh(
+      v_source,v_user,v_generation,(v_run->>'refreshRunId')::uuid,v_job,'phase3-post-2',v_lease,
+      (v_run->>'checkpointRevision')::bigint,(v_snapshot->>'headRevision')::bigint,
+      (v_snapshot->>'configRevision')::bigint,(v_snapshot->>'sourceVisibilityEpoch')::bigint,
+      (v_snapshot->>'userVisibilityEpoch')::bigint,
+      (v_run->'checkpoint')||jsonb_build_object('contentSha256',repeat('a',64),'spoolToken','fixture_bound_spool'),false,0);
+    perform public.norva_settle_credential_transition_job(v_job,'phase3-post-2',v_lease,'dead','internal_error',1);
+    begin
+      perform public.norva_retry_unstarted_credential_refresh(v_transition,v_user,v_job,v_revision,1,
+        'Reject accepted provider manifest regression');
+      raise exception 'accepted provider progress was incorrectly retried';
+    exception when sqlstate 'PT409' then
+      if sqlerrm<>'refresh already has provider progress' then raise; end if;
+    end;
+    -- Undo the entire negative probe through a subtransaction; retain no fake
+    -- provider manifest or terminal job from the rejected test branch.
+    raise exception 'rollback negative probe' using errcode='ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
+  perform public.norva_settle_credential_transition_job(v_job,'phase3-post-2',v_lease,'dead','internal_error',1);
+  v_new_job:=public.norva_retry_unstarted_credential_refresh(v_transition,v_user,v_job,v_revision,1,
+    'Retry empty provider run after page-bound correction');
+  if v_new_job is distinct from public.norva_retry_unstarted_credential_refresh(
+    v_transition,v_user,v_job,v_revision,1,'Replay empty provider recovery regression') then
+    raise exception 'empty recovery replay created a second job';
+  end if;
+  select claim.* into strict v_claim from public.norva_claim_credential_transition_jobs(
+    'phase3-post-2',1,120,'credential-transition-worker-v3-active-catalog-refresh') claim;
+  if v_claim.job_id<>v_new_job then raise exception 'wrong replacement job claimed'; end if;
+  update phase3_ctx set value=to_jsonb(v_claim) where key='postclaim2';
+  insert into phase3_ctx values('empty-run-recovery',jsonb_build_object('oldJobId',v_job,'oldRunId',v_run->>'refreshRunId'));
+end
+$empty_refresh$;
+reset role;
+select extensions.ok((select job.state='dead' and checkpoint.checkpoint_revision=1
+  and checkpoint.progress->>'contentSha256'=''
+  and job.title_projection_refresh_run_id=checkpoint.refresh_run_id
+  and generation.title_projection_refresh_run_id<>checkpoint.refresh_run_id
+  from public.cloud_source_credential_transition_jobs job
+  join public.cloud_source_catalog_title_refresh_checkpoints checkpoint on checkpoint.job_id=job.id
+  join public.cloud_source_catalog_generations generation on generation.id=job.catalog_generation_id
+  where job.id=(select (value->>'oldJobId')::uuid from phase3_ctx where key='empty-run-recovery')),
+  'empty recovery retains the old failure and ledger while allocating a distinct run');
+set local role service_role;
+\endif
 select pg_temp.phase3_refresh_proof();
 select public.norva_complete_credential_transition(
   (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
