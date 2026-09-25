@@ -793,7 +793,10 @@ test('playback expiry aborts while a 401 token refresh remains unresolved', asyn
   await assert.rejects(expiry, (error) => error?.name === 'AbortError');
 });
 
-for (const cached of [false, true]) test(`standalone native VOD owns, replaces, and closes cloud sessions exactly once (cache=${cached})`, async () => {
+for (const scenario of ['no_data_timeout', 'ERROR_CODE_IO_BAD_HTTP_STATUS', 'provider_html_response', 'media_cache_unavailable', 'closed-during-resolution']) test(`standalone native VOD owns, replaces, and closes cloud sessions exactly once (${scenario})`, async () => {
+  const closedDuringResolution = scenario === 'closed-during-resolution';
+  const reason = closedDuringResolution ? 'ERROR_CODE_IO_BAD_HTTP_STATUS' : scenario;
+  const cached = reason === 'media_cache_unavailable';
   const launches = [];
   const lifecycle = [];
   const scheduled = [];
@@ -878,7 +881,12 @@ for (const cached of [false, true]) test(`standalone native VOD owns, replaces, 
         xtream: {
           async getStreamUrl(_source, _id, _type, _container, options) {
             assert.equal(options.mediaCacheReadPolicy, cached ? 'bypass-once' : undefined);
+            assert.equal(options.nativeNetworkRecovery, cached ? undefined : true);
             lifecycle.push(['resolve', freshSessionId]);
+            if (closedDuringResolution) {
+              assert.equal(window.__norvaNative.onPlaybackClosed(initialSessionId, 'back'), 'accepted');
+              releasePendingExpiry();
+            }
             return {
               url: 'https://provider.example/episode-fresh.mkv',
               fallbackUrl: 'https://gateway.example/session-fresh/raw',
@@ -949,13 +957,20 @@ for (const cached of [false, true]) test(`standalone native VOD owns, replaces, 
     'episode',
     'episode-3',
     120,
-    cached ? 'media_cache_unavailable' : 'no_data_timeout',
+    reason,
     'recovery-token-1',
   );
   assert.equal(retryResult, 'scheduled');
   const recovery = scheduled.find(({ delay }) => delay === 1200);
   assert.ok(recovery, 'the existing first bounded VOD retry must be scheduled');
   await recovery.callback();
+
+  if (closedDuringResolution) {
+    assert.equal(launches.length, 1, 'Back must cancel the in-flight native relaunch');
+    assert.ok(lifecycle.some(([event, id]) => event === 'expiry-resolved' && id === freshSessionId),
+      'the late replacement must be expired instead of holding a provider slot');
+    return;
+  }
 
   const replacementStop = lifecycle.findIndex(
     ([event, sessionIds, keepalive]) => event === 'stop'

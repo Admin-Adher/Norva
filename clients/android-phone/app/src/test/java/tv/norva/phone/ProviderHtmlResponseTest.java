@@ -23,7 +23,7 @@ public final class ProviderHtmlResponseTest {
         assertFalse(html("<?xml version='1.0'?><MPD>"));
     }
 
-    @Test public void onlyConfirmedHtmlStopsRecoveryAndDiagnosticsContainNoBody() {
+    @Test public void onlyConfirmedHtmlIdentifiesTheRefusalAndDiagnosticsContainNoBody() {
         IOException error = new BoundedRangeDataSource.HtmlResponseException();
         assertTrue(BoundedRangeDataSource.isHtmlResponse(new IOException("wrapped", error)));
         assertFalse(BoundedRangeDataSource.isHtmlResponse(new IOException("network")));

@@ -761,11 +761,12 @@ public class PlayerActivity extends Activity {
                 engineReady = false;
                 if (BoundedRangeDataSource.isHtmlResponse(error)) {
                     rememberRecoverySignal("provider_html_response", "direct", false);
-                    showPlaybackFailure(
-                            PlaybackUiState.TERMINAL,
-                            R.string.player_error_title,
-                            getString(R.string.player_no_data),
-                            false);
+                    if (sourceId != null && !sourceId.isEmpty() && itemId != null && !itemId.isEmpty()) {
+                        requestFreshStream("provider_html_response");
+                    } else {
+                        showPlaybackFailure(PlaybackUiState.TERMINAL, R.string.player_error_title,
+                                getString(R.string.player_no_data), false);
+                    }
                     return;
                 }
                 int httpStatus = ProviderPlaybackPolicy.httpStatus(error);

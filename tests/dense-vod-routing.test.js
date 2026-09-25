@@ -907,6 +907,29 @@ test('explicit conversion of an unknown-codec MP4 opens exactly one Gateway lane
     assert.strictEqual(calls[0].enginePipe, undefined);
 });
 
+test('native network recovery requests one raw relay while ordinary native VOD stays direct', async () => {
+    for (const container of ['mkv', 'mp4', 'ts']) {
+        for (const recovery of [false, true]) {
+            const { API, calls } = loadCloudApi({ native: true });
+            await API.proxy.xtream.getStreamUrl('source-1', '123', 'movie', container,
+                recovery ? { nativeNetworkRecovery: true } : {});
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0].mode, recovery ? 'relay' : 'direct');
+            assert.strictEqual(calls[0].enginePipe, recovery ? true : undefined);
+            assert.strictEqual(calls[0].nativeNetworkRecovery, recovery ? true : undefined);
+            assert.notStrictEqual(calls[0].requiresTranscode, true);
+        }
+    }
+});
+
+test('a browser recovery hint cannot select the native raw route', async () => {
+    const { API, calls } = loadCloudApi();
+    await API.proxy.xtream.getStreamUrl('source-1', '123', 'movie', 'mkv', { nativeNetworkRecovery: true });
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].mode, 'transcode');
+    assert.strictEqual(calls[0].nativeNetworkRecovery, undefined);
+});
+
 test('unknown MKV remains direct on a native player', async () => {
     const { API, calls } = loadCloudApi({ native: true });
     const result = await API.proxy.xtream.getStreamUrl(

@@ -542,6 +542,7 @@
         // native close can expire the exact registered lifecycle once, and so a
         // replacement never competes with the previous provider lane.
         const nativeVodCloudSessions = new Map();
+        const nativeVodSessionClaims = new Map();
         const nativeVodCleanupByOwner = new WeakMap();
         const stopNativeVodCloudSessions = (owner, options = {}) => {
             if (!owner) return Promise.resolve();
@@ -580,11 +581,25 @@
             if (!sessionId || !owner || typeof owner.registerCloudPlaybackSession !== 'function') return '';
             owner.registerCloudPlaybackSession(sessionId);
             nativeVodCloudSessions.set(sessionId, { owner });
+            nativeVodSessionClaims.set(sessionId, activeNativeIntentClaim);
+            if (nativeVodSessionClaims.size > 64) {
+                nativeVodSessionClaims.delete(nativeVodSessionClaims.keys().next().value);
+            }
             return sessionId;
         };
         window.__norvaNative.onPlaybackClosed = (rawSessionId, _reason = '') => {
             const sessionId = boundedNativePlaybackSessionId(rawSessionId);
             if (!sessionId) return 'not_ready';
+            // A close can arrive while its replacement URL is resolving, after
+            // the previous session has already left the active registry.
+            if (nativeVodSessionClaims.get(sessionId) === activeNativeIntentClaim
+                && activeNativeIntentClaim) {
+                activeNativeRecoveryTokens.delete(activeNativeIntentKey);
+                activeNativeIntentKey = '';
+                activeNativeIntentClaim = '';
+                nativeIntentGeneration += 1;
+            }
+            nativeVodSessionClaims.delete(sessionId);
             if (completedNativePlaybackCloses.has(sessionId)) {
                 acknowledgeNativePlaybackClose(sessionId);
                 return 'accepted';
@@ -1246,9 +1261,19 @@
                     })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
                 const meta = initialMeta;
+                const launchClaim = activeNativeIntentClaim;
                 let bypassNativeCache = false;
+                let nativeNetworkRecovery = false;
                 const launchResolved = async (resumeAt, fresh = false, recoveryToken = '', reason = '') => {
                     if (reason === 'media_cache_unavailable') bypassNativeCache = true;
+                    // A fresh direct URL cannot repair a refused network route.
+                    // The Activity closes its socket before requesting this one
+                    // replacement. Keep decoding on-device; relay the same file.
+                    if (['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS',
+                        'ERROR_CODE_IO_NETWORK_CONNECTION_FAILED', 'ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT',
+                        'ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED', 'no_data_timeout'].includes(reason)) {
+                        nativeNetworkRecovery = true;
+                    }
                     let resolved;
                     if (fresh && meta && window.API?.proxy?.xtream?.getStreamUrl) {
                         await stopNativeVodCloudSessions(this);
@@ -1266,7 +1291,9 @@
                             content.id,
                             streamType,
                             container,
-                            { ...hint, ...(bypassNativeCache ? { mediaCacheReadPolicy: 'bypass-once' } : {}) }
+                            { ...hint,
+                                ...(nativeNetworkRecovery ? { nativeNetworkRecovery: true } : {}),
+                                ...(bypassNativeCache ? { mediaCacheReadPolicy: 'bypass-once' } : {}) }
                         );
                     } else {
                         resolved = await resolveStreamPayload(streamUrl);
@@ -1281,6 +1308,12 @@
                         || playback?.cloudPlaybackSessionId
                         || ''
                     ).trim();
+                    if (activeNativeIntentClaim !== launchClaim) {
+                        if (playbackSessionId) {
+                            await publishNativePlaybackCloseTask(playbackSessionId, this, nativeVodCleanupByOwner);
+                        }
+                        return;
+                    }
                     if (!nativePlay(resolved.url, nativeTitle(content), meta, resumeAt, fallbackUrl, {
                         poster: content.poster || '',
                         previousTitle: content.previousEpisodeLabel || '',
@@ -1294,6 +1327,9 @@
                             || null,
                         recoveryToken
                     })) {
+                        if (playbackSessionId) {
+                            await publishNativePlaybackCloseTask(playbackSessionId, this, nativeVodCleanupByOwner);
+                        }
                         throw new Error('Native relaunch throttled');
                     }
                     registerNativeVodCloudSession(this, playbackSessionId);

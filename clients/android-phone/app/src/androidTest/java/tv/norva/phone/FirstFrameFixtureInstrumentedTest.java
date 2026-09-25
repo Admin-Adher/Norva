@@ -232,6 +232,77 @@ public final class FirstFrameFixtureInstrumentedTest {
         }
     }
 
+    @Test public void ownedHtmlRefusalRecoversThroughOneRawRouteAtTheRequestedPosition() throws Exception {
+        Instrumentation ins = InstrumentationRegistry.getInstrumentation();
+        Context target = ins.getTargetContext();
+        File fixture = new File(target.getCacheDir(), "norva-network-recovery.mkv");
+        copyFixture(ins.getContext(), fixture);
+        String testToken = UUID.randomUUID().toString();
+        CountDownLatch frame = new CountDownLatch(1);
+        AtomicReference<Intent> frameResult = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger recoveries = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicReference<Throwable> callbackFailure = new AtomicReference<>();
+        Instrumentation.ActivityMonitor monitor = ins.addMonitor(PlayerActivity.class.getName(), null, false);
+        AtomicReference<Activity> activity = new AtomicReference<>();
+        try (FixtureHttpServer blocked = new FixtureHttpServer(
+                "<!DOCTYPE html><html>Unavailable</html>".getBytes(StandardCharsets.UTF_8), "text/html");
+             FixtureHttpServer raw = new FixtureHttpServer(Files.readAllBytes(fixture.toPath()))) {
+            BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override public void onReceive(Context context, Intent intent) {
+                    if (PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT.equals(intent.getAction())) {
+                        if (testToken.equals(intent.getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN))) {
+                            frameResult.set(intent); frame.countDown();
+                        }
+                        return;
+                    }
+                    if (!"network-fixture".equals(intent.getStringExtra(PlayerActivity.EXTRA_ITEM_ID))) return;
+                    try {
+                        assertEquals("provider_html_response", intent.getStringExtra("retryReason"));
+                        assertEquals(3L, intent.getLongExtra("positionSeconds", -1));
+                        assertEquals(1, recoveries.incrementAndGet());
+                        String payload = new org.json.JSONObject().put("url", raw.url())
+                                .put("sourceId", "network-fixture-source").put("itemId", "network-fixture")
+                                .put("resumeSeconds", 3).toString();
+                        target.sendBroadcast(new Intent(PlayerActivity.ACTION_APPLY_FRESH_STREAM)
+                                .setPackage(target.getPackageName())
+                                .putExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN,
+                                        intent.getStringExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN))
+                                .putExtra(PlayerActivity.EXTRA_RECOVERY_PAYLOAD, payload));
+                    } catch (Throwable failure) { callbackFailure.set(failure); frame.countDown(); }
+                }
+            };
+            IntentFilter filter = new IntentFilter(PlayerActivity.ACTION_REQUEST_FRESH_STREAM);
+            filter.addAction(PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT);
+            ContextCompat.registerReceiver(target, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+            try {
+                target.startActivity(new Intent(target, PlayerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        .putExtra(PlayerActivity.EXTRA_URL, blocked.url())
+                        .putExtra(PlayerActivity.EXTRA_TITLE, "Network recovery fixture")
+                        .putExtra(PlayerActivity.EXTRA_SOURCE_ID, "network-fixture-source")
+                        .putExtra(PlayerActivity.EXTRA_ITEM_ID, "network-fixture")
+                        .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
+                        .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, 3)
+                        .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, testToken));
+                activity.set(ins.waitForMonitorWithTimeout(monitor, 10000));
+                assertTrue("Native raw recovery must render a frame", frame.await(30, TimeUnit.SECONDS));
+                if (callbackFailure.get() != null) throw new AssertionError(callbackFailure.get());
+                assertEquals("first_frame", frameResult.get().getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_OUTCOME));
+                assertEquals("The refused route must not be retried", 1, blocked.requests.get());
+                assertEquals(1, recoveries.get());
+                java.lang.reflect.Field field = PlayerActivity.class.getDeclaredField("player");
+                field.setAccessible(true);
+                androidx.media3.exoplayer.ExoPlayer player = (androidx.media3.exoplayer.ExoPlayer) field.get(activity.get());
+                ins.runOnMainSync(() -> {
+                    assertTrue("Cross-device resume survives the refusal", player.getCurrentPosition() >= 3000);
+                    activity.get().onBackPressed();
+                });
+            } finally {
+                target.unregisterReceiver(receiver);
+                if (activity.get() != null) ins.runOnMainSync(activity.get()::finish);
+            }
+        } finally { ins.removeMonitor(monitor); fixture.delete(); }
+    }
+
     @Test
     public void episodeControlsFillTheDisplayAndHandOffInsteadOfSeeking() throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
