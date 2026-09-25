@@ -260,7 +260,7 @@ test('locked profile placement is allowlisted end to end', () => {
   assert.match(subscribe, /placement: paywallPlacement/);
   assert.match(billing, /opts\.placement === 'locked_profile'/);
   assert.match(checkout, /params\.get\('placement'\) === 'locked_profile'/);
-  assert.match(checkout, /revolutCreateOrder\(\{ plan, period, returnTo, intent, placement \}\)/);
+  assert.match(checkout, /revolutCreateOrder\(\{ plan, period, returnTo, intent, placement, retentionOfferId \}\)/);
   assert.match(revolut, /if \(!selectedExperiment\)[\s\S]{0,100}Unsupported paywall placement/);
 });
 

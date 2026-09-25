@@ -22,6 +22,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { renderRetentionOffer, type RetentionOffer } from "../_shared/retention-email.ts";
 import {
   renderWelcome, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
   renderCancellationConfirmed, renderSubscriptionResumed,
@@ -183,11 +184,11 @@ interface LifecycleQueueResult { durable: boolean; created: boolean; outboxId: s
 async function queueUserEmail(
   db: SupabaseClient,
   userId: string,
-  make: (firstName: string | null, context: { unsubscribeUrl?: string }) => Rendered,
+  make: (firstName: string | null, context: { unsubscribeUrl?: string; locale?: string }) => Rendered,
   opts: {
     dedupeKey: string;
     marketing?: boolean;
-    markerKind: "welcome" | "dunning" | "winback" | "abandoned" | "billing_event";
+    markerKind: "welcome" | "dunning" | "winback" | "abandoned" | "billing_event" | "retention";
     markerReference?: string;
     markerStage?: number;
   },
@@ -201,7 +202,10 @@ async function queueUserEmail(
   const unsubscribeUrl = opts.marketing
     ? `${UNSUBSCRIBE_URL}?token=${encodeURIComponent(await makeUnsubscribeToken(userId))}`
     : undefined;
-  const rendered = make(firstNameOf(u?.user ?? null), { unsubscribeUrl });
+  const rendered = make(firstNameOf(u?.user ?? null), {
+    unsubscribeUrl,
+    locale: String(u?.user?.user_metadata?.language || u?.user?.user_metadata?.locale || "en"),
+  });
   const unsubscribeHeaders = opts.marketing && unsubscribeUrl
     ? {
       "List-Unsubscribe": `<${UNSUB_MAILTO}>, <${unsubscribeUrl}>`,
@@ -438,18 +442,40 @@ async function runRenewalNotices(db: SupabaseClient): Promise<number> {
 // MARKETING email (not transactional). It is consent-gated twice (before claim and
 // immediately before Resend), carries RFC8058 one-click headers, and stays OFF by
 // default until the per-flow flag is deliberately enabled.
+async function runRetentionOffers(db: SupabaseClient): Promise<number> {
+  const { data, error } = await db.rpc("norva_retention_candidates");
+  if (error) throw new Error("Retention offer selection failed");
+  let queuedCount = 0;
+  for (const offer of (Array.isArray(data) ? data : []) as RetentionOffer[]) {
+    try {
+    const queued = await queueUserEmail(db, offer.user_id, (_name, context) => renderRetentionOffer(offer, context), {
+      dedupeKey: `lifecycle:retention:${offer.reference}`, marketing: true,
+      markerKind: "retention", markerReference: offer.reference,
+    });
+    if (queued.created) queuedCount++;
+    } catch (_) {
+      console.error("[norva-lifecycle] retention enqueue failed");
+    }
+  }
+  return queuedCount;
+}
+
 async function runWinback(db: SupabaseClient): Promise<number> {
+  const { data: retentionPolicy, error: retentionPolicyError } = await db.from("cloud_retention_policy").select("enabled").eq("singleton", true).maybeSingle();
   // Once, 3–30 days after the subscription lapsed.
   const lo = new Date(Date.now() - 30 * 86400_000).toISOString();
   const hi = new Date(Date.now() - 3 * 86400_000).toISOString();
   const { data } = await db.from("cloud_entitlement_projection")
-    .select("user_id,last_event_at,status")
+    .select("user_id,last_event_at,status,provider")
     .in("status", ["expired", "canceled", "cancelled"])
     .is("winback_email_at", null)
     .gte("last_event_at", lo).lte("last_event_at", hi)
     .limit(BATCH);
   let sent = 0;
-  for (const row of (data ?? []) as (Proj & { last_event_at: string })[]) {
+  for (const row of (data ?? []) as (Proj & { last_event_at: string; provider?: string })[]) {
+    // The personal-offer journey owns Revolut follow-ups when enabled. Never
+    // send the older generic email in addition to a declined or accepted offer.
+    if (row.provider === "revolut" && (retentionPolicyError || retentionPolicy?.enabled)) continue;
     if (!await marketingEmailAllowed(db, row.user_id)) continue;
     try {
       const queued = await queueUserEmail(
@@ -673,7 +699,7 @@ async function runBehavioralPushes(
       continue;
     }
     const tokens = Array.isArray(authorization.tokens)
-      ? [...new Set(authorization.tokens.map((value: unknown) => String(value ?? "")).filter(Boolean))]
+      ? [...new Set<string>(authorization.tokens.map((value: unknown) => String(value ?? "")).filter(Boolean))]
       : [];
     const deepLink = behavioralDeepLink(String(authorization.deep_link ?? claim.deep_link), claim.id, {
       mobile: true,
@@ -1006,7 +1032,10 @@ Deno.serve(async (req) => {
     // Expiry is never allowed to run without the warning/dunning flow, even if
     // an environment variable is accidentally toggled in isolation.
     if (BILLING_LIVE && LC_DUNNING && LC_EXPIRE) out.expired_past_due = await runExpirePastDue(db);
-    if (BILLING_LIVE && LC_WINBACK) out.winback = await runWinback(db);
+    if (BILLING_LIVE && LC_WINBACK) {
+      out.retention = await runRetentionOffers(db);
+      out.winback = await runWinback(db);
+    }
     if (BILLING_LIVE && LC_ABANDONED) out.abandoned = await runAbandoned(db);
     await db.rpc("prune_lifecycle_billing_intents");
     return json({ ok: true, ...out });
