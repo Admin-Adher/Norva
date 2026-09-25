@@ -9,7 +9,9 @@ export function nativeVodFileProof(ownedHint = {}, now = Date.now()) {
   const probedAt = Date.parse(p.probedAt || p.probed_at || '');
   const kind = String(p.container || '').toLowerCase().split(',')[0];
   const origin = String(p.probeSource || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!(origin === 'gatewayprobe' || (origin === 'gatewayinband' && p.metadataComplete === true))
+  // metadataComplete attests the MKV track inventory, not MP4 byte length.
+  // This lane needs the exact server-observed size and container only.
+  if (!['gatewayprobe', 'gatewayinband'].includes(origin)
     || !Number.isFinite(probedAt) || probedAt > now || now - probedAt > 14 * 86400_000
     || !['matroska', 'mkv', 'mov', 'mp4', 'mpegts', 'ts', 'avi', 'mpeg', 'ogg', 'flv'].includes(kind)
     || !Number.isSafeInteger(p.fileSizeBytes) || p.fileSizeBytes < 1024) return null;

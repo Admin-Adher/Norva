@@ -134,8 +134,11 @@ test('native recovery accepts complete exact playback-produced profiles and reje
     for (const container of ['mov,mp4,m4a,3gp,3g2,mj2', 'matroska,webm']) {
         const observed = profile({container, probeSource:'gateway_inband', metadataComplete:true});
         assert.deepEqual(nativeVodFileProof(observed, now), {fileSizeBytes:123456,durationSeconds:120});
-        for (const metadataComplete of [false, undefined, 'true']) {
-            assert.equal(nativeVodFileProof(profile({...observed.codecProfile, metadataComplete}), now), null);
+        for (const metadataComplete of [false, undefined]) {
+            assert.deepEqual(nativeVodFileProof(profile({...observed.codecProfile, metadataComplete}), now), {fileSizeBytes:123456,durationSeconds:120});
+        }
+        for (const fileSizeBytes of [0, undefined, '123456']) {
+            assert.equal(nativeVodFileProof(profile({...observed.codecProfile, fileSizeBytes}), now), null);
         }
     }
 });
