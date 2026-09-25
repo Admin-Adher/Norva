@@ -1513,5 +1513,17 @@
   "ui_web_00e8c3f9d962": {
     "ar": "قيّم هذا المسلسل",
     "bn": "এই সিরিজটিকে রেট করুন"
+  },
+  "ui_web_d506d4a34939": {
+    "fr": "Fin de l’essai"
+  },
+  "ui_web_c05a75e0f571": {
+    "fr": "Réactiver le renouvellement"
+  },
+  "ui_web_309e5b1f7b55": {
+    "fr": "Conserver mon forfait"
+  },
+  "ui_web_fa8ed0bdabdd": {
+    "fr": "Forfait"
   }
 }

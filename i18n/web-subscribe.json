@@ -508,5 +508,133 @@
     "ar": "Norva مشغّل وسائط؛ لا يتضمن أي محتوى أو اشتراك تلفزيوني. يوفّر المحتوى التلفزيوني مزوّد الخدمة الخاص بك.",
     "id": "Norva adalah pemutar media; tidak termasuk konten atau langganan TV. Konten TV disediakan oleh layanan TV Anda sendiri.",
     "fil": "Media player ang Norva; walang kasamang content o subscription sa TV. Ang sarili mong serbisyo sa TV ang nagbibigay ng content."
+  },
+  "ui_sub_renewal_cancelled": {
+    "source": "Renewal cancelled",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Renewal cancelled",
+    "fr": "Renouvellement annulé",
+    "pt-BR": "Renovação cancelada",
+    "es": "Renovación cancelada",
+    "hi": "नवीनीकरण रद्द",
+    "tr": "Yenileme iptal edildi",
+    "bn": "নবায়ন বাতিল",
+    "ar": "تم إلغاء التجديد",
+    "id": "Perpanjangan dibatalkan",
+    "fil": "Kinansela ang pag-renew"
+  },
+  "ui_sub_cancelled_until": {
+    "source": "Cancellation confirmed. You can keep watching until {{date}}. Your plan will not renew.",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Cancellation confirmed. You can keep watching until {{date}}. Your plan will not renew.",
+    "fr": "Annulation confirmée. Vous pouvez continuer à regarder jusqu’au {{date}}. Votre forfait ne sera pas renouvelé.",
+    "pt-BR": "Cancelamento confirmado. Você pode continuar assistindo até {{date}}. Seu plano não será renovado.",
+    "es": "Cancelación confirmada. Puedes seguir viendo hasta el {{date}}. Tu plan no se renovará.",
+    "hi": "रद्द करना पुष्ट हो गया है। आप {{date}} तक देखना जारी रख सकते हैं। आपका प्लान नवीनीकृत नहीं होगा।",
+    "tr": "İptal onaylandı. {{date}} tarihine kadar izlemeye devam edebilirsiniz. Planınız yenilenmeyecek.",
+    "bn": "বাতিলকরণ নিশ্চিত হয়েছে। আপনি {{date}} পর্যন্ত দেখা চালিয়ে যেতে পারবেন। আপনার প্ল্যান নবায়ন হবে না।",
+    "ar": "تم تأكيد الإلغاء. يمكنك متابعة المشاهدة حتى {{date}}. لن يتم تجديد خطتك.",
+    "id": "Pembatalan dikonfirmasi. Anda dapat terus menonton hingga {{date}}. Paket Anda tidak akan diperpanjang.",
+    "fil": "Nakumpirma ang pagkansela. Maaari kang patuloy na manood hanggang {{date}}. Hindi mare-renew ang iyong plano."
+  },
+  "ui_sub_manage_anytime": {
+    "source": "You can manage or cancel your subscription anytime.",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "You can manage or cancel your subscription anytime.",
+    "fr": "Vous pouvez gérer ou annuler votre abonnement à tout moment.",
+    "pt-BR": "Você pode gerenciar ou cancelar sua assinatura a qualquer momento.",
+    "es": "Puedes gestionar o cancelar tu suscripción en cualquier momento.",
+    "hi": "आप कभी भी अपनी सदस्यता प्रबंधित या रद्द कर सकते हैं।",
+    "tr": "Aboneliğinizi istediğiniz zaman yönetebilir veya iptal edebilirsiniz.",
+    "bn": "আপনি যেকোনো সময় আপনার সাবস্ক্রিপশন পরিচালনা বা বাতিল করতে পারেন।",
+    "ar": "يمكنك إدارة اشتراكك أو إلغاؤه في أي وقت.",
+    "id": "Anda dapat mengelola atau membatalkan langganan kapan saja.",
+    "fil": "Maaari mong pamahalaan o kanselahin ang iyong subscription anumang oras."
+  },
+  "ui_sub_action_failed": {
+    "source": "We could not confirm this change. Please retry or contact support@norva.tv.",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "We could not confirm this change. Please retry or contact support@norva.tv.",
+    "fr": "Nous n’avons pas pu confirmer cette modification. Réessayez ou contactez support@norva.tv.",
+    "pt-BR": "Não foi possível confirmar esta alteração. Tente novamente ou entre em contato com support@norva.tv.",
+    "es": "No pudimos confirmar este cambio. Vuelve a intentarlo o contacta con support@norva.tv.",
+    "hi": "हम इस बदलाव की पुष्टि नहीं कर सके। फिर कोशिश करें या support@norva.tv से संपर्क करें।",
+    "tr": "Bu değişikliği onaylayamadık. Tekrar deneyin veya support@norva.tv ile iletişime geçin.",
+    "bn": "আমরা এই পরিবর্তন নিশ্চিত করতে পারিনি। আবার চেষ্টা করুন অথবা support@norva.tv-তে যোগাযোগ করুন।",
+    "ar": "تعذر تأكيد هذا التغيير. أعد المحاولة أو تواصل مع support@norva.tv.",
+    "id": "Kami tidak dapat mengonfirmasi perubahan ini. Coba lagi atau hubungi support@norva.tv.",
+    "fil": "Hindi namin makumpirma ang pagbabagong ito. Subukang muli o makipag-ugnayan sa support@norva.tv."
+  },
+  "ui_sub_reason_cost": {
+    "source": "It costs too much",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "It costs too much",
+    "fr": "Le prix est trop élevé",
+    "pt-BR": "O preço é muito alto",
+    "es": "El precio es demasiado alto",
+    "hi": "कीमत बहुत अधिक है",
+    "tr": "Fiyatı çok yüksek",
+    "bn": "দাম অনেক বেশি",
+    "ar": "السعر مرتفع جدًا",
+    "id": "Harganya terlalu mahal",
+    "fil": "Masyadong mahal"
+  },
+  "ui_sub_reason_usage": {
+    "source": "I am not using Norva enough",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "I am not using Norva enough",
+    "fr": "Je n’utilise pas assez Norva",
+    "pt-BR": "Não uso o Norva o suficiente",
+    "es": "No uso Norva lo suficiente",
+    "hi": "मैं Norva का पर्याप्त उपयोग नहीं कर रहा हूँ",
+    "tr": "Norva’yı yeterince kullanmıyorum",
+    "bn": "আমি Norva যথেষ্ট ব্যবহার করছি না",
+    "ar": "لا أستخدم Norva بما يكفي",
+    "id": "Saya jarang menggunakan Norva",
+    "fil": "Hindi ko gaanong nagagamit ang Norva"
+  },
+  "ui_sub_reason_technical": {
+    "source": "I had a technical problem",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "I had a technical problem",
+    "fr": "J’ai rencontré un problème technique",
+    "pt-BR": "Tive um problema técnico",
+    "es": "Tuve un problema técnico",
+    "hi": "मुझे तकनीकी समस्या हुई",
+    "tr": "Teknik bir sorun yaşadım",
+    "bn": "আমার একটি প্রযুক্তিগত সমস্যা হয়েছে",
+    "ar": "واجهت مشكلة تقنية",
+    "id": "Saya mengalami masalah teknis",
+    "fil": "Nagkaroon ako ng teknikal na problema"
+  },
+  "ui_sub_reason_other": {
+    "source": "Another reason",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Another reason",
+    "fr": "Une autre raison",
+    "pt-BR": "Outro motivo",
+    "es": "Otro motivo",
+    "hi": "कोई अन्य कारण",
+    "tr": "Başka bir neden",
+    "bn": "অন্য একটি কারণ",
+    "ar": "سبب آخر",
+    "id": "Alasan lain",
+    "fil": "Ibang dahilan"
   }
 }

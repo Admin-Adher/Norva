@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=1893cafe50"></script>
+    <script src="/js/i18n.js?v=d12f140006"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_72d0c37fff0b">Your Norva subscription</title>
@@ -191,6 +191,11 @@
       const storeNote = document.getElementById('store-note');
       const SUB_STATUSES = ['trialing', 'active', 'cancelled_at_period_end', 'past_due', 'grace'];
 
+      function copy(key, fallback, values) {
+        return globalThis.NorvaI18n?.t(key, { defaultValue: fallback, ...values })
+          ?? fallback.replace(/\{\{(\w+)\}\}/g, (_, name) => String(values?.[name] ?? ''));
+      }
+
       function el(tag, cls, text) {
         const e = document.createElement(tag);
         if (cls) e.className = cls;
@@ -199,17 +204,14 @@
       }
       function fmtDate(iso) {
         if (!iso) return '—';
-        try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
+        try { return new Date(iso).toLocaleDateString(document.documentElement.lang || undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
         catch (_) { return '—'; }
-      }
-      function daysLeft(iso) {
-        if (!iso) return null;
-        return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
       }
       function planLabel(code) {
         const p = String(code || '').toLowerCase();
+        if (p === 'plus') return copy('ui_web_acc74895bf2b', 'Norva Plus');
         if (p === 'family') return (globalThis.NorvaI18n?.t("ui_web_fada8f5631ee", { defaultValue: "Norva Family" }) ?? 'Norva Family');
-        if (!p || p === 'none' || p === 'free' || p === 'plus' || p === 'premium' || p === 'trial' || p === 'manual') return 'Norva';
+        if (!p || p === 'none' || p === 'free' || p === 'premium' || p === 'trial' || p === 'manual') return 'Norva';
         return 'Norva ' + p.charAt(0).toUpperCase() + p.slice(1);
       }
       function isNative() { try { return !!(window.NorvaBilling && window.NorvaBilling.isNative()); } catch (_) { return false; } }
@@ -296,7 +298,7 @@
       }
 
       function backBtn(label) {
-        const a = el('a', 'btn ghost', label || (globalThis.NorvaI18n?.t("ui_web_91d13041c60d", { defaultValue: "Back to Norva" }) ?? 'Back to Norva'));
+        const a = el('a', 'btn ghost', label === 'Back' ? copy('ui_web_76900f1bfd16', 'Back') : label || (globalThis.NorvaI18n?.t("ui_web_91d13041c60d", { defaultValue: "Back to Norva" }) ?? 'Back to Norva'));
         a.setAttribute('href', returnTo);
         return a;
       }
@@ -376,10 +378,12 @@
             function slot(node) { if (msg) card.insertBefore(node, msg); else card.appendChild(node); }
             // Billing terms of record (what the next renewal will charge) — the one
             // place a plan change becomes visible before the renewal happens.
-            if (p.amount_cents && p.period) {
+            if (p.amount_cents && p.period && decision.status !== 'cancelled_at_period_end') {
               const d0 = el('div', 'detail');
               d0.appendChild(el('span', null, (globalThis.NorvaI18n?.t("ui_web_3ac8bbca9a74", { defaultValue: "Billing" }) ?? 'Billing')));
-              d0.appendChild(el('b', null, '$' + (p.amount_cents / 100).toFixed(2) + (p.period === 'annual' ? ' / year' : ' / month')));
+              const amount = new Intl.NumberFormat(document.documentElement.lang || undefined, { style: 'currency', currency: 'USD' }).format(p.amount_cents / 100);
+              const period = p.period === 'annual' ? copy('ui_web_2c5e81714652', 'Annual') : copy('ui_web_9b11f6b707d2', 'Monthly');
+              d0.appendChild(el('b', null, amount + ' · ' + period));
               slot(d0);
             }
             // Honest annual upsell for a monthly subscriber in good standing: the
@@ -474,7 +478,7 @@
         if (entProvider(decision) === 'google_play' && isNative()) {
           return 'Subscriptions are billed through Google Play — manage or cancel anytime in the Play Store.';
         }
-        return 'You can manage or cancel your subscription anytime.';
+        return copy('ui_sub_manage_anytime', 'You can manage or cancel your subscription anytime.');
       }
       function clearActionError() {
         if (!storeNote) return;
@@ -483,8 +487,7 @@
         storeNote.removeAttribute('role');
       }
       function showActionError(action, error) {
-        const detail = error && error.message ? ': ' + error.message : '';
-        const message = (globalThis.NorvaI18n?.t("ui_web_df8a32dfd54d", { defaultValue: "Could not " }) ?? 'Could not ') + action + detail + (globalThis.NorvaI18n?.t("ui_web_e0ca94e30d84", { defaultValue: " — please retry or contact support@norva.tv." }) ?? ' — please retry or contact support@norva.tv.');
+        const message = copy('ui_sub_action_failed', 'We could not confirm this change. Please retry or contact support@norva.tv.');
         if (storeNote) {
           storeNote.textContent = message;
           storeNote.classList.add('action-error');
@@ -590,10 +593,10 @@
           legend.textContent = (globalThis.NorvaI18n?.t("ui_web_4ad7aea7f46e", { defaultValue: "Optional — what is the main reason?" }) ?? 'Optional — what is the main reason?');
           reasons.appendChild(legend);
           [
-            ['too_expensive', 'It costs too much'],
-            ['not_using', 'I am not using Norva enough'],
-            ['technical', 'I had a technical problem'],
-            ['other', 'Another reason']
+            ['too_expensive', copy('ui_sub_reason_cost', 'It costs too much')],
+            ['not_using', copy('ui_sub_reason_usage', 'I am not using Norva enough')],
+            ['technical', copy('ui_sub_reason_technical', 'I had a technical problem')],
+            ['other', copy('ui_sub_reason_other', 'Another reason')]
           ].forEach(function (entry) {
             const label = document.createElement('label');
             const input = document.createElement('input');
@@ -677,16 +680,27 @@
       function detailRows(decision) {
         const proj = decision.projection || {};
         const frag = document.createDocumentFragment();
-        const status = String(decision.status || proj.status || '—').replace(/_/g, ' ');
+        const statusCode = String(decision.status || proj.status || 'none');
+        const statuses = {
+          trialing: ['ui_web_17f6390c3192', 'Free trial'],
+          active: ['ui_web_92340695899b', 'Active'],
+          cancelled_at_period_end: ['ui_sub_renewal_cancelled', 'Renewal cancelled'],
+          past_due: ['ui_web_ca0d5a072c30', 'Payment issue'],
+          grace: ['ui_web_ca0d5a072c30', 'Payment issue'],
+          expired: ['ui_web_424a2551d356', 'Expired'],
+          none: ['ui_web_637ae3d9e272', 'No active plan']
+        };
+        const statusEntry = statuses[statusCode] || ['ui_web_4377586214cd', 'Verification needed'];
+        const status = copy(statusEntry[0], statusEntry[1]);
         const add = (label, value) => {
           const d = el('div', 'detail');
           d.appendChild(el('span', null, label));
           d.appendChild(el('b', null, value));
           frag.appendChild(d);
         };
-        add('Plan', planLabel(decision.planCode || proj.plan_code));
-        add('Status', status);
-        const end = proj.trial_ends_at || proj.current_period_end;
+        add(copy('ui_web_fa8ed0bdabdd', 'Plan'), planLabel(decision.planCode || proj.plan_code));
+        add(copy('ui_web_920e413c7d41', 'Status'), status);
+        const end = statusCode === 'trialing' ? proj.trial_ends_at || proj.current_period_end : proj.current_period_end;
         if (end) {
           // A manually granted plan (VIP/system) has no billing cycle — nothing
           // "renews", the access simply runs until its end date.
@@ -814,13 +828,10 @@
         }
 
         if (status === 'trialing') {
-          const end = (decision.projection || {}).trial_ends_at || (decision.projection || {}).current_period_end;
-          const dl = daysLeft(end);
           card.appendChild(el('span', 'pill ok', (globalThis.NorvaI18n?.t("ui_web_17f6390c3192", { defaultValue: "Free trial" }) ?? 'Free trial')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
           card.appendChild(detailRows(decision));
-          const left = (dl != null && dl >= 0) ? (dl === 0 ? (globalThis.NorvaI18n?.t("ui_web_587f51e5a63f", { defaultValue: "Last day of your trial. " }) ?? 'Last day of your trial. ') : dl + ' day' + (dl === 1 ? '' : 's') + ' left. ') : '';
-          card.appendChild(el('p', 'msg', left + (globalThis.NorvaI18n?.t("ui_web_f35a57d125d9", { defaultValue: "You won't be charged until your trial ends — cancel anytime before then." }) ?? "You won't be charged until your trial ends — cancel anytime before then.")));
+          card.appendChild(el('p', 'msg', (globalThis.NorvaI18n?.t("ui_web_f35a57d125d9", { defaultValue: "You won't be charged until your trial ends — cancel anytime before then." }) ?? "You won't be charged until your trial ends — cancel anytime before then.")));
           content.appendChild(card);
         } else if (status === 'active') {
           card.appendChild(el('span', 'pill ok', (globalThis.NorvaI18n?.t("ui_web_92340695899b", { defaultValue: "Active" }) ?? 'Active')));
@@ -829,10 +840,10 @@
           content.appendChild(card);
         } else if (status === 'cancelled_at_period_end') {
           const end = (decision.projection || {}).current_period_end;
-          card.appendChild(el('span', 'pill warn', (globalThis.NorvaI18n?.t("ui_web_a17bfde3804f", { defaultValue: "Ending" }) ?? 'Ending')));
+          card.appendChild(el('span', 'pill warn', copy('ui_sub_renewal_cancelled', 'Renewal cancelled')));
           card.appendChild(el('div', 'plan-name', planLabel(decision.planCode)));
           card.appendChild(detailRows(decision));
-          card.appendChild(el('p', 'msg', (globalThis.NorvaI18n?.t("ui_web_f036f3554d1a", { defaultValue: "Your plan won't renew and ends on " }) ?? "Your plan won't renew and ends on ") + fmtDate(end) + (globalThis.NorvaI18n?.t("ui_web_7f2b2b097996", { defaultValue: ". You can resume anytime before then." }) ?? '. You can resume anytime before then.')));
+          card.appendChild(el('p', 'msg', copy('ui_sub_cancelled_until', 'Cancellation confirmed. You can keep watching until {{date}}. Your plan will not renew.', { date: fmtDate(end) })));
           content.appendChild(card);
         } else {
           // none / expired / free — no active plan → win-back.
