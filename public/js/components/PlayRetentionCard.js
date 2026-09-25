@@ -5,7 +5,7 @@
     const fr = String(window.NorvaI18n?.language || navigator.language).startsWith('fr');
     return fr ? {
       title: 'Continuez avec votre offre Google Play', view: 'Voir mon offre', buy: 'Continuer avec Google Play', no: 'Non merci',
-      loading: 'Vérification de votre offre…', retry: 'Réessayer', error: 'L’offre est momentanément indisponible. Votre abonnement reste inchangé.',
+      loading: 'Vérification de votre offre…', retry: 'Réessayer', error: 'La confirmation est momentanément indisponible. Vérifiez l’état de votre abonnement dans Google Play avant de réessayer.',
       pending: 'Confirmation Google Play reçue. Votre accès est en cours de synchronisation. Ne recommencez pas le paiement.',
       cancelled: 'Achat annulé. Votre abonnement reste résilié. Vous pourrez réessayer dans quelques minutes.',
       monthly: (p, r) => `${p}/mois pendant 3 mois, puis ${r}/mois.`, annual: (p, r) => `${p} pour la prochaine année, puis ${r}/an.`,
@@ -18,7 +18,7 @@
       declined: 'Offre refusée. Aucun rappel ne sera envoyé.',
     } : {
       title: 'Continue with your Google Play offer', view: 'View my offer', buy: 'Continue with Google Play', no: 'No thanks',
-      loading: 'Checking your offer…', retry: 'Try again', error: 'The offer is temporarily unavailable. Your subscription is unchanged.',
+      loading: 'Checking your offer…', retry: 'Try again', error: 'Confirmation is temporarily unavailable. Check your subscription in Google Play before trying again.',
       pending: 'Google Play confirmation received. Your access is syncing. Please do not pay again.',
       cancelled: 'Purchase cancelled. Your subscription stays cancelled. You can try again in a few minutes.',
       monthly: (p, r) => `${p}/month for 3 months, then ${r}/month.`, annual: (p, r) => `${p} for your next year, then ${r}/year.`,

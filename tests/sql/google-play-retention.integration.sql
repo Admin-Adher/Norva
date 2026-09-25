@@ -12,7 +12,7 @@ insert into public.cloud_marketing_email_preferences(user_id,marketing_email_opt
 values('00000000-0000-4000-8000-000000000902',true,now(),'account_settings');
 set local session_replication_role=origin;
 do $test$
-declare u uuid:='00000000-0000-4000-8000-000000000902'; q jsonb; o uuid; claim jsonb; delivery jsonb; allowed boolean; used_at timestamptz;
+declare u uuid:='00000000-0000-4000-8000-000000000902'; q jsonb; o uuid; claim jsonb; delivery jsonb; allowed boolean; used_at timestamptz; mail uuid;
 begin
  if public.norva_play_retention_offer(u) is not null then raise exception 'policy off leaked offer'; end if;
  update public.cloud_play_retention_policy set enabled=true,communications_enabled=true;
@@ -22,14 +22,35 @@ begin
  select x into delivery from public.norva_play_retention_deliveries(false) x where x->>'user_id'=u::text;
  if delivery->>'channel'<>'email' then raise exception 'email consent channel'; end if;
  if not public.norva_play_retention_delivery_allowed(u,delivery->>'deliveryId') then raise exception 'valid delivery blocked'; end if;
+ mail:=(public.norva_enqueue_lifecycle_email(u,'play_retention_offer','lifecycle:play-retention:'||(delivery->>'deliveryId'),
+   'play-retention@example.test','Norva <updates@norva.tv>','support@norva.tv','Synthetic mobile offer','<p>Test</p>','Test',
+   '[{"name":"app","value":"norva"},{"name":"category","value":"marketing"},{"name":"flow","value":"play_retention_offer"}]',
+   '{"List-Unsubscribe":"<https://norva.tv/test-unsubscribe>","List-Unsubscribe-Post":"List-Unsubscribe=One-Click"}',
+   true,'play_retention',delivery->>'deliveryId',null)->>'id')::uuid;
+ if mail is null or not norva_postal_full.branded_allowed(mail) then raise exception 'Postal mobile offer blocked'; end if;
  perform public.norva_play_retention_deliveries(true);
  if (select count(*) from public.cloud_play_retention_deliveries where offer_id=o)<>1 then raise exception 'duplicate stage'; end if;
  update public.cloud_marketing_email_preferences set marketing_email_opt_in=false where user_id=u;
  if public.norva_play_retention_delivery_allowed(u,delivery->>'deliveryId') then raise exception 'revoked email consent'; end if;
+ if norva_postal_full.branded_allowed(mail) then raise exception 'Postal consent bypass'; end if;
  update public.cloud_marketing_email_preferences set marketing_email_opt_in=true where user_id=u;
  update public.cloud_entitlement_projection set provider='revolut' where user_id=u;
  if public.norva_play_retention_offer(u) is not null or public.norva_play_retention_delivery_allowed(u,delivery->>'deliveryId') then raise exception 'cross rail'; end if;
  update public.cloud_entitlement_projection set provider='google_play' where user_id=u;
+ -- Replace this synthetic delivery only, inside the rollback transaction, to
+ -- exercise a push-first stage with no real network transport.
+ delete from public.cloud_play_retention_deliveries where offer_id=o;
+ insert into public.cloud_play_retention_preferences(user_id,push_opt_in) values(u,true);
+ insert into public.cloud_push_tokens(token,user_id,platform,permission_state,app_version,last_seen_at)
+ values('synthetic-retention-token',u,'android','granted','1.3.24',now());
+ select x into delivery from public.norva_play_retention_deliveries(true) x where x->>'user_id'=u::text;
+ if delivery->>'channel'<>'push' then raise exception 'push preferred with explicit consent'; end if;
+ update public.cloud_play_retention_preferences set push_opt_in=false where user_id=u;
+ if public.norva_play_retention_claim_push((delivery->>'deliveryId')::uuid) is not null then raise exception 'push consent bypass'; end if;
+ update public.cloud_play_retention_preferences set push_opt_in=true where user_id=u;
+ if public.norva_play_retention_claim_push((delivery->>'deliveryId')::uuid)->>'token'<>'synthetic-retention-token' then raise exception 'push missing'; end if;
+ if public.norva_play_retention_claim_push((delivery->>'deliveryId')::uuid) is not null then raise exception 'push duplicate'; end if;
+ if exists(select 1 from public.norva_play_retention_deliveries(false) x where x->>'user_id'=u::text) then raise exception 'email after push'; end if;
  claim:=public.norva_play_retention_action(u,o,'claim');
  if claim->>'claimId' is null then raise exception 'claim failed'; end if;
  if public.norva_play_retention_action(u,o,'claim')->>'pending'<>'true' then raise exception 'double tap'; end if;
