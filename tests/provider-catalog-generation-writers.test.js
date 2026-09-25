@@ -149,6 +149,9 @@ class FakeQuery {
   execute() {
     const tableRows = this.database.tables[this.table] ?? (this.database.tables[this.table] = []);
     if (this.operation === 'insert' || this.operation === 'upsert') {
+      if (this.table === 'cloud_title_variants' && this.rows.some((row) => Object.hasOwn(row, 'synced_at'))) {
+        throw new Error('PGRST204: cloud_title_variants has no synced_at column');
+      }
       this.database.writeBatches.push({ table: this.table, size: this.rows.length });
       const conflictColumns = {
         cloud_media_items: ['source_id', 'generation_id', 'item_type', 'external_id'],
@@ -191,7 +194,15 @@ class FakeDatabase {
 
   async rpc(name, args) {
     this.rpcCalls.push({ name, args });
-    if (name === 'norva_register_credential_generation_categories') {
+    if (name === 'norva_ensure_credential_generation_titles') {
+      const titles = this.tables.cloud_titles ?? (this.tables.cloud_titles = []);
+      for (const row of args.p_titles) {
+        if (!titles.some((title) => title.user_id === args.p_user_id
+          && title.item_type === row.item_type && title.identity_key === row.identity_key)) {
+          titles.push({ ...row, id: `title-${titles.length + 1}`, user_id: args.p_user_id });
+        }
+      }
+    } else if (name === 'norva_register_credential_generation_categories') {
       const rows = this.tables.cloud_source_catalog_generation_categories;
       const categories = [...new Map(args.p_categories.map((category) => [
         category.provider_category_id,
@@ -951,6 +962,33 @@ test('optional VOD metadata enrichment preserves the provider single-flight inva
   const providerReads = projection.slice(start, end);
   assert.match(providerReads, /const concurrency = 1;/);
   assert.match(providerReads, /await Promise\.all\(Array\.from\(\{ length: concurrency \}/);
+});
+
+test('a staged movie page persists its real title variant with the ingest lease', async () => {
+  const { stageXtreamCredentialCatalogGeneration } = loadXtreamModule();
+  const database = new FakeDatabase();
+  const generationId = '44444444-4444-4444-8444-444444444444';
+  const jobId = '55555555-5555-4555-8555-555555555555';
+  await stageXtreamCredentialCatalogGeneration({
+    db: database,
+    userId: '11111111-1111-4111-8111-111111111111',
+    sourceId: '22222222-2222-4222-8222-222222222222',
+    transitionId: '33333333-3333-4333-8333-333333333333',
+    generationId, jobId, leaseSequence: 7, leaseOwner: 'staged-vod-test', maxSlices: 1,
+    cursor: { action: 'cinema_streams', version: 2, typeIndex: 3,
+      categoryOrdinal: 0, itemOffset: 0, categoryPageCursor: '', categoriesDone: true,
+      itemCursor: '', processedCategories: 0, processedItems: 0 },
+    fetchMetadataPage: async () => ({ items: [{ stream_id: 70000,
+      name: 'Norva QA A 01 (2026)', container_extension: 'mp4' }], nextCursor: null, done: true }),
+  });
+  assert.equal(database.tables.cloud_title_variants.length, 1);
+  const variant = database.tables.cloud_title_variants[0];
+  assert.equal(variant.title_id, database.tables.cloud_titles[0].id);
+  assert.equal(variant.media_item_id, database.tables.cloud_media_items[0].id);
+  assert.equal(variant.generation_id, generationId);
+  assert.equal(variant.ingest_job_id, jobId);
+  assert.equal(variant.ingest_attempt, 7);
+  assert.equal(variant.ingest_lease_owner, 'staged-vod-test');
 });
 
 test('v2 staged import alternates bounded Movies and Series pages with one provider request at a time', async () => {
