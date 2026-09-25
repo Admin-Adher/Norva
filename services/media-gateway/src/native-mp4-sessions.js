@@ -111,7 +111,12 @@ function pipeNativeMp4(req, res, entry, resource) {
     if (target.protocol !== 'http:' || target.hostname !== '127.0.0.1') throw failure(500, 'NATIVE_MP4_BROKER_INVALID');
     return new Promise(resolve => {
         const headers = {};
-        if (typeof req.headers.range === 'string') headers.range = req.headers.range;
+        const fullGet = req.method !== 'HEAD' && req.headers.range === undefined;
+        // Android initially opens the complete file without a Range header.
+        // The internal finite broker requires an explicit range, but the public
+        // response must retain normal full-GET semantics and the full length.
+        if (fullGet) headers.range = 'bytes=0-';
+        else if (typeof req.headers.range === 'string') headers.range = req.headers.range;
         const upstream = http.request(target, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers });
         const abort = () => upstream.destroy();
         const done = () => { entry.ac.signal.removeEventListener('abort', abort); res.off('close', abort); resolve(); };
@@ -119,8 +124,10 @@ function pipeNativeMp4(req, res, entry, resource) {
         res.once('close', abort);
         upstream.setTimeout(30_000, () => upstream.destroy(new Error('native idle timeout')));
         upstream.once('response', response => {
-            res.statusCode = response.statusCode;
+            const fullResponse = fullGet && response.statusCode === 206;
+            res.statusCode = fullResponse ? 200 : response.statusCode;
             for (const name of ['content-length', 'content-range', 'accept-ranges']) {
+                if (name === 'content-range' && fullResponse) continue;
                 if (response.headers[name]) res.setHeader(name, response.headers[name]);
             }
             res.setHeader('Content-Type', response.statusCode < 400 && entry.claims.scope === 'native-browser-mp4'
