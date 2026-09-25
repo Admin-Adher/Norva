@@ -38,3 +38,13 @@ test('native recovery uses a committed, owned raw session before returning and n
   assert.match(raw, /url: access\.toString\(\)/);
   assert.doesNotMatch(raw, /url: pipe\.url|\/detect-language|\/probe/);
 });
+
+test('native recovery receives the same renewable lease marker as browser native playback', () => {
+  const marker = source.match(/__norvaNativeMp4SessionV1:\s*([^\n]+),/)[1];
+  for (const serverNativeProviderMp4 of [false, true]) for (const nativeNetworkRecovery of [false, true]) {
+    const value = vm.runInNewContext(marker, {serverNativeProviderMp4,nativeNetworkRecovery});
+    assert.equal(value, serverNativeProviderMp4 || nativeNetworkRecovery ? true : undefined);
+  }
+  const binding = section('requestedPlaybackHint = compactRecord({\n    ...stripMkvH264FastStartInternalHints', '\n  const entitlement');
+  assert.ok(binding.indexOf('stripMkvH264FastStartInternalHints') < binding.indexOf('__norvaNativeMp4SessionV1'));
+});

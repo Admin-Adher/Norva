@@ -2395,7 +2395,7 @@ async function createPlaybackSessionCore(
   requestedPlaybackHint = compactRecord({
     ...stripMkvH264FastStartInternalHints(requestedPlaybackHint),
     // Override caller input; this internal marker controls the liveness lease.
-    __norvaNativeMp4SessionV1: serverNativeProviderMp4 ? true : undefined,
+    __norvaNativeMp4SessionV1: (serverNativeProviderMp4 || nativeNetworkRecovery) ? true : undefined,
     ...(itemType === "movie" && itemCasId && itemCasUpdatedAt
       ? {
         __norvaMkvH264FastStartItemCasV2: {
