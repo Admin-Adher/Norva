@@ -219,4 +219,22 @@ begin
   raise notice 'RETENTION_ABUSE_CANCEL_EMAIL_REPLAY_PRICE_DURATION_OWNERSHIP_OK';
 end;
 $abuse$;
+do $channel$
+declare u uuid:='00000000-0000-4000-8000-000000000010'; o jsonb; delivery uuid;
+begin
+  update cloud_marketing_email_preferences set marketing_email_opt_in=true where user_id=u;
+  o:=norva_retention_offer(u);
+  if o is null then raise exception 'missing channel isolation fixture'; end if;
+  delivery:=(norva_enqueue_lifecycle_email(u,'retention_offer','lifecycle:retention:'||(o->>'id')||':pre',
+    'retention10@example.test','Norva <updates@norva.tv>','support@norva.tv','Synthetic web offer','<p>Test</p>','Test',
+    '[{"name":"app","value":"norva"},{"name":"category","value":"marketing"},{"name":"flow","value":"retention_offer"}]',
+    '{"List-Unsubscribe":"<https://norva.tv/test-unsubscribe>","List-Unsubscribe-Post":"List-Unsubscribe=One-Click"}',
+    true,'retention',(o->>'id')||':pre',null)->>'id')::uuid;
+  if delivery is null or not norva_postal_full.branded_allowed(delivery) then raise exception 'eligible web email not queued'; end if;
+  update cloud_entitlement_projection set provider='google_play' where user_id=u;
+  if norva_retention_offer(u) is not null or norva_retention_delivery_allowed(u,(o->>'id')||':pre')
+    or norva_postal_full.branded_allowed(delivery) then raise exception 'web offer survived Google Play switch'; end if;
+  raise notice 'RETENTION_QUEUED_WEB_EMAIL_BLOCKED_AFTER_GOOGLE_PLAY_SWITCH_OK';
+end;
+$channel$;
 rollback;

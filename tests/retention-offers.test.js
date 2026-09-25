@@ -51,9 +51,11 @@ test('retention emails state prices, duration, payment timing and opt-out', asyn
   assert.match(fr.text, /3,99.*3 mois.*4,99/); assert.match(fr.text, /premier paiement réduit/);
   assert.match(fr.html, /unsubscribe\?t=1&amp;x=2/);
   assert.match(fr.text, /reste résilié tant que/);
+  assert.match(fr.text, /abonnement souscrit sur norva\.tv/);
   const en = renderRetentionOffer({ ...offer, stage: 'post', period: 'annual', cycles: 1, amount_cents: 3779, base_amount_cents: 4199 }, { locale: 'en', unsubscribeUrl: 'https://fixture.test/unsubscribe' });
   assert.match(en.text, /\$37.79.*next year.*\$41.99/);
   assert.match(en.text, /payment will be requested at checkout/);
+  assert.match(en.text, /subscription purchased on norva\.tv only/);
   assert.doesNotMatch(en.html, /action=accept|mailto:.*example\.test/);
   assert.match(en.html, /https:\/\/norva.tv\/subscription\?retentionOffer=/);
 });

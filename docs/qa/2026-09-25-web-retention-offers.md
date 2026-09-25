@@ -40,3 +40,9 @@ Les tests SQL supplémentaires prouvent : nouveau motif/événement de résiliat
 La règle des douze mois porte sur le compte Norva (UUID). Elle ne certifie pas l’identité d’une personne derrière plusieurs comptes. Aucune déduplication fondée sur les quatre derniers chiffres d’une carte ou une adresse IP n’est introduite : ces indices ne sont pas des identifiants fiables.
 
 Concurrence réelle dans le conteneur de test sans réseau : huit connexions PostgreSQL acceptent la même offre simultanément. Résultat : une acceptation appliquée, sept répétitions idempotentes, une seule offre consommée, trois cycles restants et aucune commande de paiement créée. Ces fixtures persistées sont limitées à ce conteneur jetable, supprimé à la fin de la validation.
+
+## E-mails et séparation des abonnements
+
+Le template couvre les offres mensuelles et annuelles avant/après expiration, en français ou en anglais. Il précise les tarifs, la durée, la date de paiement, le renouvellement et la portée « abonnement souscrit sur norva.tv ». Le bouton ouvre l’offre sans l’accepter automatiquement. Le transport existant apporte le lien de désinscription et les en-têtes de désinscription en un clic.
+
+Le scénario SQL de changement de canal est réussi : e-mail Revolut éligible en attente, puis passage de l’abonnement à Google Play ; la sélection, l’accès à l’offre et le contrôle Postal final refusent alors cette offre web. Les répétitions sont dédupliquées par offre et phase. La campagne personnalisée remplace les relances génériques Revolut lorsqu’elle est activée ; son producteur ne crée aucune notification push. Une future offre Google Play devra utiliser ses propres prix, éligibilité, campagne et contrôles d’envoi.

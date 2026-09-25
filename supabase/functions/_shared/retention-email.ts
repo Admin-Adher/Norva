@@ -14,6 +14,7 @@ export function renderRetentionOffer(offer: RetentionOffer, opts: { locale?: str
   const base = new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(offer.base_amount_cents / 100);
   const date = (value: string) => new Date(value).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric" });
   const subject = fr ? "Une offre personnelle pour continuer avec Norva" : "A personal offer to continue with Norva";
+  const scope = fr ? "Offre réservée à votre abonnement souscrit sur norva.tv." : "For your subscription purchased on norva.tv only.";
   const terms = offer.period === "monthly"
     ? (fr ? `${amount}/mois pendant ${offer.cycles} mois, puis ${base}/mois.` : `${amount}/month for ${offer.cycles} months, then ${base}/month.`)
     : (fr ? `${amount} pour la prochaine année, puis ${base}/an.` : `${amount} for the next year, then ${base}/year.`);
@@ -32,9 +33,9 @@ export function renderRetentionOffer(offer: RetentionOffer, opts: { locale?: str
   return {
     subject,
     tags: [{ name: "app", value: "norva" }, { name: "category", value: "marketing" }, { name: "flow", value: "retention_offer" }],
-    text: `${subject}\n\n${terms}\n\n${timing}\n\n${conditions}\n\n${label}: ${url}\n\n${unsubscribe}: ${opts.unsubscribeUrl || ""}\n${address}\nsupport@norva.tv`,
+    text: `${subject}\n\n${scope}\n\n${terms}\n\n${timing}\n\n${conditions}\n\n${label}: ${url}\n\n${unsubscribe}: ${opts.unsubscribeUrl || ""}\n${address}\nsupport@norva.tv`,
     html: renderEmailFrame({ lang: fr ? "fr" : "en", title: subject, heading: subject, preheader: terms, artwork: "billing",
-      bodyHtml: `<p>${escape(terms)}</p><p>${escape(timing)}</p><p>${escape(conditions)}</p>`,
+      bodyHtml: `<p>${escape(scope)}</p><p>${escape(terms)}</p><p>${escape(timing)}</p><p>${escape(conditions)}</p>`,
       cta: { label, url }, noteHtml: "support@norva.tv",
       footerHtml: `<a href="${escape(opts.unsubscribeUrl || "")}">${unsubscribe}</a><br>${escape(address)}` }),
   };
