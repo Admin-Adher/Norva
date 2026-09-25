@@ -2660,7 +2660,8 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     categoryId: null,
     cursor: state.cursor || null,
     spoolToken: state.spoolToken || null,
-    maxItems: action.kind === "category" ? 500 : 250,
+    // Match staged imports: the Gateway defaults to a 250-item ceiling.
+    maxItems: action.kind === "category" ? 100 : 250,
   });
   if (page.pending) {
     await checkpointActiveRefresh(fence, run.checkpointRevision, state, true, boundedGatewayRetryAfter(page.retryAfterSeconds ?? 2));
