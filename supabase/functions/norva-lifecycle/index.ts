@@ -699,7 +699,7 @@ async function runBehavioralPushes(
       continue;
     }
     const tokens = Array.isArray(authorization.tokens)
-      ? [...new Set(authorization.tokens.map((value: unknown) => String(value ?? "")).filter(Boolean))]
+      ? [...new Set<string>(authorization.tokens.map((value: unknown) => String(value ?? "")).filter(Boolean))]
       : [];
     const deepLink = behavioralDeepLink(String(authorization.deep_link ?? claim.deep_link), claim.id, {
       mobile: true,
