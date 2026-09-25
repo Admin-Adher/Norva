@@ -805,6 +805,9 @@ function normalizeAccessCycleBody(body, requireComplete) {
     ? null
     : enumValue(String(body.termUnit), ["DAY", "WEEK", "MONTH", "YEAR"], "INVALID_REQUEST").toLowerCase();
   if ((termValue === null) !== (termUnit === null)) throw new ContractError("INVALID_REQUEST");
+  // PostgreSQL owns calendar arithmetic. A supplied duration and an explicit
+  // end date are competing inputs, including when their dates happen to agree.
+  if (expiresOn !== null && termValue !== null) throw new ContractError("INVALID_REQUEST");
   const remindersEnabled = body.remindersEnabled === undefined ? false : body.remindersEnabled;
   if (typeof remindersEnabled !== "boolean") throw new ContractError("INVALID_REQUEST");
   return Object.freeze({ startedOn, expiresOn, termValue, termUnit, remindersEnabled });
@@ -3153,7 +3156,10 @@ async function assertProviderReadAllowed(job, config) {
   if (Array.isArray(sessions) && sessions.length) throw new WorkerFault("rate_limited", true);
 
   const accountKey = providerAccountActivityKey(config);
-  const { data: busy, error: busyError } = await admin.rpc("provider_account_busy", { p_key: accountKey });
+  // A released metadata request must not fence the next page of this workflow
+  // for five minutes. The catalogue-specific fence still blocks viewers,
+  // language validation and unknown activity; Gateway admission owns live I/O.
+  const { data: busy, error: busyError } = await admin.rpc("provider_account_busy_for_catalog_refresh", { p_key: accountKey });
   if (busyError) throw new WorkerFault("internal_error", false);
   if (busy !== false) throw new WorkerFault("rate_limited", true);
 }

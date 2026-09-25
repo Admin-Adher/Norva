@@ -38,6 +38,84 @@ function functionExpression(name, nextName) {
   return declaration.replace(new RegExp(`^(async\\s+)?function\\s+${name}`), (_all, asyncPrefix) => `${asyncPrefix || ''}function`);
 }
 
+function accessCycleHarness(body) {
+  const calls = [];
+  const context = {
+    ContractError: class ContractError extends Error { constructor(code) { super(code); this.code = code; } },
+    requireIdempotencyKey: () => 'cycle-request', parseEntityTag: () => 2,
+    readJsonObject: async () => body,
+    getRuntimeConfig: async () => { calls.push('runtime'); return { sourceConfigKey: 'fixture' }; },
+    keyedFingerprint: async () => 'a'.repeat(64),
+    rpc: async (name, input) => { calls.push({ name, input }); return {}; },
+    sanitizeProviderAccess: () => ({ revision: 3, activeCycle: { cycleId: 'cycle' } }),
+    successResponse: (_req, _id, _kind, data) => data,
+    providerAccessTag: () => '"provider-access-rev-3"',
+  };
+  const functions = [
+    section('async function createProviderAccessCycle', '\nasync function endProviderAccessCycle'),
+    section('function normalizeAccessCycleBody', '\nfunction sanitizeProviderAccess'),
+    section('function nullableDateKey', '\nfunction nullablePositiveInteger'),
+    section('function enumValue', '\nfunction nonNegativeInteger'),
+  ].join('\n');
+  return { calls, ...vm.runInNewContext(`(() => { ${functions}; return { createProviderAccessCycle, updateProviderAccessCycle }; })()`, context) };
+}
+
+test('conflicting calendar inputs are rejected before cycle create or update reaches business services', async () => {
+  for (const method of ['createProviderAccessCycle', 'updateProviderAccessCycle']) {
+    const harness = accessCycleHarness({ startedOn: '2026-09-20', expiresOn: '2026-09-28',
+      termValue: 8, termUnit: 'DAY', remindersEnabled: false });
+    await assert.rejects(harness[method]({}, 'request', { id: 'owner', actor: 'owner' }, { id: 'source' }, 'cycle'),
+      error => error.code === 'INVALID_REQUEST');
+    assert.deepEqual(harness.calls, []);
+  }
+});
+
+test('duration and explicit-date cycle requests retain separate PostgreSQL inputs', async () => {
+  for (const method of ['createProviderAccessCycle', 'updateProviderAccessCycle']) {
+    for (const duration of [true, false]) {
+      const body = { startedOn: '2026-09-20', expiresOn: duration ? null : '2026-09-28',
+        termValue: duration ? 8 : null, termUnit: duration ? 'DAY' : null, remindersEnabled: false };
+      const harness = accessCycleHarness(body);
+      await harness[method]({}, 'request', { id: 'owner', actor: 'owner' }, { id: 'source' }, 'cycle');
+      assert.equal(harness.calls.length, 2);
+      const input = harness.calls[1].input;
+      assert.equal(input.p_expires_on, body.expiresOn);
+      assert.equal(input.p_term_value, body.termValue);
+      assert.equal(input.p_term_unit, duration ? 'day' : null);
+      assert.equal(input.p_started_on, '2026-09-20');
+    }
+  }
+});
+
+test('credential metadata uses the catalogue activity fence and still fails closed for viewers or unknown activity', async () => {
+  const source = section('async function assertProviderReadAllowed', '\nasync function credentialAccountAffinityHash');
+  for (const scenario of [
+    { sessions: [], busy: false, allowed: true },
+    { sessions: [{ id: 'viewer' }], busy: false, error: 'rate_limited', noRpc: true },
+    { sessions: [], busy: true, error: 'rate_limited' },
+    { sessions: [], busy: null, error: 'rate_limited' },
+    { sessions: [], busy: false, rpcError: {}, error: 'internal_error' },
+  ]) {
+    const calls = [];
+    const query = { select() { return this; }, eq() { return this; }, in() { return this; },
+      gt() { return this; }, limit: async () => ({ data: scenario.sessions, error: null }) };
+    const guard = vm.runInNewContext(`(() => { ${source}; return assertProviderReadAllowed; })()`, {
+      URL, WorkerFault: class WorkerFault extends Error {},
+      admin: { from: () => query, rpc: async (name, input) => {
+        calls.push({ name, input }); return { data: scenario.busy, error: scenario.rpcError || null };
+      } },
+    });
+    const request = guard({ userId: 'owner' }, { serverUrl: 'https://provider.example.test', username: 'qa' });
+    if (scenario.allowed) await request;
+    else await assert.rejects(request, error => error.message === scenario.error);
+    assert.equal(calls.length, scenario.noRpc ? 0 : 1);
+    if (!scenario.noRpc) {
+      assert.equal(calls[0].name, 'provider_account_busy_for_catalog_refresh');
+      assert.equal(calls[0].input.p_key, 'provider.example.test/qa');
+    }
+  }
+});
+
 test('Provider Access Edge surface exposes credential candidates and durable catalog replacements', () => {
   assert.match(EDGE, /const API_VERSION = "provider-access\.norva\/v1"/);
   assert.match(EDGE, /parts\[0\] !== "v1"/);

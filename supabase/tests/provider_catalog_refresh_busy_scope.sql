@@ -64,6 +64,25 @@ select extensions.is(
   'a released catalogue metadata page does not block its own next continuation'
 );
 
+select public.provider_account_touch_many(array['catalog-refresh.invalid/metadata'],'catalog-metadata');
+select extensions.ok(
+  not public.provider_account_busy_for_catalog_refresh('catalog-refresh.invalid/metadata')
+  and public.provider_account_busy('catalog-refresh.invalid/metadata'),
+  'released account/catalog metadata permits catalogue continuation while the generic fence remains conservative'
+);
+select public.provider_account_touch_many(array['catalog-refresh.invalid/metadata-priority'],'gateway');
+select public.provider_account_touch_many(array['catalog-refresh.invalid/metadata-priority'],'catalog-metadata');
+select public.provider_account_touch_many(array['catalog-refresh.invalid/metadata-priority'],'presence');
+select extensions.ok(
+  public.provider_account_busy_for_catalog_refresh('catalog-refresh.invalid/metadata-priority')
+  and (select kind='gateway' from public.provider_account_activity
+    where account_key=encode(extensions.digest('catalog-refresh.invalid/metadata-priority','sha256'),'hex')),
+  'metadata and browsing reports preserve the recent viewer fence'
+);
+select public.provider_account_touch_many(array['catalog-refresh.invalid/unknown-kind'],'unknown-future-kind');
+select extensions.ok(public.provider_account_busy_for_catalog_refresh('catalog-refresh.invalid/unknown-kind'),
+  'unknown fresh activity fails closed for catalogue work');
+
 select public.provider_account_touch_many(
   array['catalog-refresh.invalid/raw-touch'],
   'catalog-refresh'
