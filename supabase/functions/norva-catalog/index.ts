@@ -1104,11 +1104,16 @@ async function attachOwnedMediaEditorialMetadata(
         const variant = exact[0];
         const title = byTitle.get(String(variant.title_id));
         const owner = owners.get(String(variant.title_id));
-        if (!title || !owner?.sources.includes(row.source_id) ||
-            owner.generation !== flatMediaGenerationId(row)) continue;
+        if (!title || !owner?.sources.includes(row.source_id)) continue;
+        const usesGenerationPayload = catalogTitleUsesGenerationPayload(owner.title);
+        // A progressive P payload belongs to exactly one display generation.
+        // A published G title can span several active provider generations;
+        // the exact owned, visible variant above proves this media association.
+        // Its best/display generation may legitimately belong to another source.
+        if (usesGenerationPayload && owner.generation !== flatMediaGenerationId(row)) continue;
         ownedTitles.set(String(title.id), owner.title);
         if (!catalogTextStatusEligible(title.match_status) || !title.provider_tmdb_id) continue;
-        if (flatMediaBlocksGlobalTitleOverlay(row)) {
+        if (usesGenerationPayload) {
           // The generation binder below applies P's own thin/full overlay once.
           // Copying a full public card here would manufacture rich fields while
           // the full overlay flag is off and could outlive an epoch failure.

@@ -75284,6 +75284,8 @@ export const SELECTION_QUALIFIED_VOD = Object.freeze([
   {
     "feedId": "sandro-tested-vod",
     "title": "O Retorno",
+    "providerTmdbId": "1745971",
+    "logo": "https://norva.tv/img/posters/selection-o-retorno-1745971.jpg",
     "tvgId": "qualified-20260907-d444973af4170e6e5a3a932717eee8d2",
     "group": "Films",
     "url": "https://sandroflix.sandrostoreps3.workers.dev/content/filmes/Comedia/O.Retorno.-.BY.SANDRO.STORE.mp4",

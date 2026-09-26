@@ -107,3 +107,13 @@ test('only an owned VOD descriptor grants automatic relay; explicit conversion a
   const sequel = result.items.find(item => item.fields.title === 'South Park Guerras do Streaming Parte 2');
   assert.notEqual(sequel.fields.metadata.providerTmdbId, '974691');
  });
+
+test('O Retorno keeps the owner-supplied artwork when TMDB has no poster', async () => {
+  const { fetchSelectionVod } = await import('../supabase/functions/_shared/selection-vod.mjs');
+  const result = await fetchSelectionVod({ fetchPlaylist: async () => { throw Error('offline external feeds'); } });
+  const row = result.items.find(item => item.fields.title === 'O Retorno').fields;
+  assert.equal(row.metadata.providerTmdbId, '1745971');
+  assert.equal(row.poster_url, 'https://norva.tv/img/posters/selection-o-retorno-1745971.jpg');
+  assert.equal(row.metadata.plot, undefined);
+  assert.ok(require('node:fs').statSync(require('node:path').join(__dirname, '../public/img/posters/selection-o-retorno-1745971.jpg')).size > 0);
+});
