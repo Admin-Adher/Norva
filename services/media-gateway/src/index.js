@@ -8260,7 +8260,10 @@ function initializeStrictLidCapturePipeline(store) {
             return Array.isArray(binding) ? audio : audio[0];
         }),
         infer: async (wavPath, binding, context, signal) => {
-            const deadline = Date.now() + 50000;
+            // Capture has already released the provider. Allow the full model's
+            // quality fallback to finish locally without acquiring another stream.
+            // This remains bounded and immediately preemptible by playback.
+            const deadline = Date.now() + 100000;
             const options = { backgroundKey: context.accountKey, preemptibleBackground: true, abortSignal: signal };
             const prepared = await runStrictSpeechSampler(wavPath,
                 planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal),
@@ -8308,7 +8311,7 @@ async function handleStrictLidCaptureRequest(req, res, action) {
     if (rejectWhileLidBenchmarkRuns(res)) return;
     const binding = { ...strictLidWindowReceiptBinding(context, context.windowOrdinal), sourceUrlHash: sha256Hex(claims.url) };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), action === 'capture' ? 210000 : 55000);
+    const timer = setTimeout(() => controller.abort(), action === 'capture' ? 210000 : action === 'infer' ? 105000 : 55000);
     const closed = () => { if (!res.writableEnded) controller.abort(); };
     res.once('close', closed);
     try {
