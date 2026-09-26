@@ -47741,6 +47741,8 @@ export const SELECTION_QUALIFIED_VOD = Object.freeze([
   {
     "feedId": "sandro-tested-vod",
     "title": "South Park Guerras do Streaming",
+    "providerTmdbId": "974691",
+    "logo": "https://image.tmdb.org/t/p/w500/dfgZJlKYg5xm6dBl05bOKhfunXb.jpg",
     "tvgId": "qualified-20260907-7b851ac50d0c6b8646a1366ecd6b9466",
     "group": "Films",
     "url": "https://sandroflix.sandrostoreps3.workers.dev/content/filmes/LANCAMENTOS/South.Park.Guerras.do.Streaming.2022.mkv",
@@ -49645,6 +49647,8 @@ export const SELECTION_QUALIFIED_VOD = Object.freeze([
   {
     "feedId": "sandro-tested-vod",
     "title": "Anjos da Noite 4",
+    "providerTmdbId": "52520",
+    "logo": "https://image.tmdb.org/t/p/w500/jN0uuc8U6M3sTg9zEaliJV60Stf.jpg",
     "tvgId": "qualified-20260907-92041981838f80901f1b87855f04a4ea",
     "group": "Films",
     "url": "https://sandroflix.sandrostoreps3.workers.dev/content/filmes/Anjos.da.Noite/Anjos.da.Noite.4.O.Despertar.-.BY.SANDRO.STORE.mkv",
