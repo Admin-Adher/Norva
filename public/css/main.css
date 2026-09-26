@@ -26689,3 +26689,34 @@ html.tv-mode #page-settings #tab-sources .settings-tv-handoff {
 .play-retention-card [role=status]:empty { display: none; }
 .play-retention-card .btn:focus-visible, .play-retention-preference input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
 @media (max-width: 480px) { .play-retention-card { padding: 16px; } .play-retention-actions .btn { flex: 1 1 100%; } }
+
+/* Fluid Web catalog tracks keep VOD cards centered and use the available width. */
+html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host),
+html:not(.tv-mode) #page-series #series-grid:not(.rail-host) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(11.25rem, 42vw), 1fr));
+  align-content: start;
+  justify-content: stretch;
+}
+
+html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host) > .movie-card,
+html:not(.tv-mode) #page-series #series-grid:not(.rail-host) > .series-card {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: initial;
+}
+
+html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host) > .movie-card .movie-poster,
+html:not(.tv-mode) #page-series #series-grid:not(.rail-host) > .series-card .series-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+
+html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host) > .movies-loader,
+html:not(.tv-mode) #page-series #series-grid:not(.rail-host) > .series-loader,
+html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host) > .empty-state,
+html:not(.tv-mode) #page-series #series-grid:not(.rail-host) > .empty-state {
+  grid-column: 1 / -1;
+}

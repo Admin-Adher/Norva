@@ -231,7 +231,11 @@ class MoviesPage {
         // window (re-materialize recycled cards when scrolling back up).
         this.container?.addEventListener('scroll', () => {
             this.updateContinueCompact();
-            this.restoreRecycledCards();
+            if (this._restoreFrame) return;
+            this._restoreFrame = requestAnimationFrame(() => {
+                this._restoreFrame = 0;
+                this.restoreRecycledCards();
+            });
         }, { passive: true });
 
         // Favorites filter toggle
