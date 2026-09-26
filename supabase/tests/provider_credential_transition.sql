@@ -1359,6 +1359,9 @@ begin
       v_kind,v_catalog_version,200
     ) into v_result;
     v_user_epoch := (v_result->>'visibilityEpoch')::bigint;
+    if v_kind='vod' and exists(select 1 from phase3_ctx where key='refresh-stop-after-vod') then
+      return;
+    end if;
     v_action := case v_kind when 'live' then 'vod_streams'
       when 'vod' then 'series_streams' else 'complete' end;
     v_progress := jsonb_build_object('version',1,'catalogVersion',v_catalog_version,
@@ -1507,6 +1510,9 @@ select extensions.ok((select job.state='dead' and checkpoint.checkpoint_revision
   'empty recovery retains the old failure and ledger while allocating a distinct run');
 set local role service_role;
 \endif
+\if :{?phase3_refresh_rebuild_test}
+\ir provider_failed_refresh_rebuild_assertions.sql
+\endif
 select pg_temp.phase3_refresh_proof();
 select public.norva_complete_credential_transition(
   (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
@@ -1519,6 +1525,14 @@ reset role;
 select extensions.ok(not public.norva_source_catalog_visible_internal(
   '93000000-0000-4000-8000-000000000102','93000000-0000-4000-8000-000000000001'),
   'successful credential completion does not bypass the separate access check');
+\if :{?phase3_refresh_rebuild_test}
+select extensions.is(pg_temp.rebuild_preserved_rows()-'media'-'variants'-'titles',
+  (select value-'media'-'variants'-'titles' from phase3_ctx where key='rebuild-before'),
+  'full successful rebuild retains original dead job and accepted run evidence');
+select extensions.is((select state from public.cloud_source_transitions where id=
+  (select (value->>'transition_id')::uuid from phase3_ctx where key='rebuild-dead')),
+  'completed','new exhaustive inventory completes the transition');
+\endif
 select extensions.is((select state from public.cloud_source_credential_transition_jobs where id=
   (select (value->>'job_id')::uuid from phase3_ctx where key='expired-dead-job')),'dead',
   'recovery preserves immutable failure evidence');
