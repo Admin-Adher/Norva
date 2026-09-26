@@ -971,14 +971,20 @@ select extensions.is(
   'ambiguous',
   'typed overlap without an equal independent content manifest stays ambiguous'
 );
-select public.norva_decide_ambiguous_credential_transition(
+insert into phase3_ctx values('manual-keep-result',public.norva_decide_ambiguous_credential_transition(
   (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
   '93000000-0000-4000-8000-000000000001',
   'KEEP_AS_SAME_CATALOG','phase3-test',
   (select revision from public.cloud_source_transitions
    where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2')),
   'phase3-manifest-mismatch-manual-keep',repeat('e',64)
-);
+));
+select extensions.ok((select value->>'identityDecision'='SAME_CATALOG'
+  and value->>'decisionOrigin'='MANUAL'
+  and (value->>'revision')::bigint=(select revision from public.cloud_source_transitions
+    where id=(select (value->>'transitionId')::uuid from phase3_ctx where key='create2'))
+  from phase3_ctx where key='manual-keep-result'),
+  'the initial manual decision response contains the new decision and revision');
 select public.norva_mark_credential_transition_ready(
   (select (value->>'transitionId')::uuid from phase3_ctx where key='create2'),
   '93000000-0000-4000-8000-000000000001','93000000-0000-4000-8000-000000000901',
