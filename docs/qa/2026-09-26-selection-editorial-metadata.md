@@ -24,3 +24,11 @@ The three sampled titles also remain unmatched across 40 owner variants each. Cr
 ## Other active work
 
 The capture rollout was advanced from revision 4 / 50% to revision 5 / 100% via its service-only CAS setter after the PR438 deployment and full six-window Dino processing. Both Gateways healthy, no local inference failures after deployment; ordinary-account runtime replay remains to be completed. Metadata batching and owned-provider metadata declaration flags are still off; they are distinct from capture activation. Android version 39 startup validation remains pending official installation/review.
+
+## Portuguese title matching follow-up
+
+Two live TMDB matches were rejected because the supplier omitted one interior Portuguese article. The matcher now tolerates exactly one such omission only against a Portuguese TMDB translation with at least five provider title tokens. All other words, their order, sequel numbers and year checks remain required. The automatic confidence threshold is unchanged.
+
+Read-only live API replay with the corrected matcher accepted `Como Treinar seu Dragão 3` as TMDB 166428 and `As Crônicas de Narnia - Viagem do Peregrino da Alvorada` as TMDB 10140, both at confidence 0.923, with a poster and French synopsis available. `O Ultimo Duelo` remains correctly unresolved. No production catalogue rows were changed by this proof.
+
+Six matcher regression tests pass, including wrong sequel, conflicting year, non-Portuguese translation and existing movie/series aliases. Twelve combined matcher/editorial/import tests pass. Deployment and controlled historical reprocessing still pending.
