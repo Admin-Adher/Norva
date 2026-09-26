@@ -4792,7 +4792,7 @@ async function requestLanguageCaptureWindow(options: LanguageCaptureWindowOption
       captureProtocol: 1, captureAction: action, captureTrackIndex: trackIndex,
       ...(action === "infer" ? { captureRelease: release } : {}),
     });
-  const budget = Math.min(action === "infer" ? 60000 : 5000, languageValidationFetchBudgetMs(taskDeadlineAt));
+  const budget = Math.min(action === "infer" ? 110000 : 5000, languageValidationFetchBudgetMs(taskDeadlineAt));
   if (budget <= 0) throw new HttpError(503, "Local inference task budget exhausted", { code: "LANGUAGE_VALIDATION_TASK_BUDGET_EXHAUSTED" });
   let response: Response;
   try {

@@ -295,3 +295,34 @@ test('capture routes remain service-authenticated and never put provider capabil
     assert.doesNotMatch(compute, /claim_provider|release_provider|begin_catalog_file_audio_validation_provider_attempt/);
     assert.ok(compute.indexOf('checkpoint_catalog_file_audio_validation_window') < compute.indexOf('"ack"'));
 });
+
+test('captured audio permits a slow full-model quality fallback without a new provider request', async () => {
+    let time = 0; let pipeline; let passes = 0;
+    const { createStrictLidInference } = require('../services/media-gateway/src/strict-lid-inference');
+    const engine = createStrictLidInference({ now: () => time });
+    const signal = new AbortController().signal;
+    const context = vm.createContext({
+        Date: { now: () => time },
+        createStrictLidCapturePipeline: options => { pipeline = options; return options; },
+        capturePipelineError: code => Object.assign(Error(code), { code }),
+        planStrictSpeechWindow: () => ({}),
+        runStrictSpeechSampler: async () => { time += 5000; return { ok: true, offset: 0, selection: {} }; },
+        runStrictWhisperBatch: (paths, options) => engine.run({ ...options, wavPaths: paths, vadModel: 'fixture' }, async args => {
+            const duration = ++passes === 1 ? 20000 : 60000;
+            time += Math.min(duration, args.timeoutMs);
+            if (args.timeoutMs < duration) return { ok: false, timedOut: true, samples: [] };
+            return { ok: true, samples: [{ disposition: passes === 1 ? 'weak' : 'accepted', result: { language: 'te' } }] };
+        }),
+        strictLanguageBatchSampleResult: sample => sample,
+        createStrictLidWindowReceipt: ({ evidence }) => evidence.disposition,
+        GATEWAY_TOKEN: 'fixture',
+    });
+    vm.runInContext(section(gateway, 'function initializeStrictLidCapturePipeline(', 'async function handleStrictLidCaptureRequest('), context);
+    context.initializeStrictLidCapturePipeline({});
+    const result = await pipeline.infer('/private/fixture.wav', { durationSeconds: 3600, windowOrdinal: 1, windowCount: 6 },
+        { accountKey: 'fixture' }, signal);
+    assert.equal(result.receipt, 'accepted');
+    assert.equal(time, 85000);
+    assert.equal(passes, 2);
+    assert.equal(engine.health().qualityFallbackRecoveredSamples, 1);
+});
