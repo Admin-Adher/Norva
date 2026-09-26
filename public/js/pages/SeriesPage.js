@@ -232,7 +232,7 @@ class SeriesPage {
             }
         }, {
             root: this.container,
-            rootMargin: '0px 0px 700px 0px'
+            rootMargin: '0px 0px 900px 0px'
         });
 
         // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
@@ -676,7 +676,7 @@ class SeriesPage {
         const loaderEl = this.container.querySelector('.genre-bucket-loader');
         this.bucketObserver = new IntersectionObserver((entries) => {
             if (entries.some((e) => e.isIntersecting)) this.loadBucketPage();
-        }, { root: this.container, rootMargin: '700px' });
+        }, { root: this.container, rootMargin: '900px' });
         this.loadBucketPage().then(() => {
             if (loaderEl) this.bucketObserver.observe(loaderEl);
         });

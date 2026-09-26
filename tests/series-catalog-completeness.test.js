@@ -157,7 +157,7 @@ test('Series grid is bounded by its single visible scroll container', () => {
     'the Series scroller must not extend below its clipped parent');
   assert.match(
     source,
-    /this\.observer = new IntersectionObserver\([\s\S]*?root:\s*this\.container,[\s\S]*?rootMargin:\s*'0px 0px 700px 0px'/,
+    /this\.observer = new IntersectionObserver\([\s\S]*?root:\s*this\.container,[\s\S]*?rootMargin:\s*'0px 0px 900px 0px'/,
     'the infinite-scroll sentinel must observe the actual Series scroll owner',
   );
 });
