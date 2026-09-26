@@ -1097,7 +1097,31 @@
     async function playbackRequest(session, options = {}) {
         // Creation is security-sensitive and has no legacy fallback: a partial
         // deployment must fail closed instead of bypassing provider arbitration.
-        return requestToBase(playbackBase(), 'POST', '/playback/session', session, options);
+        const { signal, ...receiptOptions } = options;
+        const abortError = () => Object.assign(new Error('Playback cancelled'), { name: 'AbortError' });
+        if (signal?.aborted) throw abortError();
+        // A browser fetch abort does not reliably reach the Edge through the
+        // reverse proxy. Keep the creation receipt so Back can close the exact
+        // server session instead of abandoning a running provider connection.
+        const cleanupOptions = { token: options.token === undefined ? getToken() : options.token,
+            catalogVisibility: false, keepalive: true };
+        const closeReceipt = async (id) => {
+            if (!id) return;
+            await playbackSessionRequest('POST',
+                `/playback/sessions/${encodeURIComponent(id)}/expire`, null, cleanupOptions);
+        };
+        let result;
+        try {
+            result = await requestToBase(playbackBase(), 'POST', '/playback/session', session, receiptOptions);
+        } catch (error) {
+            if (error.playbackSessionReceiptId) await closeReceipt(error.playbackSessionReceiptId);
+            throw error;
+        }
+        if (signal?.aborted) {
+            await closeReceipt(result?.session?.id);
+            throw abortError();
+        }
+        return result;
     }
 
     async function playbackSessionRequest(method, path, body, options = {}) {
@@ -1302,6 +1326,9 @@
             }
             const stale = new Error('Stale catalog visibility generation');
             stale.code = 'STALE_CATALOG_VISIBILITY_EPOCH';
+            if (method === 'POST' && path === '/playback/session' && response.ok) {
+                stale.playbackSessionReceiptId = payload?.session?.id;
+            }
             if (method === 'POST' && path === '/sources') {
                 stale.sourceCreationReceiptId = sourceCreationReceiptId(response.status, payload);
             }

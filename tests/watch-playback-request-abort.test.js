@@ -41,7 +41,7 @@ test('Watch owns one AbortController per playback attempt and cancels it on tear
   assert.match(timer, /this\.app\?\.currentPage && this\.app\.currentPage !== 'watch'/);
 });
 
-test('the initial resolver and every network layer carry the same AbortSignal to Gateway creation', () => {
+test('the resolver carries cancellation and the server handles transport aborts when propagated', () => {
   const play = section(watch, 'async play(content, streamUrl, playback = {}) {', '\n    async ');
   const getStream = section(api, 'getStreamUrl: (', '\n        },\n\n        // EPG');
   const cloudWrapper = section(api, 'function cloudPlaybackApi() {', '\n    return {');
