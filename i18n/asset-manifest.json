@@ -5,7 +5,7 @@
   "public/js/app.js": "0a8a1cae8b",
   "public/js/authApi.js": "be61dee633",
   "public/js/blog-index.js": "dccbee9843",
-  "public/js/cloudApi.js": "ddfd2925df",
+  "public/js/cloudApi.js": "d2b28867fb",
   "public/js/components/ChannelList.js": "31539baf07",
   "public/js/components/DevicesScreensModule.js": "f865c42fcb",
   "public/js/components/EpgGuide.js": "a0f9f26b0f",

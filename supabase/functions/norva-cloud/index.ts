@@ -1,4 +1,5 @@
 import { playRetention } from "../_shared/play-retention.ts";
+import { refreshHistoryEditorial } from "../_shared/history-editorial.mjs";
 import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
 import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
 import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
@@ -102,6 +103,7 @@ import {
   acknowledgeCatalogVisibilityEpochMutation,
   bindCatalogVisibilityEpoch as bindCatalogVisibilityEpochShared,
   catalogVisibilityEpochHeaders,
+  boundCatalogVisibilityEpoch,
   finalizeCatalogVisibilityResponse,
 } from "../_shared/catalog-visibility-response.mjs";
 import {
@@ -4984,7 +4986,11 @@ async function listHistory(req: Request, url: URL, userId: string, db: SupabaseC
     sources.filter((s) => s.status === "ready" || s.status === "completed").map((s) => s.id),
   );
   const history = await pruneUnavailableHistory(data.slice(0, limit), userId, stableSourceIds, db);
-  return { history: history.map(sanitizeWatchHistory) };
+  const editorialHistory = await refreshHistoryEditorial(history, {
+    db, userId, epoch: boundCatalogVisibilityEpoch(req),
+    lang: (url.searchParams.get("lang") ?? "").toLowerCase().split(/[-_]/)[0],
+  });
+  return { history: editorialHistory.map(sanitizeWatchHistory) };
 }
 
 async function listHistorySources(userId: string, db: SupabaseClient) {

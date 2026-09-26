@@ -4915,6 +4915,7 @@
 
         history: {
             list: (params = {}, { fresh = false } = {}) => {
+                params = { ...params, lang: resolveLang() };
                 if (fresh) invalidateCache('hist');
                 return cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                     () => request('GET', `/history${query(params)}`));
@@ -5082,6 +5083,7 @@
             },
             history: {
                 list: (params = {}, { fresh = false } = {}) => {
+                    params = { ...params, lang: resolveLang() };
                     if (fresh) invalidateCache('hist');
                     return cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                         () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() }));
