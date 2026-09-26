@@ -55,6 +55,12 @@ public class CatalogProgressModalInstrumentedTest {
         });
         try {
             assertTrue("Modal assets loaded", loaded.await(45, TimeUnit.SECONDS));
+            evaluate(instrumentation, holder.get(), "window.conflictResult='pending';verifySourceConflict().then(v=>window.conflictResult=v).catch(e=>window.conflictResult=String(e));");
+            String conflict = "\"pending\"";
+            for (int i=0; i<50 && "\"pending\"".equals(conflict); i++) {
+                Thread.sleep(100); conflict=evaluate(instrumentation, holder.get(), "window.conflictResult");
+            }
+            assertEquals("Source conflict has safe copy and no automatic resubmission", "\"ok\"", conflict);
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
                 evaluate(instrumentation, holder.get(), "window.modalResult='pending';openProgress().then(()=>setTimeout(()=>{try{"
