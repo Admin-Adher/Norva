@@ -667,7 +667,7 @@ class SeriesPage {
                 </button>
                 <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
             </div>
-            <div class="genre-bucket-grid" style="display:flex;flex-wrap:wrap;gap:16px"></div>
+            <div class="genre-bucket-grid"></div>
             <div class="genre-bucket-loader" style="height:1px"></div>`;
         document.getElementById('genre-bucket-back')?.addEventListener('click', () => this.closeBucket());
         this.bucketGridEl = this.container.querySelector('.genre-bucket-grid');

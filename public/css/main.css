@@ -26724,3 +26724,32 @@ html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host) > .empty-state,
 html:not(.tv-mode) #page-series #series-grid:not(.rail-host) > .empty-state {
   grid-column: 1 / -1;
 }
+
+/* "See all" genre buckets are full catalogue views, so their cards use the
+   same responsive tracks as the flat movie and series grids. Rails keep their
+   horizontal card sizing through .horizontal-scroll. */
+html:not(.tv-mode) #page-movies .genre-bucket-grid,
+html:not(.tv-mode) #page-series .genre-bucket-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(min(11.25rem, 42vw), 1fr));
+  grid-auto-rows: max-content;
+  gap: var(--space-md) !important;
+  width: 100%;
+  align-content: start;
+  align-items: start;
+}
+
+html:not(.tv-mode) #page-movies .genre-bucket-grid > .dashboard-card,
+html:not(.tv-mode) #page-series .genre-bucket-grid > .dashboard-card {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+
+html:not(.tv-mode) #page-movies .genre-bucket-grid > .dashboard-card .card-image,
+html:not(.tv-mode) #page-series .genre-bucket-grid > .dashboard-card .card-image {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
