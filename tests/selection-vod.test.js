@@ -95,7 +95,7 @@ test('only an owned VOD descriptor grants automatic relay; explicit conversion a
   const { fetchSelectionVod, selectionVodIdentity } = await import('../supabase/functions/_shared/selection-vod.mjs');
   const { SELECTION_QUALIFIED_VOD } = await import('../supabase/functions/_shared/selection-qualified-vod.mjs');
   const result = await fetchSelectionVod({ fetchPlaylist: async () => { throw Error('offline external feeds'); } });
-  for (const [title, tmdbId] of [['Anjos da Noite 4', '52520'], ['South Park Guerras do Streaming', '974691']]) {
+  for (const [title, tmdbId] of [['Anjos da Noite 4', '52520'], ['South Park Guerras do Streaming', '974691'], ['South of Heaven', '645861'], ['South Park Guerras do Streaming Parte 2', '993729']]) {
     const original = SELECTION_QUALIFIED_VOD.find(item => item.title === title);
     const row = result.items.find(item => item.fields.title === title);
     assert.ok(row);
