@@ -215,3 +215,47 @@ test('a definitive refresh-token 401 still clears the stored session', async () 
   assert.equal(runtime.values.has('norva-cloud-session'), false);
   assert.equal(runtime.cloudTokens.at(-1), null);
 });
+
+test('a GoTrue 403 for an unverifiable access token forces refresh and retries user lookup', async () => {
+  const calls = [];
+  const runtime = loadAuth(async (url, options = {}) => {
+    calls.push({ url, token: options.headers?.Authorization || '' });
+    if (url.endsWith('/auth/v1/user') && calls.length === 1) {
+      return response(403, { msg: 'token signature is invalid' });
+    }
+    if (url.includes('/auth/v1/token?grant_type=refresh_token')) {
+      return response(200, {
+        access_token: 'fresh-access-token',
+        refresh_token: 'fresh-refresh-token',
+        expires_in: 3600,
+        user: { id: 'user-1', email: 'member@example.test' },
+      });
+    }
+    assert.equal(url, 'https://api.norva.tv/auth/v1/user');
+    return response(200, { id: 'user-1', email: 'member@example.test' });
+  }, {
+    navigator: {
+      locks: {
+        async request(_name, _options, callback) { return callback(); },
+      },
+    },
+  });
+  runtime.auth.setSession({
+    access_token: 'old-access-token',
+    refresh_token: 'still-valid-refresh-token',
+    expires_at: Math.floor(Date.now() / 1000) + 300,
+    user: { id: 'user-1', email: 'member@example.test' },
+  });
+
+  const user = await runtime.auth.getUser();
+
+  assert.equal(user.id, 'user-1');
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].token, 'Bearer old-access-token');
+  assert.equal(calls[1].url, 'https://api.norva.tv/auth/v1/token?grant_type=refresh_token');
+  assert.equal(calls[2].token, 'Bearer fresh-access-token');
+  assert.equal(
+    JSON.parse(runtime.values.get('norva-cloud-session')).refresh_token,
+    'fresh-refresh-token',
+  );
+});

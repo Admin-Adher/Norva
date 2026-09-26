@@ -1201,7 +1201,7 @@
         const auth = (typeof window !== 'undefined') ? window.NorvaAuth : null;
         if (!auth || typeof auth.refreshSession !== 'function') return Promise.resolve(null);
         _tokenRefreshInFlight = Promise.resolve()
-            .then(() => auth.refreshSession())
+            .then(() => auth.refreshSession({ force: true }))
             .then((session) => (session && session.access_token) ? session.access_token : null)
             .catch(() => null)
             .finally(() => { _tokenRefreshInFlight = null; });
@@ -1287,7 +1287,10 @@
         let response = await send();
         let _trRefreshed = false;
 
-        if (response.status === 401 && usingUserToken && token) {
+        // Auth gateways may report an unverifiable bearer as either 401 or
+        // 403. Retry once through the shared refresh path so a JWT signing-key
+        // rotation does not strand an otherwise valid browser session.
+        if ((response.status === 401 || response.status === 403) && usingUserToken && token) {
             // Exact native-session closure owns a strict AbortSignal budget.
             // Token rotation may continue safely in the auth single-flight, but
             // this request must release its close barrier on time so Android can
