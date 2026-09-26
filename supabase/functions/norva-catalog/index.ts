@@ -4111,7 +4111,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
   const displayTitle = stringOrNull(loc.title) ?? title.title;
   const displayOverview = stringOrNull(loc.overview) ?? overview;
   const rating = numberOrNull(tmdb.vote_average ?? metadata.vote_average);
-  const runtime = numberOrNull(tmdb.runtime ?? metadata.runtime);
+  const runtime = numberOrNull(Number(tmdb.runtime) > 0 ? tmdb.runtime : metadata.runtime);
   const defaultVariantId = defaultVariant.id ?? title.default_variant_id ?? null;
   const posterUrl = preferSecureImage(title.poster_url ?? defaultVariant.poster_url, tmdbImageUrl(tmdb.poster_path, "w500"));
   const backdropUrl = preferSecureImage(title.backdrop_url, tmdbImageUrl(tmdb.backdrop_path, "w780"));
