@@ -1,4 +1,5 @@
 import { publicProviderAudioLanguages } from './selection-provider-languages.mjs';
+import { isSelectionSourceAttribution, isEditorialTextField } from './catalog-editorial-text.mjs';
 
 const PROFILE_FIELDS = Object.freeze([
   "display_name",
@@ -688,6 +689,7 @@ function pick(value, fields) {
   const result = {};
   for (const field of fields) {
     if (!Object.prototype.hasOwnProperty.call(source, field)) continue;
+    if (isEditorialTextField(field) && isSelectionSourceAttribution(source[field])) continue;
     const publicValue = clonePublicValue(source[field]);
     if (publicValue !== undefined) result[field] = publicValue;
   }

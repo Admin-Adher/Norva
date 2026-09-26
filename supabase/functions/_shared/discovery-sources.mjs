@@ -173,7 +173,8 @@ export async function fetchDiscoveryCandidates({ fetchPlaylist = fetchM3uPlaylis
           tvgId: entry.tvgId, group, categoryName: group, container, containerExtension: container,
           discoveryFeed: feed.id, discoveryMediaKey: key, discoverySource: feed.website,
           ...(feed.region ? { country: feed.region } : {}),
-          ...(feed.kind === 'movie' ? { plot: `${feed.name}\n${feed.website}\nhttps://norva.tv/catalog/credits.html`, year: entry.title.match(/\((19\d{2}|20\d{2})\)/)?.[1] } : {}),
+          attribution: { name: feed.name, website: feed.website },
+          ...(feed.kind === 'movie' ? { year: entry.title.match(/\((19\d{2}|20\d{2})\)/)?.[1] } : {}),
         };
         const fields = { item_type: feed.kind, external_id: externalId, title: entry.title,
           parent_external_id: group, subtitle: group, poster_url: entry.logo || null, metadata,

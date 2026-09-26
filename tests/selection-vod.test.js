@@ -21,6 +21,11 @@ test('Selection imports both approved movie feeds, pins nested hosts, retains SD
     .filter(row => !row.metadata.discoveryFeed.endsWith('-tested-vod'));
   assert.equal(rows.filter(row => row.item_type === 'live').length, 21);
   assert.equal(rows.filter(row => row.item_type === 'movie').length, 2);
+  for (const row of rows.filter(row => row.item_type === 'movie')) {
+    assert.equal(row.metadata.plot, undefined, 'source credits are not a film synopsis');
+    assert.ok(row.metadata.attribution.name);
+    assert.equal(row.metadata.attribution.website, row.metadata.discoverySource);
+  }
   assert.ok(rows.filter(row => row.item_type === 'movie').every(row => row.playback_hint.container === 'm3u8'));
   assert.equal(data.sources.find(source => source.id === 'babuperumana-vod').rejected, 2);
   assert.equal(data.sources.find(source => source.id === 'babuperumana-vod').duplicates, 1);

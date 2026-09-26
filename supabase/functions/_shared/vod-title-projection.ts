@@ -1346,7 +1346,9 @@ export async function validateTmdbCandidate(
   // momia" (the provider's language is the user's). i18n carries all the other
   // languages for the read path; validation passes if ANY language matches.
   const ranked = titleCandidates
-    .map((cand) => ({ cand, score: titleConfidence(candidate.title, cand, candidate.year, year) }))
+    .map((cand) => ({ cand, score: titleConfidence(candidate.title, cand, candidate.year, year,
+      candidate.itemType === "movie" && translations.some((translation) =>
+        translation.iso_639_1 === "pt" && recordOrEmpty(translation.data).title === cand)) }))
     .sort((a, b) => b.score - a.score);
   const best = ranked[0];
   const title = best?.cand || stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
@@ -1654,11 +1656,12 @@ async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tm
   return await fetchTmdbJsonWithRetry(url.toString(), headers);
 }
 
-function titleConfidence(providerTitle: string, tmdbTitle: string, providerYear: string | null, tmdbYear: string | null) {
+function titleConfidence(providerTitle: string, tmdbTitle: string, providerYear: string | null, tmdbYear: string | null,
+  portugueseTranslation = false) {
   const provider = normalizeMatchTitle(providerTitle, providerYear);
   const tmdb = normalizeMatchTitle(tmdbTitle, tmdbYear);
   if (!provider || !tmdb) return 0;
-  const titleScore = provider === tmdb
+  const titleScore = provider === tmdb || (portugueseTranslation && portugueseArticleOmissionMatches(provider, tmdb))
     ? 1
     : provider.includes(tmdb) || tmdb.includes(provider)
       ? 0.82
@@ -1667,6 +1670,17 @@ function titleConfidence(providerTitle: string, tmdbTitle: string, providerYear:
     ? Math.abs(Number(providerYear) - Number(tmdbYear)) <= 1 ? 1 : 0
     : 0.65;
   return Number((titleScore * 0.78 + yearScore * 0.22).toFixed(3));
+}
+
+// Only a TMDB Portuguese translation may confirm this long-title spelling
+// variation. Preserve every content token, its order and sequel number; never
+// turn a short homonym into a confident match by deleting general stop words.
+function portugueseArticleOmissionMatches(provider: string, translated: string): boolean {
+  const left = provider.split(" "), right = translated.split(" ");
+  if (left.length < 5 || right.length !== left.length + 1) return false;
+  return right.some((token, index) => index > 0 && index < right.length - 1
+    && /^(?:o|a|os|as|um|uma)$/.test(token)
+    && right.filter((_, position) => position !== index).join(" ") === provider);
 }
 
 // Matching is allowed to be more forgiving than identity construction. Strip

@@ -1,3 +1,4 @@
+import { isSelectionSourceAttribution, isEditorialTextField } from './catalog-editorial-text.mjs';
 import {
   sanitizeCodecProfile,
   sanitizeMediaMetadata,
@@ -272,6 +273,7 @@ function pick(value, fields) {
   const result = {};
   for (const field of fields) {
     if (!Object.prototype.hasOwnProperty.call(source, field)) continue;
+    if (isEditorialTextField(field) && isSelectionSourceAttribution(source[field])) continue;
     const selected = publicScalar(source[field], 1);
     if (selected !== undefined) result[field] = selected;
   }
