@@ -222,7 +222,7 @@ class MoviesPage {
             }
         }, {
             root: this.container,
-            rootMargin: '0px 0px 700px 0px'
+            rootMargin: '0px 0px 900px 0px'
         });
 
         // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
@@ -662,7 +662,7 @@ class MoviesPage {
             // the viewport made the sentinel depend on how much variable chrome
             // (filters + Continue Watching) happened to sit above the grid.
             root: this.container,
-            rootMargin: '0px 0px 700px 0px'
+            rootMargin: '0px 0px 900px 0px'
         });
         this.loadBucketPage().then(() => {
             if (loaderEl) this.bucketObserver.observe(loaderEl);
