@@ -26695,7 +26695,9 @@ html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host),
 html:not(.tv-mode) #page-series #series-grid:not(.rail-host) {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(11.25rem, 42vw), 1fr));
+  grid-auto-rows: max-content;
   align-content: start;
+  align-items: start;
   justify-content: stretch;
 }
 
@@ -26705,6 +26707,8 @@ html:not(.tv-mode) #page-series #series-grid:not(.rail-host) > .series-card {
   min-width: 0;
   max-width: none;
   flex: initial;
+  height: max-content;
+  align-self: start;
 }
 
 html:not(.tv-mode) #page-movies #movies-grid:not(.rail-host) > .movie-card .movie-poster,
