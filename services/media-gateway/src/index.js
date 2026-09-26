@@ -4791,6 +4791,14 @@ function claimLanguageEnrichmentNetwork(sourceUrl, selection = null, opaqueTarge
     throw error;
 }
 
+// Legacy probes outside a canary keep their existing playback/extraction
+// guards. Only selected files enter the new shared admission lane. Explicit
+// capture requests still call the strict claim above and cannot fall back.
+function claimOptionalLanguageEnrichmentNetwork(sourceUrl, selection = null, opaqueTarget = false, enrichmentFileKey = null) {
+    if (enrichmentPilot.mode === 'pilot' && !enrichmentPilot.allowsFile(enrichmentFileKey)) return null;
+    return claimLanguageEnrichmentNetwork(sourceUrl, selection, opaqueTarget, enrichmentFileKey);
+}
+
 async function handleProbeAudioRequest(req, res, options = {}) {
     const providerDrainState = createProviderProbeDrainState();
     let networkLease = null;
@@ -4895,7 +4903,7 @@ async function handleProbeAudioRequest(req, res, options = {}) {
 }
 
 app.post('/probe-audio', requireGatewayAuth, (req, res) => handleProbeAudioRequest(req, res, {
-    claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimLanguageEnrichmentNetwork : undefined,
+    claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimOptionalLanguageEnrichmentNetwork : undefined,
 }));
 
 // ── Strict LID loopback broker (mono-account provider barrier) ───────────────
@@ -7716,7 +7724,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
             // Whisper computes. Keep the original CPU/request deadline active.
             // The distributed account lease still awaits Edge's response; its
             // earlier durable handoff is a separate capture-protocol workstream.
-            if (options.claimNetwork) await closeStrictBrokerForResponse(false);
+            if (networkLease) await closeStrictBrokerForResponse(false);
             const batchTimeoutMs = strictLidWhisperBatchTimeoutMs(
                 strictWorkDeadlineAt,
                 Boolean(strictWindowContext),
@@ -8353,7 +8361,7 @@ app.post('/detect-language', setDetectLanguageSecurityHeaders, requireGatewayAut
     }
     return handleDetectLanguageRequest(req, res, capabilityToken, {
         requiredScope: LID_LEGACY_FULL_SCOPE,
-        claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimLanguageEnrichmentNetwork : undefined,
+        claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimOptionalLanguageEnrichmentNetwork : undefined,
     });
 });
 
@@ -8373,7 +8381,7 @@ app.post('/detect-language/finalize', setDetectLanguageSecurityHeaders, requireG
 // use the header route above because this path can be captured by access logs.
 app.get('/detect-language/:token', async (req, res) => (
     handleDetectLanguageRequest(req, res, String(req.params.token || ''), {
-        claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimLanguageEnrichmentNetwork : undefined,
+        claimNetwork: LANGUAGE_METADATA_LANE_ENABLED ? claimOptionalLanguageEnrichmentNetwork : undefined,
     })
 ));
 
