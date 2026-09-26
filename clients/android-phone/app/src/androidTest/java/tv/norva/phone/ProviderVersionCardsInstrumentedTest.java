@@ -35,10 +35,15 @@ public class ProviderVersionCardsInstrumentedTest {
     @Test public void landscapeVersionCardsAtBothTextZooms() throws Exception { verify(844, 390); }
     @Test public void portraitCatalogueSurfacesAtBothTextZooms() throws Exception { verify(360, 800, true); }
     @Test public void landscapeCatalogueSurfacesAtBothTextZooms() throws Exception { verify(844, 390, true); }
+    @Test public void restoredFicheUsesFreshEvidence() throws Exception { verify(360, 800, false, true); }
 
     private void verify(int width, int height) throws Exception { verify(width, height, false); }
 
     private void verify(int width, int height, boolean catalogue) throws Exception {
+        verify(width, height, catalogue, false);
+    }
+
+    private void verify(int width, int height, boolean catalogue, boolean restoration) throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         android.content.Context context = instrumentation.getTargetContext();
         AtomicReference<WebView> holder = new AtomicReference<>();
@@ -70,12 +75,14 @@ public class ProviderVersionCardsInstrumentedTest {
             assertTrue("Version renderer assets loaded", loaded.await(45, TimeUnit.SECONDS));
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
-                for (String locale : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
+                for (String locale : restoration ? new String[] {"fr"} : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
                     for (String kind : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
                         String fixture = catalogue ? "CatalogLanguageQA" : "ProviderVersionCardsQA";
                         evaluate(instrumentation, holder.get(), "window.versionResult='pending';(async()=>{try{"
-                            + "await NorvaI18n.setPreference('"+locale+"');await "+fixture+".mount('"+kind+"'"+(catalogue ? ",9" : "")+");"
-                            + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();"
+                            + "await NorvaI18n.setPreference('"+locale+"');"
+                            + (restoration ? "await ProviderVersionCardsQA.verifyRestoration('"+kind+"');"
+                                : "await "+fixture+".mount('"+kind+"'"+(catalogue ? ",9" : "")+");"
+                                    + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();")
                             + "const audioPage=Object.create(WatchPage.prototype);audioPage.content={rawTitle:'ES | Example'};"
                             + "audioPage.audioLanguageValidationStatus='pending';audioPage.audioTracks=[{index:1,codec:'ac3',channels:6,channelLayout:'5.1(side)'}];"
                             + "if(audioPage.getProbeAudioTracks()[0].label!==audioPage.getLanguageDisplayName('es')+' · AC3 · 5.1')throw Error('public player qualifier');"

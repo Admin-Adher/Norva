@@ -2265,7 +2265,8 @@ class MoviesPage {
                 String(i.stream_id) === String(item.stream_id) && String(i.sourceId) === String(item.sourceId));
             const group = MediaUtils.groupItems(items, { idField: 'stream_id' }).find(inGroup)
                 || { key: 'search', items: [tapped], representative: tapped };
-            const selected = group.items.find(i => String(i.stream_id) === String(item.stream_id)) || null;
+            const selected = group.items.find(i => String(i.stream_id) === String(item.stream_id)
+                && String(i.sourceId) === String(item.sourceId)) || null;
             return this.openGroup(group, { selectedMovie: selected, intentToken: token });
         } catch (_) {
             return false;
@@ -2995,9 +2996,7 @@ class MoviesPage {
                 window.app?.rememberOpenFiche?.({
                     type: 'movie', sourceId: movie.sourceId, id: movie.stream_id,
                     title: this.getMovieDisplayTitle(displayMovie),
-                    // Stash the whole version group so the restore rebuilds the EXACT fiche
-                    // (all versions + the selected one) without re-searching.
-                    group: this.currentMovieGroup,
+                    // Resolve current versions from this identity after a reload.
                 });
             } catch (_) { /* best-effort */ }
         }
