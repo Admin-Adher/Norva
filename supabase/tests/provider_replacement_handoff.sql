@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select extensions.plan(26);
+select extensions.plan(30);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -27,6 +27,19 @@ select public.norva_register_active_catalog_refresh_worker(
   'active-catalog-refresh-checkpoint-prune-v1'
 );
 reset role;
+-- This transaction exercises post-activation behavior, like the credential
+-- fixture. Rollout gates have their own tests; these markers are rolled back.
+update public.cloud_provider_access_foundation_rollout
+set phase='complete',started_at=coalesce(started_at,clock_timestamp()),
+    completed_at=clock_timestamp(),updated_at=clock_timestamp() where singleton;
+update public.cloud_source_provider_account_affinity_rollout
+set phase='complete',started_at=coalesce(started_at,clock_timestamp()),
+    completed_at=clock_timestamp(),updated_at=clock_timestamp() where singleton;
+update public.cloud_catalog_generation_rollout
+set phase='contracted',discovery_complete=true,backfill_started_at=clock_timestamp(),
+    backfill_completed_at=clock_timestamp(),constraints_validated_at=clock_timestamp(),
+    contracted_at=clock_timestamp() where singleton;
+alter table public.provider_account_activity validate constraint provider_account_activity_opaque_key_ck;
 update public.admin_feature_flags set enabled=true
 where key in ('provider_credential_transition_v1_enabled','provider_replacement_v1_enabled');
 
@@ -225,12 +238,30 @@ select public.norva_mark_credential_category_list_complete(
   (select (value->>'job_id')::uuid from phase4_ctx where key='claim'),
   'phase4-worker-1',(select (value->>'lease_sequence')::integer from phase4_ctx where key='claim'),'live',0
 );
+select public.norva_register_credential_generation_categories(
+  (select (value->>'replacementId')::uuid from phase4_ctx where key='create'),
+  '94000000-0000-4000-8000-000000000001',
+  (select (value->>'generationId')::uuid from phase4_ctx where key='allocate'),
+  (select (value->>'job_id')::uuid from phase4_ctx where key='claim'),
+  'phase4-worker-1',(select (value->>'lease_sequence')::integer from phase4_ctx where key='claim'),
+  'vod','[{"category_ordinal":0,"provider_category_id":"b-movies","category_name":"B movies"}]'::jsonb
+);
+reset role;
+select extensions.is((select source_id from public.cloud_source_catalog_generation_categories
+  where generation_id=(select (value->>'generationId')::uuid from phase4_ctx where key='allocate')
+    and category_kind='vod' and provider_category_id='b-movies'),
+  (select (value->>'candidateSourceId')::uuid from phase4_ctx where key='create'),
+  'nonempty replacement categories belong to B and pass the generation foreign key');
+select extensions.is((select count(*)::integer from public.cloud_source_catalog_generation_categories
+  where source_id='94000000-0000-4000-8000-000000000101' and provider_category_id='b-movies'),0,
+  'replacement category registration never writes categories into A');
+set local role service_role;
 select public.norva_mark_credential_category_list_complete(
   (select (value->>'replacementId')::uuid from phase4_ctx where key='create'),
   '94000000-0000-4000-8000-000000000001',
   (select (value->>'generationId')::uuid from phase4_ctx where key='allocate'),
   (select (value->>'job_id')::uuid from phase4_ctx where key='claim'),
-  'phase4-worker-1',(select (value->>'lease_sequence')::integer from phase4_ctx where key='claim'),'vod',0
+  'phase4-worker-1',(select (value->>'lease_sequence')::integer from phase4_ctx where key='claim'),'vod',1
 );
 select public.norva_mark_credential_category_list_complete(
   (select (value->>'replacementId')::uuid from phase4_ctx where key='create'),
@@ -353,6 +384,16 @@ select extensions.ok((select cleared_at is not null
   from public.cloud_source_transition_secrets
   where transition_id=(select (value->>'replacementId')::uuid from phase4_ctx where key='create')),
   'terminal replacement cancellation clears its copied ciphertext');
+
+set local role service_role;
+select extensions.is(public.norva_purge_cancelled_credential_generation_batch(
+  '94000000-0000-4000-8000-000000000301',
+  '94000000-0000-4000-8000-000000000001',10)->>'purgeMode','abandoned',
+  'immutable handoff origin authorizes cleanup of the consumed off-head candidate');
+select extensions.ok((public.norva_purge_cancelled_credential_generation_batch(
+  '94000000-0000-4000-8000-000000000301',
+  '94000000-0000-4000-8000-000000000001',10)->>'replayed')::boolean,
+  'consumed candidate cleanup remains idempotent');
 
 select * from extensions.finish();
 rollback;
