@@ -3556,12 +3556,17 @@ class SeriesPage {
         try {
             if (!item || item.series_id == null) return false;
             const title = item.tmdb?.name || item.tmdb?.title || item.name || '';
-            const items = [item];
+            const tapped = { ...item };
+            const items = [tapped];
             try {
                 const page = await API.media.page({ type: 'series', q: title, limit: 60 });
                 const seen = new Set([`${item.sourceId}:${item.series_id}`]);
                 for (const s of (page.items || [])) {
                     const k = `${s.sourceId}:${s.series_id}`;
+                    if (k === `${tapped.sourceId}:${tapped.series_id}`) {
+                        Object.assign(tapped, s);
+                        continue;
+                    }
                     if (!seen.has(k)) { seen.add(k); items.push(s); }
                 }
             } catch (_) { /* best-effort: keep just the tapped item */ }
@@ -3569,8 +3574,9 @@ class SeriesPage {
             const inGroup = (g) => g.items.some(i =>
                 String(i.series_id) === String(item.series_id) && String(i.sourceId) === String(item.sourceId));
             const group = MediaUtils.groupItems(items, { idField: 'series_id' }).find(inGroup)
-                || { key: 'search', items: [item], representative: item };
-            const series = group.items.find(i => String(i.series_id) === String(item.series_id)) || group.representative || item;
+                || { key: 'search', items: [tapped], representative: tapped };
+            const series = group.items.find(i => String(i.series_id) === String(item.series_id)
+                && String(i.sourceId) === String(item.sourceId)) || group.representative || tapped;
             await this.showSeriesDetailsV2(series, group, { intentToken: token });
             return this.isFicheIntentCurrent(token);
         } catch (_) {
@@ -3598,8 +3604,7 @@ class SeriesPage {
             window.app?.rememberOpenFiche?.({
                 type: 'series', sourceId: series.sourceId, id: series.series_id,
                 title: this.getSeriesDisplayTitle(series),
-                // Stash the series + its version group so the restore rebuilds the EXACT fiche.
-                series, group: this.currentSeriesGroup,
+                // Resolve current versions from this identity after a reload.
             });
         } catch (_) { /* best-effort */ }
 

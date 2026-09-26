@@ -113,5 +113,48 @@ window.ProviderVersionCardsQA = (() => {
         return { kind:currentKind, buttons:13, internalHints:8, selected:lastChoice.stream_id,
             locale:NorvaI18n.language, width:innerWidth };
     }
-    return { mount, verify, get lastChoice() { return lastChoice?.stream_id ?? null; } };
+    async function verifyRestoration(kind) {
+        // Load after DOMContentLoaded: exercise App's real restoration without
+        // booting an account or connecting this offline fixture to production.
+        if (typeof App === 'undefined') await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = '/js/app.js'; script.onload = resolve; script.onerror = reject;
+            document.head.append(script);
+        });
+        const page = mount(kind);
+        const pageName = kind === 'movie' ? 'movies' : 'series';
+        const idField = kind === 'movie' ? 'stream_id' : 'series_id';
+        const fresh = ['selected-source', 'other-source'].map((sourceId, index) => ({
+            sourceId, [idField]: 'same-id', stream_id: 'same-id', series_id: 'same-id',
+            name: 'Jasper Mall', raw_title: 'Jasper Mall', container_extension: 'mkv',
+            audio_tracks_scope: 'file', audio_tracks: [{ index: 1, lang: index ? 'fr' : 'en' }],
+            audio_languages: [index ? 'fr' : 'en'], audio_language_validation_status: 'verified',
+        }));
+        let fetches = 0;
+        window.API = { media: { page: async () => { fetches++; return { items: fresh }; } } };
+        const app = Object.create(App.prototype);
+        app.pages = { [pageName]: page }; app.currentPage = pageName; app._navigationToken = 1;
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(Error('restoration timed out')), 6000);
+            app.forgetOpenFiche = () => { clearTimeout(timeout); reject(Error('restoration discarded')); };
+            const show = (item, group) => {
+                page.currentMovieVersions = group.items;
+                page.currentSeriesGroup = group;
+                choose(item); clearTimeout(timeout); resolve();
+            };
+            page.showMovieDetails = (group, item) => show(item, group);
+            page.showSeriesDetailsV2 = async (item, group) => show(item, group);
+            app.restoreOpenFiche(pageName, { type: kind, sourceId: 'selected-source', id: 'same-id',
+                title: 'Jasper Mall', series: { ...fresh[0], audio_languages: [] },
+                group: { items: [{ ...fresh[0], audio_tracks: [], audio_language_validation_status: 'pending' }] } });
+        });
+        if (fetches !== 1 || selected.sourceId !== 'selected-source') throw Error('restored source or fresh fetch');
+        const buttons = [...document.querySelectorAll('#qa-versions button')];
+        const active = buttons.find(button => button.classList.contains('active'));
+        if (buttons.length !== 2 || !active) throw Error('restored versions');
+        if (active.querySelector('.version-headline')?.textContent !== MediaUtils.languageDisplayFull('en')) {
+            throw Error('restored audio still stale');
+        }
+    }
+    return { mount, verify, verifyRestoration, get lastChoice() { return lastChoice?.stream_id ?? null; } };
 })();

@@ -1,6 +1,14 @@
 name: Catalog modal Android QA
 on:
   workflow_dispatch:
+    inputs:
+      test_class:
+        description: Focused WebView verification
+        type: choice
+        default: tv.norva.phone.CatalogProgressModalInstrumentedTest
+        options:
+          - tv.norva.phone.CatalogProgressModalInstrumentedTest
+          - tv.norva.phone.ProviderVersionCardsInstrumentedTest#restoredFicheUsesFreshEvidence
   push:
     branches: [codex/max-ott-import-ux]
     paths:
@@ -38,6 +46,8 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          NORVA_QA_TEST_CLASS: ${{ inputs.test_class || 'tv.norva.phone.CatalogProgressModalInstrumentedTest' }}
         with:
           api-level: 35
           target: google_apis
@@ -47,7 +57,7 @@ jobs:
           script: |
             adb shell settings put system font_scale 1.3
             adb shell cmd overlay enable --user 0 com.android.internal.systemui.navbar.${{ matrix.navigation }}
-            cd clients/android-phone && gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=tv.norva.phone.CatalogProgressModalInstrumentedTest --no-daemon
+            cd clients/android-phone && gradle :app:connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.class=$NORVA_QA_TEST_CLASS" --no-daemon
       - uses: actions/upload-artifact@v4
         if: always()
         with:

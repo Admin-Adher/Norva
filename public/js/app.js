@@ -3782,9 +3782,8 @@ class App {
             if (!fiche || fiche.id == null || fiche.sourceId == null) return;
             sessionStorage.setItem('norva-open-fiche', JSON.stringify(fiche));
         } catch (_) { /* private mode: sessionStorage may throw */ }
-        // The full version group can contain provider-only fields, so it remains
-        // session-scoped. Native Activity recreation gets only the bounded title
-        // identity needed to resolve the exact fiche again after a WebView reload.
+        // Native Activity recreation keeps only the bounded title identity
+        // needed to resolve the fiche again after a WebView reload.
         if (this.isNativePhoneShell()) {
             try {
                 const type = fiche.type === 'series' ? 'series' : 'movie';
@@ -3893,33 +3892,13 @@ class App {
         setTimeout(async () => {
             if (!isCurrent()) return;
             try {
-                // Rebuild the EXACT fiche from the stashed version group (all versions, no
-                // re-search). Fall back to openByItem for older id-only stashes.
-                if (fiche.type === 'series' && fiche.series && pageObj.showSeriesDetailsV2) {
-                    await pageObj.showSeriesDetailsV2(
-                        fiche.series,
-                        fiche.group || null,
-                        { intentToken: ficheIntentToken }
-                    );
-                    if (!isRouteCurrent()) {
-                        pageObj.hideDetails?.();
-                        this.forgetOpenFiche();
-                    }
-                    return;
-                }
-                if (fiche.type === 'movie' && fiche.group?.items?.length && pageObj.showMovieDetails) {
-                    const selected = fiche.group.items.find(i => String(i.stream_id) === String(fiche.id)) || null;
-                    pageObj.showMovieDetails(fiche.group, selected, { intentToken: ficheIntentToken });
-                    if (!isRouteCurrent()) {
-                        pageObj.hideDetails?.();
-                        this.forgetOpenFiche();
-                    }
-                    return;
-                }
+                // Persisted groups are navigation snapshots, not current catalogue
+                // evidence. Resolve the selected source + item again so a reload
+                // can observe new audio analysis, metadata and available versions.
                 if (pageObj.openByItem) {
-                    const item = fiche.item || (fiche.type === 'series'
+                    const item = fiche.type === 'series'
                         ? { sourceId: fiche.sourceId, series_id: fiche.id, name: fiche.title, tmdb: { name: fiche.title } }
-                        : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } });
+                        : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } };
                     const opened = await pageObj.openByItem(item, { intentToken: ficheIntentToken });
                     if (!isRouteCurrent()) {
                         if (opened) pageObj.hideDetails?.();
@@ -3930,7 +3909,7 @@ class App {
                         this.forgetOpenFiche();
                     }
                 }
-            } catch (_) { this.forgetOpenFiche(); }
+            } catch (_) { if (isCurrent()) this.forgetOpenFiche(); }
         }, 150);
     }
 
