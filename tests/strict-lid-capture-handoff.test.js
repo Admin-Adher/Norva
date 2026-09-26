@@ -30,6 +30,12 @@ function edgeFixture(options = {}) {
             return options.captureFlagError ? { data: null, error: true } : { data: options.enabled !== false };
         }
         if (name === 'catalog_language_exact_file_admission_enabled') return { data: options.exactFlagUnavailable ? null : options.exact === true };
+        if (name === 'request_language_validation_catalog_yield') {
+            assert.equal(args.p_job_id, uuid);
+            assert.ok(args.p_lease_owner);
+            assert.ok(args.p_account_key);
+            return options.yieldError ? { error: true } : { data: options.yieldMissing ? null : !options.yieldCooldown };
+        }
         if (name === 'claim_provider_account_language_validation') { account = true; return { data: true }; }
         if (name === 'claim_provider_file_probe') { identity = true; return { data: true }; }
         if (name === 'claim_provider_exact_file_probe') {
@@ -119,6 +125,22 @@ test('actual Edge worker persists capture and releases both leases BEFORE callin
         'fetch:infer', 'rpc:checkpoint_catalog_file_audio_validation_window', 'fetch:ack'];
     for (let i = 1; i < stages.length; i++) assert.ok(f.events.indexOf(stages[i - 1]) < f.events.indexOf(stages[i]), stages[i]);
     assert.deepEqual(f.slots(), { account: false, identity: false });
+});
+
+test('catalogue priority is requested before both unchanged provider admission checks', async () => {
+    const f = edgeFixture({ yieldCooldown: true }); await f.run();
+    assert.deepEqual(f.failures, []);
+    assert.ok(f.events.indexOf('rpc:request_language_validation_catalog_yield') < f.events.indexOf('provider-idle'));
+    assert.equal(f.events.filter(e => e === 'provider-idle').length, 2);
+    assert.ok(f.events.indexOf('rpc:claim_provider_file_probe') < f.events.indexOf('fetch:capture'));
+});
+
+for (const option of ['yieldError', 'yieldMissing']) test(`${option} prevents provider acquisition`, async () => {
+    const f = edgeFixture({ [option]: true }); await f.run();
+    assert.ok(f.failures.length);
+    for (const event of ['fetch:capture', 'rpc:claim_provider_file_probe', 'rpc:claim_provider_account_language_validation']) {
+        assert.equal(f.events.includes(event), false);
+    }
 });
 
 test('actual Edge retry uses local capture without idle checks, provider claims or another acquisition', async () => {
