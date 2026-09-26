@@ -4351,6 +4351,18 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       });
     }
     await assertProviderCircuitClosed(providerAccountHash, db);
+    // Let the existing foreground grace expire before admitting this audio
+    // read: future catalogue work yields briefly instead of renewing it forever.
+    // This request grants no transport lease and never downgrades activity.
+    const { data: catalogYield, error: catalogYieldError } = await db.rpc(
+      "request_language_validation_catalog_yield",
+      { p_job_id: jobId, p_lease_owner: leaseOwner, p_account_key: providerAccountKey },
+    );
+    if (catalogYieldError || typeof catalogYield !== "boolean") {
+      throw new HttpError(503, "Unable to coordinate provider background work", {
+        code: "LANGUAGE_VALIDATION_PROVIDER_LEASE_ERROR",
+      });
+    }
     await assertLanguageValidationIdle(
       db,
       current.userId,
