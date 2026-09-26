@@ -19,11 +19,12 @@ The existing global flag and scoped internal grants retain their existing behavi
 
 ## Verification
 
-Migration SHA256: `362bce9473598b46cc647ec7078083950aa3783bf5de19f27c481aefac9013de`.
+Migration SHA256: `52f694de3772cd1b8a7b41fb40d73b629d89680c25ed3bcf74c6b702be0ffc49`.
 
 - 35 assertions passed in disposable PostgreSQL 17.6, network disabled, synthetic rows only. Covers inert installation, ordinary and internal owner membership, stable same-owner cohort, different cohort, auth/source/quarantine/terminal exclusions, RLS/ACLs, runtime service-role requirement, invalid/skipped stages, idempotency, revision checks, audit, rollback and unchanged jobs.
 - Two concurrent setters with revision 6: exactly one accepted, one stale request rejected. Disposable database removed; production database untouched.
 - 68 existing actual-worker/access/handoff tests passed, zero skips. They cover revoked/fraud/refunded owners, revalidation, local cache lookup before provider acquisition, drain-before-inference, lost ACK, signed exact-file actions and unchanged manual-job restrictions.
+- The first full CI run caught an application conflict using PostgreSQL's retryable serialization code. The setter now uses Norva's `PT409` revision-conflict contract. All 35 SQL checks and the concurrent race passed again, plus the four application-conflict regression tests.
 - The SQL fixture stubs the pre-existing global/internal gate and role helper. It tests the new migration's behavior, not the complete inherited billing schema. Existing scoped-gate tests and actual worker tests retain that separate coverage.
 
 Integration, production installation and staged activation remain separate work. No global readiness or native startup improvement is claimed here.

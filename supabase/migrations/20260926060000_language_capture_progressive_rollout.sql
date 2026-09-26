@@ -39,7 +39,7 @@ begin
  end if;
  select * into strict current_row from public.catalog_language_capture_rollout where singleton for update;
  if current_row.revision<>p_expected_revision then
-   raise exception 'Capture rollout revision changed' using errcode='40001';
+   raise exception 'Capture rollout revision changed' using errcode='PT409';
  end if;
  next_points:=case current_row.basis_points when 0 then 100 when 100 then 500
    when 500 then 2000 when 2000 then 5000 when 5000 then 10000 else 10000 end;

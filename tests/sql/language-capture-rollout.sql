@@ -43,7 +43,7 @@ select public.rollout_assert(public.set_catalog_language_capture_rollout(1,100,'
 do $$begin
  begin perform public.set_catalog_language_capture_rollout(0,500,'Synthetic stale operator');
   raise exception 'missing stale guard';
- exception when serialization_failure then perform public.rollout_assert(true,'stale_operator_rejected'); end;
+ exception when sqlstate 'PT409' then perform public.rollout_assert(true,'stale_operator_rejected'); end;
 end$$;
 update auth.users set banned_until=now()+interval '1 hour' where id='00000000-0000-4000-8000-000000000010';
 select public.rollout_assert(not public.catalog_language_capture_rollout_enabled_for_job('20000000-0000-4000-8000-000000000010'),'banned_owner_refused');
