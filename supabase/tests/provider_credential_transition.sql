@@ -1522,6 +1522,9 @@ select extensions.ok(not has_function_privilege('authenticated',
 \if :{?phase3_renewal_access_test}
 \ir provider_renewal_access_assertions.sql
 \endif
+\if :{?phase3_terminal_purge_test}
+\ir provider_completed_generation_purge_assertions.sql
+\endif
 select * from extensions.finish();
 rollback;
 \quit

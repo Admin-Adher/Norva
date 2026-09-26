@@ -128,9 +128,9 @@ test('after-statement fence rejects writers that resume after seal finalization'
 
 test('terminal purge keeps its exact proof through candidate projection cleanup', () => {
   const purge = section(
-    transition,
+    read('20260926015500_completed_generation_purge.sql'),
     'create or replace function public.norva_purge_cancelled_credential_generation_batch(',
-    '\ncreate or replace function public.norva_claim_credential_transition_jobs(',
+    '\nrevoke all on function public.norva_purge_cancelled_credential_generation_batch(',
   );
   const projectionDelete = purge.indexOf(
     'delete from public.cloud_source_catalog_generation_candidate_titles projection',
