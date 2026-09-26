@@ -581,12 +581,12 @@
         }
     }
 
-    async function lockedRefresh() {
+    async function lockedRefresh({ force = false } = {}) {
         // Re-read under the lock: another tab may have refreshed while we waited.
         const now = Math.floor(Date.now() / 1000);
         const fresh = getSession();
         if (!fresh?.refresh_token) return null;
-        if (fresh.expires_at && Number(fresh.expires_at) > now + 60) return fresh;
+        if (!force && fresh.expires_at && Number(fresh.expires_at) > now + 60) return fresh;
         try {
             return await refreshSessionOnce();
         } catch (error) {
@@ -650,9 +650,10 @@
         }
     }
 
-    function refreshSession() {
+    function refreshSession(options = {}) {
         if (refreshInFlight) return refreshInFlight;
-        refreshInFlight = Promise.resolve(withCrossTabLock(lockedRefresh))
+        const force = options?.force === true;
+        refreshInFlight = Promise.resolve(withCrossTabLock(() => lockedRefresh({ force })))
             .finally(() => { refreshInFlight = null; });
         return refreshInFlight;
     }
@@ -681,10 +682,14 @@
         const token = await getAccessToken();
         if (!token) { if (_done) _done('no session token'); return null; }
         const user = await request('/auth/v1/user', { token }).catch(async (error) => {
-            if (error.status === 401) {
+            // GoTrue uses 403 for a bearer whose signature can no longer be
+            // verified (for example immediately after a JWT signing-key
+            // rotation). It is still recoverable when the refresh token is
+            // valid, so treat both auth rejection statuses as refreshable.
+            if (error.status === 401 || error.status === 403) {
                 // refreshSession throws with .definitive/.transient set — let that
                 // propagate so callers can tell "really signed out" from "network blip".
-                const refreshed = await refreshSession();
+                const refreshed = await refreshSession({ force: true });
                 if (refreshed?.access_token) return request('/auth/v1/user', { token: refreshed.access_token });
             }
             // /user itself failed with a non-auth error (network TypeError has no
