@@ -1,4 +1,5 @@
 import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
+import { supplementSelectionEditorial, supplementSelectionExtras } from "../_shared/selection-editorial-supplements.mjs";
 import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_shared/catalog-audio-job-status.mjs";
 // SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
 // supabase/functions tree, so sibling ../_shared imports stay available. A push
@@ -179,7 +180,7 @@ async function handleRequest(req: Request): Promise<Response> {
     // the TMDB key stays server-side; invariant per title → long CDN cache.
     if (req.method === "GET" && (segments[0] === "tmdb-meta" || (segments[0] === "device" && segments[1] === "tmdb-meta"))) {
       await requireUserId(req);
-      return jsonCached(req, await getTmdbMeta(url), 86400);
+      return jsonCached(req, supplementSelectionExtras(await getTmdbMeta(url), url), 86400);
     }
 
     // Per-episode TMDB data (stills, localized names, air dates) for the series fiche,
@@ -4084,6 +4085,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
   // Defense in depth for callers that do not need a global display overlay.
   applyGenerationCatalogMetadata(title, lang ?? null, catalogReadEnabled());
   stripCatalogTitleInternalProof(title);
+  title = supplementSelectionEditorial(title);
   const defaultVariant = variants[0] ?? {};
   const variantMetadata = recordOrEmpty(defaultVariant.metadata);
   const metadata = recordOrEmpty(title.metadata);
