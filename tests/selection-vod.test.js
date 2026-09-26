@@ -90,3 +90,20 @@ test('only an owned VOD descriptor grants automatic relay; explicit conversion a
     assert.equal(await resolveSelectionVodDelivery({ ...args, ...changes }), null);
   }
 });
+
+ test('confirmed Selection movie identities retain stable playback identity and import TMDB artwork', async () => {
+  const { fetchSelectionVod, selectionVodIdentity } = await import('../supabase/functions/_shared/selection-vod.mjs');
+  const { SELECTION_QUALIFIED_VOD } = await import('../supabase/functions/_shared/selection-qualified-vod.mjs');
+  const result = await fetchSelectionVod({ fetchPlaylist: async () => { throw Error('offline external feeds'); } });
+  for (const [title, tmdbId] of [['Anjos da Noite 4', '52520'], ['South Park Guerras do Streaming', '974691'], ['South of Heaven', '645861'], ['South Park Guerras do Streaming Parte 2', '993729']]) {
+    const original = SELECTION_QUALIFIED_VOD.find(item => item.title === title);
+    const row = result.items.find(item => item.fields.title === title);
+    assert.ok(row);
+    assert.equal(row.fields.metadata.providerTmdbId, tmdbId);
+    assert.match(row.fields.poster_url, /^https:\/\/image\.tmdb\.org\/t\/p\/w500\//);
+    assert.equal(row.fields.external_id, `norva-selection:movie:${await selectionVodIdentity(original.feedId, original)}`);
+    assert.equal(row.fields.playback_hint.targetUrl, original.url);
+  }
+  const sequel = result.items.find(item => item.fields.title === 'South Park Guerras do Streaming Parte 2');
+  assert.notEqual(sequel.fields.metadata.providerTmdbId, '974691');
+ });
