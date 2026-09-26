@@ -22,6 +22,8 @@ avec contrôles de forme avant modification et exécution idempotente :
    SQL stable appelé dans RETURNING voyait encore la version antérieure de la ligne.
 3. Le nettoyage d'un candidat consommé par un remplacement accepte la preuve
    durable `cloud_source_replacement_origins`, en plus d'une annulation explicite.
+   L'annulation d'un remplacement utilise son événement durable, lié au même
+   propriétaire, à la même transition et à la nouvelle source.
    Les contrôles de propriétaire et de génération active restent présents.
 
 ## Vérification avant publication
@@ -29,7 +31,7 @@ avec contrôles de forme avant modification et exécution idempotente :
 - Erreur d'insertion de catégorie reproduite sur une base jetable avant correction.
   Le scénario historique utilisait uniquement des listes de catégories vides.
 - Réponse périmée reproduite par une nouvelle assertion du scénario de décision.
-- Après migration : **30 assertions du remplacement et 73 du renouvellement réussies**.
+- Après migration : **31 assertions du remplacement et 73 du renouvellement réussies**.
   Les tests vérifient une catégorie non vide appartenant à B, l'absence d'écriture
   dans A, la réponse initiale de décision et le nettoyage idempotent du candidat.
 - Les dépendances de remplacement manquantes de l'ancienne base de preuve ont été

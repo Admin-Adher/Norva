@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select extensions.plan(30);
+select extensions.plan(31);
 
 insert into auth.users(
   id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,
@@ -386,6 +386,10 @@ select extensions.ok((select cleared_at is not null
   'terminal replacement cancellation clears its copied ciphertext');
 
 set local role service_role;
+select extensions.ok((public.norva_purge_cancelled_credential_generation_batch(
+  (select (value->>'generationId')::uuid from phase4_ctx where key='allocate'),
+  '94000000-0000-4000-8000-000000000001',10)->>'complete')::boolean,
+  'durable replacement cancellation permits bounded cleanup of B');
 select extensions.is(public.norva_purge_cancelled_credential_generation_batch(
   '94000000-0000-4000-8000-000000000301',
   '94000000-0000-4000-8000-000000000001',10)->>'purgeMode','abandoned',
