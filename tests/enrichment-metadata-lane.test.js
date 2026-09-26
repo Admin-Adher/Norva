@@ -107,11 +107,12 @@ test('real Edge batch selection requires a server-only feature flag and preserve
     }
 });
 test('network reservation is bound to the production probe and both strict route entries', () => {
-    assert.equal((gateway.match(/claimNetwork: LANGUAGE_METADATA_LANE_ENABLED \? claimLanguageEnrichmentNetwork/g) || []).length, 3);
+    assert.equal((gateway.match(/claimNetwork: LANGUAGE_METADATA_LANE_ENABLED \? claimOptionalLanguageEnrichmentNetwork/g) || []).length, 3);
     const probe = gateway.slice(gateway.indexOf('async function handleProbeAudioRequest('), gateway.indexOf("app.post('/probe-audio'"));
     assert.ok(probe.indexOf('options.claimNetwork') < probe.indexOf('await probeCodecProfile('));
     assert.match(probe, /networkLease\?\.release\(drainAttestation\)/);
     const handler = gateway.slice(gateway.indexOf('async function handleDetectLanguageRequest('), gateway.indexOf('function buildStrictLidWindowFinalizePendingObservability('));
     assert.ok(handler.indexOf('closeStrictBrokerForResponse(false)') < handler.indexOf('await runStrictWhisperBatch('));
+    assert.match(handler, /if \(networkLease\) await closeStrictBrokerForResponse\(false\)/);
     assert.match(handler, /if \(forResponse && strictWorkBudgetTimer/);
 });
