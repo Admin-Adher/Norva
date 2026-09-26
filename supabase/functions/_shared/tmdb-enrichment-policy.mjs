@@ -1,4 +1,5 @@
 import { selectionSeriesUnit } from './selection-series.mjs';
+import { isSelectionSourceAttribution } from './catalog-editorial-text.mjs';
 import { tmdbSearchYear } from './tmdb-search-policy.mjs';
 // Search has no provider-supplied TMDB identity. Require a strong title/year
 // confirmation before replacing editorial metadata; exact artwork is stronger.
@@ -16,7 +17,8 @@ export function acceptAutomaticTmdbSearchMatch(row, match) {
 }
 
 export function preferredTmdbSynopsis(localized, fallback, provider) {
-  return [localized, fallback, provider].find(value => typeof value === 'string' && value.trim())?.trim() || null;
+  return [localized, fallback, provider].find(value => typeof value === 'string' && value.trim()
+    && !isSelectionSourceAttribution(value))?.trim() || null;
 }
 
 export function isMissingTmdbTitle(error) {

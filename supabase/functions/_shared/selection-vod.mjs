@@ -113,7 +113,7 @@ export async function fetchSelectionVod({ fetchPlaylist = fetchM3uPlaylistStream
           ...(item.validation ? { selectionPlaybackValidation: item.validation } : {}),
           ...(filenameAudio ? { selectionFilenameAudio: filenameAudio } : {}),
           ...(year ? { year: Number(year) } : {}),
-          plot: `${feed.name}\n${feed.website}\nhttps://norva.tv/catalog/credits.html` },
+          attribution: { name: feed.name, website: feed.website } },
         playback_hint: { sourceType: 'm3u', targetUrl: item.url, container, containerExtension: container } };
       const unit = selectionSeriesUnit(item.title);
       if (unit) {
@@ -130,7 +130,7 @@ export async function fetchSelectionVod({ fetchPlaylist = fetchM3uPlaylistStream
             metadata: { selectionRevision: SELECTION_VOD_REVISION, selectionSeriesTitle: unit.baseTitle,
               selectionVodGroup: item.group, discoveryFeed: feed.id, discoverySource: feed.website,
               ...(item.providerTmdbId ? { providerTmdbId: item.providerTmdbId } : {}),
-              seriesDelivery: 'selection', group, categoryName: `${feed.name} · Séries`, plot: fields.metadata.plot },
+              seriesDelivery: 'selection', group, categoryName: `${feed.name} · Séries`, attribution: fields.metadata.attribution },
             playback_hint: { sourceType: 'm3u' },
           } };
           parents.set(seriesId, parent);
