@@ -128,7 +128,7 @@
 <p>Record that security was checked, not the credentials themselves.</p>
 <h2 id="collect-only-the-documented-fields">Collect only the documented fields</h2>
 <p>Use current Norva and source instructions to identify address, username, password, token, or other fields actually required. Do not invent or repurpose values because labels look similar.</p>
-<p>The secure source-details guide keeps reusable secrets in protected storage and uses masked references in the planning record.</p>
+<p>The <a href="/blog/collect-source-details-securely/">secure source-details guide</a> keeps reusable secrets in protected storage and uses masked references in the planning record.</p>
 <h2 id="validate-format-before-making-requests">Validate format before making requests</h2>
 <p>Check whitespace, scheme, host, port, path, and provider-required trailing characters. Never embed a password or token in an address. The source-address guide separates syntax from availability and authentication.</p>
 <p>A syntactically valid address can still point to the wrong or unreachable endpoint.</p>
@@ -172,6 +172,12 @@
           <div class="card-title">Confirm Source Authorization Before You Connect</div>
 
           <p>Authorization is a documented relationship among source owner, account, permitted users, purpose, scope, duration, and provider terms, not merely a usable credential.</p>
+        </a>
+        <a class="card" href="/blog/collect-source-details-securely/">
+          <span class="tag">Source Connection Setup</span>
+          <div class="card-title">Collect Source Connection Details Without Exposing Them</div>
+
+          <p>Secure collection separates non-secret endpoint structure from reusable credentials, uses official source instructions, and moves secrets directly from protected storage to a trusted screen.</p>
         </a>
       </div>
     </section>
