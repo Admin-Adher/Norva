@@ -24,8 +24,8 @@ test('native raw recovery preserves the input container even when its codecs nee
     }
   }
 });
-test('native recovery uses a committed, owned raw session before returning and never opens a track probe', () => {
-  const raw = section('const nativeAccessProof =', '\n    // In-browser engine:');
+test('native recovery uses a committed, owned raw session before returning and fences exact episode preparation', () => {
+  const raw = section('let nativeAccessProof =', '\n    // In-browser engine:');
   assert.match(raw, /nativeVodFileProof\(resolved\.playbackHint\)/);
   assert.match(raw, /nativeNetworkRecovery && !nativeAccessProof/);
   assert.match(raw, /if \(!nativeCoordination\?\.lockId\)/);
@@ -37,6 +37,8 @@ test('native recovery uses a committed, owned raw session before returning and n
   assert.match(raw, /transport: nativeNetworkRecovery \? "native-raw-recovery"/);
   assert.match(raw, /url: access\.toString\(\)/);
   assert.doesNotMatch(raw, /url: pipe\.url|\/detect-language|\/probe/);
+  assert.ok(raw.indexOf("if (nativeCoordination.waitMs)") < raw.indexOf("await loadNativeEpisodeAccessProof"));
+  assert.match(raw, /itemType === "movie" \|\| nativeEpisodeRecovery/);
 });
 
 test('native recovery receives the same renewable lease marker as browser native playback', () => {
