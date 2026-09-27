@@ -386,7 +386,7 @@ services:
     volumes:
       # Whole functions dir (read-only) — includes the `main` router that
       # dispatches /functions/v1/<name> -> /home/deno/functions/<name>.
-      - ../../supabase/functions:/home/deno/functions:ro
+      - ${NORVA_EDGE_FUNCTIONS_ROOT:-../../supabase/functions}:/home/deno/functions:ro
       - deno-cache:/root/.cache/deno
     # Ancre YAML : functions2 (scale-out, audit capacité 2026-07-17) réutilise ce
     # bloc env à l'identique — une seule source de vérité pour les secrets.
@@ -411,6 +411,9 @@ services:
       NORVA_OPS_EMAIL: ${NORVA_OPS_EMAIL:-}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       NORVA_MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL:-}
+      # Public origins used to validate signed native VOD recovery grants.
+      NORVA_NATIVE_MP4_PUBLIC_BASE_URL: ${NORVA_NATIVE_MP4_PUBLIC_BASE_URL:-}
+      NORVA_NATIVE_MP4_PILOT_PUBLIC_BASE_URL: ${NORVA_NATIVE_MP4_PILOT_PUBLIC_BASE_URL:-}
       NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:-}
       # Dedicated bearer checked again by the Provider Access drain route.
       # It is distinct from the shared cron secret and must match the Vault
@@ -634,7 +637,7 @@ services:
         soft: 262144
         hard: 262144
     volumes:
-      - ../../supabase/functions:/home/deno/functions:ro
+      - ${NORVA_EDGE_FUNCTIONS_ROOT:-../../supabase/functions}:/home/deno/functions:ro
       # Cache deno séparé : deux runtimes qui écrivent le même cache se corrompent.
       - deno-cache-2:/root/.cache/deno
     environment: *functions-env
