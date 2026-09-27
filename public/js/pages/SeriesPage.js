@@ -678,13 +678,14 @@ class SeriesPage {
             if (entries.some((e) => e.isIntersecting)) this.loadBucketPage();
         }, { root: this.container, rootMargin: '900px' });
         this.loadBucketPage().then(() => {
-            if (loaderEl) this.bucketObserver.observe(loaderEl);
+            if (loaderEl?.isConnected) this.bucketObserver?.observe(loaderEl);
         });
     }
 
     async loadBucketPage() {
         if (this.bucketLoading || !this.bucketHasMore || !this.activeBucket) return;
         this.bucketLoading = true;
+        this.renderBucketStatus('loading');
         // Switching buckets/filters mid-flight must not append the old grid's page
         // into the new grid (or corrupt its offset).
         const requestId = this.bucketRequestId;
@@ -718,6 +719,7 @@ class SeriesPage {
             }
             this.bucketOffset += items.length;
             this.bucketHasMore = Boolean(payload && payload.hasMore) && items.length > 0;
+            this.renderBucketStatus(this.bucketOffset === 0 ? 'empty' : 'ready');
             // The endpoint returns the exact filtered count — show it (the grid view
             // otherwise leaves the header count blank).
             if (this.countEl && typeof payload?.count === 'number') {
@@ -733,10 +735,41 @@ class SeriesPage {
             }
         } catch (err) {
             console.warn('[Series] Genre bucket page failed:', err);
+            if (requestId !== this.bucketRequestId || !this.bucketGridEl?.isConnected) return;
             this.bucketHasMore = false;
+            this.renderBucketStatus('error');
         } finally {
-            this.bucketLoading = false;
+            if (requestId === this.bucketRequestId) this.bucketLoading = false;
         }
+    }
+
+    renderBucketStatus(state) {
+        const loader = this.container?.querySelector('.genre-bucket-loader');
+        if (!loader) return;
+        loader.replaceChildren();
+        loader.style.height = state === 'ready' ? '1px' : 'auto';
+        loader.classList.toggle('premium-state', state === 'error' || state === 'empty');
+        loader.setAttribute('role', state === 'error' ? 'alert' : 'status');
+        if (state === 'ready') return;
+        const message = document.createElement('p');
+        const key = state === 'error' ? 'ui_web_58d140544bb7' : 'ui_web_47d2a515ef2f';
+        const fallback = state === 'error' ? 'Your catalogue is still connected. Try loading this view again.' : 'Loading...';
+        message.textContent = globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
+        if (state === 'empty') {
+            message.textContent = globalThis.NorvaI18n?.t('ui_web_ecbf34a19fd7', { defaultValue: 'No shows to show yet.' }) ?? 'No shows to show yet.';
+        }
+        loader.appendChild(message);
+        if (state !== 'error') return;
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn btn-primary';
+        retry.textContent = globalThis.NorvaI18n?.t('ui_web_d8b8392e2c54', { defaultValue: 'Try again' }) ?? 'Try again';
+        retry.addEventListener('click', () => {
+            if (!loader.isConnected || this.bucketLoading) return;
+            this.bucketHasMore = true;
+            this.loadBucketPage();
+        });
+        loader.appendChild(retry);
     }
 
     closeBucket() {
