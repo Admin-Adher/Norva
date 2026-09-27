@@ -11,3 +11,9 @@ Six old/new comparisons matched exact ordered title IDs and exact counts: all-so
 Frontend changes add a loading announcement, translated terminal empty/error state and explicit retry retaining existing cards and pagination offset. Stale failures cannot clear the new bucket's loading state. 24 focused tests passed, including executable failure/retry/stale-request coverage.
 
 Native gfxinfo captured only two frames for the early failing bucket; it is insufficient to certify scroll performance. A separate gfx/view/webview/input trace is retained locally, but renderer frame timing remains to be analyzed. A successful physical replay and deployment proof are still required.
+
+## Production replay and runtime reconciliation
+
+PR446 merged as 2bea337e after all checks passed. Guarded SQL deployment committed successfully. Direct service-role SQL takes 2,182 ms, but API still returned 500 at 8s. pg_stat_activity proved the deployed Edge runtime uses the old direct cloud_catalog_visible_titles count/select, not the page RPC. Runtime SHA256 before patch: 5d88b673e1d8eaa99cbac13afa398a09a08b8230bf2e5432c5b17e2b8f9cf2fc.
+
+The targeted runtime patch in ops/hetzner/patches/20260927-genre-page-runtime.patch copies the main-branch page RPC helper and bounded hydration branch for genre requests without strict language filters. Other deployed runtime behavior is preserved. Expected output SHA256: f03bd93f13676d639869da9ee21b40bcc55d01fc6a1a4b0edf58f936b39de13c. This patch is for the recorded production snapshot; main already contains the equivalent path. Verify the base hash, apply once, reload replicas sequentially, then replay the real endpoint. Do not claim the initial SQL deployment alone fixed the physical flow.

@@ -1,0 +1,115 @@
+--- a/supabase/functions/norva-catalog/index.ts
++++ b/supabase/functions/norva-catalog/index.ts
+@@ -1883,6 +1883,62 @@
+   }
+ }
+ 
++async function visibleTitlePageByLanguages(options: {
++  userId: string;
++  itemType: "movie" | "series";
++  sourceId: string | null;
++  audioIso: string | null;
++  subtitleIso: string | null;
++  buckets: string[];
++  hiddenBuckets: string[];
++  search: string;
++  yearMin: number | null;
++  yearMax: number | null;
++  minRating: number | null;
++  addedAfter: string | null;
++  sort: string;
++  preferredAudio: string | null;
++  preferredSubtitle: string | null;
++  candidateLimit: number;
++  limit: number;
++  offset: number;
++}): Promise<{ titleIds: string[]; count: number }> {
++  const { data, error } = await db.rpc("cloud_catalog_visible_title_language_page", {
++    p_user_id: options.userId,
++    p_item_type: options.itemType,
++    p_source_id: options.sourceId,
++    p_filters: {
++      audio: options.audioIso,
++      subtitle: options.subtitleIso,
++      buckets: options.buckets,
++      hiddenBuckets: options.hiddenBuckets,
++      search: options.search,
++      yearMin: options.yearMin,
++      yearMax: options.yearMax,
++      minRating: options.minRating,
++      addedAfter: options.addedAfter,
++      sort: options.sort,
++      prefAudio: options.preferredAudio,
++      prefSubtitle: options.preferredSubtitle,
++      candidateLimit: options.candidateLimit,
++      limit: options.limit,
++      offset: options.offset,
++    },
++  });
++  if (error) throwDb(error, "Unable to page visible catalogue languages");
++  const payload = recordOrEmpty(data);
++  const rawIds = Array.isArray(payload.titleIds)
++    ? payload.titleIds
++    : Array.isArray(payload.title_ids) ? payload.title_ids : [];
++  const titleIds = [...new Set(rawIds
++    .map((value) => String(value ?? ""))
++    .filter((value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
++  )];
++  return {
++    titleIds,
++    count: Math.max(titleIds.length, Number(payload.count) || 0),
++  };
++}
+ async function visibleTitleIdsBySourceLanguages(
+   userId: string,
+   itemType: "movie" | "series",
+@@ -2077,6 +2133,49 @@
+   };
+ 
+   try {
++    if (requestedBuckets.length > 0 && !langSort && !hasStrictLanguageFilter) {
++      const page = await visibleTitlePageByLanguages({
++        userId,
++        itemType,
++        sourceId,
++        audioIso,
++        subtitleIso: subIso,
++        buckets,
++        hiddenBuckets: [...hidden],
++        search,
++        yearMin: yearRange?.min ?? null,
++        yearMax: yearRange?.max ?? null,
++        minRating,
++        addedAfter: addedAfterDate,
++        sort,
++        preferredAudio: prefAudioIso,
++        preferredSubtitle: prefSubIso,
++        candidateLimit,
++        limit,
++        offset,
++      });
++      const pageRows = await hydrateVisibleCatalogTitlesByIds(
++        userId,
++        page.titleIds,
++        requiredCatalogTitleVisibilityEpoch(userId),
++      );
++      const variantsByTitle = await listVariantsByTitleIds(
++        pageRows.map((row) => String(row.id)),
++        userId,
++        audioIso ? 24 : HOME_RAIL_VARIANT_LIMIT,
++        audioIso,
++        sourceId,
++      );
++      await applyCatalogOverlay(pageRows, itemType, lang);
++      return {
++        items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
++        count: page.count,
++        limit,
++        offset,
++        hasMore: offset + limit < page.count,
++      };
++    }
++
+     const sourceLanguageTitleIds = sourceId && hasStrictLanguageFilter
+       ? await visibleTitleIdsBySourceLanguages(userId, itemType, sourceId, audioIso, subIso)
+       : null;
