@@ -366,7 +366,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 83,
+        version: 84,
         automaticOwnedEpisodeGatewayProtocol: 1,
         genericNativeMp4Protocol: 1,
         genericNativeMp4Enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
@@ -2718,13 +2718,14 @@ async function createPlaybackSessionCore(
   }
 
   if (mode === "relay") {
-    const nativeAccessProof = nativeNetworkRecovery && itemType === "movie"
+    let nativeAccessProof = nativeNetworkRecovery && itemType === "movie"
       ? nativeVodFileProof(resolved.playbackHint) : nativeMp4Proof;
-    if (nativeNetworkRecovery && !nativeAccessProof) {
+    const nativeEpisodeRecovery = nativeNetworkRecovery && itemType === "series" && Boolean(episodeCoordinates);
+    if (nativeNetworkRecovery && !nativeAccessProof && !nativeEpisodeRecovery) {
       await expirePlaybackSession(session.id, userId, db);
       throw new HttpError(503, "Exact native media profile is not yet available");
     }
-    if ((serverNativeProviderMp4 || nativeNetworkRecovery) && nativeAccessProof) {
+    if ((serverNativeProviderMp4 || nativeNetworkRecovery) && (nativeAccessProof || nativeEpisodeRecovery)) {
       const nativeCoordination = await prepareEdgeSessionCoordinator({
         userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
         playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
@@ -2735,6 +2736,14 @@ async function createPlaybackSessionCore(
       }
       try {
         if (nativeCoordination.waitMs) await sleep(nativeCoordination.waitMs);
+        // The previous reader is drained before opening an exact episode probe.
+        if (nativeEpisodeRecovery) {
+          nativeAccessProof = await loadNativeEpisodeAccessProof({
+            db, userId, sourceId, itemId, targetUrl, userAgent,
+            episodeCoordinates: episodeCoordinates!,
+          });
+        }
+        if (!nativeAccessProof) throw new HttpError(503, "Exact native media profile is not yet available");
         markStartup("nativeCoordinatorMs");
         startupTrace.nativeCoordinatorWaitMs = nativeCoordination.waitMs || 0;
         const capability = await createBytePipeCapability(session.id, userId, targetUrl,
@@ -2756,7 +2765,7 @@ async function createPlaybackSessionCore(
           itemType, itemId, targetUrlHash, playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
         });
         if (!committed?.ok) throw new HttpError(503, "Playback session coordinator did not accept the native session");
-        if (itemType === "movie") {
+        if (itemType === "movie" || nativeEpisodeRecovery) {
           await bindPreparedPlaybackReceipt(async () => {
             // Revoke the exact prepared grant even if the catalogue/database is
             // unavailable during cleanup; never recalculate its gateway route.
@@ -7477,6 +7486,57 @@ async function hasVisibleSeriesEpisodeReceiptProof(
     return !cacheError && seriesInfoPayloadContainsEpisode(cached?.payload, episodeId);
   } catch (_) {
     return false;
+  }
+}
+
+// Exact membership and the playback coordinator must precede this probe.
+async function loadNativeEpisodeAccessProof(options: {
+  db: SupabaseClient; userId: string; sourceId: string; itemId: string;
+  targetUrl: string; userAgent: string | null; episodeCoordinates: JsonRecord;
+}) {
+  const { db, userId, sourceId, itemId, targetUrl, userAgent, episodeCoordinates } = options;
+  if (stringOr(episodeCoordinates.episode_id, "") !== itemId ||
+      stringOr(episodeCoordinates.user_id, "") !== userId ||
+      stringOr(episodeCoordinates.source_id, "") !== sourceId) {
+    throw new HttpError(409, "Exact episode ownership changed");
+  }
+  const identity = await resolveSourceIdentity(sourceId, userId, db);
+  const { data: cached, error: cacheError } = await db.from("catalog_file_tracks")
+    .select("observed_profile_snapshot")
+    .eq("server_host", identity.key).eq("item_type", "episode").eq("external_id", itemId)
+    .maybeSingle();
+  const cachedProof = !cacheError && nativeVodFileProof({ codecProfile: cached?.observed_profile_snapshot });
+  if (cachedProof) return cachedProof;
+  const runtime = await getRuntimeConfig(db);
+  const route = await mediaGatewayRouteForPlaybackUser(runtime, userId);
+  if (!route) throw new HttpError(503, "Media gateway is not configured");
+  const leaseOwner = `native-episode:${crypto.randomUUID()}`;
+  if (!await claimProviderFileProbeStrict(db, identity.key, leaseOwner, 90)) {
+    throw new HttpError(503, "Exact episode preparation is busy");
+  }
+  let drained = false;
+  try {
+    const response = await fetch(`${route.url}/probe-audio`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${route.token}` },
+      body: JSON.stringify({ url: targetUrl, userAgent: userAgent || "VLC/3.0.20 LibVLC/3.0.20", refreshCodecProfile: true }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const info = recordOrEmpty(await response.json().catch(() => ({})));
+    drained = providerProbeResponseAllowsLeaseRelease(response.status,
+      sanitizedProviderErrorCode(info.code), info, () => {});
+    // A valid profile alone cannot prove its provider connection has closed.
+    // Timeouts retain the bounded lease, preventing a second overlapping probe.
+    const proof = response.ok && drained && nativeVodFileProof({ codecProfile: info.codecProfile });
+    if (!proof) throw new HttpError(503, "Exact episode preparation is temporarily unavailable");
+    await shareObservedGatewayFile(db, {
+      userId, sourceId, itemId, variantId: stringOr(episodeCoordinates.variant_id, ""),
+      itemType: "episode", profile: info.codecProfile,
+      audioProbeComplete: info.audioProbeComplete === true,
+      subtitleProbeComplete: info.subtitleProbeComplete === true,
+    });
+    return proof;
+  } finally {
+    if (drained) await releaseProviderFileProbe(db, identity.key, leaseOwner);
   }
 }
 

@@ -13,7 +13,7 @@ export function nativeVodFileProof(ownedHint = {}, now = Date.now()) {
   // This lane needs the exact server-observed size and container only.
   if (!['gatewayprobe', 'gatewayinband'].includes(origin)
     || !Number.isFinite(probedAt) || probedAt > now || now - probedAt > 14 * 86400_000
-    || !['matroska', 'mkv', 'mov', 'mp4', 'mpegts', 'ts', 'avi', 'mpeg', 'ogg', 'flv'].includes(kind)
+    || !['matroska', 'matroskawebm', 'mkv', 'mov', 'movmp4m4a3gp3g2mj2', 'mp4', 'mpegts', 'ts', 'avi', 'mpeg', 'ogg', 'flv'].includes(kind)
     || !Number.isSafeInteger(p.fileSizeBytes) || p.fileSizeBytes < 1024) return null;
   return { fileSizeBytes: p.fileSizeBytes,
     durationSeconds: Number.isFinite(p.durationSeconds) ? p.durationSeconds : null };
