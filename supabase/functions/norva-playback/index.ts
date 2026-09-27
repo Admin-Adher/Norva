@@ -2720,6 +2720,9 @@ async function createPlaybackSessionCore(
   if (mode === "relay") {
     let nativeAccessProof = nativeNetworkRecovery && itemType === "movie"
       ? nativeVodFileProof(resolved.playbackHint) : nativeMp4Proof;
+    if (nativeNetworkRecovery && itemType === "movie" && !nativeAccessProof) {
+      nativeAccessProof = await loadNativeMovieAccessProof({ db, userId, sourceId, itemId });
+    }
     const nativeEpisodeRecovery = nativeNetworkRecovery && itemType === "series" && Boolean(episodeCoordinates);
     if (nativeNetworkRecovery && !nativeAccessProof && !nativeEpisodeRecovery) {
       await expirePlaybackSession(session.id, userId, db);
@@ -7487,6 +7490,24 @@ async function hasVisibleSeriesEpisodeReceiptProof(
   } catch (_) {
     return false;
   }
+}
+
+// Recover missing tenant metadata only from the exact verified provider file.
+// This read opens no provider connection; the normal receipt still revalidates
+// catalogue visibility and the resolved target before returning the grant.
+async function loadNativeMovieAccessProof(options: {
+  db: SupabaseClient; userId: string; sourceId: string; itemId: string;
+}) {
+  const { db, userId, sourceId, itemId } = options;
+  const { data: owned, error: ownedError } = await db.from("cloud_catalog_visible_title_variants")
+    .select("id").eq("user_id", userId).eq("source_id", sourceId)
+    .eq("item_type", "movie").eq("external_id", itemId).maybeSingle();
+  if (ownedError || !owned?.id) return null;
+  const identity = await resolveSourceIdentity(sourceId, userId, db);
+  const { data: cached, error } = await db.from("catalog_file_tracks")
+    .select("observed_profile_snapshot").eq("server_host", identity.key)
+    .eq("item_type", "movie").eq("external_id", itemId).maybeSingle();
+  return error ? null : nativeVodFileProof({ codecProfile: cached?.observed_profile_snapshot });
 }
 
 // Exact membership and the playback coordinator must precede this probe.
