@@ -4165,6 +4165,7 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                 finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 750,
+                finiteInitialContinuationGraceMs: claims.nativeContainer === 'ts' ? 500 : 0,
             });
             return { inputUrl: broker.inputUrl, close: async reason => {
                 try { await broker.close(reason); }
@@ -6025,8 +6026,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 // continuation I/O. Previously a cached response could trigger
                 // an upstream GET which was cancelled 1-2 ms later, needlessly
                 // cooling a healthy mono-session connection for 2.5 seconds.
-                if (context.finiteSeekContinuationGraceMs > 0 && forwarded > 0 && finiteBufferedBytes === 0) {
-                    await new Promise(resolve => setTimeout(resolve, context.finiteSeekContinuationGraceMs));
+                const continuationGraceMs = Math.max(context.finiteSeekContinuationGraceMs,
+                    forwarded <= context.finiteWindowBytes ? context.finiteInitialContinuationGraceMs : 0);
+                if (continuationGraceMs > 0 && forwarded > 0 && finiteBufferedBytes === 0) {
+                    await new Promise(resolve => setTimeout(resolve, continuationGraceMs));
                     if (attempt.localClosed || controller.signal.aborted) break;
                 }
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
@@ -6832,6 +6835,10 @@ async function createStrictLidBroker(options = {}) {
             ? Math.max(0, Math.min(256 * 1024, options.finiteSeekLookbehindBytes)) : 0,
         finiteSeekContinuationGraceMs: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteSeekContinuationGraceMs)
             ? Math.max(0, Math.min(100, options.finiteSeekContinuationGraceMs)) : 0,
+        // Allow a remote native extractor's next seek to arrive after its
+        // initial small window. Steady sequential reads retain the short grace.
+        finiteInitialContinuationGraceMs: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteInitialContinuationGraceMs)
+            ? Math.max(0, Math.min(1000, options.finiteInitialContinuationGraceMs)) : 0,
         finiteAbandonedDrainMs: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteAbandonedDrainMs)
             ? Math.max(0, Math.min(1500, options.finiteAbandonedDrainMs)) : 0,
         // Native extractors need a complete small search window even when

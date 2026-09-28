@@ -464,6 +464,24 @@ test('finite TS continuation grace avoids opening a provider window after libav 
   assert.deepEqual(calls,['bytes=0-7','bytes=24-31']);assert.equal(broker.interruptedProviderFetches,0);
 });
 
+for (const initialGrace of [0,500]) test(`native TS delayed remote seek with initial grace ${initialGrace}`, {timeout:8000},async(t)=>{
+  const data=Buffer.alloc(64,7),calls=[];
+  const provider=http.createServer((req,res)=>{calls.push(req.headers.range);sendExactRange(req,res,data);});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:8,finiteSeekContinuationGraceMs:50,
+    finiteInitialContinuationGraceMs:initialGrace,releaseDelayMs:0});t.after(()=>broker.close());
+  const first=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-63'}}),reader=first.body.getReader();
+  assert.equal((await reader.read()).value.length,8);
+  await new Promise(resolve=>setTimeout(resolve,200));
+  await reader.cancel();
+  const second=await fetch(broker.inputUrl,{headers:{Range:'bytes=24-31'}});
+  assert.deepEqual(Buffer.from(await second.arrayBuffer()),data.subarray(24,32));
+  if (initialGrace) assert.deepEqual(calls,['bytes=0-7','bytes=24-31']);
+  else assert.ok(calls.includes('bytes=8-15'), 'control opens an unnecessary continuation before the remote seek');
+  assert.equal(broker.interruptedProviderFetches,0);
+});
+
 for(const drain of [true,false])test(`finite TS abandoned drain ${drain?'finishes a small exact body':'expires without provider overlap'}`,{timeout:8000},async(t)=>{
   const data=Buffer.alloc(64,7);let calls=0,active=0,peak=0,timer;
   const provider=http.createServer((req,res)=>{
