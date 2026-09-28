@@ -62,7 +62,8 @@ public final class TsPrerollExperimentTest {
      @Override public void onRenderedFirstFrame(){m[4]=p.getCurrentPosition();}
      @Override public void onPlayerError(PlaybackException e){error.set(e);frames.countDown();}
     });
-    ExtractorsFactory factory=()->new Extractor[]{preroll?new PreRoll(new TsExtractor()):new TsExtractor()};
+    ExtractorsFactory baseline=()->new Extractor[]{new TsExtractor()};
+    ExtractorsFactory factory=preroll?new tv.norva.playback.TsResumeExtractorsFactory(baseline):baseline;
     ProgressiveMediaSource source=new ProgressiveMediaSource.Factory(()->new ByteArrayDataSource(bytes),factory)
      .createMediaSource(MediaItem.fromUri("https://fixture.invalid/long-gop.ts"));
     started[0]=SystemClock.elapsedRealtime();p.setMediaSource(source,resume);p.prepare();p.play();
@@ -78,18 +79,5 @@ public final class TsPrerollExperimentTest {
    ins.runOnMainSync(()->{if(ref.get()!=null)ref.get().stop();if(a!=null)a.finish();});
    ins.removeMonitor(monitor);
   }
- }
- /** Keep sample-queue target unchanged; move only extractor decoding start earlier. */
- private static final class PreRoll implements Extractor {
-  private final Extractor delegate; private boolean rewind;
-  PreRoll(Extractor d){delegate=d;}
-  public boolean sniff(ExtractorInput i)throws IOException{return delegate.sniff(i);}
-  public void init(ExtractorOutput o){delegate.init(o);}
-  public void seek(long position,long timeUs){long t=Math.max(0,timeUs-15000000L);rewind=t==0;delegate.seek(rewind?0:position,t);}
-  public int read(ExtractorInput i,PositionHolder h)throws IOException{
-   if(rewind){if(i.getPosition()!=0){h.position=0;return RESULT_SEEK;}rewind=false;}
-   return delegate.read(i,h);
-  }
-  public void release(){delegate.release();}
  }
 }
