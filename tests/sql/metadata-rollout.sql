@@ -1,0 +1,47 @@
+select public.metadata_rollout_assert(not public.catalog_language_metadata_enabled_for_source(id,id),'installation_inert') from auth.users limit 1;
+select public.metadata_rollout_assert(not public.catalog_language_metadata_enabled_for_source(null,null),'null_refused');
+select public.metadata_rollout_assert(not has_table_privilege('service_role','public.catalog_language_metadata_rollout','UPDATE'),'no_direct_service_mutation');
+select public.metadata_rollout_assert(not has_function_privilege('authenticated','public.catalog_language_metadata_enabled_for_source(uuid,uuid)','EXECUTE'),'no_client_rpc');
+select public.metadata_rollout_assert((select bool_and(relrowsecurity and relforcerowsecurity) from pg_class where oid in ('public.catalog_language_metadata_rollout'::regclass,'public.catalog_language_metadata_rollout_events'::regclass)),'forced_rls');
+do $$begin
+ begin perform public.set_catalog_language_metadata_rollout(0,100,'Fixture runtime role guard');
+ raise exception 'role bypass'; exception when insufficient_privilege then null; end;
+end$$;
+set request.jwt.claim.role='service_role';
+do $$begin
+ begin perform public.set_catalog_language_metadata_rollout(0,10000,'Fixture skipped stage guard');
+ raise exception 'stage bypass'; exception when invalid_parameter_value then null; end;
+end$$;
+select public.set_catalog_language_metadata_rollout(0,100,'Fixture first stage rollout');
+select public.metadata_rollout_assert((select count(*) between 1 and 199 from auth.users where public.catalog_language_metadata_enabled_for_source(id,id)),'bounded_cohort');
+create temp table chosen as select id from auth.users where public.catalog_language_metadata_enabled_for_source(id,id) limit 1;
+select public.metadata_rollout_assert(not public.catalog_language_metadata_enabled_for_source(c.id,u.id),'cross_owner_source_refused') from chosen c,auth.users u where c.id<>u.id limit 1;
+select public.metadata_rollout_assert(not public.catalog_language_metadata_available_for_source(id,id),'no_capacity_fails_closed') from chosen;
+insert into public.catalog_language_metadata_capacity values(true,1,clock_timestamp()+interval '1 minute');
+select public.metadata_rollout_assert(public.claim_catalog_vod_language_file(id,id)->>'path'='metadata','claim_uses_owner_gate') from chosen;
+insert into public.catalog_vod_language_intake values('leased',clock_timestamp()+interval '1 minute');
+select public.metadata_rollout_assert(public.claim_catalog_vod_language_file(id,id)->>'skipped'='metadata-capacity','global_capacity_preserved') from chosen;
+delete from public.catalog_vod_language_intake;
+update public.catalog_language_metadata_capacity set expires_at=clock_timestamp()-interval '1 second';
+select public.metadata_rollout_assert(not public.catalog_language_metadata_available_for_source(id,id),'stale_capacity_refused') from chosen;
+update auth.users set banned_until=now()+interval '1 hour' where id in(select id from chosen);
+select public.metadata_rollout_assert(not public.catalog_language_metadata_enabled_for_source(id,id),'banned_refused') from chosen;
+update auth.users set banned_until=null where id in(select id from chosen);
+update public.cloud_sources set enabled=false where id in(select id from chosen);
+select public.metadata_rollout_assert(not public.catalog_language_metadata_enabled_for_source(id,id),'disabled_source_refused') from chosen;
+update public.cloud_sources set enabled=true where id in(select id from chosen);
+do $$begin
+ begin perform public.set_catalog_language_metadata_rollout(0,500,'Fixture stale revision guard');
+ raise exception 'revision bypass'; exception when sqlstate 'PT409' then null; end;
+end$$;
+select public.metadata_rollout_assert(public.set_catalog_language_metadata_rollout(1,100,'Fixture idempotent replay')->>'changed'='false','idempotent');
+select public.set_catalog_language_metadata_rollout(1,500,'Fixture second stage rollout');
+select public.set_catalog_language_metadata_rollout(2,2000,'Fixture third stage rollout');
+select public.set_catalog_language_metadata_rollout(3,5000,'Fixture fourth stage rollout');
+select public.set_catalog_language_metadata_rollout(4,10000,'Fixture full stage rollout');
+select public.metadata_rollout_assert((select bool_and(public.catalog_language_metadata_enabled_for_source(id,id)) from auth.users),'full_cohort');
+select public.set_catalog_language_metadata_rollout(5,0,'Fixture emergency rollback');
+select public.metadata_rollout_assert(not public.catalog_language_metadata_enabled_for_source(id,id),'rollback_inert') from chosen;
+select public.metadata_rollout_assert((select count(*)=6 from public.catalog_language_metadata_rollout_events),'audit_events');
+update public.fixture_global set enabled=true;
+select public.metadata_rollout_assert(public.catalog_language_metadata_enabled_for_source(id,id),'legacy_global_preserved') from chosen;

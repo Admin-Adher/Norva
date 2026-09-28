@@ -102,7 +102,11 @@ test('real Edge batch selection requires a server-only feature flag and preserve
     vm.runInContext(stripTypeScriptTypes(edge.slice(start, edge.indexOf('// Automatic UNTAGGED', start))), context);
     for (const flag of [{ data: false }, { error: true }, { data: true }]) {
         calls.length = 0;
-        await context.runAutomaticVodLanguageMetadataBatch({ rpc: async () => flag }, 'u', 's');
+        await context.runAutomaticVodLanguageMetadataBatch({ rpc: async (name, args) => {
+            assert.equal(name, 'catalog_language_metadata_enabled_for_source');
+            assert.equal(args.p_user, 'u'); assert.equal(args.p_source, 's');
+            return flag;
+        } }, 'u', 's');
         assert.deepEqual(calls, flag.data === true ? ['metadata', 'metadata', 'metadata', 'metadata'] : [undefined]);
     }
 });
