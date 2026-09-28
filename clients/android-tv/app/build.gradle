@@ -36,6 +36,7 @@ namespace "tv.norva.tv"
         }
         androidTest {
             assets.srcDir "$buildDir/generated/i18nTestAssets"
+            assets.srcDir "../../android-phone/app/src/androidTest/assets"
             java.srcDir "../../android-common/src/androidTest/java"
         }
         test {
