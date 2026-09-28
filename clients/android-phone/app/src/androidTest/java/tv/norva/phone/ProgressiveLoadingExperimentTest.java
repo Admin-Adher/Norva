@@ -40,9 +40,11 @@ public final class ProgressiveLoadingExperimentTest {
             }
             byte[] bytes = output.toByteArray();
             // Alternate order to avoid systematically favoring warm decoder startup.
-            for (int repetition = 0; repetition < 2; repetition++) {
-                for (int interval : repetition == 0 ? new int[]{1048576, 131072} : new int[]{131072, 1048576}) {
-                    run(instrumentation, bytes, fixture, interval, repetition == 0 ? 0 : 3000);
+            for (long resumeMs : new long[]{0, 3000}) {
+                for (int repetition = 0; repetition < 2; repetition++) {
+                    for (int interval : repetition == 0 ? new int[]{1048576, 131072} : new int[]{131072, 1048576}) {
+                        run(instrumentation, bytes, fixture, interval, resumeMs);
+                    }
                 }
             }
         }
@@ -90,16 +92,19 @@ public final class ProgressiveLoadingExperimentTest {
         }
     }
 
-    // 4 KiB per 16 ms, at most 256 KiB/s. Every seek uses the same byte source.
+    // 256 KiB/s by cumulative byte count, independent of extractor read size.
     private static final class ThrottledBytes extends BaseDataSource {
         private final byte[] bytes;
         private int position;
         private int end;
         private Uri uri;
+        private long openedAt;
+        private long delivered;
         ThrottledBytes(byte[] bytes) { super(true); this.bytes = bytes; }
         @Override public long open(DataSpec spec) {
             transferInitializing(spec);
             uri = spec.uri; position = (int) Math.min(spec.position, bytes.length);
+            openedAt = SystemClock.elapsedRealtime(); delivered = 0;
             end = spec.length == C.LENGTH_UNSET ? bytes.length
                     : (int) Math.min(bytes.length, spec.position + spec.length);
             transferStarted(spec);
@@ -109,7 +114,10 @@ public final class ProgressiveLoadingExperimentTest {
             if (length == 0) return 0;
             if (position >= end) return C.RESULT_END_OF_INPUT;
             int read = Math.min(4096, Math.min(length, end - position));
-            SystemClock.sleep(16);
+            delivered += read;
+            long due = openedAt + (delivered * 1000 + 262143) / 262144;
+            long delay = due - SystemClock.elapsedRealtime();
+            if (delay > 0) SystemClock.sleep(delay);
             System.arraycopy(bytes, position, buffer, offset, read);
             position += read; bytesTransferred(read); return read;
         }
