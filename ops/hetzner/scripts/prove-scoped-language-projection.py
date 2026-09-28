@@ -7,7 +7,7 @@ import json, os, pathlib, subprocess, sys, time
 
 ROOT = pathlib.Path('/home/adrien/.norva/scoped-language-projection-20260928')
 NAME = 'norva-scoped-language-proof-20260928'
-MIGRATIONS = ['20260928223000_scoped_owned_language_projection.sql', '20260928224000_owned_language_evidence_membership.sql', '20260928230000_owned_language_metadata_rollout.sql']
+MIGRATIONS = ['20260928223000_scoped_owned_language_projection.sql', '20260928224000_owned_language_evidence_membership.sql', '20260928230000_owned_language_metadata_rollout.sql', '20260928233000_exact_movie_language_projection.sql']
 
 def run(args, data=None, timeout=90):
     result = subprocess.run(args, input=data, capture_output=True, timeout=timeout)
@@ -50,7 +50,7 @@ def main():
             print(json.dumps({'syntheticDatabaseReset':True,'productionWrites':0}))
         elif mode=='test':
             for file in MIGRATIONS:sql((ROOT/file).read_text())
-            result=sql((ROOT/'owned-language-rollout.sql').read_text())
+            result=sql((ROOT/'exact-movie-language-projection.sql').read_text())
             print(result)
         else:
             print(sql((ROOT/'proof-query.sql').read_text()))
