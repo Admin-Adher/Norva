@@ -1,0 +1,34 @@
+name: Metadata rollout admission
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260928194000_language_metadata_progressive_rollout.sql'
+      - 'tests/sql/metadata-rollout*'
+      - '.github/workflows/metadata-rollout.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify PostgreSQL admission with synthetic owners
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name metadata-qa --network none --memory 256m --cpus 1 \
+            --tmpfs /var/lib/postgresql/data -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine
+          trap 'docker rm -f metadata-qa >/dev/null' EXIT
+          for i in {1..30}; do
+            if docker exec metadata-qa pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker exec metadata-qa pg_isready -U postgres
+          cat tests/sql/metadata-rollout.setup.sql \
+            supabase/migrations/20260928194000_language_metadata_progressive_rollout.sql \
+            tests/sql/metadata-rollout.sql |
+            docker exec -i metadata-qa psql -X -U postgres -v ON_ERROR_STOP=1 -q

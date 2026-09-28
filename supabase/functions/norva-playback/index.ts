@@ -12166,7 +12166,9 @@ async function claimExactMetadataProbe(db: SupabaseClient, identityKey: string, 
 }
 
 async function runAutomaticVodLanguageMetadataBatch(db: SupabaseClient, userId: string, sourceId: string) {
-  const { data, error } = await db.rpc("catalog_language_metadata_lane_enabled");
+  const { data, error } = await db.rpc("catalog_language_metadata_enabled_for_source", {
+    p_user: userId, p_source: sourceId,
+  });
   // Deploying code ahead of SQL, missing permission or a disabled flag retains
   // the previous one-file path. No unsigned request can enable the new lane.
   if (error || data !== true) return await runAutomaticVodLanguageIntake(db, userId, sourceId);
