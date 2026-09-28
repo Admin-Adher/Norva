@@ -5,6 +5,31 @@ const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/fini
 const binding = { ownerKey: 'a'.repeat(64), sourceUrl: 'https://fixture.invalid/account/secret/file.ts', fileSizeBytes: 1024 };
 const proof = { fileSizeBytes: 1024, validator: { kind: 'etag', header: 'If-Range', value: '"v1"' }, effectiveUrlIdentitySha256: 'b'.repeat(64) };
 
+test('identity diagnostics distinguish rejected proofs without retaining secrets or double counting', () => {
+    const cache = new FinitePlaybackRangeReuse();
+    const cases = [
+        { validator: null },
+        { validator: { kind: 'last-modified', value: 'provider-secret' } },
+        { validator: { kind: 'etag', value: 'W/"provider-secret"' } },
+        { fileSizeBytes: 1025 },
+        { effectiveUrlIdentitySha256: 'provider-secret' },
+    ];
+    for (const change of cases) {
+        const session = cache.begin(binding);
+        assert.equal(session.confirm({ ...proof, ...change }), false);
+        assert.equal(session.confirm(proof), false, 'rejected session remains rejected');
+        assert.equal(session.remember(0, Buffer.alloc(16)), false);
+    }
+    const expected = { missingValidator: 1, nonEtagValidator: 1,
+        weakOrInvalidEtag: 1, sizeMismatch: 1, missingTargetIdentity: 1 };
+    assert.deepEqual(cache.publicStatus().identityRejections, expected);
+    assert.deepEqual(cache.describe().identityRejections, expected);
+    assert.equal(cache.publicStatus().validation.rejectedIdentity, 5);
+    assert.doesNotMatch(JSON.stringify(cache.describe()), /provider-secret|fixture|https:/);
+    const snapshot = cache.publicStatus(); snapshot.identityRejections.missingValidator = 99;
+    assert.equal(cache.publicStatus().identityRejections.missingValidator, 1);
+});
+
 test('playback fragments require current strong proof and only count previous-session reuse', () => {
     const cache = new FinitePlaybackRangeReuse();
     const first = cache.begin(binding);

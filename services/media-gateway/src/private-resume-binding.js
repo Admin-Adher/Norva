@@ -24,11 +24,18 @@ function privateResumeBinding({ ownerKey, sourceUrl, sourceId, sourceRevision, v
             vodIdentityKey || null, profile])) });
 }
 
+// Fixed categories only: never return provider-controlled values in diagnostics.
+function resumeIdentityRejection(observed, fileSizeBytes) {
+    if (!observed?.validator) return 'missingValidator';
+    if (observed.validator.kind !== 'etag') return 'nonEtagValidator';
+    if (typeof observed.validator.value !== 'string' || observed.validator.value.length > 512
+        || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(observed.validator.value)) return 'weakOrInvalidEtag';
+    if (observed.fileSizeBytes !== fileSizeBytes) return 'sizeMismatch';
+    if (!hex(observed.effectiveUrlIdentitySha256)) return 'missingTargetIdentity';
+    return null;
+}
 function strongResumeIdentity(observed, fileSizeBytes) {
-    return observed?.validator?.kind === 'etag'
-        && typeof observed.validator.value === 'string' && observed.validator.value.length <= 512
-        && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(observed.validator.value)
-        && observed.fileSizeBytes === fileSizeBytes && hex(observed.effectiveUrlIdentitySha256)
+    return resumeIdentityRejection(observed, fileSizeBytes) === null
         ? hash(JSON.stringify([observed.validator.value, fileSizeBytes, observed.effectiveUrlIdentitySha256])) : null;
 }
-module.exports = { privateResumeBinding, strongResumeIdentity, createPrivateResumeOwnerGate };
+module.exports = { privateResumeBinding, strongResumeIdentity, resumeIdentityRejection, createPrivateResumeOwnerGate };
