@@ -4449,15 +4449,15 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     providerAccountLeaseClaimed = true;
     providerAccountLeaseReleaseSafe = true;
 
-    const useExactProviderLease = useCapturePipeline && await exactFileProbeAdmissionEnabled(db);
+    const useExactProviderLease = useCapturePipeline && await exactFileProbeAdmissionEnabled(db, userId, sourceId);
     if (useExactProviderLease) exactProviderLease = { itemType: current.itemType, externalId: current.itemId };
     const { data: providerClaimed, error: providerClaimError } = await db.rpc(
-      useExactProviderLease ? "claim_provider_exact_file_probe" : "claim_provider_file_probe",
+      useExactProviderLease ? "claim_provider_exact_file_probe_for_source" : "claim_provider_file_probe",
       {
         p_identity_key: current.identityKey,
         p_lease_owner: providerLeaseOwner,
         p_ttl_seconds: LANGUAGE_VALIDATION_LEASE_SECONDS,
-        ...(useExactProviderLease ? { p_item_type:current.itemType, p_external_id:current.itemId,
+        ...(useExactProviderLease ? { p_user:userId, p_source:sourceId, p_item_type:current.itemType, p_external_id:current.itemId,
           p_provider_account_hash:providerAccountHash } : {}),
       },
     );
@@ -12124,8 +12124,8 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
   }
 }
 
-async function exactFileProbeAdmissionEnabled(db: SupabaseClient): Promise<boolean> {
-  const { data, error } = await db.rpc("catalog_language_exact_file_admission_enabled");
+async function exactFileProbeAdmissionEnabled(db: SupabaseClient, userId: string, sourceId: string): Promise<boolean> {
+  const { data, error } = await db.rpc("catalog_language_exact_file_enabled_for_source", { p_user:userId, p_source:sourceId });
   if (error || typeof data !== "boolean") throw new HttpError(503, "Exact-file admission unavailable", {
     code:"LANGUAGE_EXACT_FILE_ADMISSION_UNAVAILABLE",
   });
@@ -12141,7 +12141,7 @@ async function releaseExactProviderFileProbe(db: SupabaseClient, identityKey: st
 }
 
 async function claimExactMetadataProbe(db: SupabaseClient, identityKey: string, owner: string,
-  externalId: string, providerAccountHash: string): Promise<boolean> {
+  externalId: string, providerAccountHash: string, userId: string, sourceId: string): Promise<boolean> {
   let accountClaimed = false; let fileClaimed = false;
   try {
     const account = await db.rpc("claim_provider_account_language_validation", {
@@ -12149,7 +12149,7 @@ async function claimExactMetadataProbe(db: SupabaseClient, identityKey: string, 
     });
     if (account.error || account.data !== true) return false;
     accountClaimed = true;
-    const file = await db.rpc("claim_provider_exact_file_probe", { p_identity_key:identityKey,p_item_type:"movie",
+    const file = await db.rpc("claim_provider_exact_file_probe_for_source", { p_user:userId,p_source:sourceId,p_identity_key:identityKey,p_item_type:"movie",
       p_external_id:externalId,p_provider_account_hash:providerAccountHash,p_lease_owner:owner,p_ttl_seconds:180 });
     fileClaimed = !file.error && file.data === true;
     return fileClaimed;
@@ -16680,8 +16680,8 @@ async function runCodecProfileBackfill(
     await assertProviderProbeCircuitClosedStrict(db, identityKey);
 
     const leaseOwner = `codec-profile:${crypto.randomUUID()}`;
-    const useExactLease = await exactFileProbeAdmissionEnabled(db);
-    if (!(useExactLease ? await claimExactMetadataProbe(db, identityKey, leaseOwner, externalId, providerAccountHash)
+    const useExactLease = await exactFileProbeAdmissionEnabled(db, userId, sourceId);
+    if (!(useExactLease ? await claimExactMetadataProbe(db, identityKey, leaseOwner, externalId, providerAccountHash, userId, sourceId)
       : await claimProviderFileProbeStrict(db, identityKey, leaseOwner, 180))) {
       stopped = "provider-lease-busy";
       results.push({ variantId, status: "deferred", code: stopped });
