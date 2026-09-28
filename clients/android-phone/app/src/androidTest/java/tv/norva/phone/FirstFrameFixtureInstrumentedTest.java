@@ -596,7 +596,7 @@ public final class FirstFrameFixtureInstrumentedTest {
      * supported by BoundedRangeDataSource), so this server keeps the gate both
      * deterministic and representative.
      */
-    private static final class FixtureHttpServer implements AutoCloseable {
+    static final class FixtureHttpServer implements AutoCloseable {
         private final byte[] media;
         private final String contentType;
         private final boolean hls;

@@ -44,9 +44,9 @@ public final class TsPrerollExperimentTest {
   AtomicReference<PlaybackException> error=new AtomicReference<>();
   CountDownLatch frames=new CountDownLatch(1); long[] m={-1,-1,-1,-1,-1};
   AtomicInteger count=new AtomicInteger(); long[] started={0};
-  try {
+  try (FirstFrameFixtureInstrumentedTest.FixtureHttpServer server = new FirstFrameFixtureInstrumentedTest.FixtureHttpServer(bytes,"video/mp2t")) {
    ins.getTargetContext().startActivity(new Intent(ins.getTargetContext(),PlayerActivity.class)
-    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(PlayerActivity.EXTRA_URL,file.toURI().toString())
+    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(PlayerActivity.EXTRA_URL,server.url())
     .putExtra(PlayerActivity.EXTRA_TITLE,"TS resume experiment").putExtra(PlayerActivity.EXTRA_ITEM_TYPE,"movie"));
    activity=ins.waitForMonitorWithTimeout(monitor,5000); assertNotNull(activity);
    java.lang.reflect.Field field=PlayerActivity.class.getDeclaredField("player");field.setAccessible(true);
