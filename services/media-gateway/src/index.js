@@ -4155,20 +4155,15 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 pathPrefix: 'finite-mkv-seek',
                 finiteWindowBytes: 8 * 1024 * 1024,
                 finiteSequentialWindowBytes: 8 * 1024 * 1024,
-                // Browser MP4 needs its initialization boxes before decoding.
-                // The measured 6.33 MiB moov index of a KING365 H264/AAC MP4
-                // spans the old first-MiB boundary. The default is one bounded
-                // 8 MiB streamed window. The 2 MiB canary did not improve real
-                // native MP4 startup or continuity, so retain this path's
-                // previous transport independently of the finite HLS canary.
-                // A repeat visit validates a small fresh range before releasing
-                // the retained index/seek bytes. Cold startup keeps its 8 MiB
-                // streamed window and incurs no extra validation request.
-                finiteWarmupWindowBytes: (resumeRanges?.hasPriorRanges || resumeRanges?.requiresValidation) ? 64 * 1024 : 0,
+                // Native extractors read the header, then tail/index, then the
+                // resume position. Complete a bounded header before the first
+                // seek so its prefix can be reused without a second provider
+                // opening and the interrupted-reader release grace.
+                finiteWarmupWindowBytes: 128 * 1024,
                 finiteWarmupCueGraceMs: 0, finiteResumeRanges: resumeRanges,
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
-                finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 300,
+                finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 750,
             });
             return { inputUrl: broker.inputUrl, close: async reason => {
                 try { await broker.close(reason); }
