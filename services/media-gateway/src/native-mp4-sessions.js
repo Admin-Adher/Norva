@@ -44,6 +44,7 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
     return {
         grant(claims) {
             if (!claims || claims.v !== 1 || !['native-browser-mp4', 'native-vod-recovery'].includes(claims.scope)
+                || (claims.nativeContainer !== undefined && (claims.scope !== 'native-vod-recovery' || claims.nativeContainer !== 'ts'))
                 || !UUID.test(claims.sid) || !UUID.test(claims.uid)
                 || !Number.isSafeInteger(claims.fileSizeBytes) || claims.fileSizeBytes < 1024
                 || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= now()
@@ -51,7 +52,7 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
                 || !allows?.(claims)) throw failure(403, 'NATIVE_MP4_CAPABILITY_REJECTED');
             const ownerHash = hash(claims.uid);
             const identity = hash(JSON.stringify([ownerHash, claims.url, claims.fileSizeBytes, claims.exp, claims.ua || '',
-                claims.resumeSourceId || '', claims.resumeSourceRevision || '', claims.sharedFragmentGrant || null, claims.scope]));
+                claims.resumeSourceId || '', claims.resumeSourceRevision || '', claims.sharedFragmentGrant || null, claims.nativeContainer || null, claims.scope]));
             const prior = entries.get(claims.sid);
             if (prior) {
                 if (prior.identity !== identity) throw failure(409, 'NATIVE_MP4_SESSION_CONFLICT');

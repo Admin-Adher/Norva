@@ -2753,6 +2753,8 @@ async function createPlaybackSessionCore(
           transportExpiresAt, db, userAgent, nativeNetworkRecovery ? "native-vod-recovery" : "native-browser-mp4", nativeAccessProof.fileSizeBytes,
           nativeAccessProof.durationSeconds, null, true,
           { sourceId, sourceRevision: await loadSourceConfigRevision(sourceId, userId, db),
+            nativeContainer: nativeNetworkRecovery && 'nativeContainer' in nativeAccessProof
+              ? String(nativeAccessProof.nativeContainer) : null,
             sharedFragmentGrant: await createSharedFragmentGrant(sourceId, userId, itemType, itemId, transportExpiresAt, db) });
         const response = await fetch(`${capability.gatewayUrl}/native-sessions`, {
           method: "POST", headers: { Authorization: `Bearer ${capability.serviceToken}`, "Content-Type": "application/json" },
@@ -8058,7 +8060,7 @@ async function createBytePipeCapability(
   durationSeconds: number | null = null,
   strictLidWindowClaims: StrictLidWindowCapabilityClaims | null = null,
   usePlaybackCanary = false,
-  resumeBinding: { sourceId: string; sourceRevision: string; sharedFragmentGrant?: JsonRecord | null } | null = null,
+  resumeBinding: { sourceId: string; sourceRevision: string; nativeContainer?: string | null; sharedFragmentGrant?: JsonRecord | null } | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   const gatewayRoute = usePlaybackCanary
@@ -8111,6 +8113,7 @@ async function createBytePipeCapability(
     ...((scope === "native-browser-mp4" || scope === "native-vod-recovery") && resumeBinding ? {
       resumeSourceId: resumeBinding.sourceId,
       resumeSourceRevision: resumeBinding.sourceRevision,
+      ...(scope === "native-vod-recovery" && resumeBinding.nativeContainer === "ts" ? { nativeContainer: "ts" } : {}),
       ...(resumeBinding.sharedFragmentGrant ? { sharedFragmentGrant: resumeBinding.sharedFragmentGrant } : {}),
     } : {}),
     ...(Number.isSafeInteger(fileSizeBytes) && Number(fileSizeBytes) > 0

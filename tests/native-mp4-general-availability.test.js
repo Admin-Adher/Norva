@@ -110,7 +110,7 @@ test('native finite recovery accepts exact MKV or TS proof without relaxing brow
     const { nativeVodFileProof, browserNativeMp4Proof } = await edge;
     for (const container of ['matroska,webm', 'mpegts', 'avi', 'mp4']) {
         const owned = profile({container,videoCodec:'hevc'});
-        assert.deepEqual(nativeVodFileProof(owned, now), {fileSizeBytes:123456,durationSeconds:120});
+        assert.deepEqual(nativeVodFileProof(owned, now), {fileSizeBytes:123456,durationSeconds:120, ...(container === 'mpegts' ? {nativeContainer:'ts'} : {})});
         assert.equal(browserNativeMp4Proof(owned, {}, now), null);
     }
     for (const patch of [{probeSource:'caller'}, {probedAt:new Date(now-15*86400_000).toISOString()},
@@ -133,12 +133,30 @@ test('native recovery accepts complete exact playback-produced profiles and reje
     const { nativeVodFileProof } = await edge;
     for (const container of ['mov,mp4,m4a,3gp,3g2,mj2', 'matroska,webm']) {
         const observed = profile({container, probeSource:'gateway_inband', metadataComplete:true});
-        assert.deepEqual(nativeVodFileProof(observed, now), {fileSizeBytes:123456,durationSeconds:120});
+        assert.deepEqual(nativeVodFileProof(observed, now), {fileSizeBytes:123456,durationSeconds:120, ...(container === 'mpegts' ? {nativeContainer:'ts'} : {})});
         for (const metadataComplete of [false, undefined]) {
-            assert.deepEqual(nativeVodFileProof(profile({...observed.codecProfile, metadataComplete}), now), {fileSizeBytes:123456,durationSeconds:120});
+            assert.deepEqual(nativeVodFileProof(profile({...observed.codecProfile, metadataComplete}), now), {fileSizeBytes:123456,durationSeconds:120, ...(container === 'mpegts' ? {nativeContainer:'ts'} : {})});
         }
         for (const fileSizeBytes of [0, undefined, '123456']) {
             assert.equal(nativeVodFileProof(profile({...observed.codecProfile, fileSizeBytes}), now), null);
         }
     }
+});
+
+
+test('verified TS search policy is immutable and restricted to native recovery', () => {
+    const sessions = createNativeMp4Sessions({ now: () => now,
+        allows: value => allowsNativeMp4Capability(value, { publicBaseUrl }),
+        open: async () => ({ close: async () => {} }) });
+    for (const patch of [{ nativeContainer: 'ts' },
+        { scope: 'native-vod-recovery', nativeContainer: 'mp4' },
+        { scope: 'native-vod-recovery', nativeContainer: {} }]) {
+        assert.throws(() => sessions.grant(claims(patch)), { code: 'NATIVE_MP4_CAPABILITY_REJECTED' });
+    }
+    const value = claims({ scope: 'native-vod-recovery', nativeContainer: 'ts' });
+    const entry = sessions.grant(value);
+    assert.equal(entry.claims.nativeContainer, 'ts');
+    assert.equal(sessions.grant(value), entry);
+    assert.throws(() => sessions.grant(claims({ scope: 'native-vod-recovery' })),
+        { code: 'NATIVE_MP4_SESSION_CONFLICT' });
 });
