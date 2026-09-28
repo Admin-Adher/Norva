@@ -7,7 +7,7 @@ import json, os, pathlib, subprocess, sys, time
 
 ROOT = pathlib.Path('/home/adrien/.norva/scoped-language-projection-20260928')
 NAME = 'norva-scoped-language-proof-20260928'
-MIGRATIONS = ['20260928223000_scoped_owned_language_projection.sql', '20260928224000_owned_language_evidence_membership.sql', '20260928230000_owned_language_metadata_rollout.sql', '20260928233000_exact_movie_language_projection.sql']
+MIGRATIONS = ['20260928223000_scoped_owned_language_projection.sql', '20260928224000_owned_language_evidence_membership.sql', '20260928230000_owned_language_metadata_rollout.sql', '20260928233000_exact_movie_language_projection.sql', '20260928234500_scoped_series_inventory.sql']
 
 def run(args, data=None, timeout=90):
     result = subprocess.run(args, input=data, capture_output=True, timeout=timeout)
@@ -16,8 +16,8 @@ def run(args, data=None, timeout=90):
         raise RuntimeError('proof_command_failed')
     return result.stdout
 
-def sql(text):
-    return run(['docker','exec','-i',NAME,'psql','-h','/tmp','-U','postgres','-d','postgres','-X','-qAt','-v','ON_ERROR_STOP=1'],text.encode()).decode()
+def sql(text, timeout=90):
+    return run(['docker','exec','-i',NAME,'psql','-h','/tmp','-U','postgres','-d','postgres','-X','-qAt','-v','ON_ERROR_STOP=1'],text.encode(),timeout=timeout).decode()
 
 def main():
     os.umask(0o077)
@@ -49,8 +49,12 @@ def main():
             sql((ROOT/'schema.private.sql').read_text())
             print(json.dumps({'syntheticDatabaseReset':True,'productionWrites':0}))
         elif mode=='test':
-            for file in MIGRATIONS:sql((ROOT/file).read_text())
-            result=sql((ROOT/'exact-movie-language-projection.sql').read_text())
+            for file in MIGRATIONS:
+                if file=='20260928234500_scoped_series_inventory.sql':
+                    reference=sql("select pg_get_functiondef('public.catalog_series_inventory_candidates(uuid,uuid,integer)'::regprocedure)")
+                    reference=reference.replace('public.catalog_series_inventory_candidates','pg_temp.inventory_reference')+';\n'
+                sql((ROOT/file).read_text())
+            result=sql('create temp table prepare_temp_schema(x int);\n'+reference+(ROOT/'scoped-series-inventory.sql').read_text(),timeout=300)
             print(result)
         else:
             print(sql((ROOT/'proof-query.sql').read_text()))
