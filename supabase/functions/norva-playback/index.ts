@@ -12054,7 +12054,7 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
 // a full probe if metadata was inconclusive; never open both in one claim.
 async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string, sourceId: string,
   variantId: string, itemId: string, identityKey: string): Promise<JsonRecord | null> {
-  const { data: enabled, error: flagError } = await db.rpc("feature_flag", { p_key: "owned_provider_language_metadata_enabled" });
+  const { data: enabled, error: flagError } = await db.rpc("catalog_owned_language_metadata_enabled_for_source", { p_user: userId, p_source: sourceId });
   if (flagError || enabled !== true || !PLAYBACK_SESSION_UUID_PATTERN.test(identityKey) || !/^\d+$/.test(itemId)) return null;
   const snapshot = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
   const { data: prior, error: priorError } = await db.from("catalog_owned_language_declarations")

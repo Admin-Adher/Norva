@@ -8,19 +8,28 @@ export function useCachedAudioLanguageEvidence(variant, cacheRow) {
 
 export async function attachOwnedProviderLanguageDeclarations(db, variants, userId) {
   const byId = new Map(variants.filter(v => v.user_id === userId && v.id).map(v => [String(v.id), v]));
-  const ids = [...byId.keys()];
+  const scopes = new Map();
+  for (const [id, variant] of byId) {
+    if (!variant.source_id || !['movie', 'series'].includes(variant.item_type)) continue;
+    const key = JSON.stringify([variant.source_id, variant.item_type]);
+    if (!scopes.has(key)) scopes.set(key, { source: variant.source_id, type: variant.item_type, ids: [] });
+    scopes.get(key).ids.push(id);
+  }
   const collected = new Map();
-  for (let offset = 0; offset < ids.length; offset += 200) {
-    const { data, error } = await db.from('cloud_catalog_owned_audio_declarations')
-      .select('variant_id,source_id,item_type,language').eq('user_id', userId)
-      .in('variant_id', ids.slice(offset, offset + 200));
-    if (error) throw new Error('Owned language declarations unavailable');
-    for (const row of data || []) {
-      const v = byId.get(String(row.variant_id));
-      if (!v || v.source_id !== row.source_id || v.item_type !== row.item_type
-        || !/^(?:[a-z]{2}|yue)$/.test(row.language || '') || ['un', 'xx', 'zz'].includes(row.language)) continue;
-      if (!collected.has(v)) collected.set(v, new Set());
-      collected.get(v).add(row.language);
+  for (const { source, type, ids } of scopes.values()) {
+    for (let offset = 0; offset < ids.length; offset += 200) {
+      const { data, error } = await db.rpc('cloud_catalog_owned_audio_declarations_scoped', {
+        p_user_id: userId, p_source_id: source, p_item_type: type,
+      })
+        .in('variant_id', ids.slice(offset, offset + 200));
+      if (error) throw new Error('Owned language declarations unavailable');
+      for (const row of data || []) {
+        const v = byId.get(String(row.variant_id));
+        if (!v || v.source_id !== row.source_id || v.item_type !== row.item_type
+          || !/^(?:[a-z]{2}|yue)$/.test(row.language || '') || ['un', 'xx', 'zz'].includes(row.language)) continue;
+        if (!collected.has(v)) collected.set(v, new Set());
+        collected.get(v).add(row.language);
+      }
     }
   }
   for (const [v, codes] of collected) {

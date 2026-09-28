@@ -18,11 +18,11 @@ test('owned metadata projects declared languages without tracks, certification o
   const calls=[];const query={select(){return this},eq(k,v){calls.push([k,v]);return this},in(k,v){calls.push([k,v]);return Promise.resolve({data:rows})}};
   const v={id:'v',user_id:'u',source_id:'s',item_type:'movie',raw_title:'EN | Example'};
   const foreign={id:'foreign',user_id:'other',source_id:'s',item_type:'movie'};
-  await attach({from(t){assert.equal(t,'cloud_catalog_owned_audio_declarations');return query}},[v,foreign],'u');
+  await attach({rpc(t,args){assert.equal(t,'cloud_catalog_owned_audio_declarations_scoped');calls.push(['scope',args]);return query}},[v,foreign],'u');
   assert.deepEqual(languages(v),['es']); assert.deepEqual(publicLanguages(v),['es']);
   assert.equal(v.audio_languages,undefined);assert.equal(v.audio_verified_at,undefined);assert.equal(v.audio_tracks,undefined);
   assert.equal(foreign.provider_audio_languages,undefined);
-  assert.deepEqual(calls,[['user_id','u'],['variant_id',['v']]]);
+  assert.deepEqual(calls,[['scope',{p_user_id:'u',p_source_id:'s',p_item_type:'movie'}],['variant_id',['v']]]);
   const {sanitizeCatalogVariant}=await load('catalog-public-view.mjs');
   const published=sanitizeCatalogVariant(v);assert.deepEqual(published.provider_audio_languages,['es']);
   assert.doesNotMatch(JSON.stringify(published),/__owned|fingerprint|observed_at|Audio à vérifier/);
@@ -31,6 +31,24 @@ test('owned metadata projects declared languages without tracks, certification o
 test('raw preserved metadata never grants declaration authority',async()=>{
   const {catalogProviderAudioLanguages: languages}=await load('selection-provider-languages.mjs');
   assert.deepEqual(languages({metadata:{__owned_provider_audio_languages:['en'],providerLanguageDeclarations:{audio:'en'}}}),[]);
+});
+
+test('declaration batches keep source and media type boundaries',async()=>{
+  const {attachOwnedProviderLanguageDeclarations:attach}=await load('owned-provider-language-declarations.mjs');
+  const variants=[
+    {id:'a',user_id:'owner',source_id:'first',item_type:'movie'},
+    {id:'b',user_id:'owner',source_id:'first',item_type:'series'},
+    {id:'c',user_id:'owner',source_id:'second',item_type:'series'},
+    {id:'foreign',user_id:'other',source_id:'second',item_type:'series'},
+  ];
+  const scopes=[];
+  await attach({rpc(name,args){
+    scopes.push([args.p_user_id,args.p_source_id,args.p_item_type]);
+    return {in:async(_,ids)=>({data:ids.map(id=>({variant_id:id,source_id:args.p_source_id,item_type:args.p_item_type,language:'fr'}))})};
+  }},variants,'owner');
+  assert.deepEqual(scopes,[['owner','first','movie'],['owner','first','series'],['owner','second','series']]);
+  for(const variant of variants.slice(0,3))assert.deepEqual(variant.provider_audio_languages,['fr']);
+  assert.equal(variants[3].provider_audio_languages,undefined);
 });
 
 test('owned canonical ISO languages are not restricted to known supplier tag spellings',async()=>{
@@ -61,7 +79,7 @@ test('flat movie and series paths copy only the matching owned declaration',asyn
     const variants=[{id:'v',media_item_id:'m',source_id:'s',user_id:'u',external_id:'file',item_type:itemType}];
     const context=vm.createContext({attachOwnedProviderLanguageDeclarations,
       flatMediaVariantKey:v=>JSON.stringify([v.media_item_id||v.id,v.source_id,v.external_id]),
-      db:{from(table){const q={select(){return q},eq(){return q},in(){return Promise.resolve({data:
+      db:{rpc(name,args){assert.equal(name,'cloud_catalog_owned_audio_declarations_scoped');assert.equal(args.p_user_id,'u');return {in:async()=>({data:[{variant_id:'v',source_id:'s',item_type:itemType,language:'es'}]})}},from(table){const q={select(){return q},eq(){return q},in(){return Promise.resolve({data:
         table==='cloud_catalog_visible_title_variants'?variants:[{variant_id:'v',source_id:'s',item_type:itemType,language:'es'}]})}};return q;}}
     });
     vm.runInContext(stripTypeScriptTypes(catalog.slice(start,end)),context);
@@ -82,7 +100,7 @@ test('upper-case technical tags retain their audio/subtitle role',async()=>{
 const playback=read('supabase/functions/norva-playback/index.ts');
 async function metadataFixture(options={}) {
   const events=[];
-  const db={rpc:async(name,args)=>{events.push({name,args});return {data:name==='feature_flag'?options.enabled!==false:options.empty?0:1}},
+  const db={rpc:async(name,args)=>{events.push({name,args});return {data:name==='catalog_owned_language_metadata_enabled_for_source'?options.enabled!==false:options.empty?0:1}},
     from:()=>{const q={select(){return q},eq(){return q},maybeSingle:async()=>({data:options.prior?{}:null})};return q}};
   let checks=0;
   const context=vm.createContext({crypto:require('node:crypto').webcrypto,PLAYBACK_SESSION_UUID_PATTERN:/^identity$/,
@@ -113,6 +131,8 @@ async function metadataFixture(options={}) {
 }
 test('cheap provider metadata is fresh, bounded and only writes the fenced declaration RPC',async()=>{
   const h=await metadataFixture();assert.equal(h.result.persisted,1);
+  assert.equal(h.events[0].name,'catalog_owned_language_metadata_enabled_for_source');
+  assert.equal(h.events[0].args.p_user,'u');assert.equal(h.events[0].args.p_source,'s');
   const fetch=h.events.find(e=>e.fetch);assert.match(fetch.fetch,/\/xtream\/metadata$/);
   assert.equal(fetch.args.maxBytes,1048576);assert.equal(fetch.args.timeoutMs,55000);
   assert.equal(JSON.parse(fetch.args.body).action,'get_vod_info');
