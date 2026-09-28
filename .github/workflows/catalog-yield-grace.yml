@@ -1,0 +1,36 @@
+name: Catalogue yield grace
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260928220000_language_catalog_yield_grace.sql'
+      - 'supabase/migrations/20260926043000_language_validation_catalog_yield.sql'
+      - 'tests/sql/language-catalog-yield*'
+      - '.github/workflows/catalog-yield-grace.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  grace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify priority duration and foreground isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name norva-yield-grace-qa --network none --memory 256m --cpus 1 \
+            --tmpfs /var/lib/postgresql/data -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine
+          trap 'docker rm -f norva-yield-grace-qa >/dev/null' EXIT
+          for i in {1..30}; do
+            if docker exec norva-yield-grace-qa pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker exec norva-yield-grace-qa pg_isready -U postgres
+          cat tests/sql/language-catalog-yield.setup.sql \
+            supabase/migrations/20260926043000_language_validation_catalog_yield.sql \
+            supabase/migrations/20260928220000_language_catalog_yield_grace.sql \
+            tests/sql/language-catalog-yield-grace.sql |
+            docker exec -i norva-yield-grace-qa psql -X -q -v ON_ERROR_STOP=1 -U postgres
