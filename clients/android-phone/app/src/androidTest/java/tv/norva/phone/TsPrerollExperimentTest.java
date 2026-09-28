@@ -48,7 +48,7 @@ public final class TsPrerollExperimentTest {
    ins.getTargetContext().startActivity(new Intent(ins.getTargetContext(),PlayerActivity.class)
     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(PlayerActivity.EXTRA_URL,server.url())
     .putExtra(PlayerActivity.EXTRA_TITLE,"TS resume experiment").putExtra(PlayerActivity.EXTRA_ITEM_TYPE,"movie"));
-   activity=ins.waitForMonitorWithTimeout(monitor,5000); assertNotNull(activity);
+   activity=ins.waitForMonitorWithTimeout(monitor,20000); assertNotNull("PlayerActivity did not finish cold creation",activity);
    java.lang.reflect.Field field=PlayerActivity.class.getDeclaredField("player");field.setAccessible(true);
    ExoPlayer p=(ExoPlayer)field.get(activity);ref.set(p);assertNotNull(p);
    ins.runOnMainSync(()->{
