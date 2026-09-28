@@ -1,4 +1,8 @@
 create table public.admin_feature_flags(key text primary key,enabled boolean);
+-- Stub only the existing lifecycle predicate; the new gate must honor false.
+create table public.fixture_visibility(visible boolean);
+insert into public.fixture_visibility values(true);
+create function public.norva_source_catalog_visible(uuid,uuid) returns boolean language sql stable as $$select visible from public.fixture_visibility$$;
 create function public.catalog_language_capture_pipeline_enabled() returns boolean language sql as $$select false$$;
 create table public.provider_account_language_validation_leases(provider_account_hash text primary key,lease_owner text,expires_at timestamptz);
 create table public.provider_file_probe_leases(identity_key text,lease_owner text,expires_at timestamptz);

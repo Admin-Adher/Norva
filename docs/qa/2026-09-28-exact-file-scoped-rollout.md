@@ -23,7 +23,7 @@ unchanged for older workers during deployment.
   ROLLBACK: revision 0, basis points 0, null owner/source rejected and authenticated
   role cannot call the new claim RPC. No production configuration was committed.
 - `git diff --check` passes.
-- Disposable PostgreSQL 15, network disabled: 18 named SQL assertions and
+- Disposable PostgreSQL 15, network disabled: 19 named SQL assertions and
   stage-skip/stale-revision exception guards pass. The fixture loads the actual
   original lease function from its migration, rather than a stubbed claim.
 - Two independent concurrent database connections request different files on

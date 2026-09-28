@@ -39,6 +39,9 @@ begin
  perform public.metadata_rollout_assert(not public.claim_provider_exact_file_probe_for_source(u,u,ident,'movie','a',repeat('a',64),'holder',180),'exact_disabled_source');
  update public.cloud_sources set enabled=true where id=u;
  insert into public.catalog_file_audio_validation_jobs values(u,u,ident,'episode','ep','running',now()+interval '1 minute',null);
+ update public.fixture_visibility set visible=false;
+ perform public.metadata_rollout_assert(not public.claim_provider_exact_file_probe_for_source(u,u,ident,'episode','ep',repeat('a',64),'holder',180),'exact_hidden_source_job_denied');
+ update public.fixture_visibility set visible=true;
  perform public.metadata_rollout_assert(public.claim_provider_exact_file_probe_for_source(u,u,ident,'episode','ep',repeat('a',64),'holder',180),'exact_episode_job');
  perform public.release_provider_exact_file_probe(ident,'episode','ep','holder');
  update public.catalog_file_audio_validation_jobs set quarantined_at=now();

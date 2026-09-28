@@ -64,7 +64,8 @@ end $f$;
 -- The worker separately requires its existing job-aware capture admission.
 create function public.catalog_language_exact_file_enabled_for_source(p_user uuid,p_source uuid)
 returns boolean language sql stable security definer set search_path='' as $f$
- select public.catalog_language_metadata_enabled_for_source(p_user,p_source) and exists(
+ select public.catalog_language_metadata_enabled_for_source(p_user,p_source)
+  and public.norva_source_catalog_visible(p_source,p_user) and exists(
   select 1 from public.catalog_language_exact_file_rollout r where r.singleton and
    (public.catalog_language_exact_file_admission_enabled() or
     (('x'||substr(md5('norva-language-metadata-v1:'||p_user::text),1,8))::bit(32)::bigint % 10000)<r.basis_points)
