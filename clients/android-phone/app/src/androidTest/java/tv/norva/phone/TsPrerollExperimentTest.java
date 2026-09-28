@@ -21,9 +21,13 @@ import java.util.concurrent.atomic.*;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Test-only decode pre-roll experiment. No production factory is changed. */
+/** Comparative measurements plus replay through the real PlayerActivity source factory. */
 @UnstableApi @RunWith(AndroidJUnit4.class)
 public final class TsPrerollExperimentTest {
+ @Test public void productionFactoryResumesLongGopAtExactFrame() throws Exception {
+  Instrumentation ins=InstrumentationRegistry.getInstrumentation();
+  run(ins,fixture(ins,"long-gop.ts"),"production",17000,true,0);
+ }
  @Test public void compareLongGopResume() throws Exception {
   Instrumentation ins=InstrumentationRegistry.getInstrumentation();
   byte[] bytes=fixture(ins,"long-gop.ts");
@@ -75,7 +79,10 @@ public final class TsPrerollExperimentTest {
     ExtractorsFactory factory=preroll?new tv.norva.playback.TsResumeExtractorsFactory(baseline):baseline;
     ProgressiveMediaSource source=new ProgressiveMediaSource.Factory(()->new MeteredSource(bytes,rate,delivered),factory)
      .createMediaSource(MediaItem.fromUri("https://fixture.invalid/long-gop.ts"));
-    started[0]=SystemClock.elapsedRealtime();p.setMediaSource(source,resume);p.prepare();p.play();
+    started[0]=SystemClock.elapsedRealtime();
+    if(fixture.equals("production")) p.setMediaItem(MediaItem.fromUri(server.url()),resume);
+    else p.setMediaSource(source,resume);
+    p.prepare();p.play();
    });
    assertTrue("No second frame",frames.await(35,TimeUnit.SECONDS));assertNull(error.get());
    ins.runOnMainSync(()->{});
@@ -83,6 +90,7 @@ public final class TsPrerollExperimentTest {
    assertTrue("Actual first rendered callback missing",m[4]>=0);
    assertTrue("Requested timeline position lost",Math.abs(m[4]-resume)<750);
    if(preroll)assertTrue("Pre-roll still waits for a future keyframe",m[2]-m[0]<1000);
+   if(preroll)assertTrue("Decoded video does not match requested position",Math.abs(m[1]/1000-resume)<750);
   } finally {
    final Activity a=activity;
    ins.runOnMainSync(()->{if(ref.get()!=null)ref.get().stop();if(a!=null)a.finish();});

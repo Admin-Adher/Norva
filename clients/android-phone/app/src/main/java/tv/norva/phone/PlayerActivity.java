@@ -640,7 +640,7 @@ public class PlayerActivity extends Activity {
                 // silently skips it when absent. (See clients/android-ffmpeg-decoder.)
                 .setRenderersFactory(new DefaultRenderersFactory(this)
                         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON))
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory, new tv.norva.playback.TsResumeExtractorsFactory(new androidx.media3.extractor.DefaultExtractorsFactory()))
                         .setLoadErrorHandlingPolicy(new ProviderLoadErrorHandlingPolicy()))
                 // Symmetric ±10s so the controller's rewind/fast-forward and the
                 // double-tap gesture both jump a predictable, equal amount.

@@ -14,6 +14,7 @@ import androidx.media3.extractor.PositionHolder;
 import androidx.media3.extractor.SeekMap;
 import androidx.media3.extractor.TrackOutput;
 import androidx.media3.extractor.ts.TsExtractor;
+import androidx.media3.extractor.text.SubtitleParser;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,16 @@ public final class TsResumeExtractorsFactory implements ExtractorsFactory {
 
     public TsResumeExtractorsFactory(ExtractorsFactory delegate) {
         this.delegate = delegate;
+    }
+
+    @Override public ExtractorsFactory experimentalSetTextTrackTranscodingEnabled(boolean enabled) {
+        delegate.experimentalSetTextTrackTranscodingEnabled(enabled);
+        return this;
+    }
+
+    @Override public ExtractorsFactory setSubtitleParserFactory(SubtitleParser.Factory factory) {
+        delegate.setSubtitleParserFactory(factory);
+        return this;
     }
 
     @Override public Extractor[] createExtractors() {

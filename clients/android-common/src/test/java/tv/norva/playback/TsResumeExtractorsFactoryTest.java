@@ -6,6 +6,25 @@ import java.lang.reflect.Proxy;
 import org.junit.Test;
 
 public final class TsResumeExtractorsFactoryTest {
+    @Test public void subtitleConfigurationReachesDelegate() {
+        boolean[] enabled = {true};
+        androidx.media3.extractor.text.SubtitleParser.Factory[] parser = {null};
+        ExtractorsFactory delegate = new ExtractorsFactory() {
+            public Extractor[] createExtractors() { return new Extractor[0]; }
+            public ExtractorsFactory experimentalSetTextTrackTranscodingEnabled(boolean value) {
+                enabled[0] = value; return this;
+            }
+            public ExtractorsFactory setSubtitleParserFactory(androidx.media3.extractor.text.SubtitleParser.Factory value) {
+                parser[0] = value; return this;
+            }
+        };
+        ExtractorsFactory factory = new TsResumeExtractorsFactory(delegate);
+        androidx.media3.extractor.text.SubtitleParser.Factory expected = new androidx.media3.extractor.text.DefaultSubtitleParserFactory();
+        assertSame(factory, factory.experimentalSetTextTrackTranscodingEnabled(false));
+        assertSame(factory, factory.setSubtitleParserFactory(expected));
+        assertFalse(enabled[0]);
+        assertSame(expected, parser[0]);
+    }
     @Test public void nearStartRewindsBytesBeforeReading() throws Exception {
         Fake delegate = new Fake();
         Extractor extractor = new TsResumeExtractorsFactory.PreRoll(delegate);
