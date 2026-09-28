@@ -67,6 +67,7 @@ let passiveLidCandidatePosition = 0;
 let strictLidCaptureStore = null;
 let strictLidCapturePipeline = null;
 const { classifyCodecProbeFailure } = require('./codec-probe-diagnostic');
+const { codecProbeInputOptions } = require('./codec-probe-input-options');
 const { startupFailureDiagnostics } = require('./startup-diagnostics');
 const { createPlaybackStartupWindowPolicy } = require('./playback-startup-window');
 const languageResourceSampler = createLanguageResourceSampler({ readFile: fsp.readFile, os });
@@ -20606,6 +20607,7 @@ async function probeCodecProfileUncached(sourceUrl, userAgent, options = {}) {
     probeStats.attempts += 1;
     const args = [
         '-v', 'error',
+        ...codecProbeInputOptions(sourceUrl),
         '-rw_timeout', '8000000',
         '-user_agent', userAgent || FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
