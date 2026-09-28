@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const { StrictLidRangeReuse } = require('./strict-lid-range-reuse');
-const { privateResumeBinding, strongResumeIdentity } = require('./private-resume-binding');
+const { privateResumeBinding, strongResumeIdentity, resumeIdentityRejection } = require('./private-resume-binding');
 
 // Reuse the already bounded/TTL-aware fragment store, not its strict-LID
 // admission policy. A stale PLAYBACK cache is a miss, not a playback failure.
@@ -18,6 +18,8 @@ class FinitePlaybackRangeReuse {
         this.skippedSequentialWindows = 0;
         this.validationStats = { confirmed: 0, rejectedIdentity: 0, changed: 0,
             rejectedLifecycle: 0, storedWindows: 0 };
+        this.identityRejections = { missingValidator: 0, nonEtagValidator: 0,
+            weakOrInvalidEtag: 0, sizeMismatch: 0, missingTargetIdentity: 0 };
     }
 
     begin({ ownerKey, sourceUrl, fileSizeBytes, sourceId, sourceRevision, vodIdentityKey = '' } = {}) {
@@ -33,6 +35,7 @@ class FinitePlaybackRangeReuse {
         let checked = false;
         let reusedBytes = 0;
         const validationStats = this.validationStats;
+        const identityRejections = this.identityRejections;
         return Object.freeze({
             hasPriorRanges: fragments.priorRanges.length > 0,
             // Called only AFTER a current, complete, validated provider range
@@ -41,6 +44,8 @@ class FinitePlaybackRangeReuse {
                 if (checked) return fragments.confirmed;
                 checked = true;
                 const exactIdentity = Boolean(strongResumeIdentity(observed, fileSizeBytes));
+                const rejection = resumeIdentityRejection(observed, fileSizeBytes);
+                if (rejection) identityRejections[rejection]++;
                 try {
                     const confirmed = fragments.confirm(observed);
                     validationStats[confirmed ? 'confirmed' : exactIdentity ? 'rejectedLifecycle' : 'rejectedIdentity']++;
@@ -89,11 +94,11 @@ class FinitePlaybackRangeReuse {
 
     // Same guarantees as the store: coordinates and counters, no secrets.
     describe() {
-        return { ...this.store.describe(),
+        return { ...this.store.snapshot(),
             scope: 'process-private-owner-exact-source',
             maxRetainedWindowBytes: this.maxRetainedWindowBytes,
             skippedSequentialWindows: this.skippedSequentialWindows,
-            validation: { ...this.validationStats } };
+            validation: { ...this.validationStats }, identityRejections: { ...this.identityRejections } };
     }
     revokeOwner(ownerKey) { return this.store.revokeOwner(ownerKey); }
 
@@ -104,7 +109,7 @@ class FinitePlaybackRangeReuse {
             maxFiles: this.store.maxFiles, maxFragments: this.store.maxFragments, ttlMs: this.store.ttlMs,
             maxRetainedWindowBytes: this.maxRetainedWindowBytes,
             skippedSequentialWindows: this.skippedSequentialWindows,
-            validation: { ...this.validationStats } };
+            validation: { ...this.validationStats }, identityRejections: { ...this.identityRejections } };
     }
 }
 
