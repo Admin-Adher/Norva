@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=106ed71043"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Catalog Import Stuck? Build a Timeline | Norva Blog</title>
+  <meta name="description" content="Diagnose an import at one displayed stage by recording start and change times, visible labels and counts, source state, device context, and observations.">
+  <link rel="canonical" href="https://norva.tv/blog/catalog-import-stuck-same-stage/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Catalog Import Stuck? Build a Timeline | Norva Blog">
+  <meta property="og:description" content="Diagnose an import at one displayed stage by recording start and change times, visible labels and counts, source state, device context, and observations.">
+  <meta property="og:url" content="https://norva.tv/blog/catalog-import-stuck-same-stage/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Catalog Import Stuck? Build a Timeline | Norva Blog">
+  <meta name="twitter:description" content="Diagnose an import at one displayed stage by recording start and change times, visible labels and counts, source state, device context, and observations.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Catalog Import Stuck at the Same Stage? Build a Timeline",
+  "description": "Diagnose an import at one displayed stage by recording start and change times, visible labels and counts, source state, device context, and observations.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-28T06:00:00+02:00",
+  "dateModified": "2026-09-28T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/catalog-import-stuck-same-stage/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Catalog Import Stuck at the Same Stage? Build a Timeline",
+      "item": "https://norva.tv/blog/catalog-import-stuck-same-stage/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">Catalog Import Stuck at the Same Stage? Build a Timeline</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="catalog-import-stuck-same-stage" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">Import &amp; Sync Troubleshooting</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-28T06:00:00+02:00">28 September 2026</time>
+        <span class="dot">·</span>
+        <span>8 min read</span>
+      </div>
+      <h1>Catalog Import Stuck at the Same Stage? Build a Timeline</h1>
+      <p class="lede">An unchanged-stage investigation records what the interface displays, when it began, when it last changed, and which source, device, network, and count signals remained stable.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#capture-the-exact-stage">Capture the exact stage</a></li><li><a href="#establish-three-timestamps">Establish three timestamps</a></li><li><a href="#record-count-movement-separately">Record count movement separately</a></li><li><a href="#check-the-authorized-source-layer">Check the authorized source layer</a></li><li><a href="#freeze-account-and-display-context">Freeze account and display context</a></li><li><a href="#observe-at-useful-intervals">Observe at useful intervals</a></li><li><a href="#perform-one-controlled-comparison">Perform one controlled comparison</a></li><li><a href="#stop-actions-that-muddy-evidence">Stop actions that muddy evidence</a></li><li><a href="#build-the-support-packet">Build the support packet</a></li><li><a href="#original-evidence-unchanged-import-stage-timeline">Original evidence: unchanged import stage timeline</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Record when the request began, every displayed stage or message, the last visible change, any count or progress cue, device and application version, network, account, profile, and authorized source state. Observe without repeatedly restarting. Call the stage unchanged for the documented interval, not universally stalled. Use current Norva guidance for timing, perform only one controlled comparison, and escalate a redacted timeline.</blockquote>
+<p>A screen that appears unchanged is an important observation, but it does not reveal whether work continues, waits on another layer, or has stopped. A timeline gives support evidence without inventing internal behavior.</p>
+<h2 id="capture-the-exact-stage">Capture the exact stage</h2>
+<p>Copy the visible label, message, percentage, count, animation state, and enabled or disabled controls. Record whether the page remains responsive. A screenshot can help if it excludes credentials, private addresses, and unnecessary catalog titles.</p>
+<p>If no acknowledgment ever appeared, use the <a href="/blog/catalog-import-will-not-start/">import-start checklist</a> instead.</p>
+<h2 id="establish-three-timestamps">Establish three timestamps</h2>
+<p>Record the initial request, the first appearance of the current stage, and the last observed change. Add timezone and device-local clock. If you did not watch continuously, state the observation gaps. “Unchanged between 14:10 and 14:35” is stronger than “stuck forever.”</p>
+<p>Do not claim a timeout unless current official guidance defines one.</p>
+<h2 id="record-count-movement-separately">Record count movement separately</h2>
+<p>A stage label may remain the same while a displayed count changes, or a count may remain static while another cue changes. Log each signal independently. Do not estimate precise progress from an animation or infer unseen catalog work from device heat, fan noise, or network activity.</p>
+<h2 id="check-the-authorized-source-layer">Check the authorized source layer</h2>
+<p>Through the provider's official route, record whether the source responds and whether account access remains authorized. Note maintenance or access messages. Do not change credentials simply because the Norva stage is unchanged.</p>
+<p>The source-timeout guide applies when the source itself fails to respond.</p>
+<h2 id="freeze-account-and-display-context">Freeze account and display context</h2>
+<p>Keep the Norva account, profile, device, application version, source label, filters, grouping, and network stable. Record foreground and background transitions or device sleep because they alter the observation context, not because they prove a cause.</p>
+<p>Avoid reinstalling, clearing data, or removing the source before preserving the timeline.</p>
+<h2 id="observe-at-useful-intervals">Observe at useful intervals</h2>
+<p>Choose a practical interval that records changes without creating dozens of identical screenshots. Current Norva support guidance should govern any published wait period. If none is stated, report elapsed time only. The purpose is to show when signals changed, not to manufacture a threshold.</p>
+<h2 id="perform-one-controlled-comparison">Perform one controlled comparison</h2>
+<p>When safe and relevant, check the same account and profile on another supported trusted device or network. Label the new timestamp, version, and context. Do not launch another import merely to compare screens. A different display can indicate device-local state, but it does not by itself identify the root cause.</p>
+<p>For a source update followed by delayed results, use the delayed-sync record.</p>
+<h2 id="stop-actions-that-muddy-evidence">Stop actions that muddy evidence</h2>
+<p>Repeated requests, source removal and re-addition, credential rotation, filter changes, application-data clearing, and bulk catalog actions can reset the visible sequence or create new symptoms. If one was already performed, record it honestly in the timeline.</p>
+<h2 id="build-the-support-packet">Build the support packet</h2>
+<p>Include the exact stage, three timestamps, every visible change, aggregate counts, account and profile context, device and application version, network type, masked source label, source observation, and actions taken. Redact household titles unless a tiny sample is necessary.</p>
+<p>The <a href="/blog/catalog-import-sync-troubleshooting-handbook/">full troubleshooting handbook</a> provides the evidence-layer matrix.</p>
+<h2 id="original-evidence-unchanged-import-stage-timeline">Original evidence: unchanged import stage timeline</h2>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Time and timezone</th><th scope="col">Stage or message</th><th scope="col">Count or cue</th><th scope="col">Context change</th><th scope="col">Action</th></tr></thead>
+<tbody><tr><td>Request</td><td></td><td></td><td>Baseline</td><td></td></tr><tr><td>First current stage</td><td></td><td></td><td></td><td></td></tr><tr><td>Last visible change</td><td></td><td></td><td></td><td></td></tr><tr><td>Observation 1</td><td></td><td></td><td></td><td>None</td></tr><tr><td>Observation 2</td><td></td><td></td><td></td><td>None</td></tr><tr><td>Controlled comparison</td><td></td><td></td><td>Device or network</td><td></td></tr></tbody>
+</table></div>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Calling a stage stalled without a documented interval.</li><li>Restarting before recording the original sequence.</li><li>Combining label, count, and animation into one assumption.</li><li>Changing account, profile, filters, or grouping during observation.</li><li>Treating another device's display as proof of an internal cause.</li><li>Sending private catalog or credential data with the timeline.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="when-is-an-unchanged-stage-officially-stuck">When is an unchanged stage officially stuck?</h3>
+<p>Use a current threshold only if Norva publishes one. Otherwise report the exact elapsed interval and visible state to support.</p>
+<h3 id="should-i-leave-the-screen-open">Should I leave the screen open?</h3>
+<p>Follow current Norva and device guidance. Record foreground, background, sleep, or navigation changes so the timeline remains interpretable.</p>
+<h3 id="can-i-restart-once-to-test-it">Can I restart once to test it?</h3>
+<p>Preserve the original timeline first and restart only when current support guidance calls for it. Label any restart as a new sequence.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="catalog-import-stuck-same-stage">Open Norva Support</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/support">Norva support</a></li><li><a href="https://norva.tv/privacy">Norva privacy policy</a></li><li><a href="https://norva.tv/terms">Norva terms of service</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/catalog-import-sync-troubleshooting-handbook/">
+          <span class="tag">Import &amp; Sync Troubleshooting</span>
+          <div class="card-title">The Complete Catalog Import and Sync Troubleshooting Handbook</div>
+
+          <p>A disciplined import and sync investigation preserves one timeline, freezes viewing context, and separates source response from account, profile, device, filter, metadata, and item-identity signals.</p>
+        </a>
+        <a class="card" href="/blog/catalog-import-will-not-start/">
+          <span class="tag">Import &amp; Sync Troubleshooting</span>
+          <div class="card-title">Catalog Import Will Not Start? First Checks</div>
+
+          <p>A first-pass import-start check preserves the original request, verifies authorization and source reachability, and records account, device, network, storage, and message context before retrying.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
