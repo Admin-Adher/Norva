@@ -25,7 +25,7 @@ public final class TsResumeExtractorsFactoryTest {
     @Test public void laterSeekCancelsPendingRewind() throws Exception {
         Fake delegate = new Fake();
         Extractor extractor = new TsResumeExtractorsFactory.PreRoll(delegate);
-        extractor.seek(2000, 5_000_000);
+        extractor.seek(2000, 1_000_000);
         extractor.seek(9000, 25_000_000);
         assertEquals(9000, delegate.position);
         assertEquals(23_000_000, delegate.timeUs);
