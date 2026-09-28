@@ -4155,6 +4155,9 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 pathPrefix: 'finite-mkv-seek',
                 finiteWindowBytes: claims.nativeContainer === 'ts' ? 128 * 1024 : 8 * 1024 * 1024,
                 finiteAlignFirstWindow: claims.nativeContainer !== 'ts',
+                // Native TS binary seeking commonly corrects backwards by a
+                // few packets. Keep a bounded preceding slice in this session.
+                finiteSeekLookbehindBytes: claims.nativeContainer === 'ts' ? 64 * 1024 : 0,
                 finiteSequentialWindowBytes: 8 * 1024 * 1024,
                 // Native extractors read the header, then tail/index, then the
                 // resume position. Complete a bounded header before the first
@@ -5967,7 +5970,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 );
                 const effectiveWindowBytes = finiteWindowIsWarmup
                     ? context.finiteWarmupWindowBytes
-                    : (regularProviderWindowsCompleted > 0
+                    : (regularProviderWindowsCompleted > 0 || forwarded >= context.finiteWindowBytes
                         ? context.finiteSequentialWindowBytes
                         : context.finiteWindowBytes);
                 finiteWindowRange = finiteMkvSeekWindowRange({

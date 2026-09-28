@@ -382,6 +382,41 @@ test('finite TS lookbehind returns only requested bytes and reuses backwards tim
   assert.ok(broker.cacheHits >= 4);
 });
 
+for (const lookbehind of [0, 64 * 1024]) test(`native TS 60604-byte backward cue with lookbehind ${lookbehind}`, { timeout: 8000 }, async (t) => {
+  const data = Buffer.from(Array.from({ length: 1024 * 1024 }, (_, i) => i % 251));
+  const calls = [];
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 128 * 1024,
+    finiteAlignFirstWindow: false, finiteSeekLookbehindBytes: lookbehind,
+    finiteCacheBytes: 1024 * 1024, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const [start, length] of [[600000, 131072], [539396, 112800]]) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${start+length-1}` } });
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start,start+length));
+  }
+  assert.equal(calls.length, lookbehind ? 1 : 2);
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
+
+test('native TS cached initial search proceeds directly to sequential provider window', { timeout: 8000 }, async (t) => {
+  const data = Buffer.alloc(2 * 1024 * 1024, 17), calls = [];
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 128 * 1024,
+    finiteSequentialWindowBytes: 512 * 1024, finiteAlignFirstWindow: false,
+    finiteSeekLookbehindBytes: 64 * 1024, finiteCacheBytes: data.length, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const [start, length] of [[600000, 131072], [539396, 600000]]) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${start+length-1}` } });
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start,start+length));
+  }
+  assert.deepEqual(calls, ['bytes=534464-731071', 'bytes=731072-1139395']);
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
+
 test('finite TS lookbehind resumes a truncated preceding slice without duplicate local bytes', { timeout: 8000 }, async (t) => {
   const data = Buffer.from(Array.from({ length: 64 }, (_, i) => i)), calls = [];
   const provider = http.createServer((req,res) => {
@@ -477,9 +512,13 @@ for (const initialGrace of [0,500]) test(`native TS delayed remote seek with ini
   await reader.cancel();
   const second=await fetch(broker.inputUrl,{headers:{Range:'bytes=24-31'}});
   assert.deepEqual(Buffer.from(await second.arrayBuffer()),data.subarray(24,32));
-  if (initialGrace) assert.deepEqual(calls,['bytes=0-7','bytes=24-31']);
-  else assert.ok(calls.includes('bytes=8-15'), 'control opens an unnecessary continuation before the remote seek');
-  assert.equal(broker.interruptedProviderFetches,0);
+  if (initialGrace) {
+    assert.deepEqual(calls,['bytes=0-7','bytes=24-31']);
+    assert.equal(broker.interruptedProviderFetches,0);
+  } else {
+    // The speculative control fetch may finish or be cancelled by the cue.
+    assert.ok(calls.includes('bytes=8-15'), 'control opens an unnecessary continuation before the remote seek');
+  }
 });
 
 for(const drain of [true,false])test(`finite TS abandoned drain ${drain?'finishes a small exact body':'expires without provider overlap'}`,{timeout:8000},async(t)=>{
