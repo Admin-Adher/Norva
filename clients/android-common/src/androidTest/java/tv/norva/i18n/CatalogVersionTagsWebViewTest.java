@@ -49,6 +49,8 @@ public class CatalogVersionTagsWebViewTest {
             configuration.fontScale = zoom / 100f;
             Context context = instrumentation.getTargetContext().createConfigurationContext(configuration);
             AtomicReference<WebView> holder = new AtomicReference<>();
+            java.util.concurrent.atomic.AtomicBoolean disposed = new java.util.concurrent.atomic.AtomicBoolean();
+            AtomicReference<String> rendererFailure = new AtomicReference<>();
             CountDownLatch loaded = new CountDownLatch(1);
             instrumentation.runOnMainSync(() -> {
                 WebView view = new WebView(context); holder.set(view);
@@ -63,6 +65,17 @@ public class CatalogVersionTagsWebViewTest {
                     }
                 });
                 view.setWebViewClient(new WebViewClient() {
+                    @Override public boolean onRenderProcessGone(WebView v, android.webkit.RenderProcessGoneDetail detail) {
+                        // This fixture owns detached, short-lived WebViews. A callback after
+                        // explicit destruction must not terminate the whole instrumentation.
+                        // Losing a renderer during verification remains a failed assertion.
+                        if (!disposed.get()) {
+                            rendererFailure.set("Renderer lost during verification; didCrash=" + detail.didCrash());
+                            loaded.countDown();
+                            v.destroy();
+                        }
+                        return true;
+                    }
                     @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
                         if ("norva-tags.test".equals(request.getUrl().getHost())) {
                             try {
@@ -92,6 +105,7 @@ public class CatalogVersionTagsWebViewTest {
             });
             try {
                 assertTrue("Packaged renderer loaded", loaded.await(45, TimeUnit.SECONDS));
+                assertNull(rendererFailure.get(), rendererFailure.get());
                 assertEquals("Production dependencies present", "\"object,object,function,function\"", evaluate(instrumentation, holder.get(),
                     "[typeof NorvaI18n,typeof MediaUtils,typeof MoviesPage,typeof SeriesPage].join(',')"));
                 evaluate(instrumentation, holder.get(), "window.tagFontsReady=false;document.fonts.ready.then(()=>window.tagFontsReady=true);");
@@ -111,7 +125,8 @@ public class CatalogVersionTagsWebViewTest {
                     }
                 }
                 System.out.println("CATALOG_TAGS_WEBVIEW_OK width="+width+" textZoom="+zoom+" contextFontScale="+configuration.fontScale+" locales=10 mediaTypes=2 prefixes=8 evidenceStates=2");
-            } finally { instrumentation.runOnMainSync(() -> holder.get().destroy()); }
+                assertNull(rendererFailure.get(), rendererFailure.get());
+            } finally { instrumentation.runOnMainSync(() -> { disposed.set(true); holder.get().destroy(); }); }
         }
     }
 

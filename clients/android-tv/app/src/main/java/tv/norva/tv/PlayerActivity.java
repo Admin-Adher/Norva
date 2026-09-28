@@ -735,7 +735,7 @@ public class PlayerActivity extends Activity {
         DataSource.Factory dataSourceFactory = nativeMediaCache;
 
         player = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory, new tv.norva.playback.TsResumeExtractorsFactory(new androidx.media3.extractor.DefaultExtractorsFactory()))
                         .setLoadErrorHandlingPolicy(new ProviderLoadErrorHandlingPolicy()))
                 .build();
         player.setVideoSurfaceView(surfaceView);
