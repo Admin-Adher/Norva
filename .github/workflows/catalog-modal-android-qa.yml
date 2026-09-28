@@ -7,6 +7,7 @@ on:
         type: choice
         default: tv.norva.phone.CatalogProgressModalInstrumentedTest
         options:
+          - tv.norva.phone.TsPrerollExperimentTest
           - tv.norva.phone.CatalogProgressModalInstrumentedTest
           - tv.norva.phone.ProviderVersionCardsInstrumentedTest#restoredFicheUsesFreshEvidence
   push:
