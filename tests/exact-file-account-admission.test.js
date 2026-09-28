@@ -20,10 +20,17 @@ test('exact-file mode requires an explicit boolean database flag, never request 
 });
 test('metadata claims the mono account before the exact file and keeps both only after confirmed admission',async()=>{
   const calls=[];const db={rpc:async(name,args)=>{calls.push({name,args});return{data:true};}};
-  assert.equal(await functions.claim(db,'catalogue','unique-owner','file-1','a'.repeat(64)),true);
-  assert.deepEqual(calls.map(c=>c.name),['claim_provider_account_language_validation','claim_provider_exact_file_probe']);
+  assert.equal(await functions.claim(db,'catalogue','unique-owner','file-1','a'.repeat(64),'owner-id','source-id'),true);
+  assert.deepEqual(calls.map(c=>c.name),['claim_provider_account_language_validation','claim_provider_exact_file_probe_for_source']);
   assert.equal(calls[1].args.p_external_id,'file-1');assert.equal(calls[1].args.p_provider_account_hash,'a'.repeat(64));
   assert.equal(calls[0].args.p_lease_owner,calls[1].args.p_lease_owner);
+  assert.equal(calls[1].args.p_user,'owner-id');
+  assert.equal(calls[1].args.p_source,'source-id');
+});
+test('rollout gate binds the source to the current owner through the service RPC',async()=>{
+  const calls=[];
+  assert.equal(await functions.enabled({rpc:async(name,args)=>{calls.push({name,args});return{data:false};}},'owner-id','source-id'),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{name:'catalog_language_exact_file_enabled_for_source',args:{p_user:'owner-id',p_source:'source-id'}}]);
 });
 test('failed no-I/O file admission releases only its own new account lease; occupied accounts are untouched',async()=>{
   for(const failed of [1,2]) {
@@ -40,9 +47,9 @@ test('exact release is file + owner CAS, and metadata/ASR retain existing drain 
   const calls=[];await functions.release({rpc:async(name,args)=>{calls.push({name,args});}},'catalogue','unique-owner',{itemType:'movie',externalId:'file-1'});
   assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{name:'release_provider_exact_file_probe',args:{p_identity_key:'catalogue',p_item_type:'movie',p_external_id:'file-1',p_lease_owner:'unique-owner'}}]);
   const worker=source.slice(source.indexOf('async function processOneLanguageValidationTrack('),source.indexOf('type LanguageCaptureWindowOptions'));
-  assert.match(worker,/useCapturePipeline && await exactFileProbeAdmissionEnabled\(db\)/);
-  assert.ok(worker.indexOf('claim_provider_account_language_validation')<worker.indexOf('claim_provider_exact_file_probe'));
-  assert.ok(worker.indexOf('await assertProviderCircuitClosed')<worker.indexOf('claim_provider_exact_file_probe'));
+  assert.match(worker,/useCapturePipeline && await exactFileProbeAdmissionEnabled\(db, current.userId, current.sourceId\)/);
+  assert.ok(worker.indexOf('claim_provider_account_language_validation')<worker.indexOf('claim_provider_exact_file_probe_for_source'));
+  assert.ok(worker.indexOf('await assertProviderCircuitClosed')<worker.indexOf('claim_provider_exact_file_probe_for_source'));
   assert.match(worker,/providerAccountLeaseReleaseSafe[\s\S]*releaseExactProviderFileProbe/);
   const metadata=source.slice(source.indexOf('async function runCodecProfileBackfill('),source.indexOf('async function runLidBenchmarkEndpoint('));
   assert.match(metadata,/if \(providerTransportMayBeActive\) releaseLeaseOnExit = false/);

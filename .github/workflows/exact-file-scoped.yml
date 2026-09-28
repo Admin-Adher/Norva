@@ -1,0 +1,34 @@
+name: Scoped exact-file admission
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260928211000_exact_file_scoped_rollout.sql'
+      - 'supabase/migrations/20260911204928_exact_file_account_enrichment_admission.sql'
+      - 'tests/sql/*exact-file-scoped*'
+      - '.github/workflows/exact-file-scoped.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify SQL isolation and concurrent claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name norva-exact-scoped-qa --network none --memory 256m --cpus 1 \
+            --tmpfs /var/lib/postgresql/data -e POSTGRES_HOST_AUTH_METHOD=trust postgres:15-alpine
+          trap 'docker rm -f norva-exact-scoped-qa >/dev/null' EXIT
+          for i in {1..30}; do
+            if docker exec norva-exact-scoped-qa pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker exec norva-exact-scoped-qa pg_isready -U postgres
+          python3 tests/sql/build-exact-file-scoped-fixture.py |
+            docker exec -i norva-exact-scoped-qa psql -X -q -v ON_ERROR_STOP=1 -U postgres
+          python3 tests/sql/exact-file-scoped-concurrency.py norva-exact-scoped-qa
