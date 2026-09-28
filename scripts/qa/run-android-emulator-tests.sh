@@ -63,10 +63,22 @@ collect_captures() {
 # Copy while instrumentation is running, before those files disappear.
 (while true; do collect_captures; sleep 5; done) &
 capture_pid=$!
+# Keep diagnostics outside Gradle's results directory while UTP owns it.
+# Per-test logcat can stop before the crash that terminates instrumentation.
+diagnostic_dir="$(mktemp -d)"
+adb logcat -b all -v threadtime > "$diagnostic_dir/device-logcat.txt" 2>&1 &
+logcat_pid=$!
 finish_captures() {
+  local test_status=$?
   kill "$capture_pid" 2>/dev/null || true
   wait "$capture_pid" 2>/dev/null || true
   collect_captures
+  adb shell dumpsys activity exit-info "tv.norva.${platform}" > "$diagnostic_dir/process-exit-info.txt" 2>&1 || true
+  kill "$logcat_pid" 2>/dev/null || true
+  wait "$logcat_pid" 2>/dev/null || true
+  mkdir -p app/build/outputs/androidTest-results/connected/diagnostics
+  cp "$diagnostic_dir/"*.txt app/build/outputs/androidTest-results/connected/diagnostics/ || true
+  return "$test_status"
 }
 trap finish_captures EXIT
 gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
