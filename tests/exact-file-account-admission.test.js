@@ -47,7 +47,7 @@ test('exact release is file + owner CAS, and metadata/ASR retain existing drain 
   const calls=[];await functions.release({rpc:async(name,args)=>{calls.push({name,args});}},'catalogue','unique-owner',{itemType:'movie',externalId:'file-1'});
   assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{name:'release_provider_exact_file_probe',args:{p_identity_key:'catalogue',p_item_type:'movie',p_external_id:'file-1',p_lease_owner:'unique-owner'}}]);
   const worker=source.slice(source.indexOf('async function processOneLanguageValidationTrack('),source.indexOf('type LanguageCaptureWindowOptions'));
-  assert.match(worker,/useCapturePipeline && await exactFileProbeAdmissionEnabled\(db, userId, sourceId\)/);
+  assert.match(worker,/useCapturePipeline && await exactFileProbeAdmissionEnabled\(db, current.userId, current.sourceId\)/);
   assert.ok(worker.indexOf('claim_provider_account_language_validation')<worker.indexOf('claim_provider_exact_file_probe_for_source'));
   assert.ok(worker.indexOf('await assertProviderCircuitClosed')<worker.indexOf('claim_provider_exact_file_probe_for_source'));
   assert.match(worker,/providerAccountLeaseReleaseSafe[\s\S]*releaseExactProviderFileProbe/);

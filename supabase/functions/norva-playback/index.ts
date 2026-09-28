@@ -4449,7 +4449,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
     providerAccountLeaseClaimed = true;
     providerAccountLeaseReleaseSafe = true;
 
-    const useExactProviderLease = useCapturePipeline && await exactFileProbeAdmissionEnabled(db, userId, sourceId);
+    const useExactProviderLease = useCapturePipeline && await exactFileProbeAdmissionEnabled(db, current.userId, current.sourceId);
     if (useExactProviderLease) exactProviderLease = { itemType: current.itemType, externalId: current.itemId };
     const { data: providerClaimed, error: providerClaimError } = await db.rpc(
       useExactProviderLease ? "claim_provider_exact_file_probe_for_source" : "claim_provider_file_probe",
@@ -4457,7 +4457,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         p_identity_key: current.identityKey,
         p_lease_owner: providerLeaseOwner,
         p_ttl_seconds: LANGUAGE_VALIDATION_LEASE_SECONDS,
-        ...(useExactProviderLease ? { p_user:userId, p_source:sourceId, p_item_type:current.itemType, p_external_id:current.itemId,
+        ...(useExactProviderLease ? { p_user:current.userId, p_source:current.sourceId, p_item_type:current.itemType, p_external_id:current.itemId,
           p_provider_account_hash:providerAccountHash } : {}),
       },
     );

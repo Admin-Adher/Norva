@@ -29,7 +29,11 @@ function edgeFixture(options = {}) {
             assert.equal(args.p_job_id, uuid, 'capture approval must be resolved for the claimed job');
             return options.captureFlagError ? { data: null, error: true } : { data: options.enabled !== false };
         }
-        if (name === 'catalog_language_exact_file_admission_enabled') return { data: options.exactFlagUnavailable ? null : options.exact === true };
+        if (name === 'catalog_language_exact_file_enabled_for_source') {
+            assert.equal(args.p_user, current.userId);
+            assert.equal(args.p_source, current.sourceId);
+            return { data: options.exactFlagUnavailable ? null : options.exact === true };
+        }
         if (name === 'request_language_validation_catalog_yield') {
             assert.equal(args.p_job_id, uuid);
             assert.ok(args.p_lease_owner);
@@ -38,7 +42,8 @@ function edgeFixture(options = {}) {
         }
         if (name === 'claim_provider_account_language_validation') { account = true; return { data: true }; }
         if (name === 'claim_provider_file_probe') { identity = true; return { data: true }; }
-        if (name === 'claim_provider_exact_file_probe') {
+        if (name === 'claim_provider_exact_file_probe_for_source') {
+            assert.equal(args.p_user, current.userId); assert.equal(args.p_source, current.sourceId);
             assert.equal(account, true, 'mono account must be reserved before an exact file');
             assert.equal(args.p_identity_key, current.identityKey); assert.equal(args.p_item_type, current.itemType);
             assert.equal(args.p_external_id, current.itemId); assert.equal(args.p_provider_account_hash, hash);
@@ -163,7 +168,7 @@ test('actual Edge missing or denied job approval never uses the new capture path
 
 test('actual Edge exact-file mode still owns the mono account and hands off both leases before inference', async () => {
     const f = edgeFixture({ exact: true }); await f.run(); assert.deepEqual(f.failures, []);
-    assert.ok(f.events.indexOf('rpc:claim_provider_account_language_validation') < f.events.indexOf('rpc:claim_provider_exact_file_probe'));
+    assert.ok(f.events.indexOf('rpc:claim_provider_account_language_validation') < f.events.indexOf('rpc:claim_provider_exact_file_probe_for_source'));
     assert.equal(f.events.includes('rpc:claim_provider_file_probe'), false);
     assert.ok(f.events.indexOf('rpc:checkpoint_catalog_file_audio_capture') < f.events.indexOf('fetch:infer'));
     assert.deepEqual(f.slots(), { account: false, identity: false });
