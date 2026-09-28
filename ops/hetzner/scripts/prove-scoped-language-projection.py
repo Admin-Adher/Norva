@@ -7,7 +7,7 @@ import json, os, pathlib, subprocess, sys, time
 
 ROOT = pathlib.Path('/home/adrien/.norva/scoped-language-projection-20260928')
 NAME = 'norva-scoped-language-proof-20260928'
-MIGRATIONS = ['20260928223000_scoped_owned_language_projection.sql']
+MIGRATIONS = ['20260928223000_scoped_owned_language_projection.sql', '20260928224000_owned_language_evidence_membership.sql']
 
 def run(args, data=None, timeout=90):
     result = subprocess.run(args, input=data, capture_output=True, timeout=timeout)

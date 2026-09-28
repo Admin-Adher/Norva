@@ -184,5 +184,10 @@ select pg_temp.ok(not exists(
 select pg_temp.projection_equal();
 select pg_temp.projection_equal();
 select pg_temp.ok(not has_function_privilege('authenticated','public.cloud_catalog_owned_audio_declarations_scoped(uuid,uuid,text)','EXECUTE'),'scoped_reader_private');
+select pg_temp.ok(not exists (
+ select 1 from (values(1),(2),(3)) candidate(id)
+ where (not exists(select 1 from (values(1),(1),(null::int)) evidence(id) where evidence.id=candidate.id))
+ is distinct from (candidate.id not in(select id from (values(1),(1),(null::int)) evidence(id) where id is not null))
+),'membership_preserves_null_and_duplicate_evidence');
 select jsonb_build_object('passed',true,'checks',count(*),'productionWrites',0,'providerRequests',0) from checks;
 rollback;

@@ -36,3 +36,20 @@ and retains an empty search path. An absent owner yields no results.
 
 Not yet deployed. The provider metadata flag remains disabled. Broader
 commercial, Android and staged rollout gates remain separate.
+
+## Follow-up: avoid repeated scans of the materialized evidence
+
+The first deployed correction still scanned its CTE per candidate. A broader
+source check found 12.116 seconds for 23 projected rows. EXPLAIN on another
+source showed 5,704 CTE scans, removing 1,622 rows per scan. Therefore the
+single-source 4.299-second measurement was insufficient to generalize.
+
+The follow-up migration replaces correlated NOT EXISTS with an uncorrelated
+NOT IN over non-null variant IDs, allowing a hashed subplan. The candidate ID
+is a primary key; null evidence IDs are explicitly removed. All other fences
+and episode-evidence logic remain unchanged. No activation is included.
+
+Query-level measurements on all four sources with stored nonempty declarations:
+23 rows / 1,969.778 ms; 444 / 2,554.868 ms; 3 / 1,424.504 ms;
+63 / 751.599 ms. These are EXPLAIN ANALYZE timings on real data with the gate
+substituted inside a private transaction, not a production activation or UI test.
