@@ -4153,7 +4153,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 dispatcherFactory, abortSignal: entry.ac.signal,
                 // Historical name: the finite broker is container-independent.
                 pathPrefix: 'finite-mkv-seek',
-                finiteWindowBytes: 8 * 1024 * 1024,
+                finiteWindowBytes: claims.nativeContainer === 'ts' ? 128 * 1024 : 8 * 1024 * 1024,
+                finiteAlignFirstWindow: claims.nativeContainer !== 'ts',
                 finiteSequentialWindowBytes: 8 * 1024 * 1024,
                 // Native extractors read the header, then tail/index, then the
                 // resume position. Complete a bounded header before the first
@@ -5976,7 +5977,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // The first slice ends on a stable base-window boundary. A
                     // later overlapping cue can reuse the cached suffix and fetch
                     // only its missing tail instead of redownloading the prefix.
-                    alignToWindowEnd: regularProviderWindowsCompleted === 0,
+                    alignToWindowEnd: context.finiteAlignFirstWindow && regularProviderWindowsCompleted === 0,
                 });
                 const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange, {
                     allowPrefix: true,
@@ -6833,6 +6834,9 @@ async function createStrictLidBroker(options = {}) {
             ? Math.max(0, Math.min(100, options.finiteSeekContinuationGraceMs)) : 0,
         finiteAbandonedDrainMs: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteAbandonedDrainMs)
             ? Math.max(0, Math.min(1500, options.finiteAbandonedDrainMs)) : 0,
+        // Native extractors need a complete small search window even when
+        // the requested offset lies just before a fixed block boundary.
+        finiteAlignFirstWindow: options.finiteAlignFirstWindow !== false,
         finiteWarmupWindowBytes: 0,
         finiteWarmupCueGraceMs: Number.isFinite(Number(options.finiteWarmupCueGraceMs))
             ? Math.max(0, Math.min(250, Number(options.finiteWarmupCueGraceMs)))

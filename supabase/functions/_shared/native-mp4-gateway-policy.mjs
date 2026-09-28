@@ -16,6 +16,7 @@ export function nativeVodFileProof(ownedHint = {}, now = Date.now()) {
     || !['matroska', 'matroskawebm', 'mkv', 'mov', 'movmp4m4a3gp3g2mj2', 'mp4', 'mpegts', 'ts', 'avi', 'mpeg', 'ogg', 'flv'].includes(kind)
     || !Number.isSafeInteger(p.fileSizeBytes) || p.fileSizeBytes < 1024) return null;
   return { fileSizeBytes: p.fileSizeBytes,
+      ...(['mpegts', 'ts'].includes(kind) ? { nativeContainer: 'ts' } : {}),
     durationSeconds: Number.isFinite(p.durationSeconds) ? p.durationSeconds : null };
 }
 

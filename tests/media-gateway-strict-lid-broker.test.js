@@ -3240,3 +3240,30 @@ test('viewer preemption closes and unregisters a strict LID broker only after pr
   assert.equal(strictLidBrokers.size, 0);
   await assert.rejects(fetch(localUrl, { headers: { Range: 'bytes=0-1' } }));
 });
+
+
+test('native seek search keeps a full bounded first window at arbitrary offsets then expands sequentially', async (t) => {
+  const { createStrictLidBroker } = brokerHarness();
+  const data = Buffer.from(Array.from({ length: 80 }, (_, index) => index));
+  const calls = [];
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range);
+    sendExactRange(req, res, data, { etag: '"native-search-window"' });
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await createStrictLidBroker({
+    sourceUrl, fileSizeBytes: data.length, dispatcher: null,
+    pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8,
+    finiteAlignFirstWindow: false, finiteSequentialWindowBytes: 24,
+    releaseDelayMs: 0, completedReleaseDelayMs: 0,
+  });
+  t.after(() => broker.close());
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=7-39' } });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(7, 40));
+  assert.deepEqual(calls, ['bytes=7-14', 'bytes=15-38', 'bytes=39-39']);
+  const seek = await fetch(broker.inputUrl, { headers: { Range: 'bytes=55-62' } });
+  assert.deepEqual(Buffer.from(await seek.arrayBuffer()), data.subarray(55, 63));
+  assert.equal(calls.at(-1), 'bytes=55-62');
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
