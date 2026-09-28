@@ -23,12 +23,16 @@ unchanged for older workers during deployment.
   ROLLBACK: revision 0, basis points 0, null owner/source rejected and authenticated
   role cannot call the new claim RPC. No production configuration was committed.
 - `git diff --check` passes.
+- Disposable PostgreSQL 15, network disabled: 18 named SQL assertions and
+  stage-skip/stale-revision exception guards pass. The fixture loads the actual
+  original lease function from its migration, rather than a stubbed claim.
+- Two independent concurrent database connections request different files on
+  one provider account: exactly one succeeds and one fails; one lease remains.
+  The QA container is removed after verification.
 
 ## Required before release
 
-Add SQL tests for rollout CAS/stages/rollback, cross-owner and hidden source
-rejection, movie and episode bindings, account contention, rolling legacy claims,
-and no inference/provider writes on denied admission. Then integrate, deploy SQL
+Integrate after CI, deploy SQL
 at zero, deploy the matching Edge code through the idle/drain guard, verify parity
 and advance progressively with actual provider evidence. This candidate is not
 deployed or active. The broader commercial objective remains incomplete.
