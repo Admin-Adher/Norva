@@ -26753,3 +26753,21 @@ html:not(.tv-mode) #page-series .genre-bucket-grid > .dashboard-card .card-image
   height: auto;
   aspect-ratio: 2 / 3;
 }
+
+/* Phone Live: touch targets; TV retains its existing focus model. */
+.norva-phone-apk #page-live .live-guide-more,
+.norva-phone-apk #page-live .live-guide-group,
+.norva-phone-apk #page-live .live-guide-play,
+.norva-phone-apk #page-live .live-guide-search-clear,
+.norva-phone-apk #page-live .lg-btn {
+  min-width: 48px;
+  min-height: 48px;
+}
+.norva-phone-apk #page-live .live-guide-play {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+.norva-phone-apk #page-live .live-guide-row:active {
+  background: var(--color-bg-tertiary);
+}

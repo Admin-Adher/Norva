@@ -68,7 +68,7 @@ class LiveGuideFusion {
                 return;
             }
 
-            // The ▶ button plays immediately; tapping the row body only previews.
+            // The ▶ button plays immediately; phone rows also play directly, desktop rows preview.
             const playBtn = event.target.closest('.live-guide-play');
             if (playBtn) {
                 const playRow = playBtn.closest('.live-guide-row');
@@ -76,7 +76,10 @@ class LiveGuideFusion {
                 return;
             }
             const row = event.target.closest('.live-guide-row');
-            if (row) this.previewFamilyRow(row);
+            if (row) {
+                if (this.isPhoneApk()) this.playFamilyRow(row);
+                else this.previewFamilyRow(row);
+            }
         });
 
         // Keyboard/remote OK on a row:
@@ -90,7 +93,7 @@ class LiveGuideFusion {
             const row = event.target.closest('.live-guide-row');
             if (row) {
                 event.preventDefault();
-                if (this._isTvMode()) this.playFamilyRow(row);
+                if (this._isTvMode() || this.isPhoneApk()) this.playFamilyRow(row);
                 else this.previewFamilyRow(row);
             }
         });
@@ -287,6 +290,7 @@ class LiveGuideFusion {
     }
 
     playChannel(channel) {
+        if (!this.matchesSelectedSource(channel)) return;
         this.app.channelList.selectChannel({
             channelId: channel.id,
             sourceId: String(channel.sourceId),
@@ -317,9 +321,18 @@ class LiveGuideFusion {
         this.playChannel(this.getBestFamilyChannel(healthyMembers));
     }
 
+    matchesSelectedSource(channel) {
+        if (!channel) return false;
+        const value = document.getElementById('source-select')?.value || '';
+        if (!value) return true;
+        const [type, id] = value.split(':');
+        return String(channel.sourceId) === id && channel.sourceType === type;
+    }
+
     getPlayableChannels() {
         const list = this.app.channelList;
         return (list.channels || []).filter(channel => {
+            if (!this.matchesSelectedSource(channel)) return false;
             const rawId = channel.streamId || channel.id;
             if (list.isHidden('channel', channel.sourceId, rawId)) return false;
             if (list.hideBroken && list.shouldHideByPlayback(channel)) return false;
@@ -1472,9 +1485,12 @@ class LiveGuideFusion {
         // Preload the last-watched channel into the preview when nothing is
         // selected yet — the phone/tablet APK no longer auto-plays on open, so this
         // makes resuming the last channel a single tap on "Watch".
-        const selectedChannel = this.currentChannel
-            || this.app.channelList.currentChannel
-            || this.app.channelList.findLastLiveChannel?.()
+        const candidates = [this.currentChannel, this.app.channelList.currentChannel,
+            this.app.channelList.findLastLiveChannel?.()];
+        const selectedChannel = candidates.map(candidate => candidate && channels.find(channel =>
+            String(channel.sourceId) === String(candidate.sourceId)
+            && channel.sourceType === candidate.sourceType
+            && String(channel.id) === String(candidate.id))).find(Boolean)
             || groupChannels[0] || channels[0] || null;
         this.currentChannel = selectedChannel;
         this._lastChannelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;

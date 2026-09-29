@@ -81,4 +81,9 @@ finish_captures() {
   return "$test_status"
 }
 trap finish_captures EXIT
-gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
+test_args=()
+if [[ -n "${NORVA_ANDROID_TEST_CLASS:-}" ]]; then
+  [[ "$NORVA_ANDROID_TEST_CLASS" =~ ^[A-Za-z0-9_.,#]+$ ]] || exit 2
+  test_args+=("-Pandroid.testInstrumentationRunnerArguments.class=$NORVA_ANDROID_TEST_CLASS")
+fi
+gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace "${test_args[@]}"

@@ -2109,6 +2109,7 @@ class ChannelList {
             this.isLoading = false;
             this.container?.removeAttribute('aria-busy');
             window.app?.liveGuideFusion?.render();
+            if (this.sourceSelect.value !== sourceValue) await this.loadChannels();
             return;
         }
 
@@ -2144,6 +2145,8 @@ class ChannelList {
             // Pull cloud recent channels into the local mirror (TTL-gated + refocus + slow
             // interval — no longer once per session). Fire-and-forget.
             this.maybeSyncRecentsFromCloud();
+            // A source change during the request must not be lost to isLoading.
+            if (this.sourceSelect.value !== sourceValue) await this.loadChannels();
         }
     }
 
