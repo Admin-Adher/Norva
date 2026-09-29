@@ -1805,9 +1805,10 @@ const CloudAdapter = (() => {
     async function sourcePatchFromLocal(id, data = {}) {
         const cached = (await listSources()).find(source => String(source.id) === String(id) || source.cloudId === id) || {};
         const type = data.type || data.sourceType || data.source_type || cached.type || 'xtream';
-        const patch = {
-            sourceType: type
-        };
+        // The legacy PATCH accepts display-name edits only. Do not attach
+        // sourceType to a rename (including the rename preceding a credential
+        // candidate); the server deliberately rejects that extra field.
+        const patch = {};
 
         if (data.name || data.displayName || data.display_name) {
             patch.displayName = data.name || data.displayName || data.display_name;
