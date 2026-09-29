@@ -1416,3 +1416,32 @@ test('one logical live channel split across pages keeps its exact merged variant
   assert.equal(channel.default_variant.stream_id, 'tf1-hd');
   assert.equal(channel.default_stream_id, 'tf1-hd');
 });
+
+test('production-sized signed cursor pairs survive a worker checkpoint and remain bounded', async () => {
+  const { stageXtreamCredentialCatalogGeneration } = loadXtreamModule();
+  const base = {
+    db: new FakeDatabase(),
+    userId: '11111111-1111-4111-8111-111111111111',
+    sourceId: '22222222-2222-4222-8222-222222222222',
+    transitionId: '33333333-3333-4333-8333-333333333333',
+    generationId: '44444444-4444-4444-8444-444444444444',
+    jobId: '55555555-5555-4555-8555-555555555555',
+    leaseSequence: 2, leaseOwner: 'generation-writer-test', maxSlices: 1,
+  };
+  const spoolToken = 's'.repeat(396);
+  const nextCursor = 'c'.repeat(396);
+  const first = await stageXtreamCredentialCatalogGeneration({ ...base,
+    fetchMetadataPage: async () => ({items: [], nextCursor, spoolToken, done: false}),
+  });
+  assert.ok(first.checkpoint.categoryPageCursor.length > 1024);
+  assert.ok(first.checkpoint.categoryPageCursor.length <= 4096);
+  let resumed;
+  await stageXtreamCredentialCatalogGeneration({ ...base, leaseSequence: 3, cursor: first.checkpoint,
+    fetchMetadataPage: async request => { resumed = request; return {items: [], nextCursor: null, spoolToken, done: true}; },
+  });
+  assert.equal(resumed.cursor, nextCursor);
+  assert.equal(resumed.spoolToken, spoolToken);
+  await assert.rejects(stageXtreamCredentialCatalogGeneration({ ...base,
+    fetchMetadataPage: async () => ({items: [], nextCursor: 'x'.repeat(4096), spoolToken: 'y'.repeat(4096), done: false}),
+  }), /checkpoint bound/);
+});
