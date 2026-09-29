@@ -72,9 +72,11 @@ public class LiveGuideAuditInstrumentedTest {
             assertEquals("fixture: "+js(i,ref.get(),"window.fixtureError||null"),"true",ready);
             Thread.sleep(400);screenshot(i,ref.get(),"live-guide-initial");
             String measurement=js(i,ref.get(),"liveAudit.measure()");
+            assertEquals("Touch controls have at least 44 CSS pixels", "true", js(i,ref.get(),
+                "liveAudit.measure().targets.every(t=>t.width>=44&&t.height>=44)"));
             try(FileWriter out=new FileWriter(new File(i.getTargetContext().getExternalFilesDir(null),"live-guide-measurements.json"))){out.write(measurement);}
-            assertEquals("Row is preview-only","0",js(i,ref.get(),"document.querySelector('.live-guide-row').click();liveAudit.plays.length"));
-            assertEquals("Play control submits one request","1",js(i,ref.get(),"document.querySelector('.live-guide-play').click();liveAudit.plays.length"));
+            assertEquals("Phone row launches playback","1",js(i,ref.get(),"document.querySelector('.live-guide-row').click();liveAudit.plays.length"));
+            assertEquals("Play control submits one additional request","2",js(i,ref.get(),"document.querySelector('.live-guide-play').click();liveAudit.plays.length"));
             assertEquals("Selected channel passed to playback","\"0\"",js(i,ref.get(),"liveAudit.plays[0].channelId"));
             js(i,ref.get(),"document.querySelector('.live-guide-source-trigger').click()");
             Thread.sleep(200);screenshot(i,ref.get(),"live-guide-source-sheet");
@@ -98,6 +100,16 @@ public class LiveGuideAuditInstrumentedTest {
             assertEquals("Search filters the guide","1",js(i,ref.get(),"document.querySelectorAll('.live-guide-row').length"));
             screenshot(i,ref.get(),"live-guide-search");
             assertEquals("Search retains focus","true",js(i,ref.get(),"document.activeElement.classList.contains('live-guide-search')"));
+            // Exercise both filter orders while the real IME remains open.
+            js(i,ref.get(),"document.querySelector('.live-guide-search').value='';liveAudit.guide.searchQuery='';document.querySelectorAll('.live-guide-group')[1].click();document.getElementById('source-select').value='';document.getElementById('source-select').dispatchEvent(new Event('change'))");
+            Thread.sleep(300);
+            js(i,ref.get(),"document.querySelector('.live-guide-group[data-group=\"\"]').click()");
+            assertEquals("All sources then all categories", "96", js(i,ref.get(),"liveAudit.guide.getRowsChannels().length"));
+            js(i,ref.get(),"document.getElementById('source-select').value='m3u:2';document.getElementById('source-select').dispatchEvent(new Event('change'))");
+            Thread.sleep(300);
+            js(i,ref.get(),"document.querySelectorAll('.live-guide-group')[1].click();document.querySelector('.live-guide-group[data-group=\"\"]').click();document.getElementById('source-select').value='';document.getElementById('source-select').dispatchEvent(new Event('change'))");
+            Thread.sleep(300);
+            assertEquals("All categories then all sources", "96", js(i,ref.get(),"liveAudit.guide.getRowsChannels().length"));
             System.out.println("LIVE_GUIDE_AUDIT "+measurement);
             System.out.println("LIVE_SOURCE_WATCH_REQUEST "+sourcePlay);
             assertEquals("Watch must follow the selected source", "\"2\"", sourcePlay);

@@ -3363,7 +3363,7 @@
       "public/js/components/LiveGuideFusion.js"
     ],
     "en": "Show {{p0}} more",
-    "fr": "Afficher {{p0}} plus",
+    "fr": "Afficher {{p0}} de plus",
     "pt-BR": "Mostrar mais {{p0}}",
     "es": "Mostrar {{p0}} más",
     "hi": "{{p0}} और दिखाएँ",
@@ -3379,7 +3379,7 @@
       "public/js/components/LiveGuideFusion.js"
     ],
     "en": "· {{p1}} of {{p2}} left",
-    "fr": "· {{p1}} ou {{p2}} gauche",
+    "fr": "· {{p1}} restants sur {{p2}}",
     "pt-BR": "· {{p1}} de {{p2}} restante",
     "es": "· Quedan {{p1}} de {{p2}}",
     "hi": "· {{p2}} में से {{p1}} बाएँ",

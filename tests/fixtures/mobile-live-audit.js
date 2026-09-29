@@ -35,7 +35,8 @@
     loadM3uChannels: async id => {list.channels=channels.filter(c=>c.sourceId===String(id));return true;},
     loadAllChannels: async () => {list.channels=channels.slice();return true;},
     render:()=>{},loadLiveDecorationsAndRefresh:()=>{},maybeSyncRecentsFromCloud:()=>{}});
-  select.addEventListener('change', () => ChannelList.prototype.loadChannels.call(list));
+  list.loadChannels = () => ChannelList.prototype.loadChannels.call(list);
+  select.addEventListener('change', list.loadChannels);
   window.NorvaI18n?.setPreference('fr');
   guide.render();
   window.liveAudit.measure = () => ({width:innerWidth,height:innerHeight,
