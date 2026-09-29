@@ -1,6 +1,6 @@
 {
   "public/css/i18n.css": "9d49bdc112",
-  "public/css/main.css": "6d985c890f",
+  "public/css/main.css": "c6ace9009b",
   "public/js/api.js": "2f79d1f8c1",
   "public/js/app.js": "0a8a1cae8b",
   "public/js/authApi.js": "c736215973",
@@ -41,6 +41,6 @@
   "public/js/utils/mediaUtils.js": "b8e738b0ee",
   "public/js/utils/regions.js": "68b00bc227",
   "public/js/utils/sourceHealth.js": "c9d3adcf56",
-  "public/js/utils/standalone.js": "6602e013a4",
+  "public/js/utils/standalone.js": "247722927c",
   "public/js/utils/tvNavigation.js": "f5f0aa2f08"
 }

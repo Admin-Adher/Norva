@@ -1076,7 +1076,7 @@ test('standalone Live recovery re-resolves the channel instead of replaying a st
   const source = read('public/js/utils/standalone.js');
   const liveFlow = section(source, 'if (window.VideoPlayer)', '// Logout makes no sense');
 
-  assert.match(liveFlow, /const relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
+  assert.match(liveFlow, /const relaunchLive = async \(_resumeAt = 0, recoveryToken = '', reason = ''\)/);
   assert.match(
     liveFlow,
     /fresh = await window\.API\.proxy\.xtream\.getStreamUrl\([\s\S]*?channel\.sourceId,[\s\S]*?liveStreamId,[\s\S]*?'live',[\s\S]*?providerContainer/,
@@ -1090,7 +1090,7 @@ test('standalone Live recovery re-resolves the channel instead of replaying a st
   assert.match(liveFlow, /registerNativeRecovery\(meta, relaunchLive\)/);
 });
 
-test('standalone native Live owns initial and fresh sessions without entering the VOD lifecycle', async () => {
+for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`standalone native Live owns sessions and recovers ${liveReason}`, async () => {
   const launches = [];
   const lifecycle = [];
   const scheduled = [];
@@ -1254,7 +1254,7 @@ test('standalone native Live owns initial and fresh sessions without entering th
     'channel',
     '42',
     0,
-    'no_data_timeout',
+    liveReason,
     'live-recovery-token-1',
   );
   assert.equal(retry, 'scheduled');
@@ -1275,6 +1275,9 @@ test('standalone native Live owns initial and fresh sessions without entering th
   assert.equal(freshResolverStarted, true);
   assert.equal(launches.length, 2);
   assert.equal(launches[1].sessionId, freshSessionId);
+  assert.equal(launches[0].url, 'https://provider.example/live/initial.ts');
+  assert.equal(launches[1].url, liveReason === 'provider_html_response'
+    ? 'https://gateway.example/live-fresh/raw' : 'https://provider.example/live/fresh.ts');
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register-live'),
     [
@@ -1556,7 +1559,7 @@ test('standalone binds every recovered stream to the exact native recovery token
     /\(resumeAt, recoveryToken, reason\) => launchResolved\(resumeAt, true, recoveryToken, reason\)/,
   );
   assert.match(vodFlow, /playbackPreferences:[\s\S]{0,180}recoveryToken/);
-  assert.match(liveFlow, /relaunchLive = async \(_resumeAt = 0, recoveryToken = ''\)/);
+  assert.match(liveFlow, /relaunchLive = async \(_resumeAt = 0, recoveryToken = '', reason = ''\)/);
   assert.match(
     liveFlow,
     /activeStreamId:[^\r\n]*\r?\n[ \t]*sessionId:[ \t]*freshLiveSessionId,\r?\n[ \t]*recoveryToken\b/,
@@ -1573,7 +1576,7 @@ test('standalone Live recovery releases the previous cloud session before creati
   );
   const relaunch = section(
     liveFlow,
-    "const relaunchLive = async (_resumeAt = 0, recoveryToken = '') =>",
+    "const relaunchLive = async (_resumeAt = 0, recoveryToken = '', reason = '') =>",
     'registerNativeRecovery(meta, relaunchLive)',
   );
   const releaseAt = relaunch.indexOf('await releasePreviousLiveSession()');
