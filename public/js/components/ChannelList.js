@@ -2170,12 +2170,19 @@ class ChannelList {
                 if (!this.isLiveLoadCurrent(loadRunId)) return false;
                 if (this.channels.length >= this.liveResidentCap()) break;
                 if (!(await this.loadXtreamChannels(source.id, true, loadRunId))) return false;
+                if (this.sourceSelect?.value) break;
+                this.render();
+                window.app?.liveGuideFusion?.render();
             }
 
             for (const source of m3uSources) {
+                if (this.sourceSelect?.value) break;
                 if (!this.isLiveLoadCurrent(loadRunId)) return false;
                 if (this.channels.length >= this.liveResidentCap()) break;
                 if (!(await this.loadM3uChannels(source.id, true, loadRunId))) return false;
+                if (this.sourceSelect?.value) break;
+                this.render();
+                window.app?.liveGuideFusion?.render();
             }
 
             if (!this.isLiveLoadCurrent(loadRunId)) return false;
@@ -2227,7 +2234,7 @@ class ChannelList {
      * Load Xtream channels
      */
     livePageSize() {
-        return this._isTvMode() ? 400 : 1000;
+        return this._isTvMode() ? 400 : 200;
     }
 
     liveResidentCap() {
@@ -2438,6 +2445,17 @@ class ChannelList {
                 const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, sourceType);
                 const added = this.addChannelsUnique(channelList.slice(0, room));
                 addedSinceHydrationStart += added;
+                const knownGroups = new Set(this.groups.map(group => group.id));
+                for (const channel of channelList) {
+                    if (knownGroups.has(channel.groupId)) continue;
+                    knownGroups.add(channel.groupId);
+                    this.groups.push({id: channel.groupId, name: channel.groupTitle, sourceId, sourceType});
+                }
+                if (added > 0 && (addedSinceHydrationStart === added || addedSinceHydrationStart % 1000 < added)) {
+                    this._indexedChannels = null;
+                    if (!this.searchMode) this.renderBrowsePreservingFocus();
+                    window.app?.liveGuideFusion?.render();
+                }
 
                 if (streams.length < requestLimit || this.channels.length >= residentCap) break;
                 // Yield between pages so D-pad events and focus paint are never
@@ -2776,17 +2794,27 @@ class ChannelList {
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
         if (cacheLoaded) return true;
 
-        const categories = await API.proxy.xtream.liveCategories(sourceId);
+        // Cloud logical rows already carry their category labels. Fetching the
+        // categories first used to build a second 1000-channel catalogue and an
+        // unstamped fallback could silently turn a service failure into emptiness.
+        const categories = window.API?.isCloudMode?.()
+            ? null : await API.proxy.xtream.liveCategories(sourceId);
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
-        const visibilityEpoch = this.liveCatalogVisibilityEpoch(categories);
-        if (!visibilityEpoch) return false;
         const streams = await this.loadFirstLivePage(sourceId);
-        if (!this.isLiveLoadCurrent(loadRunId)
-            || this.liveCatalogVisibilityEpoch(streams) !== visibilityEpoch
-            || this.liveCatalogVisibilityEpoch() !== visibilityEpoch) return false;
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        const visibilityEpoch = this.liveCatalogVisibilityEpoch(streams);
+        if (!visibilityEpoch || this.liveCatalogVisibilityEpoch() !== visibilityEpoch) {
+            throw new Error('Live catalogue visibility changed; retry required');
+        }
+        const pageCategories = categories || Array.from(new Map((streams || []).map(stream => [
+            String(stream.category_id || 'uncategorized'), {
+                category_id: String(stream.category_id || 'uncategorized'),
+                category_name: stream.category_name || stream.groupTitle || 'Uncategorized'
+            }
+        ])).values());
 
         // Map categories to groups
-        const categoryGroups = categories.map(cat => ({
+        const categoryGroups = pageCategories.map(cat => ({
             id: `xtream_${sourceId}_${cat.category_id}`,
             name: cat.category_name,
             sourceId,
@@ -2796,13 +2824,13 @@ class ChannelList {
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
         this.groups = this.groups.concat(categoryGroups);
 
-        const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, 'xtream');
+        const channelList = this.mapLiveStreamsToChannels(sourceId, pageCategories, streams, 'xtream');
         const room = Math.max(0, this.liveResidentCap() - this.channels.length);
         this.channels = this.channels.concat(channelList.slice(0, room));
         // In All Sources, keep one fair first page per provider on TV. A selected
         // provider may hydrate further up to the resident cap.
         if (!this._isTvMode() || !append) {
-            this.hydrateRemainingLivePages(sourceId, categories, 'xtream', loadRunId, visibilityEpoch);
+            this.hydrateRemainingLivePages(sourceId, pageCategories, 'xtream', loadRunId, visibilityEpoch);
         }
         if ((streams || []).length < this.livePageSize()) {
             if (!this.isLiveLoadCurrent(loadRunId)) return false;
@@ -2831,17 +2859,27 @@ class ChannelList {
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
         if (cacheLoaded) return true;
 
-        const categories = await API.proxy.xtream.liveCategories(sourceId);
+        // Cloud logical rows already carry their category labels. Fetching the
+        // categories first used to build a second 1000-channel catalogue and an
+        // unstamped fallback could silently turn a service failure into emptiness.
+        const categories = window.API?.isCloudMode?.()
+            ? null : await API.proxy.xtream.liveCategories(sourceId);
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
-        const visibilityEpoch = this.liveCatalogVisibilityEpoch(categories);
-        if (!visibilityEpoch) return false;
         const streams = await this.loadFirstLivePage(sourceId);
-        if (!this.isLiveLoadCurrent(loadRunId)
-            || this.liveCatalogVisibilityEpoch(streams) !== visibilityEpoch
-            || this.liveCatalogVisibilityEpoch() !== visibilityEpoch) return false;
+        if (!this.isLiveLoadCurrent(loadRunId)) return false;
+        const visibilityEpoch = this.liveCatalogVisibilityEpoch(streams);
+        if (!visibilityEpoch || this.liveCatalogVisibilityEpoch() !== visibilityEpoch) {
+            throw new Error('Live catalogue visibility changed; retry required');
+        }
+        const pageCategories = categories || Array.from(new Map((streams || []).map(stream => [
+            String(stream.category_id || 'uncategorized'), {
+                category_id: String(stream.category_id || 'uncategorized'),
+                category_name: stream.category_name || stream.groupTitle || 'Uncategorized'
+            }
+        ])).values());
 
         // Map categories to groups (keeping m3u sourceType for downstream compatibility)
-        const m3uGroups = categories.map(cat => ({
+        const m3uGroups = pageCategories.map(cat => ({
             id: `m3u_${sourceId}_${cat.category_id}`,
             name: cat.category_name,
             sourceId,
@@ -2851,11 +2889,11 @@ class ChannelList {
         if (!this.isLiveLoadCurrent(loadRunId)) return false;
         this.groups = this.groups.concat(m3uGroups);
 
-        const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, 'm3u');
+        const channelList = this.mapLiveStreamsToChannels(sourceId, pageCategories, streams, 'm3u');
         const room = Math.max(0, this.liveResidentCap() - this.channels.length);
         this.channels = this.channels.concat(channelList.slice(0, room));
         if (!this._isTvMode() || !append) {
-            this.hydrateRemainingLivePages(sourceId, categories, 'm3u', loadRunId, visibilityEpoch);
+            this.hydrateRemainingLivePages(sourceId, pageCategories, 'm3u', loadRunId, visibilityEpoch);
         }
         if ((streams || []).length < this.livePageSize()) {
             if (!this.isLiveLoadCurrent(loadRunId)) return false;

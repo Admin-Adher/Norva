@@ -413,7 +413,8 @@ test('Live IndexedDB entries and multi-page hydration are fenced by one exact v2
     assert.match(channelList, /entry\?\.visibilityEpoch === visibilityEpoch/);
     assert.match(channelList, /visibilityEpoch: expectedVisibilityEpoch/);
     assert.match(channelList, /this\.liveCatalogVisibilityEpoch\(streams\) !== expectedVisibilityEpoch/);
-    assert.match(channelList, /this\.liveCatalogVisibilityEpoch\(streams\) !== visibilityEpoch/);
+    assert.match(channelList, /const visibilityEpoch = this\.liveCatalogVisibilityEpoch\(streams\)/);
+    assert.match(channelList, /!visibilityEpoch \|\| this\.liveCatalogVisibilityEpoch\(\) !== visibilityEpoch/);
     assert.match(channelList, /writeLiveCatalogCache\(sourceId, 'xtream', loadRunId, visibilityEpoch\)/);
     assert.match(channelList, /writeLiveCatalogCache\(sourceId, 'm3u', loadRunId, visibilityEpoch\)/);
 });
