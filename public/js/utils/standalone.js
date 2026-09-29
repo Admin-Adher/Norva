@@ -771,7 +771,7 @@
                 state = { count: 0, lastAttemptAt: 0 };
             }
             const isLiveRecovery = itemType === 'channel' || itemType === 'live';
-            if (!isLiveRecovery && state.count >= NATIVE_RECOVERY_MAX) {
+            if ((!isLiveRecovery || reason === 'provider_html_response') && state.count >= NATIVE_RECOVERY_MAX) {
                 surfaceNativeRecoveryFailure(reason || 'retry_limit');
                 return 'exhausted';
             }
@@ -1429,6 +1429,7 @@
                             providerContainer,
                             {
                                 gatewayMode,
+                                ...(reason === 'provider_html_response' ? { mode: 'engine' } : {}),
                                 ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
                             }
                         );

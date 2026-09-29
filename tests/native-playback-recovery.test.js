@@ -380,7 +380,7 @@ test('standalone native recovery is item-scoped, with bounded VOD and persistent
   assert.match(recovery, /const NATIVE_LIVE_RECOVERY_DELAYS_MS = \[250, 1000, 2500, 5000, 8000, 12000, 15000\]/);
   assert.match(recovery, /const key = nativeProgressKey\(sourceId, itemType, itemId\)/);
   assert.match(recovery, /const isLiveRecovery = itemType === 'channel' \|\| itemType === 'live'/);
-  assert.match(recovery, /if \(!isLiveRecovery && state\.count >= NATIVE_RECOVERY_MAX\)/);
+  assert.match(recovery, /if \(\(!isLiveRecovery \|\| reason === 'provider_html_response'\) && state\.count >= NATIVE_RECOVERY_MAX\)/);
   assert.match(recovery, /return 'exhausted'/);
   assert.match(recovery, /state\.count \+= 1/);
   assert.match(recovery, /await entry\.launcher\(resume,\s*recoveryToken,\s*reason\)/);
@@ -1156,12 +1156,13 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`st
     API: {
       proxy: {
         xtream: {
-          async getStreamUrl() {
+          async getStreamUrl(sourceId, streamId, type, container, options) {
+            assert.equal(options.mode, liveReason === 'provider_html_response' ? 'engine' : undefined);
             freshResolverStarted = true;
             lifecycle.push(['resolve-live', freshSessionId]);
             return {
-              url: 'https://provider.example/live/fresh.ts',
-              fallbackUrl: 'https://gateway.example/live-fresh/raw',
+              url: options.mode === 'engine' ? 'https://gateway.example/live-fresh/raw' : 'https://provider.example/live/fresh.ts',
+              fallbackUrl: null,
               sessionId: freshSessionId,
             };
           },
@@ -1341,6 +1342,10 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`st
     'the lifecycle fix must not add resolver retries',
   );
   assert.deepEqual(acknowledgements, [initialSessionId, freshSessionId, nextSessionId]);
+  if (liveReason === 'provider_html_response') {
+    for (let i = 0; i < 3; i++) assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'html-' + i), 'scheduled');
+    assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'html-last'), 'exhausted');
+  }
 });
 
 test('standalone rejects duplicate playback intent before asynchronous resolution', () => {
