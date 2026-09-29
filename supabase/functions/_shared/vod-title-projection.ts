@@ -680,9 +680,10 @@ export async function projectVodTitleGenerationIsolated(options: {
   }
 
   const titleIdByTypedKey = new Map<string, string>();
-  for (let index = 0; index < titleRows.length; index += 200) {
-    const chunk = titleRows.slice(index, index + 200);
-    const identityKeys = [...new Set(chunk.map((row) => stringOr(row.identity_key, "")).filter(Boolean))];
+  const allIdentityKeys = [...new Set(titleRows.map((row) => stringOr(row.identity_key, "")).filter(Boolean))];
+  // A row-count cap alone does not bound a PostgREST GET URL: long and
+  // non-ASCII provider titles can exceed Kong's request-line limit.
+  for (const identityKeys of boundedTitleIdentityBatches(allIdentityKeys)) {
     const { data, error } = await options.db
       .from("cloud_titles")
       .select("id,item_type,identity_key")
@@ -714,6 +715,27 @@ export async function projectVodTitleGenerationIsolated(options: {
     if (error) throw error;
   }
   return { titlesEnsured: titleRows.length, variants: saved.length };
+}
+
+export function boundedTitleIdentityBatches(keys: string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let size = 0;
+  for (const key of keys) {
+    // JSON quotes conservatively include PostgREST's punctuation escaping;
+    // URI encoding accounts for UTF-8 expansion. Leave room for fixed filters.
+    const encodedSize = encodeURIComponent(JSON.stringify(key)).length + 3;
+    if (encodedSize > 4000) throw new Error("Catalog title identity exceeds lookup URL bound");
+    if (batch.length && (size + encodedSize > 4000 || batch.length >= 200)) {
+      batches.push(batch);
+      batch = [];
+      size = 0;
+    }
+    batch.push(key);
+    size += encodedSize;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
 }
 
 type ProviderIds = { tmdbId: string | null; imdbId: string | null };
