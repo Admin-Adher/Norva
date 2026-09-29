@@ -1728,6 +1728,13 @@ async function handleWorkerDrain(req, requestId) {
         kind: job.kind,
         code: failure.queueCode,
         outcome,
+        // Never log provider responses, URLs or exception messages. Keep only
+        // an identifier code and source-frame coordinates for hidden failures.
+        causeCode: /^[A-Z0-9_]{1,80}$/.test(String(error?.code ?? "")) ? error.code : null,
+        causeFrames: String(error?.stack ?? "").split("\n").slice(1, 5).map((line) => {
+          const frame = line.match(/at\s+([A-Za-z0-9_.]+)\s+\([^)]*?:(\d+):\d+\)/);
+          return frame ? `${frame[1]}:${frame[2]}` : "unavailable";
+        }),
       });
     }
   }
