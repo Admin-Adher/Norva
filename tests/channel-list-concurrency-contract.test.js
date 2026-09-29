@@ -385,7 +385,7 @@ async function assertLoadCancelledAt(methodName, stage) {
 
 test('Xtream and M3U first-page loads honor generation after every await', async () => {
   for (const methodName of ['loadXtreamChannels', 'loadM3uChannels']) {
-    for (const stage of ['cache', 'categories', 'streams']) {
+    for (const stage of ['cache', 'streams']) {
       await assertLoadCancelledAt(methodName, stage);
     }
   }
@@ -422,3 +422,24 @@ test('cache writer rechecks generation after opening IndexedDB', async () => {
   assert.equal(await writing, false);
   assert.equal(transactions, 0);
 });
+
+for (const methodName of ['loadXtreamChannels', 'loadM3uChannels']) {
+  test(`${methodName} paints a cloud first page without a categories round trip`, async () => {
+    const {API, list} = createHarness();
+    list.loadLiveCatalogFromCache = async () => false;
+    API.proxy.xtream.liveCategories = async () => { throw new Error('must not request categories'); };
+    list.loadFirstLivePage = async () => Object.assign([{stream_id: '42', name: 'News', category_id: 'news', category_name: 'News'}], {_norvaVisibilityEpoch:'v2.1.1'});
+    list._isTvMode = () => false;
+    list.hydrateRemainingLivePages = () => {};
+    list.writeLiveCatalogCache = async () => {};
+    assert.equal(await list[methodName](7, false, 1), true);
+    assert.equal(list.channels.length, 1);
+    assert.equal(list.groups[0].name, 'News');
+  });
+  test(`${methodName} does not report missing visibility proof as an empty catalogue`, async () => {
+    const {list} = createHarness();
+    list.loadLiveCatalogFromCache = async () => false;
+    list.loadFirstLivePage = async () => [];
+    await assert.rejects(list[methodName](7, false, 1), /visibility/);
+  });
+}

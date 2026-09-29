@@ -1980,7 +1980,8 @@ const CloudAdapter = (() => {
                             )
                         });
                     } catch (err) {
-                        console.warn('[Cloud] Logical live catalog unavailable, falling back to raw media items:', err);
+                        // Do not replace a failed page with an unbounded, unstamped full import.
+                        throw err;
                     }
                 }
                 const items = await listAllMedia({ sourceId, type, q: query.get('q') || '' });
