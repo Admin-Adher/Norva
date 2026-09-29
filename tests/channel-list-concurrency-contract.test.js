@@ -439,7 +439,9 @@ for (const methodName of ['loadXtreamChannels', 'loadM3uChannels']) {
   test(`${methodName} does not report missing visibility proof as an empty catalogue`, async () => {
     const {list} = createHarness();
     list.loadLiveCatalogFromCache = async () => false;
-    list.loadFirstLivePage = async () => [];
-    await assert.rejects(list[methodName](7, false, 1), /visibility/);
+    for (const stamp of ['', 'v2.1.2']) {
+      list.loadFirstLivePage = async () => Object.assign([], {_norvaVisibilityEpoch: stamp});
+      await assert.rejects(list[methodName](7, false, 1), /visibility/);
+    }
   });
 }
