@@ -1705,7 +1705,11 @@ class WatchPage {
             if (cloudRestored) return cloudRestored;
         }
 
+        let restoreAttemptId = null;
+        let restoreSignal = null;
         this._resumeRestorePromise = (async () => {
+            restoreAttemptId = this.beginPlaybackAttempt();
+            restoreSignal = this.playbackResolveSignalForAttempt(restoreAttemptId);
             const content = {
                 ...snapshot.content,
                 type: snapshot.content.type,
