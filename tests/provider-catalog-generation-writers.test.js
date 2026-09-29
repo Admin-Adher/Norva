@@ -964,7 +964,7 @@ test('optional VOD metadata enrichment preserves the provider single-flight inva
   assert.match(providerReads, /await Promise\.all\(Array\.from\(\{ length: concurrency \}/);
 });
 
-test('a staged movie page persists its real title variant with the ingest lease', async () => {
+test('a staged movie page preserves the exact lease after more than 25 successful claims', async () => {
   const { stageXtreamCredentialCatalogGeneration } = loadXtreamModule();
   const database = new FakeDatabase();
   const generationId = '44444444-4444-4444-8444-444444444444';
@@ -974,7 +974,7 @@ test('a staged movie page persists its real title variant with the ingest lease'
     userId: '11111111-1111-4111-8111-111111111111',
     sourceId: '22222222-2222-4222-8222-222222222222',
     transitionId: '33333333-3333-4333-8333-333333333333',
-    generationId, jobId, leaseSequence: 7, leaseOwner: 'staged-vod-test', maxSlices: 1,
+    generationId, jobId, leaseSequence: 26, leaseOwner: 'staged-vod-test', maxSlices: 1,
     cursor: { action: 'cinema_streams', version: 2, typeIndex: 3,
       categoryOrdinal: 0, itemOffset: 0, categoryPageCursor: '', categoriesDone: true,
       itemCursor: '', processedCategories: 0, processedItems: 0 },
@@ -987,7 +987,7 @@ test('a staged movie page persists its real title variant with the ingest lease'
   assert.equal(variant.media_item_id, database.tables.cloud_media_items[0].id);
   assert.equal(variant.generation_id, generationId);
   assert.equal(variant.ingest_job_id, jobId);
-  assert.equal(variant.ingest_attempt, 7);
+  assert.equal(variant.ingest_attempt, 26);
   assert.equal(variant.ingest_lease_owner, 'staged-vod-test');
 });
 
