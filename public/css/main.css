@@ -26771,3 +26771,23 @@ html:not(.tv-mode) #page-series .genre-bucket-grid > .dashboard-card .card-image
 .norva-phone-apk #page-live .live-guide-row:active {
   background: var(--color-bg-tertiary);
 }
+
+/* Keep the real loading mark bounded before the first channel arrives. */
+.norva-phone-apk .live-guide-status-mark {
+  display: block;
+  width: 64px;
+  height: 64px;
+  max-width: 100%;
+  object-fit: contain;
+  flex: 0 0 auto;
+  align-self: center;
+}
+.norva-phone-apk .live-guide-status-copy {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.norva-phone-apk .live-guide-status-kicker {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}

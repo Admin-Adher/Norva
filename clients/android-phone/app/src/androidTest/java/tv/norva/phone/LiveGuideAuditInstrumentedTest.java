@@ -70,6 +70,11 @@ public class LiveGuideAuditInstrumentedTest {
             String ready="false";
             for(int n=0;n<100&&!"true".equals(ready);n++){Thread.sleep(100);ready=js(i,ref.get(),"window.fixtureReady===true");}
             assertEquals("fixture: "+js(i,ref.get(),"window.fixtureError||null"),"true",ready);
+            js(i,ref.get(),"liveAudit.list.channels=[];liveAudit.list.isLoading=true;liveAudit.guide.render()");
+            assertEquals("Loading logo is bounded before catalog arrival", "true", js(i,ref.get(),
+                "(()=>{const r=document.querySelector('.live-guide-status-mark').getBoundingClientRect();return r.width<=64&&r.height<=64&&r.width>0&&document.documentElement.scrollWidth<=innerWidth+1})()"));
+            screenshot(i,ref.get(),"live-guide-loading");
+            js(i,ref.get(),"liveAudit.list.channels=liveAudit.channels;liveAudit.list.isLoading=false;liveAudit.guide.render()");
             Thread.sleep(400);screenshot(i,ref.get(),"live-guide-initial");
             String measurement=js(i,ref.get(),"liveAudit.measure()");
             assertEquals("Touch controls have at least 44 CSS pixels: "+measurement, "true", js(i,ref.get(),
