@@ -81,7 +81,15 @@ public final class FirstFrameFixtureInstrumentedTest {
         assertFixtureFirstFrame(contentType, hls, hls ? 3 : 0);
     }
 
+    @Test public void liveChannelHlsRendersARealFirstFrame() throws Exception {
+        assertFixtureFirstFrame("application/vnd.apple.mpegurl", true, 0, "channel");
+    }
+
     private void assertFixtureFirstFrame(String contentType, boolean hls, int resumeSeconds) throws Exception {
+        assertFixtureFirstFrame(contentType, hls, resumeSeconds, "movie");
+    }
+
+    private void assertFixtureFirstFrame(String contentType, boolean hls, int resumeSeconds, String itemType) throws Exception {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Context target = instrumentation.getTargetContext();
         Context testContext = instrumentation.getContext();
@@ -118,7 +126,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                     // BoundedRangeDataSource, extractor, decoder and renderer.
                     .putExtra(PlayerActivity.EXTRA_URL, server.url())
                     .putExtra(PlayerActivity.EXTRA_TITLE, "Norva first-frame gate")
-                    .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
+                    .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, itemType)
                     .putExtra(PlayerActivity.EXTRA_ITEM_ID, "fixture-h264-aac")
                     .putExtra(PlayerActivity.EXTRA_CONTAINER, "mkv")
                     .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds)

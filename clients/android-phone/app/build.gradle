@@ -86,6 +86,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
         include "subscribe.html", "subscription.html", "css/subscription.css", "css/commerce.css", "css/i18n.css"
         include "css/main.css", "js/utils/mediaUtils.js", "js/pages/WatchPage.js"
         include "js/pages/Settings.js"
+        include "js/components/LiveGuideFusion.js"
         include "js/components/SourceManager.js", "js/components/NorvaModal.js"
         include "js/components/RetentionOffer.js"
         include "js/components/PlayRetentionCard.js"
@@ -97,6 +98,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
     }
     from("../../../tests/fixtures") { include "i18n-context.html", "i18n-context.js", "provider-version-cards.js", "catalog-language-surfaces.js", "catalog-progress-modal.html", "gateway-late-recovery.js", "subscription-cancellation.js", "subscription-retention.js" }
     into("$buildDir/generated/i18nTestAssets")
+    from("../../../tests/fixtures") { include "mobile-live-audit.html", "mobile-live-audit.js" }
     from("../../../tests/fixtures") { include "play-retention.html", "continue-watching.html", "continue-watching.js" }
 }
 tasks.configureEach { task ->
