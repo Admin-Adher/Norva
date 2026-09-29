@@ -72,7 +72,7 @@ public class LiveGuideAuditInstrumentedTest {
             assertEquals("fixture: "+js(i,ref.get(),"window.fixtureError||null"),"true",ready);
             Thread.sleep(400);screenshot(i,ref.get(),"live-guide-initial");
             String measurement=js(i,ref.get(),"liveAudit.measure()");
-            assertEquals("Touch controls have at least 44 CSS pixels", "true", js(i,ref.get(),
+            assertEquals("Touch controls have at least 44 CSS pixels: "+measurement, "true", js(i,ref.get(),
                 "liveAudit.measure().targets.every(t=>t.width>=44&&t.height>=44)"));
             try(FileWriter out=new FileWriter(new File(i.getTargetContext().getExternalFilesDir(null),"live-guide-measurements.json"))){out.write(measurement);}
             assertEquals("Phone row launches playback","1",js(i,ref.get(),"document.querySelector('.live-guide-row').click();liveAudit.plays.length"));
