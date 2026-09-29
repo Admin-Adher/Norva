@@ -5,7 +5,7 @@
   const page = markup.getElementById('page-live');
   page.classList.add('active');
   document.querySelector('main').append(page);
-  const channels = Array.from({length: 96}, (_, n) => ({id: String(n), sourceId: n < 48 ? 'qa-a' : 'qa-b',
+  const channels = Array.from({length: 96}, (_, n) => ({id: String(n), sourceId: n < 48 ? '1' : '2',
     sourceType: 'm3u', name: `Chaîne ${n + 1} HD — actualités et documentaires`,
     groupTitle: n % 2 ? 'Informations internationales' : 'Documentaires', num: n + 1}));
   const plays = [];
@@ -22,14 +22,20 @@
     selectChannel: c => { plays.push(c); },
     reloadLive: async () => {}, getSourceOptions: () => [], getRemoteSearchSources: () => []};
   const select = document.getElementById('source-select');
-  select.replaceChildren(new Option('Toutes les sources',''),new Option('Catalogue QA A','qa-a'),new Option('Catalogue QA B','qa-b'));
+  select.replaceChildren(new Option('Toutes les sources',''),new Option('Catalogue QA A','m3u:1'),new Option('Catalogue QA B','m3u:2'));
   window.liveAudit = {plays, channels, list, observations:[]};
   const guide = new LiveGuideFusion({channelList:list, epgGuide:{channels:[],programmes:[]}});
   window.liveAudit.guide = guide;
-  select.addEventListener('change', () => {
-    list.channels = channels.filter(c => !select.value || c.sourceId===select.value);
-    guide.render();
-  });
+  window.app = {channelList:list, liveGuideFusion:guide};
+  // Exercise the production source-change controller; replace only catalogue I/O
+  // and the legacy hidden sidebar renderer, not loadChannels or guide behavior.
+  Object.assign(list, {sourceSelect:select, container:document.getElementById('channel-list'),
+    liveHydrationRunId:0, isLoading:false, sourceDiscoveryError:false,
+    isLiveLoadCurrent: id => id===list.liveHydrationRunId,
+    loadM3uChannels: async id => {list.channels=channels.filter(c=>c.sourceId===String(id));return true;},
+    loadAllChannels: async () => {list.channels=channels.slice();return true;},
+    render:()=>{},loadLiveDecorationsAndRefresh:()=>{},maybeSyncRecentsFromCloud:()=>{}});
+  select.addEventListener('change', () => ChannelList.prototype.loadChannels.call(list));
   window.NorvaI18n?.setPreference('fr');
   guide.render();
   window.liveAudit.measure = () => ({width:innerWidth,height:innerHeight,

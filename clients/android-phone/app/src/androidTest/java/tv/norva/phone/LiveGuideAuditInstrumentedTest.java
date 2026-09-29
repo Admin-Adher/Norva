@@ -23,6 +23,18 @@ public class LiveGuideAuditInstrumentedTest {
         Bitmap b=i.getUiAutomation().takeScreenshot(); assertNotNull(b);
         try(FileOutputStream out=new FileOutputStream(new File(i.getTargetContext().getExternalFilesDir(null),name+".png"))){b.compress(Bitmap.CompressFormat.PNG,100,out);} finally {b.recycle();}
     }
+    private void tapSearch(Instrumentation i, WebView v) throws Exception {
+        org.json.JSONArray r=new org.json.JSONArray(js(i,v,"(()=>{const r=document.querySelector('.live-guide-search').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2,devicePixelRatio]})()"));
+        int[] offset=new int[2];i.runOnMainSync(()->v.getLocationOnScreen(offset));
+        float x=(float)(r.getDouble(0)*r.getDouble(2)+offset[0]),y=(float)(r.getDouble(1)*r.getDouble(2)+offset[1]);
+        long down=android.os.SystemClock.uptimeMillis();
+        for(int action:new int[]{0,1}) {
+            android.view.MotionEvent e=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,x,y,0);
+            e.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+            try {assertTrue(i.getUiAutomation().injectInputEvent(e,true));}finally{e.recycle();}
+            Thread.sleep(50);
+        }
+    }
     @Test public void attachedGuideNavigationAndPlayRequests() throws Exception {
         Instrumentation i=InstrumentationRegistry.getInstrumentation();
         Activity a=i.startActivitySync(new Intent(i.getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -52,15 +64,26 @@ public class LiveGuideAuditInstrumentedTest {
             js(i,ref.get(),"document.querySelector('.live-guide-source-trigger').click()");
             Thread.sleep(200);screenshot(i,"live-guide-source-sheet");
             assertEquals("Background inert","true",js(i,ref.get(),"document.querySelector('main').inert"));
-            js(i,ref.get(),"document.querySelector('[data-source-value=\"qa-b\"]').click()");
+            js(i,ref.get(),"document.querySelector('[data-source-value=\"m3u:2\"]').click()");
             Thread.sleep(200);
-            assertEquals("Source fixture projects only B","true",js(i,ref.get(),"[...document.querySelectorAll('.live-guide-row')].every(r=>r.dataset.sourceId==='qa-b')"));
+            assertEquals("Source fixture projects only B","true",js(i,ref.get(),"[...document.querySelectorAll('.live-guide-row')].every(r=>r.dataset.sourceId==='2')"));
+            screenshot(i,"live-guide-after-source-change");
+            String sourcePlay=js(i,ref.get(),"document.querySelector('[data-action=watch]').click();liveAudit.plays[liveAudit.plays.length-1].sourceId");
+            tapSearch(i,ref.get());
+            java.util.concurrent.atomic.AtomicBoolean keyboard=new java.util.concurrent.atomic.AtomicBoolean();
+            for(int n=0;n<40&&!keyboard.get();n++) {Thread.sleep(100);i.runOnMainSync(()->{
+                android.view.WindowInsets insets=ref.get().getRootWindowInsets();
+                keyboard.set(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));
+            });}
+            assertTrue("Real Android keyboard opened",keyboard.get());
             js(i,ref.get(),"const q=document.querySelector('.live-guide-search');q.value='Chaîne 80';q.dispatchEvent(new Event('input',{bubbles:true}));q.focus()");
             Thread.sleep(600);
             assertEquals("Search filters the guide","1",js(i,ref.get(),"document.querySelectorAll('.live-guide-row').length"));
             screenshot(i,"live-guide-search");
             assertEquals("Search retains focus","true",js(i,ref.get(),"document.activeElement.classList.contains('live-guide-search')"));
             System.out.println("LIVE_GUIDE_AUDIT "+measurement);
+            System.out.println("LIVE_SOURCE_WATCH_REQUEST "+sourcePlay);
+            assertEquals("Watch must follow the selected source", "\"2\"", sourcePlay);
         } finally {i.runOnMainSync(()->{ref.get().destroy();a.finish();});}
     }
 }
