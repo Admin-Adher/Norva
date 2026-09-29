@@ -380,7 +380,7 @@ test('standalone native recovery is item-scoped, with bounded VOD and persistent
   assert.match(recovery, /const NATIVE_LIVE_RECOVERY_DELAYS_MS = \[250, 1000, 2500, 5000, 8000, 12000, 15000\]/);
   assert.match(recovery, /const key = nativeProgressKey\(sourceId, itemType, itemId\)/);
   assert.match(recovery, /const isLiveRecovery = itemType === 'channel' \|\| itemType === 'live'/);
-  assert.match(recovery, /if \(\(!isLiveRecovery \|\| reason === 'provider_html_response'\) && state\.count >= NATIVE_RECOVERY_MAX\)/);
+  assert.match(recovery, /if \(\(!isLiveRecovery \|\| \['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'\]\.includes\(reason\)\) && state\.count >= NATIVE_RECOVERY_MAX\)/);
   assert.match(recovery, /return 'exhausted'/);
   assert.match(recovery, /state\.count \+= 1/);
   assert.match(recovery, /await entry\.launcher\(resume,\s*recoveryToken,\s*reason\)/);
@@ -1090,7 +1090,7 @@ test('standalone Live recovery re-resolves the channel instead of replaying a st
   assert.match(liveFlow, /registerNativeRecovery\(meta, relaunchLive\)/);
 });
 
-for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`standalone native Live owns sessions and recovers ${liveReason}`, async () => {
+for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS']) test(`standalone native Live owns sessions and recovers ${liveReason}`, async () => {
   const launches = [];
   const lifecycle = [];
   const scheduled = [];
@@ -1157,7 +1157,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`st
       proxy: {
         xtream: {
           async getStreamUrl(sourceId, streamId, type, container, options) {
-            assert.equal(options.mode, liveReason === 'provider_html_response' ? 'engine' : undefined);
+            assert.equal(options.mode, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason) ? 'engine' : undefined);
             freshResolverStarted = true;
             lifecycle.push(['resolve-live', freshSessionId]);
             return {
@@ -1277,7 +1277,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`st
   assert.equal(launches.length, 2);
   assert.equal(launches[1].sessionId, freshSessionId);
   assert.equal(launches[0].url, 'https://provider.example/live/initial.ts');
-  assert.equal(launches[1].url, liveReason === 'provider_html_response'
+  assert.equal(launches[1].url, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason)
     ? 'https://gateway.example/live-fresh/raw' : 'https://provider.example/live/fresh.ts');
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register-live'),
@@ -1342,7 +1342,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response']) test(`st
     'the lifecycle fix must not add resolver retries',
   );
   assert.deepEqual(acknowledgements, [initialSessionId, freshSessionId, nextSessionId]);
-  if (liveReason === 'provider_html_response') {
+  if (['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason)) {
     for (let i = 0; i < 3; i++) assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'html-' + i), 'scheduled');
     assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'html-last'), 'exhausted');
   }
