@@ -771,7 +771,7 @@
                 state = { count: 0, lastAttemptAt: 0 };
             }
             const isLiveRecovery = itemType === 'channel' || itemType === 'live';
-            if (!isLiveRecovery && state.count >= NATIVE_RECOVERY_MAX) {
+            if ((!isLiveRecovery || reason === 'provider_html_response') && state.count >= NATIVE_RECOVERY_MAX) {
                 surfaceNativeRecoveryFailure(reason || 'retry_limit');
                 return 'exhausted';
             }
@@ -1429,6 +1429,7 @@
                             providerContainer,
                             {
                                 gatewayMode,
+                                ...(reason === 'provider_html_response' ? { mode: 'engine' } : {}),
                                 ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
                             }
                         );
@@ -1436,11 +1437,6 @@
                         if (fresh?.cloudSourceId) channel.cloudSourceId = fresh.cloudSourceId;
                     } else {
                         fresh = { url: channel?.url || null, fallbackUrl: null };
-                    }
-                    // HTML is not media: refreshing the same direct route cannot
-                    // decode it. Use only the resolver's authorized fresh byte pipe.
-                    if (reason === 'provider_html_response' && fresh?.fallbackUrl) {
-                        fresh = { ...fresh, url: fresh.fallbackUrl, fallbackUrl: null };
                     }
                     if (!fresh?.url) throw new Error('No fresh live stream URL returned');
                     const freshLiveSessionId = String(fresh?.sessionId || '').trim();
