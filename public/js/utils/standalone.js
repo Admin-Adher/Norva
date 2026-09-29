@@ -1438,6 +1438,11 @@
                     } else {
                         fresh = { url: channel?.url || null, fallbackUrl: null };
                     }
+                    // HTML is not media: refreshing the same direct route cannot
+                    // decode it. Use only the resolver's authorized fresh byte pipe.
+                    if (reason === 'provider_html_response' && fresh?.fallbackUrl) {
+                        fresh = { ...fresh, url: fresh.fallbackUrl, fallbackUrl: null };
+                    }
                     if (!fresh?.url) throw new Error('No fresh live stream URL returned');
                     const freshLiveSessionId = String(fresh?.sessionId || '').trim();
                     if (!nativePlay(fresh.url, channel?.name || 'Live TV', meta, 0, fresh.fallbackUrl || null, {

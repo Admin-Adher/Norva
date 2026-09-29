@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=bc6e05853f"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Now-and-Next Looks Stale? Build a Timeline | Norva Blog</title>
+  <meta name="description" content="Diagnose stale now-and-next information by recording source schedule changes, device clock and zone, channel identity, guide state, devices, and timestamps.">
+  <link rel="canonical" href="https://norva.tv/blog/now-next-information-stale/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Now-and-Next Looks Stale? Build a Timeline | Norva Blog">
+  <meta property="og:description" content="Diagnose stale now-and-next information by recording source schedule changes, device clock and zone, channel identity, guide state, devices, and timestamps.">
+  <meta property="og:url" content="https://norva.tv/blog/now-next-information-stale/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Now-and-Next Looks Stale? Build a Timeline | Norva Blog">
+  <meta name="twitter:description" content="Diagnose stale now-and-next information by recording source schedule changes, device clock and zone, channel identity, guide state, devices, and timestamps.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Now-and-Next Information Looks Stale: Build a Timeline",
+  "description": "Diagnose stale now-and-next information by recording source schedule changes, device clock and zone, channel identity, guide state, devices, and timestamps.",
+  "inLanguage": "en",
+  "datePublished": "2026-09-29T06:00:00+02:00",
+  "dateModified": "2026-09-29T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/now-next-information-stale/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "Now-and-Next Information Looks Stale: Build a Timeline",
+      "item": "https://norva.tv/blog/now-next-information-stale/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">Now-and-Next Information Looks Stale: Build a Timeline</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="now-next-information-stale" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">TV Guide Troubleshooting</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-09-29T06:00:00+02:00">29 September 2026</time>
+        <span class="dot">·</span>
+        <span>8 min read</span>
+      </div>
+      <h1>Now-and-Next Information Looks Stale: Build a Timeline</h1>
+      <p class="lede">A now-and-next timeline aligns source schedule changes, exact channel identity, device clock and zone, guide observations, device versions, and user actions.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#confirm-channel-identity">Confirm channel identity</a></li><li><a href="#record-device-time-context">Record device time context</a></li><li><a href="#capture-the-source-sequence">Capture the source sequence</a></li><li><a href="#capture-norva-by-view">Capture Norva by view</a></li><li><a href="#plan-observation-points">Plan observation points</a></li><li><a href="#distinguish-text-from-start-time-mismatch">Distinguish text from start-time mismatch</a></li><li><a href="#preserve-the-refresh-sequence">Preserve the refresh sequence</a></li><li><a href="#compare-a-control-channel">Compare a control channel</a></li><li><a href="#compare-another-supported-device">Compare another supported device</a></li><li><a href="#avoid-schedule-edits-and-repeated-refreshes">Avoid schedule edits and repeated refreshes</a></li><li><a href="#classify-the-result">Classify the result</a></li><li><a href="#prepare-support-evidence">Prepare support evidence</a></li><li><a href="#original-evidence-now-and-next-timeline">Original evidence: now-and-next timeline</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Select one affected channel and one control, then record exact channel identity, source current and next listings, source confirmation time, device clock, time zone, Norva current and next text by view, device, application version, and every refresh or navigation action. Observe at documented times without repeated requests. Classify stale text, wrong channel, wrong time window, delayed source update, device-specific display, or unknown rather than assuming a refresh mechanism.</blockquote>
+<p>“Stale” means a previous listing remains visible after the point when a newer source schedule observation suggests it should differ. That definition requires channel, time, and text evidence.</p>
+<h2 id="confirm-channel-identity">Confirm channel identity</h2>
+<p>Record source label, channel name, number or identifier where visible, logo state, region or version cue, and guide row. Same-name channels can carry different schedules. Do not compare by name alone.</p>
+<p>The <a href="/blog/tv-guide-troubleshooting-handbook/">TV guide handbook</a> provides the identity and time matrix.</p>
+<h2 id="record-device-time-context">Record device time context</h2>
+<p>Capture device-local clock, time zone name, UTC offset where visible, automatic or manual time state, selected date, and guide window. An incorrect clock can make a correct listing appear old.</p>
+<h2 id="capture-the-source-sequence">Capture the source sequence</h2>
+<p>Through the provider's official authorized route, record the current and next program titles, start and end times, and confirmation timestamp for the exact channel. Use short title cues when privacy requires. Do not assume the source schedule itself is final or unchanged.</p>
+<h2 id="capture-norva-by-view">Capture Norva by view</h2>
+<p>Record current and next text on the guide grid, channel detail, or other relevant view. Note start and end times, selected cell, and timestamp. A stale value limited to one screen is a view-specific observation.</p>
+<h2 id="plan-observation-points">Plan observation points</h2>
+<p>Record a baseline before the expected source transition, one observation around it, and one afterward. If you missed an interval, state the gap. Do not describe continuous monitoring when the screen was not observed.</p>
+<h2 id="distinguish-text-from-start-time-mismatch">Distinguish text from start-time mismatch</h2>
+<p>If the title changes but its start time disagrees with what is live, use the program-time comparison. If both title and times belong to another channel, investigate mapping instead of refresh timing.</p>
+<h2 id="preserve-the-refresh-sequence">Preserve the refresh sequence</h2>
+<p>Record source schedule change, any guide refresh request, visible acknowledgment, first Norva change, application navigation, device sleep or resume, and current state. The delayed refresh timeline expands that sequence.</p>
+<p>Use only timing guidance published by current Norva support. Otherwise report elapsed observation without a universal threshold.</p>
+<h2 id="compare-a-control-channel">Compare a control channel</h2>
+<p>Choose one nearby channel whose current and next listings change normally in the same guide window. Record identical fields. A healthy control narrows scope but does not reveal why the affected listing differs.</p>
+<h2 id="compare-another-supported-device">Compare another supported device</h2>
+<p>Use the same account, profile, source, channel, filters, guide window, clock context, and close timestamp. Record both application versions. Different now-and-next text on one screen is cross-device evidence, not proof of local storage behavior.</p>
+<h2 id="avoid-schedule-edits-and-repeated-refreshes">Avoid schedule edits and repeated refreshes</h2>
+<p>Do not rename programs, change channel identifiers, edit time zones, remove the source, clear application data, or issue repeated refreshes before preserving the first timeline. Each action creates a new sequence.</p>
+<h2 id="classify-the-result">Classify the result</h2>
+<p>Use source schedule unchanged, source schedule changed, wrong channel identity, device time mismatch, wrong guide window, one-view old text, one-device difference, changed after documented action, or unknown. Keep hypotheses about refresh or caching separate.</p>
+<h2 id="prepare-support-evidence">Prepare support evidence</h2>
+<p>Use the guide evidence template with masked channel cues, short listing text, source and Norva times, device clock and zone, observation points, control channel, devices, versions, and actions.</p>
+<h2 id="original-evidence-now-and-next-timeline">Original evidence: now-and-next timeline</h2>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Time</th><th scope="col">Source current/next</th><th scope="col">Norva current/next</th><th scope="col">Device and guide context</th><th scope="col">Action</th></tr></thead>
+<tbody><tr><td>Baseline</td><td></td><td></td><td></td><td>None</td></tr><tr><td>Expected transition</td><td></td><td></td><td></td><td></td></tr><tr><td>Later observation</td><td></td><td></td><td></td><td></td></tr><tr><td>Other device</td><td></td><td></td><td></td><td>Compare</td></tr></tbody>
+</table></div>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Comparing same-name but different channels.</li><li>Ignoring device clock, zone, and guide window.</li><li>Relying on memory instead of timestamped text.</li><li>Repeating refreshes and losing the first sequence.</li><li>Treating a control channel as proof of a cause.</li><li>Sharing complete private schedules.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="when-is-now-and-next-officially-stale">When is now-and-next officially stale?</h3>
+<p>Use current Norva support guidance if it defines a threshold. Otherwise report exact source and screen timestamps.</p>
+<h3 id="should-i-keep-refreshing-the-guide">Should I keep refreshing the guide?</h3>
+<p>No. Preserve the first sequence and repeat only when current support guidance requests a controlled test.</p>
+<h3 id="what-if-only-the-title-is-old">What if only the title is old?</h3>
+<p>Record title and time fields separately by view. A text-only difference needs a narrower classification than an entire channel mismatch.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/support" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="now-next-information-stale">Consult Norva Support</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/support">Norva support</a></li><li><a href="https://norva.tv/privacy">Norva privacy policy</a></li><li><a href="https://norva.tv/terms">Norva terms of service</a></li><li><a href="https://www.iana.org/time-zones" target="_blank" rel="noopener">IANA Time Zone Database</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/tv-guide-troubleshooting-handbook/">
+          <span class="tag">TV Guide Troubleshooting</span>
+          <div class="card-title">The Complete TV Guide Troubleshooting Handbook</div>
+
+          <p>A disciplined guide investigation separates schedule data, channel identity, time context, filters, device presentation, remote focus, layout, and performance before any reset.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
