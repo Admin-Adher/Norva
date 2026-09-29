@@ -10,10 +10,15 @@ const diagnosticCodes = new Set(['LID_CAPTURE_CANCELLED', 'LID_CAPTURE_GROUP_INV
     'LID_CAPTURE_EXTRACTION_FAILED', 'LID_CAPTURE_EXTRACTION_TIMEOUT', 'LID_CAPTURE_DURATION_INVALID',
     'LID_CAPTURE_AUDIO_TOO_LARGE', 'LID_CAPTURE_INFERENCE_FAILED', 'LID_CAPTURE_PREPARATION_FAILED',
     'LID_CAPTURE_EVIDENCE_INVALID', 'LID_EXTRACT_CLOSE_UNCONFIRMED', 'LID_EXTRACT_OUTPUT_LIMIT',
+    'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_STORE_FILE_INVALID', 'LID_CAPTURE_STORE_FOREIGN_FILE',
+    'LID_CAPTURE_STORE_OWNERSHIP_LOST', 'LID_CAPTURE_STORE_PATH_INVALID',
+    'STRICT_LID_WINDOW_BINDING_INVALID', 'STRICT_LID_WINDOW_EVIDENCE_INVALID',
+    'STRICT_LID_WINDOW_KEY_INVALID', 'STRICT_LID_WINDOW_RECEIPT_TOO_LARGE',
     'LANGUAGE_VALIDATION_VIEWER_PREEMPTED', 'LANGUAGE_ENRICHMENT_CAPACITY_BUSY',
     'PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT',
     'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'PROVIDER_FETCH_FAILED',
     'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'UND_ERR_ABORTED', 'ABORT_ERR']);
+const diagnosticErrorNames = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AbortError']);
 
 // A capture response never includes a language or a receipt. The caller must
 // durably acknowledge it and release its distributed provider leases before
@@ -27,6 +32,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
     const observe = (stage, cause, startedAt, providerDrained, audioMilliseconds = [], requestedMilliseconds = null) => {
         try { diagnostic({ event: 'strict_lid_capture_diagnostic', stage,
             code: cause ? diagnosticCodes.has(cause.code) ? cause.code : 'UNCLASSIFIED' : 'OK',
+            errorKind: cause ? diagnosticErrorNames.has(cause.name) ? cause.name : 'OtherError' : null,
             elapsedMs: Math.max(0, Date.now() - startedAt), providerDrained: providerDrained === true,
             upstreamStatus: Number.isInteger(cause?.upstreamStatus) && cause.upstreamStatus >= 400
                 && cause.upstreamStatus <= 599 ? cause.upstreamStatus : null,

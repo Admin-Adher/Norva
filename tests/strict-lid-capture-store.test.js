@@ -244,7 +244,7 @@ function pipelineFixture(store, options = {}) {
         infer: async p => {
             events.push('infer'); assert.equal(sockets, 0);
             assert.deepEqual(await fs.readFile(p), wav());
-            if (options.inferFails) throw Error('interrupted');
+            if (options.inferFails) throw options.inferFails instanceof Error ? options.inferFails : Error('interrupted');
             return { receipt: 'test-opaque-receipt' };
         },
     });
@@ -268,6 +268,30 @@ test('internal capture diagnostics distinguish short audio after drain without e
     assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|SECRET|private-owner|12345678/);
     const r = pipelineFixture(f.store, { diagnostic: () => { throw Error('logger down'); } });
     assert.equal((await r.pipeline.capture(binding(), {})).providerDrained, true);
+});
+
+test('inference diagnostics classify receipt and workspace failures without logging private error fields', async t => {
+    const f = await fixture(t); await f.store.put(binding(), wav(), drain);
+    for (const code of ['STRICT_LID_WINDOW_EVIDENCE_INVALID', 'LID_CAPTURE_STORE_FOREIGN_FILE', 'SECRET_CREDENTIAL_VALUE']) {
+        const diagnostics = [];
+        const cause = Object.assign(new TypeError('https://private.invalid/secret transcript'), { code });
+        const p = pipelineFixture(f.store, { inferFails: cause, diagnostic: value => diagnostics.push(value) });
+        await assert.rejects(p.pipeline.compute(binding(), {}), error => error === cause);
+        assert.equal(diagnostics[0].stage, 'inference');
+        assert.equal(diagnostics[0].code, code === 'SECRET_CREDENTIAL_VALUE' ? 'UNCLASSIFIED' : code);
+        assert.equal(diagnostics[0].errorKind, 'TypeError');
+        assert.equal(diagnostics[0].providerDrained, true);
+        assert.equal(p.reads(), 0);
+        assert.equal(f.store.snapshot().computations, 0);
+        assert.ok(await f.store.get(binding()));
+        assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|SECRET|transcript/);
+    }
+    const diagnostics = [];
+    const cause = Object.assign(new Error('private'), { name: 'private-owner' });
+    const p = pipelineFixture(f.store, { inferFails: cause, diagnostic: value => diagnostics.push(value) });
+    await assert.rejects(p.pipeline.compute(binding(), {}));
+    assert.equal(diagnostics[0].errorKind, 'OtherError');
+    assert.doesNotMatch(JSON.stringify(diagnostics), /private/);
 });
 
 test('a bounded partial search survives storage without padding and still produces a full 20-second selected sample', async t => {
