@@ -771,7 +771,7 @@
                 state = { count: 0, lastAttemptAt: 0 };
             }
             const isLiveRecovery = itemType === 'channel' || itemType === 'live';
-            if ((!isLiveRecovery || reason === 'provider_html_response') && state.count >= NATIVE_RECOVERY_MAX) {
+            if ((!isLiveRecovery || ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(reason)) && state.count >= NATIVE_RECOVERY_MAX) {
                 surfaceNativeRecoveryFailure(reason || 'retry_limit');
                 return 'exhausted';
             }
@@ -1429,7 +1429,7 @@
                             providerContainer,
                             {
                                 gatewayMode,
-                                ...(reason === 'provider_html_response' ? { mode: 'engine' } : {}),
+                                ...(['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(reason) ? { mode: 'engine' } : {}),
                                 ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
                             }
                         );
@@ -1438,9 +1438,9 @@
                     } else {
                         fresh = { url: channel?.url || null, fallbackUrl: null };
                     }
-                    // HTML is not media: refreshing the same direct route cannot
-                    // decode it. Use only the resolver's authorized fresh byte pipe.
-                    if (reason === 'provider_html_response' && fresh?.fallbackUrl) {
+                    // A refused or non-media response needs a different route.
+                    // Use only the resolver's authorized fresh byte pipe.
+                    if (['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(reason) && fresh?.fallbackUrl) {
                         fresh = { ...fresh, url: fresh.fallbackUrl, fallbackUrl: null };
                     }
                     if (!fresh?.url) throw new Error('No fresh live stream URL returned');
