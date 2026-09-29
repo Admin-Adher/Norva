@@ -1,7 +1,7 @@
 {
   "public/css/i18n.css": "9d49bdc112",
   "public/css/main.css": "c6ace9009b",
-  "public/js/api.js": "3c2744acc9",
+  "public/js/api.js": "063b68c343",
   "public/js/app.js": "0a8a1cae8b",
   "public/js/authApi.js": "c736215973",
   "public/js/blog-index.js": "dccbee9843",
@@ -31,7 +31,7 @@
   "public/js/pages/PartnersPage.js": "2e4adbbee5",
   "public/js/pages/SeriesPage.js": "6bb7603173",
   "public/js/pages/Settings.js": "735116eca8",
-  "public/js/pages/WatchPage.js": "1e84be7e35",
+  "public/js/pages/WatchPage.js": "5ce07a9cb7",
   "public/js/plan-selection-ui.js": "06877f0757",
   "public/js/profiles.js": "a086ae985e",
   "public/js/promo-ui.js": "16352011b4",
