@@ -19,7 +19,15 @@ public class LiveGuideAuditInstrumentedTest {
         i.runOnMainSync(()->v.evaluateJavascript(code,s->{out.set(s);done.countDown();}));
         assertTrue(done.await(15,TimeUnit.SECONDS)); return out.get();
     }
-    private void screenshot(Instrumentation i, String name) throws Exception {
+    private void screenshot(Instrumentation i, WebView view, String name) throws Exception {
+        CountDownLatch presented = new CountDownLatch(1);
+        i.runOnMainSync(() -> view.postVisualStateCallback(0, new WebView.VisualStateCallback() {
+            @Override public void onComplete(long requestId) {
+                view.postOnAnimation(() -> view.postOnAnimation(presented::countDown));
+            }
+        }));
+        assertTrue("WebView frame presented before screenshot", presented.await(15, TimeUnit.SECONDS));
+        i.waitForIdleSync();
         Bitmap b=i.getUiAutomation().takeScreenshot(); assertNotNull(b);
         try(FileOutputStream out=new FileOutputStream(new File(i.getTargetContext().getExternalFilesDir(null),name+".png"))){b.compress(Bitmap.CompressFormat.PNG,100,out);} finally {b.recycle();}
     }
@@ -55,19 +63,19 @@ public class LiveGuideAuditInstrumentedTest {
             String ready="false";
             for(int n=0;n<100&&!"true".equals(ready);n++){Thread.sleep(100);ready=js(i,ref.get(),"window.fixtureReady===true");}
             assertEquals("fixture: "+js(i,ref.get(),"window.fixtureError||null"),"true",ready);
-            Thread.sleep(400);screenshot(i,"live-guide-initial");
+            Thread.sleep(400);screenshot(i,ref.get(),"live-guide-initial");
             String measurement=js(i,ref.get(),"liveAudit.measure()");
             try(FileWriter out=new FileWriter(new File(i.getTargetContext().getExternalFilesDir(null),"live-guide-measurements.json"))){out.write(measurement);}
             assertEquals("Row is preview-only","0",js(i,ref.get(),"document.querySelector('.live-guide-row').click();liveAudit.plays.length"));
             assertEquals("Play control submits one request","1",js(i,ref.get(),"document.querySelector('.live-guide-play').click();liveAudit.plays.length"));
             assertEquals("Selected channel passed to playback","\"0\"",js(i,ref.get(),"liveAudit.plays[0].channelId"));
             js(i,ref.get(),"document.querySelector('.live-guide-source-trigger').click()");
-            Thread.sleep(200);screenshot(i,"live-guide-source-sheet");
+            Thread.sleep(200);screenshot(i,ref.get(),"live-guide-source-sheet");
             assertEquals("Background inert","true",js(i,ref.get(),"document.querySelector('main').inert"));
             js(i,ref.get(),"document.querySelector('[data-source-value=\"m3u:2\"]').click()");
             Thread.sleep(200);
             assertEquals("Source fixture projects only B","true",js(i,ref.get(),"[...document.querySelectorAll('.live-guide-row')].every(r=>r.dataset.sourceId==='2')"));
-            screenshot(i,"live-guide-after-source-change");
+            screenshot(i,ref.get(),"live-guide-after-source-change");
             String sourcePlay=js(i,ref.get(),"document.querySelector('[data-action=watch]').click();liveAudit.plays[liveAudit.plays.length-1].sourceId");
             tapSearch(i,ref.get());
             java.util.concurrent.atomic.AtomicBoolean keyboard=new java.util.concurrent.atomic.AtomicBoolean();
@@ -79,7 +87,7 @@ public class LiveGuideAuditInstrumentedTest {
             js(i,ref.get(),"const q=document.querySelector('.live-guide-search');q.value='Chaîne 80';q.dispatchEvent(new Event('input',{bubbles:true}));q.focus()");
             Thread.sleep(600);
             assertEquals("Search filters the guide","1",js(i,ref.get(),"document.querySelectorAll('.live-guide-row').length"));
-            screenshot(i,"live-guide-search");
+            screenshot(i,ref.get(),"live-guide-search");
             assertEquals("Search retains focus","true",js(i,ref.get(),"document.activeElement.classList.contains('live-guide-search')"));
             System.out.println("LIVE_GUIDE_AUDIT "+measurement);
             System.out.println("LIVE_SOURCE_WATCH_REQUEST "+sourcePlay);
