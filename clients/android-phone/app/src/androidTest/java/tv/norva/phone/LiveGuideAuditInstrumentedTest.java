@@ -57,7 +57,14 @@ public class LiveGuideAuditInstrumentedTest {
                 catch(Exception e){return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));}
             }});
             a.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-            a.setContentView(v);v.requestFocus();v.loadUrl("https://norva-live.test/mobile-live-audit.html");
+            android.widget.FrameLayout root = new android.widget.FrameLayout(a);
+            root.setOnApplyWindowInsetsListener((host, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
+                host.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+            root.addView(v, new android.widget.FrameLayout.LayoutParams(-1, -1));
+            a.setContentView(root);root.requestApplyInsets();v.requestFocus();v.loadUrl("https://norva-live.test/mobile-live-audit.html");
         });
         try {
             String ready="false";
@@ -77,6 +84,8 @@ public class LiveGuideAuditInstrumentedTest {
             assertEquals("Source fixture projects only B","true",js(i,ref.get(),"[...document.querySelectorAll('.live-guide-row')].every(r=>r.dataset.sourceId==='2')"));
             screenshot(i,ref.get(),"live-guide-after-source-change");
             String sourcePlay=js(i,ref.get(),"document.querySelector('[data-action=watch]').click();liveAudit.plays[liveAudit.plays.length-1].sourceId");
+            System.out.println("LIVE_SOURCE_WATCH_REQUEST "+sourcePlay);
+            try(FileWriter out=new FileWriter(new File(i.getTargetContext().getExternalFilesDir(null),"live-source-watch.json"))){out.write(sourcePlay);}
             tapSearch(i,ref.get());
             java.util.concurrent.atomic.AtomicBoolean keyboard=new java.util.concurrent.atomic.AtomicBoolean();
             for(int n=0;n<40&&!keyboard.get();n++) {Thread.sleep(100);i.runOnMainSync(()->{
