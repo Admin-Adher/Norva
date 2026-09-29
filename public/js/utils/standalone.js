@@ -1402,7 +1402,7 @@
                     channel.cloudPlaybackSessionId = null;
                     if (channel.playbackSessionId != null) channel.playbackSessionId = null;
                 };
-                const relaunchLive = async (_resumeAt = 0, recoveryToken = '') => {
+                const relaunchLive = async (_resumeAt = 0, recoveryToken = '', reason = '') => {
                     let fresh;
                     const liveStreamId = channel?.streamId ?? channel?.stream_id ?? channel?.id;
                     const canResolveXtream = channel?.sourceType === 'xtream'
@@ -1436,6 +1436,11 @@
                         if (fresh?.cloudSourceId) channel.cloudSourceId = fresh.cloudSourceId;
                     } else {
                         fresh = { url: channel?.url || null, fallbackUrl: null };
+                    }
+                    // HTML is not media: refreshing the same direct route cannot
+                    // decode it. Use only the resolver's authorized fresh byte pipe.
+                    if (reason === 'provider_html_response' && fresh?.fallbackUrl) {
+                        fresh = { ...fresh, url: fresh.fallbackUrl, fallbackUrl: null };
                     }
                     if (!fresh?.url) throw new Error('No fresh live stream URL returned');
                     const freshLiveSessionId = String(fresh?.sessionId || '').trim();
