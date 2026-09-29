@@ -1664,8 +1664,11 @@ type StagedGenerationCursor = {
 
 const STAGED_CATEGORY_PAGE_SIZE = 100;
 const STAGED_ITEM_PAGE_SIZE = 250;
-const STAGED_CURSOR_TOKEN_MAX = 1024;
-const STAGED_PACKED_CURSOR_MAX = 1024;
+// Two signed Gateway tokens are packed together with delimiter-safe base64.
+// Real 396-character tokens already produce a 1332-character checkpoint.
+// Keep this bounded and aligned with norva_credential_job_progress_safe.
+const STAGED_CURSOR_TOKEN_MAX = 4096;
+const STAGED_PACKED_CURSOR_MAX = 4096;
 type StagedProgressAction = "live_categories" | "vod_categories" | "series_categories" |
   "live_streams" | "vod_streams" | "series_streams" | "cinema_streams";
 type StagedActionDefinition = {
