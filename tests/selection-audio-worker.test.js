@@ -67,6 +67,34 @@ test('retry resumes persisted receipts without probing or repeating completed wi
   assert.deepEqual(run.finals[0].receipts, [1,2,3,4,5,6].map(receipt));
 });
 
+test('gateway failure retains safe diagnostics and reports exhausted retries as terminal', async () => {
+  for (const attempts of [1,8]) {
+    const run = await harness({ job:{ ...baseJob(), attempt_count:attempts } });
+    run.gateway.probe = async () => { throw Object.assign(Error('private upstream message'), {
+      code:'SELECTION_AUDIO_GATEWAY_REJECTED', retryable:true, stage:'probe', status:502,
+      gatewayCode:'codec_probe_timeout', url:'https://private.example', transcript:'private speech' }); };
+    const result = await run.run();
+    assert.equal(result.state, attempts === 8 ? 'failed' : 'retry_wait');
+    assert.deepEqual(result.diagnostic, { stage:'probe', status:502, gatewayCode:'codec_probe_timeout' });
+    assert.doesNotMatch(JSON.stringify(result), /private|transcript/);
+    assert.equal(run.finishes[0].errorCode, 'SELECTION_AUDIO_GATEWAY_REJECTED');
+    assert.equal(run.finishes[0].retryable, true); // SQL remains the retry-budget authority.
+    assert.equal(run.events.includes('hydrate'), false);
+  }
+});
+
+test('failure reporting honors a lost lease and the persisted interruption retry decision', async () => {
+  for (const owned of [true,false]) {
+    const controller = new AbortController();
+    const run = await harness({ finish:() => owned });
+    run.gateway.probe = async () => { controller.abort(); throw Error('interrupted'); };
+    const result = await run.run({ signal:controller.signal });
+    assert.equal(result.state, owned ? 'retry_wait' : 'lease_lost');
+    assert.equal(run.finishes[0].retryable, true);
+    assert.equal(run.events.includes('hydrate'), false);
+  }
+});
+
 test('Selection captures after a miss, persists drain checkpoint, computes locally, and ACKs only durable evidence', async () => {
   for (const cached of [false,true]) {
     const run = await harness(); const events = run.events;

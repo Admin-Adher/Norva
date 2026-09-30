@@ -14,12 +14,35 @@ const language = value => typeof value !== 'string' ? null
   : Object.hasOwn(aliases, value) ? aliases[value] : null;
 const safeCodec = value => typeof value === 'string' && /^[a-zA-Z0-9_.-]{1,32}$/.test(value) ? value : null;
 
+// Only literal protocol codes may enter operational logs. A provider's error
+// text (even an identifier-shaped string) is never a safe diagnostic.
+const diagnosticCodes = new Set(['codec_probe_timeout', 'strict_lid_extraction_timeout',
+  'strict_lid_request_timeout', 'strict_lid_drain_failed', 'strict_lid_window_claims_invalid',
+  'strict_lid_receipts_invalid', 'strict_lid_checkpoint_reset_required',
+  'LID_CAPTURE_DISABLED', 'LID_CAPTURE_CLAIMS_INVALID', 'LID_CAPTURE_DEDICATED_ROUTE_REQUIRED',
+  'LANGUAGE_ENRICHMENT_CAPACITY_BUSY', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_ALREADY_RUNNING',
+  'LID_CAPTURE_COMPUTE_BUSY', 'account_busy', 'background_busy', 'viewer_preempted',
+  'LANGUAGE_VALIDATION_VIEWER_PREEMPTED', 'strict_lid_preempted']);
+const diagnosticStages = new Map([['/probe-audio', 'probe'], ['/detect-language', 'analyze'],
+  ['/detect-language/finalize', 'finalize'], ['/detect-language/capture/status', 'capture_status'],
+  ['/detect-language/capture/capture', 'capture'], ['/detect-language/capture/infer', 'infer'],
+  ['/detect-language/capture/ack', 'ack']]);
+
+export function selectionAudioFailureDiagnostic(error) {
+  const stage = [...diagnosticStages.values()].includes(error?.stage) ? error.stage : null;
+  const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : null;
+  const gatewayCode = diagnosticCodes.has(error?.gatewayCode) ? error.gatewayCode : null;
+  return stage || status || gatewayCode ? { stage, status, gatewayCode } : null;
+}
+
 export class SelectionAudioGatewayError extends Error {
-  constructor(code, { status = 0, retryable = false, retryAfterSeconds = 300, resetRequired = false, providerDrained = false } = {}) {
+  constructor(code, { status = 0, retryable = false, retryAfterSeconds = 300, resetRequired = false, providerDrained = false, stage = null, gatewayCode = null } = {}) {
     // Never carry an upstream message, URL, bearer token or speech transcript.
     super(code);
     this.name = 'SelectionAudioGatewayError';
     Object.assign(this, { code, status, retryable, retryAfterSeconds, resetRequired, providerDrained });
+    this.stage = [...diagnosticStages.values()].includes(stage) ? stage : null;
+    this.gatewayCode = diagnosticCodes.has(gatewayCode) ? gatewayCode : null;
   }
 }
 const fail = (code, options) => { throw new SelectionAudioGatewayError(code, options); };
@@ -154,21 +177,24 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       if (!response.ok) {
         if (response.status === 429 && ['LANGUAGE_ENRICHMENT_CAPACITY_BUSY','LID_CAPTURE_STORE_FULL',
           'LID_CAPTURE_ALREADY_RUNNING','LID_CAPTURE_COMPUTE_BUSY'].includes(payload.code) && providerDrained) {
-          fail('SELECTION_AUDIO_CAPACITY_BUSY', { status:429, retryable:true, providerDrained:true, retryAfterSeconds:30 });
+          fail('SELECTION_AUDIO_CAPACITY_BUSY', { status:429, retryable:true, providerDrained:true, retryAfterSeconds:30, gatewayCode:payload.code });
         }
         const busy = [409,429].includes(response.status) && ['account_busy','background_busy','viewer_preempted','LANGUAGE_VALIDATION_VIEWER_PREEMPTED','strict_lid_preempted'].includes(payload.code);
         const resetRequired = response.status === 409 && payload.code === 'strict_lid_checkpoint_reset_required' && payload.resetRequired === true;
         const retryable = busy || resetRequired || response.status >= 500 || response.status === 429;
         fail(resetRequired ? 'SELECTION_AUDIO_CHECKPOINT_RESET_REQUIRED' : busy ? 'SELECTION_AUDIO_VIEWER_BUSY' : 'SELECTION_AUDIO_GATEWAY_REJECTED',
-          { status:response.status, retryable, resetRequired, providerDrained,
+          { status:response.status, retryable, resetRequired, providerDrained, gatewayCode:payload.code,
             retryAfterSeconds:busy ? 30 : 300 });
       }
       if (!providerDrained) fail('SELECTION_AUDIO_GATEWAY_DRAIN_UNCONFIRMED', { retryable:true, status:response.status });
       return payload;
     } catch (error) {
-      if (error instanceof SelectionAudioGatewayError) throw error;
+      if (error instanceof SelectionAudioGatewayError) {
+        error.stage = diagnosticStages.get(path.split('?')[0]) || null;
+        throw error;
+      }
       fail(signal?.aborted ? 'SELECTION_AUDIO_ABORTED' : 'SELECTION_AUDIO_GATEWAY_TRANSPORT',
-        { retryable:true, retryAfterSeconds:signal?.aborted ? 30 : 300 });
+        { retryable:true, retryAfterSeconds:signal?.aborted ? 30 : 300, stage:diagnosticStages.get(path.split('?')[0]) });
     }
   }
 

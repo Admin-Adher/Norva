@@ -1,4 +1,4 @@
-import { createSelectionAudioGateway, getSelectionAudioManifest } from '../../../supabase/functions/_shared/selection-audio-gateway.mjs';
+import { createSelectionAudioGateway, getSelectionAudioManifest, selectionAudioFailureDiagnostic } from '../../../supabase/functions/_shared/selection-audio-gateway.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -177,13 +177,13 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     if (lostLease) return { state: 'lease_lost' };
     if (localCapturePhase && captureEnabled) {
       if (!await repository.deferCapture(job)) return { state:'lease_lost' };
-      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY' };
+      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY', diagnostic:selectionAudioFailureDiagnostic(error) };
     }
     if (error.code === 'SELECTION_AUDIO_CAPACITY_BUSY' && error.providerDrained === true) {
       // A local capacity refusal is not a provider failure. Preserve all
       // receipts/profile and give back only this claim's retry debit by CAS.
       if (!await repository.deferAdmission(job)) return { state: 'lease_lost' };
-      return { state: 'retry_wait', error: 'SELECTION_AUDIO_CAPACITY_BUSY' };
+      return { state: 'retry_wait', error: 'SELECTION_AUDIO_CAPACITY_BUSY', diagnostic:selectionAudioFailureDiagnostic(error) };
     }
     if (error.resetRequired) {
       profile = null;
@@ -192,8 +192,10 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     }
     const code = typeof error.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(error.code)
       ? error.code : 'SELECTION_AUDIO_ANALYSIS_ERROR';
-    await repository.finish(job, null, code, error.retryable === true || signal?.aborted === true);
-    return { state: error.retryable ? 'retry_wait' : 'failed', error: code };
+    const retryable = error.retryable === true || signal?.aborted === true;
+    if (!await repository.finish(job, null, code, retryable)) return { state:'lease_lost' };
+    return { state: retryable && Number(job.attempt_count || 0) < 8 ? 'retry_wait' : 'failed',
+      error: code, diagnostic:selectionAudioFailureDiagnostic(error) };
   } finally { clearInterval(heartbeat); signal?.removeEventListener('abort', abort); }
 }
 
@@ -240,7 +242,8 @@ export async function runSelectionAudioWorker(env = process.env) {
         const result = await processSelectionAudioJob({ repository, gateway, file: files.get(job.external_id), job,
           signal: controller.signal, captureEnabled, onProgress: health });
         console.log(JSON.stringify({ event: 'selection_audio_job', state: result.state,
-          error: result.error || null, languages: result.languages || [], hydrated: result.hydrated || 0 }));
+          error: result.error || null, diagnostic:selectionAudioFailureDiagnostic(result.diagnostic),
+          languages: result.languages || [], hydrated: result.hydrated || 0 }));
       } });
       // Wake promptly when a slot frees, but keep process health fresh during
       // long work. No detached provider task is started by this wait.

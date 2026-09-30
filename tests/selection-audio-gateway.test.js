@@ -134,6 +134,32 @@ test('viewer preemption, temporary saturation and checkpoint reset remain resuma
   }
 });
 
+test('failure diagnostics distinguish probe timeout without retaining upstream text or identifiers', async () => {
+  const { selectionAudioFailureDiagnostic } = await lib;
+  for (const code of ['codec_probe_timeout', 'PRIVATE_ACCOUNT_IDENTIFIER', 'https://private.example/token']) {
+    const { gateway, file } = await setup(() => json({ code, error:'private transcript and credentials', ...drain }, 502));
+    await assert.rejects(gateway.probe(file), error => {
+      assert.deepEqual(selectionAudioFailureDiagnostic(error), { stage:'probe', status:502,
+        gatewayCode:code === 'codec_probe_timeout' ? code : null });
+      assert.equal(error.retryable, true);
+      assert.doesNotMatch(JSON.stringify(error), /private|PRIVATE_ACCOUNT/);
+      return true;
+    });
+  }
+  assert.equal(selectionAudioFailureDiagnostic({ stage:'secret', status:'502', gatewayCode:'secret' }), null);
+});
+
+test('transport diagnostics identify the operation without a fabricated HTTP status', async () => {
+  const { selectionAudioFailureDiagnostic } = await lib;
+  const { gateway, file } = await setup(() => { throw Error('https://secret.example'); });
+  await assert.rejects(gateway.probe(file), error => {
+    assert.deepEqual(selectionAudioFailureDiagnostic(error), { stage:'probe', status:null, gatewayCode:null });
+    assert.equal(error.code, 'SELECTION_AUDIO_GATEWAY_TRANSPORT');
+    assert.doesNotMatch(JSON.stringify(error), /secret/);
+    return true;
+  });
+});
+
 test('ambiguous evidence never promotes a candidate language and malformed verified evidence is rejected', async () => {
   for (const payload of [
     { ...drain, verified:false, language:null, candidate:'es', sample:'private speech' },
