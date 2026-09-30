@@ -1111,7 +1111,34 @@ async function attachOwnedMediaEditorialMetadata(
         // A published G title can span several active provider generations;
         // the exact owned, visible variant above proves this media association.
         // Its best/display generation may legitimately belong to another source.
-        if (usesGenerationPayload && owner.generation !== flatMediaGenerationId(row)) continue;
+        if (usesGenerationPayload && owner.generation !== flatMediaGenerationId(row)) {
+          // A verified grouped film/series can choose another active source's
+          // display generation. Reuse only its validated TMDB text, never its
+          // generation payload, audio map, provider fields or playback proof.
+          const catalog = recordOrEmpty(owner.title.overlay_catalog_metadata);
+          const tmdb = recordOrEmpty(catalog.tmdb);
+          const tmdbId = stringOrNull(title.provider_tmdb_id);
+          if (!flatMediaGenerationId(row) || !owner.generation || owner.sources.length < 2
+              || !catalogTextStatusEligible(title.match_status)
+              || recordOrEmpty(catalog.tmdbValidation).valid !== true
+              || !tmdbId || !/^[1-9][0-9]*$/.test(tmdbId)
+              || String(tmdb.id ?? "") !== tmdbId) continue;
+          const localized = lang ? recordOrEmpty(recordOrEmpty(catalog.i18n)[lang]) : {};
+          const textTitle = stringOrNull(localized.title) ?? stringOrNull(tmdb.title);
+          const textOverview = stringOrNull(localized.overview) ?? stringOrNull(tmdb.overview);
+          if (textTitle) { row.title = textTitle; row.name = textTitle; }
+          if (textOverview) {
+            row.overview = textOverview; row.description = textOverview; row.plot = textOverview;
+          }
+          if (textTitle || textOverview) row.tmdb = {
+            ...recordOrEmpty(row.tmdb),
+            ...(textTitle ? { title: textTitle } : {}),
+            ...(textOverview ? { overview: textOverview } : {}),
+          };
+          // Exclude this proof from the file-language/generation binder below.
+          // Its current owner+variant fence authorizes editorial text only.
+          continue;
+        }
         ownedTitles.set(String(title.id), owner.title);
         if (!catalogTextStatusEligible(title.match_status) || !title.provider_tmdb_id) continue;
         if (usesGenerationPayload) {
