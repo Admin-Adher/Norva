@@ -243,6 +243,14 @@ async function routeRequest(req, requestId) {
   if (req.method === "POST" && match.kind === "collection") {
     return createCredentialCandidate(req, requestId, user, source);
   }
+  if (req.method === "GET" && match.kind === "collection") {
+    const result = await rpc("norva_get_pending_credential_transition", {
+      p_source_id: source.id, p_user_id: user.id,
+    });
+    return successResponse(req, requestId, "PendingCredentialCandidate", {
+      candidate: result ? sanitizeCredentialCandidate(result, source.id) : null,
+    }, 200);
+  }
   if (req.method === "GET" && match.kind === "candidate") {
     return getCredentialCandidate(req, requestId, user, source, match.candidateId);
   }

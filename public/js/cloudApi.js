@@ -4828,6 +4828,9 @@
                 'POST', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates`, credentials,
                 { ...options, mutate: true }
             ),
+            getPendingCandidate: (sourceId, options = {}) => providerAccessRequest(
+                'GET', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates`, null, options
+            ),
             getCandidate: (sourceId, candidateId, options = {}) => providerAccessRequest(
                 'GET', `/v1/sources/${encodeURIComponent(sourceId)}/credential-candidates/${encodeURIComponent(candidateId)}`,
                 null, options

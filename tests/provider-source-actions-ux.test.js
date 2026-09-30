@@ -174,8 +174,36 @@ function sourceManagerHarness({
     if (loadError) throw loadError;
   };
   manager.notifySourceHealthChanged = () => { calls.notify += 1; };
-  return { manager, calls, checkButton, document, hardSyncButton, syncButton };
+  return { manager, api, calls, checkButton, document, hardSyncButton, syncButton };
 }
+
+test('background repair watches durable status and notifies once without applying or cancelling', async () => {
+  const { manager, api, calls } = sourceManagerHarness({ instantTimers: true });
+  manager.sources = [{ id: 'source-1', type: 'xtream' }];
+  const ready = { candidateId: 'candidate-1', state: 'READY_TO_SWITCH', revision: 3,
+    comparison: 'SAME_CATALOG', actions: { canApply: true } };
+  let reads = 0;
+  api.providerAccess.getCandidate = async () => { reads++; return ready; };
+  await manager.watchCredentialCandidate('source-1', { ...ready, state: 'IMPORTING', revision: 2, actions: {} });
+  assert.equal(reads, 1);
+  assert.equal(manager.pendingCredentialCandidates.get('source-1').state, 'READY_TO_SWITCH');
+  assert.equal(calls.toast.length, 1);
+  await manager.watchCredentialCandidate('source-1', ready);
+  assert.equal(calls.toast.length, 1);
+  assert.equal(calls.release, 0);
+  assert.equal(calls.sync.length, 0);
+});
+
+test('repair discovery survives a new manager and routes reopening to the existing candidate', async () => {
+  const { manager, api } = sourceManagerHarness({ instantTimers: true, providerAccessUiEnabled: true });
+  const candidate = { candidateId: 'persisted', state: 'IMPORTING' };
+  api.providerAccess.getPendingCandidate = async () => ({ candidate });
+  let opened;
+  manager.showCredentialCandidate = (id, value) => { opened = { id, value }; };
+  await manager.showEditModal('source-1', 'xtream', { intent: 'credentials' });
+  assert.equal(opened.value, candidate);
+  assert.equal(opened.id, 'source-1');
+});
 
 test('cloud app launch leaves refresh ownership to the durable fair scheduler', async () => {
   const { app, calls } = appHarness({
