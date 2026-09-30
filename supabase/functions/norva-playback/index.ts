@@ -16242,12 +16242,10 @@ async function runPregenGate(req: Request, db: SupabaseClient) {
   // activity fence and the catalogue worker can starve indefinitely. Waiting
   // for a user's decision has no pending worker and does not hold this gate.
   try {
-    const { data, error } = await db.from("cloud_source_credential_transition_jobs")
-      .select("id").eq("user_id", userId).in("state", ["pending", "processing"])
-      .in("job_kind", ["validate_candidate", "build_candidate_generation", "post_switch_verify", "rollback_refresh"])
-      .limit(1);
+    const { data, error } = await db.rpc("norva_credential_work_pending_for_owner", { p_user_id: userId });
     if (error) return { defer: true, reason: "connection-check-unavailable" };
-    if (data?.length) return { defer: true, reason: "connection-check" };
+    if (data === true) return { defer: true, reason: "connection-check" };
+    if (data !== false) return { defer: true, reason: "connection-check-unavailable" };
   } catch (_) { return { defer: true, reason: "connection-check-unavailable" }; }
   try {
     const sinceIso = new Date(Date.now() - ENRICH_TICK_DEFER_MS).toISOString();
