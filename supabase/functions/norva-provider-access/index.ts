@@ -2647,7 +2647,7 @@ async function verifyPostSwitchJob(job, workerId) {
     await restoreAfterPostSwitchFailure(job, workerId, fault);
     return "handled";
   }
-  const refresh = await runActivePostSwitchRefresh(job, workerId, runtime, candidateConfig);
+  const refresh = await runBoundedActivePostSwitchRefresh(job, workerId, runtime, candidateConfig);
   if (!refresh.complete) return "handled";
   await workerRpc("norva_complete_credential_transition", {
     p_transition_id: job.transitionId,
@@ -2692,8 +2692,9 @@ async function verifyCredentialTransportSwitch(job, workerId, runtime, candidate
 
 // The post-switch lane never reuses the candidate-generation writer: its SQL
 // contract is deliberately different (active head, exact job lease, refresh
-// run, action ledger and compensable prune).  One invocation consumes at most
-// one gateway page or one bounded prune batch, then atomically requeues itself.
+// run, action ledger and compensable prune). Each slice consumes one page or
+// bounded prune batch. The outer budget retains the lease only while time and
+// admission permit; every slice persists its checkpoint before continuing.
 // Consequently a crash can only replay a SQL-fenced page, never invent a
 // refresh proof in Edge memory.
 const ACTIVE_REFRESH_ACTIONS = Object.freeze([
@@ -2705,7 +2706,26 @@ const ACTIVE_REFRESH_ACTIONS = Object.freeze([
   { action: "series_streams", gateway: "get_series", kind: "item", itemType: "series", categoryKind: "series" },
 ]);
 
-async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfig) {
+async function runBoundedActivePostSwitchRefresh(job, workerId, runtime, candidateConfig, now = () => Date.now()) {
+  const startedAt = now();
+  let slices = 0;
+  const canContinue = () => slices < 16 && now() - startedAt < 40_000
+    && job.leaseUntilMs - now() >= WORKER_MIN_START_LEASE_MS;
+  while (true) {
+    slices += 1;
+    const result = await runActivePostSwitchRefresh(job, workerId, runtime, candidateConfig, canContinue);
+    if (result.complete || !result.continueLease) return result;
+  }
+}
+
+async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfig, canContinue = () => false) {
+  // Each page remains a separate SQL transaction and durable checkpoint. Only
+  // the scheduler gap is removed; pending provider work releases the lease.
+  async function advance(fence, revision, next) {
+    const continueLease = canContinue();
+    const checkpoint = await checkpointActiveRefresh(fence, revision, next, !continueLease, continueLease ? 0 : 1);
+    return { complete: false, continueLease, checkpointRevision: checkpoint.checkpointRevision };
+  }
   const expectedGenerationId = requiredJobGenerationId(job);
   const snapshot = activeRefreshSnapshot(await workerRpc("norva_get_catalog_write_snapshot", {
     p_source_id: job.sourceId,
@@ -2759,30 +2779,21 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
         fence.p_user_visibility_epoch,
       );
       if (pruned.complete !== true) {
-        await checkpointActiveRefresh(
+        return advance(
           { ...fence, p_user_visibility_epoch: visibilityEpoch },
           run.checkpointRevision,
           state,
-          true,
-          1,
         );
-        return { complete: false };
       }
     }
     const next = actionIndex === ACTIVE_REFRESH_ACTIONS.length - 1
       ? { ...state, action: "complete", actionComplete: true, cursor: "", spoolToken: "" }
       : emptyActiveRefreshProgress(ACTIVE_REFRESH_ACTIONS[actionIndex + 1].action, state.catalogVersion);
-    const checkpoint = await checkpointActiveRefresh(
+    return advance(
       { ...fence, p_user_visibility_epoch: visibilityEpoch },
       run.checkpointRevision,
       next,
-      true,
-      1,
     );
-    if (next.action !== "complete") return { complete: false };
-    // The complete checkpoint can only be persisted after all three action
-    // proofs are current.  A new lease will perform the final marker.
-    return { complete: false, checkpointRevision: checkpoint.checkpointRevision };
   }
 
   const page = await gatewayMetadataPage(runtime, candidateConfig, job, expectedGenerationId, {
@@ -2833,8 +2844,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
       processedCategories: state.processedCategories + categories.length,
       categoryCount: state.categoryCount + categories.length,
     };
-    await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next, true, 1);
-    return { complete: false };
+    return advance({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next);
   }
 
   const rawItems = page.items.filter(isRecord);
@@ -2876,8 +2886,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     processedCategories: run.actionCategoryCount,
     categoryCount: run.actionCategoryCount,
   };
-  await checkpointActiveRefresh({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next, true, 1);
-  return { complete: false };
+  return advance({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next);
 }
 
 function rpcObject(value) {
