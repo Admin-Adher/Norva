@@ -1862,7 +1862,7 @@ function parseVersionInfo(title: string, metadata: JsonRecord) {
   return { language, quality, resolution };
 }
 
-function compatibilitySeed(playbackHint: JsonRecord, metadata: JsonRecord, title: string) {
+export function compatibilitySeed(playbackHint: JsonRecord, metadata: JsonRecord, title: string) {
   const profile = recordOrEmpty(metadata.codecProfile ?? metadata.codec_profile);
   const video = String(profile.videoCodec ?? profile.video_codec ?? "").toLowerCase();
   const audio = String(profile.audioCodec ?? profile.audio_codec ?? "").toLowerCase();
@@ -1876,7 +1876,7 @@ function compatibilitySeed(playbackHint: JsonRecord, metadata: JsonRecord, title
   return { tier: "unknown" };
 }
 
-function playbackCostScore(tier: string, observedTtff: number | null) {
+export function playbackCostScore(tier: string, observedTtff: number | null) {
   if (observedTtff !== null) return Math.max(1, Math.min(999, Math.round(observedTtff / 10)));
   if (tier === "direct") return 100;
   if (tier === "remux") return 250;
@@ -1885,7 +1885,7 @@ function playbackCostScore(tier: string, observedTtff: number | null) {
   return 500;
 }
 
-function observedTtffMs(...records: JsonRecord[]) {
+export function observedTtffMs(...records: JsonRecord[]) {
   for (const record of records) {
     const value = record.lastObservedTtffMs ?? record.last_observed_ttff_ms ?? record.ttffMs ?? record.time_to_first_frame_ms;
     const number = Number(value);
