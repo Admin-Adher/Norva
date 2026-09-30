@@ -36,3 +36,25 @@ After the five-minute activity fence elapsed, the current transition's durable r
 
 ## Rejected speculative startup changes
 Neutral tail-moov MP4 benchmarks showed no meaningful benefit from either smaller range windows (2769 vs 2753ms) or smaller ffprobe analysis limits (2757 vs 2754ms). Neither change was deployed. Real cold MP4 codec-probe timeouts still require a measured fix.
+
+## September 30 follow-up fixes
+- PR488: transient snapshot conflicts defer under the exact current worker lease. They do not consume provider failure attempts. SQL regression verifies permissions, affinity and stale-lease rejection.
+- PR489: page confirmation accepts an exact refreshed title payload once a current-run variant exists; other variants can occur on later pages. Final inventory/prune proof still requires all surviving variants. Rollback runtime fixture rejects stale payload timestamps and premature completion.
+- SQL statement/lock timeouts and deadlocks now defer safely. Signed provider pages remain 250 items; database variant writes are split into 100/100/50 with epoch handoff. Changing the signed page size was tried and reverted after spool validation rejected it.
+- Two terminal refresh jobs were retained. Audited replacement jobs inherited their run/checkpoint and attempt budget; checkpoint and action-ledger ownership moved atomically. No media or proof reset was performed. The current job has four recorded provider attempts, including one Gateway-restart interruption; keep services stable while it finishes.
+- PR489 merged as e564133a92939132e41f65ab222fbde37fba0afe. Provider Access SHA256 on both replicas: fe0bbedde3880acb93622dfb29e2e7ddbff5d71b72b8e5de83e1add198de8d7b.
+
+## Native browser MP4 resume
+Sharte Ezdeva uses the raw MP4 broker (no HLS transcoding). Before correction, browser header/tail discovery was followed by a speculative prefix continuation aborted after 341–377ms with no bytes. This incurred provider release delay before the actual resume range.
+
+PR490 gives finite MP4 continuation the existing 500ms seek grace. 111 focused tests passed, two skipped; CI 36675960523 passed. Merged as bbe3ebf7d3c480cb9e96488f5bfda7d7c011bdc1. Both Gateways now use index SHA256 b9ced65fcd355d472bc044519873dd415eef1fad6b442bef1c2b170d95030e48.
+
+After deployment, real browser resume displayed advancing 1280x720 video by the 17.574s observation. The transport trace confirms the speculative prefix request was eliminated. This observation is an upper bound, not a precise first-frame measurement. The provider still required 6.1s for the 3.66MB tail metadata. The server admission/grant phase was 612ms. All own playback was closed after verification.
+
+## Rollup dependency optimization
+A rollback measurement of 100 real Strng title rollups took 2408.555ms. Proof-only variant updates were unnecessarily running these scans. The trigger now skips updates only when all membership and ranking dependencies are unchanged: variant ID, title, owner, source, generation, playback cost, observed startup time and creation order. Inserts/deletes and changes to those inputs still recalculate.
+
+The rollback SQL fixture checks hidden/active/legacy visibility, other-owner isolation, title and generation moves, all ranking dependencies, and irrelevant metadata writes. It passed before deploying the migration without service restarts. Throughput measurement and full legacy completion remain in progress.
+
+## Remaining runtime observations
+Concurrent catalogue writes have caused fail-closed visibility-epoch conflicts in browser search/history; manual retry after writes quieted succeeded. Do not weaken epoch/ownership validation to mask these errors. Android remains untested in this session because ADB reports no connected device.
