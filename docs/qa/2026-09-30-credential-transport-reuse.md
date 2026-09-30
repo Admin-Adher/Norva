@@ -93,3 +93,11 @@ PR493 merged as 6f938814b3cc59001ca48ce3f156162133d930d8 after CI 36684672410 pa
 
 ## Bounded reader window follow-up
 Background catalogue reads repeatedly extended the owner's 10-second reader window; at 07:57 UTC an active/recent window was still observed despite no UI interaction since 07:26. The service-only RPC now shares an existing unexpired window instead of extending it. Expired windows can renew under the same epoch lock. The rollback runtime fixture passed no-extension, renewal, owner isolation, unchanged epoch, writer exclusion and ACL checks before the migration was committed without restarting services.
+
+## 30 September, final movie batch: source visibility rollup
+
+The legacy refresh repeatedly timed out at 180250/180711 movies in `norva_upsert_active_catalog_title_variants` (SQLSTATE 57014). Temporary exception diagnostics located the cost in source visibility checks during the upsert; diagnostic instrumentation was removed after investigation. A refreshed title has 654 variants. Five rollup calls made 3270 authorization checks and took 701.81 ms in a rollback benchmark.
+
+Migration `20260930105000_catalog_rollup_source_visibility.sql` materializes the title candidates and evaluates the unchanged visibility function once per distinct owner/source within the statement. Generation membership, ranking, count, empty-rollup handling and update guards remain identical. The same five calls made five authorization checks and took 42.00 ms. `catalog_rollup_source_visibility.sql` passed in a rolled-back SQL fixture with 605 variants, including wrong-owner and hidden-generation rows, asserting per-statement visibility calls and clearing when hidden.
+
+Deployed transactionally without restarting either Gateway. At 08:24:29 UTC the durable movie checkpoint advanced to **180711**, confirming that the previously blocked batch completed. Series and final closure still require observation. PR494 CI 36686916408 passed and merged as aa8186387e1174692d45a4e4a344bdd053569b40.
