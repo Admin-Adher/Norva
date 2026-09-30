@@ -13202,8 +13202,15 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
             await stopBoundedMkvInputPump(session).catch(() => {});
             await stopFiniteMkvLinearSeekBridge(session).catch(() => {});
             await stopChildProcess(session.ffmpeg).catch(() => {});
+            if (session.liveTsStartupTranscodeFallback === true && session.ffmpeg
+                && session.ffmpeg.exitCode == null && !session.ffmpeg.signalCode) {
+                const error = new Error('Previous Live producer has not exited');
+                error.code = 'LIVE_TS_STARTUP_RELEASE_FAILED';
+                throw error;
+            }
             session.ffmpeg = null;
-            if (stoppedProviderPump && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+            if ((stoppedProviderPump || session.liveTsStartupTranscodeFallback === true)
+                && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
                 if (!await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, abortSignal)) {
                     throw abortedVodInputPumpError();
                 }
@@ -13245,6 +13252,23 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
             return true;
         } catch (err) {
             if (abortSignal?.aborted) throw abortedVodInputPumpError();
+            if (err?.code === 'LIVE_TS_STARTUP_INVALID' && isLiveSession(session)
+                && videoModeForSession(session) === 'copy'
+                && session.liveTsStartupTranscodeFallback !== true
+                && session.liveTsStartupGate?.snapshot().rejected >= 3
+                && totalAttempt < maxTotalAttempts) {
+                session.liveTsStartupTranscodeFallback = true;
+                session.startupTimings.liveTsStartupFallback = 'invalid-h264-prefix';
+                const failedProof = session.liveTsStartupGate.snapshot();
+                session.startupTimings.liveTsStartupFallbackRejected = failedProof.rejected;
+                session.startupTimings.liveTsStartupFallbackProofMs = failedProof.proofMs;
+                session.videoMode = 'encode';
+                // The next loop first stops and joins the old producer, waits
+                // for the provider slot and removes its output. Encoder
+                // admission still applies; never run two provider inputs.
+                console.warn(`[media-gateway] invalid live H.264 prefix for ${session.id}; retrying once with video encode`);
+                continue;
+            }
             session.startupFailureCode = err?.message === 'Playlist timeout'
                 ? 'PLAYLIST_TIMEOUT' : session.inputFailure ? 'INPUT_FAILED' : 'FFMPEG_FAILED';
             const finiteMkvSeekBrokerFailed = applyFiniteMkvSeekBrokerFailure(session);
@@ -21590,7 +21614,7 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 }
                 return;
             } catch (error) {
-                if (error?.code === 'LIVE_TS_STARTUP_PROOF_CHANGED') throw error;
+                if (['LIVE_TS_STARTUP_PROOF_CHANGED', 'LIVE_TS_STARTUP_INVALID'].includes(error?.code)) throw error;
                 // FFmpeg updates HLS artifacts atomically. A rename/read/stat
                 // race means "not ready yet", not a terminal provider failure.
             }

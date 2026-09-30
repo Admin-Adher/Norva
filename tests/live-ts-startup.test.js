@@ -193,17 +193,19 @@ test('real MPEG-TS startup proof and lifecycle', { skip: process.env.NORVA_LIVE_
             assert.equal((await verifyFiniteTsStartupSegments({ root, bin,
                 files: ['segment-00000.ts', 'segment-00001.ts'], durations: [4, 4] })).verified, true);
         });
-        await t.test('the diagnostic is bounded and never discards an untested fourth segment', async () => {
+        await t.test('three invalid segments fail closed without serving an untested fourth segment', async () => {
             await reset();
             await fsp.copyFile(bad, path.join(root, 'segment-00001.ts'));
             await fsp.copyFile(bad, path.join(root, 'segment-00002.ts'));
             const gate = createLiveTsStartupGate({ root, bin });
-            assert.equal(await gate.check(playlist(4)), true);
+            await assert.rejects(gate.check(playlist(3)), { code: 'LIVE_TS_STARTUP_INVALID' });
+            await assert.rejects(gate.check(playlist(4)), { code: 'LIVE_TS_STARTUP_INVALID' });
             assert.equal(gate.snapshot().attempts, 3);
             assert.equal(gate.snapshot().verified, false);
             assert.equal(gate.snapshot().minimum, 3);
             assert.equal(gate.allows('segment-00002.ts'), false);
-            assert.equal(gate.allows('segment-00003.ts'), true);
+            assert.equal(gate.allows('segment-00003.ts'), false);
+            assert.equal(gate.snapshot().bypass, false);
         });
         await t.test('healthy 1080p local proof adds one bounded decoder and no discarded prefix', async () => {
             const hd = path.join(root, 'segment-00000.ts');
