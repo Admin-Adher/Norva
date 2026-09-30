@@ -47,3 +47,31 @@ require a PostgreSQL integration check before applying the migration.
 No production migration, flag or queue change has been made for this recovery.
 Real extraction, local inference, hydration and user-visible results remain
 necessary before enabling the accelerated Selection path broadly.
+
+## PostgreSQL concurrent-session verification
+
+Executed on PostgreSQL 17.6 in a separately created scratch database, removed
+after the test. Two independent sessions verified that a claim transaction
+blocks recovery, recovery blocks claiming, and concurrent recovery returns
+`SELECTION_RECOVERY_BUSY`. After the first recovery commits, replay returns the
+same replacement UUID. Exactly one queued job and one archive remain in the
+fixture, with attempt count zero. No production catalogue row was modified.
+
+This concurrency fixture executes the actual recovery migration and claim
+function with reduced synthetic owner/seeder dependencies. The canonical
+seeder and visibility checks are covered separately by the SQL/WASM fixture
+above. It does not simulate provider media or claim a successful audio replay.
+Receipt: `/home/adrien/.norva/selection-recovery-concurrency.safe.json`.
+
+## Migration publication
+
+PR #517 merged as `df0b33bb4dfa19ba7509de03bffc558e0ac860be` after Build Norva
+36779206231, Partners 36779206267 and customer-service notices 36779206253
+succeeded. Production migration SHA256:
+`56f9044040bd97146ae9b18813242b05813e935e99f7c1e1742d91a4d68be55d`.
+
+The installed RPC and archive exist; customer execution and archive access
+are denied. Before/after counts match (192 completed, 523 failed), both Selection
+flags remain false and zero recoveries have been invoked. Receipt:
+`/home/adrien/.norva/selection-audio-recovery-migration.safe.json`.
+Real capture/inference/hydration replay remains outstanding.
