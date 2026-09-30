@@ -152,11 +152,13 @@ function decodeStartupSegments(bin, descriptors, { signal, spawnImpl = spawn, ti
                 // Separate outputs let both decoders emit two real frames.
                 // A single muxer can stop at the video cap before audio is
                 // emitted; hashing a whole half-second wastes startup CPU.
-                // Keep the common half-second window: audio starting much
-                // later must not earn an accelerated-start certificate.
+                // VOD keeps its common half-second window. Live diagnostics
+                // compare actual first-frame PTS so a leading audio-only span
+                // is distinguished from an inconclusive decoder failure.
             descriptors.forEach((_, i) => tracks.forEach((track, j) => args.push(
                 '-map', `${i}:${track === 'video' ? 'V' : 'a'}:0`, track === 'video' ? '-frames:v' : '-frames:a',
-                '2', '-t', '0.5', '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * tracks.length + j]}`)));
+                '2', ...(diagnostics ? (track === 'video' ? ['-fps_mode', 'passthrough'] : []) : ['-t', '0.5']),
+                '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * tracks.length + j]}`)));
             child = spawnImpl(bin, args, { stdio: ['ignore', 'pipe', 'pipe', ...descriptors,
                 ...Array(outputs.length - 1).fill('pipe')], windowsHide: true });
         } catch (_) { finish(false, 'process-failed'); return; }
@@ -179,7 +181,30 @@ function decodeStartupSegments(bin, descriptors, { signal, spawnImpl = spawn, ti
                 const match = /^0,\s*-?\d+,\s*-?\d+,\s*\d+,\s*(\d+),\s*[a-f0-9]{64}\s*$/.exec(line);
                 return match && Number(match[1]) > 0;
             }).length);
-            finish(!failed && !stderr && !signal?.aborted && code === 0 && counts.every(n => n >= 2));
+            const decoded = !failed && !stderr && !signal?.aborted && code === 0 && counts.every(n => n >= 2);
+            if (decoded && diagnostics && tracks.length === 2) {
+                // Two decoded frames per lane prove content, not a simultaneous
+                // start. Live recovery may discard undecodable video while
+                // retaining seconds of earlier audio. Compare actual PTS from
+                // the same input; never infer a gap from a missing output or a
+                // decoder timeout. VOD keeps its original half-second window.
+                const firstTimes = outputs.map(output => {
+                    const tb = /^#tb 0:\s*(\d+)\/(\d+)\s*$/m.exec(output);
+                    const frame = /^0,\s*-?\d+,\s*(-?\d+),\s*\d+,\s*[1-9]\d*,\s*[a-f0-9]{64}\s*$/m.exec(output);
+                    if (!tb || !frame) return NaN;
+                    const numerator = Number(tb[1]), denominator = Number(tb[2]), pts = Number(frame[1]);
+                    return Number.isSafeInteger(numerator) && numerator > 0
+                        && Number.isSafeInteger(denominator) && denominator > 0
+                        && Number.isSafeInteger(pts) ? pts * numerator / denominator : NaN;
+                });
+                if (firstTimes.some(time => !Number.isFinite(time))) { finish(false, 'inconclusive'); return; }
+                for (let i = 0; i < descriptors.length; i++) {
+                    if (Math.abs(firstTimes[i * 2] - firstTimes[i * 2 + 1]) > 0.5) {
+                        finish(false, 'delayed-track-start'); return;
+                    }
+                }
+            }
+            finish(decoded);
         });
         signal?.addEventListener('abort', abort, { once: true });
         if (signal?.aborted) abort();

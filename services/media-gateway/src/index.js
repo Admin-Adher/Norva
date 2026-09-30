@@ -16561,7 +16561,8 @@ function startFfmpeg(session) {
     // Each producer attempt starts a new proof, even when retrying in the same
     // directory with segment-00000. Only the finalized local H.264 TS output is
     // inspected; no second provider request or metadata probe is opened.
-    session.liveTsStartupGate = isLiveSession(session) && !encodeVideo
+    session.liveTsStartupGate = isLiveSession(session)
+        && (!encodeVideo || session.liveTsStartupTranscodeFallback === true)
         && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)
         ? createLiveTsStartupGate({ root: session.outputDir, bin: FFMPEG_PATH,
             signal: session.startupAbortController?.signal }) : null;

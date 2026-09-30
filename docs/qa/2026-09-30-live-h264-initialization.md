@@ -61,3 +61,35 @@ new fallback may add preparation time; native recovery has a 60-second deadline.
 The provider's initial delay, an actual first frame, Back cleanup, and global
 deployment must be measured separately. Code 42 was under Play review at the
 last check; these measurements use installed code 40.
+
+## Full isolated integration and leading-audio correction
+
+The real candidate Gateway was exercised via POST /sessions against a local
+HTTP fixture, inside a container with no external network, production secrets,
+devices or mounts. The captured bytes reproduced three rejected copy segments
+and the actual FFmpeg encode fallback. This initially exposed 5.121 seconds of
+audio preceding the first decoded video frame in encoded segment 0.
+
+Live diagnostics now decode two frames per lane with video PTS passthrough and
+compare each first presentation time using its framehash time base. A proven
+gap over 0.5 seconds is `delayed-track-start`; missing data, stderr, timeout and
+invalid time bases cannot establish that result. VOD retains the original
+half-second common-window proof. The startup gate also applies to this bounded
+Live encoder fallback, so the audio-leading prefix is projected out before ready.
+
+The integration replay with the final three source changes confirmed:
+
+- Segment 0: video PTS256 with time base1/50 =5.12s, audio0/48000 =0s;
+  `delayed-track-start` and not served.
+- Segments 1 and 2: video0s, audio0.02s; both independently `decoded`.
+- POST201 after9.128s, positive startup decode proof, one rejected encoded
+  prefix and three retained segments/10.18s reserve.
+- Exactly two sequential local input requests, copy then encode, with2.549s
+  between old connection close and replacement open. Peak simultaneous inputs1.
+- DELETE returned all local sessions, producers and reservations to zero.
+
+This uses software encoding in the isolated container. Production uses its
+existing admitted VAAPI encoder; actual phone playback remains to be replayed.
+Private integration receipt SHA256:
+`de5e135bae98dffb9b3db39329dc490e6e366cf79e1367b2a5ab3bc245eada64`.
+Encoded segments0–2 were preserved privately for further verification.

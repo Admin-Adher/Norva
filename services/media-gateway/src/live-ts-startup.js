@@ -186,7 +186,7 @@ function createLiveTsStartupGate({ root, bin, signal, decode = decodeStartupSegm
                 reason = result.reason;
                 if (result.reason === 'aborted' || signal?.aborted) return false;
                 if (result.verified) { minimum = segment.sequence; verified = true; reason = 'decoded'; return true; }
-                if (result.reason === 'invalid-bitstream') {
+                if (['invalid-bitstream', 'delayed-track-start'].includes(result.reason)) {
                     rejected.add(segment.name); minimum = segment.sequence + 1;
                     // Three proven corrupt prefixes do not authorize an untested
                     // fourth segment. The session may take its bounded encoder
