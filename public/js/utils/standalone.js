@@ -781,6 +781,14 @@
             state.lastAttemptAt = now;
             nativeRecoveryAttempts.set(key, state);
             const resume = Math.max(0, Math.floor(Number(positionSeconds) || 0));
+            // A confirmed HTML response already disproved this media route.
+            // Its first replacement still awaits exact session cleanup, but
+            // needs no retry backoff. Later failures retain the normal budget.
+            const recoveryDelayMs = attempt === 0 && reason === 'provider_html_response' ? 0 : (isLiveRecovery
+                ? (NATIVE_LIVE_RECOVERY_DELAYS_MS[attempt]
+                    || NATIVE_LIVE_RECOVERY_DELAYS_MS[NATIVE_LIVE_RECOVERY_DELAYS_MS.length - 1])
+                : (NATIVE_RECOVERY_DELAYS_MS[attempt]
+                    || NATIVE_RECOVERY_DELAYS_MS[NATIVE_RECOVERY_DELAYS_MS.length - 1]));
             setTimeout(async () => {
                 if (scheduledGeneration !== nativeIntentGeneration
                     || activeNativeIntentKey !== key
@@ -808,11 +816,7 @@
                         recoveryToken
                     );
                 }
-            }, isLiveRecovery
-                ? (NATIVE_LIVE_RECOVERY_DELAYS_MS[attempt]
-                    || NATIVE_LIVE_RECOVERY_DELAYS_MS[NATIVE_LIVE_RECOVERY_DELAYS_MS.length - 1])
-                : (NATIVE_RECOVERY_DELAYS_MS[attempt]
-                    || NATIVE_RECOVERY_DELAYS_MS[NATIVE_RECOVERY_DELAYS_MS.length - 1]));
+            }, recoveryDelayMs);
             return 'scheduled';
         };
 
@@ -1198,15 +1202,20 @@
         if (window.WatchPage) {
             WatchPage.prototype.play = async function (content, streamUrl, playback) {
                 const initialMeta = contentMeta(content);
-                if (initialMeta && !beginNativePlaybackIntent(
+                // Capture this viewer action before any await. Reading the
+                // mutable claim after history/cleanup could adopt a newer tap
+                // or an invalidated route and launch the abandoned title.
+                const launchClaim = initialMeta ? beginNativePlaybackIntent(
                     initialMeta.sourceId,
                     initialMeta.itemType,
                     initialMeta.itemId
-                )) return;
+                ) : activeNativeIntentClaim;
+                if (initialMeta && !launchClaim) return;
                 // A new viewer intent owns a single provider lane. Await expiry of
                 // any prior native VOD before its resolver is allowed to mint a
                 // replacement session.
                 await stopNativeVodCloudSessions(this);
+                if (activeNativeIntentClaim !== launchClaim) return;
                 // Cross-device resume for the native player. content.resumeTime comes from the
                 // launcher card, which can be up to ~80 s stale (or days, via the SWR paint) —
                 // ALWAYS ask the server and prefer its answer when it responds (audit 2026-07-17
@@ -1223,6 +1232,7 @@
                         if (Number(serverPos) > 0) effectiveResume = Math.floor(Number(serverPos));
                     }
                 } catch (_) { /* best-effort */ }
+                if (activeNativeIntentClaim !== launchClaim) return;
                 try {
                     const meta = contentMeta(content);
                     // Data parity with the web player's history blob (audit 2026-07-17 P2): the
@@ -1261,10 +1271,10 @@
                     })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
                 const meta = initialMeta;
-                const launchClaim = activeNativeIntentClaim;
                 let bypassNativeCache = false;
                 let nativeNetworkRecovery = false;
                 const launchResolved = async (resumeAt, fresh = false, recoveryToken = '', reason = '') => {
+                    if (activeNativeIntentClaim !== launchClaim) return;
                     if (reason === 'media_cache_unavailable') bypassNativeCache = true;
                     // A fresh direct URL cannot repair a refused network route.
                     // The Activity closes its socket before requesting this one
@@ -1277,12 +1287,14 @@
                     let resolved;
                     if (fresh && meta && window.API?.proxy?.xtream?.getStreamUrl) {
                         await stopNativeVodCloudSessions(this);
+                        if (activeNativeIntentClaim !== launchClaim) return;
                         const container = content.containerExtension || 'mp4';
                         const streamType = content.type === 'movie' ? 'movie' : 'series';
                         const catalogPage = streamType === 'movie'
                             ? window.app?.pages?.movies
                             : window.app?.pages?.series;
                         await catalogPage?.prepareForPlaybackSession?.();
+                        if (activeNativeIntentClaim !== launchClaim) return;
                         const hint = (typeof MediaUtils !== 'undefined' && MediaUtils.playbackHintFromItem)
                             ? MediaUtils.playbackHintFromItem(content, { container, streamType })
                             : { container, streamType };
