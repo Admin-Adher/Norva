@@ -1349,7 +1349,7 @@ test('standalone Live recovery re-resolves the channel instead of replaying a st
     liveFlow,
     /fresh = await window\.API\.proxy\.xtream\.getStreamUrl\([\s\S]*?channel\.sourceId,[\s\S]*?liveStreamId,[\s\S]*?'live',[\s\S]*?providerContainer/,
   );
-  assert.match(liveFlow, /if \(!fresh\?\.url\) throw new Error\('No fresh live stream URL returned'\)/);
+  assert.match(liveFlow, /if \(!fresh\?\.url\) \{[\s\S]*?throw new Error\('No fresh live stream URL returned'\)/);
   assert.match(liveFlow, /nativePlay\(fresh\.url,[\s\S]*?fresh\.fallbackUrl \|\| null/);
   assert.match(liveFlow, /sessionId:\s*freshLiveSessionId/);
   assert.match(liveFlow, /sessionId:\s*initialLiveSessionId/);
@@ -1363,6 +1363,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
   const lifecycle = [];
   const scheduled = [];
   const acknowledgements = [];
+  const outgoingSessionId = '40000000-0000-4000-8000-000000000000';
   const initialSessionId = '40000000-0000-4000-8000-000000000001';
   const freshSessionId = '40000000-0000-4000-8000-000000000002';
   const nextSessionId = '40000000-0000-4000-8000-000000000003';
@@ -1389,6 +1390,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
       lifecycle.push(['stop-live', ids]);
       this.currentCloudPlaybackSessionId = null;
       this.activeCloudPlaybackSessionIds.clear();
+      await Promise.all(ids.map(id => window.NorvaCloud.playback.expireSession(id)));
     }
 
     async prepareLiveSwitch() {
@@ -1443,7 +1445,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
         async expireSession(sessionId) {
           const id = String(sessionId);
           lifecycle.push(['expire-live', id]);
-          if (id === initialSessionId) await initialExpiry;
+          if (id === outgoingSessionId) await initialExpiry;
           return { session: { id, status: 'expired' }, gatewayErrors: 0 };
         },
       },
@@ -1492,6 +1494,12 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
     name: 'Test Live',
     cloudPlaybackSessionId: initialSessionId,
   };
+  // A close from the outgoing Activity can be delivered after the next viewer
+  // intent. Its exact expiry is still a strict barrier, without cancelling the
+  // newer intent (current APKs close only on abandonment, never for recovery).
+  await player.play({ ...channel, id: 'outgoing', streamId: '41', cloudPlaybackSessionId: outgoingSessionId },
+    'https://provider.example/live/outgoing.ts', { sessionId: outgoingSessionId });
+  window.__norvaResetPlayThrottle();
   await player.play(
     channel,
     'https://provider.example/live/initial.ts',
@@ -1501,22 +1509,22 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
     },
   );
 
-  assert.equal(launches.length, 1);
-  assert.equal(launches[0].sessionId, initialSessionId);
+  assert.equal(launches.length, 2);
+  assert.equal(launches[1].sessionId, initialSessionId);
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register-live'),
-    [['register-live', initialSessionId]],
+    [['register-live', outgoingSessionId], ['register-live', initialSessionId]],
   );
 
-  assert.equal(window.__norvaNative.onPlaybackClosed(initialSessionId, 'retry'), 'accepted');
+  assert.equal(window.__norvaNative.onPlaybackClosed(outgoingSessionId, 'closed'), 'accepted');
   assert.equal(
-    window.__norvaNative.onPlaybackClosed(initialSessionId, 'duplicate-result'),
+    window.__norvaNative.onPlaybackClosed(outgoingSessionId, 'duplicate-result'),
     'accepted',
     'a duplicate Live close must join its exact in-flight expiry',
   );
-  assert.equal(channel.cloudPlaybackSessionId, null);
-  assert.equal(player.currentCloudPlaybackSessionId, null);
-  assert.equal(player.activeCloudPlaybackSessionIds.size, 0);
+  assert.equal(channel.cloudPlaybackSessionId, initialSessionId);
+  assert.equal(player.currentCloudPlaybackSessionId, initialSessionId);
+  assert.equal(player.activeCloudPlaybackSessionIds.size, 1);
 
   const retry = window.__norvaNative.retryPlayback(
     'atlas-pro',
@@ -1542,10 +1550,10 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
   await recoveryTask;
 
   assert.equal(freshResolverStarted, true);
-  assert.equal(launches.length, 2);
-  assert.equal(launches[1].sessionId, freshSessionId);
-  assert.equal(launches[0].url, 'https://provider.example/live/initial.ts');
-  assert.equal(launches[1].url, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason)
+  assert.equal(launches.length, 3);
+  assert.equal(launches[2].sessionId, freshSessionId);
+  assert.equal(launches[1].url, 'https://provider.example/live/initial.ts');
+  assert.equal(launches[2].url, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason)
     ? 'https://gateway.example/live-fresh/raw' : 'https://provider.example/live/fresh.ts');
   if (liveReason === 'provider_html_response') {
     const retryTimers = scheduled.length;
@@ -1562,7 +1570,9 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register-live'),
     [
+      ['register-live', outgoingSessionId],
       ['register-live', initialSessionId],
+      ['register-live', initialSessionId], // retained until the strict switch release
       ['register-live', freshSessionId],
     ],
   );
@@ -1587,7 +1597,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
       sessionId: nextSessionId,
     },
   );
-  assert.equal(launches[2].sessionId, nextSessionId);
+  assert.equal(launches[3].sessionId, nextSessionId);
   assert.equal(player.currentCloudPlaybackSessionId, nextSessionId);
 
   assert.equal(window.__norvaNative.onPlaybackClosed(freshSessionId, 'back'), 'accepted');
@@ -1621,10 +1631,9 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
     1,
     'the lifecycle fix must not add resolver retries',
   );
-  assert.deepEqual(acknowledgements, [initialSessionId, freshSessionId, nextSessionId]);
+  assert.deepEqual(acknowledgements, [outgoingSessionId, freshSessionId, nextSessionId]);
   if (['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason)) {
-    for (let i = 0; i < 3; i++) assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'html-' + i), 'scheduled');
-    assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'html-last'), 'exhausted');
+    assert.equal(window.__norvaNative.retryPlayback('atlas-pro', 'channel', '84', 0, liveReason, 'after-back'), 'cancelled');
   }
 });
 
@@ -1864,7 +1873,7 @@ test('standalone Live recovery releases the previous cloud session before creati
     "const relaunchLive = async (_resumeAt = 0, recoveryToken = '', reason = '') =>",
     'registerNativeRecovery(meta, relaunchLive)',
   );
-  const releaseAt = relaunch.indexOf('await releasePreviousLiveSession()');
+  const releaseAt = relaunch.indexOf('await releasePreviousLiveSession(recoveryToken)');
   const resolveAt = relaunch.indexOf('fresh = await window.API.proxy.xtream.getStreamUrl(');
   const replacementResolutions = relaunch.match(/fresh = await window\.API\.proxy\.xtream\.getStreamUrl\(/g) || [];
 
