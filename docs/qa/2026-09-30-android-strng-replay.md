@@ -32,3 +32,29 @@ Strng successful session IDs: `614f0b6e-1f76-4383-91a0-f91418ede675` (series), `
 ## Next replay
 
 Verify installed code 40, then repeat a single tap from Continue Watching (with the source explicit), exact resume, Back/session release and TF1. Capture errors from the start of the attempt. Investigate any remaining pre-launch silence and the direct HTML response using those current-version observations.
+
+## Code 40 replay — 10:52–11:00 UTC
+
+ADB verified production **1.3.27 / code 40** after the user's update. Every launch below used one normal tap, with no manual retry. These measurements precede the new WebView fixes described below.
+
+| Strng item | Tap UTC | First-frame event UTC | Tap to first-frame event | Native clock | Resume evidence |
+| --- | --- | --- | --- | --- | --- |
+| Monkey Wrench, MKV episode 2120388 | 10:52:28.325 | 10:52:39.570 | 11.25 s | 8.486 s | History 1411 → 1449 / 1629 s; advancing image |
+| Pish Sharte Ezdeva, MP4 100002 | 10:54:14.427 | 10:54:30.732 | 16.30 s | 14.400 s | History 334 → 360 / 4843 s; image obtained |
+| A Very Merry Bridesmaid, TS-labelled 1220495 | 10:55:21.978 | 10:55:41.962 | 19.98 s | 18.382 s | History 131 → 170 / 4935 s; advancing image |
+| BE: TF1 HD, channel 985192 | 10:59:02.516 | 10:59:09.456 | 6.94 s | 5.210 s | Actual programme image, then Back |
+
+First-frame event receipt includes telemetry delivery latency. Native clock starts once in `PlayerActivity.onCreate` and is not reset by in-place stream recovery. It excludes WebView work before opening the Activity.
+
+VOD relay sessions: `ddbc316c-ad66-42fa-8a5f-ae84f6867b08`, `38bddb3c-0190-41dd-93bf-052301b64a34`, `ef49a706-b53b-4c18-b3f8-d882d8817d5e`. Live transcode session: `6af32c66-9a2f-498e-9eee-b6f9b8871cb2`. All three VOD sessions were confirmed expired after Back. Final Live release is checked separately below.
+
+The direct series attempt again produced confirmed `HtmlResponseException` on code 40. Successful raw relay VOD playback does not imply direct access works. Code 40 changes TS extraction; HTML recovery already existed in code 39.
+
+### Delay breakdown and changes
+
+- Safe Edge startup phases took 478–564 ms; provider takeover/coordinator wait counters were zero.
+- MP4 needed 3,780,512 bytes of tail metadata: that provider read took 7,135 ms. The broker streams data immediately; these bytes are not held until a complete 8 MiB window downloads.
+- TS-labelled input made several timestamp-seek range reads and interrupted one larger continuation before closing. Increasing its grace timer is only a hypothesis and has not been deployed.
+- A VM replay of the actual WebView bridge reproduced an independent bug: navigating away while cleanup/history was pending could launch the abandoned title; an older history result could adopt a newer action. Capture the action claim before the first await and reject stale stages. Four new regressions fail on the previous code.
+- Skip the first HTML-confirmed recovery backoff (1,200 ms VOD, 250 ms Live), while still awaiting exact outgoing session expiry. Subsequent backoff, three-attempt budget, token/route/action checks remain enforced.
+- 72 focused native-bridge and adjacent history tests pass. The changes are WebView JavaScript and require no new APK; production deployment and a refreshed phone replay remain to be recorded.
