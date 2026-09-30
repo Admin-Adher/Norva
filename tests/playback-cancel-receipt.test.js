@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../public/js/cloudApi.js'), 'utf8');
-const body = source.slice(source.indexOf('    async function playbackRequest('),
+const body = source.slice(source.indexOf('    const pendingPlaybackPreparations ='),
     source.indexOf('    async function playbackSessionRequest('));
 function harness() {
     let resolve, reject;

@@ -13,7 +13,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function fixture({ resolveFresh, expire, release, userAgent = 'NorvaTV-test', monotonicNow, wallNow = () => 10_000 } = {}) {
+function fixture({ resolveFresh, expire, release, abortable = false, userAgent = 'NorvaTV-test', monotonicNow, wallNow = () => 10_000 } = {}) {
   const launches = [], resolutions = [], expirations = [], timers = [], notices = [];
   const listeners = new Map();
   const renders = [];
@@ -71,6 +71,7 @@ function fixture({ resolveFresh, expire, release, userAgent = 'NorvaTV-test', mo
     window, document, location, WatchPage, VideoPlayer,
     localStorage: { getItem() { return null; }, setItem() {} },
     navigator: { userAgent }, URL,
+    ...(abortable ? { AbortController } : {}),
     ...(monotonicNow ? { performance: { now: monotonicNow } } : {}),
     Date: class extends Date { static now() { return wallNow(); } }, Map, Set, Promise,
     console: { log() {}, warn() {}, error() {}, info() {} },
@@ -100,6 +101,50 @@ function fixture({ resolveFresh, expire, release, userAgent = 'NorvaTV-test', mo
   };
   return { window, player, play, retry, close, navigate, timers, launches, resolutions, expirations, notices, renders };
 }
+
+for (const departure of ['Back', 'navigation', 'new Play', 'new recovery token']) {
+  test(`Live ${departure} aborts its exact in-flight preparation signal`, async () => {
+    const pending = deferred();
+    const f = fixture({ abortable: true, resolveFresh: () => pending.promise });
+    await f.play(); f.retry();
+    const recovering = f.timers[0].callback(); await tick();
+    const signal = f.resolutions[0][5].signal;
+    assert.equal(signal.aborted, false);
+    if (departure === 'Back') f.close(1);
+    if (departure === 'navigation') f.navigate('#movies');
+    if (departure === 'new Play') await f.play(3);
+    if (departure === 'new recovery token') f.retry('new-token');
+    assert.equal(signal.aborted, true);
+    pending.reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+    await recovering; await tick();
+    assert.equal(f.resolutions.length, 1);
+  });
+}
+
+test('a delayed old Activity close never aborts the new Live preparation', async () => {
+  const pending = deferred();
+  const f = fixture({ abortable: true, resolveFresh: () => pending.promise });
+  await f.play(1); await f.play(3); f.retry('new-token', 3);
+  const recovering = f.timers[0].callback(); await tick();
+  const signal = f.resolutions[0][5].signal;
+  f.close(1); assert.equal(signal.aborted, false);
+  pending.resolve({ url: 'https://gateway.example/live.m3u8', sessionId: session(4) });
+  await recovering;
+  assert.equal(f.launches.at(-1).sessionId, session(4));
+});
+
+test('native recovery deadline actively cancels the pending Live request', async () => {
+  const pending = deferred(); let now = 0;
+  const f = fixture({ abortable: true, userAgent: 'NorvaTV-AndroidPhone/1.3.27',
+    monotonicNow: () => now, resolveFresh: () => pending.promise });
+  await f.play(); f.retry();
+  const recovering = f.timers[0].callback(); await tick();
+  const deadline = f.timers.find(timer => timer.delay === 65_000);
+  assert.ok(deadline); now = 65_000; deadline.callback();
+  assert.equal(f.resolutions[0][5].signal.aborted, true);
+  pending.reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+  await recovering; assert.equal(f.launches.length, 1);
+});
 
 test('Live Back before retry timer invalidates the intent and clears only its Playing state', async () => {
   const f = fixture(); const channel = await f.play();

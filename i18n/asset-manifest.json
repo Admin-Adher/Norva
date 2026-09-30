@@ -1,11 +1,11 @@
 {
   "public/css/i18n.css": "9d49bdc112",
   "public/css/main.css": "9d8eed0a65",
-  "public/js/api.js": "151503cc1e",
+  "public/js/api.js": "7d48d0d70a",
   "public/js/app.js": "0a8a1cae8b",
   "public/js/authApi.js": "c736215973",
   "public/js/blog-index.js": "dccbee9843",
-  "public/js/cloudApi.js": "906b91bb61",
+  "public/js/cloudApi.js": "b15d82215d",
   "public/js/components/ChannelList.js": "2b94d11883",
   "public/js/components/DevicesScreensModule.js": "f865c42fcb",
   "public/js/components/EpgGuide.js": "a0f9f26b0f",
@@ -41,6 +41,6 @@
   "public/js/utils/mediaUtils.js": "b8e738b0ee",
   "public/js/utils/regions.js": "68b00bc227",
   "public/js/utils/sourceHealth.js": "c9d3adcf56",
-  "public/js/utils/standalone.js": "e99fdfd83e",
+  "public/js/utils/standalone.js": "41e25a511a",
   "public/js/utils/tvNavigation.js": "f5f0aa2f08"
 }

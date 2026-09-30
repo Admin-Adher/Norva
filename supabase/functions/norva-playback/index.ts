@@ -370,6 +370,7 @@ async function handleRequest(req: Request): Promise<Response> {
         ok: true,
         service: "norva-playback",
         version: 84,
+        livePlaybackPreparationProtocol: 1,
         automaticOwnedEpisodeGatewayProtocol: 1,
         genericNativeMp4Protocol: 1,
         genericNativeMp4Enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
@@ -484,6 +485,17 @@ async function handleRequest(req: Request): Promise<Response> {
     if (req.method === "GET" && segments[0] === "telemetry" && segments[1] === "summary") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await getPlaybackTelemetrySummary(url, identity.userId, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "playback" && segments[1] === "preparations") {
+      const identity = await requireIdentity(req, supabase);
+      if (!segments[2]) {
+        return json(req, await prepareLivePlayback(req, identity.userId, supabase, identity.deviceId ?? null), 201);
+      }
+      if (segments[3] === "cancel" && !segments[4]) {
+        const result = await cancelLivePlaybackPreparation(req, segments[2], identity.userId, supabase,
+          identity.deviceId ?? null);
+        return json(req, result.body, result.status);
+      }
     }
     if (
       req.method === "POST" &&
@@ -2167,6 +2179,7 @@ async function createPlaybackSessionCore(
   db: SupabaseClient,
   defaultDeviceId: string | null = null,
   mediaCacheLifecycle: MediaCacheSingleflightLifecycle,
+  preparation: LivePlaybackPreparationContext | null = null,
 ) {
   const startupTraceStarted = performance.now();
   const startupTraceAt = new Date().toISOString();
@@ -2285,6 +2298,11 @@ async function createPlaybackSessionCore(
   // failed; browser codec promotion must not turn this recovery into encoding.
   const nativeNetworkRecovery = body.nativeNetworkRecovery === true && body.enginePipe === true &&
     clientMode === "relay" && (itemType === "movie" || itemType === "series");
+  // ExoPlayer also decodes continuous Live TS. An explicit network recovery
+  // keeps the generic coordinated raw transport; it must not enter the
+  // finite native-MP4 session/proof path selected by nativeNetworkRecovery.
+  const nativeLiveNetworkRecovery = body.nativeNetworkRecovery === true && body.enginePipe === true &&
+    clientMode === "relay" && itemType === "live";
   const serverOwnedEpisodeGateway = shouldUseOwnedEpisodeBrowserGateway(
     resolved, itemType, clientMode, body,
   );
@@ -2337,7 +2355,7 @@ async function createPlaybackSessionCore(
     clientMode === "transcode" &&
     body.gatewayAutoMode === true;
   const serverPromotedRelay = clientMode === "relay" &&
-    !nativeNetworkRecovery &&
+    !nativeNetworkRecovery && !nativeLiveNetworkRecovery &&
     !browserNativeMp4 &&
     (authoritativeVodTier === "video_transcode" || authoritativeVodTier === "audio_transcode"
       // A finite .ts object is not an HLS manifest. Once its container is
@@ -2411,7 +2429,7 @@ async function createPlaybackSessionCore(
   });
   const entitlement = await requirePlaybackEntitlement(userId, db);
   markStartup("policyAndEntitlementMs");
-  let sessionId = crypto.randomUUID();
+  let sessionId = preparation?.playbackSessionId ?? crypto.randomUUID();
   let mediaCacheRuntimeConfig: RuntimeConfig | null = null;
   // Only exact Matroska VOD enters the shared HLS lane. Browser-native MP4
   // remains byte-preserving Relay/direct even if a stale historical binding
@@ -2503,11 +2521,12 @@ async function createPlaybackSessionCore(
       itemId,
       container: stringOr(authoritativeVodContainer ?? requestedPlaybackHint.container, "unknown"),
     });
+  await preparation?.assertCurrent();
   await preemptBackgroundMediaCacheForViewer({
     db,
     accountFingerprint: mediaCacheAccountFingerprint,
     exceptWorkFingerprint: mediaCacheLifecycle.producer?.workFingerprint ?? null,
-    signal: req.signal,
+    signal: preparation?.signal ?? req.signal,
   });
   await assertProviderCircuitClosed(providerAccountHash, db);
 
@@ -2516,8 +2535,9 @@ async function createPlaybackSessionCore(
 
   const sessionStatus = mode === "transcode" ? "pending" : "ready";
   const { data: claimRows, error: claimError } = await db.rpc(
-    "claim_cloud_playback_session",
+    preparation ? "claim_prepared_cloud_playback_session" : "claim_cloud_playback_session",
     {
+      ...(preparation ? { p_preparation_id: preparation.id } : {}),
       p_session_id: sessionId,
       p_user_id: userId,
       p_source_id: sourceId,
@@ -2671,6 +2691,7 @@ async function createPlaybackSessionCore(
         }
       },
       assertSourceCurrent: async () => {
+        await preparation?.assertCurrent();
         await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
         await assertSourceCatalogVisible(sourceId, userId, db);
         if (deviceId) await assertOwnedDevice(deviceId, userId, db);
@@ -2845,7 +2866,9 @@ async function createPlaybackSessionCore(
         null,
         null,
         true,
+        preparation,
       );
+      await preparation?.assertCurrent();
       await commitEdgeSessionCoordinator(rawCoordination, {
         playbackSessionId: session.id,
         gatewaySessionId: null,
@@ -3165,13 +3188,14 @@ async function createPlaybackSessionCore(
       gatewayVideoTranscodeExplicit,
       releasedSuperseded,
       resolvedContainerObservation,
-      req.signal,
+      preparation?.signal ?? req.signal,
       mediaCacheLifecycle.producer,
       mediaCacheReadBypassOnce,
+      preparation ? { expiresAt: preparation.expiresAt, gatewayGenerations: preparation.gatewayGenerations } : null,
     );
     markStartup("gatewayMs");
     if (mediaCacheLifecycle.producer) mediaCacheLifecycle.transferredToGateway = true;
-    if (req.signal.aborted) throw playbackRequestAbortError();
+    if ((preparation?.signal ?? req.signal).aborted) throw playbackRequestAbortError();
     const gatewayCommit = await commitEdgeSessionCoordinator(edgeCoordination, {
       playbackSessionId: session.id,
       gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
@@ -3380,6 +3404,179 @@ async function createPlaybackSessionCore(
   };
 }
 
+type LivePlaybackPreparationContext = {
+  gatewayGenerations: JsonRecord;
+  id: string;
+  playbackSessionId: string;
+  expiresAt: string;
+  signal: AbortSignal;
+  assertCurrent: () => Promise<void>;
+  finish: () => Promise<void>;
+};
+
+function livePreparationRpcRow(data: unknown): JsonRecord {
+  return recordOrEmpty(Array.isArray(data) ? data[0] : data);
+}
+
+function livePreparationRpcError(error: { code?: string } | null): void {
+  if (!error) return;
+  const status = error.code === "42501" ? 403 : error.code === "54000" ? 429
+    : error.code === "22023" || error.code === "22P02" ? 400 : error.code === "55000" ? 409 : 503;
+  throw new HttpError(status, "Playback preparation is unavailable", { code: "PLAYBACK_PREPARATION_UNAVAILABLE" });
+}
+
+function livePreparationDevice(body: JsonRecord, defaultDeviceId: string | null): string | null {
+  const supplied = stringOrNull(body.deviceId ?? body.device_id);
+  if (defaultDeviceId && supplied && supplied !== defaultDeviceId)
+    throw new HttpError(403, "Playback preparation device does not match authentication");
+  return supplied ?? defaultDeviceId;
+}
+
+async function prepareLivePlayback(req: Request, userId: string, db: SupabaseClient, defaultDeviceId: string | null) {
+  const body = await readJson(req);
+  const sourceId = stringOrNull(body.sourceId ?? body.source_id);
+  const itemId = stringOrNull(body.itemId ?? body.item_id);
+  const deviceId = livePreparationDevice(body, defaultDeviceId);
+  if (!sourceId || !itemId || stringOr(body.itemType ?? body.item_type, "") !== "live")
+    throw new HttpError(400, "A live catalogue item is required");
+  await assertOwnedSource(sourceId, userId, db);
+  await assertSourceCatalogVisible(sourceId, userId, db);
+  if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+  await requirePlaybackEntitlement(userId, db);
+  const { data: item, error: itemError } = await db.from("cloud_catalog_visible_media_items")
+    .select("id").eq("source_id", sourceId).eq("user_id", userId)
+    .eq("item_type", "live").eq("external_id", itemId).limit(1).maybeSingle();
+  if (itemError || !item) throw new HttpError(404, "Live catalogue item is unavailable");
+  const routes = mediaGatewayRoutesForProviderPreemption(await getRuntimeConfig(db));
+  if (!routes.length) throw new HttpError(503, "Live preparation routing is unavailable");
+  const generations = await Promise.all(routes.map(async route => {
+    const response = await fetch(`${route.url}/playback-preparations/generation`, {
+      headers: { Authorization: `Bearer ${route.token}` }, signal: AbortSignal.timeout(3000),
+    });
+    const result = recordOrEmpty(await response.json());
+    if (!response.ok || !PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(result.generation, "")))
+      throw new HttpError(503, "Live preparation protocol is unavailable");
+    return [await sha256Hex(route.url), result.generation];
+  }));
+  const { data, error } = await db.rpc("norva_prepare_live_playback", {
+    p_user_id: userId, p_source_id: sourceId, p_device_id: deviceId,
+    p_item_id: itemId, p_mode: stringOrNull(body.mode),
+    p_gateway_generations: Object.fromEntries(generations),
+  });
+  livePreparationRpcError(error);
+  const row = livePreparationRpcRow(data);
+  return { preparation: { id: row.id, expiresAt: row.expires_at } };
+}
+
+async function cancelLivePlaybackPreparation(req: Request, id: string, userId: string,
+  db: SupabaseClient, defaultDeviceId: string | null) {
+  const body = await readJson(req);
+  const deviceId = livePreparationDevice(body, defaultDeviceId);
+  // This monotone transition fences claim in the same SQL row-lock domain.
+  const { data, error } = await db.rpc("norva_cancel_live_preparation", {
+    p_id: id, p_user_id: userId, p_device_id: deviceId,
+  });
+  livePreparationRpcError(error);
+  const row = livePreparationRpcRow(data);
+  const playbackSessionId = stringOr(row.playback_session_id, "");
+  const ownerKey = await sha256Hex(userId);
+  const routes = mediaGatewayRoutesForProviderPreemption(await getRuntimeConfig(db));
+  const expected = recordOrEmpty(row.gateway_generations);
+  const routeHashes = await Promise.all(routes.map(route => sha256Hex(route.url)));
+  if (JSON.stringify(Object.keys(expected).sort()) !== JSON.stringify([...routeHashes].sort())) {
+    return { status: 202, body: { preparation: { id, status: "cancel_requested" }, drained: false, retryAfterMs: 500 } };
+  }
+  const outcomes = await Promise.all(routes.map(async route => {
+    try {
+      const response = await fetch(`${route.url}/playback-preparations/cancel`, {
+        method: "POST", headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerKey, playbackSessionId,
+          generation: expected[await sha256Hex(route.url)] }), signal: AbortSignal.timeout(10_000),
+      });
+      const result = recordOrEmpty(await response.json());
+      return response.status === 200 && result.drained === true
+        && result.generation === expected[await sha256Hex(route.url)]
+        && result.ownerKey === ownerKey && result.playbackSessionId === playbackSessionId;
+    } catch (_) { return false; }
+  }));
+  let drained = routes.length > 0 && outcomes.every(Boolean);
+  const { data: currentPreparation, error: preparationError } = await db.from("live_playback_preparations")
+    .select("started_at,settled_at").eq("id", id).eq("user_id", userId).maybeSingle();
+  if (preparationError || !currentPreparation
+    || (currentPreparation.started_at && !currentPreparation.settled_at)) drained = false;
+  // A missing cloud row is safe only AFTER the owned preparation is cancelled:
+  // its transactional claim can no longer create that UUID. Never a public 404 ACK.
+  const { data: session, error: sessionError } = await db.from("cloud_playback_sessions")
+    .select("id").eq("id", playbackSessionId).eq("user_id", userId).maybeSingle();
+  if (sessionError) drained = false;
+  if (session) {
+    try {
+      const expired = await expirePlaybackSession(playbackSessionId, userId, db);
+      if (expired.gatewayErrors || expired.mediaCacheErrors) drained = false;
+    } catch (_) { drained = false; }
+  }
+  if (drained) {
+    const { error: updateError } = await db.from("live_playback_preparations")
+      .update({ state: "cancelled", updated_at: new Date().toISOString() })
+      .eq("id", id).eq("user_id", userId).eq("state", "cancel_requested");
+    if (updateError) drained = false;
+  }
+  return { status: drained ? 200 : 202,
+    body: { preparation: { id, status: drained ? "cancelled" : "cancel_requested" },
+      drained, ...(drained ? {} : { retryAfterMs: 500 }) } };
+}
+
+async function beginLivePlaybackPreparation(req: Request, userId: string, db: SupabaseClient,
+  defaultDeviceId: string | null): Promise<LivePlaybackPreparationContext | null> {
+  const body = await readJson(req.clone());
+  const id = stringOrNull(body.preparationId);
+  if (!id) return null;
+  if (stringOr(body.itemType ?? body.item_type, "") !== "live")
+    throw new HttpError(400, "Preparations support live playback only");
+  const { data, error } = await db.rpc("norva_begin_live_preparation", {
+    p_id: id, p_user_id: userId,
+    p_device_id: livePreparationDevice(body, defaultDeviceId),
+    p_source_id: stringOrNull(body.sourceId ?? body.source_id),
+    p_item_id: stringOr(body.itemId ?? body.item_id, ""), p_mode: stringOr(body.mode, "auto"),
+  });
+  livePreparationRpcError(error);
+  const row = livePreparationRpcRow(data);
+  const controller = new AbortController();
+  const relayAbort = () => controller.abort();
+  req.signal.addEventListener("abort", relayAbort, { once: true });
+  if (req.signal.aborted) relayAbort();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const assertCurrent = async () => {
+    if (controller.signal.aborted) throw playbackRequestAbortError();
+    const { data: current, error: readError } = await db.from("live_playback_preparations")
+      .select("state,expires_at").eq("id", id).eq("user_id", userId).maybeSingle();
+    if (readError || !["creating", "finished"].includes(current?.state)
+      || Date.parse(current.expires_at) <= Date.now()) {
+      controller.abort();
+      throw playbackRequestAbortError();
+    }
+  };
+  const tick = async () => {
+    try { await assertCurrent(); } catch (_) { controller.abort(); }
+    if (!stopped && !controller.signal.aborted) timer = setTimeout(tick, 500);
+  };
+  timer = setTimeout(tick, 500);
+  return { id, playbackSessionId: stringOr(row.playback_session_id, ""),
+    gatewayGenerations: recordOrEmpty(row.gateway_generations),
+    expiresAt: stringOr(row.expires_at, ""), signal: controller.signal, assertCurrent,
+    finish: async () => {
+      stopped = true; clearTimeout(timer); req.signal.removeEventListener("abort", relayAbort);
+      // Cancellation always wins; this update can never revive its row.
+      await db.from("live_playback_preparations").update({ state: "finished", updated_at: new Date().toISOString() })
+        .eq("id", id).eq("user_id", userId).eq("state", "creating");
+      // This acknowledgement follows every creation/rollback await. Cancel
+      // cannot report drained while a response is still being persisted.
+      await db.from("live_playback_preparations").update({ settled_at: new Date().toISOString() })
+        .eq("id", id).eq("user_id", userId);
+    } };
+}
+
 async function createPlaybackSession(
   req: Request,
   userId: string,
@@ -3390,15 +3587,25 @@ async function createPlaybackSession(
     producer: null,
     transferredToGateway: false,
   };
+  const preparation = await beginLivePlaybackPreparation(req, userId, db, defaultDeviceId);
   try {
-    return await createPlaybackSessionCore(
+    const result = await createPlaybackSessionCore(
       req,
       userId,
       db,
       defaultDeviceId,
       mediaCacheLifecycle,
+      preparation,
     );
+    await preparation?.assertCurrent();
+    return result;
+  } catch (error) {
+    if (preparation) {
+      await expirePlaybackSession(preparation.playbackSessionId, userId, db).catch(() => null);
+    }
+    throw error;
   } finally {
+    await preparation?.finish();
     if (mediaCacheLifecycle.producer && !mediaCacheLifecycle.transferredToGateway) {
       await abandonMediaCacheProducerClaim(db, mediaCacheLifecycle.producer).catch(() => {
         console.warn("[norva-playback] unable to abandon untransferred media cache producer lease");
@@ -8065,6 +8272,7 @@ async function createBytePipeCapability(
   strictLidWindowClaims: StrictLidWindowCapabilityClaims | null = null,
   usePlaybackCanary = false,
   resumeBinding: { sourceId: string; sourceRevision: string; nativeContainer?: string | null; sharedFragmentGrant?: JsonRecord | null } | null = null,
+  preparation: LivePlaybackPreparationContext | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(_db);
   const gatewayRoute = usePlaybackCanary
@@ -8107,8 +8315,11 @@ async function createBytePipeCapability(
       });
     }
   }
+  const preparationGeneration = preparation?.gatewayGenerations[await sha256Hex(gatewayRoute.url)];
+  if (preparation && !preparationGeneration) throw new HttpError(409, "Live preparation route changed");
   const payload = JSON.stringify({
     v: 1,
+    ...(preparation ? { preparationProtocol: 1, preparationGatewayGeneration: preparationGeneration } : {}),
     sid: playbackSessionId,
     uid: userId,
     url: targetUrl,
@@ -8170,6 +8381,7 @@ async function createBytePipeAccess(
   scope: string | null = null,
   fileSizeBytes: number | null = null,
   usePlaybackCanary = false,
+  preparation: LivePlaybackPreparationContext | null = null,
 ) {
   const access = await createBytePipeCapability(
     playbackSessionId,
@@ -8183,6 +8395,8 @@ async function createBytePipeAccess(
     null,
     null,
     usePlaybackCanary,
+    null,
+    preparation,
   );
   return { url: `${access.gatewayUrl}/raw/${access.capability}` };
 }
@@ -8475,6 +8689,7 @@ async function createGatewaySession(
   requestSignal: AbortSignal | null = null,
   mediaCacheProducer: MediaCacheProducerContext | null = null,
   bypassCompleteHlsCache = false,
+  preparation: { expiresAt: string; gatewayGenerations: JsonRecord } | null = null,
 ) {
   const gatewayMode = gatewayModeForPlayback(mode, playbackHint, forceVideoTranscode);
   const gatewayHints = gatewayPlaybackHints(playbackHint);
@@ -8524,6 +8739,8 @@ async function createGatewaySession(
     };
   }
 
+  if (preparation && !preparation.gatewayGenerations[await sha256Hex(gatewayRoute.url)])
+    throw new HttpError(409, "Live preparation route changed");
   const startupStartedAt = performance.now();
   const originalTargetUrlHash = await sha256Hex(targetUrl);
   const identityForTarget = async (resolvedUrl: string) => await sha256Hex(JSON.stringify([
@@ -8537,6 +8754,8 @@ async function createGatewaySession(
   );
   const baseGatewayBody = {
     playbackSessionId,
+    ...(preparation ? { preparationProtocol: 1, preparationExpiresAt: preparation.expiresAt,
+      preparationGatewayGeneration: preparation.gatewayGenerations[await sha256Hex(gatewayRoute.url)] } : {}),
     ownerKey: await sha256Hex(userId),
     sourceUrl: targetUrl,
     mode: gatewayMode,

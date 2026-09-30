@@ -55,7 +55,9 @@ test('the resolver carries cancellation and the server handles transport aborts 
   assert.match(cloudWrapper, /createSession: async \(session, requestOptions = \{\}\)/);
   assert.match(cloudWrapper, /api\.createSession\(session, requestOptions\)/);
   assert.match(cloud, /createSession: \(session, options = \{\}\) => playbackRequest\(session, options\)/);
-  assert.match(edge, /resolvedContainerObservation,\s*req\.signal,/);
+  assert.match(edge, /resolvedContainerObservation,\s*preparation\?\.signal \?\? req\.signal,/);
+  assert.match(edge, /req\.signal\.addEventListener\("abort", relayAbort, \{ once: true \}\)/);
+  assert.match(edge, /if \(req\.signal\.aborted\) relayAbort\(\)/);
   assert.match(edge, /if \(req\.signal\.aborted\) throw playbackRequestAbortError\(\)/);
   assert.match(edge, /if \(req\.signal\.aborted\) \{\s*try \{\s*await expirePlaybackSession/);
   assert.match(edge, /await gateway\.cleanupCreatedSession\?\.\(\)\.catch/);

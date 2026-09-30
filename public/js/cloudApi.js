@@ -1094,30 +1094,175 @@
         }
     }
 
+    // An HTTP abort alone cannot stop a preparation behind the reverse proxy.
+    // Keep exact, authenticated cancellation receipts until the Gateway has
+    // joined its producer. A subsequent Play must not acquire that supplier
+    // slot while its previous cancellation remains unconfirmed.
+    const pendingPlaybackPreparations = new Set();
+    function playbackAuthPrincipal(token, device = false) {
+        // This is only a local cancellation scope, never authentication proof.
+        // Every operation is still authorized by the server. Opaque device
+        // credentials stay exact; user JWT rotation may preserve the same sub.
+        if (!device) {
+            try {
+                const part = String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+                const sub = JSON.parse(atob(part)).sub;
+                if (typeof sub === 'string' && sub) return `user:${sub}`;
+            } catch (_) { /* non-JWT fixtures/legacy credentials remain exact */ }
+        }
+        return `${device ? 'device' : 'opaque-user'}:${token || ''}`;
+    }
+    function playbackAuthScope(options, deviceId) {
+        const device = options.token !== undefined;
+        const token = device ? options.token : getToken();
+        const principal = playbackAuthPrincipal(token, device);
+        return { token, device, principal, key: `${principal}:${deviceId || ''}` };
+    }
+    const playbackPreparationId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        .test(String(value || '')) ? String(value).toLowerCase() : '';
+    const playbackPreparationError = () => Object.assign(new Error('Playback preparation release not confirmed'), {
+        code: 'native_live_cleanup_failed'
+    });
+    async function drainPlaybackPreparation(entry) {
+        if (entry.task) return entry.task;
+        entry.task = (async () => {
+            // Back can arrive before prepare returns. No creation request is
+            // sent in that case, but retire its receipt as soon as it arrives.
+            const id = await entry.receipt;
+            if (!id) return;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 12_000);
+            try {
+                while (!controller.signal.aborted) {
+                    const result = await requestToBase(entry.base, 'POST',
+                        `/playback/preparations/${encodeURIComponent(id)}/cancel`,
+                        entry.deviceId ? { deviceId: entry.deviceId } : {},
+                        { ...entry.options, signal: controller.signal });
+                    if (playbackPreparationId(result?.preparation?.id) !== id) throw playbackPreparationError();
+                    if (result.drained === true && result.preparation.status === 'cancelled') return;
+                    if (result.drained !== false || result.preparation.status !== 'cancel_requested') {
+                        throw playbackPreparationError();
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+                throw playbackPreparationError();
+            } catch (_) {
+                // 404 is not an acknowledgement: a partial deployment must not
+                // reopen a provider connection on an older route.
+                throw playbackPreparationError();
+            } finally {
+                clearTimeout(timeout);
+            }
+        })();
+        entry.task.then(() => {
+            pendingPlaybackPreparations.delete(entry);
+        }, () => {
+            // Keep the exact receipt for the next explicit Play to retry its
+            // cancellation. Never silently release this barrier on failure.
+            entry.task = null;
+        });
+        return entry.task;
+    }
+
     async function playbackRequest(session, options = {}) {
         // Creation is security-sensitive and has no legacy fallback: a partial
         // deployment must fail closed instead of bypassing provider arbitration.
         const { signal, ...receiptOptions } = options;
+        const scope = playbackAuthScope(options, session.deviceId);
+        if (session.itemType === 'live' && signal) receiptOptions._playbackAuthScope = scope;
         const abortError = () => Object.assign(new Error('Playback cancelled'), { name: 'AbortError' });
         if (signal?.aborted) throw abortError();
         // A browser fetch abort does not reliably reach the Edge through the
         // reverse proxy. Keep the creation receipt so Back can close the exact
         // server session instead of abandoning a running provider connection.
-        const cleanupOptions = { token: options.token === undefined ? getToken() : options.token,
-            catalogVisibility: false, keepalive: true };
+        const cleanupOptions = { token: scope.token,
+            ...(receiptOptions._playbackAuthScope ? { _playbackAuthScope: scope } : {}),
+            catalogVisibility: false, keepalive: true, skipProfile: true };
+        const closedReceipts = new Set();
         const closeReceipt = async (id) => {
             if (!id) return;
+            if (closedReceipts.has(id)) return;
             await playbackSessionRequest('POST',
                 `/playback/sessions/${encodeURIComponent(id)}/expire`, null, cleanupOptions);
+            closedReceipts.add(id);
         };
+        if (pendingPlaybackPreparations.size) {
+            await Promise.all(Array.from(pendingPlaybackPreparations)
+                .filter(entry => entry.scopeKey === scope.key).map(drainPlaybackPreparation));
+            if (signal?.aborted) throw abortError();
+        }
+        // Limit the new protocol to cancellable Live resolutions. VOD and
+        // completed sessions retain their existing receipt lifecycle.
+        let preparation = null;
+        let cancelPlayback = null;
+        let cancellation;
+        let cancellationRequested = false;
+        if (session.itemType === 'live' && signal) {
+            const base = playbackBase();
+            const prepareController = new AbortController();
+            const prepareTimeout = setTimeout(() => prepareController.abort(), 15_000);
+            const prepare = requestToBase(base, 'POST', '/playback/preparations', {
+                sourceId: session.sourceId, itemType: 'live', itemId: session.itemId,
+                ...(session.deviceId ? { deviceId: session.deviceId } : {}),
+                ...(session.mode ? { mode: session.mode } : {})
+            }, { ...receiptOptions, catalogVisibility: false, skipProfile: true, signal: prepareController.signal })
+                .finally(() => clearTimeout(prepareTimeout));
+            const receipt = prepare.then(result => {
+                const id = playbackPreparationId(result?.preparation?.id);
+                if (!id) throw playbackPreparationError();
+                return id;
+            });
+            preparation = { base, deviceId: session.deviceId, scopeKey: scope.key, options: cleanupOptions,
+                receipt: receipt.catch(() => null), task: null };
+            let cancelled, cancelFailed;
+            cancellation = new Promise((resolve, reject) => { cancelled = resolve; cancelFailed = reject; });
+            // Prepare may still be pending when cancellation fails; attaching a
+            // rejection handler immediately avoids an unhandled promise.
+            cancellation.catch(() => {});
+            cancelPlayback = () => {
+                if (cancellationRequested) return;
+                cancellationRequested = true;
+                pendingPlaybackPreparations.add(preparation);
+                drainPlaybackPreparation(preparation).then(() => cancelled(), cancelFailed);
+            };
+            signal.addEventListener('abort', cancelPlayback, { once: true });
+            if (signal.aborted) cancelPlayback();
+            try {
+                const id = await receipt;
+                if (signal.aborted || (!scope.device && playbackAuthPrincipal(getToken()) !== scope.principal)) {
+                    cancelPlayback(); await cancellation; throw abortError();
+                }
+                session = { ...session, preparationId: id };
+            } catch (error) {
+                signal.removeEventListener('abort', cancelPlayback);
+                throw error;
+            }
+        }
         let result;
         try {
-            result = await requestToBase(playbackBase(), 'POST', '/playback/session', session, receiptOptions);
+            const creation = requestToBase(playbackBase(), 'POST', '/playback/session', session, receiptOptions)
+                .then(async receipt => {
+                    if (signal?.aborted) await closeReceipt(receipt?.session?.id);
+                    return receipt;
+                }, async error => {
+                    if (error.playbackSessionReceiptId) await closeReceipt(error.playbackSessionReceiptId);
+                    throw error;
+                });
+            result = cancellation
+                ? await Promise.race([creation, cancellation.then(() => { throw abortError(); })])
+                : await creation;
         } catch (error) {
-            if (error.playbackSessionReceiptId) await closeReceipt(error.playbackSessionReceiptId);
+            if (cancelPlayback) {
+                cancelPlayback();
+                await cancellation;
+            }
             throw error;
+        } finally {
+            if (cancelPlayback) signal.removeEventListener('abort', cancelPlayback);
         }
-        if (signal?.aborted) {
+        if (signal?.aborted || (preparation && !scope.device
+            && playbackAuthPrincipal(getToken()) !== scope.principal)) {
+            if (cancelPlayback) { cancelPlayback(); await cancellation; }
             await closeReceipt(result?.session?.id);
             throw abortError();
         }
@@ -1238,13 +1383,14 @@
     async function requestToBase(baseUrl, method, path, body, options = {}) {
         // Only user-session calls (no explicit token) get the refresh-and-retry.
         // Device tokens ('' / device token) keep their own invalidation path.
-        const usingUserToken = options.token === undefined;
+        const playbackScope = options._playbackAuthScope;
+        const usingUserToken = playbackScope ? !playbackScope.device : options.token === undefined;
         const usesCatalogVisibility = options.catalogVisibility !== false;
         const headers = {
             'Content-Type': 'application/json',
             ...(options.headers || {})
         };
-        let token = usingUserToken ? getToken() : options.token;
+        let token = playbackScope ? playbackScope.token : (usingUserToken ? getToken() : options.token);
         if (token) headers.Authorization = `Bearer ${token}`;
         // Account-scoped functions such as Norva Partners deliberately opt out:
         // their CORS contract does not accept a profile header and financial
@@ -1290,14 +1436,17 @@
         // Auth gateways may report an unverifiable bearer as either 401 or
         // 403. Retry once through the shared refresh path so a JWT signing-key
         // rotation does not strand an otherwise valid browser session.
-        if ((response.status === 401 || response.status === 403) && usingUserToken && token) {
+        if ((response.status === 401 || response.status === 403) && usingUserToken && token
+            && (!playbackScope || playbackAuthPrincipal(getToken()) === playbackScope.principal)) {
             // Exact native-session closure owns a strict AbortSignal budget.
             // Token rotation may continue safely in the auth single-flight, but
             // this request must release its close barrier on time so Android can
             // redeliver it rather than leaving the next episode blocked forever.
             const fresh = await awaitWithSignal(refreshAccessToken(), options.signal);
-            if (fresh && fresh !== token) {
+            if (fresh && fresh !== token
+                && (!playbackScope || playbackAuthPrincipal(fresh) === playbackScope.principal)) {
                 token = fresh;
+                if (playbackScope) playbackScope.token = fresh;
                 headers.Authorization = `Bearer ${token}`;
                 _trRefreshed = true;
                 response = await send();

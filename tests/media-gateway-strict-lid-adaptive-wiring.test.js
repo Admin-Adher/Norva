@@ -183,7 +183,7 @@ test('real strict evaluator cross-pass disagreement survives the authenticated r
     const evaluator = vm.runInNewContext(`(() => {
         ${between('function strictLanguageSampleDisposition(', 'const BASIC_LID_MIN_CONFIDENCE')}
         ${between('function strictLanguageBatchSampleResult(', 'function strictLidWindowRuntimeBinding(')}
-        ${between('function detectLanguageFromText(', "app.post('/sessions'")}
+        ${between('function detectLanguageFromText(', "app.get('/playback-preparations/generation'")}
         return strictLanguageBatchSampleResult;
     })()`, { evaluateStrictTranscriptEvidence, prepareStrictSpokenTranscript, WHISPER_STRICT_MIN_WORDS: 12,
         WHISPER_STRICT_MIN_UNIQUE_WORDS: 8, WHISPER_STRICT_MIN_PROBABILITY: 0.95 });
@@ -235,7 +235,7 @@ test('real Japanese evaluator seals punctuation safely without certifying a sing
     const evaluator = vm.runInNewContext(`(() => {
         ${between('function strictLanguageSampleDisposition(', 'const BASIC_LID_MIN_CONFIDENCE')}
         ${between('function strictLanguageBatchSampleResult(', 'function strictLidWindowRuntimeBinding(')}
-        ${between('function detectLanguageFromText(', "app.post('/sessions'")}
+        ${between('function detectLanguageFromText(', "app.get('/playback-preparations/generation'")}
         return strictLanguageBatchSampleResult;
     })()`, { evaluateStrictTranscriptEvidence, prepareStrictSpokenTranscript, WHISPER_STRICT_MIN_WORDS: 12,
         WHISPER_STRICT_MIN_UNIQUE_WORDS: 8, WHISPER_STRICT_MIN_PROBABILITY: 0.95 });

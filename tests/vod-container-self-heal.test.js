@@ -100,7 +100,7 @@ test('a server-observed container overrides a stale open-tab label without trust
 test('a confirmed finite TS browser relay is promoted without forcing a direct native client through Gateway',()=>{
   const source=read(EDGE_PATH);
   const expression=source.match(/const serverPromotedRelay =([\s\S]*?);/)[1];
-  const decide=input=>vm.runInNewContext(`(${expression})`,{clientMode:'relay',browserNativeMp4:false,nativeNetworkRecovery:false,
+  const decide=input=>vm.runInNewContext(`(${expression})`,{clientMode:'relay',browserNativeMp4:false,nativeNetworkRecovery:false,nativeLiveNetworkRecovery:false,
     authoritativeVodTier:null,authoritativeVodContainer:null,...input});
   assert.equal(decide({authoritativeVodContainer:'ts'}),true);
   assert.equal(decide({clientMode:'direct',authoritativeVodContainer:'ts'}),false);

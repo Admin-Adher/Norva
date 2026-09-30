@@ -78,12 +78,13 @@ class RolloutSafety(unittest.TestCase):
         config['HostConfig']['OomKillDisable'] = False
         self.assertEqual(rollout.contract(config), baseline)
 
-    def check_idle(self, h, debug=None, native='0'):
+    def check_idle(self, h, debug=None, native='0', table_exists='0', preparations='0'):
         original = container()
         with patch.object(rollout, 'inspect', return_value=original), \
              patch.object(rollout, 'health', side_effect=[h, {'sessions': []} if debug is None else debug]), \
-             patch.object(rollout.subprocess, 'check_output', return_value=native):
-            return rollout.idle('norva-media-gateway', original)
+             patch.object(rollout.subprocess, 'check_output',
+                          side_effect=[native, table_exists, preparations]):
+            return rollout.idle('norva-media-gateway', original, expected_version=167)
 
     def test_idle_requires_positive_evidence_not_missing_counters(self):
         self.check_idle(empty_health())
@@ -101,6 +102,11 @@ class RolloutSafety(unittest.TestCase):
             self.check_idle(empty_health(), debug={'sessions': [{'id': 'viewer'}]})
         with self.assertRaises(AssertionError):
             self.check_idle(empty_health(), native='1')
+
+    def test_existing_preparation_table_is_checked_before_stop(self):
+        self.check_idle(empty_health(), table_exists='1', preparations='0')
+        with self.assertRaisesRegex(AssertionError, 'live_playback_preparation_active'):
+            self.check_idle(empty_health(), table_exists='1', preparations='1')
 
 
 if __name__ == '__main__':

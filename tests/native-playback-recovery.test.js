@@ -1463,6 +1463,7 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
         xtream: {
           async getStreamUrl(sourceId, streamId, type, container, options) {
             assert.equal(options.mode, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason) ? 'engine' : undefined);
+            assert.equal(options.nativeNetworkRecovery, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason) ? true : undefined);
             freshResolverStarted = true;
             lifecycle.push(['resolve-live', freshSessionId]);
             return {

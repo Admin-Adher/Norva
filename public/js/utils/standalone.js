@@ -358,9 +358,17 @@
         const activeNativeRecoveryTokens = new Map();
         const nativeRecoveryTokenDeadlines = new Map();
         const retiredNativeRecoveryTokens = new Set();
+        const nativeLivePreparationControllers = new Map();
+        const abortNativeLivePreparation = claim => {
+            const entry = nativeLivePreparationControllers.get(claim);
+            if (entry) entry.controller.abort();
+        };
         const retireNativeRecoveryToken = (key) => {
             const token = activeNativeRecoveryTokens.get(key);
             if (token) {
+                for (const entry of nativeLivePreparationControllers.values()) {
+                    if (entry.key === key && entry.token === token) entry.controller.abort();
+                }
                 retiredNativeRecoveryTokens.add(token);
                 if (retiredNativeRecoveryTokens.size > 64) {
                     retiredNativeRecoveryTokens.delete(retiredNativeRecoveryTokens.values().next().value);
@@ -657,6 +665,7 @@
             const sessionId = boundedNativePlaybackSessionId(rawSessionId);
             if (!sessionId) return 'not_ready';
             const liveClaim = nativeLiveSessionClaims.get(sessionId);
+            if (liveClaim) abortNativeLivePreparation(liveClaim.claim);
             // A close can arrive while its replacement URL is resolving, after
             // the previous session has already left the active registry.
             if ((nativeVodSessionClaims.get(sessionId) === activeNativeIntentClaim
@@ -758,6 +767,7 @@
                 && route === activeNativeIntentRoute
                 && now - lastNativeIntentAt < 1500) return false;
             dismissNativePlaybackStartFailure();
+            abortNativeLivePreparation(activeNativeIntentClaim);
             retireNativeRecoveryToken(activeNativeIntentKey);
             activeNativeIntentKey = key;
             activeNativeIntentRoute = route;
@@ -789,6 +799,7 @@
         const invalidateNativeRecoveryForRouteChange = () => {
             if (!activeNativeIntentKey || currentNativeRoute() === activeNativeIntentRoute) return;
             dismissNativePlaybackStartFailure();
+            abortNativeLivePreparation(activeNativeIntentClaim);
             retireNativeRecoveryToken(activeNativeIntentKey);
             activeNativeIntentKey = '';
             activeNativeIntentClaim = '';
@@ -1596,17 +1607,37 @@
                                 : 'transcode');
                         await releasePreviousLiveSession(recoveryToken);
                         if (!isCurrentLiveLaunch(recoveryToken)) return;
-                        fresh = await window.API.proxy.xtream.getStreamUrl(
-                            channel.sourceId,
-                            liveStreamId,
-                            'live',
-                            providerContainer,
-                            {
-                                gatewayMode,
-                                ...(['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(reason) ? { mode: 'engine' } : {}),
-                                ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
+                        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+                        const key = meta && nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId);
+                        const preparationEntry = controller ? { controller, key, token: recoveryToken } : null;
+                        if (preparationEntry) {
+                            abortNativeLivePreparation(launchClaim);
+                            nativeLivePreparationControllers.set(launchClaim, preparationEntry);
+                        }
+                        const deadline = nativeRecoveryTokenDeadlines.get(key);
+                        const preparationTimeout = controller && deadline?.token === recoveryToken
+                            ? setTimeout(() => controller.abort(), Math.max(0, deadline.expiresAt - nativeRecoveryClock()))
+                            : null;
+                        try {
+                            fresh = await window.API.proxy.xtream.getStreamUrl(
+                                channel.sourceId,
+                                liveStreamId,
+                                'live',
+                                providerContainer,
+                                {
+                                    gatewayMode,
+                                    ...(['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(reason)
+                                        ? { mode: 'engine', nativeNetworkRecovery: true } : {}),
+                                    ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
+                                },
+                                controller ? { signal: controller.signal } : {}
+                            );
+                        } finally {
+                            if (preparationTimeout !== null) clearTimeout(preparationTimeout);
+                            if (nativeLivePreparationControllers.get(launchClaim) === preparationEntry) {
+                                nativeLivePreparationControllers.delete(launchClaim);
                             }
-                        );
+                        }
                     } else {
                         fresh = { url: channel?.url || null, fallbackUrl: null };
                     }

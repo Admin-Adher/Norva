@@ -930,6 +930,24 @@ test('a browser recovery hint cannot select the native raw route', async () => {
     assert.strictEqual(calls[0].nativeNetworkRecovery, undefined);
 });
 
+test('only explicit native Live network recovery selects one raw engine session', async () => {
+    for (const native of [false, true]) for (const recovery of [false, true]) {
+        const { API, calls, callOptions } = loadCloudApi({ native });
+        const controller = new AbortController();
+        await API.proxy.xtream.getStreamUrl('source-1', '123', 'live', 'ts',
+            recovery ? { mode: 'engine', nativeNetworkRecovery: true } : {}, { signal: controller.signal });
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(callOptions[0].signal, controller.signal, 'the same cancellation signal reaches the session request');
+        assert.strictEqual(calls[0].itemType, 'live');
+        assert.strictEqual(calls[0].nativeNetworkRecovery, native && recovery ? true : undefined);
+        if (native) {
+            assert.strictEqual(calls[0].mode, recovery ? 'relay' : 'direct');
+            assert.strictEqual(calls[0].enginePipe, recovery ? true : undefined);
+            assert.notStrictEqual(calls[0].requiresTranscode, true);
+        }
+    }
+});
+
 test('unknown MKV remains direct on a native player', async () => {
     const { API, calls } = loadCloudApi({ native: true });
     const result = await API.proxy.xtream.getStreamUrl(

@@ -384,9 +384,16 @@ test('transcode reservation is cleanup-safe and global QoS never authorizes a 45
   const acquire = sessionsRoute.indexOf('await acquireViewerSessionStartupLocks');
   const firstPreemption = sessionsRoute.indexOf('await stopConflictingOwnerSessions');
   assert.ok(acquire >= 0 && acquire < reserve && reserve < firstPreemption);
+  const finalizerStart = sessionsRoute.lastIndexOf('} finally {');
+  assert.ok(finalizerStart >= 0, 'session creation must release its QoS resources in finally');
+  const finalizer = sessionsRoute.slice(finalizerStart);
+  assert.match(finalizer,
+    /if \(releasePreparationStartup && sessionRequestAbortController\?\.signal\.aborted && createdSession\)[\s\S]*await stopSession\(createdSession, \{ reason: 'preparation-cancelled' \}\);[\s\S]*catch \(_\) \{ preparationCleanupFailed = true; \}/,
+    'prepared cancellation must attempt the exact session cleanup and preserve a failed drain');
   assert.match(
-    sessionsRoute,
-    /finally\s*\{\s*detachSessionRequestAbort\?\.\(\);\s*releaseViewerSessionStartupLock\?\.\(\);\s*releaseViewerSessionStartupAdmission\(viewerSessionStartupAdmission\);\s*releaseViewerStartup\(viewerStartupReservation\)/,
+    finalizer,
+    /detachSessionRequestAbort\?\.\(\);\s*clearTimeout\(preparationExpiryTimer\);\s*releaseViewerSessionStartupLock\?\.\(\);\s*releaseViewerSessionStartupAdmission\(viewerSessionStartupAdmission\);\s*releaseViewerStartup\(viewerStartupReservation\);\s*releasePreparationStartup\?\.\(async \(\) => !preparationCleanupFailed/,
+    'abort listeners, deadline, lock, admission and reservation must be released before reporting the preparation drain',
   );
   assert.match(sessionsRoute, /catch \(err\)[\s\S]*await stopSession\(createdSession\)/);
   assert.match(sessionsRoute, /req\.once\('aborted', abortSessionRequest\)/);
