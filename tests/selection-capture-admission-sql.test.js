@@ -1,0 +1,136 @@
+'use strict';
+// Actual PostgreSQL/WASM execution. For an isolated local run, install
+// @electric-sql/pglite@0.5.8 in a scratch prefix and expose it through NODE_PATH.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+let PGlite;
+try { ({ PGlite } = require('@electric-sql/pglite')); }
+catch (error) {
+  if (process.env.NORVA_REQUIRE_SELECTION_SQL === '1') throw error;
+  // Optional in the general suite; the mandatory Build SQL step requires it.
+}
+const root = path.resolve(__dirname, '..');
+const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
+const migration = read('supabase/migrations/20260930160000_selection_capture_independent_admission.sql');
+const queue = read('supabase/migrations/20260909190753_selection_audio_analysis_queue.sql');
+function sqlFunction(source, name, delimiter = '$function$') {
+  const start = source.search(new RegExp(`create (?:or replace )?function public\\.${name}\\(`, 'i'));
+  assert.notEqual(start, -1, name);
+  const body = source.indexOf(delimiter, start);
+  const end = source.indexOf(delimiter + ';', body + delimiter.length);
+  assert.ok(body > start && end > body, name);
+  return source.slice(start, end + delimiter.length + 1);
+}
+
+async function fixture() {
+  const db = new PGlite();
+  // Only visibility's dependency tables/view are reduced. The source-identity,
+  // owner lookup, claim, capture checkpoint and migration execute verbatim SQL.
+  await db.exec(`
+    create role anon; create role authenticated; create role service_role;
+    create schema auth;
+    create function auth.jwt() returns jsonb language sql stable as $$select '{}'::jsonb$$;
+    create table public.admin_feature_flags(key text primary key, enabled boolean not null);
+    insert into public.admin_feature_flags values('language_capture_pipeline_enabled',false);
+    create table public.cloud_sources(id uuid primary key,user_id uuid,enabled boolean,sync_status text,source_type text,deleted_at timestamptz);
+    create table public.cloud_source_catalog_heads(source_id uuid primary key,user_id uuid,active_generation_id uuid);
+    create table public.cloud_media_items(id uuid primary key,user_id uuid,source_id uuid,generation_id uuid,item_type text,available boolean,playback_hint jsonb);
+    create table public.cloud_title_variants(id uuid primary key,user_id uuid,source_id uuid,generation_id uuid,media_item_id uuid,item_type text,external_id text,playback_hint jsonb);
+    create view public.cloud_catalog_visible_title_variants as
+      select v.* from public.cloud_title_variants v join public.cloud_sources s on s.id=v.source_id and s.user_id=v.user_id
+      join public.cloud_source_catalog_heads h on h.source_id=s.id and h.user_id=s.user_id and h.active_generation_id=v.generation_id
+      where s.enabled and s.deleted_at is null and s.sync_status='ready';
+    create table public.metadata_proof_checks(label text primary key);
+    create function public.metadata_assert(ok boolean,label text) returns void language plpgsql as $$
+      begin if ok is distinct from true then raise exception 'metadata_fixture_%',label; end if;
+      insert into public.metadata_proof_checks values(label); end $$;
+    ${sqlFunction(read('supabase/migrations/20260823120000_provider_credential_transition_v1.sql'), 'norva_credential_require_service_role')}
+    ${sqlFunction(read('supabase/migrations/20260909095957_selection_reenrollment_identity.sql'), 'norva_selection_source_identity_valid')}
+    ${sqlFunction(read('supabase/migrations/20260911191032_strict_lid_capture_handoff.sql'), 'catalog_language_capture_pipeline_enabled', '$f$')}
+    ${queue.slice(queue.indexOf('create table public.catalog_selection_audio_jobs'), queue.indexOf('create or replace function public.selection_audio_tracks_complete'))}
+    ${sqlFunction(queue, 'selection_audio_job_owners')}
+    ${sqlFunction(read('supabase/migrations/20260909194054_selection_audio_claim_bounded_candidates.sql'), 'claim_selection_audio_job')}
+    revoke all on function public.claim_selection_audio_job() from public,anon,authenticated;
+    grant execute on function public.claim_selection_audio_job() to service_role;
+  `);
+  await db.exec(read('supabase/migrations/20260911200200_selection_audio_capture_handoff.sql'));
+  await db.exec(read('supabase/migrations/20260911204152_selection_parallel_capture_admission.sql'));
+  return db;
+}
+
+test('Selection admission is independent, exact-file scoped and keeps private SQL controls', { skip: !PGlite }, async t => {
+  const db = await fixture();
+  const value = async sql => (await db.query(sql)).rows[0].value;
+  const attributes = () => value(`select jsonb_build_object('oid',oid,'owner',proowner,'acl',proacl,'definer',prosecdef,
+    'volatility',provolatile,'config',proconfig,'language',prolang) value from pg_proc
+    where oid='public.selection_audio_capture_pipeline_enabled()'::regprocedure`);
+  try {
+    const before = await attributes();
+    const flags = await value('select jsonb_object_agg(key,enabled) value from public.admin_feature_flags');
+    const unchangedFunctions = () => value(`select jsonb_object_agg(proname,pg_get_functiondef(oid)) value
+      from pg_proc where oid in ('public.claim_selection_audio_job()'::regprocedure,
+        'public.selection_audio_job_owners(text,text)'::regprocedure,
+        'public.checkpoint_selection_audio_capture(text,text,uuid,integer,integer,text,text,timestamptz)'::regprocedure,
+        'public.defer_selection_audio_capture(text,text,uuid)'::regprocedure,
+        'public.selection_audio_parallel_capture_enabled()'::regprocedure,
+        'public.catalog_language_capture_pipeline_enabled()'::regprocedure)`);
+    const controls = await unchangedFunctions();
+    await db.exec("begin; update public.admin_feature_flags set enabled=true where key='selection_capture_pipeline_enabled'");
+    assert.equal(await value('select public.selection_audio_capture_pipeline_enabled() value'), false, 'reproduces the legacy coupling before migration');
+    await db.exec('rollback');
+    await db.exec(migration);
+    assert.deepEqual(await attributes(), before);
+    assert.deepEqual(await unchangedFunctions(), controls);
+    assert.deepEqual(await value('select jsonb_object_agg(key,enabled) value from public.admin_feature_flags'), flags);
+    assert.equal(await value('select public.selection_audio_capture_pipeline_enabled() value'), false);
+    assert.equal(await value("select has_function_privilege('anon','public.selection_audio_capture_pipeline_enabled()','EXECUTE') or has_function_privilege('authenticated','public.selection_audio_capture_pipeline_enabled()','EXECUTE') value"), false);
+
+    await t.test('legacy alone never admits Selection; missing flag also fails closed', async () => {
+      await db.exec("begin; update public.admin_feature_flags set enabled=true where key='language_capture_pipeline_enabled'");
+      assert.equal(await value('select public.selection_audio_capture_pipeline_enabled() value'), false);
+      await db.exec("delete from public.admin_feature_flags where key='selection_capture_pipeline_enabled'");
+      assert.equal(await value('select public.selection_audio_capture_pipeline_enabled() value'), false);
+      await db.exec('rollback');
+    });
+    await t.test('real checkpoint, owner, URL, lease, generation and terminal tests run with legacy OFF', async () => {
+      await db.exec(read('tests/sql/selection-audio-capture-handoff.sql'));
+      assert.equal(await value('select public.catalog_language_capture_pipeline_enabled() value'), false);
+      assert.equal(await value('select public.selection_audio_capture_pipeline_enabled() value'), true);
+      assert.equal(await value("select count(*)::int value from public.metadata_proof_checks where label='selection_capture_committed'"), 1);
+      // The historical networkless runner uses an unfiltered visibility view.
+      // Keep these stronger visibility checks in this scoped fixture, whose
+      // view actually enforces enabled/deleted and active-generation state.
+      await db.exec(`do $$ declare token uuid:=gen_random_uuid(); job uuid; begin
+        perform set_config('request.jwt.claim.role','service_role',true);
+        insert into public.catalog_selection_audio_jobs(external_id,url_sha256,state,attempt_count,lease_token,lease_until,profile,progress)
+          values('norva-selection:movie:'||repeat('4',64),encode(sha256(convert_to('https://fixture.invalid/a.mkv','UTF8')),'hex'),
+            'running',1,token,clock_timestamp()+interval '5 minutes',
+            jsonb_build_object('fingerprint',repeat('c',64),'externalId','norva-selection:movie:'||repeat('4',64),
+              'urlSha256',encode(sha256(convert_to('https://fixture.invalid/a.mkv','UTF8')),'hex'),
+              'durationSeconds',600,'audioTracks',jsonb_build_array(jsonb_build_object('index',1))),
+            '{"trackPosition":0,"receipts":[],"tracks":[],"evidence":[]}') returning id into job;
+        if public.selection_capture_fixture(token) is null then raise exception 'visible checkpoint prerequisite missing'; end if;
+        update public.cloud_sources set enabled=false;
+        perform public.metadata_assert(public.selection_capture_fixture(token) is null,'selection_capture_disabled_source');
+        update public.cloud_sources set enabled=true,deleted_at=clock_timestamp();
+        perform public.metadata_assert(public.selection_capture_fixture(token) is null,'selection_capture_deleted_source');
+        update public.cloud_sources set deleted_at=null;
+        delete from public.catalog_selection_audio_jobs where id=job;
+      end $$;`);
+    });
+    await t.test('parallel remains separately enabled and bounded to two work leases', async () => {
+      await db.exec(read('tests/sql/selection-parallel-capture-admission.sql'));
+      assert.equal(await value('select public.catalog_language_capture_pipeline_enabled() value'), false);
+      assert.equal(await value("select count(*)::int value from public.metadata_proof_checks where label in ('selection_parallel_disabled_one_work_lease','selection_parallel_hard_two_work_leases','selection_parallel_old_failures_untouched')"), 3);
+    });
+    await t.test('migration refuses a changed admission expression instead of weakening it', async () => {
+      // It must not silently apply a second time or accept an unfamiliar body.
+      await assert.rejects(db.exec(migration), error => error.code === '55000');
+      await db.exec('rollback');
+      assert.deepEqual(await attributes(), before);
+    });
+    t.diagnostic(`${await value('select count(*)::int value from public.metadata_proof_checks')} SQL assertions executed; no provider requests`);
+  } finally { await db.close(); }
+});

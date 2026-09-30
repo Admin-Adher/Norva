@@ -19,9 +19,10 @@ begin
       values(m,u,s,g,'movie',true,jsonb_build_object('targetUrl',url));
     insert into public.cloud_title_variants(id,user_id,source_id,generation_id,media_item_id,item_type,external_id,playback_hint)
       values(gen_random_uuid(),u,s,g,m,'movie',ext,jsonb_build_object('targetUrl',url));
-    insert into public.catalog_selection_audio_jobs(external_id,url_sha256,state,attempt_count,priority,profile,progress)
+    insert into public.catalog_selection_audio_jobs(external_id,url_sha256,state,attempt_count,priority,profile,progress,completed_at)
       values(ext,url_hash,case when i=10 then 'failed' else 'queued' end,case when i=10 then 8 else 0 end,
-        1000-i,'{"fingerprint":"retained-fixture-profile"}','{"trackPosition":1,"receipts":["retained"]}');
+        1000-i,'{"fingerprint":"retained-fixture-profile"}','{"trackPosition":1,"receipts":["retained"]}',
+        case when i=10 then clock_timestamp() else null end);
   end loop;
   first_job:=public.claim_selection_audio_job();
   perform public.metadata_assert(first_job is not null and first_job->'progress'->>'trackPosition'='1','selection_parallel_claim_preserves_cursor');
@@ -31,9 +32,9 @@ begin
   second_job:=public.claim_selection_audio_job();
   perform public.metadata_assert(second_job is not null and second_job->>'id'<>first_job->>'id','selection_parallel_two_distinct_files');
   perform public.metadata_assert(public.claim_selection_audio_job() is null,'selection_parallel_hard_two_work_leases');
-  update public.admin_feature_flags set enabled=false where key='language_capture_pipeline_enabled';
-  perform public.metadata_assert(not public.selection_audio_parallel_capture_enabled(),'selection_parallel_requires_capture_runtime_flag');
-  update public.admin_feature_flags set enabled=true where key='language_capture_pipeline_enabled';
+  update public.admin_feature_flags set enabled=false where key='selection_capture_pipeline_enabled';
+  perform public.metadata_assert(not public.selection_audio_parallel_capture_enabled(),'selection_parallel_requires_selection_capture_flag');
+  update public.admin_feature_flags set enabled=true where key='selection_capture_pipeline_enabled';
   update public.catalog_selection_audio_jobs set lease_until=clock_timestamp()-interval '1 second',attempt_count=8
     where id=(first_job->>'id')::uuid;
   third_job:=public.claim_selection_audio_job();
@@ -46,6 +47,6 @@ begin
     where external_id='norva-selection:movie:'||repeat('e',62)||'10'),'selection_parallel_old_failures_untouched');
   -- Release only these synthetic rows for the separate real concurrent-client
   -- race. Four queued synthetic files remain with real valid owner lookups.
-  update public.catalog_selection_audio_jobs set state='completed',lease_token=null,lease_until=null
+  update public.catalog_selection_audio_jobs set state='completed',lease_token=null,lease_until=null,completed_at=clock_timestamp()
     where id in ((second_job->>'id')::uuid,(third_job->>'id')::uuid);
 end $$;
