@@ -276,6 +276,17 @@ test('fresh-stream waiting budget covers the resolver worst case without another
   assert.doesNotMatch(timeout, /requestFreshStream|recoverPlayback|switchToFallback|prepareMediaItem/);
 });
 
+test('fresh-stream timeout uses observed connectivity for UI and terminal telemetry', () => {
+  const timeout = method(player, 'private final Runnable freshStreamTimeout = new Runnable()');
+  const telemetry = method(player, 'private String terminalTelemetryCode(');
+
+  assert.match(timeout, /boolean deviceOffline = !hasUsableNetwork\(\)/);
+  assert.match(timeout, /showPlaybackFailure\(\s*stateForFreshStreamTimeout\(formatFailure, deviceOffline\)/);
+  assert.match(timeout, /rememberRecoverySignal\("fresh_stream_timeout"/);
+  assert.match(telemetry, /state == PlaybackUiState\.OFFLINE\) return "native_offline"/);
+  assert.match(telemetry, /"fresh_stream_timeout"\.equals\(lastRecoveryReason\)[\s\S]*return "native_reconnect_failed"/);
+});
+
 test('phone keeps exact native close pending until an explicit trusted ACK', () => {
   const finish = method(player, 'public void finish()');
   const result = method(main, 'protected void onActivityResult(');

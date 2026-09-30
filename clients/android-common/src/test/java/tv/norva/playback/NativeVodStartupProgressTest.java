@@ -13,7 +13,7 @@ public final class NativeVodStartupProgressTest {
             assertTrue(progress.mayRenewLease(now));
             assertTrue(progress.nextCheckMs(now) > 0);
         }
-        progress.stop(); // Actual first frame ends the startup budget.
+        progress.rendered(); // Actual first frame ends the startup budget.
         assertEquals(NativeVodStartupProgress.Decision.STOPPED, progress.decision(81000));
     }
 
@@ -51,5 +51,37 @@ public final class NativeVodStartupProgressTest {
         assertEquals(NativeVodStartupProgress.Decision.IDLE_TIMEOUT, progress.decision(75000));
         progress.bytesRead(current, 1000, 76000);
         assertEquals(NativeVodStartupProgress.Decision.WAIT, progress.decision(76000));
+    }
+
+    @Test public void renderedRouteAllowsSeeksUntilItIsActuallyCancelled() {
+        NativeVodStartupProgress progress = new NativeVodStartupProgress();
+        long route = progress.begin(0);
+        int[] closed = {0};
+        Runnable reader = () -> closed[0]++;
+        assertTrue(progress.attachReader(route, reader));
+        progress.rendered();
+        assertEquals(0, closed[0]);
+        assertFalse(progress.active());
+        progress.detachReader(reader);
+        assertTrue(progress.attachReader(route, reader));
+        progress.stop();
+        progress.stop();
+        assertEquals(1, closed[0]);
+        assertFalse(progress.attachReader(route, reader));
+    }
+
+    @Test public void successorCancelsOnlyPreviousReadersAndRejectsLateAttachment() {
+        NativeVodStartupProgress progress = new NativeVodStartupProgress();
+        long previous = progress.begin(0);
+        int[] closed = {0};
+        Runnable reader = () -> closed[0]++;
+        assertTrue(progress.attachReader(previous, reader));
+        long current = progress.begin(10);
+        assertEquals(1, closed[0]);
+        assertFalse(progress.attachReader(previous, reader));
+        assertTrue(progress.attachReader(current, reader));
+        progress.detachReader(reader);
+        progress.stop();
+        assertEquals(1, closed[0]);
     }
 }

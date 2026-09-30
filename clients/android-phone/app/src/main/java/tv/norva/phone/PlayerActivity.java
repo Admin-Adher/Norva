@@ -439,7 +439,7 @@ public class PlayerActivity extends Activity {
             boolean formatFailure = isFormatRecoveryReason(freshStreamReason);
             boolean deviceOffline = !hasUsableNetwork();
             showPlaybackFailure(
-                    formatFailure ? PlaybackUiState.TERMINAL : PlaybackUiState.OFFLINE,
+                    stateForFreshStreamTimeout(formatFailure, deviceOffline),
                     formatFailure
                             ? R.string.player_state_terminal_title
                             : (deviceOffline
@@ -1271,6 +1271,17 @@ public class PlayerActivity extends Activity {
         return playbackActive || inPictureInPicture;
     }
 
+    static PlaybackUiState stateForFreshStreamTimeout(
+            boolean formatFailure,
+            boolean deviceOffline
+    ) {
+        // A resolver timeout can occur while the device is online. Only a
+        // network observation may select the offline UI and telemetry code.
+        return !formatFailure && deviceOffline
+                ? PlaybackUiState.OFFLINE
+                : PlaybackUiState.TERMINAL;
+    }
+
     private String routeIdForEvent(AnalyticsListener.EventTime eventTime) {
         if (eventTime == null || eventTime.timeline == null
                 || eventTime.timeline.isEmpty()
@@ -1287,7 +1298,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void handleRenderedFirstFrame() {
-        vodStartupProgress.stop();
+        vodStartupProgress.rendered();
         firstFrameForCurrentRoute = true;
         recoveryInProgress = false;
         errHandler.removeCallbacks(bufferWatchdog);
@@ -4134,7 +4145,7 @@ public class PlayerActivity extends Activity {
 
     private void deactivatePlaybackForBackground() {
         boolean preparingVod = vodStartupProgress.active();
-        vodStartupProgress.stop();
+        if (preparingVod) vodStartupProgress.stop();
         stopPlaybackHeartbeat();
         boolean wasActive = playbackActive;
         playbackActive = false;
@@ -4325,7 +4336,7 @@ public class PlayerActivity extends Activity {
      */
     @Override
     public void finish() {
-        boolean preparingVod = vodStartupProgress.active();
+        boolean stopOnlineVod = !isLocal && !isLiveContent();
         vodStartupProgress.stop();
         stopPlaybackHeartbeat();
         try {
@@ -4402,7 +4413,7 @@ public class PlayerActivity extends Activity {
             // next foreground, which is how a downloaded title's progress syncs.
             if (!isLocal) { gracefulResultEmitted = true; clearPendingProgress(); }
         } catch (Exception ignored) { /* result is best-effort */ }
-        if (preparingVod && player != null) player.stop();
+        if (stopOnlineVod && player != null) player.stop();
         super.finish();
     }
 

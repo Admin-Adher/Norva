@@ -57,8 +57,10 @@ public final class SlowVodStartupInstrumentedTest {
         try (Fixture fixture = new Fixture(true)) {
             fixture.ins.runOnMainSync(() -> {
                 long now = SystemClock.elapsedRealtime();
-                long generation = fixture.progress().begin(now - NativeVodStartupProgress.STARTUP_LIMIT_MS);
-                fixture.progress().bytesRead(generation, 1, now);
+                // Advance only this route's clock; creating another route here
+                // would itself cancel the reader before the watchdog runs.
+                set(fixture.progress(), "startedAt", now - NativeVodStartupProgress.STARTUP_LIMIT_MS);
+                set(fixture.progress(), "lastProgressAt", now);
                 ((Runnable) field(fixture.activity, "bufferWatchdog")).run();
                 assertEquals(View.VISIBLE, ((View) field(fixture.activity, "errorPanel")).getVisibility());
                 assertFalse(fixture.progress().active());
