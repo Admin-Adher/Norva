@@ -45,7 +45,7 @@ begin
      or v_job.lease_owner is distinct from p_worker
      or v_job.lease_sequence <> p_expected_attempt
      or v_job.lease_until <= now() then
-    raise exception 'credential job lease CAS failed' using errcode = '40001';
+    raise exception 'credential job lease CAS failed' using errcode = 'PT409';
   end if;
 
   v_state := case
