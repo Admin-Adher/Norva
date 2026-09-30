@@ -356,10 +356,46 @@
         const nativeRecoveryLaunchers = new Map();
         const nativeRecoveryAttempts = new Map();
         const activeNativeRecoveryTokens = new Map();
+        const nativeRecoveryTokenDeadlines = new Map();
+        const retiredNativeRecoveryTokens = new Set();
+        const retireNativeRecoveryToken = (key) => {
+            const token = activeNativeRecoveryTokens.get(key);
+            if (token) {
+                retiredNativeRecoveryTokens.add(token);
+                if (retiredNativeRecoveryTokens.size > 64) {
+                    retiredNativeRecoveryTokens.delete(retiredNativeRecoveryTokens.values().next().value);
+                }
+            }
+            activeNativeRecoveryTokens.delete(key);
+            nativeRecoveryTokenDeadlines.delete(key);
+        };
+        // MainActivity starts its token TTL before dispatching retryPlayback.
+        // Starting the same upper bound here can only be later by that dispatch
+        // delay. This stops demonstrably late work; it is not a native ACK or
+        // the PlayerActivity timeout (60 s phone / 25 s TV).
+        const recoveryUserAgent = String(globalThis.navigator?.userAgent || '');
+        const recoveryPhone = /\bNorvaTV-AndroidPhone\//.test(recoveryUserAgent);
+        const recoveryTv = /\bNorvaTV-AndroidTV\//.test(recoveryUserAgent);
+        const nativeRecoveryTokenTtlMs = recoveryPhone !== recoveryTv
+            ? (recoveryPhone ? 65_000 : 30_000)
+            : 0;
+        const nativeRecoveryClock = typeof globalThis.performance?.now === 'function'
+            ? globalThis.performance.now.bind(globalThis.performance)
+            : () => Date.now();
+        const isNativeRecoveryTokenCurrent = (key, token) => {
+            if (!token) return true; // Tokenless legacy hand-offs have no native TTL contract.
+            if (activeNativeRecoveryTokens.get(key) !== token) return false;
+            const deadline = nativeRecoveryTokenDeadlines.get(key);
+            return !deadline || (deadline.token === token && nativeRecoveryClock() < deadline.expiresAt);
+        };
         // Live uses VideoPlayer's own cloud-session registry. Track only the
         // native Activity ownership here so its close result can expire that
         // exact Live session without routing it through WatchPage/VOD cleanup.
         const nativeLiveCloudSessions = new Map();
+        // Keep the Activity's intent after its old session leaves the registry
+        // during recovery. Back can arrive while the replacement is unresolved.
+        const nativeLiveSessionClaims = new Map();
+        const nativeLiveIntentByOwner = new WeakMap();
         const nativeLiveCleanupByOwner = new WeakMap();
         const nativePlaybackCloseTasks = new Map();
         const completedNativePlaybackCloses = new Set();
@@ -535,7 +571,37 @@
             if (!sessionId || !owner || typeof owner.registerCloudPlaybackSession !== 'function') return '';
             owner.registerCloudPlaybackSession(sessionId);
             nativeLiveCloudSessions.set(sessionId, { owner, channel });
+            nativeLiveSessionClaims.set(sessionId, { owner, channel, claim: activeNativeIntentClaim });
+            if (nativeLiveSessionClaims.size > 64) {
+                nativeLiveSessionClaims.delete(nativeLiveSessionClaims.keys().next().value);
+            }
             return sessionId;
+        };
+        const clearClosedNativeLiveSelection = ({ owner, channel }) => {
+            let changed = false;
+            if (owner?.currentChannel === channel) owner.currentChannel = null;
+            const list = window.app?.channelList;
+            const selectSeq = channel?._norvaSelection?.selectSeq;
+            if (selectSeq != null && list?._pendingPlaybackSelection?.selectSeq === selectSeq) {
+                list.failPendingPlaybackSelection?.(selectSeq);
+                changed = true;
+            }
+            if (list?.currentChannel === channel) {
+                list.currentChannel = null;
+                list.currentRenderId = null;
+                list.currentRenderGroup = null;
+                list.container?.querySelectorAll('.channel-item.active').forEach(el => {
+                    el.classList.remove('active', 'nav-active');
+                });
+                changed = true;
+            }
+            if (!changed) return;
+            try {
+                const guide = window.app?.liveGuideFusion;
+                guide?.refreshPreview?.(guide.currentChannel);
+                guide?.refreshRows?.();
+                guide?.updateHighlights?.();
+            } catch (_) { /* closing playback does not navigate the guide */ }
         };
         // Native VOD runs outside the WebView, but its cloud session still belongs
         // to the WatchPage that resolved it. Keep that ownership explicit so a
@@ -590,16 +656,26 @@
         window.__norvaNative.onPlaybackClosed = (rawSessionId, _reason = '') => {
             const sessionId = boundedNativePlaybackSessionId(rawSessionId);
             if (!sessionId) return 'not_ready';
+            const liveClaim = nativeLiveSessionClaims.get(sessionId);
             // A close can arrive while its replacement URL is resolving, after
             // the previous session has already left the active registry.
-            if (nativeVodSessionClaims.get(sessionId) === activeNativeIntentClaim
+            if ((nativeVodSessionClaims.get(sessionId) === activeNativeIntentClaim
+                    || liveClaim?.claim === activeNativeIntentClaim)
                 && activeNativeIntentClaim) {
-                activeNativeRecoveryTokens.delete(activeNativeIntentKey);
+                retireNativeRecoveryToken(activeNativeIntentKey);
                 activeNativeIntentKey = '';
                 activeNativeIntentClaim = '';
                 nativeIntentGeneration += 1;
             }
+            // Navigation can already have invalidated the global claim. The
+            // owner's latest Live intent still distinguishes this closed state
+            // from a later Play, even when the same channel object is reused.
+            if (liveClaim && nativeLiveIntentByOwner.get(liveClaim.owner) === liveClaim.claim) {
+                nativeLiveIntentByOwner.delete(liveClaim.owner);
+                clearClosedNativeLiveSelection(liveClaim);
+            }
             nativeVodSessionClaims.delete(sessionId);
+            nativeLiveSessionClaims.delete(sessionId);
             if (completedNativePlaybackCloses.has(sessionId)) {
                 acknowledgeNativePlaybackClose(sessionId);
                 return 'accepted';
@@ -682,6 +758,7 @@
                 && route === activeNativeIntentRoute
                 && now - lastNativeIntentAt < 1500) return false;
             dismissNativePlaybackStartFailure();
+            retireNativeRecoveryToken(activeNativeIntentKey);
             activeNativeIntentKey = key;
             activeNativeIntentRoute = route;
             lastNativeIntentAt = now;
@@ -690,7 +767,7 @@
             activeNativeIntentClaimConsumed = false;
             // This is a new viewer action, not an automatic recovery attempt.
             nativeRecoveryAttempts.delete(key);
-            activeNativeRecoveryTokens.delete(key);
+            retireNativeRecoveryToken(key);
             return activeNativeIntentClaim;
         };
         const consumeNativePlaybackIntent = (sourceId, itemType, itemId, claim) => {
@@ -712,7 +789,7 @@
         const invalidateNativeRecoveryForRouteChange = () => {
             if (!activeNativeIntentKey || currentNativeRoute() === activeNativeIntentRoute) return;
             dismissNativePlaybackStartFailure();
-            activeNativeRecoveryTokens.delete(activeNativeIntentKey);
+            retireNativeRecoveryToken(activeNativeIntentKey);
             activeNativeIntentKey = '';
             activeNativeIntentClaim = '';
             activeNativeIntentClaimConsumed = true;
@@ -731,7 +808,7 @@
                 if ((entry?.registeredAt || 0) < cutoff) {
                     nativeRecoveryLaunchers.delete(oldKey);
                     nativeRecoveryAttempts.delete(oldKey);
-                    activeNativeRecoveryTokens.delete(oldKey);
+                    retireNativeRecoveryToken(oldKey);
                 }
             }
         };
@@ -758,6 +835,9 @@
             recoveryToken = ''
         ) => {
             const key = nativeProgressKey(sourceId, itemType, itemId);
+            if (activeNativeIntentKey !== key || !activeNativeIntentClaim
+                || currentNativeRoute() !== activeNativeIntentRoute) return 'cancelled';
+            if (recoveryToken && retiredNativeRecoveryTokens.has(recoveryToken)) return 'cancelled';
             const entry = nativeRecoveryLaunchers.get(key);
             if (!entry) {
                 surfaceNativeRecoveryFailure('launcher_missing');
@@ -771,8 +851,16 @@
                 // resetting here would turn an unreadable response into an endless
                 // sequence of fresh provider sessions. Only a new Play intention
                 // (or the existing healthy interval) renews the VOD retry budget.
+                retireNativeRecoveryToken(key);
                 activeNativeRecoveryTokens.set(key, recoveryToken);
+                if (nativeRecoveryTokenTtlMs) {
+                    nativeRecoveryTokenDeadlines.set(key, {
+                        token: recoveryToken,
+                        expiresAt: nativeRecoveryClock() + nativeRecoveryTokenTtlMs
+                    });
+                }
             }
+            if (!isNativeRecoveryTokenCurrent(key, recoveryToken)) return 'expired';
             let state = nativeRecoveryAttempts.get(key);
             if (!state || now - state.lastAttemptAt > NATIVE_RECOVERY_WINDOW_MS) {
                 state = { count: 0, lastAttemptAt: 0 };
@@ -801,7 +889,7 @@
                     || activeNativeIntentKey !== key
                     || currentNativeRoute() !== activeNativeIntentRoute
                     || nativeRecoveryLaunchers.get(key) !== entry
-                    || (recoveryToken && activeNativeRecoveryTokens.get(key) !== recoveryToken)) {
+                    || !isNativeRecoveryTokenCurrent(key, recoveryToken)) {
                     console.info('[Native] Cancelled stale playback recovery for', key);
                     return;
                 }
@@ -809,8 +897,16 @@
                     window.__norvaResetPlayThrottle?.();
                     await entry.launcher(resume, recoveryToken, reason);
                 } catch (error) {
-                    if (recoveryToken && activeNativeRecoveryTokens.get(key) !== recoveryToken) {
+                    if (scheduledGeneration !== nativeIntentGeneration
+                        || activeNativeIntentKey !== key
+                        || currentNativeRoute() !== activeNativeIntentRoute
+                        || nativeRecoveryLaunchers.get(key) !== entry
+                        || !isNativeRecoveryTokenCurrent(key, recoveryToken)) {
                         console.info('[Native] Ignored superseded playback recovery for', key);
+                        return;
+                    }
+                    if (error?.code === 'native_live_cleanup_failed') {
+                        surfaceNativeRecoveryFailure('session_release_failed');
                         return;
                     }
                     console.warn(`[Native] Fresh playback retry ${attempt + 1} failed:`, error?.message || error);
@@ -935,7 +1031,7 @@
             const sessionId = String(extras?.sessionId || '').trim();
             if (recoveryToken && meta) {
                 const key = nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId);
-                if (activeNativeRecoveryTokens.get(key) !== recoveryToken) return false;
+                if (!isNativeRecoveryTokenCurrent(key, recoveryToken)) return false;
             }
             const nowTs = Date.now();
             if (nowTs - lastNativePlayAt < 1500) return false;
@@ -1282,7 +1378,11 @@
                 let bypassNativeCache = false;
                 let nativeNetworkRecovery = false;
                 const launchResolved = async (resumeAt, fresh = false, recoveryToken = '', reason = '') => {
-                    if (activeNativeIntentClaim !== launchClaim) return;
+                    const isCurrentLaunch = () => activeNativeIntentClaim === launchClaim
+                        && (!recoveryToken || (meta && isNativeRecoveryTokenCurrent(
+                            nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId), recoveryToken
+                        )));
+                    if (!isCurrentLaunch()) return;
                     if (reason === 'media_cache_unavailable') bypassNativeCache = true;
                     // A fresh direct URL cannot repair a refused network route.
                     // The Activity closes its socket before requesting this one
@@ -1295,14 +1395,14 @@
                     let resolved;
                     if (fresh && meta && window.API?.proxy?.xtream?.getStreamUrl) {
                         await stopNativeVodCloudSessions(this);
-                        if (activeNativeIntentClaim !== launchClaim) return;
+                        if (!isCurrentLaunch()) return;
                         const container = content.containerExtension || 'mp4';
                         const streamType = content.type === 'movie' ? 'movie' : 'series';
                         const catalogPage = streamType === 'movie'
                             ? window.app?.pages?.movies
                             : window.app?.pages?.series;
                         await catalogPage?.prepareForPlaybackSession?.();
-                        if (activeNativeIntentClaim !== launchClaim) return;
+                        if (!isCurrentLaunch()) return;
                         const hint = (typeof MediaUtils !== 'undefined' && MediaUtils.playbackHintFromItem)
                             ? MediaUtils.playbackHintFromItem(content, { container, streamType })
                             : { container, streamType };
@@ -1318,7 +1418,6 @@
                     } else {
                         resolved = await resolveStreamPayload(streamUrl);
                     }
-                    if (!resolved.url) throw resolved.error || new Error('No fresh stream URL returned');
                     // fallbackUrl: the resolver payload carries it for the movie/series
                     // path; the restore-after-refresh path passes it as the 3rd arg.
                     const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
@@ -1328,12 +1427,13 @@
                         || playback?.cloudPlaybackSessionId
                         || ''
                     ).trim();
-                    if (activeNativeIntentClaim !== launchClaim) {
+                    if (!isCurrentLaunch()) {
                         if (playbackSessionId) {
                             await publishNativePlaybackCloseTask(playbackSessionId, this, nativeVodCleanupByOwner);
                         }
                         return;
                     }
+                    if (!resolved.url) throw resolved.error || new Error('No fresh stream URL returned');
                     if (!nativePlay(resolved.url, nativeTitle(content), meta, resumeAt, fallbackUrl, {
                         poster: content.poster || '',
                         previousTitle: content.previousEpisodeLabel || '',
@@ -1420,19 +1520,40 @@
                     : false;
                 if (meta && !consumedIntentClaim
                     && !beginNativePlaybackIntent(meta.sourceId, meta.itemType, meta.itemId)) return;
+                const launchClaim = activeNativeIntentClaim;
+                const launchRoute = currentNativeRoute();
+                const isCurrentLiveLaunch = (recoveryToken = '') => activeNativeIntentClaim === launchClaim
+                    && currentNativeRoute() === launchRoute
+                    && (!recoveryToken || (meta && isNativeRecoveryTokenCurrent(
+                        nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId), recoveryToken
+                    )));
+                nativeLiveIntentByOwner.set(this, launchClaim);
                 this.currentChannel = channel;
                 const initialLiveSessionId = channel?.cloudPlaybackSessionId
                     || channel?.playbackSessionId
                     || playback?.sessionId
                     || playback?.cloudPlaybackSessionId
                     || null;
-                const releasePreviousLiveSession = async () => {
+                const expireUnlaunchedLiveSession = async (sessionId) => {
+                    if (!sessionId) return;
+                    try {
+                        await publishNativePlaybackCloseTask(sessionId, this, nativeLiveCleanupByOwner);
+                    } catch (_) {
+                        // This UUID never reached Android's durable close queue.
+                        // Do not mint another session if its release is unproven.
+                        const error = new Error('Native live session release failed');
+                        error.code = 'native_live_cleanup_failed';
+                        throw error;
+                    }
+                };
+                const releasePreviousLiveSession = async (recoveryToken) => {
                     // onPlaybackClosed starts exact Live expiry without blocking
                     // the Android result callback. A recovery must wait for that
                     // in-flight release before it asks the one-slot provider for
                     // a replacement session.
                     const pendingNativeClose = nativeLiveCleanupByOwner.get(this);
                     if (pendingNativeClose) await pendingNativeClose;
+                    if (!isCurrentLiveLaunch(recoveryToken)) return;
                     const staleSessionId = channel?.cloudPlaybackSessionId
                         || channel?.playbackSessionId
                         || this.currentCloudPlaybackSessionId
@@ -1449,10 +1570,12 @@
                     } else if (staleSessionId) {
                         await stopNativeLiveCloudSession(this, channel, staleSessionId);
                     }
+                    if (!isCurrentLiveLaunch(recoveryToken)) return;
                     channel.cloudPlaybackSessionId = null;
                     if (channel.playbackSessionId != null) channel.playbackSessionId = null;
                 };
                 const relaunchLive = async (_resumeAt = 0, recoveryToken = '', reason = '') => {
+                    if (!isCurrentLiveLaunch(recoveryToken)) return;
                     let fresh;
                     const liveStreamId = channel?.streamId ?? channel?.stream_id ?? channel?.id;
                     const canResolveXtream = channel?.sourceType === 'xtream'
@@ -1471,7 +1594,8 @@
                             : ((typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
                                 ? MediaUtils.liveGatewayMode(channel)
                                 : 'transcode');
-                        await releasePreviousLiveSession();
+                        await releasePreviousLiveSession(recoveryToken);
+                        if (!isCurrentLiveLaunch(recoveryToken)) return;
                         fresh = await window.API.proxy.xtream.getStreamUrl(
                             channel.sourceId,
                             liveStreamId,
@@ -1483,31 +1607,58 @@
                                 ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
                             }
                         );
-                        channel.cloudPlaybackSessionId = fresh?.sessionId || null;
-                        if (fresh?.cloudSourceId) channel.cloudSourceId = fresh.cloudSourceId;
                     } else {
                         fresh = { url: channel?.url || null, fallbackUrl: null };
+                    }
+                    const freshLiveSessionId = String(fresh?.sessionId || '').trim();
+                    if (!isCurrentLiveLaunch(recoveryToken)) {
+                        if (freshLiveSessionId) {
+                            await expireUnlaunchedLiveSession(freshLiveSessionId);
+                        }
+                        return;
                     }
                     // A refused or non-media response needs a different route.
                     // Use only the resolver's authorized fresh byte pipe.
                     if (['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(reason) && fresh?.fallbackUrl) {
                         fresh = { ...fresh, url: fresh.fallbackUrl, fallbackUrl: null };
                     }
-                    if (!fresh?.url) throw new Error('No fresh live stream URL returned');
-                    const freshLiveSessionId = String(fresh?.sessionId || '').trim();
+                    if (!fresh?.url) {
+                        if (freshLiveSessionId) {
+                            await expireUnlaunchedLiveSession(freshLiveSessionId);
+                        }
+                        throw new Error('No fresh live stream URL returned');
+                    }
                     if (!nativePlay(fresh.url, channel?.name || 'Live TV', meta, 0, fresh.fallbackUrl || null, {
                         variants: buildNativeVariants(channel),
                         activeStreamId: channel?.streamId != null ? String(channel.streamId) : '',
                         sessionId: freshLiveSessionId,
                         recoveryToken
                     })) {
-                        await stopNativeLiveCloudSession(this, channel, freshLiveSessionId);
+                        if (freshLiveSessionId) {
+                            await expireUnlaunchedLiveSession(freshLiveSessionId);
+                        }
                         throw new Error('Native live relaunch throttled');
                     }
+                    channel.cloudPlaybackSessionId = freshLiveSessionId || null;
+                    if (fresh?.cloudSourceId) channel.cloudSourceId = fresh.cloudSourceId;
                     registerNativeLiveCloudSession(this, channel, freshLiveSessionId);
                 };
                 registerNativeRecovery(meta, relaunchLive);
                 const resolved = await resolveStreamPayload(streamUrl);
+                if (!isCurrentLiveLaunch()) {
+                    if (nativeLiveIntentByOwner.get(this) === launchClaim) {
+                        nativeLiveIntentByOwner.delete(this);
+                        // ChannelList commits after play() settles. Retire this
+                        // pending selection now so a cancelled initial resolver
+                        // cannot restore Playing when its promise completes.
+                        clearClosedNativeLiveSelection({ owner: this, channel });
+                    }
+                    const staleSessionId = resolved.sessionId || initialLiveSessionId;
+                    if (staleSessionId) {
+                        await expireUnlaunchedLiveSession(staleSessionId);
+                    }
+                    return;
+                }
                 if (!resolved.url) return;
                 // Live resolves to a bare URL string (ChannelList passes result.url), so
                 // resolveStreamPayload yields fallbackUrl=null. Recover the gateway
