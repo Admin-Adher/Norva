@@ -89,6 +89,14 @@ const PUBLIC_EDGE_ERROR_CODES = new Set([
 export async function bindCatalogVisibilityEpoch(req, userId, db) {
   const normalizedUserId = String(userId ?? "").trim();
   if (!normalizedUserId) throw new Error("Catalog visibility user is missing");
+  // Home assembles several independent rails under a short client budget.
+  // Reserve the same bounded window before its fan-out rather than spending
+  // that budget on a first conflict plus a retry. Other routes remain lazy.
+  if ((req.method === "GET" || req.method === "HEAD") && /\/(?:device\/)?home\/rails\/?$/.test(new URL(req.url).pathname)) {
+    try {
+      await db.rpc("norva_request_catalog_reader_window", { p_user_id: normalizedUserId });
+    } catch (_) { /* Optional scheduling must not replace visibility validation. */ }
+  }
   const snapshot = await readCatalogVisibilityEpoch(db, normalizedUserId);
   bindings.set(req, { userId: normalizedUserId, ...snapshot });
   const previous = latestBoundEpochsByUser.get(normalizedUserId);

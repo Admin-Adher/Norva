@@ -28,6 +28,7 @@ function sequencedDb(...outcomes) {
     calls,
     async rpc(name, args) {
       calls.push({ name, args });
+      if (name === 'norva_request_catalog_reader_window') return { data: false, error: null };
       const outcome = outcomes[Math.min(index, outcomes.length - 1)];
       index += 1;
       if (outcome instanceof Error) return { data: null, error: { message: outcome.message } };
@@ -447,4 +448,14 @@ test('missing retry scheduling RPC cannot expose the discarded response',async()
  await api.bindCatalogVisibilityEpoch(req,'window-fallback',db);
  const result=await api.finalizeCatalogVisibilityResponse(req,new Response('{"oldBody":true}'),db,{corsHeaders});
  assert.equal(result.status,409);assert.equal((await jsonBody(result)).oldBody,undefined);
+});
+
+test('Home reserves its owner window before binding the epoch; normal GETs do not',async()=>{
+ const api=await helper();
+ for(const route of ['/home/rails','/device/home/rails','/functions/v1/norva-catalog/home/rails','/media-items']){
+  const db=sequencedDb(8);const req=new Request('https://edge.test'+route);
+  await api.bindCatalogVisibilityEpoch(req,'home-owner',db);
+  const expected=route.endsWith('/home/rails')?['norva_request_catalog_reader_window','norva_catalog_cache_epoch_v2']:['norva_catalog_cache_epoch_v2'];
+  assert.deepEqual(db.calls.map(c=>c.name),expected);assert.equal(api.boundCatalogVisibilityEpoch(req),'8');
+ }
 });
