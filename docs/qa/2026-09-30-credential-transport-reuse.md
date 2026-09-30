@@ -128,3 +128,12 @@ Migration `20260930110000_catalog_final_proof_custom_plan.sql` retains the same 
 - TF1 HD Strng: actual advancing 1280x720 image. Session bf576389-8e19-4bef-a401-72b7ae89447f expired at 09:31:04.466 immediately on document reload, validating PR493 release. An earlier automatic TF1 attempt belonged to a different source and failed with gateway_502; it is not a Strng success.
 - Android ADB still returns no device. Device replay remains externally blocked.
 - Additional defect found: all 57,443 active Strng logical channels had Uncategorized labels despite matching verified category IDs. The next fix resolves missing labels inside the existing fenced media writer and passes them into both title and live projections.
+
+## 09:42 UTC — verified category labels restored
+
+- PR499 fixes the active refresh writer and worker; 49 focused tests and the rollback SQL fixture passed. The SQL lookup preserves exact owner/source/generation/run/category-kind boundaries and explicit provider labels. No permission widening.
+- Migration 20260930120000 applied; both Edge replicas healthy with provider-access normalized SHA256 879ded24bf1a0ef8f2ae062ee2a700a1e1f20d96d507c1e85d78d33ed98510e5.
+- Existing Strng rows repaired in batches of 500, with server-side backups and a fresh catalog write snapshot on every transaction. Generation guards remained enabled. A concurrent stale-proof failure rolled back its batch; remaining batches were resumed from unmatched rows without replaying completed updates.
+- Verified after repair: 57,443 logical live channels and 57,443 live variants; zero Uncategorized labels; 914 distinct provider category labels in each projection. Browser displayed the actual provider groups after navigation; no catalogue rebuild.
+- Transition remains completed/revision 7. Terminal title promotion and old-generation purge are pending maintenance, not a pending address switch. All QA playback sessions are closed; both Gateways report no active sessions.
+- Large guide hydration is progressive: its background count continuing to grow does not block selecting a searched channel. Complete hydration timing and Android rendering are not certified by this check.
