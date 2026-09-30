@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$RUNNER_TEMP/selection-sql-runtime" --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.5.8
           NODE_PATH="$RUNNER_TEMP/selection-sql-runtime/node_modules" NORVA_REQUIRE_SELECTION_SQL=1 NORVA_REQUIRE_PREPARATION_SQL=1 \
-            node --test tests/selection-capture-admission-sql.test.js tests/live-preparation-sql.test.js
+            node --test tests/selection-capture-admission-sql.test.js tests/selection-hydration-profile-sql.test.js tests/live-preparation-sql.test.js
 
       - name: Verify generated locale assets
         run: npm run i18n:check
