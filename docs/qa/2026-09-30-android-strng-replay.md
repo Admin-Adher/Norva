@@ -82,3 +82,19 @@ A second explicit tap opened PlayerActivity. The direct request returned a confi
 Safe Gateway traces isolate a separate slow-start problem. The first relay read the prefix in 1.603 s and the MP4 tail in 2.076 s + 33.883 s; the next relay needed 2.052 s + 68.471 s for the same tail. No video-position range was requested before the retries. Android's 35-second buffering watchdog did not observe positive byte transfers, so it discarded active metadata work and started again. These failed attempts supersede any implication that the refreshed flow is fully validated.
 
 Phone/server clocks are not sufficiently synchronized for precise tap-to-server-event comparisons. Event ordering and same-process durations are used for this diagnosis; no subsecond end-to-end improvement is claimed.
+
+## Receipt fix deployed and phone replay after 11:45 UTC
+
+PR501 merged as `517efe394c7e34d17f696987903243e73c7d5d5f` after all ten checks passed. The Edge artifact SHA256 `1549cd945a6b8ef9c1676d8093281ed86de0015a4218c57266efda002dbe000d` was rolled out sequentially to both replicas with a verified backup, unchanged receipt-authority helper, and healthy checks on each replica. No Gateway media process was restarted. WebView notification deployment follows the production Cloudflare workflow.
+
+The real Deno request wiring regression proves one body read and one creation across multiple visibility-fence retries. Source revocation still rejects the response and closes the exact receipt. Initial native-resolution failure now has the existing translated error toast with an explicit Retry action; route change, cancellation and newer action suppress stale notifications/retries. The action uses a minimum 44px touch height.
+
+On the physical code40 phone, a single tap at 11:47:00.542 UTC resumed Strng episode2120388 through a raw relay. Actual video was visible; native first-frame duration was 5.816s, received by the server at 11:47:08.529 UTC. Saved progress advanced from1449 to1496 /1629s. Relay `2df9ffc5-80b4-4fbc-9496-013fae6bff53` expired on Back at11:47:57.516 UTC. Direct access still produced an HTML refusal; this validates recovery, not direct reachability.
+
+## Android slow-start correction prepared for production
+
+Phone1.3.28/code41 tracks positive reads per media route. It retains the35s inactivity deadline and adds a120s absolute preparation budget. Active progress no longer restarts metadata work at35s. Reaching the absolute limit closes the reader and leaves explicit Retry; it does not automatically repeat that download. Preparation renews its existing session lease only while the bounded, foreground startup is active. Back/background stop the preparing reader and heartbeat; old callbacks cannot prolong another route. Live keeps its previous policy.
+
+Four JVM cases cover active progress, stalled reads, a trickle exceeding the absolute limit and cancelled/old generations. Four instrumented cases use a local media origin and actual Media3 rendering, including40s of header transfer, terminal/manual Retry, background/return, and Back. Matroska index Range requests are explicitly allowed and distinguished from a new playback generation. CI compilation, emulator results, signed bundle publication and a production-code41 physical replay must be recorded before declaring this correction available and validated on the user's phone.
+
+The full Windows regression run reported5300 passed,27 skipped and5 failed: four shell/Git-fixture checks unavailable in that Windows environment and one release-version assertion encountered while preparing code41. The corresponding Linux server/WebView CI passed, and the two native version gates have been updated and pass their focused suite. This local result is not represented as an all-green full run.
