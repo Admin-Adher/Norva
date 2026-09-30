@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
       - 'scripts/qa/run-android-emulator-tests.sh'
+      - 'scripts/qa/patch-emulator-runner-unlock.cjs'
+      - 'tests/emulator-runner-unlock.test.js'
       - 'clients/android-phone/**'
       - 'clients/android-tv/**'
       - 'clients/android-common/**'
@@ -47,8 +49,19 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # Keep the upstream Apache-2.0 action and its licence intact. Apply only
+      # the audited unlock correction; see scripts/qa/android-emulator-runner-patch.md.
+      - name: Check out pinned phone emulator runner
+        uses: actions/checkout@v4
+        with:
+          repository: ReactiveCircus/android-emulator-runner
+          ref: a421e43855164a8197daf9d8d40fe71c6996bb0d
+          path: .github/actions/phone-emulator-runner
+          persist-credentials: false
+      - name: Apply focus-safe emulator unlock
+        run: node scripts/qa/patch-emulator-runner-unlock.cjs .github/actions/phone-emulator-runner
       - name: Run instrumented phone tests
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: ./.github/actions/phone-emulator-runner
         with:
           api-level: 35
           target: google_apis

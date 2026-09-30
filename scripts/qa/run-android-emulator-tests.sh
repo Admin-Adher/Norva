@@ -103,7 +103,9 @@ wait_for_phone_home() {
     -c android.intent.category.HOME >/dev/null
   while (( SECONDS < deadline )); do
     anr_events="$(timeout 5s adb logcat -b events -d -s am_anr:I '*:S')"
-    window_state="$(timeout 5s adb shell dumpsys window windows | tr -d '\r')"
+    # API 35 prints mCurrentFocus under DisplayContent, outside the "windows"
+    # subsection. Include that section so a healthy HOME is not rejected.
+    window_state="$(timeout 5s adb shell dumpsys window | tr -d '\r')"
     if grep -q 'am_anr' <<< "$anr_events" \
       || grep -q 'Application Not Responding' <<< "$window_state"; then
       printf '%s\n' "$anr_events" > "$diagnostic_dir/readiness-anr.txt"
