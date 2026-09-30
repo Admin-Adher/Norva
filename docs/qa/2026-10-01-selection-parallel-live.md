@@ -90,3 +90,63 @@ retry (or add narrowly allowlisted diagnostics), then assess actual file duratio
 and extraction boundaries. Initial opaque probe admission remains a separate
 parallel-throughput constraint. Neither is resolved by this trial. Real viewer
 preemption and successful overlapping capture/inference remain unproven.
+
+## Diagnostic repair deployed
+
+The second normal attempt failed at the same fourth window, retaining all three
+receipts. Its next retry is 23:14:28.737266 UTC; no attempt was brought forward.
+
+PR #521: `0bea90d37c770059f623e2b2e18905a947bca0ae`, merged as
+`91b6d01b8c14fd95bc6b52a6acbc312cd1b80f10`. Build 36788999343 succeeded.
+The change adds only literal WAV-parser failures to the internal diagnostic
+allowlist. Four malformed WAV fixtures exercise the actual parser/storage path
+and confirm provider drain, no retained invalid audio, no inference and no
+private diagnostic text. Windows: 28 pass, one Linux-only skip. The isolated
+Linux candidate image passes **29/29**, including the real ownership lock.
+
+The complete image is
+`sha256:74c0c8fd18b53ef1b1ceeb411251a0e424be3a3da49f31caca72678b7c83e87e`.
+It was built and checked without network access or production configuration.
+Both production Gateways now use that image, after idle guards, at 23:08:42
+(pilot) and 23:09:11 (main) UTC. An initial main invocation erroneously included
+the pilot-only mount flag; the operator rejected it before mutation. The corrected
+main invocation succeeded. Environment, mounts and protocol version 171 remain
+unchanged. This diagnostic-only change does not weaken WAV validation.
+
+The persisted Compose image pin was updated at 23:09:22 UTC, verified as the
+only rendered configuration difference. Override SHA256:
+`388aef80d5a4178fa3cf40edc9cc64a3c4c867508e90a1034cf1888610cd7bc2`.
+At 23:09:44 both nodes were healthy and idle; all 76 source files and two
+dependency manifests match the candidate archive (dependency line endings
+normalized). This is archive provenance, not a claim about raw Git line endings.
+
+Image, isolated checks and postdeployment receipt:
+`/home/adrien/.norva/selection-wav-diagnostics-20261001/0bea90d37c77/`.
+Runtime rollout receipts:
+`/home/adrien/.norva/gateway-reference-rollout/20260930T230842681972Z/` and
+`/home/adrien/.norva/gateway-reference-rollout/20260930T230911745411Z/`.
+The automatic job retry is still needed to identify the real malformed output;
+these tests do not establish its root cause or fix the media acquisition.
+
+## Third normal attempt and follow-up
+
+The same job resumed at 23:14:30 UTC, again retained its three prior windows,
+and returned to retry_wait on attempt three. The new diagnostic proves
+`STRICT_LID_AUDIO_INVALID_DATA`: a WAV with no valid data samples, not an HTTP
+502 from the supplier. Next scheduled attempt: 23:34:40.670938 UTC.
+The observation process (exec 50803) is now terminal; the durable job is not.
+
+A separate normal, admitted `/probe-audio` request returned 200 with confirmed
+provider drain: MOV/MP4 container, duration 7,120.15 seconds, size 702,299,602
+bytes, one stereo AAC track at 44,100 Hz. The exact per-track duration and the
+reason for the empty fourth window are not yet known.
+
+Code inspection found an independent error-propagation defect: the capture
+adapter checked `broker.terminalError` only when FFmpeg reported failure.
+A zero exit with empty or partial output could therefore hide an authoritative
+provider/range failure behind WAV validation. The pending correction checks
+viewer preemption first, then the broker's terminal error, before accepting an
+FFmpeg success. A test executes the actual adapter for zero/nonzero process exit,
+conflicting preemption and a valid success; an errored input never reaches the
+audio read/storage stage. This is not yet proof that the live file's broker had
+a terminal error. Its next normal retry must resolve that question.
