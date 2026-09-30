@@ -1727,6 +1727,10 @@ async function handleWorkerDrain(req, requestId) {
       // our still-current lease, then reload the durable snapshot on reclaim.
       // This conflict is not a provider failure and cannot justify rollback.
       if (failure.retryable && failure.queueCode === "stale") {
+        console.warn("[norva-provider-access] snapshot_conflict", {
+          rpc: /^norva_[a-z_]+$/.test(String(failure.rpc ?? "")) ? failure.rpc : null,
+          reason: /^[a-z_]{1,100}$/.test(String(failure.reason ?? "")) ? failure.reason : null,
+        });
         const deferred = await settleJob(job, workerId, "defer", "stale", 5);
         if (deferred) summary.retried += 1;
         else summary.leaseLost += 1;
@@ -3545,7 +3549,12 @@ async function workerRpc(name, params) {
   // It is not evidence that candidate credentials are bad and must never take
   // the compensation branch; a later claim either resumes from PostgreSQL or
   // finds that the transition is terminal/cancelled.
-  if (isStaleDatabaseConflict(error)) throw new WorkerFault("stale", true);
+  if (isStaleDatabaseConflict(error)) {
+    const fault = new WorkerFault("stale", true);
+    fault.rpc = name;
+    fault.reason = String(error.details ?? "").match(/(?:^|\s)reason=([a-z_]{1,100})(?:$|\s)/)?.[1] ?? null;
+    throw fault;
+  }
   if (error) throw new WorkerFault("internal_error", false);
   if (data === null || data === undefined) throw new WorkerFault("internal_error", false);
   return data;
