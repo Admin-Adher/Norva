@@ -49,6 +49,9 @@ begin
   saved:=public.selection_capture_fixture(token);
   perform public.metadata_assert(saved is not null,'selection_capture_committed');
   perform public.metadata_assert(public.selection_capture_fixture(token)=saved,'selection_capture_idempotent_resume');
+  update public.admin_feature_flags set enabled=false where key='selection_capture_pipeline_enabled';
+  perform public.metadata_assert(public.selection_capture_fixture(token) is null,'selection_capture_revocation_blocks_checkpoint');
+  update public.admin_feature_flags set enabled=true where key='selection_capture_pipeline_enabled';
   select progress into track_progress from public.catalog_selection_audio_jobs where id=job;
   perform public.metadata_assert((select state='running' and lease_token=token and attempt_count=3
     and progress=track_progress from public.catalog_selection_audio_jobs where id=job),'selection_capture_retains_work_lease_not_audio_vote');

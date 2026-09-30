@@ -89,6 +89,34 @@ test('Selection captures after a miss, persists drain checkpoint, computes local
   }
 });
 
+test('the worker routes through Selection capture admission independently of the legacy flag and parallelism', async () => {
+  const { createSelectionAudioRepository } = await workerModule;
+  const calls = [];
+  const admission = createSelectionAudioRepository({ baseUrl:'https://database.example', serviceKey:'test-only-key',
+    fetchImpl:async url => {
+      const rpc = url.split('/').at(-1); calls.push(rpc);
+      if (rpc === 'selection_audio_capture_pipeline_enabled') return Response.json(true);
+      if (rpc === 'selection_audio_parallel_capture_enabled') return Response.json(false);
+      if (rpc === 'catalog_language_capture_pipeline_enabled') return Response.json(false);
+      throw new Error('Unexpected RPC ' + rpc);
+    } });
+  const run = await harness();
+  let inferred = 0;
+  run.gateway.getCaptureStatus = async () => ({ captured:true, providerDrained:true,
+    sha256:'d'.repeat(64), expiresAt:Date.now()+1800000 });
+  run.repository.checkpointCapture = async () => '23456789-1234-4234-8234-123456789012';
+  run.gateway.computeCapture = async args => {
+    inferred++;
+    return { providerDrained:true, receipt:receipt(args.windowOrdinal), windowCount:6 };
+  };
+  run.gateway.acknowledgeCapture = async () => {};
+  assert.equal(await admission.parallelEnabled(), false);
+  assert.equal((await run.run({ captureEnabled:await admission.captureEnabled() })).state, 'completed');
+  assert.equal(inferred, 6);
+  assert.equal(run.windows.length, 0, 'legacy network analysis was never invoked');
+  assert.deepEqual(calls, ['selection_audio_parallel_capture_enabled','selection_audio_capture_pipeline_enabled']);
+});
+
 test('Selection local failures preserve audio and retry locally; lease loss and capture refusals never infer', async () => {
   for (const stage of ['status','handoff','compute','evidence','capture']) {
     const job = { ...baseJob(), attempt_count:3, profile:profile(), progress:{ trackPosition:0, receipts:[], tracks:[], evidence:[] } };
