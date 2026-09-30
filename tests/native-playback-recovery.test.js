@@ -961,8 +961,8 @@ for (const scenario of ['no_data_timeout', 'ERROR_CODE_IO_BAD_HTTP_STATUS', 'pro
     'recovery-token-1',
   );
   assert.equal(retryResult, 'scheduled');
-  const recovery = scheduled.find(({ delay }) => delay === 1200);
-  assert.ok(recovery, 'the existing first bounded VOD retry must be scheduled');
+  const recovery = scheduled.find(({ delay }) => delay === (reason === 'provider_html_response' ? 0 : 1200));
+  assert.ok(recovery, 'only a confirmed HTML refusal can skip the first VOD backoff');
   await recovery.callback();
 
   if (closedDuringResolution) {
@@ -989,6 +989,18 @@ for (const scenario of ['no_data_timeout', 'ERROR_CODE_IO_BAD_HTTP_STATUS', 'pro
   assert.equal(launches[1].sessionId, freshSessionId);
   assert.equal(launches[1].resumeSeconds, 120);
   assert.equal(launches[1].mediaCache, null);
+  if (reason === 'provider_html_response') {
+    const retryTimers = scheduled.length;
+    for (let index = 1; index < 3; index += 1) {
+      assert.equal(window.__norvaNative.retryPlayback(
+        'atlas-pro', 'episode', 'episode-3', 120, reason, `html-vod-${index}`,
+      ), 'scheduled');
+    }
+    assert.deepEqual(scheduled.slice(retryTimers).map(({ delay }) => delay), [3500, 7000]);
+    assert.equal(window.__norvaNative.retryPlayback(
+      'atlas-pro', 'episode', 'episode-3', 120, reason, 'html-vod-exhausted',
+    ), 'exhausted', 'immediate HTML fallback must not renew the retry budget');
+  }
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register'),
     [
@@ -1071,6 +1083,166 @@ for (const scenario of ['no_data_timeout', 'ERROR_CODE_IO_BAD_HTTP_STATUS', 'pro
   ), 'exhausted');
   assert.equal(scheduled.length - timersBefore, 3);
 });
+
+function deferredNativeFixture() {
+  let resolve;
+  let reject;
+  const promise = new Promise((accept, fail) => { resolve = accept; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+function nativeVodIntentFixture({ resumeInfo, stopSessions } = {}) {
+  const launches = [];
+  const resolutions = [];
+  const savedHistory = [];
+  const scheduled = [];
+  const expired = [];
+  const listeners = new Map();
+  let nextSession = 0;
+  const session = () => `50000000-0000-4000-8000-${String(++nextSession).padStart(12, '0')}`;
+  class WatchPage {
+    constructor() { this.activeCloudPlaybackSessionIds = new Set(); }
+    async _fetchServerResumeInfo(content) {
+      return resumeInfo ? resumeInfo(content) : { answered: true, position: 120 };
+    }
+    async stopCloudPlaybackSessions() {
+      if (stopSessions) await stopSessions();
+      this.activeCloudPlaybackSessionIds.clear();
+    }
+    registerCloudPlaybackSession(id) { this.activeCloudPlaybackSessionIds.add(id); }
+  }
+  class VideoPlayer {}
+  const location = { hash: '#series', origin: 'https://norva.tv', search: '' };
+  const document = {
+    readyState: 'complete', addEventListener() {}, getElementById() { return null; },
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    body: { classList: { contains() { return false; } } },
+  };
+  const window = {
+    NorvaTVCloud: { playVideoJson(payload) { launches.push(JSON.parse(payload)); } },
+    NorvaCloud: { token: 'fixture-token', playback: {
+      async expireSession(id) {
+        expired.push(id);
+        return { session: { id, status: 'expired' }, gatewayErrors: 0 };
+      },
+    } },
+    WatchPage, VideoPlayer, __norvaNative: {}, location,
+    history: { state: null, back() {} }, app: { currentPage: 'series', pages: { series: {} } },
+    API: {
+      history: { async save(item) { savedHistory.push(item.id); } },
+      proxy: { xtream: { async getStreamUrl(_source, id) {
+        resolutions.push(id);
+        return { url: 'https://provider.example/fresh.mkv', sessionId: session() };
+      } } },
+    },
+    addEventListener(type, listener) {
+      const entries = listeners.get(type) || [];
+      entries.push(listener);
+      listeners.set(type, entries);
+    },
+    dispatchEvent() {},
+  };
+  const context = vm.createContext({
+    window, document, location, WatchPage, VideoPlayer,
+    localStorage: { getItem() { return null; }, setItem() {} },
+    navigator: { userAgent: 'NorvaTV-test' }, URL, Date, Map, Set, Promise,
+    console: { log() {}, warn() {}, error() {}, info() {} },
+    CustomEvent: class CustomEvent {},
+    setTimeout(callback, delay) { scheduled.push({ callback, delay }); return scheduled.length; },
+    clearTimeout() {},
+  });
+  vm.runInContext(read('public/js/utils/standalone.js'), context);
+  const page = new WatchPage();
+  const play = (id) => page.play({
+    sourceId: 'fixture-source', id, type: 'series', title: id, containerExtension: 'mkv',
+  }, async () => {
+    resolutions.push(id);
+    return { url: 'https://provider.example/initial.mkv', sessionId: session() };
+  });
+  const navigate = (hash) => {
+    location.hash = hash;
+    for (const listener of listeners.get('hashchange') || []) listener();
+  };
+  return { window, play, navigate, launches, resolutions, savedHistory, scheduled, expired };
+}
+
+for (const pendingPhase of ['cleanup', 'history']) {
+  test(`native VOD leaving the route during ${pendingPhase} cannot launch or seed abandoned playback`, async () => {
+    const pending = deferredNativeFixture();
+    const entered = deferredNativeFixture();
+    const wait = async () => { entered.resolve(); await pending.promise; return { answered: true, position: 120 }; };
+    const fixture = nativeVodIntentFixture(pendingPhase === 'history'
+      ? { resumeInfo: wait } : { stopSessions: wait });
+    const playback = fixture.play('abandoned-episode');
+    await entered.promise;
+    fixture.navigate('#home');
+    pending.resolve();
+    await playback;
+    assert.deepEqual(fixture.launches, []);
+    assert.deepEqual(fixture.resolutions, [], 'a cancelled action must not consume a provider slot');
+    assert.deepEqual(fixture.savedHistory, [], 'leaving before launch must not promote abandoned history');
+  });
+}
+
+for (const outcome of ['answered', 'failed']) {
+  test(`an old ${outcome} history lookup cannot adopt or cancel a newer native VOD action`, async () => {
+    const pending = deferredNativeFixture();
+    const entered = deferredNativeFixture();
+    const fixture = nativeVodIntentFixture({ resumeInfo: async (content) => {
+      if (content.id !== 'old-episode') return { answered: true, position: 240 };
+      entered.resolve();
+      return pending.promise;
+    } });
+    const oldPlayback = fixture.play('old-episode');
+    await entered.promise;
+    await fixture.play('new-episode');
+    if (outcome === 'answered') pending.resolve({ answered: true, position: 120 });
+    else pending.reject(new Error('history unavailable'));
+    await oldPlayback;
+    assert.deepEqual(fixture.resolutions, ['new-episode']);
+    assert.deepEqual(fixture.savedHistory, ['new-episode']);
+    assert.deepEqual(fixture.launches.map(({ itemId }) => itemId), ['new-episode']);
+    assert.equal(fixture.window.__norvaNative.retryPlayback(
+      'fixture-source', 'episode', 'new-episode', 240, 'provider_html_response', 'current-token',
+    ), 'scheduled');
+    const recovery = fixture.scheduled.find(({ delay }) => delay === 0);
+    assert.ok(recovery, 'the first confirmed HTML replacement must be immediate');
+    await recovery.callback();
+    assert.equal(fixture.launches.length, 2, 'new action recovery still owns the launch after old history completes');
+    assert.equal(fixture.launches[1].itemId, 'new-episode');
+    assert.equal(fixture.launches[1].resumeSeconds, 240);
+  });
+}
+
+for (const invalidation of ['route', 'new-intent', 'new-token']) {
+  test(`immediate HTML recovery still rejects a stale ${invalidation}`, async () => {
+    const fixture = nativeVodIntentFixture();
+    await fixture.play('episode');
+    assert.equal(fixture.window.__norvaNative.retryPlayback(
+      'fixture-source', 'episode', 'episode', 120, 'provider_html_response', 'old-token',
+    ), 'scheduled');
+    const firstRecovery = fixture.scheduled.find(({ delay }) => delay === 0);
+    assert.ok(firstRecovery, 'confirmed HTML fallback must still be scheduled asynchronously');
+    if (invalidation === 'route') fixture.navigate('#home');
+    if (invalidation === 'new-intent') {
+      fixture.window.__norvaNative.beginPlaybackIntent('fixture-source', 'episode', 'new-episode');
+    }
+    if (invalidation === 'new-token') {
+      assert.equal(fixture.window.__norvaNative.retryPlayback(
+        'fixture-source', 'episode', 'episode', 120, 'provider_html_response', 'new-token',
+      ), 'scheduled');
+    }
+    await firstRecovery.callback();
+    assert.equal(fixture.resolutions.length, 1, 'stale recovery must not resolve a second session');
+    assert.equal(fixture.launches.length, 1);
+    if (invalidation === 'new-token') {
+      const nextRecovery = fixture.scheduled.find(({ delay }) => delay === 3500);
+      await nextRecovery.callback();
+      assert.equal(fixture.launches.length, 2);
+      assert.equal(fixture.launches[1].recoveryToken, 'new-token');
+    }
+  });
+}
 
 test('standalone Live recovery re-resolves the channel instead of replaying a stale URL', () => {
   const source = read('public/js/utils/standalone.js');
@@ -1259,8 +1431,8 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
     'live-recovery-token-1',
   );
   assert.equal(retry, 'scheduled');
-  const recovery = scheduled.find(({ delay }) => delay === 250);
-  assert.ok(recovery, 'the pre-existing Live recovery must be scheduled once');
+  const recovery = scheduled.find(({ delay }) => delay === (liveReason === 'provider_html_response' ? 0 : 250));
+  assert.ok(recovery, 'only a confirmed HTML refusal can skip the first Live backoff');
   const recoveryTask = recovery.callback();
   await Promise.resolve();
   await Promise.resolve();
@@ -1279,6 +1451,18 @@ for (const liveReason of ['no_data_timeout', 'provider_html_response', 'ERROR_CO
   assert.equal(launches[0].url, 'https://provider.example/live/initial.ts');
   assert.equal(launches[1].url, ['provider_html_response', 'ERROR_CODE_IO_BAD_HTTP_STATUS'].includes(liveReason)
     ? 'https://gateway.example/live-fresh/raw' : 'https://provider.example/live/fresh.ts');
+  if (liveReason === 'provider_html_response') {
+    const retryTimers = scheduled.length;
+    for (let index = 1; index < 3; index += 1) {
+      assert.equal(window.__norvaNative.retryPlayback(
+        'atlas-pro', 'channel', '42', 0, liveReason, `html-live-${index}`,
+      ), 'scheduled');
+    }
+    assert.deepEqual(scheduled.slice(retryTimers).map(({ delay }) => delay), [1000, 2500]);
+    assert.equal(window.__norvaNative.retryPlayback(
+      'atlas-pro', 'channel', '42', 0, liveReason, 'html-live-exhausted',
+    ), 'exhausted', 'Live HTML failures must remain bounded');
+  }
   assert.deepEqual(
     lifecycle.filter(([event]) => event === 'register-live'),
     [
