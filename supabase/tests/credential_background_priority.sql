@@ -46,6 +46,26 @@ begin
 end
 $fixture$;
 reset role;
+update public.cloud_source_credential_transition_jobs
+set state='processing',lease_owner='priority-fixture',lease_sequence=1,lease_until=now()+interval '5 minutes'
+where user_id='97000000-0000-4000-8000-000000000001';
+do $fixture$
+declare j uuid; r jsonb;
+begin
+ select id into strict j from public.cloud_source_credential_transition_jobs
+ where user_id='97000000-0000-4000-8000-000000000001';
+ begin
+   perform public.norva_settle_credential_transition_job(j,'wrong-worker',1,'defer','stale',5);
+   raise exception 'wrong worker settled lease';
+ exception when sqlstate 'PT409' then null; end;
+ r:=public.norva_settle_credential_transition_job(j,'priority-fixture',1,'defer','stale',5);
+ if r->>'state'<>'PENDING' or (r->>'failureAttemptCount')::integer<>0 then
+   raise exception 'snapshot conflict consumed failure budget'; end if;
+ if exists(select 1 from public.cloud_source_credential_transition_jobs
+   where id=j and (lease_owner is not null or lease_until is not null or last_error_code<>'stale')) then
+   raise exception 'snapshot conflict did not release lease'; end if;
+end
+$fixture$;
 update public.cloud_source_credential_transition_jobs set state='completed',completed_at=now()
 where user_id='97000000-0000-4000-8000-000000000001';
 set local role service_role;

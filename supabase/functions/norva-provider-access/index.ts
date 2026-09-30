@@ -1723,6 +1723,15 @@ async function handleWorkerDrain(req, requestId) {
         else summary.leaseLost += 1;
         continue;
       }
+      // A catalogue epoch can advance between two guarded RPCs. Release only
+      // our still-current lease, then reload the durable snapshot on reclaim.
+      // This conflict is not a provider failure and cannot justify rollback.
+      if (failure.retryable && failure.queueCode === "stale") {
+        const deferred = await settleJob(job, workerId, "defer", "stale", 5);
+        if (deferred) summary.retried += 1;
+        else summary.leaseLost += 1;
+        continue;
+      }
       const outcome = failure.retryable && job.failureAttemptCount < workerRetryAttemptLimit(job.kind)
         ? "retry"
         : "dead";

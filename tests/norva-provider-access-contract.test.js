@@ -823,7 +823,7 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
   class WorkerFault extends Error {
     constructor(queueCode, retryable) { super(queueCode); this.queueCode = queueCode; this.retryable = retryable; }
   }
-  async function run(kind, pressure = false, recoveryPressure = false) {
+  async function run(kind, pressure = false, recoveryPressure = false, stale = false) {
     const calls = { failed: 0, restored: 0, settled: 0 };
     const handleWorkerDrain = vm.runInNewContext(`(() => { ${source}; return handleWorkerDrain; })()`, {
       WORKER_MAX_CLAIMS: 1,
@@ -843,11 +843,11 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
         }, error: null }
         : { data: [{ job_kind: kind }], error: null } },
       normalizeClaimedJob: () => ({ kind, failureAttemptCount: 4 }),
-      processWorkerJobUnderGuards: async () => { throw new WorkerFault(pressure ? 'rate_limited' : 'provider_unavailable', true); },
+      processWorkerJobUnderGuards: async () => { throw new WorkerFault(stale ? 'stale' : pressure ? 'rate_limited' : 'provider_unavailable', true); },
       normalizeWorkerFault: (error) => error,
       failCredentialValidation: async () => { calls.failed += 1; },
       restoreAfterPostSwitchFailure: async () => { calls.restored += 1; if (recoveryPressure) throw new WorkerFault('rate_limited', true); },
-      settleJob: async (_job, _worker, outcome, code, delay) => { calls.settled += 1; if (pressure || recoveryPressure) { assert.equal(outcome, 'defer'); assert.equal(code, 'rate_limited'); assert.equal(delay, 60); } return true; },
+      settleJob: async (_job, _worker, outcome, code, delay) => { calls.settled += 1; if (pressure || recoveryPressure || stale) { assert.equal(outcome, 'defer'); assert.equal(code, stale ? 'stale' : 'rate_limited'); assert.equal(delay, stale ? 5 : 60); } return true; },
       workerRetryAttemptLimit: () => 4,
       retryDelaySeconds: () => 30,
       successResponse: (_req, _requestId, _kind, summary) => summary,
@@ -868,6 +868,9 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
     assert.equal(result.summary.completed, 1);
   }
   for (const kind of ['validate_candidate', 'build_candidate_generation', 'post_switch_verify', 'rollback_refresh']) {
+    const rebased = await run(kind, false, false, true);
+    assert.deepEqual(rebased.calls, { failed: 0, restored: 0, settled: 1 });
+    assert.equal(rebased.summary.retried, 1);
     for (let repeated = 0; repeated < 6; repeated += 1) {
       const result = await run(kind, true);
       assert.deepEqual(result.calls, { failed: 0, restored: 0, settled: 1 });
