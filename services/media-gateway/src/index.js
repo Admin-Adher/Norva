@@ -2427,7 +2427,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 170;
+const GATEWAY_VERSION = 171;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3819,6 +3819,50 @@ function cancelRawBodyBestEffort(cancelable) {
     }
 }
 
+// One owner and one disposal proof per fetched body. Cancelling a reader closes
+// its body too; cancelling that body again after Undici aborts it is not a new
+// cleanup attempt and can reject even though the first disposal succeeded.
+function createPreparedRawBodyDisposals() {
+    const bodies = new Map();
+    const owners = new WeakMap();
+    const track = (body) => {
+        if (!body) return null;
+        let entry = bodies.get(body);
+        if (!entry) {
+            entry = { body, cancelable: body, disposal: null };
+            bodies.set(body, entry); owners.set(body, entry);
+        }
+        return entry;
+    };
+    const dispose = (cancelable) => {
+        if (!cancelable) return Promise.resolve(true);
+        const entry = owners.get(cancelable) || track(cancelable);
+        if (!entry.disposal) entry.disposal = cancelRawBodyBestEffort(entry.cancelable);
+        return entry.disposal;
+    };
+    const cancelAll = () => { for (const entry of bodies.values()) dispose(entry.cancelable); };
+    return {
+        track,
+        ownReader(body, reader) {
+            const entry = track(body);
+            if (entry && reader) { entry.cancelable = reader; owners.set(reader, entry); }
+        },
+        dispose,
+        record(body, completion) {
+            const entry = track(body);
+            if (entry && !entry.disposal) {
+                entry.disposal = Promise.resolve(completion).then(value => value === true, () => false);
+            }
+        },
+        cancelAll,
+        async drained() {
+            cancelAll();
+            const results = await Promise.all([...bodies.values()].map(entry => entry.disposal));
+            return results.every(value => value === true);
+        },
+    };
+}
+
 function abandonRawAttempt(guard, cancelable, reason) {
     if (guard) guard.abort(reason);
     const drained = cancelRawBodyBestEffort(cancelable);
@@ -3877,10 +3921,11 @@ function readRawPrefixChunk(reader, signal, timeoutMs) {
 // bounded prefix, while retaining every consumed byte for replay into the pipe.
 // If an ambiguous prefix stalls after at least one byte, it fails open; the idle
 // watchdog remains responsible for a provider that stops mid-stream.
-async function sniffLeadingBytes(webBody, signal, timeoutMs, inspectPrefix) {
+async function sniffLeadingBytes(webBody, signal, timeoutMs, inspectPrefix, ownReader = null) {
     let reader = null;
     try {
         reader = webBody.getReader();
+        if (ownReader) ownReader(reader);
     } catch (error) {
         return { chunk: Buffer.alloc(0), reader, timedOut: false, error };
     }
@@ -4039,7 +4084,7 @@ function isDeclaredEmptyRawResponse(upstream) {
 // Rebuild a Node stream from a sniffed body: replay the leading chunk, then pump
 // the remaining web-stream reads. destroy() cancels the reader so the provider
 // connection (the account's single slot) drops with the client, like fromWeb does.
-function readableFromSniffedBody(sniffed, onDrain = null) {
+function readableFromSniffedBody(sniffed, onDrain = null, cancelReader = cancelRawBodyBestEffort) {
     const { Readable } = require('stream');
     let leading = sniffed.chunk && sniffed.chunk.length ? sniffed.chunk : null;
     const reader = sniffed.reader;
@@ -4059,7 +4104,7 @@ function readableFromSniffedBody(sniffed, onDrain = null) {
             });
         },
         destroy(err, cb) {
-            const drained = ended ? Promise.resolve(true) : cancelRawBodyBestEffort(reader);
+            const drained = ended ? Promise.resolve(true) : cancelReader(reader);
             if (onDrain && drained) onDrain(drained);
             cb(err);
         },
@@ -4283,12 +4328,17 @@ app.get('/raw/:token', async (req, res) => {
     let activeAttemptGuard = null;
     let releasePreparedRaw;
     let preparedStream = null;
-    let preparedDisposalFailed = false;
-    const preparedBodies = new Set();
-    const preparedDisposals = new Set();
-    const abandonAttempt = (...args) => {
-        const drained = abandonRawAttempt(...args);
-        if (preparedRaw && drained) preparedDisposals.add(drained);
+    const preparedDisposals = preparedRaw ? createPreparedRawBodyDisposals() : null;
+    // Register before attempt guards/fetch so every abort source (client close,
+    // supersession, cancellation or watchdog) requests disposal before Undici's
+    // signal listener errors the body. A rejected disposal still stays false.
+    const cancelPreparedBodies = () => preparedDisposals?.cancelAll();
+    if (preparedRaw) ac.signal.addEventListener('abort', cancelPreparedBodies, { once: true });
+    const abandonAttempt = (guard, cancelable, reason) => {
+        if (!preparedRaw) return abandonRawAttempt(guard, cancelable, reason);
+        const drained = preparedDisposals.dispose(cancelable);
+        if (guard) { guard.abort(reason); guard.dispose(); }
+        return drained;
     };
     const rawScope = `${pumpOwnerHash}:${claims.sid}`;
     if (preparedRaw) {
@@ -4332,6 +4382,7 @@ app.get('/raw/:token', async (req, res) => {
     // extraction/inference and let its queue re-run it after playback.
     preemptBackgroundWorkGlobally(pumpProxyKey, rawPlaybackReason);
     res.on('close', () => {
+        if (preparedRaw) preparedStream?.destroy();
         ac.abort();
         if (activeAttemptGuard) activeAttemptGuard.dispose();
         releaseRawPump(pump);
@@ -4391,10 +4442,15 @@ app.get('/raw/:token', async (req, res) => {
             return;
         }
         const attemptGuard = createRawAttemptGuard(ac.signal, startupDeadlineAt);
+        let attemptBody = null;
+        // The attempt deadline can fire without aborting the parent controller.
+        if (preparedRaw) attemptGuard.signal.addEventListener('abort',
+            () => preparedDisposals.dispose(attemptBody), { once: true });
         upstream = null;
         try {
             upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: attemptGuard.signal, dispatcher: rawProxyAgent || undefined });
-            if (preparedRaw && upstream.body) preparedBodies.add(upstream.body);
+            attemptBody = upstream.body;
+            if (preparedRaw && attemptBody) preparedDisposals.track(attemptBody);
         } catch (err) {
             const hitDeadline = attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0;
             abandonAttempt(attemptGuard, null, 'raw_fetch_failed');
@@ -4504,6 +4560,7 @@ app.get('/raw/:token', async (req, res) => {
                     attemptGuard.signal,
                     sniffTimeoutMs,
                     (prefix, complete) => classifyRawPrefix(prefix, contentType, startsAtZero, complete),
+                    preparedRaw ? reader => preparedDisposals.ownReader(upstream.body, reader) : null,
                 );
                 if (ac.signal.aborted) {
                     abandonAttempt(attemptGuard, probe.reader, 'raw_client_aborted');
@@ -4594,8 +4651,15 @@ app.get('/raw/:token', async (req, res) => {
         res.end();
         return;
     }
+    if (preparedRaw && !sniffedBody) {
+        const reader = upstream.body.getReader();
+        preparedDisposals.ownReader(upstream.body, reader);
+        sniffedBody = { chunk: Buffer.alloc(0), reader };
+    }
     const nodeStream = sniffedBody
-        ? readableFromSniffedBody(sniffedBody, preparedRaw ? promise => preparedDisposals.add(promise) : null)
+        ? readableFromSniffedBody(sniffedBody,
+            preparedRaw ? promise => preparedDisposals.record(upstream.body, promise) : null,
+            preparedRaw ? reader => preparedDisposals.dispose(reader) : cancelRawBodyBestEffort)
         : require('stream').Readable.fromWeb(upstream.body);
     preparedStream = nodeStream;
     attachRawIdleWatchdog(nodeStream, res, ac);
@@ -4628,20 +4692,17 @@ app.get('/raw/:token', async (req, res) => {
         ac.signal.addEventListener('abort', abortStream, { once: true });
         if (ac.signal.aborted) abortStream();
         try { await require('stream/promises').finished(nodeStream, { cleanup: true }); }
-        catch (_) { if (!sniffedBody) preparedDisposalFailed = true; }
+        catch (_) { /* Premature client close is adjudicated by the owned body disposal below. */ }
         finally { ac.signal.removeEventListener('abort', abortStream); }
     }
     } finally {
         if (preparedRaw) {
+            preparedDisposals.cancelAll();
             ac.abort();
-            // Await fetch/body disposal, not just removal from the raw pump set.
-            for (const body of preparedBodies) {
-                if (!body.locked) {
-                    try { await body.cancel(); } catch (_) { preparedDisposalFailed = true; }
-                }
-            }
-            const disposals = await Promise.all(preparedDisposals);
-            releasePreparedRaw?.(!preparedDisposalFailed && disposals.every(value => value === true));
+            // Await each exact body's single disposal, not just raw-pump removal.
+            const drained = await preparedDisposals.drained();
+            ac.signal.removeEventListener('abort', cancelPreparedBodies);
+            releasePreparedRaw?.(drained);
         }
     }
 });

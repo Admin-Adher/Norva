@@ -83,7 +83,7 @@ test('Gateway joins only a validated producer and rewrites every HLS edge with t
     gateway.indexOf('function requirePlaybackToken('),
     gateway.indexOf('function cors('),
   );
-  assert.match(gateway, /const GATEWAY_VERSION = 170/);
+  assert.match(gateway, /const GATEWAY_VERSION = 171/);
   assert.match(gateway, /function mediaCacheLiveJoinEnabled\([\s\S]*sharedMediaCachePublisher[\s\S]*mediaCacheProducerControl\.active/);
   assert.match(routes, /inspectMediaCacheLiveJoinGraph\(session\)/);
   assert.match(gateway, /topologyValidated: true/);

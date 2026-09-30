@@ -49,7 +49,7 @@ const post=block("app.post('/sessions',",'function gatewayCreatedSessionPayload'
 assert.match(post,/probeCodecProfile\([\s\S]*releasePreparationStartup \? \{ signal: sessionRequestAbortController.signal \}/);
 const raw=block("app.get('/raw/:token'",'// Tee the leading bytes');
 assert.ok(raw.indexOf('playbackPreparationCancellation.assertOpen')<raw.indexOf('await providerAdaptiveRouteControl'));
-assert.match(raw,/await Promise.all\(preparedDisposals\)/);
+assert.match(raw,/await preparedDisposals\.drained\(\)/);
 assert.match(raw,/await require\('stream\/promises'\).finished/);
 });
 
