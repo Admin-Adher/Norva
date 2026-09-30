@@ -128,6 +128,8 @@ class SourceManager {
         this.searchQuery = ''; // Search filter for content browser
         this.warningModalFlight = null; // one shared confirmation per open modal
         this.providerAccessOperations = new Map(); // stable retry identities per source/action
+        this.pendingCredentialCandidates = new Map();
+        this.credentialWatchers = new Map();
         this.productSignals = new Set(); // local dedupe only; source/candidate ids never leave the device
         this.sources = [];
 
@@ -299,6 +301,7 @@ class SourceManager {
             ]);
             this.sources = Array.isArray(sources) ? sources : [];
             this.sourceStatuses = statuses || [];
+            this.discoverCredentialCandidates();
 
             this.renderSourceList(this.xtreamList, this.sources.filter(s => s.type === 'xtream'), 'xtream');
             this.renderSourceList(this.m3uList, this.sources.filter(s => s.type === 'm3u'), 'm3u');
@@ -568,6 +571,7 @@ class SourceManager {
           ${backgrounding ? `<div class="source-backgrounding"><span class="source-backgrounding-dot" aria-hidden="true"></span><norva-i18n data-i18n="ui_web_c71e5f16db44">Adding the rest of your library in the background…</norva-i18n></div>` : ''}
         </div>
         <div class="source-actions">
+          ${this.pendingCredentialCandidates?.has(String(source.id)) ? '<button class="btn btn-sm btn-secondary" data-action="credential-progress" type="button" data-i18n="ui_web_18503529eed0">Checking new login</button>' : ''}
           ${progressButton}
           <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}" type="button"${retryPending ? (globalThis.NorvaI18n?.t("ui_web_a7fc6d2dc8f3", { defaultValue: " title=\"Retry catalog update\" aria-label=\"Retry catalog update\"" }) ?? ' title="Retry catalog update" aria-label="Retry catalog update"') : ''}>${primary.label}</button>
           <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions" title="More actions" data-i18n-title="ui_web_f8d46c2570e7" data-i18n-aria-label="ui_web_f8d46c2570e7">⋯</button>
@@ -622,6 +626,7 @@ class SourceManager {
                 if (action === 'menu') { this.toggleSourceMenu(item); return; }
                 this.closeAllSourceMenus({ restoreFocus: true });
                 switch (action) {
+                    case 'credential-progress': this.showCredentialCandidate(id, this.pendingCredentialCandidates.get(String(id))); break;
                     case 'progress': this.showCatalogPreparationById(id, type); break;
                     case 'refresh': this.refreshSource(id, type); break;
                     case 'hard-refresh': this.refreshSource(id, type, { hard: true }); break;
@@ -901,6 +906,13 @@ class SourceManager {
      */
     async showEditModal(id, type, { intent = 'edit' } = {}) {
         try {
+            if (type === 'xtream' && intent === 'credentials' && API.providerAccess?.getPendingCandidate) {
+                const pending = await API.providerAccess.getPendingCandidate(id);
+                if (pending?.candidate) {
+                    this.showCredentialCandidate(id, pending.candidate);
+                    return;
+                }
+            }
             if (type === 'xtream' && ['credentials', 'provider'].includes(intent)) {
                 this.trackProduct('provider_repair_started', {
                     journey: 'provider_recovery', step: 'provider_repair', state: 'started'
@@ -3583,9 +3595,72 @@ class SourceManager {
         });
     }
 
+    async discoverCredentialCandidates() {
+        if (!this.providerAccessUiEnabled() || !API.providerAccess?.getPendingCandidate) return;
+        const sources = this.sources;
+        const epoch = this.credentialDiscoveryEpoch = (this.credentialDiscoveryEpoch || 0) + 1;
+        this.pendingCredentialCandidates = new Map();
+        for (const source of sources.filter(s => s.type === 'xtream')) {
+            try {
+                const result = await API.providerAccess.getPendingCandidate(source.id);
+                if (this.credentialDiscoveryEpoch !== epoch || this.sources !== sources) return;
+                if (result?.candidate) {
+                    this.pendingCredentialCandidates.set(String(source.id), result.candidate);
+                    this.watchCredentialCandidate(source.id, result.candidate);
+                }
+            } catch (_) { /* Repair remains available through its own server-checked action. */ }
+        }
+        if (this.credentialDiscoveryEpoch === epoch && this.xtreamList) {
+            this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
+        }
+    }
+
+    async watchCredentialCandidate(id, initial) {
+        this.credentialWatchers ||= new Map();
+        if (this.credentialWatchers.has(initial.candidateId)) return;
+        this.credentialWatchers.set(initial.candidateId, true);
+        try {
+            let candidate = initial;
+            for (let attempt = 0; attempt < 720; attempt += 1) {
+                if (!this.sources.some(s => String(s.id) === String(id))) return;
+                const terminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(candidate.state);
+                this.pendingCredentialCandidates ||= new Map();
+                const previous = this.pendingCredentialCandidates.get(String(id));
+                const changed = previous?.candidateId !== candidate.candidateId || previous?.state !== candidate.state || previous?.revision !== candidate.revision;
+                if (terminal) this.pendingCredentialCandidates.delete(String(id));
+                else this.pendingCredentialCandidates.set(String(id), candidate);
+                if ((changed || terminal) && this.xtreamList) this.renderSourceList(this.xtreamList, this.sources.filter(s => s.type === 'xtream'), 'xtream');
+                if (terminal || candidate.actions?.canApply || candidate.actions?.canDecide || candidate.actions?.requiresReplacement) {
+                    const key = `credential-notice:${candidate.candidateId}:${candidate.state}:${candidate.revision}`;
+                    this.productSignals ||= new Set();
+                    if (!this.productSignals.has(key)) {
+                        this.productSignals.add(key);
+                        NorvaModal.toast(this.credentialCandidateCopy(candidate)[0], candidate.state === 'FAILED' ? 'error' : 'info');
+                    }
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 15000));
+                try { candidate = await API.providerAccess.getCandidate(id, initial.candidateId); }
+                catch (error) {
+                    if ([401, 403, 404].includes(Number(error?.status)) || /AUTH|NOT_FOUND/.test(String(error?.code || ''))) return;
+                }
+            }
+        } finally { this.credentialWatchers.delete(initial.candidateId); }
+    }
+
     showCredentialCandidate(id, candidate) {
+        if (!candidate) return;
+        this.pendingCredentialCandidates ||= new Map();
+        this.pendingCredentialCandidates.set(String(id), candidate);
+        this.watchCredentialCandidate(id, candidate);
         const view = this.openProviderAccessModal((globalThis.NorvaI18n?.t("ui_web_18503529eed0", { defaultValue: "Checking new login" }) ?? 'Checking new login'), '<div class="provider-transition" data-provider-transition></div>');
         if (!view) return;
+        const close = view.footer.querySelector('[data-provider-close]');
+        if (close && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(candidate.state)) {
+            close.className = 'btn btn-primary';
+            close.setAttribute('data-i18n', 'ui_web_0db77588ae5e');
+            close.textContent = globalThis.NorvaI18n?.t('ui_web_0db77588ae5e', { defaultValue: 'Run in Background' }) ?? 'Run in Background';
+        }
         this.renderCredentialCandidate(id, candidate, view);
         this.pollCredentialCandidate(id, candidate.candidateId, view);
     }
@@ -3597,7 +3672,7 @@ class SourceManager {
         if (candidate.comparison === 'AMBIGUOUS') return [(globalThis.NorvaI18n?.t("ui_web_5cc99ab3b5d1", { defaultValue: "Confirmation needed" }) ?? 'Confirmation needed'), (globalThis.NorvaI18n?.t("ui_web_20b4904a28ec", { defaultValue: "Norva could not safely tell whether these details belong to the current catalogue." }) ?? 'Norva could not safely tell whether these details belong to the current catalogue.')];
         if (candidate.comparison === 'DIFFERENT_CATALOG') return [(globalThis.NorvaI18n?.t("ui_web_9fe6090c9047", { defaultValue: "Different catalogue detected" }) ?? 'Different catalogue detected'), (globalThis.NorvaI18n?.t("ui_web_3333742d9d8d", { defaultValue: "The new catalogue must be prepared separately before a switch." }) ?? 'The new catalogue must be prepared separately before a switch.')];
         if (candidate.actions?.canApply) return [(globalThis.NorvaI18n?.t("ui_web_83e6a74c5a6d", { defaultValue: "Same catalogue confirmed" }) ?? 'Same catalogue confirmed'), (globalThis.NorvaI18n?.t("ui_web_df87a457b0af", { defaultValue: "The new login can be activated with a rollback-safe refresh." }) ?? 'The new login can be activated with a rollback-safe refresh.')];
-        return [(globalThis.NorvaI18n?.t("ui_web_48087e37217a", { defaultValue: "Checking safely" }) ?? 'Checking safely'), 'Norva is validating the login and comparing a staged catalogue. The active catalogue is unchanged.'];
+        return [(globalThis.NorvaI18n?.t("ui_web_98f579128ad0", { defaultValue: "Preparing in the background" }) ?? 'Preparing in the background'), (globalThis.NorvaI18n?.t("ui_web_f57d2d017965", { defaultValue: "Your current catalogue stays active while Norva imports and checks the candidate." }) ?? 'Your current catalogue stays active while Norva imports and checks the candidate.')];
     }
 
     renderCredentialCandidate(id, candidate, view) {
@@ -3623,7 +3698,6 @@ class SourceManager {
             && !candidate.actions?.canDecide;
         root.innerHTML = `
           <div class="provider-transition-status" role="status" aria-live="polite">
-            <span class="provider-transition-step">${this.escapeHtml(candidate.state.replaceAll('_', ' '))}</span>
             <h3>${this.escapeHtml(title)}</h3><p>${this.escapeHtml(copy)}</p>
           </div>
           ${working ? '<div class="provider-access-progress" aria-hidden="true"><span></span></div>' : ''}

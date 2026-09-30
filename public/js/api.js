@@ -2956,6 +2956,9 @@ const API = {
         createCandidate: async (sourceId, credentials, options = {}) => window.NorvaCloud.providerAccess.createCandidate(
             await CloudAdapter.resolveSourceId(sourceId), credentials, options
         ),
+        getPendingCandidate: async (sourceId, options = {}) => window.NorvaCloud.providerAccess.getPendingCandidate(
+            await CloudAdapter.resolveSourceId(sourceId), options
+        ),
         getCandidate: async (sourceId, candidateId, options = {}) => window.NorvaCloud.providerAccess.getCandidate(
             await CloudAdapter.resolveSourceId(sourceId), candidateId, options
         ),
