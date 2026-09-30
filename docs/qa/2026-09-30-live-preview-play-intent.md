@@ -47,7 +47,7 @@ node --test tests/live-preview-play-intent.test.js tests/live-source-selection.t
 
 `git diff --check` est propre.
 
-## Preuve Android préparée, non encore exécutée
+## Preuve Android exécutée
 
 La fixture existante `tests/fixtures/mobile-live-search.js` vérifie désormais le
 clic du vrai bouton dans `verifyRender()`, appelé par
@@ -55,14 +55,35 @@ clic du vrai bouton dans `verifyRender()`, appelé par
 est remplacée par un enregistrement du choix : aucun fournisseur, session ni
 vidéo. Les vrais contrôleurs, le HTML et les événements DOM sont utilisés.
 
-La même classe vérifie déjà recherche TF1, conservation du focus et du clavier,
-réponses bornées à la source et les deux ordres Sources/Catégories. La suite
-ciblée doit être exécutée après reconstruction de l'APK test, dans les quatre
-configurations téléphone (gestes/trois boutons, police 1.0/1.3), par exemple avec
-`NORVA_ANDROID_TEST_CLASS=tv.norva.phone.LiveSearchScopeInstrumentedTest` dans le
-runner QA existant. Les APK précédents embarquent leurs anciens assets ; ils ne
-permettent pas d'attester ce nouveau JavaScript sans reconstruction.
+La même classe vérifie recherche TF1, conservation du focus et du vrai clavier,
+réponses bornées à la source et les deux ordres Sources/Catégories. Les quatre
+configurations téléphone **trois boutons / gestes × police 1.0 / 1.3** ont réussi
+le 30 septembre 2026, sans test ignoré. Le reçu final atteste `complete=true`,
+`failure=null`, `cleanupError=null` : l'émulateur QA est arrêté et son plafond
+restauré à 2 CPU. Un contrôle `validate` distinct après le rejeu confirme cet état.
 
-**Limite actuelle : aucune validation Android de ce patch et aucun déploiement
-n'ont encore été effectués.** Aucune lecture ni commande ADB physique n'a été
-lancée pendant cette sous-tâche.
+Les APK app et instrumentation proviennent du même job réussi `110046628580`,
+Build `36761806338`, tête PR513 `18fc35acfe8cc35ab29772f413bf5d0469216afc` :
+artefacts `11118663240` et `11118438570`. Leurs archives et contenus ont été
+vérifiés par SHA256, et leur certificat de signature est identique. Le guide et
+la fixture extraits du test APK correspondent exactement aux sources après
+normalisation LF : `1377a11a11…` et `5339498cd7…`.
+
+- Manifeste : `6dfbc51e965c35f15b7b69ce3d35b4780f3bacd8f6d1c8d690678f2987509dcd`.
+- Opérateur local ciblé : `cc325dcb049fedd8f8e578a82f0493ac4d01006f5c0987d1b9566fc22d4faab9` ;
+  huit tests de verdict strict et d'expurgation réussis.
+- Reçu privé : `/home/adrien/.norva/live-preview-host-proof-20260930/run-20260930T185949Z/result.json`.
+- SHA du reçu : `fff8850bea7ffde0ae9803433f21f567da9278354be1cb5140cba64011583188`.
+- Seize captures conservées ; inspection visuelle d'une capture par configuration :
+  champ et focus visibles, clavier réel, cible TF1 cohérente et barre de navigation
+  Android attendue. Il s'agit du catalogue local QA, sans fournisseur.
+
+La première CI `36761441190` a refusé le digest généré obsolète du guide dans
+`i18n/asset-manifest.json`, avant toute compilation Android. Le générateur officiel
+a actualisé ce seul digest ; son mode `--check` et les contrats cloud du nouveau
+Build ont ensuite réussi. Ce premier run n'est pas compté comme une preuve Android.
+
+**Limites :** ce rejeu atteste le contrat UI avec les vrais contrôleurs dans le
+WebView Android ; il ne certifie ni la lecture du fournisseur, ni la performance
+FPS globale, ni toute la suite Android. Aucune lecture ni commande ADB physique
+n'a été lancée pendant cette sous-tâche. Le déploiement est géré séparément.
