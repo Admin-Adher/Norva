@@ -2642,7 +2642,7 @@ async function createPlaybackSessionCore(
   markStartup("coordinatorMs");
   startupTrace.coordinatorWaitMs = startupWaitMs;
 
-  // Native and HLS movie grants use the same exact-source receipt fence.
+  // Native and HLS grants use the same exact-source receipt fence.
   // Only unrelated account catalogue changes may be adopted after preparation.
   const bindPreparedPlaybackReceipt = async (
     cleanup: () => Promise<unknown>,
@@ -2650,10 +2650,11 @@ async function createPlaybackSessionCore(
   ) => {
     const receiptOwnedItemId = stringOrNull(recordOrEmpty(recordOrEmpty(resolved).itemCas).id);
     const movieReceiptProved = itemType === "movie" && !episodeCoordinates && Boolean(receiptOwnedItemId);
+    const liveReceiptProved = itemType === "live" && Boolean(receiptOwnedItemId);
     const seriesReceiptProved = itemType === "series" && Boolean(parentSeriesId)
       && await hasVisibleSeriesEpisodeReceiptProof(db, sourceId, userId, parentSeriesId, itemId);
-    if (!movieReceiptProved && !seriesReceiptProved) {
-      if (requireOwnedMovie) {
+    if (!movieReceiptProved && !liveReceiptProved && !seriesReceiptProved) {
+      if (requireOwnedMovie || itemType === "live") {
         await cleanup().catch(() => null);
         throw new HttpError(409, "Exact playback item authority is unavailable");
       }
@@ -2673,7 +2674,7 @@ async function createPlaybackSessionCore(
         await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
         await assertSourceCatalogVisible(sourceId, userId, db);
         if (deviceId) await assertOwnedDevice(deviceId, userId, db);
-        if (movieReceiptProved) {
+        if (movieReceiptProved || liveReceiptProved) {
           const { data: ownedReceiptItem, error: ownedReceiptError } = await db
             .from("cloud_catalog_visible_media_items").select("id")
             .eq("id", receiptOwnedItemId).eq("user_id", userId).eq("source_id", sourceId)
