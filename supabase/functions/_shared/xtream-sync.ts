@@ -1911,7 +1911,7 @@ export async function stageXtreamCredentialCatalogGeneration(input: {
   // Lazy episode caches are copied mechanically from the previous active
   // generation after all provider inventories. The SQL RPC is bounded and
   // lease-fenced; cloned rows are excluded from catalog identity evidence.
-  if (cursor.actionIndex === actions.length && slices < maxSlices && Date.now() < deadline) {
+  while (cursor.actionIndex === actions.length && slices < maxSlices && Date.now() < deadline) {
     const clone = await copyStagedLazySeriesCache(input, generation, cursor.copyRevision);
     cursor.copyRevision = clone.copyRevision;
     if (clone.done) cursor.actionIndex += 1;
@@ -2376,12 +2376,13 @@ async function copyStagedLazySeriesCache(
     p_worker: generation.leaseOwner,
     p_expected_lease_sequence: generation.attempt,
     p_expected_copy_revision: copyRevision,
-    p_limit: 200,
+    p_limit: 500,
   });
   if (error) throw error;
   const result = recordOrEmpty(Array.isArray(data) ? data[0] : data);
   const nextRevision = strictCheckpointInteger(result.copyRevision, Number.MAX_SAFE_INTEGER);
-  if (typeof result.complete !== "boolean" || nextRevision !== copyRevision + 1) {
+  const recoveredCheckpoint = result.replayed === true && nextRevision > copyRevision;
+  if (typeof result.complete !== "boolean" || (!recoveredCheckpoint && nextRevision !== copyRevision + 1)) {
     throw new Error("Invalid lazy series cache copy result");
   }
   return { done: result.complete, copyRevision: nextRevision };

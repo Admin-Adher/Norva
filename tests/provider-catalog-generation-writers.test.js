@@ -1215,6 +1215,36 @@ test('episode cache copying is DB-stateful and advances only by copyRevision CAS
   );
 });
 
+test('episode copy uses bounded slices and recovers a committed cursor after a lost response', async () => {
+  const { stageXtreamCredentialCatalogGeneration } = loadXtreamModule();
+  const database = new FakeDatabase();
+  let calls = 0;
+  database.rpc = async function(name, args) {
+    if (name !== 'norva_copy_credential_generation_episode_state') return { data: {}, error: null };
+    this.rpcCalls.push({ name, args });
+    assert.equal(args.p_limit, 500);
+    calls++;
+    return { data: calls === 1
+      ? { copyRevision: 7, complete: false, replayed: true }
+      : { copyRevision: args.p_expected_copy_revision + 1, complete: calls === 3 }, error: null };
+  };
+  const result = await stageXtreamCredentialCatalogGeneration({
+    db: database, userId: '11111111-1111-4111-8111-111111111111',
+    sourceId: '22222222-2222-4222-8222-222222222222',
+    transitionId: '33333333-3333-4333-8333-333333333333',
+    generationId: '44444444-4444-4444-8444-444444444444',
+    jobId: '55555555-5555-4555-8555-555555555555',
+    leaseOwner: 'copy-test', leaseSequence: 1, maxSlices: 8,
+    cursor: { action: 'episode_state_copy', version: 1, typeIndex: 6,
+      categoryOrdinal: 0, itemOffset: 2, categoryPageCursor: '', categoriesDone: true,
+      itemCursor: '', processedCategories: 0, processedItems: 0 },
+    fetchMetadataPage: async () => assert.fail('completed inventory must not be downloaded again'),
+  });
+  assert.equal(result.done, true);
+  assert.equal(calls, 3, 'stop immediately when the server finishes copying');
+  assert.deepEqual(database.rpcCalls.map(({ args }) => args.p_expected_copy_revision), [2, 7, 8]);
+});
+
 test('a category repeated on the next page keeps its original ordinal without creating a gap', async () => {
   const { stageXtreamCredentialCatalogGeneration } = loadXtreamModule();
   const database = new FakeDatabase();
