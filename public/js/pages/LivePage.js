@@ -9,6 +9,7 @@ class LivePage {
     }
 
     async init() {
+        const resumeIntent = this.app.channelList.captureLiveBrowseIntent?.();
         // Load sources and channels on initial page load
         await this.app.channelList.loadSources();
         await this.app.channelList.loadChannels();
@@ -22,7 +23,7 @@ class LivePage {
             && !document.body.classList.contains('norva-phone-apk')
             && !document.documentElement.classList.contains('tv-mode');
         if (autoResumeOk) {
-            this.app.channelList.resumeLivePlayback();
+            this.app.channelList.resumeLivePlayback({ intent: resumeIntent });
         }
 
         // Fetch EPG in the background — never block the channel list or page init
@@ -103,6 +104,7 @@ class LivePage {
     }
 
     async show() {
+        const resumeIntent = this.app.channelList.captureLiveBrowseIntent?.();
         document.addEventListener('keydown', this.handleKeydown);
         const livePage = document.getElementById('page-live');
         livePage?.setAttribute('aria-busy', 'true');
@@ -129,7 +131,7 @@ class LivePage {
             // Phone/tablet APK + Android TV: no auto-launch on open (see init()).
             if (!document.body.classList.contains('norva-phone-apk')
                 && !document.documentElement.classList.contains('tv-mode')) {
-                this.app.channelList.resumeLivePlayback();
+                this.app.channelList.resumeLivePlayback({ intent: resumeIntent });
             }
         } catch (err) {
             console.warn('[LivePage] Live view could not be prepared:', err);

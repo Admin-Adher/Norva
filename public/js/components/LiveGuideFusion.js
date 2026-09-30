@@ -1185,6 +1185,7 @@ class LiveGuideFusion {
     async loadRemoteSearchResults(term, seq) {
         const list = this.app?.channelList;
         if (!list || seq !== this._remoteSearchSeq) return;
+        const sourceValue = list.sourceSelect?.value || '';
         const sources = list.getRemoteSearchSources?.() || [];
         if (!sources.length) return;
 
@@ -1196,8 +1197,10 @@ class LiveGuideFusion {
                 streams = await window.API.proxy.xtream.liveStreams(source.id, null, { q: term, limit: 80 });
                 list.remoteSearchCache.set(key, streams || []);
             }
-            // Drop stale responses: bail if the query changed/cleared while this request was in flight.
-            if (seq !== this._remoteSearchSeq || (this.searchQuery || '').trim() !== term) return;
+            // Query and source both belong to this request. The phone guide has
+            // its own sequence, separate from the sidebar's source-change handler.
+            if (seq !== this._remoteSearchSeq || (this.searchQuery || '').trim() !== term
+                || (list.sourceSelect?.value || '') !== sourceValue) return;
             added += list.mergeRemoteSearchChannels(source, streams || []);
         }
 

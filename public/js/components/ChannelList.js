@@ -62,7 +62,11 @@ class ChannelList {
         this.pendingChannelSelection = null;
         this.pendingChannelSelectionSeq = 0;
         this.pendingLiveResume = false;
+        this.pendingLiveResumeIntent = null;
         this.liveResumeInFlight = null;
+        this._liveBrowseIntentSeq = 0;
+        this._autoResumeSelectionSeq = null;
+        this._autoResumePlayerRequest = null;
         this._selectRequestSeq = 0;
         this._streamResolveQueue = Promise.resolve();
         this._pendingPlaybackSelection = null;
@@ -406,6 +410,7 @@ class ChannelList {
         // Search: flat ranked results mode (never mutates group collapse state)
         let searchTimeout;
         this.searchInput.addEventListener('input', () => {
+            this.noteLiveBrowseIntent();
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => this.onSearchInput(), 150);
         });
@@ -445,7 +450,7 @@ class ChannelList {
         });
 
         // Source filter handler
-        this.sourceSelect.addEventListener('change', () => this.loadChannels());
+        this.sourceSelect.addEventListener('change', () => this.onSourceFilterChange());
 
         // Show hidden toggle
         if (this.showHiddenCheckbox) {
@@ -629,7 +634,7 @@ class ChannelList {
     }
 
     isChannelVisibleInBrowse(channel, showHidden, { favoritesGroup = false } = {}) {
-        if (!channel) return false;
+        if (!this.matchesSelectedLiveSource(channel)) return false;
         const rawChannelId = this.getChannelItemId(channel);
         const hidden = this.isHidden('channel', channel.sourceId, rawChannelId);
         if (!favoritesGroup && hidden && !showHidden) return false;
@@ -918,9 +923,15 @@ class ChannelList {
      * Render channel list
      */
     render() {
-        // Browse-mode renderer. Search uses renderSearchResults() (flat ranked
-        // list) and never goes through here, so the group collapse state and
-        // its localStorage persistence stay intact during a search.
+        // Catalogue/decorations can finish while the viewer is typing. Preserve
+        // the current query instead of silently replacing its results with browse.
+        const query = this.searchInput?.value?.trim() || '';
+        if (query) {
+            this.searchMode = true;
+            this.zeroState = false;
+            this.renderSearchResults(query);
+            return;
+        }
         this.searchMode = false;
         this.zeroState = false;
         const showHidden = this.showHiddenCheckbox ? this.showHiddenCheckbox.checked : false;
@@ -1435,6 +1446,7 @@ class ChannelList {
     // === Mode transitions ===
 
     onSearchInput() {
+        this.noteLiveBrowseIntent();
         const term = this.searchInput.value.trim();
         if (term.length >= 1) {
             if (!this.searchMode && !this.zeroState) {
@@ -1478,6 +1490,7 @@ class ChannelList {
         // Dedup identical channel names (same channel listed in several groups)
         const buckets = new Map(); // sourceId:normName -> { channel, score, groups }
         for (const ch of this.channels) {
+            if (!this.matchesSelectedLiveSource(ch)) continue;
             const rawId = ch.streamId || ch.id;
             if (this.isHidden('channel', ch.sourceId, rawId)) continue;
             if (this.hideBroken && this.shouldHideByPlayback(ch)) continue;
@@ -1511,6 +1524,7 @@ class ChannelList {
         // Group-name matches become clickable chips instead of flooding the list
         const groupCounts = new Map();
         for (const ch of this.channels) {
+            if (!this.matchesSelectedLiveSource(ch)) continue;
             const rawId = ch.streamId || ch.id;
             if (this.isHidden('channel', ch.sourceId, rawId)) continue;
             if (this.hideBroken && this.shouldHideByPlayback(ch)) continue;
@@ -1551,6 +1565,7 @@ class ChannelList {
 
     async loadRemoteSearchResults(term, seq) {
         if (seq !== this.remoteSearchSeq) return;
+        const sourceValue = this.sourceSelect?.value || '';
         const sources = this.getRemoteSearchSources();
         if (!sources.length) return;
 
@@ -1572,7 +1587,8 @@ class ChannelList {
                     });
                 this.remoteSearchCache.set(key, streams || []);
             }
-            if (seq !== this.remoteSearchSeq || this.searchInput.value.trim() !== term) return;
+            if (seq !== this.remoteSearchSeq || this.searchInput.value.trim() !== term
+                || (this.sourceSelect?.value || '') !== sourceValue) return;
             added += this.mergeRemoteSearchChannels(source, streams || []);
         }
 
@@ -1660,6 +1676,7 @@ class ChannelList {
         const epgToChannel = new Map();
         for (const ch of this.channels) {
             let epgCh = null;
+            if (!this.matchesSelectedLiveSource(ch)) continue;
             if (ch.tvgId && guide.channelMap?.has(ch.tvgId)) {
                 epgCh = guide.channelMap.get(ch.tvgId);
             } else if (ch.name && guide.channelMap?.has(String(ch.name).toLowerCase())) {
@@ -1689,6 +1706,7 @@ class ChannelList {
         if (!this._epgNowList) return [];
         const matches = [];
         for (const entry of this._epgNowList) {
+            if (!this.matchesSelectedLiveSource(entry.channel)) continue;
             if (entry.titleNorm.includes(termNorm)) {
                 matches.push(entry);
                 if (matches.length >= 5) break;
@@ -1822,9 +1840,11 @@ class ChannelList {
         const recents = this.getRecentChannels()
             .map(r => this.channels.find(c => c.id === r.id && c.sourceId === r.sourceId))
             .filter(Boolean)
+            .filter(ch => this.matchesSelectedLiveSource(ch))
             .filter(ch => !this.hideBroken || !this.shouldHideByPlayback(ch))
             .slice(0, 6);
         const favs = this.channels
+            .filter(ch => this.matchesSelectedLiveSource(ch))
             .filter(ch => this.isFavorite(ch.sourceId, ch.id))
             .filter(ch => !this.hideBroken || !this.shouldHideByPlayback(ch))
             .filter(ch => !recents.some(r => r.id === ch.id && r.sourceId === ch.sourceId))
@@ -2026,6 +2046,75 @@ class ChannelList {
         }
     }
 
+    captureLiveBrowseIntent() {
+        return {
+            revision: this._liveBrowseIntentSeq || 0,
+            source: this.sourceSelect?.value || '',
+            query: this.searchInput?.value?.trim() || ''
+        };
+    }
+
+    isLiveBrowseIntentCurrent(intent) {
+        const current = this.captureLiveBrowseIntent();
+        return Boolean(intent) && current.revision === intent.revision
+            && current.source === intent.source && current.query === intent.query;
+    }
+
+    noteLiveBrowseIntent() {
+        this._liveBrowseIntentSeq = (this._liveBrowseIntentSeq || 0) + 1;
+        this.pendingLiveResume = false;
+        this.pendingLiveResumeIntent = null;
+        // A filter/search interaction cancels a delayed automatic launch, but
+        // does not stop a channel already playing or an explicit Play request.
+        if (this._autoResumeSelectionSeq != null
+            && this._autoResumeSelectionSeq === this._selectRequestSeq) {
+            const automaticPlay = this._autoResumePlayerRequest;
+            const pending = this._pendingPlaybackSelection?.selectSeq;
+            this._selectRequestSeq += 1;
+            if (pending != null) this.failPendingPlaybackSelection(pending, { clearCommitted: false });
+            if (automaticPlay && automaticPlay.selectSeq === this._selectRequestSeq - 1
+                && typeof automaticPlay.requestSeq === 'number'
+                && automaticPlay.player._playRequestSeq === automaticPlay.requestSeq) {
+                // VideoPlayer owns a separate startup queue. Stop only the exact
+                // automatic request still awaiting its first frame, including
+                // startup suspended in Watch teardown or lazy HLS loading.
+                const stopping = Promise.resolve(automaticPlay.player.stop()).catch(() => {
+                    console.warn('[ChannelList] Cancelled automatic playback cleanup failed');
+                });
+                // Invalidate the player synchronously above, then keep its exact
+                // receipt release ahead of the next explicit provider request.
+                // A slow cleanup must never overlap a newly registered session.
+                this._streamResolveQueue = Promise.all([
+                    (this._streamResolveQueue || Promise.resolve()).catch(() => {}),
+                    stopping
+                ]).then(() => {});
+            }
+        }
+        this._autoResumeSelectionSeq = null;
+        this._autoResumePlayerRequest = null;
+    }
+
+    onSourceFilterChange() {
+        this.noteLiveBrowseIntent();
+        this.remoteSearchSeq = (this.remoteSearchSeq || 0) + 1;
+        clearTimeout(this.remoteSearchInFlight);
+        this.remoteSearchInFlight = null;
+        this._epgNowList = null;
+        // Hide rows from the old source immediately even if the current page
+        // request must finish before loadChannels can start the new source.
+        this.renderBrowsePreservingFocus();
+        window.app?.liveGuideFusion?.render();
+        return this.loadChannels();
+    }
+
+    matchesSelectedLiveSource(channel) {
+        if (!channel) return false;
+        const value = this.sourceSelect?.value || '';
+        if (!value) return true;
+        const [type, id] = value.split(':');
+        return channel.sourceType === type && String(channel.sourceId) === id;
+    }
+
     /**
      * Load sources into dropdown
      */
@@ -2034,6 +2123,7 @@ class ChannelList {
         try {
             this.sources = await API.sources.getAll();
             console.log('[ChannelList] loadSources: Got', this.sources?.length || 0, 'sources');
+            const selectedSource = this.sourceSelect.value;
             this.sourceSelect.innerHTML = '<option value="" data-i18n="ui_web_b877e9212b41">All Sources</option>';
 
             const xtreamSources = this.sources.filter(s => s.type === 'xtream' && s.enabled);
@@ -2061,6 +2151,10 @@ class ChannelList {
                     optgroup.appendChild(option);
                 });
                 this.sourceSelect.appendChild(optgroup);
+            }
+            if (this.sources.some(source => source.enabled
+                && `${source.type}:${source.id}` === selectedSource)) {
+                this.sourceSelect.value = selectedSource;
             }
         } catch (err) {
             console.error('Error loading sources:', err);
@@ -2224,6 +2318,8 @@ class ChannelList {
             if (loadRunId !== this.liveHydrationRunId) return;
             this.renderBrowsePreservingFocus();
             window.app?.liveGuideFusion?.render();
+            const query = this.searchInput?.value?.trim() || '';
+            if (query) this.scheduleRemoteSearch(query);
             this.resumeLivePlaybackIfPending();
         }).catch(err => {
             console.warn('[ChannelList] Live decorations refresh failed:', err);
@@ -2453,7 +2549,7 @@ class ChannelList {
                 }
                 if (added > 0 && (addedSinceHydrationStart === added || addedSinceHydrationStart % 1000 < added)) {
                     this._indexedChannels = null;
-                    if (!this.searchMode) this.renderBrowsePreservingFocus();
+                    this.renderBrowsePreservingFocus();
                     window.app?.liveGuideFusion?.render();
                 }
 
@@ -2465,7 +2561,7 @@ class ChannelList {
 
             if (addedSinceHydrationStart > 0 && loadRunId === this.liveHydrationRunId) {
                 this._indexedChannels = null;
-                if (!this.searchMode) this.renderBrowsePreservingFocus();
+                this.renderBrowsePreservingFocus();
                 window.app?.liveGuideFusion?.render();
                 this.resumeLivePlaybackIfPending();
             }
@@ -2524,6 +2620,7 @@ class ChannelList {
         const record = this.getLastLiveChannelRecord();
         if (!record) return null;
         return this.channels.find(channel => {
+            if (!this.matchesSelectedLiveSource(channel)) return false;
             if (String(channel.sourceId) !== String(record.sourceId)) return false;
             if (String(channel.id) === String(record.id)) return true;
             const streamId = channel.streamId || channel.stream_id || '';
@@ -2532,19 +2629,22 @@ class ChannelList {
     }
 
     getFirstPlayableChannel() {
-        return this.channels.find(channel => {
-            if (!channel) return false;
+        const channels = this.channels.filter(channel => this.matchesSelectedLiveSource(channel));
+        return channels.find(channel => {
             const rawId = channel.streamId || channel.stream_id || channel.id;
             if (this.isHidden('channel', channel.sourceId, rawId)) return false;
             if (this.isHidden('group', channel.sourceId, channel.groupTitle)) return false;
             if (this.hideBroken && this.shouldHideByPlayback(channel)) return false;
             return true;
-        }) || this.channels[0] || null;
+        }) || channels[0] || null;
     }
 
     getLiveResumeChannel() {
+        const current = this.channels.find(channel => this.matchesSelectedLiveSource(channel)
+            && String(channel.id) === String(this.currentChannel?.id)
+            && String(channel.sourceId) === String(this.currentChannel?.sourceId));
         return this.findLastLiveChannel()
-            || this.currentChannel
+            || current
             || this.getFirstPlayableChannel();
     }
 
@@ -2574,22 +2674,26 @@ class ChannelList {
     }
 
     resumeLivePlayback(options = {}) {
-        const { force = false } = options;
+        const { force = false, intent = this.captureLiveBrowseIntent() } = options;
+        if (!this.isLiveBrowseIntentCurrent(intent) || intent.query) return Promise.resolve(false);
         if (this.liveResumeInFlight) return this.liveResumeInFlight;
 
         const channel = this.getLiveResumeChannel();
         if (!channel) {
             this.pendingLiveResume = true;
+            this.pendingLiveResumeIntent = intent;
             return Promise.resolve(false);
         }
 
         if (!force && this.hasActiveLivePlayback(channel)) {
             this.currentChannel = channel;
             this.pendingLiveResume = false;
+            this.pendingLiveResumeIntent = null;
             return Promise.resolve(true);
         }
 
         this.pendingLiveResume = false;
+        this.pendingLiveResumeIntent = null;
         this.liveResumeInFlight = this.selectChannel({
             channelId: channel.id,
             sourceId: channel.sourceId,
@@ -2599,7 +2703,8 @@ class ChannelList {
             autoResume: 'true'
         }).then(() => true).catch(err => {
             console.warn('[ChannelList] Live resume failed:', err);
-            this.pendingLiveResume = true;
+            this.pendingLiveResume = this.isLiveBrowseIntentCurrent(intent);
+            this.pendingLiveResumeIntent = this.pendingLiveResume ? intent : null;
             return false;
         }).finally(() => {
             this.liveResumeInFlight = null;
@@ -2611,7 +2716,13 @@ class ChannelList {
     resumeLivePlaybackIfPending() {
         if (!this.pendingLiveResume) return;
         if (!document.getElementById('page-live')?.classList.contains('active')) return;
-        this.resumeLivePlayback();
+        const intent = this.pendingLiveResumeIntent;
+        if (!this.isLiveBrowseIntentCurrent(intent)) {
+            this.pendingLiveResume = false;
+            this.pendingLiveResumeIntent = null;
+            return;
+        }
+        this.resumeLivePlayback({ intent });
     }
 
     isPendingChannelSelectionCurrent(selectionSeq) {
@@ -3671,6 +3782,8 @@ class ChannelList {
         activeItem?.classList.add('active', 'nav-active');
 
         this._pendingPlaybackSelection = null;
+        this._autoResumeSelectionSeq = null;
+        this._autoResumePlayerRequest = null;
         window.app?.player?.clearPendingChannel?.(context.selectSeq);
         window.app?.liveGuideFusion?.setActiveChannel?.(channel);
         try { window.app?.liveGuideFusion?.updateHighlights?.(); } catch (_) { }
@@ -3680,6 +3793,10 @@ class ChannelList {
     failPendingPlaybackSelection(selectSeq, options = {}) {
         if (this._pendingPlaybackSelection?.selectSeq !== selectSeq) return false;
         this._pendingPlaybackSelection = null;
+        if (this._autoResumeSelectionSeq === selectSeq) {
+            this._autoResumeSelectionSeq = null;
+            this._autoResumePlayerRequest = null;
+        }
         window.app?.player?.clearPendingChannel?.(selectSeq);
         this.container?.querySelectorAll('.channel-item.pending').forEach(el => {
             el.classList.remove('pending', 'nav-active');
@@ -3711,7 +3828,9 @@ class ChannelList {
             (!dataset.sourceId || String(c.sourceId) === String(dataset.sourceId))
         );
         if (!requestedChannel) return;
+        if (dataset.autoResume !== 'true') this.noteLiveBrowseIntent();
         const selectSeq = ++this._selectRequestSeq;
+        this._autoResumeSelectionSeq = dataset.autoResume === 'true' ? selectSeq : null;
         const channel = this.buildDynamicLiveChannel(requestedChannel, dataset, selectSeq);
         this._pendingPlaybackSelection = {
             selectSeq,
@@ -3943,7 +4062,12 @@ class ChannelList {
             // VideoPlayer.play override reads playback.fallbackUrl. The browser player
             // ignores the extra argument.
             if (window.app?.player) {
-                await window.app.player.play(playbackChannel, streamUrl, playbackPayload);
+                const player = window.app.player;
+                const playing = player.play(playbackChannel, streamUrl, playbackPayload);
+                if (this._autoResumeSelectionSeq === selectSeq) {
+                    this._autoResumePlayerRequest = { player, requestSeq: player._playRequestSeq, selectSeq };
+                }
+                await playing;
                 if (nativeIntentClaim) this.commitPlaybackChannel(playbackChannel);
             }
         });
