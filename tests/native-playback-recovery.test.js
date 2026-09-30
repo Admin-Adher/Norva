@@ -1091,12 +1091,13 @@ function deferredNativeFixture() {
   return { promise, resolve, reject };
 }
 
-function nativeVodIntentFixture({ resumeInfo, stopSessions } = {}) {
+function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial } = {}) {
   const launches = [];
   const resolutions = [];
   const savedHistory = [];
   const scheduled = [];
   const expired = [];
+  const notices = [];
   const listeners = new Map();
   let nextSession = 0;
   const session = () => `50000000-0000-4000-8000-${String(++nextSession).padStart(12, '0')}`;
@@ -1127,7 +1128,14 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions } = {}) {
       },
     } },
     WatchPage, VideoPlayer, __norvaNative: {}, location,
-    history: { state: null, back() {} }, app: { currentPage: 'series', pages: { series: {} } },
+    history: { state: null, back() {} }, app: {
+      currentPage: 'series', pages: { series: {} },
+      showToast(message, options) {
+        const notice = { message, options, dismissed: false };
+        notices.push(notice);
+        return { dismiss() { notice.dismissed = true; } };
+      },
+    },
     API: {
       history: { async save(item) { savedHistory.push(item.id); } },
       proxy: { xtream: { async getStreamUrl(_source, id) {
@@ -1146,6 +1154,12 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions } = {}) {
     window, document, location, WatchPage, VideoPlayer,
     localStorage: { getItem() { return null; }, setItem() {} },
     navigator: { userAgent: 'NorvaTV-test' }, URL, Date, Map, Set, Promise,
+    NorvaI18n: { t(key, { defaultValue } = {}) {
+      return ({
+        ui_web_05958c958fa0: 'Impossible de démarrer ce titre. Veuillez réessayer.',
+        ui_web_942087cc2d41: 'Réessayer',
+      })[key] || defaultValue || key;
+    } },
     console: { log() {}, warn() {}, error() {}, info() {} },
     CustomEvent: class CustomEvent {},
     setTimeout(callback, delay) { scheduled.push({ callback, delay }); return scheduled.length; },
@@ -1157,14 +1171,96 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions } = {}) {
     sourceId: 'fixture-source', id, type: 'series', title: id, containerExtension: 'mkv',
   }, async () => {
     resolutions.push(id);
+    if (resolveInitial) return resolveInitial(id);
     return { url: 'https://provider.example/initial.mkv', sessionId: session() };
   });
   const navigate = (hash) => {
     location.hash = hash;
     for (const listener of listeners.get('hashchange') || []) listener();
   };
-  return { window, play, navigate, launches, resolutions, savedHistory, scheduled, expired };
+  return { window, play, navigate, launches, resolutions, savedHistory, scheduled, expired, notices };
 }
+
+for (const failure of ['rejected', 'missing-url']) {
+  test(`native initial ${failure} resolution shows one translated error and retries only on request`, async () => {
+    let resolutionCount = 0;
+    let historyCount = 0;
+    const fixture = nativeVodIntentFixture({
+      resumeInfo: async () => ({ answered: true, position: ++historyCount * 120 }),
+      resolveInitial: async () => {
+        resolutionCount += 1;
+        if (resolutionCount === 1) {
+          if (failure === 'missing-url') return null;
+          throw new Error('TypeError secret https://provider.example/user/password');
+        }
+        return { url: 'https://provider.example/initial.mkv', sessionId: '50000000-0000-4000-8000-000000000001' };
+      },
+    });
+    await fixture.play('episode');
+    assert.equal(fixture.launches.length, 0);
+    assert.equal(fixture.notices.length, 1);
+    const notice = fixture.notices[0];
+    assert.equal(notice.message, 'Impossible de démarrer ce titre. Veuillez réessayer.');
+    assert.equal(notice.options.action, 'Réessayer');
+    assert.equal(notice.options.type, 'error');
+    assert.doesNotMatch(JSON.stringify(notice), /TypeError|secret|provider\.example|password/);
+    assert.equal(fixture.scheduled.length, 0, 'an initial failure must not schedule automatic playback');
+    await notice.options.onAction();
+    assert.equal(resolutionCount, 2);
+    assert.equal(historyCount, 2, 'manual retry must refresh multi-device progress');
+    assert.equal(fixture.launches.length, 1);
+    assert.equal(fixture.launches[0].itemId, 'episode');
+    assert.equal(fixture.launches[0].resumeSeconds, 240);
+    assert.equal(notice.dismissed, true);
+    assert.equal(fixture.notices.length, 1);
+  });
+}
+
+for (const invalidation of ['route', 'new-intent']) {
+  test(`native initial rejection after ${invalidation} does not show a late error`, async () => {
+    const pending = deferredNativeFixture();
+    const entered = deferredNativeFixture();
+    const fixture = nativeVodIntentFixture({ resolveInitial: async (id) => {
+      if (id === 'old-episode') { entered.resolve(); return pending.promise; }
+      return { url: 'https://provider.example/new.mkv', sessionId: '50000000-0000-4000-8000-000000000002' };
+    } });
+    const oldPlayback = fixture.play('old-episode');
+    await entered.promise;
+    if (invalidation === 'route') fixture.navigate('#home');
+    else await fixture.play('new-episode');
+    pending.reject(new Error('server unavailable'));
+    await oldPlayback;
+    assert.equal(fixture.notices.length, 0);
+    assert.deepEqual(fixture.launches.map(({ itemId }) => itemId), invalidation === 'route' ? [] : ['new-episode']);
+  });
+
+  test(`native initial error retry is retired after ${invalidation}`, async () => {
+    const fixture = nativeVodIntentFixture({ resolveInitial: async (id) => {
+      if (id === 'old-episode') throw new Error('server unavailable');
+      return { url: 'https://provider.example/new.mkv', sessionId: '50000000-0000-4000-8000-000000000002' };
+    } });
+    await fixture.play('old-episode');
+    const notice = fixture.notices[0];
+    if (invalidation === 'route') fixture.navigate('#home');
+    else await fixture.play('new-episode');
+    assert.equal(notice.dismissed, true);
+    const resolutions = fixture.resolutions.length;
+    await notice.options.onAction();
+    assert.equal(fixture.resolutions.length, resolutions, 'a detached retry cannot resurrect its old title');
+    assert.equal(fixture.notices.length, 1);
+  });
+}
+
+test('a cancelled native initial resolver remains silent', async () => {
+  const fixture = nativeVodIntentFixture({ resolveInitial: async () => {
+    const error = new Error('cancelled');
+    error.name = 'AbortError';
+    throw error;
+  } });
+  await fixture.play('episode');
+  assert.equal(fixture.notices.length, 0);
+  assert.equal(fixture.launches.length, 0);
+});
 
 for (const pendingPhase of ['cleanup', 'history']) {
   test(`native VOD leaving the route during ${pendingPhase} cannot launch or seed abandoned playback`, async () => {

@@ -413,7 +413,17 @@ test('all three catalog surfaces route their externally returned response throug
     'supabase/functions/norva-playback/index.ts',
   ]) {
     const source = read(file);
-    assert.match(source, /finalizeCatalogVisibilityResponse\(\s*req,\s*await handleRequest\(req\)/, file);
+    if (file.endsWith('/norva-playback/index.ts')) {
+      const dispatch = source.slice(source.indexOf('Deno.serve(async (req) => {'),
+        source.indexOf('async function handleRequest'));
+      assert.equal((dispatch.match(/handleRequest\(req\)/g) || []).length, 1,
+        'playback receipt finalization must not re-execute its mutation');
+      assert.match(dispatch, /const preparedResponse = handleRequest\(req\);/);
+      assert.match(dispatch, /finalizePlaybackReceiptResponse\(req, async \(\) => finalizeCatalogVisibilityResponse\(\s*req,\s*\(await preparedResponse\)\.clone\(\)/,
+        'the single prepared receipt still passes through both authority finalizers');
+    } else {
+      assert.match(source, /finalizeCatalogVisibilityResponse\(\s*req,\s*await handleRequest\(req\)/, file);
+    }
     assert.match(source, /bindCatalogVisibilityEpochShared\(req, userId, db\)/, file);
     assert.doesNotMatch(source, /const catalogVisibilityEpochs = new WeakMap/, file);
     assert.match(source, /Access-Control-Expose-Headers[^\n]*retry-after/, file);

@@ -58,3 +58,27 @@ The direct series attempt again produced confirmed `HtmlResponseException` on co
 - A VM replay of the actual WebView bridge reproduced an independent bug: navigating away while cleanup/history was pending could launch the abandoned title; an older history result could adopt a newer action. Capture the action claim before the first await and reject stale stages. Four new regressions fail on the previous code.
 - Skip the first HTML-confirmed recovery backoff (1,200 ms VOD, 250 ms Live), while still awaiting exact outgoing session expiry. Subsequent backoff, three-attempt budget, token/route/action checks remain enforced.
 - 72 focused native-bridge and adjacent history tests pass. The changes are WebView JavaScript and require no new APK; production deployment and a refreshed phone replay remain to be recorded.
+
+## Cross-device replay and bounded cache diagnosis
+
+At 11:03 UTC, one normal click on the web Continue Watching card resumed Strng item 100002 at **360 seconds**, the exact position last saved by Android. A visible advancing 1280×720 image was observed at 376.97 seconds. Web history saved 388 seconds on return to Movies. Session `4f2762af-a3f5-4220-8ea6-913ab7b39bb6` expired at 11:04:25.680 UTC. TF1's prior Android session expired at 11:00:15.539 UTC; no overlapping provider stream was used.
+
+Web first-frame telemetry measured **33,669 ms**. Safe logs on the same main Gateway show Edge preparation 602 ms, all admission/takeover wait counters zero. Prefix transfer took 1,753 ms. Tail metadata required a 131,072-byte read (1,044 ms) followed by 3,660,766 bytes (26,943 ms), compared with 7,135 ms for the phone's 3,780,512-byte tail. No failed startup range or retry explains the difference. Provider throughput on this tail was approximately four times slower during the web sample.
+
+Read-only Gateway health confirms the private byte-range cache is enabled globally, with 30-minute TTL and 8 MiB maximum windows. Main counters: zero stored files/bytes/windows, 10 identity rejections, all attributed to `missingValidator`; other rejection categories are zero. The pilot also has one missing-validator rejection. These provider responses do not provide the required validator. Same-session drained-range reuse remains possible, but cross-session reuse cannot be certified without an identity validator. No expiry/eviction/owner-isolation bug is demonstrated, and no identity guard was weakened. Resume-position synchronisation and reusable media bytes are separate guarantees.
+
+## Global WebView deployment
+
+PR500 merged as `5d8a3cb04aec84b9efe632d50776d89c79637774`. Build run 36706020210 passed all four jobs (cloud contracts, Windows, Android phone and TV). Cloudflare production deployment 36706738989 passed. Public `app.html` references `standalone.js?v=0513e45316`, which matches the validated local script after line-ending normalization and contains both fixes. The unversioned URL still served the prior cached asset; the application's actual versioned URL is correct. The real browser reload also loaded `?v=0513e45316`.
+
+The user was asked to fully reopen Norva on the phone before the final refreshed-code replay because an earlier automatic approval rejected USB app restart. The successful code40 replays above establish playback/resume, but do not yet establish runtime verification of this subsequently deployed JavaScript.
+
+## Refreshed phone replay — remaining failures at 11:22–11:28 UTC
+
+The user reopened Norva; ADB observed a new MainActivity process (PID 19082). A single tap on Strng MP4 item 100002 from Continue Watching created a direct session at 11:22:20.217 UTC and retired it 472 ms later without opening PlayerActivity. The saved web position remained 388 s. The Edge logged a TypeError after creation: a visibility-finalization retry dispatched `handleRequest(req)` again and attempted to consume the same POST body twice. This is a server failure, not evidence of a slow provider or a user cancellation.
+
+A second explicit tap opened PlayerActivity. The direct request returned a confirmed HTML document. Recovery created relay 35983dbf… at 11:26:33.893 UTC, then relay 8fcd1f27… at 11:27:14.306 UTC, but neither rendered a frame. The phone reached its terminal retry screen. Android Back was used to close it; the database subsequently reported no non-expired Strng test session.
+
+Safe Gateway traces isolate a separate slow-start problem. The first relay read the prefix in 1.603 s and the MP4 tail in 2.076 s + 33.883 s; the next relay needed 2.052 s + 68.471 s for the same tail. No video-position range was requested before the retries. Android's 35-second buffering watchdog did not observe positive byte transfers, so it discarded active metadata work and started again. These failed attempts supersede any implication that the refreshed flow is fully validated.
+
+Phone/server clocks are not sufficiently synchronized for precise tap-to-server-event comparisons. Event ordering and same-process durations are used for this diagnosis; no subsecond end-to-end improvement is claimed.

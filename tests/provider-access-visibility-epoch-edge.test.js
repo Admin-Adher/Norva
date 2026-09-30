@@ -45,7 +45,14 @@ function assertResponseHeaderContract(source, hasCachedJson) {
   }
 
   assert.match(source, /catalogVisibilityEpochHeaders,[\s\S]*finalizeCatalogVisibilityResponse,/);
-  assert.match(source, /finalizeCatalogVisibilityResponse\(\s*req,\s*await handleRequest\(req\)/);
+  if (source === playback) {
+    const dispatch = section(source, 'Deno.serve(async (req) => {', '\nasync function handleRequest');
+    assert.equal((dispatch.match(/handleRequest\(req\)/g) || []).length, 1);
+    assert.match(dispatch, /const preparedResponse = handleRequest\(req\);/);
+    assert.match(dispatch, /finalizeCatalogVisibilityResponse\(\s*req,\s*\(await preparedResponse\)\.clone\(\)/);
+  } else {
+    assert.match(source, /finalizeCatalogVisibilityResponse\(\s*req,\s*await handleRequest\(req\)/);
+  }
   assert.match(source, /"Access-Control-Expose-Headers":[^\n]*x-norva-visibility-epoch/);
 }
 
