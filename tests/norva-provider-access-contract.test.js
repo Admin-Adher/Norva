@@ -673,6 +673,7 @@ test('active refresh carries durable category counts and resumes after generatio
     atob, requiredJobGenerationId: () => 'generation', isRecord: value => value && typeof value === 'object',
     uuidValue: value => value, nonNegativeInteger: value => { assert.ok(Number.isInteger(value) && value >= 0); return value; },
     WorkerFault: class WorkerFault extends Error {}, xtreamLanguageDeclarations: () => null,
+    compatibilitySeed: () => ({ tier: "unknown" }), playbackCostScore: () => 500, observedTtffMs: () => null,
     gatewayMetadataPage: async () => ({ done: true, spoolToken: token,
       items: [{ stream_id: 'qa1', name: 'QA Film', category_id: 'qa-category' }] }),
     workerRpc: async (name, params) => {
