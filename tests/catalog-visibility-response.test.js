@@ -427,3 +427,24 @@ test('all three catalog surfaces route their externally returned response throug
   assert.match(cloud, /if \(result\.visibilityChanged\) \{\s*await acknowledgeCatalogVisibilityEpochMutation/);
   assert.match(cloud, /\.is\("deleted_at", null\)\s*\.select\("id"\)\s*\.maybeSingle\(\)/);
 });
+
+test('discarded reads request an owner retry window while mutations never do', async () => {
+ const api=await helper();
+ for(const method of ['GET','HEAD','POST']){
+  const req=new Request('https://edge.test/media-items',{method});
+  const db=sequencedDb(5,6);
+  await api.bindCatalogVisibilityEpoch(req,'window-owner',db);
+  const result=await api.finalizeCatalogVisibilityResponse(req,new Response('{}'),db,{corsHeaders});
+  assert.equal(result.status,409);
+  const windows=db.calls.filter(c=>c.name==='norva_request_catalog_reader_window');
+  assert.equal(windows.length,method==='POST'?0:1);
+  if(windows.length)assert.deepEqual(windows[0].args,{p_user_id:'window-owner'});
+ }
+});
+test('missing retry scheduling RPC cannot expose the discarded response',async()=>{
+ const api=await helper();const req=new Request('https://edge.test/media-items');const base=sequencedDb(1,2);
+ const db={rpc:(name,args)=>{if(name==='norva_request_catalog_reader_window')throw new Error('unavailable');return base.rpc(name,args);}};
+ await api.bindCatalogVisibilityEpoch(req,'window-fallback',db);
+ const result=await api.finalizeCatalogVisibilityResponse(req,new Response('{"oldBody":true}'),db,{corsHeaders});
+ assert.equal(result.status,409);assert.equal((await jsonBody(result)).oldBody,undefined);
+});

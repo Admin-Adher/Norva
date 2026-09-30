@@ -167,6 +167,14 @@ export async function finalizeCatalogVisibilityResponse(
     }
 
     const readRequest = req.method === "GET" || req.method === "HEAD";
+    if (readRequest && response.ok) {
+      // The body is already discarded. Give its retry a quiet, owner-scoped
+      // window during legacy credential refresh, without accepting stale data.
+      // Older deployments may lack this optional scheduling RPC; remain closed.
+      try {
+        await db.rpc("norva_request_catalog_reader_window", { p_user_id: binding.userId });
+      } catch (_) { /* The normal 409 and client retry still apply. */ }
+    }
     return catalogVisibilityErrorResponse(req, corsHeaders, 409, {
       error: readRequest
         ? "Catalog visibility changed while the response was being prepared"
