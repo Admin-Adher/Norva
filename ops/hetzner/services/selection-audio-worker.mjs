@@ -36,25 +36,28 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
     acknowledgeHydration: job => rpc('ack_selection_audio_hydration', { p_external_id: job.external_id, p_url_sha256: job.url_sha256 }),
     async hydrate(job) {
       const owners = await rpc('selection_audio_job_owners', { p_external_id: job.external_id, p_url_sha256: job.url_sha256 });
-      let count = 0;
+      let count = 0, failedOwners = 0;
       for (const owner of owners || []) {
         // Re-read before every owner: removal, replacement or re-enrolment must
         // not resurrect a retired catalogue. RPC verifies this snapshot again.
-        const snapshot = await rpc('norva_get_catalog_write_snapshot', { p_source_id: owner.source_id, p_user_id: owner.user_id });
-        if (snapshot?.isCatalogVisible !== true) continue;
         try {
+          const snapshot = await rpc('norva_get_catalog_write_snapshot', { p_source_id: owner.source_id, p_user_id: owner.user_id });
+          if (snapshot?.isCatalogVisible !== true) continue;
           count += Number(await rpc('hydrate_selection_audio_results', {
             p_source_id: owner.source_id, p_user_id: owner.user_id,
             p_generation_id: snapshot.generationId, p_head_revision: snapshot.headRevision,
             p_config_revision: snapshot.configRevision, p_source_visibility_epoch: snapshot.sourceVisibilityEpoch,
             p_user_visibility_epoch: snapshot.userVisibilityEpoch, p_external_ids: [job.external_id],
           })) || 0;
-        } catch (error) {
-          // The result is durable; a later import or repair pass retries hydration.
-          // Do not turn successful speech analysis into another provider download.
-          throw error;
+        } catch {
+          // One owner's stale snapshot or conflicting profile must not starve
+          // later owners. Keep the durable retry pending until all can publish.
+          failedOwners++;
         }
       }
+      if (failedOwners) throw Object.assign(new Error('SELECTION_AUDIO_DATABASE_ERROR'), {
+        code:'SELECTION_AUDIO_DATABASE_ERROR', retryable:true, hydrated:count, failedOwners,
+      });
       return count;
     },
   };
@@ -158,7 +161,8 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     const verified = progress.tracks.length > 0 && progress.evidence.length === progress.tracks.length;
     const result = { audioTracks: progress.tracks, subtitleTracks: profile.subtitleTracks || [], profile, verified,
       verification: { method: 'selection-strict-lid-v1', status: verified ? 'verified' : 'probed',
-        urlSha256: file.urlSha256, profileFingerprint: profile.fingerprint, tracks: progress.evidence } };
+        urlSha256: file.urlSha256, profileFingerprint: profile.fingerprint,
+        profileProbedAt: profile.probedAt, fileSizeBytes: profile.fileSizeBytes, tracks: progress.evidence } };
     clearInterval(heartbeat);
     await checkpointChain;
     if (lostLease) return { state: 'lease_lost' };
@@ -169,7 +173,12 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
       hydrated = await repository.hydrate(job);
       await repository.acknowledgeHydration(job);
     }
-    catch { return { state: 'completed', hydrated: 0, hydrationPending: true }; }
+    catch (error) {
+      // ACK can fail after a successful publication, too. Never lose the
+      // confirmed count, nor ACK a partially published result.
+      return { state: 'completed', hydrated: Number.isSafeInteger(error?.hydrated) && error.hydrated >= 0
+        ? error.hydrated : hydrated, hydrationPending: true };
+    }
     return { state: 'completed', hydrated, languages: [...new Set(progress.tracks.map(t => t.lang).filter(Boolean))] };
   } catch (error) {
     clearInterval(heartbeat);

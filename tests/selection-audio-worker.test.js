@@ -7,7 +7,8 @@ const file = { externalId:'norva-selection:movie:' + 'a'.repeat(64), url:'https:
 const baseJob = () => ({ id:'12345678-1234-4234-8234-123456789012', external_id:file.externalId, url_sha256:file.urlSha256,
   lease_token:'23456789-1234-4234-8234-123456789012', profile:{}, progress:{} });
 const profile = () => ({ externalId:file.externalId, urlSha256:file.urlSha256, fingerprint:'c'.repeat(64),
-  durationSeconds:600, fileSizeBytes:123456, audioTracks:[{ index:1, lang:null, codec:'aac' }], subtitleTracks:[], windowCount:6 });
+  durationSeconds:600, fileSizeBytes:123456, probedAt:'2026-09-30T21:00:00.000Z',
+  audioTracks:[{ index:1, lang:null, codec:'aac' }], subtitleTracks:[], windowCount:6 });
 const receipt = ordinal => 'receipt-' + ordinal;
 const verified = index => ({ verified:true, lang:'es', providerDrained:true,
   evidence:{ protocol:1, method:'whisper-strict-consensus-v4', streamIndex:index, consensus:4 } });
@@ -53,6 +54,8 @@ test('a completed analysis checkpoints each window then the next track before sa
   assert.equal(run.finishes.length, 1);
   assert.equal(run.finishes[0].result.verified, true);
   assert.equal(run.finishes[0].result.audioTracks[0].lang, 'es');
+  assert.equal(run.finishes[0].result.verification.profileProbedAt, profile().probedAt);
+  assert.equal(run.finishes[0].result.verification.fileSizeBytes, profile().fileSizeBytes);
   assert.deepEqual(run.events.slice(-3), ['finish','hydrate','acknowledge']);
 });
 
@@ -284,6 +287,55 @@ test('hydration failure preserves the completed audio result without scheduling 
   assert.equal(run.events.includes('acknowledge'), false);
   assert.equal(run.windows.length, 6);
   assert.equal(run.events.filter(event => event === 'probe').length, 1);
+});
+
+test('partial publication and a lost acknowledgement preserve counts without redoing analysis', async () => {
+  for (const failAck of [false,true]) {
+    const run = await harness({ hydrate:() => {
+      if (!failAck) throw Object.assign(Error('partial'), { hydrated:3 });
+      return 3;
+    } });
+    let acks = 0;
+    run.repository.acknowledgeHydration = async () => { acks++; throw Error('unavailable'); };
+    const result = await run.run();
+    assert.equal(result.state, 'completed');
+    assert.equal(result.hydrated, 3);
+    assert.equal(result.hydrationPending, true);
+    assert.equal(acks, failAck ? 1 : 0);
+    assert.equal(run.finishes.length, 1);
+    assert.equal(run.finishes[0].errorCode, null);
+  }
+});
+
+test('owner snapshot or publication failure does not starve later owners; retries recheck visibility', async () => {
+  const { createSelectionAudioRepository } = await workerModule;
+  let failure = true;
+  const writes = [], snapshots = [];
+  const repository = createSelectionAudioRepository({ baseUrl:'https://database.example', serviceKey:'test-only-key',
+    fetchImpl:async (url, options) => {
+      const name = url.split('/').at(-1), body = JSON.parse(options.body);
+      if (name === 'selection_audio_job_owners') return Response.json(['a','b','c','d','e'].map(id => ({ user_id:id, source_id:id })));
+      if (name === 'norva_get_catalog_write_snapshot') {
+        snapshots.push(body.p_user_id);
+        if (failure && body.p_user_id === 'a') return Response.json({}, { status:503 });
+        return Response.json({ isCatalogVisible:body.p_user_id !== 'd' && (failure || body.p_user_id !== 'c'),
+          generationId:failure ? 'first-generation' : 'current-generation', headRevision:1,
+          configRevision:2, sourceVisibilityEpoch:3, userVisibilityEpoch:4 });
+      }
+      if (name === 'hydrate_selection_audio_results') {
+        writes.push(body);
+        if (failure && body.p_user_id === 'b') return Response.json({}, { status:409 });
+        return Response.json(1);
+      }
+      throw Error('Unexpected RPC');
+    } });
+  await assert.rejects(repository.hydrate(baseJob()), { code:'SELECTION_AUDIO_DATABASE_ERROR', hydrated:2, failedOwners:2 });
+  assert.deepEqual(snapshots, ['a','b','c','d','e']);
+  assert.deepEqual(writes.map(body => body.p_user_id), ['b','c','e']);
+  failure = false; writes.length = 0; snapshots.length = 0;
+  assert.equal(await repository.hydrate(baseJob()), 3);
+  assert.deepEqual(writes.map(body => body.p_user_id), ['a','b','e']);
+  assert.ok(writes.every(body => body.p_generation_id === 'current-generation'));
 });
 
 test('losing the final save lease never hydrates a result that was not accepted', async () => {
