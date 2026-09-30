@@ -106,8 +106,23 @@ test('/raw permits one self-handoff 458 retry without making 458 generally retry
   assert.match(route, /!rawHandoffRetryUsed[\s\S]{0,180}abortedForHandoff > 0/);
   assert.match(route, /upstream\.status === 458/);
   assert.match(route, /abandonAttempt\(attemptGuard, upstream\.body, 'raw_handoff_slot_busy'\)/);
-  assert.match(route, /const abandonAttempt = \(\.\.\.args\) => \{\s*const drained = abandonRawAttempt\(\.\.\.args\);/,
-    'the tracked disposal wrapper must still abandon the exact underlying attempt');
+  const wrapper = section('    const abandonAttempt = (guard, cancelable, reason)', '    const rawScope =');
+  for (const preparedRaw of [false, true]) {
+    const calls = [];
+    const body = {};
+    const disposal = Promise.resolve(true);
+    const guard = { abort: reason => calls.push(['abort', reason]), dispose: () => calls.push(['release']) };
+    const context = vm.createContext({ preparedRaw,
+      preparedDisposals: { dispose: value => { assert.equal(value, body); calls.push(['dispose']); return disposal; } },
+      abandonRawAttempt: (value, cancelable, reason) => {
+        assert.equal(value, guard); assert.equal(cancelable, body); calls.push(['legacy', reason]); return disposal;
+      } });
+    vm.runInContext(wrapper + '\nthis.abandon = abandonAttempt;', context);
+    assert.equal(context.abandon(guard, body, 'raw_handoff_slot_busy'), disposal);
+    assert.deepEqual(calls, preparedRaw
+      ? [['dispose'], ['abort', 'raw_handoff_slot_busy'], ['release']]
+      : [['legacy', 'raw_handoff_slot_busy']]);
+  }
   assert.match(route, /preemptBackgroundWorkGlobally\(pumpProxyKey, rawPlaybackReason\)/);
   assert.doesNotMatch(
     route,
