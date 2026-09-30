@@ -27,7 +27,9 @@ function createCatalogTransportManifest(itemType, maxItems = 1_000_000) {
                 return;
             }
             const id = text(item.stream_id ?? item.series_id ?? item.id);
-            const title = text(item.name ?? item.title);
+            // Match the display normalization used by the active refresh. A
+            // provider tab must not force reconstruction on every host change.
+            const title = text(item.name ?? item.title).replace(/[\t\r\n]/gu, ' ');
             const parent = text(item.category_id) || null;
             // Duplicate IDs and invalid provider rows take the ordinary import
             // path: guessing which version SQL would retain is not a proof.
