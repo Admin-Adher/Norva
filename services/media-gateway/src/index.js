@@ -17059,10 +17059,22 @@ function knownVodInputProbeEligible(session) {
     const hint = asRecord(session.playbackHint);
     const profile = asRecord(session.codecProfile);
     const profileSource = String(session.codecProfileSource || '').toLowerCase();
+    const currentHeader = asRecord(session.mkvH264CurrentHeaderAuthority);
+    // The bounded Matroska prefix was parsed before this FFmpeg spawn. It is
+    // equally valid demux evidence as a Gateway probe, but only for its owning
+    // session and the unchanged profile. This does not authorize video copy
+    // or shared-cache publication (those retain their full-file proof gates).
+    const currentMkvHeader = Boolean(session.id)
+        && currentHeader.source === 'gateway-inband-current'
+        && currentHeader.captureOwner === String(session.id)
+        && Boolean(currentHeader.profileFingerprint)
+        && currentHeader.profileFingerprint === mkvH264FastStartProfileFingerprint(
+            profile, fileSizeBytesForSession(session),
+        );
     // Flattened transport hints are useful routing evidence but are not a full
     // demux map. Only a detailed catalogue profile or a completed gateway probe
     // may unlock the reduced FFmpeg discovery budget.
-    const detailedProfileSource = (session.retainedVodHeaderReady === true && profileSource === 'gateway_inband') || profileSource === 'request'
+    const detailedProfileSource = currentMkvHeader || (session.retainedVodHeaderReady === true && profileSource === 'gateway_inband') || profileSource === 'request'
         || profileSource.includes('gateway_probe');
     if (!detailedProfileSource) return false;
     const container = normalizeCodecToken(hint.container || profile.container).split(',')[0];
