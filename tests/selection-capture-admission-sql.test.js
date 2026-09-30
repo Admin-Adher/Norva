@@ -158,10 +158,38 @@ test('operator recovery archives exhausted history and uses the canonical curren
         select id,1,1,repeat('c',64),repeat('d',64),'2026-01-01T00:00:00Z' from public.catalog_selection_audio_jobs;
     `);
     await db.exec(read('supabase/migrations/20260930220000_selection_audio_audited_recovery.sql'));
+    await db.exec(read('supabase/migrations/20260930223000_selection_seed_skip_existing_jobs.sql'));
     const old = (await db.query('select id,completed_at::text ended from public.catalog_selection_audio_jobs')).rows[0];
     const recover = (id=old.id, ended=old.ended, rev=revision) => db.query(
       'select public.recover_selection_audio_job($1,$2,$3) id',[id,ended,rev]);
     const count = async table => Number((await db.query(`select count(*) n from public.${table}`)).rows[0].n);
+    const seed = async priority => (await db.query(`select public.seed_selection_audio_jobs(jsonb_build_array(
+      jsonb_build_object('externalId',external_id,'urlSha256',url_sha256,'priority',$1::integer))) n
+      from catalog_selection_audio_jobs where id=$2`,[priority,old.id])).rows[0].n;
+    await t.test('known terminal jobs are skipped even for a higher priority',async()=>{
+      assert.equal(await seed(1000),0);
+      assert.equal((await db.query('select state from catalog_selection_audio_jobs')).rows[0].state,'failed');
+    });
+    await t.test('unchanged queued jobs skip reseeding, priority increases still validate the owner',async()=>{
+      await db.exec("begin; update catalog_selection_audio_jobs set state='queued',completed_at=null,attempt_count=0,error_code=null");
+      assert.equal(await seed(0),0);
+      assert.equal(await seed(1000),1);
+      assert.equal(await seed(1000),0);
+      await db.exec('rollback');
+      await db.exec("begin; update catalog_selection_audio_jobs set state='queued',completed_at=null,attempt_count=0,error_code=null; update cloud_sources set enabled=false");
+      assert.equal(await seed(1000),0);
+      await db.exec('rollback');
+    });
+    await t.test('orphan jobs revive only with a current eligible owner',async()=>{
+      await db.exec("begin; update catalog_selection_audio_jobs set state='retry_wait',completed_at=null,attempt_count=1,error_code='NO_ACTIVE_OWNER'");
+      assert.equal(await seed(0),1);
+      assert.deepEqual((await db.query('select state,error_code,attempt_count from catalog_selection_audio_jobs')).rows[0],
+        {state:'queued',error_code:null,attempt_count:1});
+      await db.exec('rollback');
+      await db.exec("begin; update catalog_selection_audio_jobs set state='retry_wait',completed_at=null,attempt_count=1,error_code='NO_ACTIVE_OWNER'; update cloud_sources set enabled=false");
+      assert.equal(await seed(0),0);
+      await db.exec('rollback');
+    });
     await t.test('private history and service-only execution', async () => {
       const r = (await db.query(`select
         has_function_privilege('authenticated','public.recover_selection_audio_job(uuid,timestamptz,text)','EXECUTE') client,
