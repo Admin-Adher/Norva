@@ -1091,7 +1091,7 @@ function deferredNativeFixture() {
   return { promise, resolve, reject };
 }
 
-function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial } = {}) {
+function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, userAgent = 'NorvaTV-test', monotonicNow } = {}) {
   const launches = [];
   const resolutions = [];
   const savedHistory = [];
@@ -1153,7 +1153,8 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial } = {
   const context = vm.createContext({
     window, document, location, WatchPage, VideoPlayer,
     localStorage: { getItem() { return null; }, setItem() {} },
-    navigator: { userAgent: 'NorvaTV-test' }, URL, Date, Map, Set, Promise,
+    navigator: { userAgent }, URL, Date, Map, Set, Promise,
+    ...(monotonicNow ? { performance: { now: monotonicNow } } : {}),
     NorvaI18n: { t(key, { defaultValue } = {}) {
       return ({
         ui_web_05958c958fa0: 'Impossible de démarrer ce titre. Veuillez réessayer.',
@@ -1179,6 +1180,40 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial } = {
     for (const listener of listeners.get('hashchange') || []) listener();
   };
   return { window, play, navigate, launches, resolutions, savedHistory, scheduled, expired, notices };
+}
+
+for (const phase of ['release', 'catalogue-preparation', 'resolution']) {
+  test(`native VOD token deadline during ${phase} cannot launch or retry a late replacement`, async () => {
+    let now = 0; let blockRelease = false;
+    const pending = deferredNativeFixture();
+    const fixture = nativeVodIntentFixture({
+      userAgent: 'NorvaTV-AndroidPhone/1.3.27', monotonicNow: () => now,
+      stopSessions: async () => { if (blockRelease) await pending.promise; },
+    });
+    await fixture.play('episode');
+    blockRelease = phase === 'release';
+    let freshRequests = 0;
+    const lateSession = '50000000-0000-4000-8000-000000000099';
+    fixture.window.API.proxy.xtream.getStreamUrl = async () => {
+      freshRequests += 1;
+      if (phase === 'resolution') await pending.promise;
+      return { url: 'https://provider.example/fresh.mkv', sessionId: lateSession };
+    };
+    if (phase === 'catalogue-preparation') {
+      fixture.window.app.pages.series.prepareForPlaybackSession = () => pending.promise;
+    }
+    assert.equal(fixture.window.__norvaNative.retryPlayback(
+      'fixture-source', 'episode', 'episode', 120, 'provider_html_response', 'vod-token'
+    ), 'scheduled');
+    const running = fixture.scheduled[0].callback();
+    await new Promise(resolve => setImmediate(resolve));
+    now = 65_000; pending.resolve(); await running;
+    assert.equal(freshRequests, phase === 'resolution' ? 1 : 0);
+    assert.equal(fixture.launches.length, 1);
+    assert.equal(fixture.expired.filter(id => id === lateSession).length, phase === 'resolution' ? 1 : 0);
+    assert.equal(fixture.scheduled.length, 1);
+    assert.equal(fixture.notices.length, 0);
+  });
 }
 
 for (const failure of ['rejected', 'missing-url']) {
@@ -1846,7 +1881,8 @@ test('standalone binds every recovered stream to the exact native recovery token
     /\.\.\.\(recoveryToken \? \{ recoveryToken \} : \{\}\)/,
     'playVideoJson must return a token only for native recovery responses',
   );
-  assert.match(nativeLaunch, /activeNativeRecoveryTokens\.get\(key\) !== recoveryToken/);
+  assert.match(nativeLaunch, /!isNativeRecoveryTokenCurrent\(key, recoveryToken\)/);
+  assert.match(source, /const isNativeRecoveryTokenCurrent = \(key, token\) => \{[\s\S]*?activeNativeRecoveryTokens\.get\(key\) !== token/);
   assert.match(vodFlow, /launchResolved = async \(resumeAt, fresh = false, recoveryToken = '', reason = ''\)/);
   assert.match(
     vodFlow,

@@ -68,3 +68,43 @@ these tests. Runtime replay remains a deployment gate.
   Since Android never received that UUID, its
   durable close queue cannot retry it; the server TTL remains the final cleanup
   fallback. The failure test asserts isolation from newer sessions.
+## Follow-up: stop demonstrably late token recovery
+
+The WebView now bounds work for one native recovery token from its first JS
+dispatch: **65 seconds on Android phone**, **30 seconds on Android TV**. These
+values are the existing `PLAYER_RECOVERY_TTL_MS` constants in each native
+`MainActivity`, including the phone code40 / TV code35 clients. No native class
+or timeout was changed. The bounds apply to Live and VOD.
+
+`MainActivity` starts its native clock **before** dispatching the JavaScript
+callback. The JS deadline can therefore be later by the unknown dispatch delay.
+This is a conservative stop for manifestly late automatic work, **not** an
+acknowledgement that the native player accepted a replacement and not a guarantee
+of cancellation at the Activity's 60-second / 25-second timeout. The phone
+Activity can defer its own timeout across background/foreground transitions;
+its host token TTL remains absolute. A precise native cancellation signal or
+bridge acknowledgement would still be required to close that smaller gap.
+
+- A retry with the same token keeps its first deadline. Replacing a token or
+  ending its intent retires it; a bounded set of the last 64 retired tokens
+  prevents delayed callbacks from rearming those requests.
+- `performance.now()` supplies the monotonic clock when available. Older shells
+  without it use one `Date.now()` deadline; wall-clock changes in that fallback
+  environment are a remaining timing limitation.
+- Tokens without a recognized phone/TV user-agent contract and tokenless legacy
+  recovery receive no invented timeout. Their existing retry limits remain.
+- The guard runs before scheduled work, after session release and catalogue
+  preparation, after URL resolution, and at the native bridge. An exact owned
+  receipt returned too late is expired without registering or launching it.
+- Expired work cannot schedule another automatic retry or show a late recovery
+  error. Existing strict release, route, intent and source ownership guards stay
+  in place. The earlier exact-expiry failure / server TTL limitation still applies.
+
+Verification: **151 tests passed, zero skipped** across the same six suites above,
+including 21 new executable VM cases. The independent reviewer also ran those
+21 cases successfully. Coverage includes both platform bounds; expiry while a
+timer, strict release or resolver is suspended; before-bound delivery; same-token
+retry; old/new-token isolation; retired-token dispatch; unknown/ambiguous platform;
+tokenless legacy; final bridge refusal; monotonic clock under wall-clock jumps;
+wall-clock fallback; and VOD release/preparation/resolution cleanup. These are
+deterministic WebView bridge tests, not a substitute for the production phone replay.
