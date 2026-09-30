@@ -3324,3 +3324,39 @@ test('native seek search keeps a full bounded first window at arbitrary offsets 
   assert.equal(calls.at(-1), 'bytes=55-62');
   assert.equal(broker.interruptedProviderFetches, 0);
 });
+
+for (const initialGrace of [0, 500]) test(`native MP4 tail then cached prefix resume, grace ${initialGrace}`, { timeout: 10000 }, async (t) => {
+  const data = Buffer.alloc(64, 11), calls = []; let active = 0, peak = 0;
+  const timers = new Set();
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range); active++; peak = Math.max(peak, active);
+    let closed = false;
+    const done = () => { if (!closed) { closed = true; active--; } };
+    res.once('close', done); res.once('finish', done);
+    if (req.headers.range.startsWith('bytes=8-')) {
+      const timer = setTimeout(() => { timers.delete(timer); if (!res.destroyed) sendExactRange(req, res, data); }, 800);
+      timers.add(timer);
+    } else sendExactRange(req, res, data);
+  });
+  const sourceUrl = await listen(provider);
+  t.after(() => { for (const timer of timers) clearTimeout(timer); return closeServer(provider); });
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: 64, dispatcher: null,
+    pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 32, finiteSequentialWindowBytes: 32,
+    finiteWarmupWindowBytes: 8, finiteSeekContinuationGraceMs: 50,
+    finiteInitialContinuationGraceMs: initialGrace, supersededReleaseDelayMs: 2500, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const range of ['bytes=0-7', 'bytes=48-63']) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: range } }); await response.arrayBuffer();
+  }
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-63' } });
+  const reader = response.body.getReader(); assert.equal((await reader.read()).value.length, 8);
+  await new Promise(resolve => setTimeout(resolve, 350)); await reader.cancel();
+  const resumed = await fetch(broker.inputUrl, { headers: { Range: 'bytes=24-31' } });
+  assert.deepEqual(Buffer.from(await resumed.arrayBuffer()), data.subarray(24, 32));
+  assert.equal(peak, 1); assert.equal(broker.terminalError, null);
+  if (initialGrace) {
+    assert.equal(calls.some(range => range.startsWith('bytes=8-')), false);
+    assert.equal(broker.interruptedProviderFetches, 0);
+  } else assert.equal(calls.some(range => range.startsWith('bytes=8-')), true);
+});
+
