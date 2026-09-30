@@ -121,11 +121,13 @@ def idle(name, original):
     for key in ('transcribeBusy', 'ocrBusy', 'translateBusy', 'lidBenchmarkBusy'):
         assert h.get(key) is False, 'gateway_busy_or_unknown_' + key
     assert h.get('videoEncoderCapacity', {}).get('active') == 0, 'encoder_active_or_unknown'
-    # The native client can still hold an unexpired grant even between requests.
-    sql = "select count(*) from cloud_playback_sessions where status='active' and expires_at>now() and playback_hint->>'__norvaNativeMp4SessionV1'='true';"
+    # Native/direct clients may still hold usable grants between media requests.
+    # Conservatively block on every unexpired pending/ready cloud session: no
+    # legacy hint or gateway-local session list proves those viewers are idle.
+    sql = "select count(*) from cloud_playback_sessions where status in ('pending','ready') and expires_at>now();"
     count = subprocess.check_output(['docker', 'exec', 'norva-db', 'psql', '-X', '-q', '-At',
                                      '-U', 'postgres', '-d', 'postgres', '-c', sql], text=True).strip()
-    assert count == '0', 'native_cloud_session_active'
+    assert count == '0', 'cloud_playback_session_active'
     return h
 
 
