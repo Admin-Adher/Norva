@@ -36,3 +36,19 @@ Local validation: 48 adjacent Android player/session/build contract tests passed
 0 skipped, and `git diff --check` passed. No local JDK/Gradle was available, so
 the new Java matrix has not been reported as executed locally. The exact-head
 Build must compile both instrumentation APKs before server emulator replay.
+# Follow-up from the first automatic QA run
+
+Build `36741810087` succeeded for `8b5d5337`, publishing all four application and
+instrumentation APK artifacts. The separate six-configuration emulator run
+`36741809603` passed both TV and both gesture configurations; it failed two
+existing first-frame cases on phone three-button / 1.0 during a documented
+Android network loss, and the first IME assertion in ContextualLanguage on
+three-button / 1.3. The new fixture requirement matrix itself passed.
+
+The first-frame precondition change is described separately in
+`2026-09-30-first-frame-network-precondition.md`. The IME failure has no proven
+root cause yet: the log shows a WebEditText InputConnection but no IME show
+request. Failure-only native focus/input state and a screenshot are now recorded
+after the original visibility deadline. No touch retry, forced keyboard display,
+assertion relaxation or new playback attempt was added. Java compilation and
+the next automatic QA execution remain pending for these follow-up changes.
