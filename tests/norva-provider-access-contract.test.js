@@ -1358,3 +1358,52 @@ test('different catalogs cannot reach apply and ambiguous candidates require an 
   assert.match(decision, /REPLACE_WITH_NEW_CATALOG/);
   assert.match(decision, /norva_decide_ambiguous_credential_transition/);
 });
+
+test('database contention and statement deadlines requeue without becoming provider failures', async () => {
+  const source = section('async function workerRpc(', '\nasync function settleJob(');
+  class WorkerFault extends Error {
+    constructor(queueCode, retryable) { super(queueCode); this.queueCode = queueCode; this.retryable = retryable; }
+  }
+  for (const code of ['40P01', '55P03', '57014', '23505']) {
+    const rpc = vm.runInNewContext(`(() => { ${source}; return workerRpc; })()`, {
+      admin: { rpc: async () => ({ data: null, error: { code, details: null } }) },
+      isStaleDatabaseConflict: () => false, WorkerFault, String,
+    });
+    await assert.rejects(rpc('norva_upsert_active_catalog_title_variants', {}), (error) => {
+      assert.equal(error.retryable, code !== '23505');
+      assert.equal(error.queueCode, code === '23505' ? 'internal_error' : 'stale');
+      assert.equal(error.code, code);
+      assert.equal(error.rpc, 'norva_upsert_active_catalog_title_variants');
+      return true;
+    });
+  }
+});
+
+test('variant writes split a signed page without advancing its cursor and carry fresh epochs', async () => {
+  const source = section('async function writeActiveVariantBatches(', '\nfunction rpcObject(');
+  const variants = Array.from({ length: 250 }, (_, id) => ({ id }));
+  for (const failSecond of [false, true]) {
+    const calls = [];
+    const write = vm.runInNewContext(`(() => { ${source}; return writeActiveVariantBatches; })()`, {
+      rpcObject: value => value, activeVisibilityEpoch: value => value.visibilityEpoch,
+      workerRpc: async (name, params) => {
+        assert.equal(name, 'norva_upsert_active_catalog_title_variants');
+        assert.equal(params.p_user_visibility_epoch, 10 + calls.length);
+        assert.equal(params.p_catalog_version, 7);
+        assert.equal(params.p_job_id, 'owned-job');
+        calls.push(params.p_variants);
+        if (failSecond && calls.length === 2) throw new Error('database busy');
+        return { visibilityEpoch: 10 + calls.length };
+      },
+    });
+    const result = write({ p_job_id: 'owned-job', p_user_visibility_epoch: 10 }, 7, variants);
+    if (failSecond) {
+      await assert.rejects(result, /database busy/);
+      assert.deepEqual(calls.map(x => x.length), [100, 100]);
+    } else {
+      assert.equal(await result, 13);
+      assert.deepEqual(calls.map(x => x.length), [100, 100, 50]);
+      assert.deepEqual(calls.flat().map(x => x.id), variants.map(x => x.id));
+    }
+  }
+});

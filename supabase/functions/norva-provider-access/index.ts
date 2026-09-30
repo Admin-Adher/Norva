@@ -1727,6 +1727,11 @@ async function handleWorkerDrain(req, requestId) {
       // our still-current lease, then reload the durable snapshot on reclaim.
       // This conflict is not a provider failure and cannot justify rollback.
       if (failure.retryable && failure.queueCode === "stale") {
+        console.warn("[norva-provider-access] snapshot_conflict", {
+          rpc: /^norva_[a-z_]+$/.test(String(failure.rpc ?? "")) ? failure.rpc : null,
+          reason: /^[a-z_]{1,100}$/.test(String(failure.reason ?? "")) ? failure.reason : null,
+          sqlstate: /^[A-Z0-9]{5}$/.test(String(failure.code ?? "")) ? failure.code : null,
+        });
         const deferred = await settleJob(job, workerId, "defer", "stale", 5);
         if (deferred) summary.retried += 1;
         else summary.leaseLost += 1;
@@ -1784,6 +1789,7 @@ async function handleWorkerDrain(req, requestId) {
         // Never log provider responses, URLs or exception messages. Keep only
         // an identifier code and source-frame coordinates for hidden failures.
         causeCode: /^[A-Z0-9_]{1,80}$/.test(String(error?.code ?? "")) ? error.code : null,
+        rpc: /^norva_[a-z_]+$/.test(String(error?.rpc ?? "")) ? error.rpc : null,
         causeFrames: String(error?.stack ?? "").split("\n").slice(1, 5).map((line) => {
           const frame = line.match(/at\s+([A-Za-z0-9_.]+)\s+\([^)]*?:(\d+):\d+\)/);
           return frame ? `${frame[1]}:${frame[2]}` : "unavailable";
@@ -2810,7 +2816,8 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     categoryId: null,
     cursor: state.cursor || null,
     spoolToken: state.spoolToken || null,
-    // Match staged imports: the Gateway defaults to a 250-item ceiling.
+    // Page size is part of the authenticated spool binding. Keep it stable
+    // across deployment/replay; split expensive database writes below instead.
     maxItems: action.kind === "category" ? 100 : 250,
   });
   if (page.pending) {
@@ -2877,10 +2884,9 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     }));
     visibilityEpoch = activeVisibilityEpoch(titleResult, visibilityEpoch);
     const variants = activeTitleVariants(media, mediaResult, titleResult);
-    const variantResult = rpcObject(await workerRpc("norva_upsert_active_catalog_title_variants", {
-      ...fence, p_user_visibility_epoch: visibilityEpoch, p_catalog_version: state.catalogVersion, p_variants: variants,
-    }));
-    visibilityEpoch = activeVisibilityEpoch(variantResult, visibilityEpoch);
+    visibilityEpoch = await writeActiveVariantBatches(
+      { ...fence, p_user_visibility_epoch: visibilityEpoch }, state.catalogVersion, variants,
+    );
     await workerRpc("norva_confirm_active_catalog_title_projection_batch", {
       ...fence, p_user_visibility_epoch: visibilityEpoch,
       p_titles: activeTitleConfirmations(titleResult),
@@ -2896,6 +2902,18 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     categoryCount: run.actionCategoryCount,
   };
   return advance({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next);
+}
+
+async function writeActiveVariantBatches(fence, catalogVersion, variants) {
+  let visibilityEpoch = fence.p_user_visibility_epoch;
+  for (let offset = 0; offset < variants.length; offset += 100) {
+    const result = rpcObject(await workerRpc("norva_upsert_active_catalog_title_variants", {
+      ...fence, p_user_visibility_epoch: visibilityEpoch, p_catalog_version: catalogVersion,
+      p_variants: variants.slice(offset, offset + 100),
+    }));
+    visibilityEpoch = activeVisibilityEpoch(result, visibilityEpoch);
+  }
+  return visibilityEpoch;
 }
 
 function rpcObject(value) {
@@ -3545,8 +3563,19 @@ async function workerRpc(name, params) {
   // It is not evidence that candidate credentials are bad and must never take
   // the compensation branch; a later claim either resumes from PostgreSQL or
   // finds that the transition is terminal/cancelled.
-  if (isStaleDatabaseConflict(error)) throw new WorkerFault("stale", true);
-  if (error) throw new WorkerFault("internal_error", false);
+  if (isStaleDatabaseConflict(error) || ["40P01", "55P03", "57014"].includes(error?.code)) {
+    const fault = new WorkerFault("stale", true);
+    fault.rpc = name;
+    fault.code = error.code;
+    fault.reason = String(error.details ?? "").match(/(?:^|\s)reason=([a-z_]{1,100})(?:$|\s)/)?.[1] ?? null;
+    throw fault;
+  }
+  if (error) {
+    const fault = new WorkerFault("internal_error", false);
+    fault.code = error.code;
+    fault.rpc = name;
+    throw fault;
+  }
   if (data === null || data === undefined) throw new WorkerFault("internal_error", false);
   return data;
 }
