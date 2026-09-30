@@ -347,9 +347,12 @@ Deno.serve(async (req) => {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
 
+  // Execute the mutation once. Visibility retries may rebind this exact receipt,
+  // but must never read the consumed request body or create another session.
+  const preparedResponse = handleRequest(req);
   return await finalizePlaybackReceiptResponse(req, async () => finalizeCatalogVisibilityResponse(
     req,
-    await handleRequest(req),
+    (await preparedResponse).clone(),
     supabase,
     { service: "norva-playback", corsHeaders },
   ));

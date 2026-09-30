@@ -662,6 +662,11 @@
         let activeNativeIntentClaim = '';
         let activeNativeIntentClaimConsumed = true;
         let lastNativeIntentAt = 0;
+        let nativePlaybackStartFailure = null;
+        const dismissNativePlaybackStartFailure = () => {
+            try { nativePlaybackStartFailure?.dismiss?.(); } catch (_) { /* best-effort */ }
+            nativePlaybackStartFailure = null;
+        };
         const currentNativeRoute = () => {
             try {
                 return String(window.location?.hash || `#${window.app?.currentPage || ''}`);
@@ -676,6 +681,7 @@
             if (key === activeNativeIntentKey
                 && route === activeNativeIntentRoute
                 && now - lastNativeIntentAt < 1500) return false;
+            dismissNativePlaybackStartFailure();
             activeNativeIntentKey = key;
             activeNativeIntentRoute = route;
             lastNativeIntentAt = now;
@@ -705,6 +711,7 @@
         // the backgrounded page, and that must not cancel a legitimate recovery.
         const invalidateNativeRecoveryForRouteChange = () => {
             if (!activeNativeIntentKey || currentNativeRoute() === activeNativeIntentRoute) return;
+            dismissNativePlaybackStartFailure();
             activeNativeRecoveryTokens.delete(activeNativeIntentKey);
             activeNativeIntentKey = '';
             activeNativeIntentClaim = '';
@@ -1036,7 +1043,7 @@
                 };
             } catch (err) {
                 console.warn('[Native] Could not resolve stream URL:', err?.message || err);
-                return { url: null, fallbackUrl: null, sessionId: null };
+                return { url: null, fallbackUrl: null, sessionId: null, error: err };
             }
         };
 
@@ -1211,6 +1218,7 @@
                     initialMeta.itemId
                 ) : activeNativeIntentClaim;
                 if (initialMeta && !launchClaim) return;
+                const launchRoute = currentNativeRoute();
                 // A new viewer intent owns a single provider lane. Await expiry of
                 // any prior native VOD before its resolver is allowed to mint a
                 // replacement session.
@@ -1310,7 +1318,7 @@
                     } else {
                         resolved = await resolveStreamPayload(streamUrl);
                     }
-                    if (!resolved.url) throw new Error('No fresh stream URL returned');
+                    if (!resolved.url) throw resolved.error || new Error('No fresh stream URL returned');
                     // fallbackUrl: the resolver payload carries it for the movie/series
                     // path; the restore-after-refresh path passes it as the 3rd arg.
                     const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
@@ -1350,7 +1358,37 @@
                     meta,
                     (resumeAt, recoveryToken, reason) => launchResolved(resumeAt, true, recoveryToken, reason)
                 );
-                await launchResolved(effectiveResume);
+                try {
+                    await launchResolved(effectiveResume);
+                } catch (error) {
+                    // Initial resolution happens before PlayerActivity exists.
+                    // Keep its failure visible on the catalogue; recovery inside
+                    // an open native player retains its separate retry handling.
+                    const isCurrentLaunch = () => activeNativeIntentClaim === launchClaim
+                        && currentNativeRoute() === launchRoute;
+                    if (error?.name === 'AbortError' || !isCurrentLaunch()) return;
+                    lastNativeIntentAt = 0;
+                    dismissNativePlaybackStartFailure();
+                    nativePlaybackStartFailure = window.app?.showToast?.(
+                        globalThis.NorvaI18n?.t('ui_web_05958c958fa0', {
+                            defaultValue: 'This title could not be started. Please try again.'
+                        }) ?? 'This title could not be started. Please try again.',
+                        {
+                            type: 'error',
+                            duration: 10000,
+                            action: globalThis.NorvaI18n?.t('ui_web_942087cc2d41', {
+                                defaultValue: 'Retry'
+                            }) ?? 'Retry',
+                            onAction: () => {
+                                if (!isCurrentLaunch()) return;
+                                dismissNativePlaybackStartFailure();
+                                // Explicitly retry the same title through the full
+                                // launcher, including fresh cross-device progress.
+                                return this.play(content, streamUrl, playback);
+                            }
+                        }
+                    ) || null;
+                }
             };
         }
 

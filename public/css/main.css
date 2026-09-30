@@ -17926,12 +17926,13 @@ html.tv-mode #gsearch-input:focus {
 .norva-toast-error { background: #3a1d1d; }
 
 .norva-toast-action {
+  min-height: 44px;
   border: none;
   background: transparent;
   color: #8be9fd;
   font-weight: 700;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 8px;
   white-space: nowrap;
 }
 
