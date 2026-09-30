@@ -1378,3 +1378,32 @@ test('database contention and statement deadlines requeue without becoming provi
     });
   }
 });
+
+test('variant writes split a signed page without advancing its cursor and carry fresh epochs', async () => {
+  const source = section('async function writeActiveVariantBatches(', '\nfunction rpcObject(');
+  const variants = Array.from({ length: 250 }, (_, id) => ({ id }));
+  for (const failSecond of [false, true]) {
+    const calls = [];
+    const write = vm.runInNewContext(`(() => { ${source}; return writeActiveVariantBatches; })()`, {
+      rpcObject: value => value, activeVisibilityEpoch: value => value.visibilityEpoch,
+      workerRpc: async (name, params) => {
+        assert.equal(name, 'norva_upsert_active_catalog_title_variants');
+        assert.equal(params.p_user_visibility_epoch, 10 + calls.length);
+        assert.equal(params.p_catalog_version, 7);
+        assert.equal(params.p_job_id, 'owned-job');
+        calls.push(params.p_variants);
+        if (failSecond && calls.length === 2) throw new Error('database busy');
+        return { visibilityEpoch: 10 + calls.length };
+      },
+    });
+    const result = write({ p_job_id: 'owned-job', p_user_visibility_epoch: 10 }, 7, variants);
+    if (failSecond) {
+      await assert.rejects(result, /database busy/);
+      assert.deepEqual(calls.map(x => x.length), [100, 100]);
+    } else {
+      assert.equal(await result, 13);
+      assert.deepEqual(calls.map(x => x.length), [100, 100, 50]);
+      assert.deepEqual(calls.flat().map(x => x.id), variants.map(x => x.id));
+    }
+  }
+});

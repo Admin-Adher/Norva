@@ -2816,9 +2816,9 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     categoryId: null,
     cursor: state.cursor || null,
     spoolToken: state.spoolToken || null,
-    // VOD variants have per-row projection/visibility triggers. Keep each
-    // database write below the API statement deadline without extending it.
-    maxItems: action.kind === "category" || action.itemType !== "live" ? 100 : 250,
+    // Page size is part of the authenticated spool binding. Keep it stable
+    // across deployment/replay; split expensive database writes below instead.
+    maxItems: action.kind === "category" ? 100 : 250,
   });
   if (page.pending) {
     await checkpointActiveRefresh(fence, run.checkpointRevision, state, true, boundedGatewayRetryAfter(page.retryAfterSeconds ?? 2));
@@ -2884,10 +2884,9 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     }));
     visibilityEpoch = activeVisibilityEpoch(titleResult, visibilityEpoch);
     const variants = activeTitleVariants(media, mediaResult, titleResult);
-    const variantResult = rpcObject(await workerRpc("norva_upsert_active_catalog_title_variants", {
-      ...fence, p_user_visibility_epoch: visibilityEpoch, p_catalog_version: state.catalogVersion, p_variants: variants,
-    }));
-    visibilityEpoch = activeVisibilityEpoch(variantResult, visibilityEpoch);
+    visibilityEpoch = await writeActiveVariantBatches(
+      { ...fence, p_user_visibility_epoch: visibilityEpoch }, state.catalogVersion, variants,
+    );
     await workerRpc("norva_confirm_active_catalog_title_projection_batch", {
       ...fence, p_user_visibility_epoch: visibilityEpoch,
       p_titles: activeTitleConfirmations(titleResult),
@@ -2903,6 +2902,18 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     categoryCount: run.actionCategoryCount,
   };
   return advance({ ...fence, p_user_visibility_epoch: visibilityEpoch }, boundCheckpointRevision, next);
+}
+
+async function writeActiveVariantBatches(fence, catalogVersion, variants) {
+  let visibilityEpoch = fence.p_user_visibility_epoch;
+  for (let offset = 0; offset < variants.length; offset += 100) {
+    const result = rpcObject(await workerRpc("norva_upsert_active_catalog_title_variants", {
+      ...fence, p_user_visibility_epoch: visibilityEpoch, p_catalog_version: catalogVersion,
+      p_variants: variants.slice(offset, offset + 100),
+    }));
+    visibilityEpoch = activeVisibilityEpoch(result, visibilityEpoch);
+  }
+  return visibilityEpoch;
 }
 
 function rpcObject(value) {
