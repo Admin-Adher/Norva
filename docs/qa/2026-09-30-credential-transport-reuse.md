@@ -81,3 +81,10 @@ A full production Home reload started at 06:57:18.893 UTC, rendered the Erik le 
 
 ## Current-header demux correction awaiting rollout
 The reduced FFmpeg discovery budget now also accepts a Gateway-parsed bounded Matroska header bound to the same session ID and unchanged exact profile fingerprint. Unknown/historical metadata, another session, a changed profile/file size and a missing requested audio track remain ineligible. Full-probe retry remains available; video-copy and cache-publication proofs are unchanged. Twelve startup tests and 41 related MKV/resume tests passed, with three environment-dependent skips. Runtime benefit is not yet claimed. Gateways must not restart while the legacy signed spool is still needed.
+
+Follow-up to the TV stop check: navigating to Films retained the live stream in Norva's mini-player. A subsequent full reload on Films at approximately 07:26 UTC closed it; read-only DOM inspection then confirmed both video elements paused with readyState 0. The TV telemetry value (476ms) measures the player stage and is not an end-to-end click-to-frame measurement. The screenshot confirms the explicitly selected Strng FR: TF1 HD image.
+
+## Live document-exit reservation correction
+The closed TF1 browser stream left cloud session 9928a8a3-7091-44fa-8008-7e502317ba9e pending until its 07:34:31 UTC TTL. VideoPlayer lacked the document-exit release already present in WatchPage. It now expires only its owned session IDs on pagehide/beforeunload using the existing authenticated keepalive expiry API. Repeated exit events deduplicate; failures retain IDs for a strict retry. Forty-nine focused tests passed. Web deployment/runtime release check pending.
+
+PR492 (current bounded-header discovery) merged as 21a94d1d8cc419a9a11b5d4615ad2c35055eec8d; all four CI jobs in 36683458415 passed. Gateway rollout remains deferred until the legacy spool is no longer needed.
