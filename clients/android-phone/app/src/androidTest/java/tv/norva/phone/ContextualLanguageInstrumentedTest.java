@@ -50,6 +50,46 @@ public class ContextualLanguageInstrumentedTest {
         }
     }
 
+    private static void captureMissingKeyboard(android.app.Instrumentation instrumentation,
+                                               WebView view, String locale, String kind) {
+        // Evidence only, after the visibility deadline has failed. Never force
+        // the keyboard open or retry the touch to turn that failure into a pass.
+        try {
+            AtomicReference<String> state = new AtomicReference<>();
+            instrumentation.runOnMainSync(() -> {
+                android.view.WindowInsets insets = view.getRootWindowInsets();
+                android.view.inputmethod.InputMethodManager ime =
+                    (android.view.inputmethod.InputMethodManager) view.getContext().getSystemService(
+                        android.content.Context.INPUT_METHOD_SERVICE);
+                int[] offset = new int[2]; view.getLocationOnScreen(offset);
+                state.set("attached=" + view.isAttachedToWindow()
+                    + " windowFocus=" + view.hasWindowFocus() + " viewFocus=" + view.hasFocus()
+                    + " served=" + (ime != null && ime.isActive(view))
+                    + " acceptingText=" + (ime != null && ime.isAcceptingText())
+                    + " imeVisible=" + (insets != null && insets.isVisible(android.view.WindowInsets.Type.ime()))
+                    + " screenOrigin=" + offset[0] + "," + offset[1]
+                    + " size=" + view.getWidth() + "x" + view.getHeight());
+            });
+            System.out.println("CONTEXT_IME_FAILURE locale=" + locale + " media=" + kind + " " + state.get());
+        } catch (Exception error) {
+            System.out.println("CONTEXT_IME_DIAGNOSTIC_FAILED " + error.getClass().getSimpleName());
+        }
+        android.graphics.Bitmap image = null;
+        try {
+            image = instrumentation.getUiAutomation().takeScreenshot();
+            java.io.File directory = instrumentation.getTargetContext().getExternalFilesDir(null);
+            if (image == null || directory == null) return;
+            java.io.File file = new java.io.File(directory, "context-ime-failed-" + locale + "-" + kind + ".png");
+            try (java.io.FileOutputStream stream = new java.io.FileOutputStream(file)) {
+                image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream);
+            }
+        } catch (Exception error) {
+            System.out.println("CONTEXT_IME_CAPTURE_FAILED " + error.getClass().getSimpleName());
+        } finally {
+            if (image != null) image.recycle();
+        }
+    }
+
     @Test public void portraitAllLocalesAndTextSizes() throws Exception { verify(360, 800); }
     @Test public void landscapeAllLocalesAndTextSizes() throws Exception { verify(844, 390); }
 
@@ -98,6 +138,7 @@ public class ContextualLanguageInstrumentedTest {
                     Thread.sleep(100);
                     instrumentation.runOnMainSync(()->{android.view.WindowInsets insets=holder.get().getRootWindowInsets();keyboard.set(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));});
                 }
+                if (!keyboard.get()) captureMissingKeyboard(instrumentation, holder.get(), locale, kind);
                 assertTrue("Keyboard visible for "+locale+"/"+kind+" "+evaluate(instrumentation,holder.get(),
                     "(()=>{const s=document.getElementById('"+kind+"-category-search'),r=s.getBoundingClientRect();return JSON.stringify({focus:document.activeElement.id,hit:document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.outerHTML,rect:r.toJSON(),viewport:{width:innerWidth,height:innerHeight,scale:devicePixelRatio}})})()"),keyboard.get());
                 assertEquals("Scope survives both reset orders with keyboard for "+locale+"/"+kind, "\"ok\"",evaluate(instrumentation,holder.get(),
