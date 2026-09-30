@@ -70,6 +70,15 @@ class VideoPlayer {
         this._gatewayRecreateKey = null;
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
+        // A full document exit closes the media socket, but not the cloud
+        // reservation. Match VOD teardown so a closed live/miniplayer tab does
+        // not occupy the provider slot until the session TTL expires.
+        this._releaseCloudPlaybackForExit = () => {
+            ++this._playRequestSeq;
+            void this.stopCloudPlaybackSessions({ keepalive: true }).catch(() => {});
+        };
+        window.addEventListener('pagehide', this._releaseCloudPlaybackForExit);
+        window.addEventListener('beforeunload', this._releaseCloudPlaybackForExit);
 
         // Live "behind the live edge" badge state. The gap is computed entirely
         // client-side (no server round-trip), and the monitor is torn down on
@@ -1536,7 +1545,7 @@ class VideoPlayer {
         const ids = Array.from(sessionIds);
         const results = await Promise.allSettled(ids.map(async (sessionId) => {
             console.log('[Player] Expiring cloud playback session:', sessionId);
-            await expireSession(sessionId);
+            await expireSession(sessionId, options.keepalive ? { keepalive: true } : {});
         }));
         const failedIds = [];
         results.forEach((result, index) => {

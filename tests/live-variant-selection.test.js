@@ -629,6 +629,38 @@ test('live switching fails closed if the previous cloud session cannot be releas
   assert.doesNotMatch(select, /prepareLiveSwitch\(\); \} catch/, 'a release failure must stop the next resolver');
 });
 
+test('document exit releases only this live player sessions with keepalive and deduplicates repeated exit events', async () => {
+  const calls = [];
+  const { VideoPlayer } = loadPlayerClass({ window: { NorvaCloud: { playback: {
+    expireSession: async (id, options) => { calls.push({ id, keepalive: options.keepalive }); },
+  } } } });
+  const player = Object.create(VideoPlayer.prototype);
+  Object.assign(player, { currentCloudPlaybackSessionId: 'current',
+    activeCloudPlaybackSessionIds: new Set(['previous', 'current']),
+    stopPublicHlsDirectSessionGuard() {} });
+  await Promise.all([player.stopCloudPlaybackSessions({ keepalive: true }),
+    player.stopCloudPlaybackSessions({ keepalive: true })]);
+  assert.deepEqual(calls, [{ id: 'previous', keepalive: true }, { id: 'current', keepalive: true }]);
+  assert.equal(player.currentCloudPlaybackSessionId, null);
+  assert.equal(player.activeCloudPlaybackSessionIds.size, 0);
+  assert.match(playerSource, /window\.addEventListener\('pagehide', this\._releaseCloudPlaybackForExit\)/);
+  assert.match(playerSource, /window\.addEventListener\('beforeunload', this\._releaseCloudPlaybackForExit\)/);
+});
+
+test('failed live exit release remains available for a strict retry', async () => {
+  let fail = true;
+  const { VideoPlayer } = loadPlayerClass({ window: { NorvaCloud: { playback: {
+    expireSession: async () => { if (fail) throw new Error('offline'); },
+  } } } });
+  const player = Object.create(VideoPlayer.prototype);
+  Object.assign(player, { currentCloudPlaybackSessionId: 'current',
+    activeCloudPlaybackSessionIds: new Set(['current']), stopPublicHlsDirectSessionGuard() {} });
+  assert.equal((await player.stopCloudPlaybackSessions({ keepalive: true })).released, false);
+  assert.equal(player.activeCloudPlaybackSessionIds.has('current'), true);
+  fail = false;
+  assert.equal((await player.stopCloudPlaybackSessions({ strict: true })).released, true);
+});
+
 test('web player recovers a missing positional URL from the authoritative resolver payload', async () => {
   const { VideoPlayer } = loadPlayerClass();
   const player = Object.create(VideoPlayer.prototype);
