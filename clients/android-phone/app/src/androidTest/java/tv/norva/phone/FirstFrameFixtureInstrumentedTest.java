@@ -14,6 +14,9 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.SystemClock;
 import android.view.View;
 import android.view.DisplayCutout;
@@ -26,6 +29,7 @@ import androidx.media3.ui.PlayerView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -50,6 +54,34 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @RunWith(AndroidJUnit4.class)
 public final class FirstFrameFixtureInstrumentedTest {
+
+    @Before public void requireOnlineFixturePrecondition() {
+        // These cases exercise online playback through a loopback HTTP server.
+        // PlayerActivity intentionally rejects an offline start before HTTP. An
+        // emulator Wi-Fi reconnect must therefore finish before the fixture is
+        // launched, rather than being misreported as a MIME/first-frame defect.
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        ConnectivityManager manager = context.getSystemService(ConnectivityManager.class);
+        assertNotNull("Online playback fixture requires ConnectivityManager", manager);
+        long deadline = SystemClock.elapsedRealtime() + 15_000;
+        long stableSince = 0;
+        Network previous = null;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            Network current = manager.getActiveNetwork();
+            NetworkCapabilities capabilities = current == null ? null : manager.getNetworkCapabilities(current);
+            if (current != null && capabilities != null
+                    && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                if (!current.equals(previous)) stableSince = SystemClock.elapsedRealtime();
+                previous = current;
+                if (SystemClock.elapsedRealtime() - stableSince >= 500) return;
+            } else {
+                previous = null;
+                stableSince = 0;
+            }
+            SystemClock.sleep(100);
+        }
+        throw new AssertionError("Online playback fixture precondition failed: no stable active INTERNET network within 15 seconds");
+    }
 
     @Test
     public void h264AacFixtureRendersARealFirstFrame() throws Exception {
