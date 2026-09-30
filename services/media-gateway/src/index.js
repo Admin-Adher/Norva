@@ -20618,6 +20618,16 @@ function hasHeAacMarker(value) {
 // header probe so both yield identical shapes (incl. per-track audio languages).
 function buildCodecProfile(payload, startedAt, probeSource) {
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
+    // Track duration can differ from container duration (for example an audio
+    // track ending halfway through a movie). Preserve observed values only;
+    // missing/invalid values must not become zero or inherit the movie length.
+    const trackSeconds = (value, allowNegative = false) => {
+        if ((typeof value !== 'string' && typeof value !== 'number')
+            || String(value).trim() === '') return null;
+        const seconds = Number(value);
+        return Number.isFinite(seconds) && Math.abs(seconds) <= 86400
+            && (allowNegative || seconds >= 0) ? seconds : null;
+    };
     // This must stay aligned with FFmpeg's `0:V:0` playback map. In
     // particular, cover art and thumbnail streams can precede the actual movie
     // video in ffprobe JSON but uppercase `V` excludes them from playback.
@@ -20658,6 +20668,8 @@ function buildCodecProfile(payload, startedAt, probeSource) {
             channels: nullableInt(stream.channels),
             sampleRate: nullableInt(stream.sample_rate),
             channelLayout: stringOrNull(stream.channel_layout),
+            durationSeconds: trackSeconds(stream.duration),
+            startTimeSeconds: trackSeconds(stream.start_time, true),
             default: stream.disposition?.default === 1,
             forced: stream.disposition?.forced === 1,
         })),

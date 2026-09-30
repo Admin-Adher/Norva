@@ -852,6 +852,30 @@ test('codec profile binds the exact first uppercase-V stream and excludes cover/
   assert.equal(noPlayableVideo.videoCodec, undefined);
 });
 
+test('codec profile retains independent audio timelines without inventing missing durations', () => {
+  const build = loadBuildCodecProfileHarness();
+  const observed = build({ format: { duration: '600', format_name: 'mov,mp4' }, streams: [
+    { index: 1, codec_type: 'audio', duration: '300.125', start_time: '-0.021' },
+    { index: 2, codec_type: 'audio', duration: '0', start_time: '0' },
+    { index: 3, codec_type: 'audio' },
+  ] }, Date.now(), 'gateway_probe');
+  assert.equal(observed.durationSeconds, 600);
+  assert.equal(observed.audioTracks[0].durationSeconds, 300.125);
+  assert.equal(observed.audioTracks[0].startTimeSeconds, -0.021);
+  assert.equal(observed.audioTracks[1].durationSeconds, 0);
+  assert.equal(observed.audioTracks[1].startTimeSeconds, 0);
+  assert.equal(observed.audioTracks[2].durationSeconds, undefined);
+  assert.equal(observed.audioTracks[2].startTimeSeconds, undefined);
+  for (const value of [null, '', ' ', 'N/A', 'Infinity', '12seconds', true, {}, 86401]) {
+    const p = build({ streams: [{ index: 1, codec_type: 'audio', duration: value, start_time: value }] }, Date.now(), 'gateway_probe');
+    assert.equal(p.audioTracks[0].durationSeconds, undefined);
+    assert.equal(p.audioTracks[0].startTimeSeconds, undefined);
+  }
+  const negative = build({ streams: [{ index: 1, codec_type: 'audio', duration: '-1', start_time: '-1' }] }, Date.now(), 'gateway_probe');
+  assert.equal(negative.audioTracks[0].durationSeconds, undefined);
+  assert.equal(negative.audioTracks[0].startTimeSeconds, -1);
+});
+
 test('cold full EOF mints a signed full-file proof; only the next request may copy video', () => {
   const h = loadFastStartHarness();
   const now = Date.now() - 1_000;
