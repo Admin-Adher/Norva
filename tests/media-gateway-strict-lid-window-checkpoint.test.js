@@ -302,6 +302,24 @@ test('six ordered receipts replay every window into the unchanged strict consens
   );
 });
 
+test('invalid evidence numbers remain strict and have a distinct diagnostic from binding numbers', () => {
+  for (const [field, invalidValues] of [
+    ['confidence', [NaN, Infinity, -0.01, 1.01]],
+    ['minProbability', [NaN, Infinity, -0.01, 1.01]],
+    ['scriptDensity', [NaN, Infinity, -0.01, 1.01]],
+    ['offset', [NaN, Infinity, -0.01, 86400.01]],
+  ]) {
+    for (const value of invalidValues) {
+      expectCheckpointCode(() => receipt({ evidence: evidence({ result: { [field]: value } }) }),
+        'STRICT_LID_WINDOW_EVIDENCE_INVALID');
+    }
+  }
+  for (const durationSeconds of [NaN, Infinity, -1, 86400.01]) {
+    expectCheckpointCode(() => receipt({ binding: binding({ durationSeconds }) }),
+      'STRICT_LID_WINDOW_BINDING_INVALID');
+  }
+});
+
 test('a strong conflict in ordinal five vetoes four earlier unanimous receipts', () => {
   const receipts = sealedEvidenceSet(new Map([[5, {
     disposition: 'conflict',

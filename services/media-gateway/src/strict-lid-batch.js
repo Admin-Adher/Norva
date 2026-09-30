@@ -127,10 +127,13 @@ function evaluateStrictTranscriptEvidence({
     const normalizedWhisperLanguage = String(whisperLanguage || '').toLowerCase();
     const normalizedTranscriptLanguage = String(transcriptLanguage || '').toLowerCase();
     const scriptPattern = STRICT_LID_CJK_CHARACTER_RE[normalizedWhisperLanguage] || null;
+    // Script ranges contain punctuation and combining marks as well as letters.
+    // Both sides of the density ratio must count letters; non-letters cannot prove speech.
+    const allLetters = Array.from(normalizedText).filter((character) => /\p{L}/u.test(character));
     const scriptCharacters = scriptPattern
-        ? Array.from(normalizedText).filter((character) => scriptPattern.test(character))
+        ? allLetters.filter((character) => scriptPattern.test(character))
         : [];
-    const allLetterCount = Array.from(normalizedText).filter((character) => /\p{L}/u.test(character)).length;
+    const allLetterCount = allLetters.length;
     const uniqueScriptCharacterCount = new Set(scriptCharacters).size;
     const scriptBigrams = new Set();
     for (let index = 1; index < scriptCharacters.length; index++) {

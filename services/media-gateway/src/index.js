@@ -1566,7 +1566,7 @@ function strictLidWindowRuntimeBinding() {
         sampleDurationSeconds: STRICT_LID_SAMPLE_DURATION_CAP_SECONDS,
         transcriptDiversityProtocol: 1,
         transcriptLexicalProtocol: 1,
-        cjkEvidenceProtocol: 1,
+        cjkEvidenceProtocol: 2,
         qualityFallbackProtocol: 1,
         speechSelectionProtocol: 1,
         speechSearchDurationSeconds: 60,
