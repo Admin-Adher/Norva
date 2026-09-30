@@ -29,6 +29,9 @@ import tv.norva.playback.NativeVodStartupProgress;
 public final class SlowVodStartupInstrumentedTest {
     @Test public void progressingHeaderPastThirtyFiveSecondsRendersWithoutRestart() throws Exception {
         try (Fixture fixture = new Fixture(true)) {
+            AtomicInteger initialRoute = new AtomicInteger();
+            fixture.ins.runOnMainSync(() -> initialRoute.set(
+                    (Integer) field(fixture.activity, "playbackRouteGeneration")));
             SystemClock.sleep(36000);
             fixture.ins.runOnMainSync(() -> {
                 assertFalse((Boolean) field(fixture.activity, "firstFrameForCurrentRoute"));
@@ -39,7 +42,13 @@ public final class SlowVodStartupInstrumentedTest {
                         ((View) field(fixture.activity, "playerView")).getImportantForAccessibility());
             });
             fixture.awaitFrame(20000);
-            assertEquals("Progress must not open another session or request", 1, fixture.origin.requests.get());
+            // This fixture's Matroska cues follow its clusters. Media3 may
+            // legitimately seek to those cues and back on the same route.
+            assertEquals("Progress must not restart the file from byte zero", 1,
+                    fixture.origin.zeroOffsetRequests.get());
+            fixture.ins.runOnMainSync(() -> assertEquals(
+                    "Progress must keep the same media route until the first frame",
+                    initialRoute.get(), (int) (Integer) field(fixture.activity, "playbackRouteGeneration")));
             assertFalse(fixture.progress().active());
         }
     }
@@ -183,7 +192,8 @@ public final class SlowVodStartupInstrumentedTest {
     private static final class Origin implements AutoCloseable {
         final ServerSocket server = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
         final byte[] bytes;
-        final AtomicInteger requests = new AtomicInteger(), active = new AtomicInteger();
+        final AtomicInteger requests = new AtomicInteger(), zeroOffsetRequests = new AtomicInteger(),
+                active = new AtomicInteger();
         volatile boolean slow;
         Origin(byte[] bytes, boolean slow) throws IOException {
             this.bytes = bytes; this.slow = slow;
@@ -205,6 +215,7 @@ public final class SlowVodStartupInstrumentedTest {
                         start = Integer.parseInt(line.substring(line.indexOf('=') + 1, line.indexOf('-')));
                 }
                 requests.incrementAndGet();
+                if (start == 0) zeroOffsetRequests.incrementAndGet();
                 final boolean delayed = slow && start == 0;
                 OutputStream out = current.getOutputStream();
                 String range = start > 0 ? "Content-Range: bytes " + start + "-" + (bytes.length - 1) + "/" + bytes.length + "\r\n" : "";
