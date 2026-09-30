@@ -65,7 +65,40 @@
       const rendered = document.querySelector('.live-guide-search');
       check(rendered.value === 'TF1' && rendered.selectionStart === 2 && document.activeElement === rendered,
         'Mobile TF1 query/focus/caret was lost during render');
+      audit.verifyPreviewIdentity();
       audit.renderVerified = true;
+    },
+    verifyPreviewIdentity() {
+      const selected = list.channels.find(channel => channel.name === 'TF1 HD');
+      const other = list.channels.find(channel => channel.name === 'France 2 HD');
+      check(selected && other, 'Preview identity fixture is incomplete');
+      const previousPreview = guide.currentChannel;
+      const selectChannel = list.selectChannel;
+      const refreshFamily = guide.refreshFamilyIfNeeded;
+      const played = [];
+      // Stub only the external playback boundary. The real DOM event handler,
+      // preview rendering and family selection run without provider/media I/O.
+      list.selectChannel = target => { played.push(target); };
+      guide.refreshFamilyIfNeeded = () => {};
+      try {
+        guide.setActiveChannel(selected);
+        const button = document.querySelector('.live-guide-preview [data-action="watch"]');
+        check(button && button.dataset.channelId === String(selected.id),
+          'Watch action is not bound to the rendered TF1');
+        // A background selection can change before its replacement DOM paints.
+        // The click must retain the identity of this already-rendered button.
+        guide.currentChannel = other;
+        button.click();
+        check(played.length === 1 && played[0].channelId === selected.id
+          && played[0].sourceType === selected.sourceType
+          && played[0].sourceId === String(selected.sourceId),
+          'Watch silently substituted a different channel');
+        audit.previewIdentityVerified = true;
+      } finally {
+        list.selectChannel = selectChannel;
+        guide.refreshFamilyIfNeeded = refreshFamily;
+        guide.setActiveChannel(previousPreview);
+      }
     },
     async verifyRemoteSourceRace() {
       clearTimeout(list.remoteSearchInFlight);

@@ -45,8 +45,9 @@ class LiveGuideFusion {
             if (event.target.closest('.live-guide-search-clear')) { this.clearSearch(); return; }
 
             // Preview-bar actions (operate on the currently selected channel).
-            const action = event.target.closest('[data-action]')?.dataset.action;
-            if (action === 'watch') { this.playCurrent(); return; }
+            const actionButton = event.target.closest('[data-action]');
+            const action = actionButton?.dataset.action;
+            if (action === 'watch') { this.playCurrent(actionButton.dataset); return; }
             if (action === 'fullscreen') { this.app.player?.toggleFullscreen?.(); return; }
             if (action === 'favorite') { this.toggleSelectedFavorite(); return; }
             if (action === 'cinema') { this.toggleCinema(); return; }
@@ -244,9 +245,20 @@ class LiveGuideFusion {
     }
 
     /** The preview bar's "Watch" button: play the currently selected family. */
-    playCurrent() {
-        const channel = this.currentChannel;
-        if (!channel) return;
+    playCurrent(displayedSelection = null) {
+        // A queued tap belongs to the rendered button, even if an EPG/catalogue
+        // update has since changed the preview. Never substitute the first row
+        // or another source for the channel the viewer actually pressed.
+        const channel = displayedSelection
+            ? (this.app.channelList.channels || []).find(candidate =>
+                String(candidate.id) === displayedSelection.channelId
+                && String(candidate.sourceId) === displayedSelection.sourceId
+                && candidate.sourceType === displayedSelection.sourceType)
+            : this.currentChannel;
+        if (!channel || !this.matchesSelectedSource(channel)) {
+            this.render();
+            return;
+        }
         const members = this.app.channelList.getChannelFamilyMembers(channel, {
             includeHidden: false,
             includeCurrent: true,
@@ -1322,7 +1334,7 @@ class LiveGuideFusion {
                     </ul>` : ''}
                 </div>
                 <div class="live-guide-preview-actions">
-                    <button type="button" class="lg-btn lg-btn-primary ${isPlaying && !isPending ? 'is-playing' : ''}" data-action="watch" aria-busy="${isPending ? 'true' : 'false'}">
+                    <button type="button" class="lg-btn lg-btn-primary ${isPlaying && !isPending ? 'is-playing' : ''}" data-action="watch" data-channel-id="${this.escapeHtml(String(channel.id ?? ''))}" data-source-id="${this.escapeHtml(String(channel.sourceId ?? ''))}" data-source-type="${this.escapeHtml(channel.sourceType)}" aria-busy="${isPending ? 'true' : 'false'}">
                         ${isPending ? '<span class="lg-btn-loading" aria-hidden="true"></span>' : '<svg class="lg-btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>'}
                         <span>${isPending ? (globalThis.NorvaI18n?.t("ui_web_ba3bbbe10d8b", { defaultValue: "Loading…" }) ?? 'Loading…') : isPlaying ? (globalThis.NorvaI18n?.t("ui_web_deaf6f9d23bc", { defaultValue: "Playing" }) ?? 'Playing') : (globalThis.NorvaI18n?.t("ui_web_a71e75732446", { defaultValue: "Watch" }) ?? 'Watch')}</span>
                     </button>
@@ -1495,8 +1507,6 @@ class LiveGuideFusion {
             && channel.sourceType === candidate.sourceType
             && String(channel.id) === String(candidate.id))).find(Boolean)
             || groupChannels[0] || channels[0] || null;
-        this.currentChannel = selectedChannel;
-        this._lastChannelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;
         const shortEpgCandidates = selectedChannel
             ? [selectedChannel, ...groupChannels.slice(0, 60)]
             : groupChannels.slice(0, 60);
@@ -1549,6 +1559,10 @@ class LiveGuideFusion {
                 </div>
             </div>
         `;
+        // Commit the selected identity only after the matching preview exists.
+        // A failed later-row render must leave the old visible action coherent.
+        this.currentChannel = selectedChannel;
+        this._lastChannelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;
 
         const rows = this.container.querySelector('.live-guide-rows');
         if (rows && prevScroll) { this._lastProgrammaticGuideScrollAt = Date.now(); rows.scrollTop = prevScroll; }
