@@ -105,6 +105,38 @@ test('a partial request profile is completed once before FFmpeg chooses copy or 
     );
 });
 
+test('current bounded MKV header permits reduced discovery only for its exact session and profile', () => {
+    const source = readGateway();
+    const start = source.indexOf('function mkvH264FastStartProfileFingerprint(');
+    const end = source.indexOf('\nconst MKV_H264_FAST_START_PROOF_DOMAIN', start);
+    const fingerprint = vm.runInNewContext(`(${source.slice(start, end).trim()})`, {
+        ...gatewayGlobals, crypto: require('node:crypto'), MKV_H264_FAST_START_PROTOCOL: 2,
+    });
+    const eligible = loadGatewayFunction('knownVodInputProbeEligible', 'isInsufficientInputProbeFailure', {
+        ...gatewayGlobals,
+        mkvH264FastStartProfileFingerprint: fingerprint,
+        fileSizeBytesForSession: (session) => session.codecProfile.fileSizeBytes,
+    });
+    const session = {
+        id: 'current-playback', codecProfileSource: 'gateway_inband',
+        playbackHint: { container: 'mkv', streamType: 'series' },
+        codecProfile: { metadataComplete: true, container: 'matroska', fileSizeBytes: 859522026,
+            videoCodec: 'h264', audioTracks: [{ index: 1, codec: 'aac', channels: 2 }] },
+    };
+    const authority = { source: 'gateway-inband-current', captureOwner: session.id,
+        profileFingerprint: fingerprint(session.codecProfile) };
+    assert.strictEqual(eligible(session), false, 'unbound historical inband metadata is insufficient');
+    session.mkvH264CurrentHeaderAuthority = authority;
+    assert.strictEqual(eligible(session), true);
+    assert.strictEqual(eligible({ ...session, id: 'other-playback' }), false);
+    assert.strictEqual(eligible({ ...session, forceFullInputProbe: true }), false, 'full-probe retry stays available');
+    assert.strictEqual(eligible({ ...session, audioStreamIndex: 9 }), false, 'missing requested audio stays closed');
+    assert.strictEqual(eligible({ ...session, codecProfile: { ...session.codecProfile, videoCodec: 'hevc' } }), false);
+    assert.strictEqual(eligible({ ...session, codecProfile: { ...session.codecProfile, fileSizeBytes: 859522027 } }), false);
+    assert.strictEqual(eligible({ ...session, mkvH264CurrentHeaderAuthority: { ...authority, source: 'request' } }), false);
+    assert.strictEqual(eligible({ ...session, mkvH264CurrentHeaderAuthority: { ...authority, profileFingerprint: null } }), false);
+});
+
 test('an authenticated VOD kind wins over an inaccurate provider URL suffix', () => {
     const source = readGateway();
     const liveStart = source.indexOf('function isLiveSession(');

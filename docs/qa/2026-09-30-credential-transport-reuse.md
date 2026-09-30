@@ -66,3 +66,18 @@ Concurrent catalogue writes have caused fail-closed visibility-epoch conflicts i
 - Reader-window rollback fixture passed expiry, owner isolation, unchanged epoch and service-only permissions. Thirty visibility/cache tests passed. Shared finalizer SHA256 1f07d62be84434ed54e7c1f04c94ca326d7c781f98e6798d78df188ee19d6973 deployed on both healthy Edge replicas.
 - Real series retry rendered Monkey Wrench during Strng refresh; the database recorded the reader window, it expired, and refresh resumed without increasing provider attempts. Films search also rendered during writes. This corrects the reproduced navigation conflict; continue checking final transition state.
 - Single-scan title rollup retains the exact active/legacy/visible-owner filters and ranking, calculating count with a window aggregate. The 100-title rollback measurement fell from 2408.555ms to 1199.205ms. SQL fixture passed active, legacy, hidden, foreign-owner, inactive-generation, ranking and empty-result cases. Migration 20260930103000 committed without restarting services.
+
+## Final PR491 rollout
+PR491 merged as e46f5eb1f95ad8df318d4d9eadea6645e74b188f after all four gates in CI 36680612364 passed (cloud contracts, Android phone, Android TV and Windows). This is build/contract evidence, not Android device playback evidence.
+
+Home now reserves the same bounded owner reader window before assembling its rails; other routes request a window only after a discarded read. Thirty-one visibility/cache tests passed. Final shared visibility module SHA256 on both healthy Edge replicas: 5e1982efff6cc765fa2c54f7bc9cbbaab39ef9c9d97f43663cfcf9c8b6255c23.
+
+A full production Home reload started at 06:57:18.893 UTC, rendered the Erik le viking hero, film/series rails and history, and produced no new Dashboard error. The reader window expired at 06:57:31 and refresh resumed by 06:57:36 without increasing provider failure attempts. This is a successful navigation observation, not a precise first-render timing. The legacy transition remains under observation at this checkpoint.
+
+## Additional live playback evidence, 07:13–07:19 UTC
+- Sharte Ezdeva MP4: first attempt resumed at 289 seconds. Browser video-frame callback reports 11700ms TTFF; resume lookup 163ms, session resolution 1324ms, attachment 1329ms. Real 1280x720 image and advancing playback confirmed.
+- Monkey Wrench S1E1: first attempt resumed around 18 minutes. Frame callback reports 29169ms TTFF; resume lookup 507ms, session resolution 28398ms, attachment 28400ms. Real 1920x1080 image and advancement confirmed. Gateway preparation was 25828ms, including 19060ms to first segment and 23080ms FFmpeg readiness. Its exact current bounded header was parsed before spawning (109ms), but the demux still used the full input-probe budget.
+- TF1 HD selected explicitly under the Strng source: real 1280x720 television image confirmed on first attempt. All own streams were stopped afterwards; account activity admission temporarily defers the legacy background refresh without consuming its failure budget.
+
+## Current-header demux correction awaiting rollout
+The reduced FFmpeg discovery budget now also accepts a Gateway-parsed bounded Matroska header bound to the same session ID and unchanged exact profile fingerprint. Unknown/historical metadata, another session, a changed profile/file size and a missing requested audio track remain ineligible. Full-probe retry remains available; video-copy and cache-publication proofs are unchanged. Twelve startup tests and 41 related MKV/resume tests passed, with three environment-dependent skips. Runtime benefit is not yet claimed. Gateways must not restart while the legacy signed spool is still needed.
