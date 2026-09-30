@@ -1686,6 +1686,14 @@ async function handleWorkerDrain(req, requestId) {
       }
     } catch (error) {
       const failure = normalizeWorkerFault(error);
+      // A viewer owns the single provider connection. Waiting for it is not a
+      // failed validation and must not exhaust retries or roll back a good host.
+      if (failure.retryable && failure.queueCode === "rate_limited") {
+        const deferred = await settleJob(job, workerId, "defer", "rate_limited", 60);
+        if (deferred) summary.retried += 1;
+        else summary.leaseLost += 1;
+        continue;
+      }
       const outcome = failure.retryable && job.failureAttemptCount < workerRetryAttemptLimit(job.kind)
         ? "retry"
         : "dead";
