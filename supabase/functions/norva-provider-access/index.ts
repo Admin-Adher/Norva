@@ -10,6 +10,7 @@ import {
   PROVIDER_ACCESS_DETECTION_VERSION,
 } from "../_shared/provider-access-state.mjs";
 import { isStaleDatabaseConflict } from "../_shared/database-conflict.ts";
+import { compatibilitySeed, playbackCostScore, observedTtffMs } from "../_shared/vod-title-projection.ts";
 import { xtreamLanguageDeclarations } from "../_shared/xtream-language-declarations.mjs";
 
 // Provider Access v1 is intentionally a service-mediated API.  Browser/user
@@ -3143,12 +3144,14 @@ function activeTitleVariants(mediaRows, mediaResult, titleResult) {
     if (!mediaItemId || !titleId) throw new WorkerFault("catalog_unhealthy", false);
     const hint = rpcObject(media.playback_hint ?? {});
     const version = activeVersionInfo(media.title);
+    const compatibility = compatibilitySeed(hint, metadata, media.title);
+    const observedTtff = observedTtffMs(metadata, hint);
     variants.push({
       title_id: titleId, media_item_id: mediaItemId, item_type: media.item_type, external_id: media.external_id,
       raw_title: media.title, label: version.label, language: version.language, quality: version.quality,
       resolution: version.resolution, container_extension: nullableString(hint.container), poster_url: media.poster_url,
       playback_hint: hint, codec_profile: rpcObject(metadata.codecProfile ?? metadata.codec_profile ?? {}),
-      compatibility_tier: "unknown", playback_cost_score: 500, last_observed_ttff_ms: null,
+      compatibility_tier: compatibility.tier, playback_cost_score: playbackCostScore(compatibility.tier, observedTtff), last_observed_ttff_ms: observedTtff,
       observed_success_rate: null, metadata: compactActiveRecord({ ...metadata, identityKey }),
     });
   }

@@ -89,6 +89,14 @@ const PUBLIC_EDGE_ERROR_CODES = new Set([
 export async function bindCatalogVisibilityEpoch(req, userId, db) {
   const normalizedUserId = String(userId ?? "").trim();
   if (!normalizedUserId) throw new Error("Catalog visibility user is missing");
+  // Home assembles several independent rails under a short client budget.
+  // Reserve the same bounded window before its fan-out rather than spending
+  // that budget on a first conflict plus a retry. Other routes remain lazy.
+  if ((req.method === "GET" || req.method === "HEAD") && /\/(?:device\/)?home\/rails\/?$/.test(new URL(req.url).pathname)) {
+    try {
+      await db.rpc("norva_request_catalog_reader_window", { p_user_id: normalizedUserId });
+    } catch (_) { /* Optional scheduling must not replace visibility validation. */ }
+  }
   const snapshot = await readCatalogVisibilityEpoch(db, normalizedUserId);
   bindings.set(req, { userId: normalizedUserId, ...snapshot });
   const previous = latestBoundEpochsByUser.get(normalizedUserId);
@@ -167,6 +175,14 @@ export async function finalizeCatalogVisibilityResponse(
     }
 
     const readRequest = req.method === "GET" || req.method === "HEAD";
+    if (readRequest && response.ok) {
+      // The body is already discarded. Give its retry a quiet, owner-scoped
+      // window during legacy credential refresh, without accepting stale data.
+      // Older deployments may lack this optional scheduling RPC; remain closed.
+      try {
+        await db.rpc("norva_request_catalog_reader_window", { p_user_id: binding.userId });
+      } catch (_) { /* The normal 409 and client retry still apply. */ }
+    }
     return catalogVisibilityErrorResponse(req, corsHeaders, 409, {
       error: readRequest
         ? "Catalog visibility changed while the response was being prepared"

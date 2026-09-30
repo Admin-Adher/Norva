@@ -28,6 +28,7 @@ function sequencedDb(...outcomes) {
     calls,
     async rpc(name, args) {
       calls.push({ name, args });
+      if (name === 'norva_request_catalog_reader_window') return { data: false, error: null };
       const outcome = outcomes[Math.min(index, outcomes.length - 1)];
       index += 1;
       if (outcome instanceof Error) return { data: null, error: { message: outcome.message } };
@@ -426,4 +427,35 @@ test('all three catalog surfaces route their externally returned response throug
   );
   assert.match(cloud, /if \(result\.visibilityChanged\) \{\s*await acknowledgeCatalogVisibilityEpochMutation/);
   assert.match(cloud, /\.is\("deleted_at", null\)\s*\.select\("id"\)\s*\.maybeSingle\(\)/);
+});
+
+test('discarded reads request an owner retry window while mutations never do', async () => {
+ const api=await helper();
+ for(const method of ['GET','HEAD','POST']){
+  const req=new Request('https://edge.test/media-items',{method});
+  const db=sequencedDb(5,6);
+  await api.bindCatalogVisibilityEpoch(req,'window-owner',db);
+  const result=await api.finalizeCatalogVisibilityResponse(req,new Response('{}'),db,{corsHeaders});
+  assert.equal(result.status,409);
+  const windows=db.calls.filter(c=>c.name==='norva_request_catalog_reader_window');
+  assert.equal(windows.length,method==='POST'?0:1);
+  if(windows.length)assert.deepEqual(windows[0].args,{p_user_id:'window-owner'});
+ }
+});
+test('missing retry scheduling RPC cannot expose the discarded response',async()=>{
+ const api=await helper();const req=new Request('https://edge.test/media-items');const base=sequencedDb(1,2);
+ const db={rpc:(name,args)=>{if(name==='norva_request_catalog_reader_window')throw new Error('unavailable');return base.rpc(name,args);}};
+ await api.bindCatalogVisibilityEpoch(req,'window-fallback',db);
+ const result=await api.finalizeCatalogVisibilityResponse(req,new Response('{"oldBody":true}'),db,{corsHeaders});
+ assert.equal(result.status,409);assert.equal((await jsonBody(result)).oldBody,undefined);
+});
+
+test('Home reserves its owner window before binding the epoch; normal GETs do not',async()=>{
+ const api=await helper();
+ for(const route of ['/home/rails','/device/home/rails','/functions/v1/norva-catalog/home/rails','/media-items']){
+  const db=sequencedDb(8);const req=new Request('https://edge.test'+route);
+  await api.bindCatalogVisibilityEpoch(req,'home-owner',db);
+  const expected=route.endsWith('/home/rails')?['norva_request_catalog_reader_window','norva_catalog_cache_epoch_v2']:['norva_catalog_cache_epoch_v2'];
+  assert.deepEqual(db.calls.map(c=>c.name),expected);assert.equal(api.boundCatalogVisibilityEpoch(req),'8');
+ }
 });
