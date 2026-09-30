@@ -84,21 +84,9 @@ trap finish_captures EXIT
 
 wait_for_phone_home() {
   local home_component home_package home_activity home_full home_short window_state anr_events
+  local setup_complete device_provisioned previous_home=''
   local deadline=$((SECONDS + 45))
   local stable_focus=0
-  home_component="$(timeout 10s adb shell cmd package resolve-activity --brief --user 0 \
-    -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
-  if [[ ! "$home_component" =~ ^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$ ]]; then
-    echo "Android QA readiness: cannot resolve the HOME activity" >&2
-    return 1
-  fi
-  home_package="${home_component%%/*}"
-  home_activity="${home_component#*/}"
-  if [[ "$home_activity" == .* ]]; then
-    home_activity="${home_package}${home_activity}"
-  fi
-  home_full="${home_package}/${home_activity}"
-  home_short="${home_package}/${home_activity#"$home_package"}"
   timeout 15s adb shell am start -W -a android.intent.action.MAIN \
     -c android.intent.category.HOME >/dev/null
   while (( SECONDS < deadline )); do
@@ -114,14 +102,40 @@ wait_for_phone_home() {
       echo "Android QA readiness failed: emulator ANR before instrumentation; dialogue left intact" >&2
       return 1
     fi
-    if grep 'mCurrentFocus=' <<< "$window_state" | grep -Fq -e "$home_full" -e "$home_short"; then
-      stable_focus=$((stable_focus + 1))
+    setup_complete="$(timeout 5s adb shell settings get secure user_setup_complete | tr -d '\r')"
+    device_provisioned="$(timeout 5s adb shell settings get global device_provisioned | tr -d '\r')"
+    # The first boot replaces its temporary setup HOME with the launcher.
+    # Resolve again after every observation instead of retaining the setup target.
+    home_component="$(timeout 5s adb shell cmd package resolve-activity --brief --user 0 \
+      -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+    home_full=''
+    home_short=''
+    if [[ "$home_component" =~ ^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$ ]]; then
+      home_package="${home_component%%/*}"
+      home_activity="${home_component#*/}"
+      if [[ "$home_activity" == .* ]]; then
+        home_activity="${home_package}${home_activity}"
+      fi
+      home_full="${home_package}/${home_activity}"
+      home_short="${home_package}/${home_activity#"$home_package"}"
+    fi
+    printf 'setup_complete=%s device_provisioned=%s resolved_home=%s\n' \
+      "$setup_complete" "$device_provisioned" "$home_component" >> "$diagnostic_dir/readiness-state.txt"
+    if [[ "$setup_complete" == 1 && "$device_provisioned" == 1 && -n "$home_full" ]] \
+      && grep 'mCurrentFocus=' <<< "$window_state" | grep -Fq -e "$home_full}" -e "$home_short}"; then
+      if [[ "$home_full" == "$previous_home" ]]; then
+        stable_focus=$((stable_focus + 1))
+      else
+        previous_home="$home_full"
+        stable_focus=1
+      fi
       if (( stable_focus >= 3 )); then
         echo "Android QA readiness: HOME has stable window focus"
         return 0
       fi
     else
       stable_focus=0
+      previous_home=''
     fi
     sleep 2
   done

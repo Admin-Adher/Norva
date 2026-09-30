@@ -8,6 +8,8 @@ on:
       - 'scripts/qa/run-android-emulator-tests.sh'
       - 'scripts/qa/patch-emulator-runner-unlock.cjs'
       - 'tests/emulator-runner-unlock.test.js'
+      - 'tests/android-home-readiness.test.js'
+      - 'tests/fixtures/android-home-readiness/**'
       - 'clients/android-phone/**'
       - 'clients/android-tv/**'
       - 'clients/android-common/**'
