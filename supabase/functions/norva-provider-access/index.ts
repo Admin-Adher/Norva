@@ -542,6 +542,27 @@ async function applyCredentialCandidate(req, requestId, user, source, candidateI
     throw new ContractError("DIFFERENT_CATALOG_REQUIRES_REPLACEMENT");
   }
   if (snapshot.comparison !== "SAME_CATALOG") throw new ContractError("INVALID_TRANSITION_STATE");
+  const transport = await rpc("norva_get_credential_transport_check", {
+    p_transition_id: candidateId, p_user_id: user.id,
+  });
+  if (transport && ["READY", "APPLIED", "COMPLETED"].includes(transport.state)) {
+    const runtime = await getRuntimeConfig();
+    const fingerprint = await keyedFingerprint(runtime.sourceConfigKey, {
+      operation: "apply_credential_transport", sourceId: source.id, candidateId,
+      expectedSourceRevision, expectedTransitionRevision,
+    });
+    const result = await rpc("norva_apply_credential_transport_check", {
+      p_transition_id: candidateId, p_user_id: user.id,
+      p_expected_transition_revision: expectedTransitionRevision,
+      p_expected_source_revision: expectedSourceRevision,
+      p_idempotency_key: idempotencyKey, p_request_fingerprint: fingerprint,
+    }, { cas: "source" });
+    const candidate = sanitizeCredentialCandidate(result, source.id);
+    scheduleWorkerAcceleration();
+    return successResponse(req, requestId, "CredentialCandidate", candidate, 202, {
+      ETag: transitionTag(candidate.revision), Location: candidateLocation(source.id, candidate.candidateId),
+    });
+  }
   const generation = normalizeCredentialGeneration(await rpc("norva_get_credential_catalog_generation", {
     p_transition_id: candidateId,
     p_user_id: user.id,
@@ -1722,7 +1743,14 @@ async function handleWorkerDrain(req, requestId) {
           await restoreAfterPostSwitchFailure(job, workerId, failure);
           summary.completed += 1;
           continue;
-        } catch (_) {
+        } catch (recoveryError) {
+          const recoveryFailure = normalizeWorkerFault(recoveryError);
+          if (recoveryFailure.retryable && recoveryFailure.queueCode === "rate_limited") {
+            const deferred = await settleJob(job, workerId, "defer", "rate_limited", 60);
+            if (deferred) summary.retried += 1;
+            else summary.leaseLost += 1;
+            continue;
+          }
           // If compensation CAS itself fails, dead-letter the proof job. The
           // transition remains nonterminal for explicit operator repair.
         }
@@ -2059,6 +2087,7 @@ async function validateCredentialCandidateJob(job, workerId) {
     }
     throw fault;
   }
+  if (await tryCredentialTransportCheck(job, workerId, runtime, candidateConfig)) return "handled";
   await workerRpc("norva_mark_credential_candidate_validated", {
     p_transition_id: job.transitionId,
     p_user_id: job.userId,
@@ -2069,6 +2098,49 @@ async function validateCredentialCandidateJob(job, workerId) {
     p_category_count: 0,
   });
   return "handled";
+}
+
+function isCredentialTransportOnly(previous, candidate) {
+  const fields = new Set(["serverUrl", "username", "password"]);
+  return isRecord(previous) && isRecord(candidate)
+    && Object.keys(previous).every(key => fields.has(key))
+    && Object.keys(candidate).every(key => fields.has(key))
+    && typeof previous.serverUrl === "string" && typeof candidate.serverUrl === "string"
+    && typeof previous.username === "string" && previous.username.length > 0
+    && typeof previous.password === "string" && previous.password.length > 0
+    && previous.username === candidate.username && previous.password === candidate.password;
+}
+
+async function tryCredentialTransportCheck(job, workerId, runtime, candidateConfig) {
+  if (job.transitionKind === "replacement") return false;
+  const previous = await decryptSourceConfig(await readTransitionSecret(job, "previous"), runtime.sourceConfigKey);
+  if (!isCredentialTransportOnly(previous, candidateConfig)) return false;
+  const proof = await workerRpc("norva_begin_credential_transport_check", {
+    p_job_id: job.jobId, p_user_id: job.userId, p_worker: workerId, p_lease_sequence: job.leaseSequence,
+  });
+  if (!proof || ["NONE", "NOT_MATCHING", "NOT_APPLICABLE"].includes(proof.state)) return false;
+  if (proof.state !== "CHECKING") throw new WorkerFault("stale", true);
+  const inventories = [
+    { itemType: "movie", action: "get_vod_streams" },
+    { itemType: "series", action: "get_series" },
+    { itemType: "live", action: "get_live_streams" },
+  ];
+  const next = inventories.find(entry => !proof.parts?.[entry.itemType]);
+  if (!next) throw new WorkerFault("catalog_unhealthy", false);
+  const page = await gatewayMetadataPage(runtime, candidateConfig, job, uuidValue(proof.generationId), {
+    action: next.action, categoryId: null, maxItems: 250, includeTransportManifest: true,
+  });
+  // A rolling/older Gateway cannot attest the whole inventory. It falls back
+  // to the existing full import, never treats the first page as the catalogue.
+  const manifest = page.pending ? null : page.transportManifest || {
+    version: 2, itemType: next.itemType, eligible: false,
+  };
+  const checkpoint = await workerRpc("norva_checkpoint_credential_transport_check", {
+    p_job_id: job.jobId, p_user_id: job.userId, p_worker: workerId, p_lease_sequence: job.leaseSequence,
+    p_item_type: next.itemType, p_manifest: manifest,
+    p_retry_after: page.pending ? boundedGatewayRetryAfter(page.retryAfterSeconds ?? 2) : 1,
+  });
+  return checkpoint?.state !== "NOT_MATCHING";
 }
 
 async function failCredentialValidation(job, failureCode) {
@@ -2556,6 +2628,13 @@ async function verifyPostSwitchJob(job, workerId) {
     await readTransitionSecret(job, "candidate"),
     runtime.sourceConfigKey,
   );
+  const transport = await workerRpc("norva_get_credential_transport_check", {
+    p_transition_id: job.transitionId, p_user_id: job.userId,
+  });
+  if (transport?.state === "APPLIED") {
+    await verifyCredentialTransportSwitch(job, workerId, runtime, candidateConfig);
+    return "handled";
+  }
   try {
     await assertProviderReadAllowed(job, candidateConfig);
     assertAuthenticatedAccount(await gatewayAccountInfo(runtime, candidateConfig, job));
@@ -2581,6 +2660,34 @@ async function verifyPostSwitchJob(job, workerId) {
     p_refresh_proof_id: refresh.refreshProofId,
   });
   return "handled";
+}
+
+async function verifyCredentialTransportSwitch(job, workerId, runtime, candidateConfig, terminalAttempt = false) {
+  let restorePrevious = false;
+  let failureCode = null;
+  try {
+    await assertProviderReadAllowed(job, candidateConfig);
+    assertAuthenticatedAccount(await gatewayAccountInfo(runtime, candidateConfig, job));
+  } catch (error) {
+    const fault = normalizeWorkerFault(error);
+    if (fault.retryable && (!terminalAttempt || ["rate_limited", "stale"].includes(fault.queueCode))) throw fault;
+    // A failed new address is never replaced with another untested address.
+    const previous = await decryptSourceConfig(await readTransitionSecret(job, "previous"), runtime.sourceConfigKey);
+    try {
+      await assertProviderReadAllowed(job, previous);
+      assertAuthenticatedAccount(await gatewayAccountInfo(runtime, previous, job));
+      restorePrevious = true;
+    } catch (previousError) {
+      const previousFault = normalizeWorkerFault(previousError);
+      if (previousFault.retryable && (!terminalAttempt || ["rate_limited", "stale"].includes(previousFault.queueCode))) throw previousFault;
+      failureCode = "rollback_unavailable";
+    }
+  }
+  await workerRpc("norva_finish_credential_transport_check", {
+    p_job_id: job.jobId, p_user_id: job.userId, p_worker: workerId,
+    p_lease_sequence: job.leaseSequence, p_restore_previous: restorePrevious,
+    p_failure_code: failureCode,
+  });
 }
 
 // The post-switch lane never reuses the candidate-generation writer: its SQL
@@ -3107,6 +3214,14 @@ function activeVersionInfo(title) {
 }
 
 async function restoreAfterPostSwitchFailure(job, workerId, fault) {
+  const transport = await workerRpc("norva_get_credential_transport_check", {
+    p_transition_id: job.transitionId, p_user_id: job.userId,
+  });
+  if (transport?.state === "APPLIED") {
+    const runtime = await getRuntimeConfig();
+    const candidateConfig = await decryptSourceConfig(await readTransitionSecret(job, "candidate"), runtime.sourceConfigKey);
+    return verifyCredentialTransportSwitch(job, workerId, runtime, candidateConfig, true);
+  }
   const head = await getSourceCatalogHead(job);
   await workerRpc("norva_restore_previous_credential_config", {
     p_transition_id: job.transitionId,
@@ -3256,6 +3371,7 @@ async function gatewayMetadataPage(runtime, config, job, generationId, request) 
     spoolToken: request.spoolToken ?? null,
     spoolKey,
     maxItems: request.maxItems,
+    ...(request.includeTransportManifest === true ? { includeTransportManifest: true } : {}),
     userAgent: "NorvaProviderAccess/1.0",
   }, MAX_GATEWAY_PAGE_BYTES);
   if (payload.gatewayPending === true) {

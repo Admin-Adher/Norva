@@ -3,6 +3,7 @@ const { createStoryboardDurabilityPolicy } = require('./storyboard-durability');
 const { storyboardEncodingArgs } = require('./storyboard-encoding');
 const { createProgress, disposeProgress, runProgressBatch } = require('./storyboard-progress');
 const crypto = require('crypto');
+const { createCatalogTransportManifest } = require('./catalog-transport-manifest');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
@@ -3634,7 +3635,7 @@ app.post('/xtream/metadata-page', requireGatewayAuth, async (req, res) => {
     try {
         const {
             serverUrl, username, password, action, params, userAgent,
-            cursor, spoolToken, spoolKey, maxItems,
+            cursor, spoolToken, spoolKey, maxItems, includeTransportManifest,
         } = req.body || {};
         const normalizedAction = String(action || '');
         const requestedMaxItems = Number(maxItems || XTREAM_CATALOG_PAGE_MAX_ITEMS);
@@ -3655,6 +3656,7 @@ app.post('/xtream/metadata-page', requireGatewayAuth, async (req, res) => {
             categoryId,
             maxItems: requestedMaxItems,
             spoolKey,
+            includeTransportManifest: includeTransportManifest === true,
         };
         const page = await readXtreamCatalogPage({
             request,
@@ -22379,6 +22381,7 @@ function xtreamCatalogRequestBinding(request) {
         categoryId: String(request.categoryId || ''),
         maxItems: Number(request.maxItems),
         spoolKey: String(request.spoolKey),
+        ...(request.includeTransportManifest === true ? { includeTransportManifest: true } : {}),
     });
     return crypto.createHmac('sha256', GATEWAY_TOKEN)
         .update('xtream-catalog-binding-v1\0')
@@ -22638,6 +22641,7 @@ async function readXtreamCatalogPage({ request, cursor, spoolToken, userAgent })
     const done = pageIndex + 1 >= metadata.pageCount;
     return {
         items,
+        transportManifest: metadata.transportManifest || null,
         nextCursor: done ? null : signXtreamCatalogCursor({
             spoolId,
             pageIndex: pageIndex + 1,
@@ -22669,6 +22673,7 @@ function signXtreamCatalogSpoolMetadata(metadata) {
         pageCount: metadata.pageCount,
         itemCount: metadata.itemCount,
         expiresAt: metadata.expiresAt,
+        ...(metadata.transportManifest ? { transportManifest: metadata.transportManifest } : {}),
     });
     return crypto.createHmac('sha256', GATEWAY_TOKEN)
         .update('xtream-catalog-manifest-v2\0')
@@ -22748,6 +22753,8 @@ async function createXtreamCatalogSpool({ request, binding, spoolId, userAgent }
             spoolId,
             binding,
             buildId,
+            inventoryType: request.includeTransportManifest === true
+                ? ({ get_vod_streams: 'movie', get_series: 'series', get_live_streams: 'live' })[request.action] : null,
         });
         const metadata = {
             v: 2,
@@ -22758,6 +22765,7 @@ async function createXtreamCatalogSpool({ request, binding, spoolId, userAgent }
             maxItems: request.maxItems,
             pageCount: result.pageCount,
             itemCount: result.itemCount,
+            ...(result.transportManifest ? { transportManifest: result.transportManifest } : {}),
             expiresAt: Date.now() + XTREAM_CATALOG_SPOOL_TTL_MS,
         };
         metadata.signature = signXtreamCatalogSpoolMetadata(metadata);
@@ -22809,7 +22817,7 @@ async function restartCorruptXtreamCatalogSpool({ request, binding, spoolId, use
 }
 
 async function fetchProviderArrayToXtreamCatalogSpool({
-    url, userAgent, backgroundAccountKey, spoolDir, maxItems, spoolId, binding, buildId,
+    url, userAgent, backgroundAccountKey, spoolDir, maxItems, spoolId, binding, buildId, inventoryType,
 }) {
     const controller = new AbortController();
     const metadataTransport = createProviderMetadataTransport(controller);
@@ -22854,6 +22862,7 @@ async function fetchProviderArrayToXtreamCatalogSpool({
             spoolDir,
             maxItems,
             { spoolId, binding, buildId },
+            inventoryType ? createCatalogTransportManifest(inventoryType, XTREAM_CATALOG_SPOOL_MAX_ITEMS) : null,
         );
     } catch (err) {
         if (err?.providerDrainFailed) metadataTransport.providerDrainFailed = true;
@@ -22928,7 +22937,7 @@ function decryptXtreamCatalogPage(encrypted, context) {
     }
 }
 
-async function spoolTopLevelJsonObjectArray(body, spoolDir, maxItems, encryptionContext) {
+async function spoolTopLevelJsonObjectArray(body, spoolDir, maxItems, encryptionContext, transportManifest = null) {
     const decoder = new TextDecoder();
     const contentHash = crypto.createHash('sha256');
     let mode = 'before-array';
@@ -22983,6 +22992,7 @@ async function spoolTopLevelJsonObjectArray(body, spoolDir, maxItems, encryption
             await flushPage();
         }
         pageItems.push(item);
+        transportManifest?.add(item);
         pageBytes += serializedBytes + (pageItems.length > 1 ? 1 : 0);
         itemCount += 1;
         if (itemCount > XTREAM_CATALOG_SPOOL_MAX_ITEMS) {
@@ -23073,7 +23083,8 @@ async function spoolTopLevelJsonObjectArray(body, spoolDir, maxItems, encryption
     await consume(decoder.decode());
     if (mode !== 'done') throw catalogSpoolError(502, 'invalid_payload', 'Invalid catalogue response');
     if (pageItems.length > 0 || pageIndex === 0) await flushPage();
-    return { pageCount: pageIndex, itemCount, contentDigest: contentHash.digest('hex') };
+    return { pageCount: pageIndex, itemCount, contentDigest: contentHash.digest('hex'),
+        ...(transportManifest ? { transportManifest: transportManifest.result() } : {}) };
 }
 
 async function removeXtreamCatalogSpool(spoolDir) {

@@ -713,7 +713,7 @@ test('active refresh carries durable category counts and resumes after generatio
 });
 
 test('identity validation is bounded, complete and persists only comparator metrics', () => {
-  const validation = section('async function validateCredentialCandidateJob', '\nasync function failCredentialValidation');
+  const validation = section('async function validateCredentialCandidateJob', '\nfunction isCredentialTransportOnly');
   assert.match(validation, /gatewayAccountInfo/);
   assert.match(validation, /norva_mark_credential_candidate_validated/);
   assert.doesNotMatch(validation, /get_live_streams|get_vod_streams|get_series/);
@@ -823,7 +823,7 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
   class WorkerFault extends Error {
     constructor(queueCode, retryable) { super(queueCode); this.queueCode = queueCode; this.retryable = retryable; }
   }
-  async function run(kind, pressure = false) {
+  async function run(kind, pressure = false, recoveryPressure = false) {
     const calls = { failed: 0, restored: 0, settled: 0 };
     const handleWorkerDrain = vm.runInNewContext(`(() => { ${source}; return handleWorkerDrain; })()`, {
       WORKER_MAX_CLAIMS: 1,
@@ -846,8 +846,8 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
       processWorkerJobUnderGuards: async () => { throw new WorkerFault(pressure ? 'rate_limited' : 'provider_unavailable', true); },
       normalizeWorkerFault: (error) => error,
       failCredentialValidation: async () => { calls.failed += 1; },
-      restoreAfterPostSwitchFailure: async () => { calls.restored += 1; },
-      settleJob: async (_job, _worker, outcome, code, delay) => { calls.settled += 1; if (pressure) { assert.equal(outcome, 'defer'); assert.equal(code, 'rate_limited'); assert.equal(delay, 60); } return true; },
+      restoreAfterPostSwitchFailure: async () => { calls.restored += 1; if (recoveryPressure) throw new WorkerFault('rate_limited', true); },
+      settleJob: async (_job, _worker, outcome, code, delay) => { calls.settled += 1; if (pressure || recoveryPressure) { assert.equal(outcome, 'defer'); assert.equal(code, 'rate_limited'); assert.equal(delay, 60); } return true; },
       workerRetryAttemptLimit: () => 4,
       retryDelaySeconds: () => 30,
       successResponse: (_req, _requestId, _kind, summary) => summary,
@@ -877,6 +877,10 @@ test('retry exhaustion finalizes pre-commit validation or starts compensation wi
   const post = await run('post_switch_verify');
   assert.deepEqual(post.calls, { failed: 0, restored: 1, settled: 0 });
   assert.equal(post.summary.completed, 1);
+  const busyRecovery = await run('post_switch_verify', false, true);
+  assert.deepEqual(busyRecovery.calls, { failed: 0, restored: 1, settled: 1 });
+  assert.equal(busyRecovery.summary.retried, 1);
+  assert.equal(busyRecovery.summary.dead, 0);
 });
 
 test('worker uses durable bounded lease/claim/settle CAS and waitUntil is only an accelerator', () => {

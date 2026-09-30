@@ -446,6 +446,7 @@ test('runtime route polls asynchronously, resumes without refetch, and safely re
     params: {},
     maxItems: 2,
     spoolKey: 'runtimeSpoolKey_1234567890',
+    includeTransportManifest: true,
   };
   let response = await postPage(baseUrl, gatewayToken, body);
   assert.equal(response.status, 202);
@@ -467,6 +468,9 @@ test('runtime route polls asynchronously, resumes without refetch, and safely re
     pending = payload;
   }
   assert.ok(firstPage, 'spool never became readable');
+  const fullManifest = require('../services/media-gateway/src/catalog-transport-manifest').createCatalogTransportManifest('movie');
+  rows.forEach(row => fullManifest.add(row));
+  assert.deepEqual(firstPage.transportManifest, fullManifest.result());
   assert.equal(providerRequests, 1);
   const restored = [...firstPage.items];
   let cursor = firstPage.nextCursor;
@@ -509,7 +513,9 @@ test('runtime route polls asynchronously, resumes without refetch, and safely re
     assert.equal(logs.includes(secret), false, `logs leaked ${secret}`);
   }
 
-  await fsp.writeFile(manifestPath, '{"corrupt":true}', 'utf8');
+  const tamperedManifest = JSON.parse(manifest.toString('utf8'));
+  tamperedManifest.transportManifest.count += 1;
+  await fsp.writeFile(manifestPath, JSON.stringify(tamperedManifest), 'utf8');
   response = await postPage(baseUrl, gatewayToken, body);
   assert.equal(response.status, 202);
   pending = await response.json();
@@ -655,9 +661,13 @@ test('large fragmented provider arrays are streamed once into bounded exact page
     directory,
     113,
     encryptionContext,
+    require('../services/media-gateway/src/catalog-transport-manifest').createCatalogTransportManifest('movie'),
   );
 
   assert.equal(result.itemCount, rows.length);
+  const expectedManifest = require('../services/media-gateway/src/catalog-transport-manifest').createCatalogTransportManifest('movie');
+  rows.forEach(row => expectedManifest.add(row));
+  assert.deepEqual(result.transportManifest, expectedManifest.result());
   assert.match(result.contentDigest, /^[a-f0-9]{64}$/);
   assert.ok(result.pageCount > 100);
   assert.equal(counter.bytes, Buffer.byteLength(payload));
