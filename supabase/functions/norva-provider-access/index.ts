@@ -1730,6 +1730,7 @@ async function handleWorkerDrain(req, requestId) {
         console.warn("[norva-provider-access] snapshot_conflict", {
           rpc: /^norva_[a-z_]+$/.test(String(failure.rpc ?? "")) ? failure.rpc : null,
           reason: /^[a-z_]{1,100}$/.test(String(failure.reason ?? "")) ? failure.reason : null,
+          sqlstate: /^[A-Z0-9]{5}$/.test(String(failure.code ?? "")) ? failure.code : null,
         });
         const deferred = await settleJob(job, workerId, "defer", "stale", 5);
         if (deferred) summary.retried += 1;
@@ -1788,6 +1789,7 @@ async function handleWorkerDrain(req, requestId) {
         // Never log provider responses, URLs or exception messages. Keep only
         // an identifier code and source-frame coordinates for hidden failures.
         causeCode: /^[A-Z0-9_]{1,80}$/.test(String(error?.code ?? "")) ? error.code : null,
+        rpc: /^norva_[a-z_]+$/.test(String(error?.rpc ?? "")) ? error.rpc : null,
         causeFrames: String(error?.stack ?? "").split("\n").slice(1, 5).map((line) => {
           const frame = line.match(/at\s+([A-Za-z0-9_.]+)\s+\([^)]*?:(\d+):\d+\)/);
           return frame ? `${frame[1]}:${frame[2]}` : "unavailable";
@@ -2814,8 +2816,9 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
     categoryId: null,
     cursor: state.cursor || null,
     spoolToken: state.spoolToken || null,
-    // Match staged imports: the Gateway defaults to a 250-item ceiling.
-    maxItems: action.kind === "category" ? 100 : 250,
+    // VOD variants have per-row projection/visibility triggers. Keep each
+    // database write below the API statement deadline without extending it.
+    maxItems: action.kind === "category" || action.itemType !== "live" ? 100 : 250,
   });
   if (page.pending) {
     await checkpointActiveRefresh(fence, run.checkpointRevision, state, true, boundedGatewayRetryAfter(page.retryAfterSeconds ?? 2));
@@ -3549,13 +3552,19 @@ async function workerRpc(name, params) {
   // It is not evidence that candidate credentials are bad and must never take
   // the compensation branch; a later claim either resumes from PostgreSQL or
   // finds that the transition is terminal/cancelled.
-  if (isStaleDatabaseConflict(error)) {
+  if (isStaleDatabaseConflict(error) || ["40P01", "55P03", "57014"].includes(error?.code)) {
     const fault = new WorkerFault("stale", true);
     fault.rpc = name;
+    fault.code = error.code;
     fault.reason = String(error.details ?? "").match(/(?:^|\s)reason=([a-z_]{1,100})(?:$|\s)/)?.[1] ?? null;
     throw fault;
   }
-  if (error) throw new WorkerFault("internal_error", false);
+  if (error) {
+    const fault = new WorkerFault("internal_error", false);
+    fault.code = error.code;
+    fault.rpc = name;
+    throw fault;
+  }
   if (data === null || data === undefined) throw new WorkerFault("internal_error", false);
   return data;
 }

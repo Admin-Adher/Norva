@@ -1358,3 +1358,23 @@ test('different catalogs cannot reach apply and ambiguous candidates require an 
   assert.match(decision, /REPLACE_WITH_NEW_CATALOG/);
   assert.match(decision, /norva_decide_ambiguous_credential_transition/);
 });
+
+test('database contention and statement deadlines requeue without becoming provider failures', async () => {
+  const source = section('async function workerRpc(', '\nasync function settleJob(');
+  class WorkerFault extends Error {
+    constructor(queueCode, retryable) { super(queueCode); this.queueCode = queueCode; this.retryable = retryable; }
+  }
+  for (const code of ['40P01', '55P03', '57014', '23505']) {
+    const rpc = vm.runInNewContext(`(() => { ${source}; return workerRpc; })()`, {
+      admin: { rpc: async () => ({ data: null, error: { code, details: null } }) },
+      isStaleDatabaseConflict: () => false, WorkerFault, String,
+    });
+    await assert.rejects(rpc('norva_upsert_active_catalog_title_variants', {}), (error) => {
+      assert.equal(error.retryable, code !== '23505');
+      assert.equal(error.queueCode, code === '23505' ? 'internal_error' : 'stale');
+      assert.equal(error.code, code);
+      assert.equal(error.rpc, 'norva_upsert_active_catalog_title_variants');
+      return true;
+    });
+  }
+});
