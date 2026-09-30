@@ -52,20 +52,33 @@ if [[ "$actual_font_scale" != "$font_scale" ]]; then
 fi
 echo "Android QA: platform=$platform navigation=$navigation font_scale=$actual_font_scale"
 
+# Keep diagnostics outside Gradle's results directory while UTP owns it.
+diagnostic_dir="$(mktemp -d)"
+record_diagnostic() {
+  local name="$1" result=0
+  shift
+  {
+    printf 'utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    timeout --kill-after=2s 10s "$@" || result=$?
+    printf 'exit_code=%s\n' "$result"
+  } >> "$diagnostic_dir/$name.txt" 2>&1
+}
 collect_captures() {
   mkdir -p app/build/outputs/androidTest-results/connected/captures
-  printf 'platform=%s\nnavigation=%s\nrequested_font_scale=%s\nactual_font_scale=%s\n' \
-    "$platform" "$navigation" "$font_scale" "$actual_font_scale" \
+  printf 'platform=%s\nnavigation=%s\nrequested_font_scale=%s\nactual_font_scale=%s\ntest_class_scope=%s\n' \
+    "$platform" "$navigation" "$font_scale" "$actual_font_scale" "${NORVA_ANDROID_TEST_CLASS:-full}" \
     > app/build/outputs/androidTest-results/connected/captures/qa-environment.txt
-  adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/ >/dev/null 2>&1 || true
+  record_diagnostic adb-state adb get-state
+  record_diagnostic adb-devices adb devices -l
+  record_diagnostic app-pid adb shell pidof "tv.norva.${platform}"
+  record_diagnostic emulator-process pgrep -af 'qemu-system|emulator.*-avd'
+  record_diagnostic capture-pull adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/
 }
 # UTP can remove the test application and its external files at teardown.
 # Copy while instrumentation is running, before those files disappear.
 (while true; do collect_captures; sleep 5; done) &
 capture_pid=$!
-# Keep diagnostics outside Gradle's results directory while UTP owns it.
 # Per-test logcat can stop before the crash that terminates instrumentation.
-diagnostic_dir="$(mktemp -d)"
 adb logcat -b all -v threadtime > "$diagnostic_dir/device-logcat.txt" 2>&1 &
 logcat_pid=$!
 finish_captures() {
@@ -73,9 +86,23 @@ finish_captures() {
   kill "$capture_pid" 2>/dev/null || true
   wait "$capture_pid" 2>/dev/null || true
   collect_captures
-  adb shell dumpsys activity exit-info "tv.norva.${platform}" > "$diagnostic_dir/process-exit-info.txt" 2>&1 || true
-  kill "$logcat_pid" 2>/dev/null || true
-  wait "$logcat_pid" 2>/dev/null || true
+  record_diagnostic process-exit-info adb shell dumpsys activity exit-info "tv.norva.${platform}"
+  local logcat_stopped_by_harness=0 logcat_status=0
+  if kill -0 "$logcat_pid" 2>/dev/null; then
+    logcat_stopped_by_harness=1
+    kill "$logcat_pid" 2>/dev/null || true
+    for ((attempt=0; attempt<10; attempt++)); do
+      kill -0 "$logcat_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$logcat_pid" 2>/dev/null; then
+      kill -KILL "$logcat_pid" 2>/dev/null || true
+    fi
+  fi
+  wait "$logcat_pid" 2>/dev/null || logcat_status=$?
+  printf 'utc=%s exit_code=%s stopped_by_harness=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$logcat_status" "$logcat_stopped_by_harness" \
+    > "$diagnostic_dir/logcat-exit.txt"
   mkdir -p app/build/outputs/androidTest-results/connected/diagnostics
   cp "$diagnostic_dir/"* app/build/outputs/androidTest-results/connected/diagnostics/ || true
   return "$test_status"

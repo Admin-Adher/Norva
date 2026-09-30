@@ -93,3 +93,30 @@ test('changing the focused HOME resets the three-observation counter', shellOpti
 for (const mode of ['setup', 'provision', 'other-app', 'unfocused', 'unresolved', 'anr-events', 'anr-window']) {
     test(`${mode} cannot pass readiness`, shellOptions, () => replay(mode, 'gesture10', 1, null));
 }
+
+test('diagnostic commands preserve failures and stderr without replacing the test exit status', shellOptions, () => {
+    const start = source.indexOf('record_diagnostic() {');
+    const end = source.indexOf('collect_captures() {', start);
+    assert.ok(start >= 0 && end > start);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'norva-adb-diagnostics-'));
+    try {
+        const script = `set -euo pipefail
+diagnostic_dir=${quote(root)}
+timeout() { if [[ "$1" == --kill-after=* ]]; then shift; fi; shift; "$@"; }
+successful_command() { printf 'device\\n'; }
+failed_command() { printf 'adb: device offline\\n' >&2; return 7; }
+${source.slice(start, end)}
+record_diagnostic healthy successful_command
+record_diagnostic disconnected failed_command
+exit 42
+`;
+        const file = path.join(root, 'replay.sh');
+        fs.writeFileSync(file, script);
+        const result = spawnSync(bash, [file], { encoding: 'utf8', timeout: 10000 });
+        assert.equal(result.status, 42, result.stderr);
+        assert.match(fs.readFileSync(path.join(root, 'healthy.txt'), 'utf8'), /device\nexit_code=0/);
+        assert.match(fs.readFileSync(path.join(root, 'disconnected.txt'), 'utf8'), /adb: device offline\nexit_code=7/);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});

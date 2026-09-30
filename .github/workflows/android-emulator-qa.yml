@@ -2,6 +2,12 @@ name: Android emulator QA
 
 on:
   workflow_dispatch:
+    inputs:
+      phone-test-class:
+        description: 'Optional comma-separated phone instrumentation classes; empty runs the full suite'
+        required: false
+        default: ''
+        type: string
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -22,6 +28,8 @@ jobs:
     name: Phone API 35 (${{ matrix.navigation }}, font ${{ matrix.font_scale }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      NORVA_ANDROID_TEST_CLASS: ${{ inputs['phone-test-class'] || '' }}
     strategy:
       fail-fast: false
       matrix:
