@@ -11,6 +11,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.json.JSONObject;
 import org.junit.Assume;
+import org.junit.AssumptionViolatedException;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.io.File;
@@ -27,6 +28,33 @@ import java.util.concurrent.atomic.AtomicReference;
 @RunWith(AndroidJUnit4.class)
 @androidx.media3.common.util.UnstableApi
 public final class NativeMediaCachePlaybackInstrumentedTest {
+    private static final String REQUIRE_FIXTURE_ARGUMENT = "norvaRequireMediaCacheFixture";
+
+    // The general CI suite remains opt-in. An explicitly requested live proof
+    // must fail rather than appear successful with only an assumption skip.
+    private static void requireFixture(String requirement, boolean supplied) {
+        assertTrue("norvaRequireMediaCacheFixture must be true or false",
+                requirement == null || "true".equals(requirement) || "false".equals(requirement));
+        if ("true".equals(requirement)) {
+            assertTrue("Required app-private cache QA fixture is missing", supplied);
+        } else {
+            Assume.assumeTrue("Live QA session not supplied", supplied);
+        }
+    }
+
+    @Test public void explicitFixtureRequirementCannotBecomeAnAssumptionSkip() {
+        for (String optional : new String[] {null, "false"}) {
+            assertThrows(AssumptionViolatedException.class, () -> requireFixture(optional, false));
+            requireFixture(optional, true);
+        }
+        assertThrows(AssertionError.class, () -> requireFixture("true", false));
+        requireFixture("true", true);
+        for (String invalid : new String[] {"", "1", "TRUE", "required"}) {
+            assertThrows(AssertionError.class, () -> requireFixture(invalid, false));
+            assertThrows(AssertionError.class, () -> requireFixture(invalid, true));
+        }
+    }
+
     private static Object field(Object target, String name) throws Exception {
         Field field = target.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(target);
     }
@@ -34,7 +62,7 @@ public final class NativeMediaCachePlaybackInstrumentedTest {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Context context = instrumentation.getTargetContext();
         File fixture = new File(context.getFilesDir(), "native-cache-qa.json");
-        Assume.assumeTrue("Live QA session not supplied", fixture.isFile());
+        requireFixture(InstrumentationRegistry.getArguments().getString(REQUIRE_FIXTURE_ARGUMENT), fixture.isFile());
         JSONObject config = new JSONObject(new String(Files.readAllBytes(fixture.toPath()), StandardCharsets.UTF_8));
         fixture.delete();
         JSONObject access = config.getJSONObject("mediaCache");

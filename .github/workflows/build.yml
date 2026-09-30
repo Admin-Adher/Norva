@@ -103,7 +103,7 @@ jobs:
 
       - name: Build Android TV debug APK
         working-directory: clients/android-tv
-        run: gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
+        run: gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
 
       - name: Upload Android TV APK artifact
         uses: actions/upload-artifact@v4
@@ -113,6 +113,14 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 5
+
+      - name: Upload Android TV instrumentation APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Norva-AndroidTV-instrumentation
+          path: clients/android-tv/app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: error
+          retention-days: 1
 
   build-android-phone:
     name: Build Android Phone APK
