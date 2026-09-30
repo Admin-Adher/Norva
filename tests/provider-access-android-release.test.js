@@ -13,7 +13,7 @@ const manifest = readFileSync(
 );
 
 test('Provider Access phone release has a fresh Play version', () => {
-  assert.match(build, /versionCode 41\b/);
+  assert.match(build, /versionCode 42\b/);
   assert.match(build, /versionName "1\.3\.28"/);
 });
 
