@@ -4171,7 +4171,10 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                 finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 750,
-                finiteInitialContinuationGraceMs: claims.nativeContainer === 'ts' ? 500 : 0,
+                // MP4 also returns to its cached prefix after reading tail
+                // metadata, then seeks to the resume point. Give that seek a
+                // short grace before opening a body that would be superseded.
+                finiteInitialContinuationGraceMs: 500,
             });
             return { inputUrl: broker.inputUrl, close: async reason => {
                 try { await broker.close(reason); }
