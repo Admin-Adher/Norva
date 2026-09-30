@@ -36,3 +36,13 @@ test('duplicate IDs, missing rows, malformed lanes and incomplete inventories ca
     bounded.add(rows[0]);
     assert.throws(() => bounded.add(rows[1]), /bound/);
 });
+
+test('display tabs and newlines match refreshed labels while identity controls stay invalid', () => {
+    const baseline = inventory('series', [{ series_id:'13621',name:'Série Partie  Deux' }]);
+    assert.deepEqual(inventory('series', [{ series_id:'13621',name:'Série\tPartie\r\nDeux' }]), baseline);
+    for (const row of [
+        {series_id:'bad\tid',name:'Title'},
+        {series_id:'13621',name:'Bad\u0000Title'},
+        {series_id:'13621',name:'Title',category_id:'bad\nid'},
+    ]) assert.equal(inventory('series',[row]).eligible,false);
+});
