@@ -16237,6 +16237,18 @@ async function runPregenGate(req: Request, db: SupabaseClient) {
   const userId = stringOr(body.userId, "");
   if (!userId) return { defer: false, reason: "no-user" };
   if (await userHasLiveSession(db, userId)) return { defer: true, reason: "live-session" };
+  // User-requested connection verification outranks automatic media work.
+  // Otherwise repeated background reads keep renewing the five-minute account
+  // activity fence and the catalogue worker can starve indefinitely. Waiting
+  // for a user's decision has no pending worker and does not hold this gate.
+  try {
+    const { data, error } = await db.from("cloud_source_credential_transition_jobs")
+      .select("id").eq("user_id", userId).in("state", ["pending", "processing"])
+      .in("job_kind", ["validate_candidate", "build_candidate_generation", "post_switch_verify", "rollback_refresh"])
+      .limit(1);
+    if (error) return { defer: true, reason: "connection-check-unavailable" };
+    if (data?.length) return { defer: true, reason: "connection-check" };
+  } catch (_) { return { defer: true, reason: "connection-check-unavailable" }; }
   try {
     const sinceIso = new Date(Date.now() - ENRICH_TICK_DEFER_MS).toISOString();
     const { data } = await db.from("enrichment_tick_heartbeat")
