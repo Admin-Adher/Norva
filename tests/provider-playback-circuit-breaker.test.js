@@ -269,7 +269,7 @@ test('client busy reports open a fixed circuit once while only a server-observed
   assert.match(gateway, /PROVIDER_SLOT_RELEASE_DELAY_MS/);
   assert.ok(
     gateway.indexOf('openProviderPlaybackCircuit(providerAccountHash, db, true)')
-      < gateway.indexOf('throw new HttpError'),
+      < gateway.indexOf('throw new HttpError(response.status, "Media gateway refused the session"'),
     'the server-observed 458 must open the circuit before it is propagated',
   );
   assert.doesNotMatch(record, /openProviderPlaybackCircuit/);
@@ -314,7 +314,10 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(edge, /segments\[3\] === "provider-failure"/);
   assert.match(create, /providerAccountHashFromUrl\(targetUrl\)/);
   assert.match(create, /assertProviderCircuitClosed\(providerAccountHash, db\)/);
-  assert.match(create, /db\.rpc\(\s*"claim_cloud_playback_session"/);
+  assert.match(create, /db\.rpc\(\s*preparation \? "claim_prepared_cloud_playback_session" : "claim_cloud_playback_session"/);
+  assert.ok(create.indexOf('assertProviderCircuitClosed(providerAccountHash, db)')
+    < create.indexOf('const { data: claimRows, error: claimError } = await db.rpc('),
+  'both claim paths must pass the same provider circuit check first');
   assert.doesNotMatch(create, /\.from\("cloud_playback_sessions"\)\s*\.insert\(/);
   assert.match(create, /releaseSupersededPlaybackSessions/);
   assert.match(create, /PROVIDER_NATIVE_TAKEOVER_GRACE_MS/);
@@ -327,6 +330,39 @@ test('playback edge checks the circuit, claims one account session and reports s
   assert.match(edge, /version:\s*84/);
   assert.match(edge, /providerCircuitProtocol:\s*1/);
   assert.match(edge, /exactFileCodecProfileProtocol:\s*1/);
+});
+
+test('legacy and prepared claims preserve the same provider identity and admission arguments', async () => {
+  const edge = read('supabase/functions/norva-playback/index.ts');
+  const statement = section(edge,
+    'const { data: claimRows, error: claimError } = await db.rpc(',
+    '  if (claimError) throwDb(claimError, "Unable to claim provider playback session");');
+  const invoke = Function('context', `return (async () => {
+    const { db, preparation, sessionId, userId, sourceId, deviceId, itemType, itemId,
+      mode, sessionStatus, targetUrlHash, providerAccountHash, body, requestedPlaybackHint,
+      expiresAt, stringOrNull } = context;
+    ${statement}
+    return { claimRows, claimError };
+  })();`);
+  const calls = [];
+  const context = {
+    db: { rpc: async (name, args) => { calls.push({ name, args }); return { data: ['receipt'], error: null }; } },
+    preparation: null, sessionId: 'session', userId: 'owner', sourceId: 'source', deviceId: 'device',
+    itemType: 'live', itemId: 'channel', mode: 'transcode', sessionStatus: 'pending',
+    targetUrlHash: 'target-hash', providerAccountHash: 'provider-account-hash',
+    body: { streamMime: 'video/mp2t' }, requestedPlaybackHint: { streamType: 'live' },
+    expiresAt: '2026-09-30T20:00:00Z', stringOrNull: value => value || null,
+  };
+  assert.deepEqual(await invoke(context), { claimRows: ['receipt'], claimError: null });
+  assert.deepEqual(await invoke({ ...context, preparation: { id: 'preparation' } }),
+    { claimRows: ['receipt'], claimError: null });
+  assert.equal(calls[0].name, 'claim_cloud_playback_session');
+  assert.equal(calls[1].name, 'claim_prepared_cloud_playback_session');
+  assert.deepEqual(calls[1].args, { p_preparation_id: 'preparation', ...calls[0].args });
+  assert.equal(calls[0].args.p_provider_account_hash, context.providerAccountHash);
+  assert.equal(calls[0].args.p_session_id, context.sessionId);
+  const migration = read('supabase/migrations/20260930173000_live_playback_preparations.sql');
+  assert.match(migration, /return query select \* from public\.claim_cloud_playback_session\(p_session_id,p_user_id,\s*p_source_id,p_device_id,p_item_type,p_item_id,p_mode,p_status,p_target_url_hash,\s*p_provider_account_hash,p_stream_mime,p_playback_hint,p_expires_at\)/);
 });
 
 test('session creation derives the global account hash only from an owned server-resolved target', () => {
@@ -581,7 +617,7 @@ test('production rollout proves the provider circuit protocol on every runtime',
   const cloud = read('supabase/functions/norva-cloud/index.ts');
   const deploy = read('ops/hetzner/scripts/04-deploy-edge-functions.sh');
 
-  assert.match(gateway, /const GATEWAY_VERSION = 169/);
+  assert.match(gateway, /const GATEWAY_VERSION = 170/);
   assert.match(gateway, /providerCircuitProtocol:\s*1/);
   assert.match(gateway, /providerProxyAffinityProtocol:\s*1/);
   assert.match(gateway, /exactFileCodecProfileProtocol:\s*1/);

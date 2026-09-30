@@ -21,7 +21,7 @@ function section(startMarker, endMarker) {
 }
 
 test('gateway health revision identifies the combined production handoff build', () => {
-  assert.match(source, /const GATEWAY_VERSION = 169;/);
+  assert.match(source, /const GATEWAY_VERSION = 170;/);
 });
 
 test('/raw waits for released provider holders before opening the replacement stream', () => {
@@ -105,7 +105,9 @@ test('/raw permits one self-handoff 458 retry without making 458 generally retry
   assert.equal((route.match(/rawHandoffRetryUsed = true/g) || []).length, 1);
   assert.match(route, /!rawHandoffRetryUsed[\s\S]{0,180}abortedForHandoff > 0/);
   assert.match(route, /upstream\.status === 458/);
-  assert.match(route, /abandonRawAttempt\(attemptGuard, upstream\.body, 'raw_handoff_slot_busy'\)/);
+  assert.match(route, /abandonAttempt\(attemptGuard, upstream\.body, 'raw_handoff_slot_busy'\)/);
+  assert.match(route, /const abandonAttempt = \(\.\.\.args\) => \{\s*const drained = abandonRawAttempt\(\.\.\.args\);/,
+    'the tracked disposal wrapper must still abandon the exact underlying attempt');
   assert.match(route, /preemptBackgroundWorkGlobally\(pumpProxyKey, rawPlaybackReason\)/);
   assert.doesNotMatch(
     route,

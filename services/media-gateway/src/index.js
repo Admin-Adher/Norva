@@ -27,6 +27,13 @@ const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_
     FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
     applyFiniteTsAccurateResume } = require('./finite-ts-startup');
 const { createLiveTsStartupGate } = require('./live-ts-startup');
+const { createPlaybackPreparationCancellation } = require('./playback-preparation-cancel');
+// Live raw grants retain the existing <=2 h entitlement transport lifetime.
+// Keep cancellation fences past that lifetime plus the 180 s prepare window.
+const playbackPreparationCancellation = createPlaybackPreparationCancellation({ ttlMs: 7_500_000 });
+const playbackPreparationGeneration = crypto.randomUUID();
+const playbackPreparationRawWork = new Map();
+const playbackPreparationUnconfirmedStops = new Map();
 const FINITE_TS_FAST_START_ENABLED = process.env.FINITE_TS_FAST_START_ENABLED !== 'false';
 const { finiteVodStartupFormat, prefetchFiniteVodHeader, retainedVodStartupPolicy, startupHeaderCacheCapacity } = require('./finite-vod-startup');
 const RETAINED_FINITE_VOD_STARTUP_ENABLED = process.env.RETAINED_FINITE_VOD_STARTUP_ENABLED === 'true';
@@ -2420,7 +2427,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 169;
+const GATEWAY_VERSION = 170;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3279,6 +3286,9 @@ app.get('/health', (req, res) => {
         translateQueueDepth: translateQueue.length,
         translateBusy,
         rawPumpCount: rawPumps.size,
+        playbackPreparationPendingCount: playbackPreparationCancellation.snapshot().pending
+            + [...playbackPreparationRawWork.values()].reduce((sum, group) => sum + group.size, 0)
+            + [...playbackPreparationUnconfirmedStops.values()].reduce((sum, group) => sum + group.size, 0),
         viewerStartupReservations: viewerStartupReservations.size,
         viewerSessionStartupAdmissions: viewerSessionStartupAdmissions.size,
         viewerSessionStartupLockCount: viewerSessionStartupLocks.size,
@@ -3795,23 +3805,25 @@ function createRawAttemptGuard(parentSignal, deadlineAt) {
 // Cancellation is deliberately fire-and-forget: a broken provider must not be
 // able to keep the HTTP handler alive by never resolving ReadableStream.cancel().
 function cancelRawBodyBestEffort(cancelable) {
-    if (!cancelable || typeof cancelable.cancel !== 'function') return;
+    if (!cancelable || typeof cancelable.cancel !== 'function') return Promise.resolve(true);
     const release = () => {
         if (typeof cancelable.releaseLock === 'function') {
             try { cancelable.releaseLock(); } catch (_) {}
         }
     };
     try {
-        Promise.resolve(cancelable.cancel()).catch(() => {}).finally(release);
+        return Promise.resolve(cancelable.cancel()).then(() => true, () => false).finally(release);
     } catch (_) {
         release();
+        return Promise.resolve(false);
     }
 }
 
 function abandonRawAttempt(guard, cancelable, reason) {
     if (guard) guard.abort(reason);
-    cancelRawBodyBestEffort(cancelable);
+    const drained = cancelRawBodyBestEffort(cancelable);
     if (guard) guard.dispose();
+    return drained;
 }
 
 function waitForRawBackoff(delayMs, deadlineAt, signal) {
@@ -4027,26 +4039,28 @@ function isDeclaredEmptyRawResponse(upstream) {
 // Rebuild a Node stream from a sniffed body: replay the leading chunk, then pump
 // the remaining web-stream reads. destroy() cancels the reader so the provider
 // connection (the account's single slot) drops with the client, like fromWeb does.
-function readableFromSniffedBody(sniffed) {
+function readableFromSniffedBody(sniffed, onDrain = null) {
     const { Readable } = require('stream');
     let leading = sniffed.chunk && sniffed.chunk.length ? sniffed.chunk : null;
     const reader = sniffed.reader;
+    let ended = false;
     return new Readable({
         read() {
             if (leading) { const c = leading; leading = null; this.push(c); return; }
             reader.read().then(({ value, done }) => {
                 if (done) {
+                    ended = true;
                     try { reader.releaseLock(); } catch (_) {}
                     this.push(null);
                 }
                 else this.push(Buffer.from(value));
             }).catch((err) => {
-                try { reader.releaseLock(); } catch (_) {}
                 this.destroy(err);
             });
         },
         destroy(err, cb) {
-            cancelRawBodyBestEffort(reader);
+            const drained = ended ? Promise.resolve(true) : cancelRawBodyBestEffort(reader);
+            if (onDrain && drained) onDrain(drained);
             cb(err);
         },
     });
@@ -4239,7 +4253,7 @@ app.get('/sessions/:id/native.mp4', async (req, res) => {
 
 app.get('/raw/:token', async (req, res) => {
     rawStreamStats.requests += 1;
-    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN, true);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
 
@@ -4248,6 +4262,14 @@ app.get('/raw/:token', async (req, res) => {
         .fingerprintsForSource(claims.url, pumpProxyKey)?.accountFingerprint || null;
     const pumpOwnerHash = claims.uid ? sha256Hex(claims.uid) : null;
     const pumpProviderSlotKey = providerSlotKeyFromUrl(claims.url, pumpOwnerHash);
+    const preparedRaw = claims.preparationProtocol === 1;
+    if (preparedRaw) {
+        try {
+            if (claims.preparationGatewayGeneration !== playbackPreparationGeneration)
+                throw new Error('Preparation generation changed');
+            playbackPreparationCancellation.assertOpen(pumpOwnerHash, claims.sid);
+        } catch (_) { return res.status(409).json({ code: 'PLAYBACK_PREPARATION_CANCELLED' }); }
+    }
     // Check and register synchronously before the first await. If a transcode
     // startup already owns this provider account, an old Engine /raw request
     // must not reopen the slot between its teardown and FFmpeg spawn.
@@ -4259,6 +4281,29 @@ app.get('/raw/:token', async (req, res) => {
     }
     const ac = new AbortController();
     let activeAttemptGuard = null;
+    let releasePreparedRaw;
+    let preparedStream = null;
+    let preparedDisposalFailed = false;
+    const preparedBodies = new Set();
+    const preparedDisposals = new Set();
+    const abandonAttempt = (...args) => {
+        const drained = abandonRawAttempt(...args);
+        if (preparedRaw && drained) preparedDisposals.add(drained);
+    };
+    const rawScope = `${pumpOwnerHash}:${claims.sid}`;
+    if (preparedRaw) {
+        const work = { abort: () => { preparedStream?.destroy(); ac.abort(); res.destroy(); },
+            done: new Promise(resolve => { releasePreparedRaw = resolve; }) };
+        const group = playbackPreparationRawWork.get(rawScope) || new Set();
+        if (group.size >= 8 || playbackPreparationRawWork.size >= 4096) return res.status(429).end();
+        group.add(work); playbackPreparationRawWork.set(rawScope, group);
+        const resolve = releasePreparedRaw;
+        releasePreparedRaw = (drained) => {
+            if (drained) { group.delete(work); if (!group.size) playbackPreparationRawWork.delete(rawScope); }
+            resolve(drained);
+        };
+    }
+    try {
     // Supersede any pump left by a PREVIOUS playback session on this account —
     // same-session concurrency (parallel range reads) is spared via claims.sid.
     const pump = registerRawPump({
@@ -4349,9 +4394,10 @@ app.get('/raw/:token', async (req, res) => {
         upstream = null;
         try {
             upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: attemptGuard.signal, dispatcher: rawProxyAgent || undefined });
+            if (preparedRaw && upstream.body) preparedBodies.add(upstream.body);
         } catch (err) {
             const hitDeadline = attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0;
-            abandonRawAttempt(attemptGuard, null, 'raw_fetch_failed');
+            abandonAttempt(attemptGuard, null, 'raw_fetch_failed');
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
             if (hitDeadline) { sendRawStartupTimeout(res); return; }
             const networkFailure = classifyProviderFetchFailure(err);
@@ -4377,13 +4423,13 @@ app.get('/raw/:token', async (req, res) => {
             continue;
         }
         if (ac.signal.aborted) {
-            abandonRawAttempt(attemptGuard, upstream.body, 'raw_client_aborted');
+            abandonAttempt(attemptGuard, upstream.body, 'raw_client_aborted');
             try { res.end(); } catch (_) {}
             return;
         }
         if (attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0) {
             const status = upstream.status;
-            abandonRawAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
+            abandonAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
             sendRawStartupTimeout(res, status);
             return;
         }
@@ -4393,7 +4439,7 @@ app.get('/raw/:token', async (req, res) => {
                 {},
                 { proxyConfigured: true },
             );
-            abandonRawAttempt(attemptGuard, upstream.body, 'proxy_auth_failed');
+            abandonAttempt(attemptGuard, upstream.body, 'proxy_auth_failed');
             rememberRawFailure('proxy_auth', upstream.status);
             return res.status(failure.status).json({
                 error: failure.publicMessage,
@@ -4411,7 +4457,7 @@ app.get('/raw/:token', async (req, res) => {
         ) {
             rawHandoffRetryUsed = true;
             const waitMs = PROVIDER_SLOT_RELEASE_DELAY_MS || 2500;
-            abandonRawAttempt(attemptGuard, upstream.body, 'raw_handoff_slot_busy');
+            abandonAttempt(attemptGuard, upstream.body, 'raw_handoff_slot_busy');
             console.warn(`[media-gateway] /raw provider 458 after aborting ${abortedForHandoff} holder(s); waiting ${waitMs}ms for slot release before one handoff retry`);
             const outcome = await waitForRawBackoff(waitMs, startupDeadlineAt, ac.signal);
             if (outcome === 'aborted' || ac.signal.aborted) {
@@ -4425,7 +4471,7 @@ app.get('/raw/:token', async (req, res) => {
             providerRetryAttempts += 1;
             rawStreamStats.providerRetries += 1;
             const status = upstream.status;
-            abandonRawAttempt(attemptGuard, upstream.body, 'raw_retryable_provider_status');
+            abandonAttempt(attemptGuard, upstream.body, 'raw_retryable_provider_status');
             console.warn(`[media-gateway] /raw provider transient ${status} (attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
             if (!await waitForRetry(attempt, status)) return;
             continue;
@@ -4449,7 +4495,7 @@ app.get('/raw/:token', async (req, res) => {
                 const sniffTimeoutMs = Math.min(RAW_FIRST_BYTE_TIMEOUT_MS, rawStartupRemainingMs(startupDeadlineAt));
                 if (sniffTimeoutMs <= 0) {
                     const status = upstream.status;
-                    abandonRawAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
+                    abandonAttempt(attemptGuard, upstream.body, 'raw_startup_deadline');
                     sendRawStartupTimeout(res, status);
                     return;
                 }
@@ -4460,13 +4506,13 @@ app.get('/raw/:token', async (req, res) => {
                     (prefix, complete) => classifyRawPrefix(prefix, contentType, startsAtZero, complete),
                 );
                 if (ac.signal.aborted) {
-                    abandonRawAttempt(attemptGuard, probe.reader, 'raw_client_aborted');
+                    abandonAttempt(attemptGuard, probe.reader, 'raw_client_aborted');
                     try { res.end(); } catch (_) {}
                     return;
                 }
                 if (attemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0) {
                     const status = upstream.status;
-                    abandonRawAttempt(attemptGuard, probe.reader, 'raw_startup_deadline');
+                    abandonAttempt(attemptGuard, probe.reader, 'raw_startup_deadline');
                     sendRawStartupTimeout(res, status);
                     return;
                 }
@@ -4483,7 +4529,7 @@ app.get('/raw/:token', async (req, res) => {
                 else rawStreamStats.emptyBodies += 1;
                 rememberRawFailure(noDataKind, upstream.status);
                 const status = upstream.status;
-                abandonRawAttempt(attemptGuard, probe ? probe.reader : upstream.body, `raw_${noDataKind}`);
+                abandonAttempt(attemptGuard, probe ? probe.reader : upstream.body, `raw_${noDataKind}`);
                 if (noDataAttempts <= RAW_NO_DATA_RETRY_LIMIT && attempt < maxAttempts) {
                     rawStreamStats.providerRetries += 1;
                     console.warn(`[media-gateway] /raw provider sent no playable bytes (${noDataKind}, status ${status}, attempt ${noDataAttempts}/${1 + RAW_NO_DATA_RETRY_LIMIT}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000}ms`);
@@ -4505,7 +4551,7 @@ app.get('/raw/:token', async (req, res) => {
             rawStreamStats.nonMediaBodies += 1;
             rememberRawFailure('non_media_body', upstream.status);
             const status = upstream.status;
-            abandonRawAttempt(attemptGuard, probe.reader, 'raw_non_media_body');
+            abandonAttempt(attemptGuard, probe.reader, 'raw_non_media_body');
             if (providerRetryAttempts < RAW_PROVIDER_RETRY_LIMIT && attempt < maxAttempts) {
                 providerRetryAttempts += 1;
                 rawStreamStats.providerRetries += 1;
@@ -4528,7 +4574,7 @@ app.get('/raw/:token', async (req, res) => {
     if (!upstream || !activeAttemptGuard || activeAttemptGuard.deadlineExpired || rawStartupRemainingMs(startupDeadlineAt) <= 0) {
         const status = upstream && upstream.status;
         const cancelable = sniffedBody ? sniffedBody.reader : upstream && upstream.body;
-        if (activeAttemptGuard) abandonRawAttempt(activeAttemptGuard, cancelable, 'raw_startup_deadline');
+        if (activeAttemptGuard) abandonAttempt(activeAttemptGuard, cancelable, 'raw_startup_deadline');
         activeAttemptGuard = null;
         sendRawStartupTimeout(res, status);
         return;
@@ -4549,8 +4595,9 @@ app.get('/raw/:token', async (req, res) => {
         return;
     }
     const nodeStream = sniffedBody
-        ? readableFromSniffedBody(sniffedBody)
+        ? readableFromSniffedBody(sniffedBody, preparedRaw ? promise => preparedDisposals.add(promise) : null)
         : require('stream').Readable.fromWeb(upstream.body);
+    preparedStream = nodeStream;
     attachRawIdleWatchdog(nodeStream, res, ac);
     // In-band header capture: if this response carries the file's LEADING bytes, tee them
     // (best-effort) so a later codec probe reads the header locally instead of opening a
@@ -4576,6 +4623,27 @@ app.get('/raw/:token', async (req, res) => {
     // instead of holding the provider slot until the post-start idle watchdog fires.
     res.flushHeaders();
     nodeStream.pipe(res);
+    if (preparedRaw) {
+        const abortStream = () => nodeStream.destroy();
+        ac.signal.addEventListener('abort', abortStream, { once: true });
+        if (ac.signal.aborted) abortStream();
+        try { await require('stream/promises').finished(nodeStream, { cleanup: true }); }
+        catch (_) { if (!sniffedBody) preparedDisposalFailed = true; }
+        finally { ac.signal.removeEventListener('abort', abortStream); }
+    }
+    } finally {
+        if (preparedRaw) {
+            ac.abort();
+            // Await fetch/body disposal, not just removal from the raw pump set.
+            for (const body of preparedBodies) {
+                if (!body.locked) {
+                    try { await body.cancel(); } catch (_) { preparedDisposalFailed = true; }
+                }
+            }
+            const disposals = await Promise.all(preparedDisposals);
+            releasePreparedRaw?.(!preparedDisposalFailed && disposals.every(value => value === true));
+        }
+    }
 });
 
 // Tee the leading bytes of a /raw response into headerByteCache when the response starts
@@ -11537,6 +11605,44 @@ function detectLanguageFromText(raw) {
   return out(best, +bestScore.toFixed(2), confident);
 }
 
+// Exact, internal cancellation for a server-issued Live preparation. The fence
+// is installed before any await and rejects a delayed POST /sessions.
+app.get('/playback-preparations/generation', requireGatewayAuth, (_req, res) => {
+    res.json({ generation: playbackPreparationGeneration });
+});
+app.post('/playback-preparations/cancel', requireGatewayAuth, async (req, res) => {
+    try {
+        const result = await playbackPreparationCancellation.cancel(
+            req.body?.ownerKey, req.body?.playbackSessionId,
+            async (owner, playbackId) => {
+                const scope = `${owner}:${playbackId}`;
+                const raw = [...(playbackPreparationRawWork.get(scope) || [])];
+                for (const work of raw) work.abort();
+                const rawDrained = await Promise.all(raw.map(work => work.done));
+                if (rawDrained.some(value => value !== true)) throw new Error('Preparation raw body is not drained');
+                const exact = [...sessions.values()].filter(session =>
+                    session.preparationProtocol === 1 && session.ownerKey === owner
+                    && session.playbackSessionId === playbackId);
+                const unconfirmed = playbackPreparationUnconfirmedStops.get(scope) || new Map();
+                for (const session of exact) if (!unconfirmed.has(session.id))
+                    unconfirmed.set(session.id, { session, child: session.ffmpeg });
+                if (unconfirmed.size) playbackPreparationUnconfirmedStops.set(scope, unconfirmed);
+                await Promise.all([...unconfirmed.values()].map(async ({ session, child }) => {
+                    await stopSession(session, { reason: 'preparation-cancelled' });
+                    if (child && child.exitCode == null && !child.signalCode)
+                        throw new Error('Preparation producer is not drained');
+                    unconfirmed.delete(session.id);
+                }));
+                if (!unconfirmed.size) playbackPreparationUnconfirmedStops.delete(scope);
+            });
+        const drained = result.drained && req.body?.generation === playbackPreparationGeneration;
+        res.status(drained ? 200 : 202).json({ ...result, drained, generation: playbackPreparationGeneration });
+    } catch (error) {
+        res.status(error?.code === 'PREPARATION_SCOPE_INVALID' ? 400 : 503)
+            .json({ code: error?.code || 'PREPARATION_DRAIN_UNCONFIRMED', drained: false });
+    }
+});
+
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     const sessionCreateStartedAt = Date.now();
     sessionStartupStats.attempts += 1;
@@ -11548,11 +11654,18 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
     let pendingMkvCompleteHlsCacheLease = null;
     let sessionRequestAbortController = null;
     let detachSessionRequestAbort = null;
+    let releasePreparationStartup = null;
+    let preparationExpiryTimer = null;
+    const preparationChildren = new Set();
+    let preparationCleanupFailed = false;
     try {
         const {
             sourceUrl,
             playbackSessionId,
             ownerKey,
+            preparationProtocol,
+            preparationExpiresAt,
+            preparationGatewayGeneration,
             mode = 'remux',
             expiresAt,
             userAgent,
@@ -11613,6 +11726,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // previous startup and keep shared QoS elevated.
         sessionRequestAbortController = new AbortController();
         const abortSessionRequest = () => {
+            if (createdSession?.ffmpeg) preparationChildren.add(createdSession.ffmpeg);
             try { sessionRequestAbortController.abort(); } catch (_) {}
             if (createdSession) stopSession(createdSession).catch(() => {});
         };
@@ -11628,6 +11742,18 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         if (req.aborted || req.destroyed || res.destroyed || res.writableEnded) {
             abortSessionRequest();
             return;
+        }
+        if (preparationProtocol !== undefined) {
+            const deadline = Date.parse(String(preparationExpiresAt || ''));
+            if (preparationProtocol !== 1 || preparationGatewayGeneration !== playbackPreparationGeneration
+                || !isLiveSession({ playbackHint, playbackIdentity })
+                || normalizedMediaCacheProducer || !Number.isFinite(deadline)
+                || deadline <= Date.now() || deadline > Date.now() + 185_000) {
+                return res.status(400).json({ code: 'PLAYBACK_PREPARATION_INVALID' });
+            }
+            releasePreparationStartup = playbackPreparationCancellation.begin(
+                normalizedOwnerKey, playbackSessionId, abortSessionRequest);
+            preparationExpiryTimer = setTimeout(abortSessionRequest, Math.max(1, deadline - Date.now()));
         }
         const admissionStartedAt = Date.now();
         viewerSessionStartupAdmission = await viewerStartupQueue.acquire(
@@ -11846,7 +11972,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                 const probedCodecProfile = await probeCodecProfile(
                     sourceUrl,
                     sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
-                    { localOnly: finiteMkvPlaybackAtRequest || Boolean(retainedVodStartupFormat) },
+                    { localOnly: finiteMkvPlaybackAtRequest || Boolean(retainedVodStartupFormat),
+                        ...(releasePreparationStartup ? { signal: sessionRequestAbortController.signal } : {}) },
                 );
                 if (hasUsefulCodecProfile(probedCodecProfile)) {
                     normalizedCodecProfile = mergeCodecProfiles(normalizedCodecProfile, probedCodecProfile);
@@ -11950,6 +12077,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             inputPump: null,
             authoritativeSpool: null,
             startupAbortController: sessionRequestAbortController,
+            preparationProtocol: preparationProtocol === 1 ? 1 : null,
             authoritativeSpoolPromise: null,
             weakContentAttestation: null,
             weakContentAttestationIdentity: null,
@@ -12334,11 +12462,19 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         pendingMkvCompleteHlsCacheLease?.release?.();
         pendingMkvCompleteHlsCacheLease = null;
         if (sessionRequestAbortController?.signal.aborted) {
+            if (releasePreparationStartup && !res.headersSent && !res.destroyed)
+                res.status(409).json({ code: 'PLAYBACK_PREPARATION_CANCELLED' });
             if (createdSession) {
                 await stopSession(createdSession).catch(() => {});
             } else if (pendingOutputDir) {
                 await removeSessionDir(pendingOutputDir).catch(() => {});
             }
+            return;
+        }
+        if (String(err?.code || '').startsWith('PREPARATION_')
+            || String(err?.code || '').startsWith('PLAYBACK_PREPARATION_')) {
+            if (!res.headersSent) res.status(err.code === 'PREPARATION_CANCEL_CAPACITY' ? 503 : 409)
+                .json({ code: err.code });
             return;
         }
         if (err?.code === 'VIEWER_STARTUP_BUSY') {
@@ -12382,10 +12518,19 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
         if (!res.headersSent) res.status(500).json({ error: 'Failed to create media session' });
     } finally {
+        // stopSession clears ffmpeg. Keep its identity until exit is proved.
+        if (releasePreparationStartup && sessionRequestAbortController?.signal.aborted && createdSession) {
+            if (createdSession.ffmpeg) preparationChildren.add(createdSession.ffmpeg);
+            try { await stopSession(createdSession, { reason: 'preparation-cancelled' }); }
+            catch (_) { preparationCleanupFailed = true; }
+        }
         detachSessionRequestAbort?.();
+        clearTimeout(preparationExpiryTimer);
         releaseViewerSessionStartupLock?.();
         releaseViewerSessionStartupAdmission(viewerSessionStartupAdmission);
         releaseViewerStartup(viewerStartupReservation);
+        releasePreparationStartup?.(async () => !preparationCleanupFailed
+            && [...preparationChildren].every(child => child.exitCode != null || Boolean(child.signalCode)));
     }
 });
 
@@ -20683,7 +20828,7 @@ async function probeCodecProfile(sourceUrl, userAgent, options = {}) {
     }
     if (!forceProviderProbe && (INBAND_HEADER_PARSE || BOUNDED_MKV_HEADER_PARSE) && sourceUrl) {
         try {
-            const local = await probeFromHeaderBytes(sourceUrl);
+            const local = await probeFromHeaderBytes(sourceUrl, options);
             if (local && hasUsefulCodecProfile(local)) {
                 probeStats.inbandHits += 1;
                 cacheCodecProfile(sourceUrl, local);
@@ -22115,7 +22260,7 @@ function timingSafeEqual(left, right) {
 // Verify a byte-pipe token: `base64url(payload).base64url(HMAC-SHA256(payload,
 // secret))`. Same format the playback function signs (with the shared gateway
 // token as the key). Returns the claims object, or null if invalid.
-function verifyRawToken(token, secret) {
+function verifyRawToken(token, secret, allowPreparedPlayback = false) {
     try {
         if (!secret) return null;
         const [payloadPart, signaturePart] = String(token).split('.');
@@ -22126,6 +22271,10 @@ function verifyRawToken(token, secret) {
         if (!timingSafeEqual(signaturePart, expected)) return null;
         const claims = JSON.parse(payload);
         if (!claims || claims.v !== 1 || !claims.url || !claims.exp) return null;
+        // A prepared Live capability grants only the tracked raw byte pipe.
+        // It must not start an untracked probe/subtitle/worker after cancellation.
+        if (claims.preparationProtocol !== undefined
+            && (!allowPreparedPlayback || claims.preparationProtocol !== 1)) return null;
         if (!isHttpUrl(claims.url)) return null;
         return claims;
     } catch (_) {

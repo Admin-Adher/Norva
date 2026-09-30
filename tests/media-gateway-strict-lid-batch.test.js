@@ -503,7 +503,7 @@ function gatewayTranscriptDetector() {
     'utf8',
   );
   const start = gateway.indexOf('function detectLanguageFromText(');
-  const end = gateway.indexOf("app.post('/sessions'", start);
+  const end = gateway.indexOf("app.get('/playback-preparations/generation'", start);
   assert.ok(start >= 0 && end > start);
   const context = {};
   vm.runInNewContext(
@@ -1150,7 +1150,7 @@ test('v102 route exposes the bounded budget rebalance and fails a broken Whisper
   const routeStart = gateway.indexOf('async function handleDetectLanguageRequest(');
   const routeEnd = gateway.indexOf('// Service-only A/B benchmark.', routeStart);
   const route = gateway.slice(routeStart, routeEnd);
-  assert.match(gateway, /const GATEWAY_VERSION = 169;/);
+  assert.match(gateway, /const GATEWAY_VERSION = 170;/);
   assert.match(gateway, /const STRICT_LID_REQUEST_BUDGET_MS = clampInt\([\s\S]*225_000,[\s\S]*225_000,/);
   assert.match(gateway, /strictLidBatchProtocol: 1/);
   assert.match(gateway, /strictLidActivityKindProtocol: 1/);

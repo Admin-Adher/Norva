@@ -198,7 +198,7 @@ test('gateway /raw accepts a valid duration-aware expiration beyond 15 minutes',
   assert.notEqual(rawEnd, -1);
   const rawRoute = gateway.slice(rawStart, rawEnd);
 
-  assert.match(rawRoute, /verifyRawToken\(req\.params\.token, GATEWAY_TOKEN\)/);
+  assert.match(rawRoute, /verifyRawToken\(req\.params\.token, GATEWAY_TOKEN, true\)/);
   assert.match(
     rawRoute,
     /Number\(claims\.exp\) \* 1000 < Date\.now\(\)/,

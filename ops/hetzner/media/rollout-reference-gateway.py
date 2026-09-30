@@ -104,12 +104,23 @@ def health(name, original, debug=False):
         return json.load(response)
 
 
-def idle(name, original):
+def preparation_generation(name, original):
+    request = urllib.request.Request('http://127.0.0.1:' + str(NODES[name]) + '/playback-preparations/generation')
+    request.add_header('Authorization', 'Bearer ' + env(original)['GATEWAY_TOKEN'])
+    with urllib.request.urlopen(request, timeout=10) as response:
+        value = json.load(response).get('generation')
+    assert isinstance(value, str) and re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', value), 'preparation_generation_invalid'
+    return value
+
+
+def idle(name, original, *, expected_version):
     current = inspect(name)
     assert current['Id'] == original['Id'], 'container_identity_changed'
     assert contract(clone(current)) == contract(clone(original)), 'configuration_changed'
     h = health(name, original)
-    assert h.get('ok') is True and h.get('version') == CURRENT_VERSION, 'unexpected_health'
+    assert h.get('ok') is True and h.get('version') == expected_version, 'unexpected_health'
+    if expected_version >= 170:
+        assert type(h.get('playbackPreparationPendingCount')) is int and h['playbackPreparationPendingCount'] == 0, 'playback_preparation_pending_or_unknown'
     debug = health(name, original, True)
     assert isinstance(debug.get('sessions'), list) and len(debug['sessions']) == 0, 'viewer_sessions_active_or_unknown'
     for key in ('activeSessions', 'rawPumpCount',
@@ -128,6 +139,22 @@ def idle(name, original):
     count = subprocess.check_output(['docker', 'exec', 'norva-db', 'psql', '-X', '-q', '-At',
                                      '-U', 'postgres', '-d', 'postgres', '-c', sql], text=True).strip()
     assert count == '0', 'cloud_playback_session_active'
+    # A prepared Live attempt can precede its cloud session. Replacing this
+    # process changes its cancellation generation, so wait for those attempts
+    # too. Probe table existence separately to support the pre-migration image.
+    table_sql = "select (to_regclass('public.live_playback_preparations') is not null)::int;"
+    table_exists = subprocess.check_output(['docker', 'exec', 'norva-db', 'psql', '-X', '-q', '-At',
+                                            '-U', 'postgres', '-d', 'postgres', '-c', table_sql], text=True).strip()
+    assert table_exists in ('0', '1'), 'preparation_table_unknown'
+    if table_exists == '1':
+        # A settled cancellation may still await its final client ACK. Preserve
+        # this process generation until that row reaches the cancelled state.
+        preparation_sql = ("select count(*) from public.live_playback_preparations where "
+                           "(state='prepared' and expires_at>now()) or "
+                           "(state='creating' and settled_at is null) or state='cancel_requested';")
+        preparations = subprocess.check_output(['docker', 'exec', 'norva-db', 'psql', '-X', '-q', '-At',
+                                                '-U', 'postgres', '-d', 'postgres', '-c', preparation_sql], text=True).strip()
+        assert preparations == '0', 'live_playback_preparation_active'
     return h
 
 
@@ -144,6 +171,10 @@ def verify(name, original, expected):
             assert h['privateResumeHlsCache']['enabled'] and not h['privateResumeHlsCache']['ownerScoped']
             assert h['boundedHlsOutput']['admissionProtocol'] == 1
             assert h['sharedVideoEncoderCapacity']['limit'] == 8
+            if TARGET_VERSION >= 170:
+                assert type(h.get('playbackPreparationPendingCount')) is int
+                assert h['playbackPreparationPendingCount'] >= 0
+                preparation_generation(name, original)
             return h
         except (OSError, ValueError, KeyError, AssertionError):
             time.sleep(1)
@@ -188,7 +219,7 @@ def main():
         assert not DATA.exists(), 'persistent_destination_already_exists'
         prepared['HostConfig']['Binds'] = list(prepared['HostConfig'].get('Binds') or [])
         prepared['HostConfig']['Binds'].append(str(DATA) + ':/tmp/resume-pilot:rw')
-    idle(args.node, original)
+    idle(args.node, original, expected_version=CURRENT_VERSION)
     summary = {'node': args.node, 'image': IMAGE, 'sourceRevision': REVISION,
                'currentVersion': CURRENT_VERSION, 'targetVersion': TARGET_VERSION,
                'environmentChanges': False, 'persistentOutputAdded': persist,
@@ -240,7 +271,7 @@ def main():
     try:
         # Gate immediately before stopping. Existing runtime has no atomic
         # viewer drain mode: a residual admission race is recorded, not hidden.
-        idle(args.node, original)
+        idle(args.node, original, expected_version=CURRENT_VERSION)
         action('stop-original', 'POST', '/containers/' + original['Id'] + '/stop?t=25',
                lambda: not inspect(original['Id'])['State']['Running'])
         stopped = True
@@ -276,7 +307,7 @@ def main():
             current = inspect(replacement)
             if current['State']['Running']:
                 # Never remove a candidate already serving a new viewer.
-                idle(args.node, current)
+                idle(args.node, current, expected_version=TARGET_VERSION)
             action('remove-replacement', 'DELETE', '/containers/' + replacement + '?force=true',
                    lambda: not any(c['Id'] == replacement for c in docker('GET', '/containers/json?all=true')))
         if renamed:

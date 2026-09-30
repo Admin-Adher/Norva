@@ -103,6 +103,7 @@ async function liveFixture({
     method: 'POST', body: JSON.stringify({ sourceId: SOURCE, itemType: 'live', itemId: ITEM }),
   });
   const context = vm.createContext({
+    preparation: null,
     req, db, resolved: { itemCas: ownedItemId ? { id: ownedItemId } : null },
     itemType: 'live', episodeCoordinates: null, parentSeriesId: null, sourceId: SOURCE, userId: OWNER,
     itemId: ITEM, deviceId: 'fixture-device', playbackGeneration: { ...initialGeneration },
