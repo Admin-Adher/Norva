@@ -93,7 +93,7 @@ begin
     or j.job_kind<>'validate_candidate' or j.state<>'processing'
     or j.lease_owner is distinct from p_worker or j.lease_sequence is distinct from p_lease_sequence
     or j.lease_until<=clock_timestamp() then
-    raise exception 'transport validation lease CAS failed' using errcode='40001';
+    raise exception 'transport validation lease CAS failed' using errcode='PT409';
   end if;
   if exists(select 1 from public.cloud_source_transport_checks where transition_id=t.id) then
     return public.norva_get_credential_transport_check(t.id,p_user_id);
@@ -175,7 +175,7 @@ begin
  if j.id is null or t.id is null or p.transition_id is null or t.state<>'validating'
    or j.job_kind<>'validate_candidate' or j.state<>'processing' or j.lease_owner is distinct from p_worker
    or j.lease_sequence is distinct from p_lease_sequence or j.lease_until<=clock_timestamp()
-   or p.state<>'checking' then raise exception 'transport checkpoint CAS failed' using errcode='40001'; end if;
+   or p.state<>'checking' then raise exception 'transport checkpoint CAS failed' using errcode='PT409'; end if;
  if p_item_type is null or p_item_type not in ('movie','series','live')
    or p_retry_after is null or p_retry_after not between 1 and 60 then
    raise exception 'invalid transport checkpoint' using errcode='22023'; end if;
@@ -199,7 +199,7 @@ begin
      perform (p_manifest->'xors'->>v_lane)::bigint;
    end loop;
    if p.parts ? p_item_type and p.parts->p_item_type is distinct from p_manifest then
-     raise exception 'transport inventory changed' using errcode='40001'; end if;
+     raise exception 'transport inventory changed' using errcode='PT409'; end if;
    update public.cloud_source_transport_checks set parts=parts||jsonb_build_object(p_item_type,p_manifest)
      where transition_id=t.id returning * into p;
  end if;
@@ -222,10 +222,10 @@ begin
      on l.source_id=h.source_id and l.user_id=h.user_id
      where h.source_id=p.source_id and h.user_id=p_user_id and h.active_generation_id=p.generation_id
        and h.head_revision=p.head_revision and l.config_revision=p.config_revision for update of h,l;
-   if not found then raise exception 'transport source changed during verification' using errcode='40001'; end if;
+   if not found then raise exception 'transport source changed during verification' using errcode='PT409'; end if;
    select revision into v_generation_revision from public.cloud_source_catalog_generations
      where id=p.generation_id and user_id=p_user_id and state='active' and not manifest_sealing for update;
-   if not found then raise exception 'transport generation changed during verification' using errcode='40001'; end if;
+   if not found then raise exception 'transport generation changed during verification' using errcode='PT409'; end if;
    if public.norva_transport_catalog_manifest(p.generation_id)->>'checksum' is distinct from p.baseline_checksum then
      update public.cloud_source_transport_checks set state='not_matching' where transition_id=t.id;
      return public.norva_get_credential_transport_check(t.id,p_user_id);
@@ -291,14 +291,14 @@ begin
    or t.state<>'ready_to_switch' or t.revision is distinct from p_expected_transition_revision
    or t.expected_source_revision is distinct from p_expected_source_revision
    or p.config_revision is distinct from p_expected_source_revision then
-   raise exception 'transport apply CAS failed' using errcode='40001'; end if;
+   raise exception 'transport apply CAS failed' using errcode='PT409'; end if;
  -- Recheck the actual current rows, not a stale generation manifest. The
  -- generation lock serializes the physical writer's AFTER-statement fence.
  if public.norva_transport_catalog_manifest(g.id)->>'checksum' is distinct from p.baseline_checksum then
-   raise exception 'catalog changed after address verification' using errcode='40001'; end if;
+   raise exception 'catalog changed after address verification' using errcode='PT409'; end if;
  update public.cloud_source_transport_checks set generation_revision=g.revision where transition_id=t.id;
  if not public.norva_transport_check_current(t.id,p_user_id) then
-   raise exception 'transport proof is no longer current' using errcode='40001'; end if;
+   raise exception 'transport proof is no longer current' using errcode='PT409'; end if;
  update public.cloud_source_transitions set state='committing' where id=t.id;
  update public.cloud_sources set config_ciphertext=s.candidate_config_ciphertext,
    config_hint=s.candidate_config_hint,updated_at=now() where id=p.source_id and user_id=p_user_id;
@@ -356,7 +356,7 @@ begin
    or j.lease_sequence is distinct from p_lease_sequence or j.lease_until<=clock_timestamp()
    or v_ciphertext is distinct from s.candidate_config_ciphertext or v_revision is distinct from p.config_revision+1
    or p_restore_previous is null or (p_failure_code is not null and (p_failure_code<>'rollback_unavailable' or p_restore_previous))
-   then raise exception 'transport completion CAS failed' using errcode='40001'; end if;
+   then raise exception 'transport completion CAS failed' using errcode='PT409'; end if;
  if p_restore_previous then
    -- Caller authenticated the retained credentials before requesting recovery.
    update public.cloud_source_transition_secrets set compensation_started_at=now(),

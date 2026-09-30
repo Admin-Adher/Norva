@@ -41,11 +41,11 @@ begin
  begin
    perform public.norva_checkpoint_credential_transport_check(j.id,u,'wrong-worker',j.lease_sequence,'movie',null,1);
    raise exception 'wrong lease accepted';
- exception when sqlstate '40001' then null; end;
+ exception when sqlstate 'PT409' then null; end;
  begin
    perform public.norva_begin_credential_transport_check(j.id,'96000000-0000-4000-8000-000000000002','transport-test',j.lease_sequence);
    raise exception 'another owner accepted';
- exception when sqlstate '40001' then null; end;
+ exception when sqlstate 'PT409' then null; end;
  -- Independent PostgreSQL lane construction; Gateway parity has its own JS
  -- fixture and streamed-parser regression, rather than faking a ready marker.
  with hashes as(select extensions.digest(jsonb_build_array('media',item_type,external_id,parent_external_id,title)::text,'sha256')h
@@ -80,7 +80,7 @@ begin
  begin
    perform public.norva_apply_credential_transport_check(t,u,rev+1,0,'transport-stale',repeat('2',64));
    raise exception 'stale transition accepted';
- exception when sqlstate '40001' then null; end;
+ exception when sqlstate 'PT409' then null; end;
  r:=public.norva_apply_credential_transport_check(t,u,rev,0,'transport-apply',repeat('3',64));
  if lower(r->>'state')<>'committing' then raise exception 'swap not applied'; end if;
  perform public.norva_apply_credential_transport_check(t,u,rev,0,'transport-apply',repeat('3',64));
