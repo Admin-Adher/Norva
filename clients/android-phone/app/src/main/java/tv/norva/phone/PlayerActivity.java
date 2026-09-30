@@ -232,6 +232,9 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_MEDIA_CACHE = "mediaCache";
     private tv.norva.playback.NativeMediaCache nativeMediaCache;
     private BoundedRangeDataSource.Factory providerDataSources;
+    private DataSource.Factory playbackDataSourceFactory;
+    private final tv.norva.playback.NativeVodStartupProgress vodStartupProgress =
+            new tv.norva.playback.NativeVodStartupProgress();
     private String playbackAuthToken;
     private String playbackAuthChannelId;
     private String pendingPlaybackAuthRequestNonce;
@@ -387,6 +390,26 @@ public class PlayerActivity extends Activity {
     private final Runnable bufferWatchdog = new Runnable() {
         @Override
         public void run() {
+            if (player == null || freshStreamRequested
+                    || !shouldAllowPlayback(playbackActive, isInPipMode())
+                    || playbackUiState == PlaybackUiState.TERMINAL
+                    || playbackUiState == PlaybackUiState.OFFLINE) return;
+            if (vodStartupProgress.active()) {
+                long now = SystemClock.elapsedRealtime();
+                tv.norva.playback.NativeVodStartupProgress.Decision decision = vodStartupProgress.decision(now);
+                if (decision == tv.norva.playback.NativeVodStartupProgress.Decision.WAIT) {
+                    errHandler.postDelayed(this, vodStartupProgress.nextCheckMs(now));
+                    return;
+                }
+                if (decision == tv.norva.playback.NativeVodStartupProgress.Decision.STARTUP_LIMIT) {
+                    // A slow but progressing file must not restart its large index
+                    // automatically. Bound the wait, stop the socket, retain Retry.
+                    showPlaybackFailure(PlaybackUiState.TERMINAL, R.string.player_error_title,
+                            getString(R.string.player_reconnect_failed), false);
+                    return;
+                }
+                vodStartupProgress.stop();
+            }
             recoverPlayback("no_data_timeout");
         }
     };
@@ -416,7 +439,7 @@ public class PlayerActivity extends Activity {
             boolean formatFailure = isFormatRecoveryReason(freshStreamReason);
             boolean deviceOffline = !hasUsableNetwork();
             showPlaybackFailure(
-                    formatFailure ? PlaybackUiState.TERMINAL : PlaybackUiState.OFFLINE,
+                    stateForFreshStreamTimeout(formatFailure, deviceOffline),
                     formatFailure
                             ? R.string.player_state_terminal_title
                             : (deviceOffline
@@ -629,6 +652,7 @@ public class PlayerActivity extends Activity {
             dataSourceFactory = nativeMediaCache;
         }
 
+        playbackDataSourceFactory = dataSourceFactory;
         player = new ExoPlayer.Builder(this)
                 // Use the bundled FFmpeg software audio decoder (AC-3/E-AC-3/DTS/
                 // TrueHD) as a FALLBACK after the device's MediaCodec, so offline
@@ -640,8 +664,7 @@ public class PlayerActivity extends Activity {
                 // silently skips it when absent. (See clients/android-ffmpeg-decoder.)
                 .setRenderersFactory(new DefaultRenderersFactory(this)
                         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON))
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory, new tv.norva.playback.TsResumeExtractorsFactory(new androidx.media3.extractor.DefaultExtractorsFactory()))
-                        .setLoadErrorHandlingPolicy(new ProviderLoadErrorHandlingPolicy()))
+                .setMediaSourceFactory(createMediaSourceFactory(dataSourceFactory))
                 // Symmetric ±10s so the controller's rewind/fast-forward and the
                 // double-tap gesture both jump a predictable, equal amount.
                 .setSeekBackIncrementMs(10_000)
@@ -701,10 +724,12 @@ public class PlayerActivity extends Activity {
                     // delivers playable bytes would otherwise wait forever.
                     errHandler.removeCallbacks(bufferWatchdog);
                     if (shouldAllowPlayback(playbackActive, isInPipMode())) {
-                        errHandler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
+                        errHandler.postDelayed(bufferWatchdog, vodStartupProgress.active()
+                                ? vodStartupProgress.nextCheckMs(SystemClock.elapsedRealtime()) : BUFFER_TIMEOUT_MS);
                     }
                     transitionTo(stateForBuffering(
                             recoveryInProgress, firstFrameRendered), false);
+                    updatePlaybackHeartbeat();
                 }
                 if (state == Player.STATE_READY) {
                     engineReady = true;
@@ -741,6 +766,7 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                vodStartupProgress.stop();
                 if (nativeMediaCache != null && nativeMediaCache.active()) {
                     requestFreshStream("media_cache_unavailable");
                     return;
@@ -1245,6 +1271,17 @@ public class PlayerActivity extends Activity {
         return playbackActive || inPictureInPicture;
     }
 
+    static PlaybackUiState stateForFreshStreamTimeout(
+            boolean formatFailure,
+            boolean deviceOffline
+    ) {
+        // A resolver timeout can occur while the device is online. Only a
+        // network observation may select the offline UI and telemetry code.
+        return !formatFailure && deviceOffline
+                ? PlaybackUiState.OFFLINE
+                : PlaybackUiState.TERMINAL;
+    }
+
     private String routeIdForEvent(AnalyticsListener.EventTime eventTime) {
         if (eventTime == null || eventTime.timeline == null
                 || eventTime.timeline.isEmpty()
@@ -1261,6 +1298,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void handleRenderedFirstFrame() {
+        vodStartupProgress.rendered();
         firstFrameForCurrentRoute = true;
         recoveryInProgress = false;
         errHandler.removeCallbacks(bufferWatchdog);
@@ -1272,6 +1310,12 @@ public class PlayerActivity extends Activity {
             recordNativeFirstFrame();
         }
         updatePlaybackHeartbeat();
+    }
+
+    private DefaultMediaSourceFactory createMediaSourceFactory(DataSource.Factory factory) {
+        return new DefaultMediaSourceFactory(factory,
+                new tv.norva.playback.TsResumeExtractorsFactory(new androidx.media3.extractor.DefaultExtractorsFactory()))
+                .setLoadErrorHandlingPolicy(new ProviderLoadErrorHandlingPolicy());
     }
 
     private void prepareMediaItem(MediaItem item, long positionMs, PlaybackUiState state) {
@@ -1292,7 +1336,18 @@ public class PlayerActivity extends Activity {
         String routeId = "norva-route-" + (++playbackRouteGeneration);
         activePlaybackRouteId = routeId;
         MediaItem routedItem = item.buildUpon().setMediaId(routeId).build();
-        player.setMediaItem(routedItem, requestedRoutePositionMs);
+        vodStartupProgress.stop();
+        if (!isLocal && !isLiveContent()) {
+            final long progressRoute = vodStartupProgress.begin(SystemClock.elapsedRealtime());
+            // A factory belongs to one media route. Late reads from a cancelled
+            // route cannot extend its successor's watchdog or lease.
+            DataSource.Factory progressFactory = () -> new tv.norva.playback.StartupProgressDataSource(
+                    playbackDataSourceFactory.createDataSource(), vodStartupProgress, progressRoute);
+            player.setMediaSource(createMediaSourceFactory(progressFactory).createMediaSource(routedItem),
+                    requestedRoutePositionMs);
+        } else {
+            player.setMediaItem(routedItem, requestedRoutePositionMs);
+        }
         player.prepare();
         boolean mayPlay = shouldAllowPlayback(playbackActive, isInPipMode());
         player.setPlayWhenReady(mayPlay);
@@ -1315,6 +1370,7 @@ public class PlayerActivity extends Activity {
             boolean recommendVersion,
             boolean retryAllowed
     ) {
+        vodStartupProgress.stop();
         // A terminal/offline surface is authoritative. Invalidate every delayed
         // reconnect and recovery token so no stale runnable can restart playback
         // behind the error panel.
@@ -1526,11 +1582,13 @@ public class PlayerActivity extends Activity {
 
     private boolean shouldRunPlaybackHeartbeat() {
         return !isLocal
+                && !isFinishing()
                 && NativePlaybackAuthPolicy.validNonce(playbackAuthChannelId)
                 && NativePlaybackTelemetry.boundedSessionId(playbackSessionId) != null
                 && player != null
-                && player.isPlaying()
-                && firstFrameForCurrentRoute
+                && ((player.isPlaying() && firstFrameForCurrentRoute)
+                    || (!isLiveContent() && !firstFrameForCurrentRoute
+                        && vodStartupProgress.mayRenewLease(SystemClock.elapsedRealtime())))
                 && (playbackActive || isInPipMode())
                 && !endedNaturally
                 && playbackUiState != PlaybackUiState.TERMINAL
@@ -3473,6 +3531,7 @@ public class PlayerActivity extends Activity {
     /** Hand exhausted playback back to the WebView for a fresh provider resolution. */
     private void requestFreshStream(String reason) {
         if (freshStreamRequested) return;
+        vodStartupProgress.stop();
         recoveryGeneration++;
         clearPendingDelayedRecovery();
         if (!isLocal && !hasUsableNetwork()) {
@@ -4085,6 +4144,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void deactivatePlaybackForBackground() {
+        boolean preparingVod = vodStartupProgress.active();
+        if (preparingVod) vodStartupProgress.stop();
         stopPlaybackHeartbeat();
         boolean wasActive = playbackActive;
         playbackActive = false;
@@ -4104,7 +4165,15 @@ public class PlayerActivity extends Activity {
         errHandler.removeCallbacks(freshStreamTimeout);
         freshStreamTimeoutDeferred = freshStreamRequested;
         longStartScheduled = false;
-        if (player != null) player.pause();
+        if (player != null) {
+            if (preparingVod && !freshStreamRequested) {
+                // Pause alone keeps Media3 loading. Release a preparing VOD's
+                // provider reader; foreground return prepares this exact route.
+                scheduleDelayedRecovery(player.getCurrentMediaItem(), recoverPositionMs(), recoveryGeneration);
+                errHandler.removeCallbacks(delayedRecovery);
+                player.stop();
+            } else player.pause();
+        }
     }
 
     private void resumePlaybackAfterForegroundReturn() {
@@ -4139,7 +4208,9 @@ public class PlayerActivity extends Activity {
         }
         if (player.getPlaybackState() == Player.STATE_BUFFERING) {
             errHandler.removeCallbacks(bufferWatchdog);
-            errHandler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
+            errHandler.postDelayed(bufferWatchdog, vodStartupProgress.active()
+                    ? vodStartupProgress.nextCheckMs(SystemClock.elapsedRealtime()) : BUFFER_TIMEOUT_MS);
+            updatePlaybackHeartbeat();
         }
         boolean waiting = playbackUiState == PlaybackUiState.PREPARING
                 || playbackUiState == PlaybackUiState.INITIAL_BUFFERING
@@ -4265,6 +4336,8 @@ public class PlayerActivity extends Activity {
      */
     @Override
     public void finish() {
+        boolean stopOnlineVod = !isLocal && !isLiveContent();
+        vodStartupProgress.stop();
         stopPlaybackHeartbeat();
         try {
             Intent data = null;
@@ -4340,6 +4413,7 @@ public class PlayerActivity extends Activity {
             // next foreground, which is how a downloaded title's progress syncs.
             if (!isLocal) { gracefulResultEmitted = true; clearPendingProgress(); }
         } catch (Exception ignored) { /* result is best-effort */ }
+        if (stopOnlineVod && player != null) player.stop();
         super.finish();
     }
 
@@ -4461,6 +4535,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        vodStartupProgress.stop();
         if (nativeMediaCache != null) nativeMediaCache.close();
         stopPlaybackHeartbeat();
         pendingPlaybackAuthRequestNonce = null;
