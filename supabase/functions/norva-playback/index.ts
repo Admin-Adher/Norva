@@ -370,6 +370,7 @@ async function handleRequest(req: Request): Promise<Response> {
         ok: true,
         service: "norva-playback",
         version: 84,
+        publicRawPlaybackProtocol: 1,
         livePlaybackPreparationProtocol: 1,
         automaticOwnedEpisodeGatewayProtocol: 1,
         genericNativeMp4Protocol: 1,
@@ -2867,6 +2868,7 @@ async function createPlaybackSessionCore(
         null,
         true,
         preparation,
+        true,
       );
       await preparation?.assertCurrent();
       await commitEdgeSessionCoordinator(rawCoordination, {
@@ -8382,6 +8384,7 @@ async function createBytePipeAccess(
   fileSizeBytes: number | null = null,
   usePlaybackCanary = false,
   preparation: LivePlaybackPreparationContext | null = null,
+  publicPlayback = false,
 ) {
   const access = await createBytePipeCapability(
     playbackSessionId,
@@ -8398,7 +8401,24 @@ async function createBytePipeAccess(
     null,
     preparation,
   );
-  return { url: `${access.gatewayUrl}/raw/${access.capability}` };
+  // Internal workers must keep the private route. A client cannot resolve its
+  // Docker hostname; expose the configured public ingress for the same route
+  // and signed capability without changing its preparation generation.
+  let base = access.gatewayUrl;
+  if (publicPlayback) {
+    let publicBase: URL;
+    try {
+      publicBase = new URL(access.gatewayPublicBaseUrl);
+      if (publicBase.protocol !== "https:" || publicBase.username || publicBase.password
+        || publicBase.search || publicBase.hash) throw new Error("Invalid public ingress");
+    } catch (_) {
+      throw new HttpError(503, "Media gateway public route is unavailable", {
+        code: "MEDIA_GATEWAY_PUBLIC_ROUTE_UNAVAILABLE",
+      });
+    }
+    base = publicBase.toString().replace(/\/+$/, "");
+  }
+  return { url: `${base}/raw/${access.capability}` };
 }
 
 function exactJsonKeys(value: JsonRecord, expected: string[]) {

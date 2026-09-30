@@ -107,11 +107,12 @@ for (const preparationState of ['legacy', 'active', 'cancelled']) test(`native L
       events.push('coordinate'); return { lockId: 'lock', waitMs: 25 };
     },
     sleep: async ms => { assert.equal(ms, 25); events.push('release-wait'); },
-    createBytePipeAccess: async (id, owner, url, expiry, _db, _ua, scope, size, canary, receivedPreparation) => {
+    createBytePipeAccess: async (id, owner, url, expiry, _db, _ua, scope, size, canary, receivedPreparation, publicPlayback) => {
       assert.equal(id, session.id); assert.equal(owner, 'owner'); assert.equal(url, ownedUrl);
       assert.equal(expiry, 'raw-expires'); events.push('raw-grant');
       assert.equal(scope, null); assert.equal(size, null); assert.equal(canary, true);
       assert.equal(receivedPreparation, preparation, 'the exact preparation accompanies the raw capability');
+      assert.equal(publicPlayback, true, 'a native client requires the public ingress of that same route');
       if (preparationState === 'cancelled') controller.abort();
       return { url: 'https://gateway.invalid/raw/exact-grant' };
     },
