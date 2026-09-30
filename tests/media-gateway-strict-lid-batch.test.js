@@ -642,6 +642,44 @@ test('strict CJK evidence keeps repeated boilerplate and sound labels pending', 
   }
 });
 
+test('CJK punctuation and non-letters cannot raise script evidence or density', () => {
+  const evaluate = (text, language = 'ja') => evaluateStrictTranscriptEvidence({
+    text, wordCount: 1, minWords: 12, minUniqueWords: 8,
+    whisperLanguage: language, transcriptLanguage: language, transcriptConfident: true,
+  });
+  const thirtyOneLetters = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほま';
+  assert.equal(Array.from(thirtyOneLetters).length, 31);
+  for (const suffix of ['・', '・'.repeat(100), '\u30a0', '\u3099\u309a']) {
+    const value = evaluate(thirtyOneLetters + suffix);
+    assert.equal(value.scriptCharacterCount, 31);
+    assert.equal(value.uniqueScriptCharacterCount, 31);
+    assert.equal(value.uniqueScriptBigramCount, 30);
+    assert.equal(value.scriptDensity, 1);
+    assert.equal(value.enough, false);
+  }
+  for (const [text, language] of [['・\u30a0\u3099\u309a', 'ja'], ['\u3130\u318f', 'ko']]) {
+    const value = evaluate(text, language);
+    assert.equal(value.scriptCharacterCount, 0);
+    assert.equal(value.scriptDensity, 0);
+    assert.equal(value.enough, false);
+  }
+  const natural = '今日は友達と一緒に映画館へ行きました。ミュージックコンサートで楽しい時間を過ごしました。';
+  const withPunctuation = natural.replace('ミュージックコンサート', 'ミュージック・コンサート');
+  const original = evaluate(natural);
+  const punctuated = evaluate(withPunctuation);
+  for (const field of ['scriptCharacterCount', 'uniqueScriptCharacterCount',
+    'uniqueScriptBigramCount', 'scriptDensity', 'compatibleWordCount', 'compatibleUniqueWordCount']) {
+    assert.equal(punctuated[field], original[field], field);
+  }
+  assert.equal(punctuated.enough, true);
+  assert.equal(punctuated.scriptDensity, 1);
+  const mixed = evaluate(natural + 'abcdefghijklmnopqrstuvwxyz');
+  const inflated = evaluate(natural + '・'.repeat(100) + 'abcdefghijklmnopqrstuvwxyz');
+  assert.equal(mixed.enough, false);
+  assert.equal(inflated.enough, false);
+  assert.equal(inflated.scriptDensity, mixed.scriptDensity);
+});
+
 function acceptedJapaneseEntry(text, offset) {
   const { transcript, evidence } = strictEvidence(text, 'ja');
   assert.equal(transcript.lang, 'ja');

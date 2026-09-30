@@ -172,6 +172,8 @@ test('runtime binding prevents receipt mixing when selector identity or quality 
     ]) assert.notEqual(runtimeBinding(override).configDigest, original);
     assert.match(runtimeSource, /qualityFallbackProtocol: 1/);
     assert.match(runtimeSource, /transcriptLexicalProtocol: 1/);
+    assert.match(runtimeSource, /cjkEvidenceProtocol: 2/);
+    assert.notEqual(runtimeBinding({}, runtimeSource.replace('cjkEvidenceProtocol: 2', 'cjkEvidenceProtocol: 1')).configDigest, original);
     assert.notEqual(runtimeBinding({}, runtimeSource.replace('transcriptLexicalProtocol: 1,', '')).configDigest, original);
     assert.notEqual(runtimeBinding({}, runtimeSource.replace('qualityFallbackProtocol: 1', 'qualityFallbackProtocol: 2')).configDigest, original);
     assert.notEqual(runtimeBinding({}, runtimeSource.replace('speechSearchDurationSeconds: 60', 'speechSearchDurationSeconds: 61')).configDigest, original);
@@ -227,4 +229,49 @@ test('real strict evaluator cross-pass disagreement survives the authenticated r
     assert.equal(consensus.evaluatedSampleCount, 1);
     assert.equal(consensus.verified, false);
     assert.doesNotMatch(receipt, /walking|jardin|test-only-user|1234567/);
+});
+
+test('real Japanese evaluator seals punctuation safely without certifying a single window', () => {
+    const evaluator = vm.runInNewContext(`(() => {
+        ${between('function strictLanguageSampleDisposition(', 'const BASIC_LID_MIN_CONFIDENCE')}
+        ${between('function strictLanguageBatchSampleResult(', 'function strictLidWindowRuntimeBinding(')}
+        ${between('function detectLanguageFromText(', "app.post('/sessions'")}
+        return strictLanguageBatchSampleResult;
+    })()`, { evaluateStrictTranscriptEvidence, prepareStrictSpokenTranscript, WHISPER_STRICT_MIN_WORDS: 12,
+        WHISPER_STRICT_MIN_UNIQUE_WORDS: 8, WHISPER_STRICT_MIN_PROBABILITY: 0.95 });
+    const text = '今日は友達と一緒に映画館へ行きました。ミュージック・コンサートで楽しい時間を過ごしました。';
+    const plan = planStrictSpeechWindow(7248.048, 1);
+    const binding = {
+        jobId: '123e4567-e89b-42d3-a456-426614174000', profileFingerprint: 'a'.repeat(64),
+        userId: 'test-only-user', trackIndex: 2, fileSizeBytes: 1234567,
+        durationSeconds: 7248.048, windowOrdinal: 1, windowCount: 6,
+        offsetMilliseconds: plan.anchorOffsetMilliseconds, method: 'whisper-strict-consensus-v4',
+        configDigest: runtimeBinding().configDigest, modelDigest: 'a'.repeat(64), selectionProtocol: 1,
+    };
+    const value = evaluator({ text, lang: 'ja', prob: 0.99 }, 604.004);
+    assert.equal(value.disposition, 'accepted');
+    assert.equal(value.result.scriptDensity, 1);
+    const evidence = { ...value, selection: {
+        protocol: 1, searchStartMilliseconds: plan.searchStartMilliseconds,
+        searchDurationMilliseconds: plan.searchDurationMilliseconds,
+        selectedOffsetMilliseconds: 604004, selectedDurationMilliseconds: 20000,
+        speechMilliseconds: 16000, selector: 'silero-vad-max-speech-v1',
+    } };
+    const secret = 'local-test-secret-long-enough';
+    const receipt = createStrictLidWindowReceipt({ secret, binding, evidence });
+    const opened = openStrictLidWindowReceipt({ secret, binding, receipt });
+    assert.equal(opened.disposition, 'accepted');
+    assert.equal(opened.result.scriptDensity, 1);
+    assert.equal(opened.result.language, 'ja');
+    assert.equal(opened.result.verified, false);
+    assert.equal('sample' in opened.result, false);
+    assert.equal(resolveStrictLidConsensus([opened], 4).verified, false);
+    assert.doesNotMatch(receipt, /ミュージック|test-only-user/);
+    const legacyBinding = { ...binding, configDigest: runtimeBinding({},
+        runtimeSource.replace('cjkEvidenceProtocol: 2', 'cjkEvidenceProtocol: 1')).configDigest };
+    const legacyReceipt = createStrictLidWindowReceipt({ secret, binding: legacyBinding, evidence });
+    assert.equal(openStrictLidWindowReceipt({ secret, binding: legacyBinding,
+        receipt: legacyReceipt }).disposition, 'accepted');
+    assert.throws(() => openStrictLidWindowReceipt({ secret, binding, receipt: legacyReceipt }),
+        { code: 'STRICT_LID_WINDOW_RECEIPT_INVALID' });
 });

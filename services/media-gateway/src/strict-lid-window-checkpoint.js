@@ -31,9 +31,9 @@ function fail(code, message) {
     throw new StrictLidWindowCheckpointError(code, message);
 }
 
-function finiteNumber(value, name, min, max) {
+function finiteNumber(value, name, min, max, code = 'STRICT_LID_WINDOW_BINDING_INVALID') {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
-        fail('STRICT_LID_WINDOW_BINDING_INVALID', `invalid ${name}`);
+        fail(code, `invalid ${name}`);
     }
     return value;
 }
@@ -123,6 +123,10 @@ function boundedEvidenceInteger(value, name) {
     return value;
 }
 
+function finiteEvidenceNumber(value, name, min, max) {
+    return finiteNumber(value, name, min, max, 'STRICT_LID_WINDOW_EVIDENCE_INVALID');
+}
+
 function normalizeStrictLidSpeechSelection(input, binding) {
     if (!input || typeof input !== 'object' || Array.isArray(input) || input.protocol !== 1) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'speech selection evidence is required');
@@ -207,7 +211,7 @@ function normalizeStrictLidWindowEvidence(input, binding) {
     if (![true, false, null].includes(transcriptAgrees)) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'invalid transcript agreement');
     }
-    const offset = finiteNumber(result.offset, 'result offset', 0, 86_400);
+    const offset = finiteEvidenceNumber(result.offset, 'result offset', 0, 86_400);
     const selection = binding.selectionProtocol === 1
         ? normalizeStrictLidSpeechSelection(input.selection, binding)
         : null;
@@ -230,7 +234,7 @@ function normalizeStrictLidWindowEvidence(input, binding) {
     const normalizedResult = Object.freeze({
         language: normalizedOptionalLanguage(result.language, 'language'),
         candidate: normalizedOptionalLanguage(result.candidate, 'candidate'),
-        confidence: finiteNumber(result.confidence, 'confidence', 0, 1),
+        confidence: finiteEvidenceNumber(result.confidence, 'confidence', 0, 1),
         confident: result.confident === true,
         verified: false,
         validationStatus: 'pending',
@@ -239,7 +243,7 @@ function normalizeStrictLidWindowEvidence(input, binding) {
         whisperLang: normalizedOptionalLanguage(result.whisperLang, 'whisper language'),
         transcriptLang: normalizedOptionalLanguage(result.transcriptLang, 'transcript language'),
         transcriptAgrees,
-        minProbability: finiteNumber(result.minProbability, 'minimum probability', 0, 1),
+        minProbability: finiteEvidenceNumber(result.minProbability, 'minimum probability', 0, 1),
         wordCount: boundedEvidenceInteger(result.wordCount, 'word count'),
         uniqueWordCount: boundedEvidenceInteger(result.uniqueWordCount, 'unique word count'),
         transcriptEvidenceBasis: evidenceBasis,
@@ -252,7 +256,7 @@ function normalizeStrictLidWindowEvidence(input, binding) {
             result.uniqueScriptBigramCount,
             'unique script bigram count',
         ),
-        scriptDensity: finiteNumber(result.scriptDensity, 'script density', 0, 1),
+        scriptDensity: finiteEvidenceNumber(result.scriptDensity, 'script density', 0, 1),
         offset,
         ...(qualityFallbackConflict ? { qualityFallbackConflict: true } : {}),
     });
