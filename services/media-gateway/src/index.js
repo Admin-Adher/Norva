@@ -26,6 +26,7 @@ const { createNativeMp4Sessions, pipeNativeMp4 } = require('./native-mp4-session
 const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
     FINITE_TS_ANALYZE_US, finiteTsStartupPolicy, verifyFiniteTsStartupSegments,
     applyFiniteTsAccurateResume } = require('./finite-ts-startup');
+const { createLiveTsStartupGate } = require('./live-ts-startup');
 const FINITE_TS_FAST_START_ENABLED = process.env.FINITE_TS_FAST_START_ENABLED !== 'false';
 const { finiteVodStartupFormat, prefetchFiniteVodHeader, retainedVodStartupPolicy, startupHeaderCacheCapacity } = require('./finite-vod-startup');
 const RETAINED_FINITE_VOD_STARTUP_ENABLED = process.env.RETAINED_FINITE_VOD_STARTUP_ENABLED === 'true';
@@ -12759,6 +12760,8 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
 
     const requested = safeSessionArtifactName(req.params.file);
     if (!requested) return res.status(400).send('Invalid segment path');
+    if (session.liveTsStartupGate && !session.liveTsStartupGate.allows(requested))
+        return res.status(404).send('Segment not available');
     const isGrowingSubtitle = requested.toLowerCase().endsWith('.vtt');
     if (requested.toLowerCase().endsWith('.m3u8') && !isAllowedSessionPlaylistName(session, requested)) {
         return res.status(404).send('Segment not found');
@@ -16531,6 +16534,13 @@ function startFfmpeg(session) {
         ? normalizeAudioStreamIndex(explicitAudioMap[1])
         : null;
     const encodeVideo = videoModeForSession(session) === 'encode';
+    // Each producer attempt starts a new proof, even when retrying in the same
+    // directory with segment-00000. Only the finalized local H.264 TS output is
+    // inspected; no second provider request or metadata probe is opened.
+    session.liveTsStartupGate = isLiveSession(session) && !encodeVideo
+        && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)
+        ? createLiveTsStartupGate({ root: session.outputDir, bin: FFMPEG_PATH,
+            signal: session.startupAbortController?.signal }) : null;
     const vaapiHardwareDecodeCodec = vaapiHardwareDecodeCodecForSession(session, encodeVideo);
     const vaapiHardwareDecode = Boolean(vaapiHardwareDecodeCodec);
     session.vaapiHardwareDecode = vaapiHardwareDecode;
@@ -21271,7 +21281,19 @@ function hlsMediaPlaylistTargetsForSession(session) {
 
 async function inspectHlsMediaPlaylistArtifact(session, target) {
     if (!isWithin(session.outputDir, target.playlistPath)) return null;
-    const playlist = await fsp.readFile(target.playlistPath, 'utf8');
+    let playlist = await fsp.readFile(target.playlistPath, 'utf8');
+    const liveGate = session.liveTsStartupGate;
+    if (liveGate) {
+        if (!await liveGate.check(playlist) || session.liveTsStartupGate !== liveGate
+            || session.startupAbortController?.signal.aborted || session.stoppingPromise) return null;
+        playlist = liveGate.project(playlist);
+        const proof = liveGate.snapshot();
+        session.startupTimings = asRecord(session.startupTimings);
+        session.startupTimings.liveTsStartupDecoded = proof.verified;
+        session.startupTimings.liveTsStartupProofMs = proof.proofMs;
+        session.startupTimings.liveTsStartupDiscardedSegments = proof.rejected;
+        session.startupTimings.liveTsStartupReason = proof.reason;
+    }
     const inspection = inspectHlsStartupPlaylist(playlist, {
         minBufferSeconds: session?.minHlsStartupBufferSeconds,
         minSegments: session?.minHlsStartupSegments,
@@ -21568,6 +21590,7 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 }
                 return;
             } catch (error) {
+                if (error?.code === 'LIVE_TS_STARTUP_PROOF_CHANGED') throw error;
                 // FFmpeg updates HLS artifacts atomically. A rename/read/stat
                 // race means "not ready yet", not a terminal provider failure.
             }
@@ -23383,6 +23406,7 @@ function rewriteMultiAudioMasterNames(playlist, session) {
 }
 
 function rewritePlaylistSegments(playlist, token, session = null) {
+    if (session?.liveTsStartupGate) playlist = session.liveTsStartupGate.project(playlist);
     const encodedToken = encodeURIComponent(token);
     return rewriteMultiAudioMasterNames(playlist, session)
         .split(/\r?\n/)

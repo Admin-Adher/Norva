@@ -110,22 +110,34 @@ function decodeStartupSegment(bin, descriptor, { signal, spawnImpl = spawn, time
     return decodeStartupSegments(bin, [descriptor], { signal, spawnImpl, timeoutMs });
 }
 
-function decodeStartupSegments(bin, descriptors, { signal, spawnImpl = spawn, timeoutMs = 1500 * descriptors.length } = {}) {
+function decodeStartupSegments(bin, descriptors, { signal, spawnImpl = spawn, timeoutMs = 1500 * descriptors.length,
+    tracks = ['video', 'audio'], diagnostics = false } = {}) {
     return new Promise(resolve => {
-        if (signal?.aborted || descriptors.length < 1 || descriptors.length > 3) return resolve(false);
+        const result = (verified, reason) => diagnostics ? { verified, reason } : verified;
+        if (signal?.aborted || descriptors.length < 1 || descriptors.length > 3
+            || !Array.isArray(tracks) || !tracks.length || tracks.length > 2
+            || tracks.some(track => !['video', 'audio'].includes(track)) || new Set(tracks).size !== tracks.length)
+            return resolve(result(false, signal?.aborted ? 'aborted' : 'invalid-scope'));
         let child, timer, killTimer, failed = false, settled = false;
-        const outputs = Array(descriptors.length * 2).fill('');
+        let failureReason = null;
+        let stderr = '', hostFailure = false;
+        const outputs = Array(descriptors.length * tracks.length).fill('');
         const outputPipes = outputs.map((_, i) => i === 0 ? 1 : descriptors.length + 2 + i);
-        const finish = value => {
+        const finish = (value, reason = failureReason || 'inconclusive') => {
             if (settled) return;
             settled = true; clearTimeout(timer); clearTimeout(killTimer);
-            signal?.removeEventListener('abort', stop); resolve(value);
+            signal?.removeEventListener('abort', abort);
+            resolve(result(value, value ? 'decoded' : signal?.aborted ? 'aborted' : hostFailure ? 'inconclusive' : reason));
         };
-        const stop = () => {
+        const stop = (reason = 'inconclusive') => {
             failed = true;
+            if (hostFailure) failureReason = 'inconclusive';
+            else if (['aborted', 'timeout', 'process-failed'].includes(reason)) failureReason = reason;
+            else failureReason ||= reason;
             try { child?.kill('SIGKILL'); } catch (_) {}
             killTimer ||= setTimeout(() => finish(false), 1000);
         };
+        const abort = () => stop('aborted');
         try {
             // Each finalized local segment has its own input and two proof
             // outputs. Sharing one process avoids repeatedly loading FFmpeg
@@ -142,27 +154,36 @@ function decodeStartupSegments(bin, descriptors, { signal, spawnImpl = spawn, ti
                 // emitted; hashing a whole half-second wastes startup CPU.
                 // Keep the common half-second window: audio starting much
                 // later must not earn an accelerated-start certificate.
-            descriptors.forEach((_, i) => args.push(
-                '-map', `${i}:V:0`, '-frames:v', '2', '-t', '0.5', '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * 2]}`,
-                '-map', `${i}:a:0`, '-frames:a', '2', '-t', '0.5', '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * 2 + 1]}`));
+            descriptors.forEach((_, i) => tracks.forEach((track, j) => args.push(
+                '-map', `${i}:${track === 'video' ? 'V' : 'a'}:0`, track === 'video' ? '-frames:v' : '-frames:a',
+                '2', '-t', '0.5', '-threads', '1', '-f', 'framehash', `pipe:${outputPipes[i * tracks.length + j]}`)));
             child = spawnImpl(bin, args, { stdio: ['ignore', 'pipe', 'pipe', ...descriptors,
                 ...Array(outputs.length - 1).fill('pipe')], windowsHide: true });
-        } catch (_) { finish(false); return; }
+        } catch (_) { finish(false, 'process-failed'); return; }
         outputPipes.forEach((pipe, i) => child.stdio[pipe].on('data', chunk => {
             outputs[i] += chunk.toString(); if (outputs[i].length > 8192) stop();
         }));
-        child.stderr.on('data', chunk => { if (chunk.length) stop(); });
-        child.once('error', () => { stop(); });
+        child.stderr.on('data', chunk => {
+            if (!chunk.length) return;
+            // Only explicit bitstream failures are negative media evidence.
+            // A timeout, missing lane or host/process failure must not authorize
+            // dropping an otherwise valid live segment.
+            stderr = (stderr + chunk.toString()).slice(-4096);
+            hostFailure ||= /Cannot allocate memory|Out of memory|Resource temporarily unavailable|Too many open files|No space left on device|(?:Cannot|Failed to) create thread|pthread_create|Permission denied|Input\/output error/i.test(stderr);
+            const invalid = /non-existing (?:SPS|PPS)|decode_slice_header error|Invalid NAL unit/i.test(stderr);
+            if (hostFailure || invalid || !diagnostics) stop(!hostFailure && invalid ? 'invalid-bitstream' : 'inconclusive');
+        });
+        child.once('error', () => { stop('process-failed'); });
         child.once('close', code => {
             const counts = outputs.map(output => output.split('\n').filter(line => {
                 const match = /^0,\s*-?\d+,\s*-?\d+,\s*\d+,\s*(\d+),\s*[a-f0-9]{64}\s*$/.exec(line);
                 return match && Number(match[1]) > 0;
             }).length);
-            finish(!failed && !signal?.aborted && code === 0 && counts.every(n => n >= 2));
+            finish(!failed && !stderr && !signal?.aborted && code === 0 && counts.every(n => n >= 2));
         });
-        signal?.addEventListener('abort', stop, { once: true });
-        if (signal?.aborted) stop();
-        timer = setTimeout(stop, timeoutMs);
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) abort();
+        timer = setTimeout(() => stop('timeout'), timeoutMs);
     });
 }
 
