@@ -72,9 +72,11 @@
       clearTimeout(guide._remoteSearchTimer);
       ++list.remoteSearchSeq;
       ++guide._remoteSearchSeq;
-      list.remoteSearchCache.clear();
       pending.splice(0).forEach(request => request.resolve([]));
       await settle();
+      // A cancelled request may still populate its per-source cache before its
+      // generation guard returns. Clear only after those promises have settled.
+      list.remoteSearchCache.clear();
       list.sourceSelect.value = 'xtream:1';
       await list.onSourceFilterChange();
       clearTimeout(list.remoteSearchInFlight);
@@ -106,9 +108,9 @@
       clearTimeout(guide._remoteSearchTimer);
       ++list.remoteSearchSeq;
       ++guide._remoteSearchSeq;
-      list.remoteSearchCache.clear();
       pending.splice(0).forEach(request => request.resolve([]));
       await settle();
+      list.remoteSearchCache.clear();
       list.sourceSelect.value = 'xtream:1';
       await list.onSourceFilterChange();
       const old = guide.loadRemoteSearchResults('TF1', ++guide._remoteSearchSeq);
