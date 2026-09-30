@@ -2870,6 +2870,7 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
   const mediaResult = rpcObject(await workerRpc("norva_upsert_active_catalog_media_items", {
     ...fence, p_catalog_version: state.catalogVersion, p_items: media,
   }));
+  applyActiveMediaCategoryLabels(media, mediaResult);
   let visibilityEpoch = activeVisibilityEpoch(mediaResult, fence.p_user_visibility_epoch);
   if (action.itemType === "live") {
     const live = activeLivePayload(job, media, mediaResult);
@@ -3088,6 +3089,19 @@ function activeMediaRows(job, items, itemType) {
     });
   }
   return rows;
+}
+
+function applyActiveMediaCategoryLabels(mediaRows, mediaResult) {
+  const labels = new Map(arrayRecordField(mediaResult, "items").map(item => [
+    `${item.itemType}:${item.externalId}`, item,
+  ]));
+  for (const media of mediaRows) {
+    const label = labels.get(`${media.item_type}:${media.external_id}`);
+    if (!label || !label.categoryName || label.categoryId !== media.parent_external_id
+        || media.metadata.categoryName) continue;
+    media.metadata.categoryName = label.categoryName;
+    media.subtitle = media.subtitle || label.categoryName;
+  }
 }
 
 function activeTitlePayload(job, mediaRows) {
