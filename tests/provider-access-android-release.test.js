@@ -13,8 +13,8 @@ const manifest = readFileSync(
 );
 
 test('Provider Access phone release has a fresh Play version', () => {
-  assert.match(build, /versionCode 40\b/);
-  assert.match(build, /versionName "1\.3\.27"/);
+  assert.match(build, /versionCode 41\b/);
+  assert.match(build, /versionName "1\.3\.28"/);
 });
 
 test('Provider Access push is data-only, deduplicated, and fixed-route', () => {
