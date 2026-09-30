@@ -240,7 +240,7 @@ function pipelineFixture(store, options = {}) {
                 sockets--;
             } };
         },
-        extract: async () => { events.push('extract'); reads++; if (options.extractFails) throw options.extractFails; return wav(options.seconds || 60); },
+        extract: async () => { events.push('extract'); reads++; if (options.extractFails) throw options.extractFails; return options.wav ?? wav(options.seconds || 60); },
         infer: async p => {
             events.push('infer'); assert.equal(sockets, 0);
             assert.deepEqual(await fs.readFile(p), wav());
@@ -268,6 +268,31 @@ test('internal capture diagnostics distinguish short audio after drain without e
     assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|SECRET|private-owner|12345678/);
     const r = pipelineFixture(f.store, { diagnostic: () => { throw Error('logger down'); } });
     assert.equal((await r.pipeline.capture(binding(), {})).providerDrained, true);
+});
+
+test('malformed extracted WAV diagnostics preserve the exact parser failure after provider drain', async t => {
+    const truncated = wav(); truncated.writeUInt32LE(truncated.length, 40);
+    const stereo = wav(); stereo.writeUInt16LE(2, 22);
+    for (const [audio, code] of [
+        [Buffer.alloc(0), 'STRICT_LID_AUDIO_INVALID_WAV_SIZE'],
+        [wav(0), 'STRICT_LID_AUDIO_INVALID_DATA'],
+        [truncated, 'STRICT_LID_AUDIO_TRUNCATED_CHUNK'],
+        [stereo, 'STRICT_LID_AUDIO_UNSUPPORTED_FORMAT'],
+    ]) {
+        const f = await fixture(t); const diagnostics = [];
+        const p = pipelineFixture(f.store, { wav: audio, diagnostic: value => diagnostics.push(value) });
+        await assert.rejects(p.pipeline.capture(binding(), {}), { code });
+        assert.equal(p.sockets(), 0);
+        assert.equal(f.store.snapshot().entries, 0);
+        assert.equal(f.store.snapshot().reservations, 0);
+        assert.equal(p.events.includes('infer'), false);
+        assert.equal(diagnostics.length, 1);
+        assert.equal(diagnostics[0].code, code);
+        assert.equal(diagnostics[0].stage, 'store');
+        assert.equal(diagnostics[0].providerDrained, true);
+        assert.deepEqual(diagnostics[0].audioMilliseconds, [null]);
+        assert.doesNotMatch(JSON.stringify(diagnostics), /private|secret|12345678|https?:/);
+    }
 });
 
 test('inference diagnostics classify receipt and workspace failures without logging private error fields', async t => {
