@@ -77,10 +77,61 @@ finish_captures() {
   kill "$logcat_pid" 2>/dev/null || true
   wait "$logcat_pid" 2>/dev/null || true
   mkdir -p app/build/outputs/androidTest-results/connected/diagnostics
-  cp "$diagnostic_dir/"*.txt app/build/outputs/androidTest-results/connected/diagnostics/ || true
+  cp "$diagnostic_dir/"* app/build/outputs/androidTest-results/connected/diagnostics/ || true
   return "$test_status"
 }
 trap finish_captures EXIT
+
+wait_for_phone_home() {
+  local home_component home_package home_activity home_full home_short window_state anr_events
+  local deadline=$((SECONDS + 45))
+  local stable_focus=0
+  home_component="$(timeout 10s adb shell cmd package resolve-activity --brief --user 0 \
+    -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+  if [[ ! "$home_component" =~ ^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$ ]]; then
+    echo "Android QA readiness: cannot resolve the HOME activity" >&2
+    return 1
+  fi
+  home_package="${home_component%%/*}"
+  home_activity="${home_component#*/}"
+  if [[ "$home_activity" == .* ]]; then
+    home_activity="${home_package}${home_activity}"
+  fi
+  home_full="${home_package}/${home_activity}"
+  home_short="${home_package}/${home_activity#"$home_package"}"
+  timeout 15s adb shell am start -W -a android.intent.action.MAIN \
+    -c android.intent.category.HOME >/dev/null
+  while (( SECONDS < deadline )); do
+    anr_events="$(timeout 5s adb logcat -b events -d -s am_anr:I '*:S')"
+    window_state="$(timeout 5s adb shell dumpsys window windows | tr -d '\r')"
+    if grep -q 'am_anr' <<< "$anr_events" \
+      || grep -q 'Application Not Responding' <<< "$window_state"; then
+      printf '%s\n' "$anr_events" > "$diagnostic_dir/readiness-anr.txt"
+      printf '%s\n' "$window_state" > "$diagnostic_dir/readiness-windows.txt"
+      timeout 5s adb exec-out screencap -p > "$diagnostic_dir/readiness-screen.png" || true
+      echo "Android QA readiness failed: emulator ANR before instrumentation; dialogue left intact" >&2
+      return 1
+    fi
+    if grep 'mCurrentFocus=' <<< "$window_state" | grep -Fq -e "$home_full" -e "$home_short"; then
+      stable_focus=$((stable_focus + 1))
+      if (( stable_focus >= 3 )); then
+        echo "Android QA readiness: HOME has stable window focus"
+        return 0
+      fi
+    else
+      stable_focus=0
+    fi
+    sleep 2
+  done
+  printf '%s\n' "$window_state" > "$diagnostic_dir/readiness-windows.txt"
+  timeout 5s adb exec-out screencap -p > "$diagnostic_dir/readiness-screen.png" || true
+  echo "Android QA readiness failed: HOME did not acquire stable window focus before the readiness deadline" >&2
+  return 1
+}
+if [[ "$platform" == phone ]]; then
+  wait_for_phone_home
+fi
+
 test_args=()
 if [[ -n "${NORVA_ANDROID_TEST_CLASS:-}" ]]; then
   [[ "$NORVA_ANDROID_TEST_CLASS" =~ ^[A-Za-z0-9_.,#]+$ ]] || exit 2
