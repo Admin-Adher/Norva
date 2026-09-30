@@ -158,6 +158,127 @@ test('route exit cancels the visible pending state and never resolves the abando
   assert.equal(resolved, 0);
 });
 
+test('a browse interaction cancels automatic playback while keeping an explicit pending Play request', async () => {
+  for (const automatic of [true, false]) {
+    let resolutions = 0;
+    const { list, player } = harness(async () => { resolutions++; return { url: 'https://example.test/live.m3u8' }; });
+    const previous = deferred();
+    list._streamResolveQueue = previous.promise;
+    const selecting = list.selectChannel({ channelId: 'a', renderId: 'a',
+      ...(automatic ? { autoResume: 'true' } : {}) });
+    list.noteLiveBrowseIntent();
+    previous.resolve();
+    await selecting;
+    assert.equal(resolutions, automatic ? 0 : 1);
+    assert.equal(Boolean(player.currentChannel), !automatic);
+  }
+});
+
+test('a cancelled automatic resolver expires its late receipt without starting the player', async () => {
+  const started = deferred();
+  const resolved = deferred();
+  const { list, player, rows } = harness(async () => { started.resolve(); return resolved.promise; });
+  const expired = [];
+  list.expireStaleCloudPlaybackSession = async id => { expired.push(id); };
+  const selecting = list.selectChannel({ channelId: 'a', renderId: 'a', autoResume: 'true' });
+  await started.promise;
+  list.noteLiveBrowseIntent();
+  resolved.resolve({ url: 'https://example.test/live.m3u8', sessionId: 'exact-late-live-receipt' });
+  await selecting;
+  assert.deepEqual(expired, ['exact-late-live-receipt']);
+  assert.equal(player.currentChannel, undefined);
+  assert.equal(rows.a.getAttribute('aria-busy'), undefined);
+});
+
+for (const phase of ['player queue', 'Watch teardown']) {
+  test(`browse cancels the exact automatic VideoPlayer request suspended in ${phase}`, async () => {
+    const { list, player, window } = harness(async () => ({
+      url: 'https://example.test/live.m3u8', sessionId: 'automatic-receipt',
+    }));
+    const suspended = deferred();
+    const entered = deferred();
+    const expired = [];
+    Object.assign(player, {
+      _playRequestSeq: 0, _playQueue: phase === 'player queue' ? suspended.promise : Promise.resolve(),
+      _triedVariants: new Set(), _variantSwitchSeq: 0,
+      video: { pause() {}, load() {} }, nowPlaying: element(),
+      _clearVariantFallbackTimer() {}, _clearMediaElementErrorTimer() {},
+      resetGatewayHlsRetries() {}, stopLiveSyncMonitor() {}, clearExternalSubtitleTracks() {},
+      stopTranscodeSession: async () => {}, stopCloudPlaybackSessions: async () => {},
+      applyQualityGroup() {}, _sendLiveEvent() {},
+      expireDetachedCloudPlaybackSession: async id => { expired.push(id); },
+    });
+    window.app.pages = { watch: { stop: () => { entered.resolve(); return suspended.promise; } } };
+    const realPlay = window.VideoPlayer.prototype.play;
+    player.play = (...args) => {
+      const playing = realPlay.apply(player, args);
+      if (phase === 'player queue') entered.resolve();
+      return playing;
+    };
+    const selecting = list.selectChannel({ channelId: 'a', renderId: 'a', autoResume: 'true' });
+    await entered.promise;
+    const requestSeq = player._playRequestSeq;
+    list.noteLiveBrowseIntent();
+    assert.equal(player._playRequestSeq, requestSeq + 1);
+    suspended.resolve();
+    await selecting;
+    assert.deepEqual(expired, ['automatic-receipt']);
+    assert.equal(player.video.src, '');
+    assert.equal(list.currentChannel == null, true);
+  });
+}
+
+test('an explicit Play waits for cancelled automatic cleanup before creating its own receipt', async () => {
+  const resolved = [];
+  const { list, player, window } = harness(async (...args) => {
+    resolved.push(args);
+    return { url: 'https://example.test/live.m3u8', sessionId: resolved.length === 1 ? 'automatic-receipt' : 'explicit-receipt' };
+  });
+  const cleanup = deferred();
+  const expired = [];
+  Object.assign(player, {
+    _playRequestSeq: 0, _playQueue: Promise.resolve(), _triedVariants: new Set(), _variantSwitchSeq: 0,
+    activeCloudPlaybackSessionIds: new Set(),
+    video: { pause() {}, load() {} }, nowPlaying: element(),
+    _clearVariantFallbackTimer() {}, _clearMediaElementErrorTimer() {},
+    resetGatewayHlsRetries() {}, stopLiveSyncMonitor() {}, clearExternalSubtitleTracks() {},
+    stopTranscodeSession: async () => {},
+    play: window.VideoPlayer.prototype.play,
+    async _playInternal(channel) {
+      this.currentChannel = channel;
+      this.registerCloudPlaybackSession(channel.cloudPlaybackSessionId);
+    },
+  });
+  window.NorvaCloud = { playback: { expireSession: async id => { expired.push(id); await cleanup.promise; } } };
+  await list.selectChannel({ channelId: 'a', renderId: 'a', autoResume: 'true' });
+  const requestSeq = player._playRequestSeq;
+  list.noteLiveBrowseIntent();
+  assert.equal(player._playRequestSeq, requestSeq + 1, 'the old player request is invalidated synchronously');
+  assert.deepEqual(expired, ['automatic-receipt']);
+  const next = list.selectChannel({ channelId: 'b', renderId: 'b' });
+  await new Promise(resolve => setTimeout(resolve, 325));
+  assert.equal(resolved.length, 1, 'the new provider request waits beyond its debounce for the old release');
+  cleanup.resolve();
+  await next;
+  assert.equal(resolved.length, 2);
+  assert.deepEqual(expired, ['automatic-receipt']);
+  assert.equal(player.currentCloudPlaybackSessionId, 'explicit-receipt');
+  assert.deepEqual(Array.from(player.activeCloudPlaybackSessionIds), ['explicit-receipt']);
+});
+
+test('browsing preserves an automatic channel once its first frame has committed', async () => {
+  const { list, player } = harness();
+  await list.selectChannel({ channelId: 'a', renderId: 'a', autoResume: 'true' });
+  let stops = 0;
+  player._playRequestSeq = 12;
+  player.stop = () => { stops++; };
+  list._autoResumePlayerRequest = { player, requestSeq: 12, selectSeq: list._selectRequestSeq };
+  assert.equal(list.commitPlaybackChannel(player.currentChannel), true);
+  list.noteLiveBrowseIntent();
+  assert.equal(stops, 0);
+  assert.equal(player._playRequestSeq, 12);
+});
+
 test('an outgoing player error cannot replace a newer pending channel; its own terminal error can', () => {
   const { player, list, b, errorContent } = harness();
   player.currentChannel = { _norvaSelection: { selectSeq: 1 } };

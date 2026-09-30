@@ -2,10 +2,20 @@ name: Android emulator QA
 
 on:
   workflow_dispatch:
+    inputs:
+      phone-test-class:
+        description: 'Optional comma-separated phone instrumentation classes; empty runs the full suite'
+        required: false
+        default: ''
+        type: string
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
       - 'scripts/qa/run-android-emulator-tests.sh'
+      - 'scripts/qa/patch-emulator-runner-unlock.cjs'
+      - 'tests/emulator-runner-unlock.test.js'
+      - 'tests/android-home-readiness.test.js'
+      - 'tests/fixtures/android-home-readiness/**'
       - 'clients/android-phone/**'
       - 'clients/android-tv/**'
       - 'clients/android-common/**'
@@ -18,6 +28,8 @@ jobs:
     name: Phone API 35 (${{ matrix.navigation }}, font ${{ matrix.font_scale }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      NORVA_ANDROID_TEST_CLASS: ${{ inputs['phone-test-class'] || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,13 +47,31 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Install phone compile SDK
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      # Compile before boot so Gradle does not compete with first-start setup of
+      # the launcher and keyboard. The connected test task still runs below.
+      - name: Compile phone and instrumentation APKs before emulator boot
+        working-directory: clients/android-phone
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # Keep the upstream Apache-2.0 action and its licence intact. Apply only
+      # the audited unlock correction; see scripts/qa/android-emulator-runner-patch.md.
+      - name: Check out pinned phone emulator runner
+        uses: actions/checkout@v4
+        with:
+          repository: ReactiveCircus/android-emulator-runner
+          ref: a421e43855164a8197daf9d8d40fe71c6996bb0d
+          path: .github/actions/phone-emulator-runner
+          persist-credentials: false
+      - name: Apply focus-safe emulator unlock
+        run: node scripts/qa/patch-emulator-runner-unlock.cjs .github/actions/phone-emulator-runner
       - name: Run instrumented phone tests
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: ./.github/actions/phone-emulator-runner
         with:
           api-level: 35
           target: google_apis

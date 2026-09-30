@@ -97,16 +97,86 @@ Cloudflare production workflow 36711003761 completed successfully. Both the publ
 
 The initial Phone 1.3.28 / code 41 candidate tracks positive reads per media route. It retains the 35 s inactivity deadline and adds a 120 s absolute preparation budget. Active progress no longer restarts metadata work at 35 s. The absolute limit stops playback and leaves explicit Retry instead of automatically repeating the download. Preparation renews its existing session lease only while bounded foreground startup is active. This candidate requests reader shutdown on Back/background, but prompt socket closure failed the emulator verification below and must be corrected before release. Live keeps its previous policy.
 
-Four JVM cases cover active progress, stalled reads, a trickle exceeding the absolute limit and cancelled/old generations. Four instrumented cases use a local media origin and actual Media3 rendering, including40s of header transfer, terminal/manual Retry, background/return, and Back. Matroska index Range requests are explicitly allowed and distinguished from a new playback generation. CI compilation, emulator results, signed bundle publication and a production-code41 physical replay must be recorded before declaring this correction available and validated on the user's phone.
+Four JVM cases cover active progress, stalled reads, a trickle exceeding the absolute limit and cancelled/old generations. Four instrumented cases use a local media origin and actual Media3 rendering, including 40 s of header transfer, terminal/manual Retry, background/return, and Back. Matroska index Range requests are explicitly allowed and distinguished from a new playback generation. At this stage, release gates and a physical replay of the corrected production version were still required; code 41 was subsequently superseded by code 42 below.
 
-The full Windows regression run reported5300 passed,27 skipped and5 failed: four shell/Git-fixture checks unavailable in that Windows environment and one release-version assertion encountered while preparing code41. The corresponding Linux server/WebView CI passed, and the two native version gates have been updated and pass their focused suite. This local result is not represented as an all-green full run.
+The full Windows regression run reported 5300 passed, 27 skipped and 5 failed: four shell/Git-fixture checks unavailable in that Windows environment and one release-version assertion encountered while preparing code 41. The corresponding Linux server/WebView CI passed, and the two native version gates have been updated and pass their focused suite. This local result is not represented as an all-green full run.
 
 ### Release gate results at 12:05 UTC
 
-Build 36711093992 and all contract/database checks passed on PR502 head `5f0f0e77`. Emulator run 36711093607 passed both TV configurations but failed all four phone configurations. The real 40-second slow-header rendering and terminal/manual-retry cases passed. Back and background failed the five-second assertion for closing the actual local HTTP reader. Those failures are release blockers; they are not waived as provider variability.
+Build 36711093992 and all contract/database checks passed on PR502 head `5f0f0e77`. Emulator run 36711093607 passed both TV configurations but failed all four phone configurations. The real 40-second slow-header rendering passed in all four phone configurations. Back and background failed the five-second assertion for closing the actual local HTTP reader in all four; terminal/manual Retry also failed that closure assertion in both gesture configurations and passed in the two three-button configurations. Those failures were release blockers; they were not waived as provider variability.
 
 Signed bundle workflow 36710492279 produced code 41 (AAB SHA256 `9237987cf7c17fcc2fde581ed954ff277453899c20acd634056a90fbc60aa716`). It was uploaded and saved as production draft release 27, but was **not submitted for review**. The phone still runs production code 40. The uploaded code 41 must not be described as globally available or as having passed emulator QA.
 
 ### TF1 replay at 11:57 UTC did not render
 
 One tap on BE: TF1 HD (985192) at 11:57:51.261 UTC opened the native player, whose direct route again received HTML. Three server recovery sessions were created: `7a4f1dd1-af47-4c4c-b15f-c01ffafebe70`, `7fe535b9-5b56-455c-bfa5-b64bcd1ee23f`, and `07f95b41-4b32-406b-9fda-1a62dd252f91`. No first frame was obtained; Android Back ended the attempt. Gateway traces show remux preparation succeeded in 14.609 s, 4.313 s and 3.810 s respectively, with actual media segments. This does not establish successful delivery to the phone. The earlier successful TF1 replay does not override this failure; diagnosis and final session cleanup are being checked separately.
+
+## Live receipt authority correction — global deployment at 12:19:52 UTC
+
+PR503 merged as `7ed37e02e1095121edc2db325561469c4d72507e`. The exact Live session receipt row is now covered by response-authority verification. The owner, source, source generation and identity-hash checks still fail closed; the change does not bypass receipt validation or authorize another session's media. Verification passed 40 focused tests and 26 adjacent tests.
+
+The server deployment completed at 12:19:52 UTC. Both Edge replicas passed health checks and served the expected `index.ts` SHA256 `40b8d22488782249e0ad3347def12bbe6263a0f0f99d10d584ba22b0c29b33cd`. No Gateway media process was restarted. This correction is deployed globally and does not require an Android update.
+
+### Physical TF1 replay after the server correction
+
+On the still-installed **Phone 1.3.27 / code 40**, one tap at 12:30:24.1409 UTC opened BE: TF1 HD. The direct response was again HTML; recovery obtained HLS session `56daa50b-f6c3-4d2a-a399-208e29e6b5b6`, created at 12:30:33.097 UTC. First-frame telemetry arrived at 12:30:40.148 UTC and reported **7,683 ms** on the native clock. A screenshot confirmed actual TF1 programme video. The recorded tap-to-event interval is approximately 16 s, with the phone/server clock and telemetry limitations already noted above.
+
+Android Back expired the session at 12:31:41.935 UTC. The subsequent check found **zero active Strng sessions**. This is a successful physical replay of the Live recovery and release after the server correction, not a validation of direct provider reachability or of the new code 42 player.
+
+## Code 42 correction and successful release gates
+
+PR502 merged as `ad97f1da2bda4fb664af9b00dd17069278d68a8d`. **Phone 1.3.28 / code 42** supersedes the failed code 41 candidate. It preserves the 35 s inactivity and 120 s absolute startup budgets, and now actively closes the route's reader outside the UI thread when cancelled. Cancellation during connection opening also closes a late-published reader. The first rendered frame ends startup tracking without cancelling healthy playback or subsequent seeks. Cancellation exceptions cannot escape the close worker and crash the app. An online resolver timeout is classified as a terminal reconnection failure, rather than incorrectly reporting that the device is offline.
+
+All release gates passed on head `c66d7672dda005886f96c1fe4fe17fb6d51ac07a`:
+
+- Build run **36713615145**: cloud contracts, Android phone and TV compilation/JVM tests/lint, and Windows build succeeded. The first TV job never started because GitHub could not acquire a runner; the authorized rerun of that job succeeded.
+- Emulator run **36713614986**: four phone configurations (gesture and three-button navigation, font scales 1.0 and 1.3) and both TV configurations passed.
+- The four new VOD scenarios passed in every phone configuration: **16 successful executions**, with each XML result inspected. The local media origin delivered a deliberately slow 40-second header and actual Media3 rendering was required. No provider stream or simulated first-frame callback was used.
+- Signed AAB workflow **36713628920** succeeded. Bundle SHA256: `F83267E2E5173CA45A7603E843509C84D7F740A8B9CE1AF657F30C0DA83581E8`.
+
+| VOD scenario | Evidence on all four phone configurations |
+| --- | --- |
+| Progressing data beyond 35 s | Actual first frame, unchanged playback generation and no restart from byte zero; legitimate Matroska index seeks remain allowed. |
+| Back during startup | Real origin socket closed within the unchanged five-second assertion; lease renewal stopped. |
+| Background then return | Preparing reader closed, no background heartbeat, foreground playback rendered, subsequent Back released the connection. |
+| Absolute startup limit then Retry | Terminal state and socket closure without an automatic retry loop; only explicit Retry opened and rendered the new attempt. |
+
+### Google Play submission at approximately 12:38 UTC
+
+Code 42 was uploaded to production release 27 with a **100% rollout configured** and submitted to Google Play. The Console confirmed **“Modifications en cours d’examen”**, **Norva Mobile 1.3.28 (42)** and **“Lancer le déploiement complet”**. Quick checks were still running, with the Console indicating up to ten minutes before review. Submission and configured rollout are not evidence of approval or public availability. The physical phone still runs **code 40**.
+
+## Current limits and separate pending work
+
+- The code 42 slow-MP4 watchdog and reader-release correction has passed deterministic JVM/emulator verification, but **has not yet been validated on the physical phone with the real slow Strng MP4**. Repeat playback, exact resume, Back and background/return after the Play update becomes available and its installed code is verified.
+- Startup remains variable and is **not instant**. The latest physical TF1 sample was about 16 s from the recorded tap to first-frame event; the earlier MP4 tail transfers demonstrate material provider-throughput variability. Preventing needless restarts does not itself make those metadata transfers faster.
+- Confirmed direct HTML refusals still require recovery. Neither the successful HLS Live replay nor raw-relay VOD playback proves all-direct provider access.
+- Cross-session byte reuse for the observed Strng files still lacks a required identity validator. No validator or owner-isolation guard has been weakened to turn those samples into cache hits.
+- A separate guide UI race is being investigated/corrected. Its fix and runtime validation remain pending and are not included in the playback successes or release evidence above.
+
+## Guide source/search follow-up (PR504, validation in progress)
+
+The observed web guide could automatically resume the previous supplier while a different source was selected during loading. Progressive rendering could also replace visible search results, and both search controllers could merge a late response from the previous source. PR504 ties automatic startup to the entry intent, cancels the exact uncommitted player request and serializes its connection release before the next explicit Play. Confirmed playback and explicit requests remain independent of later browsing. Search and recent/favorite suggestions respect the selected source.
+
+There are 71 passing focused tests, including real `VideoPlayer` queue/stop methods. An independent review verified that the cleanup barrier has no promise cycle and cannot close the next request. A browser replay using production controllers and fixture catalogue data passed `verifyRender`, `verifyRemoteSourceRace` and `verifyMobileRemoteSourceRace`; it also retained TF1 under source B and restored all six fixture rows after clearing source/category filters. These are UI/controller proofs, not provider playback proofs.
+
+The first emulator run, 36717128773, was not accepted as a passing gate. The new fixture cleared its cache before old controlled promises settled, which then repopulated the cache and prevented the intended new request. Commit `4951957dd249aa24964a31445bb8bc3863f6667b` corrects that order without weakening source or query assertions. A gesture/font-1.0 emulator also displayed a Pixel Launcher ANR dialog over Norva; its screenshot explains the blocked touch/IME checks, including failures in existing tests. No IME assertion was relaxed.
+
+The second emulator run, 36718585232, passed both TV configurations but did not complete phone validation. The three-button/font-1.0 image download failed before boot (`ZipFile unknown archive`). Gesture/font-1.3 instrumentation stopped after 31 successful tests, before the new case, with no application stack establishing the cause. The other two phone captures show a Pixel Launcher ANR that occurred before instrumentation and retained input focus. In three-button/font-1.3, the new case failed its first IME assertion and never reached TF1/source verification. These failures are not counted as product successes.
+
+All five fixture scenarios were subsequently replayed successfully in the real browser DOM through explicit local QA controls: render/focus/caret, both remote source races and both source/category orders. This isolates the fixture behavior but does not establish real Android IME behavior. The pending CI stabilization separates compilation from emulator boot and requires a healthy focused launcher before starting instrumentation; product code and assertions remain unchanged.
+
+Google Play subsequently finished its quick checks and still showed code 42 under **“Modifications en cours d’examen”**. No approval or public availability was observed at this check.
+
+### Third guide QA run and web Live replay
+
+Build 36721136462 and Partners 36721136398 passed on `78d526a0`. Emulator QA 36721136600 did not pass. Its new readiness check revealed two distinct infrastructure problems: the filtered `dumpsys window windows` output excludes the display's current-focus field, producing false HOME deadlines; and emulator-runner injects key 82 immediately after `boot_completed`, before a focused window exists. In the gesture/font-1.0 trace, the input arrived at 13:24:46.769, ANR followed at 13:24:51.788, and the first HOME window appeared at 13:24:54.715, before the Norva test script started. The readiness check and upstream unlock step are being corrected without suppressing ANRs or weakening product assertions.
+
+A separate production web replay selected **BE: TF1 HD, Strng item 985192** at 13:33:07.005 UTC. Session `a20e31f0-ea8a-440e-84a7-7a5419ff6d70` encountered a browser `bufferAppendError`; automatic conversion created `34f30f95-5846-409f-9202-0db26e7012a7`. Actual TF1 programme video was then observed at 1920×1080, readyState 4, with playback advancing. This is a successful recovered playback, not a successful initial-format selection or a fast-start result. The mini-player was explicitly closed and a subsequent database check found zero active Strng sessions. Investigation of the initial format mismatch remains open.
+
+The first-frame event for that web recovery was recorded at 13:33:59.523990 UTC, approximately **52.5 s from the tap**. Its reported 485 ms player metric covers attachment of the second stream only. Gateway preparation took 39.040 s for the initial remux and 8.590 s for the subsequent transcode. The initial FFmpeg logs include missing H.264 SPS/PPS and unknown dimensions; the original media segments have since been deleted, so this is a hypothesis for the browser rejection rather than proof of the exact defective bytes.
+
+Run 36723027110 removed the premature key injection and did not report another pre-instrumentation ANR. It exposed a further readiness bug: Android replaces the temporary Google SDK setup HOME with NexusLauncher during first boot, whereas the helper retained the initially resolved setup activity. All four final dumps show a focused NexusLauncher. The helper now waits for the read-only setup/provisioning indicators, resolves HOME on each observation and requires three consecutive focused observations of the same target. Captured focus fragments from all four configurations and explicit negative cases exercise the actual Bash function. Build 36723027176 and Partners 36723027029 passed; the phone instrumentation result remains pending the corrected readiness gate.
+
+Run 36724679619 on `c6f472c9` established the new LiveSearchScope scenario in **all four phone configurations** (5.933, 7.185, 8.007 and 7.192 seconds across the retained XML results). Both TV configurations passed. The full phone suite passed 61/61 in three-button/font-1.3 and, after one bounded replay, both gesture configurations. The initial gesture/font-1.0 keyboard assertion did not reproduce; the initial gesture/font-1.3 ADB-offline failure occurred before instrumentation. Original failures remain part of this record.
+
+The full three-button/font-1.0 suite was interrupted twice, at different existing tests after 38 and 8 completed tests. Its first run had already passed LiveSearchScope, LiveGuideAudit and the contextual-language keyboard test. No application exception or assertion explains either interruption; Android log streams and UTP file collection stopped together. This is not counted as a successful complete-suite gate. Bounded ADB/host diagnostics and an optional **manual-only** class scope were added; PR runs retain the complete suite. A separate focused run covers LiveSearchScope, LiveGuideAudit and ContextualLanguage in all four phone configurations, without weakening their assertions.
