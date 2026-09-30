@@ -22,6 +22,9 @@ test('pending connection work outranks background provider reads with owner-scop
  assert.match(sql,/job.state in \('pending','processing'\)/);
  assert.match(sql,/norva_credential_require_service_role/);
  assert.match(sql,/from public,anon,authenticated/);
+ const shared=fs.readFileSync(require.resolve('../supabase/migrations/20260930071000_credential_shared_account_priority.sql'),'utf8');
+ assert.match(shared,/other.affinity_hash=held.affinity_hash/);
+ assert.match(shared,/held.source_id=job.source_id and held.user_id=job.user_id and other.user_id=p_user_id/);
 });
 test('completed or decision-waiting transitions release background work',async()=>{
  assert.equal((await harness().run()).defer,false);
