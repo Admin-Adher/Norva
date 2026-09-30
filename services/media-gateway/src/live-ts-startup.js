@@ -127,6 +127,12 @@ function createLiveTsStartupGate({ root, bin, signal, decode = decodeStartupSegm
     let minimum = null, bypass = false, verified = false, attempts = 0, reason = 'pending', proofMs = 0;
     let inFlight = null, expectedTracks = null;
     const results = new Map(), rejected = new Set();
+    const exhausted = () => {
+        reason = 'invalid-prefix-limit';
+        const error = new Error('Live H.264 startup has no independently decodable segment');
+        error.code = 'LIVE_TS_STARTUP_INVALID';
+        throw error;
+    };
     async function inspect(name) {
         let handle;
         try {
@@ -161,6 +167,7 @@ function createLiveTsStartupGate({ root, bin, signal, decode = decodeStartupSegm
     async function check(playlist) {
             if (signal?.aborted) { reason = 'aborted'; return false; }
             if (verified || bypass) return true;
+            if (rejected.size >= 3) exhausted();
             let parsed;
             try { parsed = parseLivePlaylist(playlist); }
             catch (error) {
@@ -170,7 +177,7 @@ function createLiveTsStartupGate({ root, bin, signal, decode = decodeStartupSegm
             for (const segment of parsed.segments) {
                 let result = results.get(segment.name);
                 if (!result) {
-                    if (attempts >= 3) { reason = 'candidate-limit'; bypass = true; return true; }
+                    if (attempts >= 3) exhausted();
                     attempts++;
                     const started = Date.now();
                     result = await inspect(segment.name);
@@ -179,8 +186,13 @@ function createLiveTsStartupGate({ root, bin, signal, decode = decodeStartupSegm
                 reason = result.reason;
                 if (result.reason === 'aborted' || signal?.aborted) return false;
                 if (result.verified) { minimum = segment.sequence; verified = true; reason = 'decoded'; return true; }
-                if (result.reason === 'invalid-bitstream') {
-                    rejected.add(segment.name); minimum = segment.sequence + 1; continue;
+                if (['invalid-bitstream', 'delayed-track-start'].includes(result.reason)) {
+                    rejected.add(segment.name); minimum = segment.sequence + 1;
+                    // Three proven corrupt prefixes do not authorize an untested
+                    // fourth segment. The session may take its bounded encoder
+                    // fallback; no unusable stream is advertised as ready.
+                    if (rejected.size >= 3) exhausted();
+                    continue;
                 }
                 // A timeout, unknown PMT or process/host issue is not proof of
                 // corrupt media. Preserve the existing route, only retaining a

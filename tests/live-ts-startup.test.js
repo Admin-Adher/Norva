@@ -16,6 +16,31 @@ const { decodeStartupSegments, verifyFiniteTsStartupSegments } = require('../ser
 const playlist = (count, start = 0) => '#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:4\n#EXT-X-INDEPENDENT-SEGMENTS\n'
     + `#EXT-X-MEDIA-SEQUENCE:${start}\n` + Array.from({ length: count }, (_, i) => `#EXTINF:4,\nsegment-${String(start + i).padStart(5, '0')}.ts\n`).join('');
 
+test('Live diagnostic proves a track-start gap from decoded frame timestamps, not missing frames', async () => {
+    const hash = 'a'.repeat(64);
+    const frames = (tb, pts) => `#tb 0: ${tb}\n0, ${pts}, ${pts}, 1, 100, ${hash}\n0, ${pts + 1}, ${pts + 1}, 1, 100, ${hash}\n`;
+    for (const [video, audio, expected] of [
+        [frames('1/25', 0), frames('1/48000', 0), 'decoded'],
+        [frames('1/25', 128), frames('1/48000', 0), 'delayed-track-start'],
+        [frames('1/25', 0), frames('1/48000', 48000), 'delayed-track-start'],
+        [frames('1/25', 128), '', 'inconclusive'],
+        [frames('0/25', 0), frames('1/48000', 0), 'inconclusive'],
+        [frames('1/25', 0).replace('#tb', '#unknown'), frames('1/48000', 0), 'inconclusive'],
+    ]) {
+        const spawnImpl = (_bin, args, options) => {
+            assert.ok(args.includes('passthrough'));
+            assert.ok(!args.includes('-t'));
+            const child = new EventEmitter();
+            child.stdio = options.stdio.map(() => new PassThrough());
+            child.stderr = child.stdio[2]; child.kill = () => {};
+            process.nextTick(() => { child.stdio[1].emit('data', video); child.stdio[4].emit('data', audio); child.emit('close', 0); });
+            return child;
+        };
+        assert.deepEqual(await decodeStartupSegments('unused', [3], { diagnostics: true, spawnImpl }),
+            { verified: expected === 'decoded', reason: expected });
+    }
+});
+
 test('prefix projection preserves real media sequence, duration and discontinuity accounting', () => {
     const source = playlist(4, 40).replace('#EXTINF:4,', '#EXT-X-DISCONTINUITY\n#EXTINF:4,');
     const result = projectLivePlaylist(source, 41);
@@ -181,6 +206,18 @@ test('real MPEG-TS startup proof and lifecycle', { skip: process.env.NORVA_LIVE_
             assert.equal(await fresh.check(playlist(1)), true);
             assert.equal(fresh.snapshot().minimum, 0);
         });
+        await t.test('real audio-leading encoded prefix is projected before independently synchronized media', async () => {
+            const delayed = path.join(root, 'delayed.ts');
+            await run(bin, ['-hide_banner', '-v', 'error', '-nostdin', '-y', '-itsoffset', '3', '-i', good,
+                '-i', good, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-f', 'mpegts', delayed]);
+            await reset(delayed);
+            const gate = createLiveTsStartupGate({ root, bin });
+            assert.equal(await gate.check(playlist(2)), true);
+            assert.equal(gate.snapshot().verified, true);
+            assert.equal(gate.snapshot().minimum, 1);
+            assert.equal(gate.snapshot().rejected, 1);
+            assert.equal(gate.allows('segment-00000.ts'), false);
+        });
         await t.test('silent H.264 uses its declared video lane; the existing VOD AV proof remains strict', async () => {
             await reset(silent);
             const gate = createLiveTsStartupGate({ root, bin });
@@ -193,17 +230,19 @@ test('real MPEG-TS startup proof and lifecycle', { skip: process.env.NORVA_LIVE_
             assert.equal((await verifyFiniteTsStartupSegments({ root, bin,
                 files: ['segment-00000.ts', 'segment-00001.ts'], durations: [4, 4] })).verified, true);
         });
-        await t.test('the diagnostic is bounded and never discards an untested fourth segment', async () => {
+        await t.test('three invalid segments fail closed without serving an untested fourth segment', async () => {
             await reset();
             await fsp.copyFile(bad, path.join(root, 'segment-00001.ts'));
             await fsp.copyFile(bad, path.join(root, 'segment-00002.ts'));
             const gate = createLiveTsStartupGate({ root, bin });
-            assert.equal(await gate.check(playlist(4)), true);
+            await assert.rejects(gate.check(playlist(3)), { code: 'LIVE_TS_STARTUP_INVALID' });
+            await assert.rejects(gate.check(playlist(4)), { code: 'LIVE_TS_STARTUP_INVALID' });
             assert.equal(gate.snapshot().attempts, 3);
             assert.equal(gate.snapshot().verified, false);
             assert.equal(gate.snapshot().minimum, 3);
             assert.equal(gate.allows('segment-00002.ts'), false);
-            assert.equal(gate.allows('segment-00003.ts'), true);
+            assert.equal(gate.allows('segment-00003.ts'), false);
+            assert.equal(gate.snapshot().bypass, false);
         });
         await t.test('healthy 1080p local proof adds one bounded decoder and no discarded prefix', async () => {
             const hd = path.join(root, 'segment-00000.ts');
