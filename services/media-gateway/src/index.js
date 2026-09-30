@@ -8419,11 +8419,12 @@ function initializeStrictLidCapturePipeline(store) {
                 },
                 isPreempted: () => registration?.preempted === true || viewerPlaybackActiveLocally(),
             }));
-            if (!result.ok) {
-                if (result.preempted) throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
-                if (broker.terminalError) throw broker.terminalError;
-                throw capturePipelineError(result.code || 'LID_CAPTURE_EXTRACTION_FAILED');
-            }
+            // FFmpeg can exit zero after an interrupted input and write only a
+            // WAV header. Its exit status cannot override the broker's terminal
+            // provider/range failure, even when some PCM was produced.
+            if (result.preempted) throw capturePipelineError('LANGUAGE_VALIDATION_VIEWER_PREEMPTED');
+            if (broker.terminalError) throw broker.terminalError;
+            if (!result.ok) throw capturePipelineError(result.code || 'LID_CAPTURE_EXTRACTION_FAILED');
             const audio = [];
             for (const output of outputs) {
                 const stat = await fsp.stat(output.path);

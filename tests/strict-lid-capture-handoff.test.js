@@ -301,6 +301,36 @@ test('capture routes remain service-authenticated and never put provider capabil
     assert.ok(compute.indexOf('checkpoint_catalog_file_audio_validation_window') < compute.indexOf('"ack"'));
 });
 
+test('actual capture extraction keeps broker failure authoritative even after FFmpeg exits successfully', async () => {
+    for (const ok of [true, false]) {
+        let pipeline; let audioReads = 0;
+        const upstream = Object.assign(Error('private provider failure'), { code: 'RANGE_LENGTH_MISMATCH', status: 502 });
+        let result = { ok, processClosed: true };
+        const context = vm.createContext({
+            Buffer, path, createStrictLidCapturePipeline: options => { pipeline = options; return options; },
+            capturePipelineError: code => Object.assign(Error(code), { code }),
+            selectionEnrichmentPolicy: { describe: () => true }, sha256Hex: () => hash,
+            isAccountJobBusy: () => false, withAccountJobLock: async (_key, fn) => fn(),
+            planStrictSpeechWindow: () => ({ searchStartSeconds: 3600, searchDurationSeconds: 60 }),
+            runStrictLidMultiExtract: async () => result,
+            FFMPEG_PATH: 'fixture', loopbackOnlyEnv: () => ({}),
+            fsp: { open: async () => ({ close: async () => {} }),
+                stat: async () => ({ size: 64 }), readFile: async () => { audioReads++; return Buffer.alloc(64); } },
+        });
+        vm.runInContext(section(gateway, 'function initializeStrictLidCapturePipeline(', 'async function handleStrictLidCaptureRequest('), context);
+        context.initializeStrictLidCapturePipeline({ withWorkspace: fn => fn('/tmp/fixture.wav') });
+        const binding = { trackIndex: 1, durationSeconds: 7200, windowOrdinal: 4 };
+        const input = { url: 'https://fixture.invalid/movie', selectionCapability: {} };
+        await assert.rejects(pipeline.extract({ inputUrl: 'http://127.0.0.1/fixture', terminalError: upstream }, binding, input), error => error === upstream);
+        assert.equal(audioReads, 0, 'provider failure cannot reach audio persistence');
+        result = { ok: false, preempted: true };
+        await assert.rejects(pipeline.extract({ terminalError: upstream }, binding, input), { code: 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED' });
+        result = { ok: true, processClosed: true };
+        assert.equal((await pipeline.extract({ terminalError: null }, binding, input)).length, 64);
+        assert.equal(audioReads, 1);
+    }
+});
+
 test('captured audio permits a slow full-model quality fallback without a new provider request', async () => {
     let time = 0; let pipeline; let passes = 0;
     const { createStrictLidInference } = require('../services/media-gateway/src/strict-lid-inference');
