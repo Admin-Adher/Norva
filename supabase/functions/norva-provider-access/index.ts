@@ -3047,7 +3047,7 @@ function activeCategories(items, ordinalBase) {
   for (const item of items) {
     if (!isRecord(item)) throw new WorkerFault("invalid_payload", false);
     const id = String(item.id ?? item.category_id ?? item.categoryId ?? "").normalize("NFC").trim();
-    const name = String(item.name ?? item.category_name ?? item.categoryName ?? "").normalize("NFC").trim();
+    const name = String(item.name ?? item.category_name ?? item.categoryName ?? "").normalize("NFC").replace(/[\t\r\n]/gu, " ").trim();
     if (!id || !name || id.length > 1200 || name.length > 2000 || /[\u0000-\u001f\u007f]/u.test(id + name)) {
       throw new WorkerFault("invalid_payload", false);
     }
@@ -3063,7 +3063,9 @@ function activeMediaRows(job, items, itemType) {
   const rows = [];
   for (const item of items) {
     const externalId = String(item.stream_id ?? item.series_id ?? item.id ?? "").normalize("NFC").trim();
-    const title = String(item.name ?? item.title ?? "").normalize("NFC").trim();
+    // Provider display labels can contain layout whitespace. Keep identifiers
+    // strict, but turn tabs/newlines into printable spaces before SQL writes.
+    const title = String(item.name ?? item.title ?? "").normalize("NFC").replace(/[\t\r\n]/gu, " ").trim();
     if (!externalId || !title || externalId.length > 1200 || title.length > 2000 || /[\u0000-\u001f\u007f]/u.test(externalId + title)) {
       throw new WorkerFault("invalid_payload", false);
     }

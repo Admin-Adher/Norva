@@ -103,3 +103,11 @@ Migration `20260930105000_catalog_rollup_source_visibility.sql` materializes the
 Deployed transactionally without restarting either Gateway. At 08:24:29 UTC the durable movie checkpoint advanced to **180711**, confirming that the previously blocked batch completed. Series and final closure still require observation. PR494 CI 36686916408 passed and merged as aa8186387e1174692d45a4e4a344bdd053569b40.
 
 The next closure bottleneck was a poor plan for empty NULL refresh-marker inventories: one pending-media existence check scanned **4286778 rows** in **2052 ms**, despite an existing partial index. Ordinary ANALYZE and three-column statistics were insufficient. Five-column MCV/dependency statistics with a 1000 sample target (generation, media type, run marker, source, owner) selected the existing pending index: the same query took **17.61 ms**. Migration `20260930106000_catalog_refresh_distribution_statistics.sql` records these statistics and refreshes them without changing data, pruning conditions or timeout budgets. No new large index was needed. The movie action completed and the series checkpoint reached 2250 at approximately 08:31 UTC.
+
+## Provider display whitespace repair
+
+At series checkpoint 3052 (37250/48667), the job stopped with `invalid_payload` in `activeMediaRows`. Read-only replay of the same signed Gateway page identified one record (series ID 13621, page ordinal 117) containing a tab in its 59-character display title; the provider ID and remaining 249 records were valid. No credentials or provider text were logged.
+
+Normalize tab/CR/LF to printable spaces for media/category display labels before the existing bounds/control-character checks. Identifiers, forbidden binary controls, nonempty/bounded labels and catalogue counts stay strict; no entry is skipped. 89 focused mapper/worker/contract tests passed, including unchanged provider IDs, NFC, whitespace-only rejection and other control-byte rejection. The first harness run lacked its isRecord dependency; that test harness was corrected before validation.
+
+PR495 (SQL rollup/statistics) merged as f365b06b3a1d5dd3f5ef38b93a1ebd1f09d0974b after all four CI gates in 36690255560 passed. A production Movies reload during the series refresh rendered search/history without a new Dashboard error. Both video elements remained paused.
