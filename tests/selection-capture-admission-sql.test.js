@@ -134,3 +134,97 @@ test('Selection admission is independent, exact-file scoped and keeps private SQ
     t.diagnostic(`${await value('select count(*)::int value from public.metadata_proof_checks')} SQL assertions executed; no provider requests`);
   } finally { await db.close(); }
 });
+
+test('operator recovery archives exhausted history and uses the canonical current-file seeder', { skip: !PGlite }, async t => {
+  const db = await fixture();
+  const revision = 'a'.repeat(40);
+  try {
+    await db.exec(migration);
+    await db.exec(read('tests/sql/selection-audio-capture-handoff.sql'));
+    await db.exec(`
+      alter table public.cloud_media_items add column metadata jsonb default '{}'::jsonb;
+      create table public.catalog_file_tracks(server_host text,item_type text,external_id text,
+        audio_probed_at timestamptz,audio_lang_verification jsonb,audio_tracks jsonb);
+      ${sqlFunction(read('supabase/migrations/20260719170000_variant_file_audio_crawler.sql'), 'catalog_audio_track_indexes')}
+      ${sqlFunction(read('supabase/migrations/20260910184900_catalog_observed_language_aliases.sql'), 'norva_canonical_language_code')}
+      ${sqlFunction(queue, 'selection_audio_tracks_complete')}
+      ${sqlFunction(read('supabase/migrations/20260909194054_selection_audio_claim_bounded_candidates.sql'), 'seed_selection_audio_jobs')}
+      select set_config('request.jwt.claim.role','service_role',false);
+      insert into public.catalog_selection_audio_jobs(external_id,url_sha256,state,attempt_count,completed_at,error_code,profile,progress)
+        values('norva-selection:movie:'||repeat('4',64),encode(sha256(convert_to('https://fixture.invalid/a.mkv','UTF8')),'hex'),
+        'failed',8,'2026-01-01T00:00:00Z','SELECTION_AUDIO_GATEWAY_REJECTED',
+        '{"fingerprint":"old"}','{"receipts":["old-private-receipt"]}');
+      insert into public.catalog_selection_audio_captures(job_id,stream_index,window_ordinal,profile_fingerprint,audio_sha256,expires_at)
+        select id,1,1,repeat('c',64),repeat('d',64),'2026-01-01T00:00:00Z' from public.catalog_selection_audio_jobs;
+    `);
+    await db.exec(read('supabase/migrations/20260930220000_selection_audio_audited_recovery.sql'));
+    const old = (await db.query('select id,completed_at::text ended from public.catalog_selection_audio_jobs')).rows[0];
+    const recover = (id=old.id, ended=old.ended, rev=revision) => db.query(
+      'select public.recover_selection_audio_job($1,$2,$3) id',[id,ended,rev]);
+    const count = async table => Number((await db.query(`select count(*) n from public.${table}`)).rows[0].n);
+    await t.test('private history and service-only execution', async () => {
+      const r = (await db.query(`select
+        has_function_privilege('authenticated','public.recover_selection_audio_job(uuid,timestamptz,text)','EXECUTE') client,
+        has_table_privilege('service_role','public.catalog_selection_audio_recoveries','UPDATE') writable,
+        (select relrowsecurity and relforcerowsecurity from pg_class where oid='public.catalog_selection_audio_recoveries'::regclass) rls`)).rows[0];
+      assert.deepEqual(r,{client:false,writable:false,rls:true});
+    });
+    for (const [label,change] of [
+      ['client role',"select set_config('request.jwt.claim.role','authenticated',true)"],
+      ['capture off',"update admin_feature_flags set enabled=false where key='selection_capture_pipeline_enabled'"],
+      ['completed work',"update catalog_selection_audio_jobs set state='completed'"],
+      ['budget not exhausted',"update catalog_selection_audio_jobs set attempt_count=7"],
+      ['wrong terminal cause',"update catalog_selection_audio_jobs set error_code='SELECTION_AUDIO_FILE_CHANGED'"],
+      ['disabled source',"update cloud_sources set enabled=false"],
+      ['deleted source',"update cloud_sources set deleted_at=clock_timestamp()"],
+      ['retired generation',"update cloud_source_catalog_heads set active_generation_id=gen_random_uuid()"],
+      ['changed media URL',`update cloud_media_items set playback_hint='{"targetUrl":"https://fixture.invalid/other.mkv"}'`],
+      ['already complete audio',`insert into catalog_file_tracks
+        select 'source:'||source_id::text,'movie',external_id,clock_timestamp(),
+          jsonb_build_object('urlSha256',encode(sha256(convert_to('https://fixture.invalid/a.mkv','UTF8')),'hex')),
+          '[{"index":1,"lang":"fr"}]'::jsonb from cloud_title_variants`],
+    ]) await t.test(label,async()=>{
+      await db.exec('begin');
+      await db.exec(change);
+      await assert.rejects(recover());
+      await db.exec('rollback');
+      assert.equal(await count('catalog_selection_audio_jobs'),1);
+      assert.equal(await count('catalog_selection_audio_captures'),1);
+      assert.equal(await count('catalog_selection_audio_recoveries'),0);
+    });
+    await t.test('stale completion and malformed repair references fail',async()=>{
+      await assert.rejects(recover(old.id,'2026-01-02',revision));
+      await assert.rejects(recover(old.id,old.ended,'untrusted-ref'));
+    });
+    await t.test('recent terminal failures cannot receive an immediate new budget',async()=>{
+      await db.exec('begin');
+      const ended=(await db.query('update catalog_selection_audio_jobs set completed_at=clock_timestamp() returning completed_at::text ended')).rows[0].ended;
+      await assert.rejects(recover(old.id,ended));
+      await db.exec('rollback');
+    });
+    const replacement=(await recover()).rows[0].id;
+    await t.test('history and expired captures preserved, new identity contains no stale evidence',async()=>{
+      assert.notEqual(replacement,old.id);
+      const fresh=(await db.query('select state,attempt_count,profile,progress from catalog_selection_audio_jobs')).rows[0];
+      assert.deepEqual(fresh,{state:'queued',attempt_count:0,profile:{},progress:{}});
+      const archive=(await db.query('select original_job,original_captures from catalog_selection_audio_recoveries')).rows[0];
+      assert.equal(archive.original_job.id,old.id);
+      assert.equal(archive.original_job.attempt_count,8);
+      assert.deepEqual(archive.original_job.progress.receipts,['old-private-receipt']);
+      assert.equal(archive.original_captures.length,1);
+      assert.equal(await count('catalog_selection_audio_captures'),0);
+      assert.equal((await recover()).rows[0].id,replacement);
+      assert.equal(await count('catalog_selection_audio_jobs'),1);
+      await assert.rejects(recover(old.id,old.ended,'b'.repeat(40)));
+    });
+    await t.test('replacement follows normal claim and can never be recovered a second time',async()=>{
+      const claimed=(await db.query('select public.claim_selection_audio_job() job')).rows[0].job;
+      assert.equal(claimed.id,replacement);
+      assert.equal(claimed.attempt_count,1);
+      await db.exec(`update catalog_selection_audio_jobs set state='failed',attempt_count=8,
+        completed_at='2026-01-01',lease_token=null,lease_until=null,error_code='SELECTION_AUDIO_GATEWAY_REJECTED'`);
+      await assert.rejects(recover(replacement,old.ended));
+      assert.equal(await count('catalog_selection_audio_recoveries'),1);
+    });
+  } finally { await db.close(); }
+});
