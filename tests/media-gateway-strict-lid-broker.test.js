@@ -1869,6 +1869,82 @@ test('finite seek broker primes one pinned route before its base and sequential 
   assert.equal(broker.completedProviderFetches, 4);
 });
 
+test('current startup prefix avoids duplicate input but future ranges still validate the provider', async t => {
+  const {createStrictLidBroker,strictLidEffectiveUrlIdentitySha256}=brokerHarness();
+  const data=Buffer.from(Array.from({length:64},(_,i)=>i));const calls=[];let etag='"fixture-v1"';
+  const provider=http.createServer((req,res)=>{calls.push(req.headers.range);sendExactRange(req,res,data,{etag});});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const identity=strictLidEffectiveUrlIdentitySha256(sourceUrl);
+  const prefix={captureOwner:'current-startup',complete:true,capturedAt:Date.now(),
+    sourceSha256:require('node:crypto').createHash('sha256').update(sourceUrl).digest('hex'),
+    fileSizeBytes:data.length,effectiveUrlIdentitySha256:identity,
+    validator:{header:'If-Range',kind:'etag',value:etag},payload:Buffer.from(data.subarray(0,16))};
+  const common={sourceUrl,fileSizeBytes:data.length,dispatcher:null,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:8,finiteCacheBytes:64,releaseDelayMs:0,completedReleaseDelayMs:0,
+    effectiveUrlIdentitySha256:identity,expectedValidator:prefix.validator,
+    finiteCurrentPrefixOwner:'current-startup',finiteCurrentPrefix:prefix};
+  const broker=await createStrictLidBroker(common);t.after(()=>broker.close());
+  prefix.payload.fill(255); // Broker owns an immutable copy of current response bytes.
+  const first=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-15'}});
+  assert.deepEqual(Buffer.from(await first.arrayBuffer()),data.subarray(0,16));
+  assert.equal(broker.currentPrefixBytes,16);assert.deepEqual(calls,[]);
+  const tail=await fetch(broker.inputUrl,{headers:{Range:'bytes=56-63'}});
+  assert.deepEqual(Buffer.from(await tail.arrayBuffer()),data.subarray(56));
+  assert.deepEqual(calls,['bytes=56-63']);
+  etag='"changed"';
+  const changed=await fetch(broker.inputUrl,{headers:{Range:'bytes=32-39'}});
+  assert.notEqual(changed.status,206,'new provider identity must not mix with seeded prefix');
+});
+
+test('current startup prefix also reuses current bytes without a strong validator', async t => {
+  const {createStrictLidBroker,strictLidEffectiveUrlIdentitySha256}=brokerHarness();
+  const data=Buffer.alloc(64,29);let calls=0;
+  const provider=http.createServer((req,res)=>{calls++;sendExactRange(req,res,data,{etag:'W/"weak"'});});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const identity=strictLidEffectiveUrlIdentitySha256(sourceUrl);
+  const broker=await createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:8,finiteCacheBytes:64,
+    releaseDelayMs:0,completedReleaseDelayMs:0,effectiveUrlIdentitySha256:identity,
+    finiteCurrentPrefixOwner:'weak-current',finiteCurrentPrefix:{captureOwner:'weak-current',
+      complete:true,capturedAt:Date.now(),fileSizeBytes:64,validator:null,
+      sourceSha256:require('node:crypto').createHash('sha256').update(sourceUrl).digest('hex'),
+      effectiveUrlIdentitySha256:identity,payload:data.subarray(0,16)}});
+  t.after(()=>broker.close());
+  const response=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-15'}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data.subarray(0,16));
+  assert.equal(broker.currentPrefixBytes,16);assert.equal(calls,0);
+  const tail=await fetch(broker.inputUrl,{headers:{Range:'bytes=56-63'}});
+  assert.deepEqual(Buffer.from(await tail.arrayBuffer()),data.subarray(56));
+  assert.equal(calls,1);
+});
+
+test('current startup prefix rejects foreign, stale, incomplete and mismatched evidence', async t => {
+  const {createStrictLidBroker,strictLidEffectiveUrlIdentitySha256}=brokerHarness();
+  const data=Buffer.alloc(64,17);let calls=0;
+  const provider=http.createServer((req,res)=>{calls++;sendExactRange(req,res,data);});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const identity=strictLidEffectiveUrlIdentitySha256(sourceUrl);
+  const prefix={captureOwner:'current-startup',complete:true,capturedAt:Date.now(),
+    sourceSha256:require('node:crypto').createHash('sha256').update(sourceUrl).digest('hex'),
+    fileSizeBytes:data.length,effectiveUrlIdentitySha256:identity,
+    validator:{header:'If-Range',kind:'etag',value:'"fixture-v1"'},payload:data.subarray(0,16)};
+  for(const mutation of [{captureOwner:'another-startup'},{complete:false},{capturedAt:Date.now()-61000},
+    {capturedAt:Date.now()+61000},{sourceSha256:'0'.repeat(64)},{fileSizeBytes:65},
+    {effectiveUrlIdentitySha256:'0'.repeat(64)},{validator:{kind:'etag',value:'"other"'}},
+    {payload:Buffer.alloc(65)},{payload:Buffer.alloc(0)}]) {
+    const before=calls;
+    const broker=await createStrictLidBroker({sourceUrl,fileSizeBytes:64,dispatcher:null,
+      pathPrefix:'finite-mkv-seek',finiteWindowBytes:8,finiteCacheBytes:64,releaseDelayMs:0,
+      completedReleaseDelayMs:0,effectiveUrlIdentitySha256:identity,expectedValidator:prefix.validator,
+      finiteCurrentPrefixOwner:'current-startup',finiteCurrentPrefix:{...prefix,...mutation}});
+    try {
+      const response=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-7'}});
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()),data.subarray(0,8));
+      assert.equal(broker.currentPrefixBytes,0);assert.equal(calls,before+1);
+    } finally {await broker.close();}
+  }
+});
+
 test('a validated resume reuses the previously materialized MKV prefix after one current warmup', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));

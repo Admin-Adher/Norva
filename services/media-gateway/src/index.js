@@ -5652,6 +5652,32 @@ function finiteMkvSeekCacheStore(context, range, payload) {
     }
 }
 
+function seedFiniteMkvCurrentPrefix(context, options) {
+    const prefix = options.finiteCurrentPrefix;
+    const owner = String(options.finiteCurrentPrefixOwner || '');
+    if (context.pathPrefix !== 'finite-mkv-seek' || !owner || !prefix
+        || prefix.captureOwner !== owner || prefix.complete !== true
+        || prefix.sourceSha256 !== crypto.createHash('sha256').update(context.sourceUrl).digest('hex')
+        || prefix.fileSizeBytes !== context.fileSizeBytes
+        || !/^[a-f0-9]{64}$/.test(String(prefix.effectiveUrlIdentitySha256 || ''))
+        || prefix.effectiveUrlIdentitySha256 !== context.effectiveUrlIdentitySha256
+        || !Number.isFinite(prefix.capturedAt) || Date.now() < prefix.capturedAt
+        || Date.now() - prefix.capturedAt > 60_000
+        || !Buffer.isBuffer(prefix.payload) || !prefix.payload.length
+        || prefix.payload.length > Math.min(context.fileSizeBytes, context.finiteCacheMaxBytes, 8 * 1024 * 1024)) return false;
+    const validator = prefix.validator ? normalizeStrictLidExpectedValidator(prefix.validator) : null;
+    if ((prefix.validator && !validator)
+        || (validator?.kind || null) !== (context.validator?.kind || null)
+        || (validator?.value || null) !== (context.validator?.value || null)) return false;
+    // These bytes came from this startup's fully drained exact range, not a
+    // retained/shared cache. Later provider responses still validate normally.
+    finiteMkvSeekCacheStore(context, { start: 0, end: prefix.payload.length - 1 }, Buffer.from(prefix.payload));
+    context.finiteCurrentPrefixBytes = prefix.payload.length;
+    context.finiteResumePrefixCandidate = null;
+    context.finiteResumePrefixCandidateChecked = true;
+    return true;
+}
+
 function normalizeFiniteMkvResumePrefixCandidate(value, context) {
     const candidate = value && typeof value === 'object' ? value : null;
     const validator = candidate?.validator
@@ -6939,6 +6965,7 @@ async function createStrictLidBroker(options = {}) {
             ),
         );
     }
+    seedFiniteMkvCurrentPrefix(context, options);
     const server = http.createServer((req, res) => {
         handleStrictLidBrokerRequest(context, expectedPath, req, res);
     });
@@ -6978,6 +7005,7 @@ async function createStrictLidBroker(options = {}) {
         get cacheEvictions() { return context.finiteCacheEvictions; },
         get resumePrefixCacheHit() { return context.finiteResumePrefixCacheHit; },
         get resumePrefixCacheBytes() { return context.finiteResumePrefixCacheBytes; },
+        get currentPrefixBytes() { return context.finiteCurrentPrefixBytes || 0; },
         get resumePrefixPublished() { return context.finiteResumePrefixPublished; },
         get maxQueuedRequests() { return context.finiteMaxQueuedRequests; },
         get maxQueuedProviderWindows() { return context.finiteMaxQueuedProviderWindows; },
@@ -14540,6 +14568,18 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
                         .digest('hex');
                     session.startupTimings.providerSeekPrefixIdentityBytes = identityPrefix.length;
                 }
+                const currentHeader = headerByteCache.get(session.sourceUrl);
+                if (captureResumeHeader && currentHeader?.captureOwner === session.id
+                    && currentHeader.len === drainedBytes && drainedBytes <= 8 * 1024 * 1024) {
+                    session.currentVodPrefix = {
+                        captureOwner: session.id, complete: true, capturedAt: Date.now(),
+                        sourceSha256: sha256Hex(session.sourceUrl),
+                        fileSizeBytes: fileSizeBytesForSession(session),
+                        effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
+                        validator: session.vodInputValidator || null,
+                        payload: Buffer.concat(currentHeader.chunks, currentHeader.len),
+                    };
+                }
                 pinProviderNodeRouteForSession(session, providerRoute);
                 return;
             }
@@ -15099,6 +15139,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
         finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
         finiteResumePrefixCandidate,
+        finiteCurrentPrefix: finiteMkv ? session.currentVodPrefix : null,
+        finiteCurrentPrefixOwner: session.id,
         finiteResumeRanges: resumeRanges,
         onFiniteWindow: tsObserver ? window => tsObserver.observe(window) : null,
         onFiniteResumePrefix: !finiteMkv ? null : (prefix) => finiteMkvResumePrefixCache.put({
@@ -15113,12 +15155,14 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         abortSignal: parentSignal,
     });
     session.finiteMkvSeekBroker = broker;
+    session.currentVodPrefix = null;
     session.finiteTsSeekBroker = finiteTs;
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.boundedMkvInputPump = false;
     session.startupTimings.finiteMkvSeekBroker = !finiteTs;
     session.startupTimings.finiteTsSeekBroker = finiteTs;
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
+    session.startupTimings.finiteMkvCurrentPrefixBytes = broker.currentPrefixBytes;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
     session.startupTimings.finiteTsSeekLookbehindBytes = finiteTs ? 256 * 1024 : 0;
     session.startupTimings.finiteTsSeekContinuationGraceMs = finiteTs ? 50 : 0;
@@ -21959,6 +22003,7 @@ function debugSession(session) {
                 plannedSupersessions: Number(session.finiteMkvSeekBroker.plannedSupersessions || 0),
                 resumePrefixCacheHit: session.finiteMkvSeekBroker.resumePrefixCacheHit === true,
                 resumePrefixCacheBytes: Number(session.finiteMkvSeekBroker.resumePrefixCacheBytes || 0),
+                currentPrefixBytes: Number(session.finiteMkvSeekBroker.currentPrefixBytes || 0),
                 resumePrefixPublished: session.finiteMkvSeekBroker.resumePrefixPublished === true,
                 warmupCueGraceMs: Number(session.finiteMkvSeekBroker.warmupCueGraceMs || 0),
                 warmupWindowBytes: Number(session.finiteMkvSeekBroker.warmupWindowBytes || 0),
