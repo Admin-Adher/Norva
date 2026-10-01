@@ -337,7 +337,10 @@ test('unconfirmed expiry of a malformed Live replacement prevents another automa
   assert.equal(f.resolutions.length, 1);
   assert.equal(f.expirations.filter(id => id === session(2)).length, 1);
   assert.equal(f.timers.length, 1, 'failed release must not consume another provider lane');
-  assert.equal(f.launches.length, 1);
+  assert.equal(f.launches.length, 2);
+  assert.equal(f.launches[1].recoveryError, 'resolution_unavailable');
+  assert.equal(f.launches[1].url, undefined, 'only a terminal callback, never another media launch');
+  assert.ok(f.launches[1].recoveryToken, 'the callback remains bound to the pending native request');
   assert.equal(f.notices.length, 1, 'the still-active viewer receives the existing recovery error');
 });
 
