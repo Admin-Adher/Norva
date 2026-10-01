@@ -89,14 +89,14 @@ test('subscription removes every expired promotion before painting catalog price
   assert.match(subscribe, /if \(!normalized\) return false/);
 });
 
-test('Revolut validation, cancellation and synchronous submit errors always re-arm safely', () => {
+test('Revolut pre-submission validation re-arms while reconciliation remains locked', () => {
   const checkout = read('public/checkout-revolut.html');
 
   assert.match(checkout, /let cardValid = false/);
   assert.match(checkout, /function syncPayAvailability\(\)/);
-  assert.match(checkout, /payBtn\.disabled = submitting \|\| !cardField \|\| !cardValid \|\| !commercialQuote/);
+  assert.match(checkout, /payBtn\.disabled = submitting \|\| finishing \|\| checkoutCompleted \|\| !cardField \|\| !cardValid \|\| !commercialQuote/);
   assert.match(checkout, /onValidation: function \(errors\)[\s\S]{0,500}submitting = false;[\s\S]{0,300}syncPayAvailability\(\)/);
-  assert.match(checkout, /onCancel: function \(\)[\s\S]{0,220}submitting = false;[\s\S]{0,180}syncPayAvailability\(\)/);
+  assert.match(checkout, /onCancel: function \(\)[\s\S]{0,400}submitting = false;[\s\S]{0,180}syncPayAvailability\(\)/);
   assert.match(checkout, /try \{[\s\S]{0,120}cardField\.submit\([\s\S]{0,260}catch \(error\)[\s\S]{0,180}submitting = false/);
 });
 
