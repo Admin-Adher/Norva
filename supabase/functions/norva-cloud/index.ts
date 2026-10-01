@@ -8,6 +8,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, DISCOVERY_SELECTION_ENABLED, discoverySourceId, isDiscoverySourceId, retiredDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
 import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
+import { preparedSelectionCatalog, selectionPreparedRevision } from "../_shared/selection-prepared-catalog.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { isM3uSeriesId, isM3uEpisodeId, loadM3uSeriesInfo, resolveOwnedM3uEpisode } from "../_shared/m3u-series-info.mjs";
 import { buildM3uCatalogRows, m3uCatalogCounts } from "../_shared/m3u-media-classification.mjs";
@@ -3597,48 +3598,41 @@ async function syncM3uSource(
     steps: { connect: { status: "running" } },
   });
   await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
-  const playlist = playlistUrl === DISCOVERY_PLAYLIST_URL
-    ? await fetchDiscoverySelection({ heartbeat })
-    : await fetchM3uItems(playlistUrl, 60_000, {
-      maxBytes: 128 * 1024 * 1024,
-      maxItems: 100_000,
-    });
-  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
-  await reportProgress({
-    stage: "discovered",
-    percent: 42,
-    steps: {
-      connect: { status: "done" },
-      channels: { status: "running" },
-      movies: { status: "skipped" },
-      series: { status: "skipped" },
-      categories: { status: "running" },
-    },
-  });
-  const items = playlist.items as M3uPlaylistItem[];
-  const rows: JsonRecord[] = playlistUrl === DISCOVERY_PLAYLIST_URL ? []
-    : await buildM3uCatalogRows(items, { userId, sourceId, hash: sha256Hex, heartbeat });
+  let playlist: { sources?: unknown; truncated?: boolean; truncationReason?: unknown };
+  let rows: JsonRecord[];
   if (playlistUrl === DISCOVERY_PLAYLIST_URL) {
-    for (let index = 0; index < items.length; index += 500) {
-      await heartbeat();
-      const chunk = await Promise.all(items.slice(index, index + 500).map(async (item) => ({
-        user_id: userId,
-        source_id: sourceId,
-        item_type: "live",
-        external_id: item.tvgId || await sha256Hex(item.url),
-        parent_external_id: item.group || null,
-        title: item.title,
-        subtitle: item.group || null,
-        poster_url: item.logo || null,
-        backdrop_url: null,
-        metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
-        playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
-        available: true,
-        ...discoveryCatalogFields(playlistUrl, item),
-      })));
-      rows.push(...chunk);
-    }
+    const prepared = await preparedSelectionCatalog({ db, key: await selectionPreparedRevision(),
+      assertCurrent: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation),
+      build: async () => {
+        const fetched = await fetchDiscoverySelection({ heartbeat });
+        const template: JsonRecord[] = [];
+        for (let index = 0; index < fetched.items.length; index += 500) {
+          await heartbeat();
+          const chunk = await Promise.all(fetched.items.slice(index, index + 500).map(async (item: M3uPlaylistItem) => ({
+            item_type: "live", external_id: item.tvgId || await sha256Hex(item.url),
+            parent_external_id: item.group || null, title: item.title, subtitle: item.group || null,
+            poster_url: item.logo || null, backdrop_url: null,
+            metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
+            playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }), available: true,
+            ...discoveryCatalogFields(playlistUrl, item),
+          })));
+          template.push(...chunk);
+        }
+        return { ...fetched, rows: template };
+      },
+    });
+    playlist = prepared;
+    rows = prepared.rows.map((row: JsonRecord) => ({ ...row, user_id: userId, source_id: sourceId }));
+  } else {
+    const fetched = await fetchM3uItems(playlistUrl, 60_000, { maxBytes:128 * 1024 * 1024, maxItems:100_000 });
+    playlist = fetched;
+    rows = await buildM3uCatalogRows(fetched.items as M3uPlaylistItem[], { userId, sourceId, hash:sha256Hex, heartbeat });
   }
+  await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
+  await reportProgress({ stage:"discovered", percent:42, steps:{
+    connect:{status:"done"}, channels:{status:"running"}, movies:{status:"skipped"},
+    series:{status:"skipped"}, categories:{status:"running"},
+  } });
 
   const { counts, categories } = m3uCatalogCounts(rows);
   const { movies: movieCount, series: seriesCount, live: liveCount } = counts;
@@ -3655,21 +3649,13 @@ async function syncM3uSource(
       import: { status: "running", count: rows.length },
     },
   });
-  const savedRows = await replaceSourceItems(
-    sourceId,
-    userId,
-    rows,
-    db,
-    generation,
-    heartbeat,
-    playlistUrl === DISCOVERY_PLAYLIST_URL,
-  );
-  await reportProgress({
-    stage: "finalizing",
-    percent: 86,
-    steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
-  });
-  if (playlistUrl === DISCOVERY_PLAYLIST_URL && (movieCount > 0 || seriesCount > 0)) {
+  const isSelection = playlistUrl === DISCOVERY_PLAYLIST_URL;
+  if (isSelection) {
+    const starter = selectionStarterRows(rows);
+    const first = new Set(starter);
+    rows = [...starter, ...rows.filter(row => !first.has(row))];
+  }
+  const publishStarter = async (savedRows: LiveCatalogItem[]) => {
     await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation);
     const starterRows = selectionStarterRows(savedRows);
     if (starterRows.length) {
@@ -3684,7 +3670,13 @@ async function syncM3uSource(
         browseReady: true,
       });
     }
-  }
+  };
+  const savedRows = await replaceSourceItems(sourceId, userId, rows, db, generation, heartbeat,
+    isSelection, isSelection ? publishStarter : undefined);
+  await reportProgress({
+    stage: "finalizing", percent: 86,
+    steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
+  });
   return {
     live: liveCount, movies: movieCount, series: seriesCount, total: rows.length,
     finalizePending: true,
@@ -3703,6 +3695,7 @@ async function replaceSourceItems(
   generation: ActiveCatalogGeneration,
   heartbeat: () => Promise<void> = async () => {},
   preserveUntilSaved = false,
+  onFirstBatchSaved?: (rows: LiveCatalogItem[]) => Promise<void>,
 ): Promise<LiveCatalogItem[]> {
   const savedRows: LiveCatalogItem[] = [];
   const catalogVersion = preserveUntilSaved ? Date.now() : null;
@@ -3722,6 +3715,7 @@ async function replaceSourceItems(
       adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation) });
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
+    if (index === 0 && savedRows.length) await onFirstBatchSaved?.(savedRows);
   }
   if (preserveUntilSaved) {
     for (let guard = 0; guard < 600; guard += 1) {

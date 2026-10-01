@@ -17,6 +17,7 @@ const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const { Agent, request: undiciRequest } = require('undici');
 const { createProviderProxyAgent } = require('./providerProxyAgent');
+const { publicVodDirectRoute, isPublicDirectRoute } = require('./public-vod-route');
 const { createWeakValidatorAttestationSpool } = require('./weakValidatorAttestationSpool');
 const { acquireAuthoritativeVodSpool, createAuthoritativePlaybackSpool, verifySpoolAttestation } = require('./authoritative-vod-spool');
 const { parseHttpForwardAccounts, useProviderHttpForward } = require('./provider-http-forward-policy');
@@ -14232,12 +14233,17 @@ function providerNodeRouteIsAvailable(route) {
 }
 
 function providerNodeRouteForSession(session) {
+    const affinityKey = proxyKeyFromUrl(session?.sourceUrl || '');
+    const operatorOverride = affinityKey && providerProxySlotOverrides.has(sha256Hex(affinityKey));
+    if (!operatorOverride && isPublicDirectRoute(session?.providerNodeRoute) && publicVodDirectRoute(session?.sourceUrl)) {
+        return session.providerNodeRoute;
+    }
     if (providerNodeRouteIsAvailable(session?.providerNodeRoute)) {
         return session.providerNodeRoute;
     }
-    const affinityKey = proxyKeyFromUrl(session?.sourceUrl || '');
+    const publicRoute = !operatorOverride && publicVodDirectRoute(session?.sourceUrl);
+    if (publicRoute) return publicRoute;
     const fallbackRoute = affinityKey ? providerRouteForKey(affinityKey) : null;
-    const operatorOverride = affinityKey && providerProxySlotOverrides.has(sha256Hex(affinityKey));
     const route = !operatorOverride && providerNodeRouteIsAvailable(session?.canaryProviderRoute)
         ? session.canaryProviderRoute : fallbackRoute;
     if (providerNodeRouteIsAvailable(route)
@@ -14256,6 +14262,13 @@ function providerProxyAgentForRoute(route) {
 }
 
 function pinProviderNodeRouteForSession(session, route) {
+    if (session && isPublicDirectRoute(route) && publicVodDirectRoute(session.sourceUrl)) {
+        session.providerNodeRoute = Object.freeze({ ...route });
+        session.startupTimings = asRecord(session.startupTimings);
+        session.startupTimings.providerNodeTransport = 'direct';
+        session.startupTimings.providerProxySlot = 0;
+        return session.providerNodeRoute;
+    }
     if (!session || !providerNodeRouteIsAvailable(route)) return null;
     const pinned = Object.freeze({
         slot: Number(route.slot),
@@ -14884,7 +14897,12 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             if (parentSignal?.aborted || error?.code === 'VOD_INPUT_ABORTED') {
                 throw abortedVodInputPumpError();
             }
-            const alternateRoute = !transportFallbackAttempted && shouldFallbackProviderNodeTransport(error)
+            const publicDirectFallback = isPublicDirectRoute(providerRoute)
+                && (shouldFallbackProviderNodeTransport(error) || [403, 429, 502, 503, 504].includes(error?.upstreamStatus))
+                ? providerRouteForKey(proxyKeyFromUrl(session.sourceUrl)) : null;
+            const alternateRoute = !transportFallbackAttempted && publicDirectFallback
+                ? publicDirectFallback
+                : !transportFallbackAttempted && shouldFallbackProviderNodeTransport(error)
                 ? alternateProviderNodeTransportRoute(providerRoute)
                 : null;
             if (alternateRoute) {
