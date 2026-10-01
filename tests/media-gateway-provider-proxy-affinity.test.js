@@ -331,8 +331,8 @@ test('gateway uses the canonical provider key on every provider network lane', (
     'the admitted local HLS writer must also bypass provider proxies');
   assert.match(
     gateway,
-    /spawn\(FFPROBE_PATH, args, \{[\s\S]{0,160}env: options\.loopbackBroker === true \? loopbackOnlyEnv\(\) : proxyEnvFor\(proxyKeyFromUrl\(sourceUrl\)\)/,
-    'ffprobe must use the provider-account key',
+    /spawn\(FFPROBE_PATH, args, \{[\s\S]{0,160}env: options\.loopbackBroker === true \? loopbackOnlyEnv\(\)\s*: proxyEnvFor\(proxyKeyFromUrl\(sourceUrl\), providerNodeRouteForSession\(\{ sourceUrl \}\)\)/,
+    'ffprobe must retain the provider-account key while using its qualified route',
   );
   assert.match(
     gateway,
