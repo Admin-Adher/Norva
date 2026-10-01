@@ -1,4 +1,5 @@
 import { connect } from "cloudflare:sockets";
+import { selectionVodOrigin, proxySelectionVodOrigin } from "./selectionVodOrigin.mjs";
 import { preserveRelayResponseLength } from "./relayResponseLength.mjs";
 import { boundedProgressiveRange, createRelayBodyReader, createResumableProgressiveBody } from "./relayProgressiveStream.mjs";
 import {
@@ -620,6 +621,13 @@ function withRelayPlaybackLiveness(response, request, env, claims) {
 
 async function proxyPlayback(request, env, claims, ctx) {
   const targetUrl = new URL(claims.url);
+  const selectionOrigin = selectionVodOrigin(targetUrl);
+  if (selectionOrigin) {
+    const response = await proxySelectionVodOrigin(request, selectionOrigin,
+      url => signedRelayUrl(url, claims, env, request));
+    mergeCors(response.headers, corsHeaders(request, env));
+    return withRelayPlaybackLiveness(response, request, env, claims);
+  }
   const headers = new Headers();
   copyHeader(request.headers, headers, "accept");
   copyHeader(request.headers, headers, "accept-language");
