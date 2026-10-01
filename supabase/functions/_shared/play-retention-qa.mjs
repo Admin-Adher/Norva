@@ -12,7 +12,9 @@ export function validPlayQaConfig(value, userId, now = Date.now()) {
 }
 
 export async function playQaContext(userId, createClient, dependencies = {}) {
-  const read = dependencies.read || (() => Deno.readTextFile(new URL('./play-retention-qa.config.json', import.meta.url)));
+  // Edge workers bundle modules into a virtual filesystem. Operator secrets
+  // live in the existing host-mounted directory, never in that module bundle.
+  const read = dependencies.read || (() => Deno.readTextFile('/home/deno/functions/_shared/play-retention-qa.config.json'));
   let config;
   try { config = JSON.parse(await read()); }
   catch (error) {
