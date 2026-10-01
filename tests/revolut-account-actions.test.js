@@ -63,6 +63,10 @@ function harness(options = {}) {
     },
     async rpc(name, args) {
       calls.rpc.push({ name, args });
+      if (name === 'norva_dispatch_billing_confirmations') {
+        if (options.dispatchThrows) throw new Error('dispatch unavailable');
+        return { data: null, error: null };
+      }
       return {
         data: Object.prototype.hasOwnProperty.call(options, 'rpcData')
           ? options.rpcData
@@ -162,7 +166,9 @@ test('/cancel delegates projection mutation and event journaling to one atomic R
   assert.deepEqual(result.body, {
     ok: true, status: 'cancelled_at_period_end', access_until: trialEnd,
   });
-  assert.equal(calls.rpc.length, 1);
+  assert.deepEqual(calls.rpc.map(call => call.name), [
+    'norva_apply_revolut_account_action', 'norva_dispatch_billing_confirmations',
+  ]);
   assert.equal(calls.rpc[0].name, 'norva_apply_revolut_account_action');
   assert.equal(calls.rpc[0].args.p_user_id, 'user-1');
   assert.equal(calls.rpc[0].args.p_action, 'cancel');
@@ -184,7 +190,9 @@ test('/cancel preserves the authoritative access boundary returned by SQL', asyn
   });
   assert.equal(result.status, 200);
   assert.equal(result.body.access_until, periodEnd);
-  assert.equal(calls.rpc.length, 1);
+  assert.deepEqual(calls.rpc.map(call => call.name), [
+    'norva_apply_revolut_account_action', 'norva_dispatch_billing_confirmations',
+  ]);
 });
 
 test('/cancel exposes immediate expiry returned by the atomic action', async () => {
@@ -192,7 +200,21 @@ test('/cancel exposes immediate expiry returned by the atomic action', async () 
     rpcData: [{ status: 'expired', access_until: null, applied: true }],
   });
   assert.deepEqual(result, { status: 200, body: { ok: true, status: 'expired', access_until: null } });
-  assert.equal(calls.rpc.length, 1);
+  assert.deepEqual(calls.rpc.map(call => call.name), [
+    'norva_apply_revolut_account_action', 'norva_dispatch_billing_confirmations',
+  ]);
+});
+
+test('/cancel stays successful when the best-effort email dispatch fails', async () => {
+  const periodEnd = new Date(Date.now() + 3 * 86400000).toISOString();
+  const { result } = await run(cancelRoute, '/cancel', {
+    dispatchThrows: true,
+    rpcData: [{ status: 'cancelled_at_period_end', access_until: periodEnd, applied: true }],
+  });
+  assert.deepEqual(result, {
+    status: 200,
+    body: { ok: true, status: 'cancelled_at_period_end', access_until: periodEnd },
+  });
 });
 
 test('/cancel is idempotent once already cancelled', async () => {

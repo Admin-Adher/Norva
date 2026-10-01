@@ -115,8 +115,13 @@ test('failed Revolut cancel restores controls and keeps the confirmation open', 
   assert.doesNotMatch(source, /input\.required\s*=\s*true/,
     'the optional reason must never gate cancellation');
   assert.match(handler, /await doCancel\(cancelReason\)/);
-  assert.ok(handler.indexOf('cm.close();') < handler.indexOf('location.reload();'),
+  assert.ok(handler.indexOf('cm.close();') > handler.indexOf('await doCancel(cancelReason)'),
     'the modal must close only after the API succeeds');
+  assert.ok(handler.indexOf('return;') > handler.indexOf('catch (e)') &&
+    handler.indexOf('return;') < handler.indexOf('cm.close();'),
+    'an API failure must return before closing the confirmation');
+  assert.ok(handler.indexOf('showCancellationResult(result, decision)') > handler.indexOf('cm.close();'),
+    'the success offer must follow the confirmed cancellation');
   assert.match(handler, /catch \(e\)/);
   assert.match(handler, /cancelNow\.disabled = false/);
   assert.match(handler, /b\.disabled = false/);
