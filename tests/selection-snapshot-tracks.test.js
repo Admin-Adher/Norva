@@ -42,12 +42,12 @@ test('Selection tracks are exact snapshot data; URL pins and canonical ownership
   assert.deepEqual(await hydrateSelectionSnapshotMovieTracks(args),{seeded:0});
   db.rpc=realRpc;calls.length=0;
   const allManifests=await selectionSnapshotMovieManifests(rows);
-  const eligible=new Set(allManifests.slice(0,120).map(m=>m.externalId));
+  const eligible=new Set(allManifests.slice(0,520).map(m=>m.externalId));
   await hydrateSelectionSnapshotMovieTracks({...args,rows:rows.filter(r=>eligible.has(r.external_id))});
   const batches=calls.filter(c=>c.name==='hydrate_selection_snapshot_movie_languages');
   assert.equal(batches.length,3);
-  assert.ok(batches.every(c=>c.args.p_files.length<=50));
-  assert.equal(batches.reduce((n,c)=>n+c.args.p_files.length,0),120);
+  assert.ok(batches.every(c=>c.args.p_files.length<=250));
+  assert.equal(batches.reduce((n,c)=>n+c.args.p_files.length,0),520);
   calls.length=0;
   await assert.rejects(hydrateSelectionSnapshotMovieTracks({...args,assertSourceCurrent:async()=>{throw Error('source changed');}}),/source changed/);
   assert.equal(calls.length,0,'a stale source must fail before mutation');

@@ -51,6 +51,15 @@ export function initialTitleBatchLimit(_isSelection, firstSliceReady, activeFina
   return activeFinalizers === 1 ? 150 : activeFinalizers === 2 ? 100 : 60;
 }
 
+// A single warm Selection binds existing recipes without provider/TMDB I/O.
+// Keep at least 20% idle time and fall back to the ordinary pause on contention,
+// incomplete cache coverage or a slow batch. The next batch recounts admission.
+export function preparedSelectionThrottle({ isSelection, prepared, activeFinalizers, elapsedMs, ordinaryMs }) {
+  if (!isSelection || !prepared || activeFinalizers !== 1
+    || !Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > 5000) return ordinaryMs;
+  return Math.min(ordinaryMs, Math.max(500, Math.ceil(elapsedMs / 4)));
+}
+
 // The lease table stays private. This service-only RPC exposes one aggregate,
 // using the same database clock/expiry boundary as the durable lease claims.
 export async function activeFinalizeLeaseCount(db) {

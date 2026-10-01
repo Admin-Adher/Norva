@@ -8,11 +8,11 @@ test('all Selection hydration batches join their own writes without relaxing sou
   const {hydrateSelectionAudioResults}=await import('../supabase/functions/_shared/selection-audio-results.mjs');
   const sourceId=await discoverySourceId('owner');
   const publicRows=(await fetchSelectionVod({fetchPlaylist:async()=>{throw Error('offline test')}})).items.map(x=>x.fields);
-  const eligible=new Set((await tracks.selectionSnapshotMovieManifests(publicRows)).slice(0,120).map(x=>x.externalId));
+  const eligible=new Set((await tracks.selectionSnapshotMovieManifests(publicRows)).slice(0,520).map(x=>x.externalId));
   const cases=[
     [tracks.hydrateSelectionSnapshotMovieTracks,publicRows.filter(r=>eligible.has(r.external_id))],
-    [hydrateSelectionAudioResults,Array.from({length:120},(_,i)=>({item_type:'movie',external_id:'movie:'+i}))],
-    [tracks.hydrateSelectionSnapshotSeriesTracks,Array.from({length:120},(_,i)=>({item_type:'series',
+    [hydrateSelectionAudioResults,Array.from({length:520},(_,i)=>({item_type:'movie',external_id:'movie:'+i}))],
+    [tracks.hydrateSelectionSnapshotSeriesTracks,Array.from({length:520},(_,i)=>({item_type:'series',
       external_id:'norva-selection:series:'+i.toString(16).padStart(64,'0'),metadata:{seriesDelivery:'selection'}}))],
   ];
   for(const [hydrate,rows] of cases){
@@ -31,7 +31,7 @@ test('all Selection hydration batches join their own writes without relaxing sou
     await assert.rejects(hydrate(input),/stale epoch/);
     assert.equal(calls,1);
     calls=0;dbEpoch=3;snapshotEpoch=3;
-    await hydrate({...input,getGenerationFence:fence});assert.equal(calls,3);
+    await hydrate({...input,getGenerationFence:fence});assert.equal(calls,hydrate===tracks.hydrateSelectionSnapshotSeriesTracks?11:3);
     calls=0;sourceChanged=true;
     await assert.rejects(hydrate({...input,getGenerationFence:fence}),/source changed/);
     assert.equal(calls,0,'authority changes must still stop before writes');

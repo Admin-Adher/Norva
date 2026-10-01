@@ -96,6 +96,7 @@ function makeHarness({ globalViewerBusyChecks = null } = {}) {
     proxyEnvFor() {
       return undefined;
     },
+    providerNodeRouteForSession() { return null; },
     isProxyAuthenticationFailure: providerFailure.isProxyAuthenticationFailure,
     sanitizeLog(value) {
       return String(value || '');
@@ -146,6 +147,7 @@ function makeProbeRouteHarness() {
   const events = [];
   let releaseDelay = null;
   const context = {
+    providerNodeRouteForSession() { return null; },
     Error,
     JSON,
     Map,

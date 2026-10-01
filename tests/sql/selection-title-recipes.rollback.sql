@@ -9,6 +9,8 @@ declare a uuid:=current_setting('test.selection.owner_a')::uuid;
   b uuid:=current_setting('test.selection.owner_b')::uuid;
   s uuid; ns uuid; h text; snap jsonb; rev text; fixture jsonb; ids uuid[]; old_ids uuid[];
   recipe_count integer; result jsonb; started timestamptz; before_count integer;
+  manifest jsonb:=nullif(current_setting('test.selection.manifest',true),'')::jsonb;
+  hydrated integer;
 begin
   assert a<>b, 'two owners required';
   assert not has_table_privilege('authenticated','public.selection_title_recipes','SELECT');
@@ -27,6 +29,7 @@ begin
         and v.user_id=a and v.source_id=s and v.generation_id=m.generation_id
       join public.cloud_titles t on t.id=v.title_id and t.user_id=a
       where m.user_id=a and m.source_id=s and m.item_type in ('movie','series') and m.available
+        and (manifest is null or m.external_id in (select f->>'externalId' from jsonb_array_elements(manifest) f))
       order by m.id limit 500
     ) entries;
   recipe_count:=public.norva_cache_selection_title_recipes(rev,fixture);
@@ -88,5 +91,15 @@ begin
       or v.generation_id<>(snap->>'generationId')::uuid or v.media_item_id=any(old_ids)));
   raise notice 'cross-owner bind: % variants in % ms; ACL, foreign IDs, stale fence and expiry passed',
     recipe_count,round(extract(epoch from clock_timestamp()-started)*1000);
+  if manifest is not null then
+    assert jsonb_array_length(manifest)=250 and recipe_count>200, 'full hydration request required';
+    snap:=public.norva_get_catalog_write_snapshot(ns,b);
+    started:=clock_timestamp();
+    hydrated:=public.hydrate_selection_snapshot_movie_languages(b,ns,(snap->>'generationId')::uuid,
+      (snap->>'headRevision')::bigint,(snap->>'configRevision')::bigint,
+      (snap->>'sourceVisibilityEpoch')::bigint,(snap->>'userVisibilityEpoch')::bigint,manifest);
+    assert hydrated=recipe_count, 'all newly bound files must retain audited tracks';
+    raise notice 'new-owner snapshot 250: % ms, % hydrated',round(extract(epoch from clock_timestamp()-started)*1000),hydrated;
+  end if;
 end $test$;
 rollback;
