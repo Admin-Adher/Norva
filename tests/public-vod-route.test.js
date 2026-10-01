@@ -31,3 +31,19 @@ test('the actual FFmpeg environment removes proxy variables only for the qualifi
     assert.equal(direct.https_proxy,undefined); assert.equal(direct.ALL_PROXY,undefined); assert.equal(direct.KEEP,'value');
     assert.equal(context.proxyEnvFor('ordinary').https_proxy,'configured-proxy');
 });
+
+test('range broker receives an owned direct agent instead of its default proxy fallback', () => {
+    const source = require('node:fs').readFileSync('services/media-gateway/src/index.js','utf8');
+    const code = source.slice(source.indexOf('function pinnedProxyAgentFactoryForRoute('), source.indexOf('function waitForVodInputRetry('));
+    let agents = 0;
+    const context = { isPublicDirectRoute, Agent: class { constructor() { agents++; this.direct = true; } },
+        providerNodeRouteIsAvailable: route => !!route?.slot,
+        providerSocksProxyUrls: [], providerHttpProxyUrls: ['proxy'], createProviderProxyAgent: url => ({url}) };
+    require('node:vm').runInNewContext(code,context);
+    const factory = context.pinnedProxyAgentFactoryForRoute(publicVodDirectRoute(base+'film.mp4'));
+    assert.equal(typeof factory, 'function');
+    assert.equal(factory().direct, true); assert.equal(factory().direct, true);
+    assert.equal(agents, 2, 'broker refresh owns a fresh direct connection pool');
+    assert.equal(context.pinnedProxyAgentFactoryForRoute({slot:1,nodeTransport:'http'})().url, 'proxy');
+    assert.equal(context.pinnedProxyAgentFactoryForRoute(null), null);
+});

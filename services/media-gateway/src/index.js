@@ -14320,6 +14320,10 @@ function shouldFallbackProviderNodeTransport(error) {
 }
 
 function pinnedProxyAgentFactoryForRoute(route) {
+    // A null factory means "choose the default proxy" to the range broker.
+    // Supply an owned direct dispatcher explicitly so seeks retain the same
+    // qualified public route as the initial playback GET.
+    if (isPublicDirectRoute(route)) return () => new Agent();
     if (!providerNodeRouteIsAvailable(route)) return null;
     const urls = route.nodeTransport === 'socks5'
         ? providerSocksProxyUrls
@@ -15386,7 +15390,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         fileSizeBytes,
     });
     const primaryProviderRoute = providerNodeRouteForSession(session);
-    const fallbackProviderRoute = alternateProviderNodeTransportRoute(primaryProviderRoute);
+    const fallbackProviderRoute = isPublicDirectRoute(primaryProviderRoute)
+        ? providerRouteForKey(proxyKeyFromUrl(session.sourceUrl))
+        : alternateProviderNodeTransportRoute(primaryProviderRoute);
+    pinProviderNodeRouteForSession(session, primaryProviderRoute);
     const identity = asRecord(session.playbackIdentity);
     const privateRanges = canUsePrivateResumeCache(session.ownerKey) && identity.sourceId && identity.sourceRevision
         ? privateResumeByteRanges.begin({ ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
