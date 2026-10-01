@@ -757,6 +757,50 @@ test('active refresh carries durable category counts and resumes after generatio
   assert.equal(progress.catalogVersion, 9);
 });
 
+test('live prune resumes small slices with the returned epoch before advancing the action', async () => {
+  let progress = { version: 1, catalogVersion: 9, action: 'live_streams', actionComplete: true,
+    cursor: '', spoolToken: '', contentSha256: 'a'.repeat(64), processedCategories: 357,
+    processedItems: 21606, observedItems: 21606, categoryCount: 357 };
+  let checkpointRevision = 402;
+  let epoch = 3;
+  let remaining = 138;
+  let slices = 0;
+  const source = section('const ACTIVE_REFRESH_ACTIONS', '\nasync function restoreAfterPostSwitchFailure');
+  const run = vm.runInNewContext(`(() => { ${source}; return runActivePostSwitchRefresh; })()`, {
+    requiredJobGenerationId: () => 'generation', isRecord: value => value && typeof value === 'object',
+    uuidValue: value => value, nonNegativeInteger: value => { assert.ok(Number.isInteger(value) && value >= 0); return value; },
+    WorkerFault: class WorkerFault extends Error {},
+    gatewayMetadataPage: async () => assert.fail('completed inventory must not be fetched again'),
+    workerRpc: async (name, params) => {
+      if (name === 'norva_get_catalog_write_snapshot') return { generationId: 'generation',
+        headRevision: 1, configRevision: 1, sourceVisibilityEpoch: 3, userVisibilityEpoch: epoch };
+      if (name === 'norva_begin_active_catalog_title_projection_refresh') return {
+        refreshRunId: 'run', checkpointRevision, generationRevision: 9, catalogVersion: 9,
+        actionCategoryCount: 357, visibilityEpoch: epoch, checkpoint: progress };
+      if (name === 'norva_prune_active_catalog_refresh_action_batch') {
+        assert.equal(params.p_expected_checkpoint_revision, checkpointRevision);
+        assert.equal(params.p_user_visibility_epoch, epoch);
+        assert.equal(params.p_action_kind, 'live');
+        assert.equal(params.p_limit, 25);
+        remaining = Math.max(0, remaining - params.p_limit);
+        slices++;
+        return { complete: remaining === 0, visibilityEpoch: ++epoch };
+      }
+      assert.equal(name, 'norva_checkpoint_active_catalog_title_refresh');
+      assert.equal(params.p_user_visibility_epoch, epoch);
+      assert.equal(params.p_expected_checkpoint_revision, checkpointRevision);
+      assert.equal(params.p_requeue, true);
+      assert.equal(params.p_progress.action, remaining ? 'live_streams' : 'vod_streams');
+      progress = params.p_progress;
+      return { checkpointRevision: ++checkpointRevision, visibilityEpoch: epoch, checkpoint: progress, requeued: true };
+    },
+  });
+  const job = { sourceId: 'source', userId: 'owner', jobId: 'job', leaseSequence: 1 };
+  while (remaining) assert.equal((await run(job, 'worker', {}, {})).complete, false);
+  assert.equal(slices, 6);
+  assert.equal(progress.action, 'vod_streams');
+});
+
 test('identity validation is bounded, complete and persists only comparator metrics', () => {
   const validation = section('async function validateCredentialCandidateJob', '\nfunction isCredentialTransportOnly');
   assert.match(validation, /gatewayAccountInfo/);
