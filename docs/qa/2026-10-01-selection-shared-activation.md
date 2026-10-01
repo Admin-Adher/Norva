@@ -41,7 +41,7 @@ SQL times are not browser first-paint or end-to-end activation measurements.
 ## Release and rollback
 
 `ops/hetzner/scripts/deploy-selection-shared-20261001.py` checks installed hashes,
-applies the eight migrations with enrollment disabled, installs seven Edge files,
+applies the nine migrations with enrollment disabled, installs seven Edge files,
 publishes a freshly fetched public manifest with exact recipe/file evidence and
 complete Live variants, then enables new enrollment globally.
 
@@ -83,3 +83,24 @@ Source, variant, owner, external file ID and URL digest are checked. Series use
 language sets, never a synthetic episode track map. Tests reject foreign and
 changed-file evidence and keep unknown languages unknown. This follow-up was
 installed and hash-verified on both Edge replicas.
+
+Fresh production activation at 12:17:21.641 UTC created source generation 8 at
+12:17:23.020, ready at 12:17:23.066: 1.425 s click-to-full-server-readiness, all
+8,611 entries visible and zero physical media rows. Home was still preparing at
+7.36 s and fully rendered at the next observation (15.18 s). This upper bound is
+not a first-paint measurement and is not described as instant UI.
+
+The final SQL optimization skips historical physical-title scanning when this
+media type has no visible physical file. Mixed-provider cursors remain intact.
+Rollback replay passed again: two Home movie pages plus hydration 61 ms, series
+Home 21 ms; both-owner and mixed-provider checks passed.
+
+Real playback before the reset: Creed II decoded 1280×536 video, readyState 4,
+advancing at 8.3 s on the observation 18.4 s after click. Reopening with Resume
+also decoded video. Only the selected film was materialized; a later episode
+created exactly its file and parent. Peaky Blinders episode 1 did not play in
+the browser during this run; a direct 1 KiB range from its existing public CDN
+took 48 s before returning HTTP 206 video/mp4. Its playback is not certified by
+this activation work. TV displayed 20 logical channels / 21 variants with their
+groups. Downton's previously missing Portuguese file label is now displayed in
+search, and Creed II exposes its PT/EN exact-file tracks.

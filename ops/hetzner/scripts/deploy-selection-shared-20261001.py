@@ -32,7 +32,7 @@ def schema():
         p=EDGE/f
         assert (sha(p.read_bytes()) if p.exists() else None)==expected,'Runtime drift: '+f
     files=sorted((ROOT/'supabase/migrations').glob('2026100112*selection_shared*.sql'))
-    assert len(files)==8
+    assert len(files)==9
     statements=[]
     for p in files:
         statements.append('\n'.join(line for line in p.read_text().splitlines() if line not in ['begin;','commit;']))
