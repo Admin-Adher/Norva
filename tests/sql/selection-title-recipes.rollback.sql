@@ -15,8 +15,10 @@ begin
   assert not has_table_privilege('anon','public.selection_title_recipes','INSERT');
   assert not has_function_privilege('authenticated',
     'public.norva_apply_selection_title_recipes(uuid,uuid,uuid,bigint,bigint,bigint,bigint,uuid[],text)','EXECUTE');
-  select id into strict s from public.cloud_sources where user_id=a and enabled and deleted_at is null
-    and public.norva_selection_source_identity_valid(id,user_id) limit 1;
+  select id into strict s from public.cloud_sources where user_id=a and enabled
+    and public.norva_selection_source_identity_valid(id,user_id)
+    and exists(select 1 from public.cloud_title_variants where source_id=cloud_sources.id)
+    order by created_at desc limit 1;
   select revision into strict rev from public.selection_prepared_catalogs limit 1;
   select jsonb_agg(jsonb_build_object('raw',raw,'title',title,'variant',variant)),array_agg(id)
     into fixture,old_ids from (
@@ -37,7 +39,7 @@ begin
   assert not exists(select 1 from public.cloud_sources where id=ns), 'reserved QA source exists';
   insert into public.cloud_sources select new_source.* from public.cloud_sources donor
     cross join lateral jsonb_populate_record(null::public.cloud_sources,to_jsonb(donor)||jsonb_build_object(
-      'id',ns,'user_id',b,'name','Selection rollback probe','config_hint','{}'::jsonb,'sync_status','syncing')) new_source
+      'id',ns,'user_id',b,'deleted_at',null,'name','Selection rollback probe','config_hint','{}'::jsonb,'sync_status','syncing')) new_source
     where donor.id=s and donor.user_id=a;
   snap:=public.norva_get_catalog_write_snapshot(ns,b);
   insert into public.cloud_media_items select new_item.* from public.cloud_media_items donor
@@ -49,6 +51,9 @@ begin
   select array_agg(id order by id) into ids from public.cloud_media_items where source_id=ns and user_id=b;
   snap:=public.norva_get_catalog_write_snapshot(ns,b);
   before_count:=(select count(*) from public.cloud_title_variants where source_id=ns);
+  -- Exercise exactly the PostgREST execution role, not the fixture owner's
+  -- elevated table privileges. Internal authority tables stay RPC-only.
+  perform set_config('role','service_role',true);
   -- Real server guards: a foreign member or stale source fence aborts before any write.
   begin
     perform public.norva_apply_selection_title_recipes(ns,b,(snap->>'generationId')::uuid,

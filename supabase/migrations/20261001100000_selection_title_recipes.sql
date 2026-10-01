@@ -24,7 +24,7 @@ $f$;
 -- Only server-computed recipes for exact entries in the currently qualified
 -- public manifest are admitted. No source/account/row ID is cached.
 create function public.norva_cache_selection_title_recipes(p_revision text,p_recipes jsonb)
-returns integer language plpgsql security invoker set search_path='' as $f$
+returns integer language plpgsql security definer set search_path='' as $f$
 declare v_count integer;
 begin
   perform public.norva_credential_require_service_role();
@@ -62,7 +62,7 @@ $f$;
 create function public.norva_apply_selection_title_recipes(
   p_source_id uuid,p_user_id uuid,p_generation_id uuid,p_head_revision bigint,p_config_revision bigint,
   p_source_visibility_epoch bigint,p_user_visibility_epoch bigint,p_item_ids uuid[],p_revision text
-) returns jsonb language plpgsql security invoker set search_path='' as $f$
+) returns jsonb language plpgsql security definer set search_path='' as $f$
 declare v_snapshot jsonb; v_recipes jsonb; v_count integer; v_titles integer; v_epoch bigint;
 begin
   perform public.norva_credential_require_service_role();
