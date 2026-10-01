@@ -81,6 +81,7 @@ function pumpHarness(overrides = {}) {
         '\nasync function probeFromHeaderBytes(',
     );
     const globals = {
+        ...require('../services/media-gateway/src/public-vod-route'),
         useProviderHttpForward,
         providerHttpForwardAccounts: new Set(),
         providerHttpForwardPolicy: { allCompatibleHttpMedia: false },

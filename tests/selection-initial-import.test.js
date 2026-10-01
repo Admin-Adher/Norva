@@ -150,6 +150,8 @@ test('the real activation importer hands off Selection before any whole-catalogu
         logo: 'poster', metadata: i < 20 ? { providerTmdbId: String(i + 1) } : {} }));
     const context = vm.createContext({
         DISCOVERY_PLAYLIST_URL: selectionUrl, stringOr: (value, fallback) => value || fallback,
+        selectionPreparedRevision: async () => 'test-revision',
+        preparedSelectionCatalog: async ({ build, assertCurrent }) => { await assertCurrent(); return build(); },
         selectionStarterRows,
         m3uCatalogCounts,
         compactRecord: value => value, sha256Hex: async () => 'unused',
@@ -157,7 +159,9 @@ test('the real activation importer hands off Selection before any whole-catalogu
         adoptActiveCatalogUserVisibilityEpoch: async () => {},
         fetchDiscoverySelection: async () => ({ items, sources: ['selection'] }),
         discoveryCatalogFields: (_, item) => ({ item_type: item.item_type, metadata: item.metadata }),
-        replaceSourceItems: async (id, owner, rows) => { saved.push(...rows); return rows; },
+        replaceSourceItems: async (id, owner, rows, db, generation, heartbeat, preserve, publish) => {
+            await publish?.(rows.slice(0, 500)); saved.push(...rows); return rows;
+        },
         refreshMaterializedLiveCatalog: async () => { projected.push('live'); },
         refreshVodTitleProjection: async options => { projected.push(options.rows.length); assert.equal(options.tmdbValidateLimit, 0); },
     });
@@ -168,8 +172,8 @@ test('the real activation importer hands off Selection before any whole-catalogu
     assert.equal(saved.length, 501, 'the background worker retains the entire catalogue');
     assert.ok(saved.every(row => row.user_id === 'owner' && row.source_id === 'source'));
     assert.deepEqual(projected, [12]);
-    assert.equal(reports.at(-2).steps.import.status, 'done');
-    assert.equal(reports.at(-1).moviesReady, true);
+    assert.equal(reports.at(-1).steps.import.status, 'done');
+    assert.equal(reports.at(-2).moviesReady, true, 'first page is available before raw import finishes');
 });
 
 test('activation and durable worker use the same handoff protocol without an early READY', () => {

@@ -29,6 +29,7 @@ test('Node chooses HTTP, forward or SOCKS5 without changing the child process ac
   const { useProviderHttpForward } = require('../services/media-gateway/src/provider-http-forward-policy');
   let transport = 'http';
   const context = {
+    ...require('../services/media-gateway/src/public-vod-route'),
     useProviderHttpForward, providerHttpForwardAccounts: new Set(),
     providerHttpForwardPolicy: { allCompatibleHttpMedia: true },
     providerProxyAgents: ['configured'], providerProxyUrls: ['configured'],
@@ -71,6 +72,7 @@ test('canary route stays on its playback session and an operator override wins',
   const canaryRoute = { slot: 1, ffmpegSlot: 1, nodeTransport: 'http', controlStatus: 'canary-shadow-applied' };
   const overrides = new Set();
   const context = {
+    ...require('../services/media-gateway/src/public-vod-route'),
     providerNodeRouteIsAvailable: route => Number.isInteger(route?.slot),
     proxyKeyFromUrl: () => 'shared-provider-account',
     providerRouteForKey: () => staticRoute,
