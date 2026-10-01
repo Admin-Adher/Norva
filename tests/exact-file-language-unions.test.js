@@ -858,7 +858,12 @@ test('flat movie pages join tenant observations by owned media variant', () => {
   assert.ok(flat.includes('.eq("user_id", userId)'));
   assert.ok(flat.includes('.in("media_item_id"'));
   assert.ok(flat.includes('audio_languages_scope = "file"'));
-  assert.ok(!flat.includes('audio_tracks ='));
+  // A tenant language SET still cannot invent ordered tracks. A shared exact
+  // file proof may now supply its actual map, after the URL/owner checks.
+  assert.ok(flat.includes('attachSharedSelectionFileFacts(db, [...variantByExactFile.values()], userId)'));
+  assert.ok(flat.includes('if (Array.isArray(variant.__file_audio_tracks))'));
+  assert.ok(flat.includes('item.audio_tracks = item.audioTracks = variant.__file_audio_tracks'));
+  assert.ok(!flat.includes('observedLanguages.map('));
 });
 
 test('an audio-filtered rail prefers the exact tenant-observed matching version', () => {

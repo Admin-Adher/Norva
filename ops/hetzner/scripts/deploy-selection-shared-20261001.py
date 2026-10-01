@@ -12,6 +12,9 @@ BEFORE={
     'norva-playback/index.ts':'1c40c3f941ffd7f9ce89f4b7cd21f56ddf7a4ff285c3140116c3f9ca45651863',
     'norva-source-sync/index.ts':'1d93660db44462e64d92fa90e1777400fdd54ea04b8581eb1576ae4340c1c1f1',
     '_shared/selection-shared-catalog.mjs':None,
+    'norva-catalog/index.ts':'b6c2d28713e5c0ad11429937a37ef9ebecfb3c08cd84dd0b28c24c0ebfaed6c2',
+    '_shared/selection-series-languages.mjs':'baaa1c9eb5114861e0e5b7216f910b29c36def99f1bce0e67f817fc0e6b985cc',
+    '_shared/selection-shared-file-facts.mjs':None,
 }
 def sha(data): return hashlib.sha256(data.replace(b'\r\n',b'\n')).hexdigest()
 def run(*args): return subprocess.check_output(args)
@@ -29,7 +32,7 @@ def schema():
         p=EDGE/f
         assert (sha(p.read_bytes()) if p.exists() else None)==expected,'Runtime drift: '+f
     files=sorted((ROOT/'supabase/migrations').glob('2026100112*selection_shared*.sql'))
-    assert len(files)==5
+    assert len(files)==9
     statements=[]
     for p in files:
         statements.append('\n'.join(line for line in p.read_text().splitlines() if line not in ['begin;','commit;']))

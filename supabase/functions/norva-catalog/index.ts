@@ -2,6 +2,7 @@ import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 import { supplementSelectionEditorial, supplementSelectionExtras } from "../_shared/selection-editorial-supplements.mjs";
 import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_shared/catalog-audio-job-status.mjs";
 import { attachSelectionSourceIntegrity } from "../_shared/selection-source-integrity.mjs";
+import { attachSharedSelectionFileFacts } from "../_shared/selection-shared-file-facts.mjs";
 // SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
 // supabase/functions tree, so sibling ../_shared imports stay available. A push
 // to main validates this code but does not reload production: update the server
@@ -10,7 +11,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceIds, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { providerAudioFacet, selectionProviderAudioLanguages, catalogProviderAudioLanguages, catalogVariantMatchesAudio } from "../_shared/selection-provider-languages.mjs";
 import { attachOwnedProviderLanguageDeclarations, useCachedAudioLanguageEvidence } from "../_shared/owned-provider-language-declarations.mjs";
-import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields } from "../_shared/selection-series-languages.mjs";
+import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields, selectionSeriesTitleLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
@@ -3543,6 +3544,9 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
 
   await attachSelectionAudioFileIdentity(variants, userId);
 
+  try { await attachSharedSelectionFileFacts(db, variants, userId); }
+  catch (_) { /* Rolling schema deployment: unknown remains unknown. */ }
+
   try { await attachSelectionSourceIntegrity({ db, userId, variants }); }
   catch (_) { /* Missing advisory evidence must not block browsing or playback. */ }
 
@@ -3735,6 +3739,8 @@ async function attachFlatMediaFileLanguages(
       userId,
     );
     await attachSelectionAudioFileIdentity([...variantByExactFile.values()], userId);
+    try { await attachSharedSelectionFileFacts(db, [...variantByExactFile.values()], userId); }
+    catch (_) { /* A missing shared proof keeps the existing owned path. */ }
     try { await attachSelectionSourceIntegrity({ db, userId, variants:[...variantByExactFile.values()] }); }
     catch (_) { /* A file warning is optional; source availability is unchanged. */ }
     try { await attachAudioJobStates(db, [...variantByExactFile.values()], userId); }
@@ -3792,6 +3798,10 @@ async function attachFlatMediaFileLanguages(
         item.audioLanguageValidationStatus = validationStatus;
         item.audio_language_verified_at = variant.__file_audio_verified_at;
         item.audioLanguageVerifiedAt = variant.__file_audio_verified_at;
+        if (Array.isArray(variant.__file_audio_tracks)) {
+          item.audio_tracks = item.audioTracks = variant.__file_audio_tracks;
+          item.audio_tracks_scope = item.audioTracksScope = "file";
+        }
       }
       if (variant.__file_subtitle_observed === true) {
         item.subtitle_languages = variant.__file_subtitle_languages;
@@ -3800,6 +3810,10 @@ async function attachFlatMediaFileLanguages(
         item.subtitleLanguagesScope = "file";
         item.subtitle_languages_observed = true;
         item.subtitleLanguagesObserved = true;
+        if (Array.isArray(variant.__file_subtitle_tracks)) {
+          item.subtitle_tracks = item.subtitleTracks = variant.__file_subtitle_tracks;
+          item.subtitle_tracks_scope = item.subtitleTracksScope = "file";
+        }
       }
     }
   } catch (_) {
@@ -4233,6 +4247,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     audio_language_validation_status: titleAudioValidationStatus,
     audioLanguageValidationStatus: titleAudioValidationStatus,
     ...audioJobFields(titleAudioJobState(variants)),
+    ...selectionSeriesTitleLanguageFields(title, variants),
     // Ordered per-track map so the player labels each engine audio stream by absolute
     // index — real language names with NO playback-time probe.
     audio_tracks: numberOr(title.variant_count, variants.length) <= 1

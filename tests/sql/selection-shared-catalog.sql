@@ -17,12 +17,14 @@ begin
   started:=clock_timestamp();
   r:=public.norva_prepare_selection_shared_release(rev);
   select payload into publication from selection_shared_test_publication;
+  if not exists(select 1 from public.selection_shared_releases where id=r and published_at is not null) then
   for batch in select jsonb_agg(value) from jsonb_array_elements(publication->'files') with ordinality t(value,n)
     group by (t.n-1)/250 loop
     perform public.norva_seed_selection_shared_tags(r,batch);
   end loop;
   perform public.norva_seed_selection_shared_live(r,publication->'live'->'channels',publication->'live'->'variants');
   perform public.norva_publish_selection_shared_release(r);
+  end if;
   raise notice 'Shared public build ms: %',1000*extract(epoch from clock_timestamp()-started);
   insert into auth.users(id,email,created_at,updated_at) values(u,'selection-shared-'||u::text||'@example.invalid',now(),now());
   s:=overlay(public.norva_selection_shared_uuid('norva-selection-curated-v1:'||u::text)::text placing '4' from 15)::uuid;
@@ -50,6 +52,16 @@ begin
   select count(*) into n from public.cloud_catalog_visible_titles where user_id=u;
   if n<>expected then raise exception 'Incomplete titles: %, expected %',n,expected; end if;
   raise notice 'Visible title count %, ms %',n,1000*extract(epoch from clock_timestamp()-started);
+  -- Re-enrollment keeps historical logical IDs after the old source is removed.
+  -- Reproduce a full former catalogue, not merely a pristine new account.
+  insert into public.cloud_titles(user_id,item_type,identity_key,identity_source,match_status,title,metadata)
+    select u,item_type,identity_key,identity_source,match_status,title,metadata
+    from public.selection_shared_titles where release_id=r;
+  execute 'reset role';
+  analyze public.cloud_titles;
+  execute 'set local role service_role';
+  select count(*) into n from public.selection_shared_visible_titles where user_id=u;
+  if n<>expected then raise exception 'Historical logical identities hide shared catalogue'; end if;
   select visibility_epoch into epoch from public.cloud_user_catalog_visibility_epochs where user_id=u;
   started:=clock_timestamp();
   page:=public.norva_select_catalog_title_ordered_page(u,'movie','home_recent',36,108,null,epoch);
@@ -61,6 +73,19 @@ begin
   page:=public.norva_select_catalog_title_ordered_page(u,'movie','home_recent',36,108,page->'nextCursor',epoch);
   if exists(select 1 from jsonb_array_elements(page->'items') x where (x->>'id')::uuid=any(ids)) then raise exception 'Home paging repeated items'; end if;
   raise notice 'Home selection, hydration and cursor ms %',1000*extract(epoch from clock_timestamp()-started);
+  started:=clock_timestamp();
+  page:=public.norva_select_catalog_title_ordered_page(u,'series','home_recent',18,54,null,epoch);
+  if jsonb_array_length(page->'items')<>18 then raise exception 'Series Home page incomplete'; end if;
+  select array_agg((value->>'id')::uuid) into ids from jsonb_array_elements(page->'items');
+  result:=public.norva_get_visible_catalog_titles_by_ids(u,ids,epoch);
+  if jsonb_array_length(result->'items')<>18 then raise exception 'Series Home hydration incomplete'; end if;
+  raise notice 'Series Home selection and hydration ms %',1000*extract(epoch from clock_timestamp()-started);
+  select array_agg(id) into ids from public.selection_shared_visible_variants
+    where user_id=u and item_type='movie' and raw_title ilike '%Downton%';
+  result:=public.norva_selection_shared_file_facts(u,ids);
+  if jsonb_array_length(result)<1 or result->0->'fileTags'->>'probedAt' is null then
+    raise exception 'Shared file proof absent during browsing'; end if;
+  if public.norva_selection_shared_file_facts(u2,ids)<>'[]'::jsonb then raise exception 'Foreign file proof leaked'; end if;
   started:=clock_timestamp();
   result:=public.list_media_items_deduped(u,'movie',s,null,null,null,null,null,null,'default',36,0);
   if jsonb_array_length(result->'items')<36 then raise exception 'Media page omitted shared films'; end if;

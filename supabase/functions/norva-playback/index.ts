@@ -7733,6 +7733,11 @@ async function hasVisibleSeriesEpisodeReceiptProof(
       .eq("user_id", userId).eq("source_id", sourceId)
       .eq("item_type", "series").eq("external_id", parentSeriesId).limit(1);
     if (parentError || !Array.isArray(parent) || parent.length !== 1) return false;
+    if (await isDiscoverySourceId(sourceId, userId)) {
+      const ownedEpisode = await resolveOwnedSelectionEpisode({ db, userId, sourceId,
+        itemId: episodeId, parentId: parentSeriesId });
+      return Boolean(ownedEpisode?.id && ownedEpisode?.generation_id);
+    }
     if (await resolveCatalogSeriesEpisodeCoordinates(db, userId, sourceId, parentSeriesId, episodeId)) {
       return true;
     }

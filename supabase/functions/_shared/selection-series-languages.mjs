@@ -1,4 +1,5 @@
 import { discoverySourceIds } from './discovery-catalog.mjs';
+import { attachSharedSelectionFileFacts } from './selection-shared-file-facts.mjs';
 
 // These are language sets for the available episodes of ONE owned series
 // version. They must never become a parent series' ordered stream map.
@@ -24,6 +25,22 @@ export function selectionSeriesLanguageFields(summary) {
   return result;
 }
 
+// Grouped Home cards need the owned episode language sets at title level too.
+// Keep the series scope: these sets cannot be used as an episode stream map.
+export function selectionSeriesTitleLanguageFields(title, variants) {
+  if (title.item_type !== 'series') return {};
+  const summaries = variants.filter(v => v.item_type === 'series').map(v => v.__series_languages).filter(Boolean);
+  if (!summaries.length) return {};
+  const summary = { audio: [], subtitles: [], audioObserved: false, subtitleObserved: false };
+  for (const [field, flag] of [['audio', 'audioObserved'], ['subtitles', 'subtitleObserved']]) {
+    const observed = summaries.filter(s => s[flag] === true);
+    summary[flag] = observed.length > 0;
+    summary[field] = [...new Set(observed.flatMap(s => s[field] || [])
+      .filter(l => /^[a-z]{2,3}$/.test(l) && !['und', 'mul', 'zxx', 'mis'].includes(l)))].sort();
+  }
+  return selectionSeriesLanguageFields(summary);
+}
+
 async function allRows(query) {
   const rows = [];
   for (let offset = 0; ; offset += 1000) {
@@ -35,6 +52,8 @@ async function allRows(query) {
 }
 
 export async function attachSelectionSeriesLanguages(db, variants, userId) {
+  try { await attachSharedSelectionFileFacts(db, variants.filter(v => v.item_type === 'series'), userId); }
+  catch (_) { /* Legacy accounts and rolling SQL deployments retain owned observations. */ }
   const sourceIds = await discoverySourceIds(variants.filter(v => v.user_id === userId).map(v => v.source_id), userId);
   for (const sourceId of sourceIds) {
     await attachSelectionSourceSeriesLanguages(db, variants, userId, sourceId);

@@ -1334,7 +1334,8 @@ const CloudAdapter = (() => {
         const subtitleTracks = raw.subtitle_tracks_scope === 'file' || raw.subtitleTracksScope === 'file'
             ? (raw.subtitle_tracks || raw.subtitleTracks || [])
             : null;
-        const audioLanguages = raw.audio_languages_scope === 'file' || raw.audioLanguagesScope === 'file'
+        const audioLanguageScope = raw.audio_languages_scope || raw.audioLanguagesScope;
+        const audioLanguages = audioLanguageScope === 'file' || (context.type === 'series' && audioLanguageScope === 'series')
             ? (raw.audio_languages || raw.audioLanguages || [])
             : null;
         const audioLanguageValidationStatus = String(
@@ -1348,7 +1349,8 @@ const CloudAdapter = (() => {
         const audioLanguageVerification = raw.audio_language_verification ||
             raw.audioLanguageVerification ||
             {};
-        const subtitleLanguages = raw.subtitle_languages_scope === 'file' || raw.subtitleLanguagesScope === 'file'
+        const subtitleLanguageScope = raw.subtitle_languages_scope || raw.subtitleLanguagesScope;
+        const subtitleLanguages = subtitleLanguageScope === 'file' || (context.type === 'series' && subtitleLanguageScope === 'series')
             ? (raw.subtitle_languages || raw.subtitleLanguages || [])
             : null;
         const providerTmdbId = context.providerTmdbId || null;
@@ -1397,8 +1399,8 @@ const CloudAdapter = (() => {
             audioProbedAt: raw.audioProbedAt || raw.audio_probed_at || null,
             audio_languages: audioLanguages,
             audioLanguages,
-            audio_languages_scope: audioLanguages !== null ? 'file' : null,
-            audioLanguagesScope: audioLanguages !== null ? 'file' : null,
+            audio_languages_scope: audioLanguages !== null ? audioLanguageScope : null,
+            audioLanguagesScope: audioLanguages !== null ? audioLanguageScope : null,
             audio_languages_observed: audioLanguages !== null &&
                 (raw.audio_languages_observed === true || raw.audioLanguagesObserved === true),
             audioLanguagesObserved: audioLanguages !== null &&
@@ -1417,8 +1419,8 @@ const CloudAdapter = (() => {
             subtitleProbedAt: raw.subtitleProbedAt || raw.subtitle_probed_at || null,
             subtitle_languages: subtitleLanguages,
             subtitleLanguages,
-            subtitle_languages_scope: subtitleLanguages !== null ? 'file' : null,
-            subtitleLanguagesScope: subtitleLanguages !== null ? 'file' : null,
+            subtitle_languages_scope: subtitleLanguages !== null ? subtitleLanguageScope : null,
+            subtitleLanguagesScope: subtitleLanguages !== null ? subtitleLanguageScope : null,
             subtitle_languages_observed: subtitleLanguages !== null &&
                 (raw.subtitle_languages_observed === true || raw.subtitleLanguagesObserved === true),
             subtitleLanguagesObserved: subtitleLanguages !== null &&
