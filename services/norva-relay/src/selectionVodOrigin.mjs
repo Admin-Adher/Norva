@@ -37,6 +37,7 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 20_000);
   let reader;
+  let phase = 'origin_fetch', upstreamStatus = null;
   const close = async reason => {
     clearTimeout(timer);
     abort.abort();
@@ -45,13 +46,21 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
   try {
     const response = await fetcher(target.href, {
       method: 'GET', redirect: 'error', signal: abort.signal,
-      headers: { 'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20', 'Accept-Encoding': 'identity' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://ww7.vcdnlare.com/',
+        'Origin': 'https://ww7.vcdnlare.com',
+        'Accept-Encoding': 'identity',
+      },
     });
+    upstreamStatus = response.status;
+    phase = 'origin_status';
     if (!response.ok || !response.body) {
       await response.body?.cancel();
       throw fail();
     }
     reader = response.body.getReader();
+    phase = 'prefix_read';
     const chunks = [];
     let size = 0, done = false;
     while (size < 1024 && !done) {
@@ -61,6 +70,7 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
     const prefix = concatenate(chunks, size);
     const headers = new Headers({ 'Cache-Control': 'private, no-store' });
     if (new TextDecoder().decode(prefix.subarray(0, 7)) === '#EXTM3U') {
+      phase = 'playlist_read';
       if (size > MAX_PLAYLIST) throw fail();
       while (!done) {
         const next = await reader.read(); done = next.done;
@@ -71,6 +81,7 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
         }
       }
       const text = new TextDecoder().decode(concatenate(chunks, size));
+      phase = 'playlist_rewrite';
       // Byte-range playlists need separate transformed-offset accounting.
       if (/#EXT-X-BYTERANGE:|BYTERANGE=/i.test(text)) throw fail();
       const child = async raw => {
@@ -98,6 +109,7 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
       return new Response(request.method === 'HEAD' ? null : lines.join('\n'), { headers });
     }
     const png = [137,80,78,71,13,10,26,10].every((b, i) => prefix[i] === b);
+    phase = 'segment_prefix';
     let offset = 0;
     if (png) {
       offset = -1;
@@ -131,7 +143,11 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
     });
     return new Response(body, { headers });
   } catch {
+    console.warn(JSON.stringify({ tag: 'selection-origin-failed', phase, upstreamStatus }));
     await close();
-    throw fail();
+    const error = fail();
+    error.selectionStage = phase;
+    error.upstreamStatus = upstreamStatus;
+    throw error;
   }
 }
