@@ -131,7 +131,7 @@ public class CatalogVersionTagsWebViewTest {
     }
 
     private static String fixtureScript(String locale, String kind, int width) {
-        return "(()=>{try{const api=NorvaI18n,M=MediaUtils;api.setPreference('"+locale+"');"
+        return "(()=>{try{const api=NorvaI18n,M=MediaUtils;if(!api.setPreference('"+locale+"')||api.language!=='"+locale+"')return 'locale not applied';"
             + "const warn=document.getElementById('movie-detail-integrity'),renderWarning=MoviesPage.prototype.updateSourceIntegrityWarning;renderWarning.call({},{});"
             + "if('"+kind+"'==='movie'){const bad={source_integrity:{status:'incomplete',checkedAt:new Date().toISOString()}};renderWarning.call({},bad);"
             + "if(warn.classList.contains('hidden')||warn.textContent!==api.t('ui_source_file_incomplete')||warn.textContent==='ui_source_file_incomplete')return 'integrity warning missing';"
@@ -160,6 +160,13 @@ public class CatalogVersionTagsWebViewTest {
     }
 
     private static void saveCapture(android.app.Instrumentation instrumentation, WebView view, String name) throws Exception {
+        // DOM assertions complete before Chromium necessarily paints the frame.
+        // Wait for the exact visual state before drawing a diagnostic bitmap.
+        CountDownLatch visualReady = new CountDownLatch(1);
+        instrumentation.runOnMainSync(() -> view.postVisualStateCallback(System.nanoTime(), new WebView.VisualStateCallback() {
+            @Override public void onComplete(long requestId) { visualReady.countDown(); }
+        }));
+        assertTrue("Chromium visual state ready for " + name, visualReady.await(20, TimeUnit.SECONDS));
         AtomicReference<Exception> failure = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
             Bitmap bitmap = Bitmap.createBitmap(view.getWidth(), view.getHeight(), Bitmap.Config.ARGB_8888);
