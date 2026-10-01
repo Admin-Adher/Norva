@@ -19,11 +19,12 @@ async function handler() {
   const code = transformSync(`return (${preflight}\nreturn json({businessEvent: true}, 299);\n});\n${authHelpers}`, {loader:'ts'}).code;
   return new Function('verifyRevenueCatWebhookSignature', 'revenueCatEventAppAllowed',
     'REVENUECAT_ALLOWED_APP_IDS', 'WEBHOOK_AUTH', 'REVENUECAT_WEBHOOK_HMAC_SECRET',
-    'MAX_WEBHOOK_BYTES', 'json', 'stringOrNull', code)(
+    'MAX_WEBHOOK_BYTES', 'json', 'stringOrNull', 'productionAdmin', code)(
       boundary.verifyRevenueCatWebhookSignature, boundary.revenueCatEventAppAllowed,
       boundary.parseRevenueCatAllowedAppIds('app_norva_phone'), 'test-auth', 'test-signing',
       2_000_000, (data,status=200)=>new Response(JSON.stringify(data),{status}),
-      value=>typeof value==='string' ? value : null);
+      value=>typeof value==='string' ? value : null,
+      new Proxy({}, {get(){throw new Error('Preflight must not access the database');}}));
 }
 
 function request(type, {app='synthetic_dashboard_app', auth='test-auth', signed=true, age=0, corrupt=false}={}) {
