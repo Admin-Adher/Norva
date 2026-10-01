@@ -215,6 +215,12 @@ Deno.serve(async (req) => {
 
   const event = (body?.event ?? {}) as JsonRecord;
   const eventType = String(event.type ?? "").toUpperCase();
+  // The dashboard uses a synthetic app id for TEST deliveries. Authentication
+  // and the timestamped signature have already passed; this acknowledgement
+  // must never reach an entitlement, payment, email or event-journal mutation.
+  if (eventType === "TEST") {
+    return json({ ok: true, test: true });
+  }
   const eventId = stringOrNull(event.id);
   const causalEventId = eventId ??
     `${eventType}:${String(event.event_timestamp_ms ?? "missing")}:${
@@ -226,11 +232,6 @@ Deno.serve(async (req) => {
       configured_allowlist: true,
     });
     return json({ error: "revenuecat_app_not_allowed" }, 403);
-  }
-
-  // RevenueCat "Send test event" — acknowledge so the dashboard goes green.
-  if (eventType === "TEST") {
-    return json({ ok: true, test: true });
   }
 
   if (eventType === "TRANSFER") {

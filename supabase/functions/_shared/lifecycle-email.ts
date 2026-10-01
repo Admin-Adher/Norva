@@ -416,7 +416,7 @@ function renderBillingState(opts: {
 // These pure renderers are ready for authoritative Web/Revolut event producers.
 // No generic projection trigger calls them: each provider event must enqueue once
 // from the transaction that owns its immutable event id.
-export function renderCancellationConfirmed(_firstName: string | null, opts: { effectiveAt?: string; locale?: string }): Rendered {
+export function renderCancellationConfirmed(_firstName: string | null, opts: { effectiveAt?: string; locale?: string; provider?: 'revolut' | 'google_play' | 'store' }): Rendered {
   return renderCancellationReceipt(opts);
 }
 

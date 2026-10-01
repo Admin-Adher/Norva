@@ -14,7 +14,7 @@ const copy: Record<string, [string, string, string, string]> = {
   id: ["Pembatalan Norva Anda telah dikonfirmasi", "Paket Anda tidak akan diperpanjang. Tidak ada pembayaran langganan baru yang dijadwalkan.", "Anda dapat terus menonton hingga {{date}}.", "Kelola langganan saya"],
   fil: ["Kumpirmado na ang pagkansela ng iyong Norva", "Hindi mare-renew ang iyong plan. Walang nakaiskedyul na bagong bayad sa subscription.", "Maaari kang patuloy na manood hanggang {{date}}.", "Pamahalaan ang aking subscription"],
 };
-export function renderCancellationReceipt(opts: { effectiveAt?: string; locale?: string }): Rendered {
+export function renderCancellationReceipt(opts: { effectiveAt?: string; locale?: string; provider?: 'revolut' | 'google_play' | 'store' }): Rendered {
   const requested = String(opts.locale || "en").replace(/_/g, "-").toLowerCase();
   const lang = Object.keys(copy).find(k => requested === k.toLowerCase())
     || (requested.startsWith("pt") ? "pt-BR" : requested.split("-")[0]);
@@ -25,7 +25,9 @@ export function renderCancellationReceipt(opts: { effectiveAt?: string; locale?:
     year: "numeric", month: "long", day: "numeric", timeZone: "UTC",
   }).format(end) : "";
   const remaining = date ? access.replace("{{date}}", date) : "";
-  const url = "https://norva.tv/subscription";
+  const url = opts.provider === 'google_play'
+    ? 'https://play.google.com/store/account/subscriptions?package=tv.norva.phone'
+    : opts.provider === 'store' ? 'https://norva.tv/app#settings/account' : 'https://norva.tv/subscription';
   return {
     subject,
     tags: [{ name: "app", value: "norva" }, { name: "category", value: "transactional" }, { name: "flow", value: "cancellation_confirmed" }],
