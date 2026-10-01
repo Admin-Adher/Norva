@@ -83,3 +83,26 @@ The updated migration and SQL fixture (equal timestamps, reversed UUID order)
 also passed in disposable PostgreSQL `norva_health_qa_20261001_v2`.
 This refinement needs fresh exact-head CI/emulator evidence; the initial head's
 results do not certify the refined version. Production remains unchanged.
+
+## Emulator readiness fix
+
+Head137e4697 passed cloud contracts and both Android build jobs. Both TV
+emulator configurations passed. The phone gesture/130% job110230892246 again
+exited255 before instrumentation, at the initial HOME readiness command after
+font/navigation setup; the emulator ADB transport was unavailable. This was
+not a playback assertion failure and is not counted as a successful test.
+
+The readiness harness now tolerates failed transport observations only within
+its existing45-second deadline, resets its stable-focus count, and still
+requires three successful HOME observations, completed setup and no ANR.
+It never retries instrumentation, reboots the emulator, or clears a dialogue.
+24 readiness/unlock tests passed under Linux in a disposable, network-disabled
+container using mocked ADB and the real shell function (zero skips). Windows
+did not have Bash; its21 skipped shell tests were not counted as validation.
+
+Read-only deployment preparation is retained at
+`/home/adrien/.norva/cloud-playback-health-137e4697/plan.json`.
+The production Edge SHA7302a021 matches repository basee7be0aed. The migration
+is absent. No production schema/configuration/service was changed. The health
+runtime payload remains identical to137e4697; final rollout must also account
+for the readiness harness commit and its exact-head test results.

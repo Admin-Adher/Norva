@@ -23,6 +23,7 @@ function replay(mode, fixture = 'gesture10', expectedStatus = 0, expectedCycles 
     try {
         const counter = path.join(root, 'cycles');
         fs.writeFileSync(counter, '0');
+        fs.writeFileSync(path.join(root, 'launches'), '0');
         const script = `set -euo pipefail
 diagnostic_dir=${quote(root)}
 fixture=${quote(path.join(__dirname, 'fixtures/android-home-readiness', fixture + '.txt'))}
@@ -36,9 +37,13 @@ adb() {
   local cycle
   cycle=$(<"$counter")
   case "$*" in
-    *'am start'*) : ;;
+    *'am start'*)
+      local launches
+      launches=$(<"$diagnostic_dir/launches"); launches=$((launches+1)); printf '%s' "$launches" > "$diagnostic_dir/launches"
+      if [[ "$mode" == offline-always || ( "$mode" == offline-once && "$launches" -eq 1 ) ]]; then echo 'adb: device offline' >&2; return 255; fi ;;
     *logcat*)
       cycle=$((cycle + 1)); printf '%s' "$cycle" > "$counter"
+      if [[ "$mode" == offline-observation && "$cycle" -eq 1 ]]; then echo 'adb: device offline' >&2; return 255; fi
       if [[ "$mode" == anr-events ]]; then echo '09-30 13:24:51.788 I am_anr: launcher'; fi ;;
     *'dumpsys window')
       if [[ "$mode" == other-app ]]; then
@@ -90,6 +95,9 @@ for (const fixture of ['gesture10', 'gesture13', 'three10', 'three13']) {
 }
 test('full resolver component matches the captured full window component', shellOptions, () => replay('long-resolver'));
 test('changing the focused HOME resets the three-observation counter', shellOptions, () => replay('switch-target', 'gesture10', 0, 5));
+test('a transient ADB disconnect before HOME does not skip the three readiness observations', shellOptions, () => replay('offline-once'));
+test('a disconnect during observation restarts the stability counter within the original deadline', shellOptions, () => replay('offline-observation', 'gesture10', 0, 4));
+test('persistent ADB failure cannot pass readiness or extend its deadline', shellOptions, () => replay('offline-always', 'gesture10', 1, 0));
 for (const mode of ['setup', 'provision', 'other-app', 'unfocused', 'unresolved', 'anr-events', 'anr-window']) {
     test(`${mode} cannot pass readiness`, shellOptions, () => replay(mode, 'gesture10', 1, null));
 }
