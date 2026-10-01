@@ -46,6 +46,7 @@ function brokerHarness(diagnosticLogs = null) {
       console: { ...console, warn: (...args) => diagnosticLogs?.push(args.join(' ')) },
       crypto: require('node:crypto'),
       createStrictRangeCollector,
+      createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
       fetch,
       http,
       isHttpUrl(value) {
@@ -70,6 +71,22 @@ function brokerHarness(diagnosticLogs = null) {
     },
   );
 }
+
+test('truncated MP4 terminates an admitted exact-range broker without another provider open', async t => {
+  const data = Buffer.alloc(100);
+  data.writeUInt32BE(20, 0); data.write('ftyp', 4);
+  data.writeUInt32BE(1000, 20); data.write('mdat', 24);
+  let calls = 0;
+  const provider = http.createServer((req, res) => { calls++; sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  try { const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-99' } }); await response.arrayBuffer(); } catch (_) {}
+  assert.equal(broker.terminalError?.code, 'MP4_DECLARED_MEDIA_EXCEEDS_FILE');
+  assert.equal(broker.terminalError?.status, 422);
+  assert.equal(calls, 1);
+  await broker.close();
+});
 
 class FakeClock {
   constructor() {

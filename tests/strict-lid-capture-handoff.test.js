@@ -227,6 +227,7 @@ function gatewayFixture(overrides = {}) {
         strictLidWindowReceiptBinding: () => ({}), sha256Hex: () => hash, proxyKeyFromUrl: () => 'fixture',
         rejectWhileLidBenchmarkRuns: () => false, FFMPEG_USER_AGENT: 'fixture',
         strictLidCapturePipeline: { compute: async () => {
+            if (overrides.failure) throw overrides.failure;
             called.push('infer'); if (overrides.missing) throw Object.assign(Error(), { code: 'LID_CAPTURE_NOT_FOUND' });
             return { receipt: 'opaque' };
         } },
@@ -241,6 +242,15 @@ test('actual Gateway compute route is gated by protocol, action, track and signe
     }
     const off = gatewayFixture({ enabled: false }); await off.run(); assert.equal(off.res.statusCode, 503); assert.deepEqual(off.called, []);
     const on = gatewayFixture(); await on.run(); assert.equal(on.res.statusCode, 200); assert.equal(on.res.payload.receipt, 'opaque');
+});
+
+test('actual Gateway route preserves the terminal incomplete-MP4 classification', async () => {
+    const f = gatewayFixture({ failure: Object.assign(new Error('fixed'), {
+        code: 'MP4_DECLARED_MEDIA_EXCEEDS_FILE', status: 422, providerDrained: true }) });
+    await f.run();
+    assert.equal(f.res.statusCode, 422);
+    assert.equal(f.res.payload.code, 'MP4_DECLARED_MEDIA_EXCEEDS_FILE');
+    assert.equal(f.res.payload.providerDrained, true);
 });
 test('actual Gateway missing stored audio returns 409, never transparently downloads again', async () => {
     const f = gatewayFixture({ missing: true }); await f.run(); assert.equal(f.res.statusCode, 409);

@@ -36,6 +36,7 @@ const playbackPreparationRawWork = new Map();
 const playbackPreparationUnconfirmedStops = new Map();
 const FINITE_TS_FAST_START_ENABLED = process.env.FINITE_TS_FAST_START_ENABLED !== 'false';
 const { finiteVodStartupFormat, prefetchFiniteVodHeader, retainedVodStartupPolicy, startupHeaderCacheCapacity } = require('./finite-vod-startup');
+const { createMp4SizeEvidence } = require('./mp4-size-evidence');
 const RETAINED_FINITE_VOD_STARTUP_ENABLED = process.env.RETAINED_FINITE_VOD_STARTUP_ENABLED === 'true';
 const { StartupAdmissionQueue } = require('./startup-admission-queue');
 const { boundedHlsArgs, createHlsOutputControl } = require('./bounded-hls-output');
@@ -5059,6 +5060,13 @@ function normalizeStrictLidFileSize(value) {
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function observeStrictLidMp4Size(context, offset, bytes) {
+    const evidence = context.mp4SizeEvidence?.observe(offset, bytes);
+    if (evidence) throw markStrictLidTerminal(context, strictLidBrokerError(
+        evidence.code, 'The source media is incomplete.', { status: 422 },
+    ));
+}
+
 function parseStrictLidRange(value, fileSizeBytes) {
     const size = normalizeStrictLidFileSize(fileSizeBytes);
     const text = String(value || '').trim();
@@ -5174,7 +5182,7 @@ function strictLidProviderFailureObservation(error, details = {}) {
         'ERR_TLS_CERT_ALTNAME_INVALID', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
         'PROXY_AUTH_FAILED', 'PROVIDER_BUSY', 'PROVIDER_REQUEST_FAILED',
         'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_EMPTY_RESPONSE',
-        'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'VOD_CHANGED',
+        'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'VOD_CHANGED', 'MP4_DECLARED_MEDIA_EXCEEDS_FILE',
     ]);
     const safeNames = new Set(['Error', 'TypeError', 'ReferenceError', 'RangeError', 'AbortError']);
     const safeReasons = new Map([
@@ -6100,6 +6108,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             if (context.finiteResumeRanges && !finiteWindowRange) {
                 const cached = context.finiteResumeRanges.read(range.start + forwarded, range.end);
                 if (cached) {
+                    observeStrictLidMp4Size(context, range.start + forwarded, cached);
                     if (!responseStarted) {
                         startFiniteMkvSeekResponse(context, res, range);
                         responseStarted = true;
@@ -6112,6 +6121,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             if (rangeReuse?.confirmed) {
                 const cached = rangeReuse.read(range.start + forwarded, range.end);
                 if (cached) {
+                    observeStrictLidMp4Size(context, range.start + forwarded, cached);
                     if (!responseStarted) {
                         startFiniteMkvSeekResponse(context, res, range);
                         responseStarted = true;
@@ -6150,6 +6160,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 });
                 if (cached) {
                     if (attempt.localClosed) break;
+                    observeStrictLidMp4Size(context, range.start + forwarded, cached);
                     if (!responseStarted) {
                         startFiniteMkvSeekResponse(context, res, range);
                         responseStarted = true;
@@ -6514,6 +6525,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                             { status: 502, upstreamStatus },
                         ));
                     }
+                    observeStrictLidMp4Size(context, remainingRange.start + receivedBytes, chunk);
                     strictRangeCollector?.push(chunk);
                     const localChunk = finiteSeek
                         ? chunk.subarray(Math.max(0, range.start + forwarded - (remainingRange.start + receivedBytes)))
@@ -6944,6 +6956,7 @@ async function createStrictLidBroker(options = {}) {
         finiteAvoidedProviderOpens: 0,
         fileSizeBytes,
         userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
+        mp4SizeEvidence: fileSizeBytes >= 8 ? createMp4SizeEvidence(fileSizeBytes) : null,
         dispatcher: initialDispatcher,
         dispatcherFactory,
         dispatcherFallbackFactory,
@@ -8507,10 +8520,12 @@ async function handleStrictLidCaptureRequest(req, res, action) {
             'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_DRAIN_UNCONFIRMED', 'LID_CAPTURE_EXTRACTION_TIMEOUT',
             'LID_CAPTURE_EXTRACTION_FAILED', 'LID_CAPTURE_INFERENCE_FAILED', 'LID_CAPTURE_PREPARATION_FAILED',
             'PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT', 'PROVIDER_IDLE_TIMEOUT',
-            'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH']);
+            'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH',
+            'MP4_DECLARED_MEDIA_EXCEEDS_FILE']);
         const code = allowed.has(error?.code) ? error.code : 'LID_CAPTURE_FAILED';
         const providerCodes = new Set(['PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT',
-            'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH']);
+            'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH',
+            'MP4_DECLARED_MEDIA_EXCEEDS_FILE']);
         const status = providerCodes.has(code) && Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599
             ? error.status : code === 'LID_CAPTURE_NOT_FOUND' ? 409
             : (['LANGUAGE_ENRICHMENT_CAPACITY_BUSY', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_ALREADY_RUNNING'].includes(code) ? 429
