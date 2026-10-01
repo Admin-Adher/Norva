@@ -81,4 +81,20 @@ begin
  raise notice 'GOOGLE_PLAY_RETENTION_OWNER_CHANNEL_CONSENT_DEDUPE_CLAIM_PURCHASE_OK';
 end;
 $test$;
+insert into public.cloud_entitlement_events(user_id,provider,provider_event_id,event_type,payload,processed_at)
+values('00000000-0000-4000-8000-000000000902','revenuecat','play-proof-receipt-route','CANCELLATION',
+ '{"store":"PLAY_STORE","environment":"PRODUCTION","cancel_reason":"UNSUBSCRIBE","expiration_at_ms":1791453600000}',now());
+do $receipt$
+begin
+ if not exists(select 1 from public.cloud_lifecycle_billing_intents
+   where source_provider='revenuecat' and source_event_id='play-proof-receipt-route'
+     and event_type='cancellation_confirmed' and payload->>'store'='PLAY_STORE')
+   then raise exception 'Google Play receipt store lost'; end if;
+ update public.cloud_play_retention_policy set enabled=false,communications_enabled=false;
+ if public.norva_dispatch_play_retention() is not null then raise exception 'disabled policy dispatched'; end if;
+ if has_function_privilege('authenticated','public.norva_dispatch_play_retention()','execute')
+   then raise exception 'customer can dispatch campaign'; end if;
+ raise notice 'GOOGLE_PLAY_RECEIPT_ROUTE_AND_DISPATCH_GATE_OK';
+end;
+$receipt$;
 rollback;
