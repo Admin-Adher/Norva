@@ -71,6 +71,19 @@ test('a slow snapshot cannot erase recovery reported while the request was in fl
   assert.equal(health.statuses.size, 1);
 });
 
+test('overlapping snapshots still accept the newer server observation', async () => {
+  const pending = [];
+  const { health, API } = harness();
+  API.playbackStatus.getAll = () => new Promise(resolve => pending.push(resolve));
+  const first = health.load();
+  const second = health.load();
+  pending[0]([{ ...target, status: 'broken', session_order: '1', updated_at: '2026-10-01T10:00:00Z' }]);
+  await first;
+  pending[1]([{ ...target, status: 'ok', session_order: '2', updated_at: '2026-10-01T10:01:00Z' }]);
+  await second;
+  assert.equal(health.isBroken('source', 'episode', 'episode-2'), false);
+});
+
 test('out-of-order HTTP acknowledgements cannot replace a newer recovery', async () => {
   let resolve;
   const { health, API, events } = harness(() => new Promise(done => { resolve = done; }));

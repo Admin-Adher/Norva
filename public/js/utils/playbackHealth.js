@@ -73,10 +73,9 @@ const PlaybackHealth = {
                 }
             }
 
-            (entries || []).forEach(entry => {
-                const key = this.key(entry.source_id ?? entry.sourceId, entry.item_type ?? entry.itemType, entry.item_id ?? entry.itemId);
-                if (!this.statuses.has(key) || this.statuses.get(key) === before.get(key)) this.setStatus(entry);
-            });
+            // Server session order/timestamps decide whether an entry is newer.
+            // Another load finishing meanwhile must not suppress a later recovery.
+            (entries || []).forEach(entry => this.setStatus(entry));
             return entries || [];
         } catch (err) {
             console.warn('[PlaybackHealth] Failed to load statuses:', err.message);

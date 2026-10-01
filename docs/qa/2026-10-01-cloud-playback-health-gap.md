@@ -106,3 +106,45 @@ The production Edge SHA7302a021 matches repository basee7be0aed. The migration
 is absent. No production schema/configuration/service was changed. The health
 runtime payload remains identical to137e4697; final rollout must also account
 for the readiness harness commit and its exact-head test results.
+
+## Current validation handles (7b68fbe3)
+
+Exact head:7b68fbe3781e8f0991468510cf62d47df53b26e3. Build run36819914790;
+Android run36819914758. TV jobs110233067748(font130%) and110233068044(font100%)
+succeeded. Phone jobs110233067988,110233068009,110233068179 were still running
+at the last check. Do not restart them on an observation timeout.
+
+Phone three-button/130% job110233067844 failed during the second catalogue
+fixture. The XML has an empty failure and incomplete65-test run. Diagnostic
+logcat exited255 at05:32:21 (not killed by the harness); capture pull failed at
+05:32:22 then recovered. AppPID3889 was still present at05:32:27 and05:32:32,
+and captures grew from6 to12files before UTP cleanup. This is evidence of a
+transport interruption during instrumentation, not proof of a product crash.
+No test assertion was weakened. A targeted rerun remains pending until the
+workflow is terminal. Artifact11143250936 is retained locally under TEMP
+`norva-532-7b68-three13`; raw job log `norva-health-532-7b68-three13.log`.
+
+Deployment operator/payload remain prepared remotely at
+`/home/adrien/.norva/cloud-playback-health-137e4697/`; no apply was executed.
+The runtime files are unchanged by7b68fbe3. Local staging in TEMP
+`norva-health-release-137e4697` also contains `verify-readback.py`: after rollout,
+it requests a real ordinary-QA session, decodes5frames, records that actual
+first-frame event, verifies health readback, ignores a deliberately late status,
+checks another authorized owner's denial, and expires the session. It has not
+run and is not evidence of natural UI or physical-device playback.
+
+## Overlapping client reads
+
+A new regression test reproduced an error in the candidate's merge logic:
+when two health reads started together, the second response could ignore a
+newer recovery because the first response had already changed the local Map.
+Entries now pass through the server sequence/timestamp ordering instead of
+being discarded based on object identity. Protection against a snapshot erasing
+an in-flight report is retained. The failing test now passes;13 health tests
+pass in total. The phone/TV WebView fixture covers the same overlap. Backend
+Edge and migration bytes remain identical to137e4697 and their passing checks;
+the updated frontend requires fresh exact-head validation before publication.
+
+The7b68fbe3 TV artifacts11143505435 and11142744022 each contain a successful,
+non-skipped PlaybackHealthWebViewTest (0.207s and0.160s). Those results prove
+the previous fixture only, not this newly added overlap assertion.

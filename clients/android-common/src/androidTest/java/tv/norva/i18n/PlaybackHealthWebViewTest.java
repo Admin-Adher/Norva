@@ -57,6 +57,9 @@ public class PlaybackHealthWebViewTest {
                 + "API.playbackStatus.report=async()=>({entry:{...t,status:'ok',session_order:'2',updated_at:'2026-10-01T10:00:00Z'}});await h.report({...t,status:'ok'});"
                 + "API.playbackStatus.report=async()=>({entry:{...t,session_order:'1',updated_at:'2026-10-01T10:00:00Z'}});await h.report(t);"
                 + "if(h.isBroken('fixture','episode','ep2'))throw Error('late failure won');"
+                + "const pending=[];API.playbackStatus.getAll=()=>new Promise(resolve=>pending.push(resolve));const a=h.load(),b=h.load();"
+                + "pending[0]([{...t,status:'broken',session_order:'3',updated_at:'2026-10-01T10:01:00Z'}]);await a;"
+                + "pending[1]([{...t,status:'ok',session_order:'4',updated_at:'2026-10-01T10:02:00Z'}]);await b;if(h.isBroken('fixture','episode','ep2'))throw Error('new snapshot lost');"
                 + "NorvaCloud.token='synthetic-owner-b';if(h.isBroken('fixture','episode','ep2')||h.statuses.size)throw Error('owner leak');"
                 + "API.playbackStatus.report=async()=>{throw Error('offline')};await h.report(t);if(h.statuses.size)throw Error('false acknowledgement');"
                 + "window.qaHealthResult='ok';}catch(e){window.qaHealthResult=e.message;}})();");
