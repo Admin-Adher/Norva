@@ -33,10 +33,13 @@ export async function preparedSelectionCatalog({ db, key, build, assertCurrent =
   const payload = { version: 1, rows: selectionTemplateRows(value.rows), sources: value.sources || [],
     truncated: !!value.truncated, truncationReason: value.truncationReason || null };
   await assertCurrent();
-  // Do not spread a transient partial upstream result to new owners.
-  if (!payload.truncated && payload.sources.every(source => source.status === 'loaded')) {
+  // A failing optional feed must not disable reuse of every healthy feed.
+  // Retain its explicit unavailable status and retry after only 30 seconds;
+  // never cache a truncated payload as a complete catalogue.
+  if (!payload.truncated && payload.sources.some(source => source.status === 'loaded')) {
+    const ttl = payload.sources.every(source => source.status === 'loaded') ? 300000 : 30000;
     const result = await db.from('selection_prepared_catalogs').upsert({ revision:key, payload,
-      expires_at:new Date(Date.now() + 300000).toISOString() }, { onConflict:'revision' });
+      expires_at:new Date(Date.now() + ttl).toISOString() }, { onConflict:'revision' });
     // During a rolling schema deployment or cache outage normal import remains
     // authoritative. This cache never supplies owner authorization or readiness.
     if (result.error) console.warn('[selection] prepared cache write unavailable');

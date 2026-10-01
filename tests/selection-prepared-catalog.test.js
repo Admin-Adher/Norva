@@ -43,3 +43,10 @@ test('stale ownership aborts before either cache access or build', async () => {
   await assert.rejects(preparedSelectionCatalog({db:{},key:'revision',build:async()=>{throw Error('wrong');},
     assertCurrent:async()=>{throw Error('superseded');}}),/superseded/);
 });
+test('one unavailable optional feed keeps a short retry TTL and its failure status', async () => {
+  const {preparedSelectionCatalog}=await modulePromise;
+  const db=store(); const started=Date.now();
+  await preparedSelectionCatalog({db:db.db,key:'revision',build:async()=>({rows:[row],sources:[{status:'loaded'},{status:'unavailable'}]})});
+  assert.equal(db.saved().payload.sources[1].status,'unavailable');
+  assert.ok(Date.parse(db.saved().expires_at)-started <= 31000);
+});
