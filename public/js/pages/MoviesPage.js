@@ -698,7 +698,7 @@ class MoviesPage {
             // The endpoint returns the exact filtered count — show it (the grid view
             // otherwise leaves the header count blank).
             if (this.countEl && typeof payload?.count === 'number') {
-                this.countEl.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_117bd4782d6b", {defaultValue: "{{p0}} titles", p0:(payload.count)}) : `${payload.count} titles`);
+                this.countEl.textContent = MediaUtils.catalogCount(payload.count);
             }
         } catch (err) {
             console.warn('[Movies] Genre bucket page failed:', err);
@@ -1757,14 +1757,14 @@ class MoviesPage {
 
     updateResultChrome(cards) {
         if (this.countEl) {
-            let total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} movies`;
+            let total = MediaUtils.catalogCount(cards.length, this.groupDuplicates ? 'titles' : 'movies');
             // The server count is exact for every server-side dimension (search,
             // sort, year, rating, added) — only client-only filters force the
             // open-ended "N+" fallback.
             if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasClientOnlyFilters()) {
-                total = `${this.cloudTotal} titles`;
+                total = MediaUtils.catalogCount(this.cloudTotal);
             } else if (this.isCloudPagedMode() && this.cloudHasMore) {
-                total = `${cards.length}+ titles`;
+                total = MediaUtils.catalogCount(`${cards.length}+`);
             }
             this.countEl.textContent = total;
         }

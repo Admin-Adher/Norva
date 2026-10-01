@@ -59,6 +59,33 @@ function loadPage(relativePath, className) {
     return { Page: context.window[className], saves, context, favoriteButton };
 }
 
+for (const [name, unit] of [['MoviesPage', 'movies'], ['SeriesPage', 'series']]) {
+    test(`${name} localizes exact, zero and partial counts without changing their scope`, () => {
+        const { Page, context } = loadPage(`public/js/pages/${name}.js`, name);
+        const messages = require('../i18n/messages.json');
+        context.NorvaI18n = { t: (key, args) => messages[key][1].replace('{{value}}', args.value) };
+        const page = Object.create(Page.prototype);
+        Object.assign(page, {
+            countEl: { textContent: '' }, resetBtn: null, groupDuplicates: true,
+            cloudTotal: 37272, cloudHasMore: true,
+            isCloudPagedMode: () => true, hasClientOnlyFilters: () => false,
+            _isTvMode: () => false, hasActiveFilters: () => false, renderActiveFilterChips: () => {}
+        });
+        page.updateResultChrome([{}, {}]);
+        assert.equal(page.countEl.textContent, 'Titres : 37272');
+        page.hasClientOnlyFilters = () => true;
+        page.updateResultChrome([{}, {}]);
+        assert.equal(page.countEl.textContent, 'Titres : 2+');
+        page.isCloudPagedMode = () => false;
+        page.groupDuplicates = false;
+        page.updateResultChrome([]);
+        assert.equal(page.countEl.textContent, messages[`ui_catalog_count_${unit}`][1].replace('{{value}}', '0'));
+        page.groupDuplicates = true;
+        page.updateResultChrome([{}]);
+        assert.equal(page.countEl.textContent, 'Titres : 1');
+    });
+}
+
 class FakeSelect {
     constructor(html = '<option value="">Any</option>') {
         this._innerHTML = '';
