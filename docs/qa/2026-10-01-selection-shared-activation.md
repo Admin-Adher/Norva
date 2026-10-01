@@ -120,7 +120,7 @@ All seven deployed runtime files were rechecked against both Edge containers.
 The follow-up PR checks passed for cloud contracts, Edge type-check, disposable
 Supabase migrations, mocked Web/mobile journeys, notification policy, GoTrue
 acceptance, and Android Phone/TV compile/tests. No Android player or client UI
-code was changed by this release; native runtime playback was not replayed here.
+layout was changed by this release; native runtime playback was not replayed here.
 
 ## Episode receipt correction
 
@@ -145,3 +145,14 @@ observation 33.21 s after the click. This also covers first binding of a differe
 episode after the receipt fix. The earlier 409 is resolved; the separately
 observed upstream latency is not treated as a permanent episode failure.
 Both test players were closed after validation.
+
+## Home language adapter
+
+The final Home check exposed a second display adapter which discarded language
+sets with `series` scope while preserving only `file` scope. Server title cards
+now carry the owned episode union; the client Home variant adapter preserves
+series sets only for a series. Movies and episodes still cannot inherit these
+sets as file proof, and no ordered audio/subtitle tracks are manufactured.
+Focused tests cover the actual API adapter and presentation helper. There is
+currently no ADB device/emulator attached, so this data-adapter correction has
+no new Android WebView runtime certification.
