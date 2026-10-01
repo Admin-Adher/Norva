@@ -90,6 +90,9 @@ begin
       and m.item_type in ('movie','series') and m.available)<>cardinality(p_item_ids) then
     raise exception 'Selection batch contains unavailable or foreign files' using errcode='PT409';
   end if;
+  perform 1 from public.cloud_media_items m where m.id=any(p_item_ids)
+    and m.user_id=p_user_id and m.source_id=p_source_id and m.generation_id=p_generation_id
+    order by m.id for share;
   -- Exact cached members are rebound; changed/expired members remain explicit
   -- misses for normal computation. Foreign members abort before any write.
   select jsonb_agg(jsonb_build_object('media',m.id,'title',r.title,'variant',r.variant)) into v_recipes

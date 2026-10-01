@@ -28,6 +28,9 @@ function projectionHarness(overrides = {}) {
     hydrateSelectionSnapshotMovieTracks: async () => {},
     hydrateSelectionSnapshotSeriesTracks: async () => {},
     hydrateSelectionAudioResults: async () => {},
+    // Use the real Selection identity gate: ordinary provider fixtures must
+    // never enter the shared Selection recipe path.
+    ...require('../supabase/functions/_shared/selection-title-recipes.mjs'),
     ...overrides,
   };
   const code = transformSync(`${projectionSource}\nexport { resolveProjectionCacheKey, loadVodInfoIds, validateProviderTmdbIds, collectProviderIds, reuseExactFileTitleMatches };`, {
