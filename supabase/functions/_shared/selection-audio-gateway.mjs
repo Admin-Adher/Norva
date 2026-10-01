@@ -175,6 +175,15 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       const payload = await boundedJson(response);
       const providerDrained = payload.providerDrained === true && payload.providerDrainProtocol === 1;
       if (!response.ok) {
+        // Preserve the server-proven file defect in the durable job, rather than
+        // reducing it to a generic rejection. Only the capture route inspects
+        // exact file bytes; an HTTP error alone never proves truncation.
+        if (path.split('?')[0] === '/detect-language/capture/capture'
+          && response.status === 422 && providerDrained
+          && payload.code === 'MP4_DECLARED_MEDIA_EXCEEDS_FILE') {
+          fail('SELECTION_AUDIO_SOURCE_TRUNCATED', { status:422, retryable:false,
+            providerDrained:true, gatewayCode:payload.code });
+        }
         if (response.status === 429 && ['LANGUAGE_ENRICHMENT_CAPACITY_BUSY','LID_CAPTURE_STORE_FULL',
           'LID_CAPTURE_ALREADY_RUNNING','LID_CAPTURE_COMPUTE_BUSY'].includes(payload.code) && providerDrained) {
           fail('SELECTION_AUDIO_CAPACITY_BUSY', { status:429, retryable:true, providerDrained:true, retryAfterSeconds:30, gatewayCode:payload.code });

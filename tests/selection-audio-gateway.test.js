@@ -268,3 +268,21 @@ test('incomplete inventories and unknown file sizes cannot mint strict sampling 
     await assert.rejects(gateway.probe(file), error => error.code.startsWith('SELECTION_AUDIO_'));
   }
 });
+
+test('only exact drained capture evidence persists a truncated source classification', async () => {
+  for (const variation of [null, 'status', 'code', 'drain', 'protocol']) {
+    const payload = { ...drain, code:'MP4_DECLARED_MEDIA_EXCEEDS_FILE' };
+    if (variation === 'code') payload.code = 'RANGE_LENGTH_MISMATCH';
+    if (variation === 'drain') payload.providerDrained = false;
+    if (variation === 'protocol') payload.providerDrainProtocol = 0;
+    const { gateway, file } = await setup(url => url.endsWith('/probe-audio')
+      ? json(probePayload()) : json(payload, variation === 'status' ? 502 : 422));
+    const profile = await gateway.probe(file);
+    const args = { file, profile, jobId, subjectId, trackIndex:1, windowOrdinal:4 };
+    await assert.rejects(gateway.captureWindow(args), {
+      code:variation ? 'SELECTION_AUDIO_GATEWAY_REJECTED' : 'SELECTION_AUDIO_SOURCE_TRUNCATED',
+      retryable:variation === 'status', stage:'capture',
+    });
+    await assert.rejects(gateway.getCaptureStatus(args), { code:'SELECTION_AUDIO_GATEWAY_REJECTED' });
+  }
+});
