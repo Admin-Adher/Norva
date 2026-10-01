@@ -172,3 +172,18 @@ This physical replay supersedes the monthly-pending statements above. The isolat
 - Production mobile campaign and communication flags remain false. The production QA owner has zero SANDBOX entitlement events. The sandbox database and operator configuration remain isolated.
 
 Renewal-cycle evidence and Android release status are recorded below once complete.
+
+### Monthly cycle completion and cleanup
+
+Genuine sandbox renewal receipts prove exactly three reduced cycles followed by the ordinary price:
+
+| UTC purchase time | EUR | Receipt |
+| --- | ---: | --- |
+| 18:22:41.234 | 7.59 | C88D1394-B83C-400F-897C-A3CA398AFB5B |
+| 18:27:41.234 | 7.59 | D3653687-9858-4F0A-9EEC-BA8D9C978163 |
+| 18:32:41.234 | 7.59 | 03AB7DF2-B4F8-4274-9208-DFA09E029965 |
+| 18:37:41.234 | 9.49 | Normal-price RENEWAL, no offer code |
+
+The first three identify retention-monthly-20. A new offer lookup returns null after acceptance. The physical Google Play UI then showed the next normal EUR 9.49 test charge, and the operator cancelled only this fictional Norva subscription. Play confirmed Annulé with remaining access until 20:42 Paris and Carte test, toujours approuvée. No unrelated subscription was changed.
+
+Android 1.3.29 (43) is submitted on the production track at 100%, not internal testing. Google shows the change under review/pre-review checks; availability is not yet claimed. Nine release-note languages are supplied. The only bundle warnings concern absent deobfuscation/native debug symbols; device compatibility is unchanged. Signed build 36907223342 passed. Focused emulator run 36906943420 passed all six configurations for the same native source (only version metadata changed afterward). Cloud contracts, phone JVM/lint/build and TV build passed on caf88a55; the version-pinning tests were updated to 43/1.3.29 after the initial version-only failure. No campaign has been enabled while the native update awaits Google approval.
