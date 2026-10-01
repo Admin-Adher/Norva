@@ -68,7 +68,7 @@ Hydration avoids running the physical runtime for these cards. A new fixture
 retains an entire previous 6,432-title inventory, then checks both new owners,
 mixed providers, exact file binding, languages and visibility. It passes: Home
 selection/hydration/cursor 133 ms; grid/search/genres 473 ms; lazy film 70 ms.
-Production replay after this correction remains to be recorded below.
+Production replays after this correction are recorded below.
 
 The series replay additionally caught an anti-join plan which repeatedly scanned
 historical physical variants. The corrected indexed predicate is inside each
@@ -98,10 +98,12 @@ Home 21 ms; both-owner and mixed-provider checks passed.
 Real playback before the reset: Creed II decoded 1280×536 video, readyState 4,
 advancing at 8.3 s on the observation 18.4 s after click. Reopening with Resume
 also decoded video. Only the selected film was materialized; a later episode
-created exactly its file and parent. Peaky Blinders episode 1 did not play in
-the browser during this run; a direct 1 KiB range from its existing public CDN
-took 48 s before returning HTTP 206 video/mp4. Its playback is not certified by
-this activation work. TV displayed 20 logical channels / 21 variants with their
+created exactly its file and parent. The initial Peaky Blinders and Mathagam
+episode requests returned HTTP 409 at Norva's final receipt visibility guard.
+It did not yet recognize the exact owned Selection episode as proof after lazy
+binding advanced the visibility epoch. An additional provider latency observation
+was separate: a direct 1 KiB range from Peaky's existing public CDN took 48 s
+before returning HTTP 206 video/mp4. TV displayed 20 logical channels / 21 variants with their
 groups. Downton's previously missing Portuguese file label is now displayed in
 search, and Creed II exposes its PT/EN exact-file tracks.
 
@@ -119,3 +121,27 @@ The follow-up PR checks passed for cloud contracts, Edge type-check, disposable
 Supabase migrations, mocked Web/mobile journeys, notification policy, GoTrue
 acceptance, and Android Phone/TV compile/tests. No Android player or client UI
 code was changed by this release; native runtime playback was not replayed here.
+
+## Episode receipt correction
+
+The receipt guard now accepts the existing owned Selection episode resolver,
+after verifying its currently visible owned parent, exact file, active generation
+and source. It cannot fall through to another provider's cache. Fifteen focused
+receipt/Selection tests passed, including missing authority, hidden parent and
+stale visibility cases. Deployed and hash-verified on both Edge replicas:
+`norva-playback/index.ts` SHA-256
+`07f20e456bf0fb1d72fcef67bc5a3e76e608f6ee172574439b43e24eebf8429d`.
+
+Mathagam replay returned HTTP 201, decoded 720-pixel-wide video at readyState 4,
+and was advancing at 10.37 s in the observation 20.55 s after retry. Escaping
+then choosing Continue Watching resumed the same episode: at 27.62 s after
+the resume click, video was advancing at 40.01 s. Watch history subsequently
+persisted 58 s. Only two physical media rows exist for this source (episode and
+series parent); playback did not trigger a full catalogue copy.
+
+A first launch of Peaky Blinders S1E1 on the new source then succeeded without
+retry: 1920-pixel-wide video, readyState 4, unpaused, position 28.76 s at the
+observation 33.21 s after the click. This also covers first binding of a different
+episode after the receipt fix. The earlier 409 is resolved; the separately
+observed upstream latency is not treated as a permanent episode failure.
+Both test players were closed after validation.
