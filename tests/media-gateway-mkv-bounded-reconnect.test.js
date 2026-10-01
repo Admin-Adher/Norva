@@ -3903,6 +3903,7 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
                 },
             },
             finiteTsSeekIndex: { begin: async () => null },
+            isPublicDirectRoute: require('../services/media-gateway/src/public-vod-route').isPublicDirectRoute,
             providerNodeRouteForSession: () => ({ slot: 3, nodeTransport: 'http' }),
             alternateProviderNodeTransportRoute: () => ({ slot: 3, nodeTransport: 'socks5' }),
             pinnedProxyAgentFactoryForRoute: (route) => () => ({

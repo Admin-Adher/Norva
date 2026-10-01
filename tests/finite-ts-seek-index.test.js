@@ -125,6 +125,8 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
                 observe: () => {},
             }) },
             providerNodeRouteForSession: () => ({}),
+            isPublicDirectRoute: require('../services/media-gateway/src/public-vod-route').isPublicDirectRoute,
+            pinProviderNodeRouteForSession: (session, route) => { session.providerNodeRoute = route; },
             alternateProviderNodeTransportRoute: () => ({}),
             pinnedProxyAgentFactoryForRoute: () => () => ({}),
             finitePlaybackRangeReuse: { begin: () => ({}) },
