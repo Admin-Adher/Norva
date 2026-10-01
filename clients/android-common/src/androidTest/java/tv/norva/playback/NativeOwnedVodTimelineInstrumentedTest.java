@@ -6,6 +6,8 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.view.KeyEvent;
+import android.view.View;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -102,8 +104,30 @@ public final class NativeOwnedVodTimelineInstrumentedTest {
                     .putExtra("resumeSeconds", resumeSeconds));
             activity = instrumentation.waitForMonitorWithTimeout(monitor, 10000);
             assertNotNull("Player did not open", activity);
-            ExoPlayer player = player(activity);
-            assertNotNull(player);
+            final Activity openedActivity = activity;
+            // TV deliberately waits for the viewer's resume/restart choice.
+            // Exercise its focused remote action instead of bypassing that UI
+            // or mistaking the intentionally absent player for a load failure.
+            if (context.getPackageName().equals("tv.norva.tv") && resumeSeconds >= 30) {
+                instrumentation.runOnMainSync(() -> {
+                    int buttonId = context.getResources().getIdentifier(
+                            "norva_tv_player_resume_button", "id", context.getPackageName());
+                    assertTrue("TV resume action resource missing", buttonId != 0);
+                    View button = openedActivity.findViewById(buttonId);
+                    assertNotNull("TV resume action missing", button);
+                    assertTrue("TV resume action not visible", button.isShown());
+                    assertTrue("TV resume action not focused", button.hasFocus());
+                    assertTrue("TV resume action disabled", button.isEnabled());
+                });
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);
+            }
+            ExoPlayer[] openedPlayer = new ExoPlayer[1];
+            instrumentation.runOnMainSync(() -> {
+                try { openedPlayer[0] = player(openedActivity); }
+                catch (Exception error) { throw new AssertionError("Native player field unavailable", error); }
+            });
+            ExoPlayer player = openedPlayer[0];
+            assertNotNull("Native player not created after launch/resume action", player);
             JSONObject resumed = advance(instrumentation, player, resumeSeconds * 1000L, 90000);
             instrumentation.runOnMainSync(() -> player.seekTo(seekSeconds * 1000L));
             JSONObject sought = advance(instrumentation, player, seekSeconds * 1000L, 60000);
