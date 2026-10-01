@@ -20,6 +20,7 @@ import { fetchBoundedProviderJson } from "./bounded-provider-response.mjs";
 import { acceptAutomaticTmdbSearchMatch, isMissingTmdbTitle } from "./tmdb-enrichment-policy.mjs";
 import { hydrateSelectionSnapshotMovieTracks, hydrateSelectionSnapshotSeriesTracks } from "./selection-snapshot-tracks.mjs";
 import { hydrateSelectionAudioResults } from "./selection-audio-results.mjs";
+import { applySelectionTitleRecipes, saveSelectionTitleRecipes } from "./selection-title-recipes.mjs";
 import {
   cleanTmdbSearchQuery,
   stripProviderSearchPrefix,
@@ -134,7 +135,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   )) {
     throw new Error("VOD projection rows do not belong to the snapshotted catalog generation");
   }
-  const rows = eligibleRows;
+  let rows = eligibleRows;
   if (!rows.length) return { titles: 0, variants: 0, providerTmdbIds: 0, vodInfoFetched: 0 };
 
   // cloud_titles is shared by every source owned by a user and catalog_titles is
@@ -158,6 +159,26 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     };
   }
   await options.assertSourceCurrent?.();
+
+  const prepared = options.generation.kind === "active" ? await applySelectionTitleRecipes({
+    db: options.db, sourceId: options.sourceId, userId: options.userId, rows,
+    generationFence: catalogGenerationRpcFence(options.generation),
+  }) : null;
+  if (prepared) {
+    await adoptActiveCatalogUserVisibilityEpoch(options.db, options.sourceId, options.userId, options.generation);
+    const preparedIds = new Set(prepared.itemIds);
+    await hydrateSelectionProjection(options, rows.filter(row => preparedIds.has(row.id)));
+    await options.assertSourceCurrent?.();
+    const propagated = await options.db.rpc("propagate_media_item_years", {
+      p_user: options.userId, p_source: options.sourceId, ...catalogGenerationRpcFence(options.generation),
+      p_item_ids: prepared.itemIds,
+    });
+    if (propagated.error) throw propagated.error;
+    await adoptActiveCatalogUserVisibilityEpoch(options.db, options.sourceId, options.userId, options.generation);
+    rows = rows.filter(row => !preparedIds.has(row.id));
+    if (!rows.length) return { titles: prepared.titles, variants: prepared.variants,
+      providerTmdbIds: 0, vodInfoFetched: 0, preparedSelection: true, preparedSelectionVariants: prepared.variants };
+  }
 
   const gateway = options.mediaGatewayUrl && options.mediaGatewayToken
     ? { url: options.mediaGatewayUrl.replace(/\/+$/, ""), token: options.mediaGatewayToken }
@@ -340,6 +361,8 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   }
 
   const titleRows = [...titleRowsByKey.values()];
+  await saveSelectionTitleRecipes({ db: options.db, sourceId: options.sourceId, userId: options.userId,
+    rows, titles: titleRows, variants: variantRows });
   const titleIdByKey = new Map<string, string>();
   for (let index = 0; index < titleRows.length; index += 500) {
     await options.assertSourceCurrent?.();
@@ -389,25 +412,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     );
   }
 
-  // The curated snapshot already contains bounded container probes. Seed their
-  // exact movie maps for every new Selection owner, preserving later probes.
-  await hydrateSelectionSnapshotMovieTracks({
-    db: options.db, userId: options.userId, sourceId: options.sourceId,
-    rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
-    assertSourceCurrent: options.assertSourceCurrent,
-  });
-  if (options.generation.kind === "active") {
-    await hydrateSelectionAudioResults({
-      db: options.db, userId: options.userId, sourceId: options.sourceId,
-      rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
-      assertSourceCurrent: options.assertSourceCurrent,
-    });
-    await hydrateSelectionSnapshotSeriesTracks({
-      db: options.db, userId: options.userId, sourceId: options.sourceId,
-      rows: savedVariants, generationFence: catalogGenerationRpcFence(options.generation),
-      assertSourceCurrent: options.assertSourceCurrent,
-    });
-  }
+  await hydrateSelectionProjection(options, savedVariants);
 
   // Exact per-file track caches are shared across accounts by provider identity.
   // Once the movie variants exist, hydrate each grouped title's language UNION
@@ -549,13 +554,35 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   );
 
   return {
-    titles: titleRows.length,
-    variants: savedVariants.length,
+    titles: titleRows.length + Number(prepared?.titles || 0),
+    variants: savedVariants.length + Number(prepared?.variants || 0),
+    preparedSelection: false,
+    preparedSelectionVariants: Number(prepared?.variants || 0),
     providerTmdbIds,
     vodInfoFetched: vodInfoByExternalId.size,
     exactFileTitlesReused: exactFileMatches.size,
     publicTitlesReused: publicMatches.size,
   };
+}
+
+async function hydrateSelectionProjection(options: ProjectionOptions, rows: ProjectionRow[]) {
+  await hydrateSelectionSnapshotMovieTracks({
+    db: options.db, userId: options.userId, sourceId: options.sourceId,
+    rows, generationFence: catalogGenerationRpcFence(options.generation),
+    assertSourceCurrent: options.assertSourceCurrent,
+  });
+  if (options.generation.kind === "active") {
+    await hydrateSelectionAudioResults({
+      db: options.db, userId: options.userId, sourceId: options.sourceId,
+      rows, generationFence: catalogGenerationRpcFence(options.generation),
+      assertSourceCurrent: options.assertSourceCurrent,
+    });
+    await hydrateSelectionSnapshotSeriesTracks({
+      db: options.db, userId: options.userId, sourceId: options.sourceId,
+      rows, generationFence: catalogGenerationRpcFence(options.generation),
+      assertSourceCurrent: options.assertSourceCurrent,
+    });
+  }
 }
 
 // Deliberately separate from refreshVodTitleProjection: callers cannot reach

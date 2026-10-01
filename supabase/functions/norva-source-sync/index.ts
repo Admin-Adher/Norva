@@ -3320,6 +3320,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   let firstSliceReady = recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).browseReady === true
     || recordOrEmpty(recordOrEmpty(src0?.config_hint).syncProgress).usable === true;
   const isSelection = await isDiscoverySourceId(sourceId, userId);
+  let preparedSelectionBatch = false;
   while (Date.now() < deadline && guard++ < 400) {
     try {
       await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
@@ -3333,10 +3334,15 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // Bound title work across current lease holders. Recount every batch so a
       // newly arriving import reduces the next batch; errors use 60, never 150.
       // The count is advisory: CAS leases and all catalogue/run guards stay authoritative.
+      const activeFinalizers = phase === "titles" ? await activeFinalizeLeaseCount(db) : null;
       const batchLimit = phase === "titles"
-        ? initialTitleBatchLimit(isSelection, firstSliceReady, await activeFinalizeLeaseCount(db))
+        ? isSelection && preparedSelectionBatch && activeFinalizers === 1 ? 500
+          : initialTitleBatchLimit(isSelection, firstSliceReady, activeFinalizers)
         : 1500;
       result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, afterId, limit: batchLimit }) as unknown as JsonRecord;
+      const projection = recordOrEmpty(result.titleProjection);
+      preparedSelectionBatch = Number(projection.variants) > 0
+        && Number(projection.preparedSelectionVariants) >= Number(projection.variants) * 0.9;
     } catch (e) {
       if (isCatalogAccessGuardError(e)) { await releaseFinalizeLease(db, sourceId, userId, leaseToken); return; }
       // Transient contention/compute spike → continue in a fresh isolate; a real
@@ -4249,7 +4255,7 @@ async function loadSourceItems(
   for (let offset = Math.max(0, options.offset ?? 0); rows.length < maxRows; offset += pageSize) {
     let query = db
       .from("cloud_media_items")
-      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available")
       .eq("source_id", sourceId)
       .eq("user_id", userId)
       .eq("generation_id", generation.generationId);
@@ -4618,7 +4624,7 @@ async function replaceSourceItems(
       ), expectedSnapshot);
       return await db.from("cloud_media_items")
         .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
-        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available");
     };
     const { data, error } = await writeM3uEpochBatch({ generation: expectedSnapshot, write,
       adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, expectedSnapshot) });

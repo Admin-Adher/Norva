@@ -783,7 +783,7 @@ test('active projection adopts only a monotone user visibility epoch after its o
   assert.ok(variantWrite >= 0 && adopt > variantWrite, 'visible variant upsert must adopt its post-write user epoch');
   assert.equal(
     projection.match(/await adoptActiveCatalogUserVisibilityEpoch\(/g)?.length,
-    7,
+    9,
     'every projection write boundary must re-prove authority while adopting only the monotone user epoch',
   );
   const hydration = projection.indexOf('options.db.rpc("hydrate_cloud_title_file_languages"');

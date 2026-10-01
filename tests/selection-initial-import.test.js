@@ -188,7 +188,9 @@ test('activation and durable worker use the same handoff protocol without an ear
     assert.doesNotMatch(branch, /sync_status:\s*"ready"/);
     const worker = read('supabase/functions/norva-source-sync/index.ts');
     assert.match(worker, /isDiscoverySourceId\(sourceId, userId\)/);
-    assert.match(worker, /initialTitleBatchLimit\(isSelection, firstSliceReady, await activeFinalizeLeaseCount\(db\)\)/);
+    assert.match(worker, /await activeFinalizeLeaseCount\(db\)/);
+    assert.match(worker, /initialTitleBatchLimit\(isSelection, firstSliceReady, activeFinalizers\)/);
+    assert.match(worker, /isSelection && preparedSelectionBatch && activeFinalizers === 1 \? 500/);
 });
 
 test('M3U finalization cannot reuse a cursor from another generation or refresh', async () => {
