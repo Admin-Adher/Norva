@@ -1,4 +1,5 @@
 import { renderEmailFrame, type EmailArtwork } from "./email-frame.ts";
+import { renderCancellationReceipt } from "./cancellation-email.ts";
 // Lifecycle, billing and consent-gated marketing emails. These are pure render
 // functions; norva-lifecycle owns cohort selection, consent and delivery.
 
@@ -415,20 +416,8 @@ function renderBillingState(opts: {
 // These pure renderers are ready for authoritative Web/Revolut event producers.
 // No generic projection trigger calls them: each provider event must enqueue once
 // from the transaction that owns its immutable event id.
-export function renderCancellationConfirmed(firstName: string | null, opts: { effectiveAt?: string }): Rendered {
-  const date = fmtDate(opts.effectiveAt);
-  return renderBillingState({
-    firstName,
-    subject: "Your Norva cancellation is confirmed",
-    heading: "Cancellation confirmed",
-    preheader: date ? `Your access remains available through ${date}.` : "Your plan will not renew.",
-    body: date
-      ? `Your plan will not renew. You can keep watching on every screen through ${date}. You can reactivate before then without losing access.`
-      : "Your plan will not renew. You can reactivate whenever you are ready.",
-    flow: "cancellation_confirmed",
-    ctaLabel: "Reactivate or manage plan",
-    ctaUrl: MANAGE_URL,
-  });
+export function renderCancellationConfirmed(_firstName: string | null, opts: { effectiveAt?: string; locale?: string }): Rendered {
+  return renderCancellationReceipt(opts);
 }
 
 export function renderRenewalUpcoming(firstName: string | null, opts: { renewsAt: string; amountCents?: number | null; currency?: string }): Rendered {

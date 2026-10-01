@@ -16,7 +16,7 @@
   function date(value) {
     return new Date(value).toLocaleDateString(document.documentElement.lang || 'en', { year: 'numeric', month: 'long', day: 'numeric' });
   }
-  async function mount(parent) {
+  async function mount(parent, options = {}) {
     const billing = window.NorvaBilling;
     if (!billing?.revolutRetentionOffer || billing.isNative?.() || billing.isTvShell?.()) return;
     const card = element('section', 'card retention-offer');
@@ -25,6 +25,7 @@
     parent.insertBefore(card, parent.querySelector(':scope > .actions'));
     const standardActions = parent.querySelectorAll('[data-retention-alternative]');
     function showOffer(visible) {
+      if (options.embedded) return;
       document.body.classList.toggle('has-retention-offer', visible);
       standardActions.forEach(action => { action.hidden = visible; });
     }
@@ -32,6 +33,7 @@
       card.replaceChildren(element('p', 'msg', text('ui_ret_loading', 'Checking available offers…')));
       try {
         const offer = await billing.revolutRetentionOffer();
+        if (!parent.isConnected) return;
         if (!offer) {
           showOffer(false); card.remove();
           if (restoreFocus) standardActions[0]?.focus();
@@ -51,7 +53,7 @@
           || offer.amount_cents >= offer.base_amount_cents || !['monthly', 'annual'].includes(offer.period)) throw new Error('Invalid offer');
         showOffer(true);
         const heading = element('h2', 'retention-title', text('ui_ret_title', 'Your personal offer'));
-        heading.id = 'retention-title'; card.setAttribute('aria-labelledby', heading.id);
+        heading.id = options.embedded ? 'retention-dialog-title' : 'retention-title'; card.setAttribute('aria-labelledby', heading.id);
         card.appendChild(heading);
         const values = { amount: money(offer.amount_cents, offer.currency), base: money(offer.base_amount_cents, offer.currency), cycles: offer.cycles };
         card.appendChild(element('p', 'retention-price', offer.period === 'monthly'
@@ -69,7 +71,8 @@
         const accept = element(immediate ? 'a' : 'button', 'btn', immediate
           ? text('ui_ret_checkout', 'View offer and resubscribe')
           : text('ui_ret_accept', 'Reactivate at this price'));
-        const decline = element('button', 'btn retention-decline', text('ui_ret_decline', 'No thanks'));
+        const decline = element('button', 'btn retention-decline', options.embedded
+          ? text('ui_ret_keep_cancelled', 'Keep my cancellation') : text('ui_ret_decline', 'No thanks'));
         const status = element('p', 'note retention-status');
         status.setAttribute('role', 'status');
         if (immediate) {
@@ -89,6 +92,7 @@
           try {
             await billing.revolutRetentionAction(offer.id, action);
             if (action === 'accept') { window.location.reload(); return; }
+            if (options.onDecline) { options.onDecline(); return; }
             showOffer(false);
             card.replaceChildren(element('p', 'msg', text('ui_ret_declined', 'Your choice is saved. No reminders for this offer.')));
             card.tabIndex = -1; card.focus();
@@ -108,8 +112,10 @@
         details.appendChild(element('p', '', text('ui_ret_terms', 'Your remaining access is preserved. Offer available until {{date}}.', { date: date(offer.expires_at) })));
         details.appendChild(element('p', '', text('ui_ret_personal', 'Personal offer, cannot be combined with other discounts. Once every 12 months.')));
         card.appendChild(details);
+        options.onOffer?.();
         if (restoreFocus) accept.focus();
       } catch (_) {
+        if (!parent.isConnected) return;
         showOffer(false);
         card.replaceChildren(element('p', 'msg', text('ui_ret_error', 'We could not confirm this offer. Refresh the page and try again.')));
         const retry = element('button', 'btn ghost', text('ui_ret_retry', 'Check again'));

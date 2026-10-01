@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=ec4b76fc30"></script>
+    <script src="/js/i18n.js?v=9b47ddaa7a"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_72d0c37fff0b">Your Norva subscription</title>
@@ -508,7 +508,37 @@
       // Errors bubble to the modal so all controls can be restored for a retry.
       async function doCancel(reason) {
         clearActionError();
-        await window.NorvaBilling.revolutCancel(reason || 'skipped');
+        return await window.NorvaBilling.revolutCancel(reason || 'skipped');
+      }
+
+      // Cancellation is already committed before an optional offer is loaded.
+      // Closing this dialog, a quote failure or a declined offer cannot resume it.
+      function showCancellationResult(result, decision) {
+        const until = result?.access_until || decision.projection?.current_period_end || decision.projection?.trial_ends_at;
+        const cancelled = { ...decision, status: result?.status || 'cancelled_at_period_end' };
+        render(cancelled);
+        const cm = buildModal();
+        cm.modal.classList.add('cancellation-result');
+        const heading = el('h2', null, copy('ui_sub_cancel_done', 'Cancellation confirmed'));
+        heading.id = 'cancellation-result-title';
+        cm.modal.setAttribute('aria-labelledby', heading.id);
+        cm.modal.appendChild(heading);
+        cm.modal.appendChild(el('p', null, until
+          ? copy('ui_sub_cancelled_until', 'Cancellation confirmed. You can keep watching until {{date}}. Your plan will not renew.', { date: fmtDate(until) })
+          : copy('ui_sub_cancel_no_renewal', 'Your plan will not renew.')));
+        const offers = el('div', 'cancellation-offers');
+        cm.modal.appendChild(offers);
+        const close = el('button', 'btn ghost cancellation-close', copy('ui_sub_cancel_close', 'Close'));
+        close.addEventListener('click', cm.close);
+        cm.modal.appendChild(close);
+        cm.focusFirst();
+        if (isRevolutWeb(cancelled) && cancelled.status === 'cancelled_at_period_end') {
+          // The same server-owned quote and acceptance path as the account card.
+          window.NorvaRetentionOffer?.mount(offers, {
+            embedded: true, onDecline: cm.close,
+            onOffer: function () { close.textContent = copy('ui_sub_cancel_close', 'Close'); }
+          });
+        }
       }
 
       // Accessible modal scaffolding shared by the cancel flow and the past-due
@@ -553,7 +583,11 @@
             if (entry.ariaHidden == null) entry.node.removeAttribute('aria-hidden');
             else entry.node.setAttribute('aria-hidden', entry.ariaHidden);
           });
-          try { if (prevFocus && prevFocus.focus) prevFocus.focus(); } catch (_) { /* noop */ }
+          try {
+            const target = prevFocus?.isConnected && prevFocus !== document.body
+              ? prevFocus : document.getElementById('page-title');
+            if (target) { if (target.tagName === 'H1') target.tabIndex = -1; target.focus(); }
+          } catch (_) { /* noop */ }
         }
         function onKey(e) {
           if (e.key === 'Escape') { e.preventDefault(); close(); return; }
@@ -629,10 +663,9 @@
             cancelNow.disabled = true; cancelNow.textContent = (globalThis.NorvaI18n?.t("ui_web_91b104db05da", { defaultValue: "Cancelling…" }) ?? 'Cancelling…');
             b.disabled = true; b.textContent = (globalThis.NorvaI18n?.t("ui_web_91b104db05da", { defaultValue: "Cancelling…" }) ?? 'Cancelling…');
             keep.disabled = true;
+            let result;
             try {
-              await doCancel(cancelReason);
-              cm.close();
-              location.reload();
+              result = await doCancel(cancelReason);
             } catch (e) {
               const message = showActionError('cancel', e);
               modalError.textContent = message;
@@ -641,7 +674,10 @@
               b.disabled = false; b.textContent = (globalThis.NorvaI18n?.t("ui_web_2e5d129831b6", { defaultValue: "Cancel plan" }) ?? 'Cancel plan');
               keep.disabled = false;
               cancelNow.focus();
+              return;
             }
+            cm.close();
+            showCancellationResult(result, decision);
           });
           const keep = el('button', 'btn ghost', (globalThis.NorvaI18n?.t("ui_web_309e5b1f7b55", { defaultValue: "Keep my plan" }) ?? 'Keep my plan'));
           keep.addEventListener('click', cm.close);

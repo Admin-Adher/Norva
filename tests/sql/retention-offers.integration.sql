@@ -32,13 +32,13 @@ declare u uuid:='00000000-0000-4000-8000-000000000001';o jsonb;annual jsonb;expi
   original_end timestamptz; again jsonb; offer_id uuid; delivery uuid; rejected boolean; candidates jsonb;
 begin
   if norva_retention_offer(u) is not null then raise exception 'disabled policy exposed offer';end if;
-  update cloud_retention_policy set enabled=true;
+  update cloud_retention_policy set enabled=true,communications_enabled=true,communications_enabled_at=now();
   o:=norva_retention_offer(u);offer_id:=(o->>'id')::uuid;
   if o->>'amount_cents'<>'399' or o->>'cycles'<>'3' or o->>'charge_mode'<>'next_cycle' then raise exception 'monthly terms %',o;end if;
   if norva_retention_offer(u)->>'id'<>o->>'id' then raise exception 'duplicate offer';end if;
   annual:=norva_retention_offer('00000000-0000-4000-8000-000000000002');
   if annual->>'amount_cents'<>'3779' or annual->>'cycles'<>'1' then raise exception 'annual terms %',annual;end if;
-  if norva_retention_offer('00000000-0000-4000-8000-000000000003') is not null then raise exception 'offer earlier than J-3';end if;
+  if norva_retention_offer('00000000-0000-4000-8000-000000000003') is null then raise exception 'post-cancellation offer missing before J-3';end if;
   if norva_retention_offer('00000000-0000-4000-8000-000000000006')->>'support'<>'true' then raise exception 'technical reason not routed to help';end if;
   foreach u in array array['00000000-0000-4000-8000-000000000007'::uuid,'00000000-0000-4000-8000-000000000008'::uuid,'00000000-0000-4000-8000-000000000009'::uuid] loop
     if norva_retention_offer(u) is not null then raise exception 'ineligible owner exposed: %',u;end if;
