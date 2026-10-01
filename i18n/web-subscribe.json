@@ -1052,5 +1052,85 @@
     "ar": "شروط العرض",
     "id": "Ketentuan penawaran",
     "fil": "Mga kondisyon ng alok"
+  },
+  "ui_sub_cancel_done": {
+    "source": "Cancellation confirmed",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Cancellation confirmed",
+    "fr": "Résiliation confirmée",
+    "pt-BR": "Cancelamento confirmado",
+    "es": "Cancelación confirmada",
+    "hi": "रद्दीकरण की पुष्टि हो गई",
+    "tr": "İptal onaylandı",
+    "bn": "বাতিলকরণ নিশ্চিত হয়েছে",
+    "ar": "تم تأكيد الإلغاء",
+    "id": "Pembatalan dikonfirmasi",
+    "fil": "Kumpirmado ang pagkansela"
+  },
+  "ui_sub_cancel_no_renewal": {
+    "source": "Your plan will not renew.",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Your plan will not renew.",
+    "fr": "Votre forfait ne sera pas renouvelé.",
+    "pt-BR": "Seu plano não será renovado.",
+    "es": "Tu plan no se renovará.",
+    "hi": "आपका प्लान नवीनीकृत नहीं होगा।",
+    "tr": "Planınız yenilenmeyecek.",
+    "bn": "আপনার প্ল্যান নবায়ন হবে না।",
+    "ar": "لن يتم تجديد خطتك.",
+    "id": "Paket Anda tidak akan diperpanjang.",
+    "fil": "Hindi mare-renew ang iyong plan."
+  },
+  "ui_sub_cancel_close": {
+    "source": "Close",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Close",
+    "fr": "Fermer",
+    "pt-BR": "Fechar",
+    "es": "Cerrar",
+    "hi": "बंद करें",
+    "tr": "Kapat",
+    "bn": "বন্ধ করুন",
+    "ar": "إغلاق",
+    "id": "Tutup",
+    "fil": "Isara"
+  },
+  "ui_ret_keep_cancelled": {
+    "source": "Keep my cancellation",
+    "refs": [
+      "public/subscription.html"
+    ],
+    "en": "Keep my cancellation",
+    "fr": "Garder ma résiliation",
+    "pt-BR": "Manter meu cancelamento",
+    "es": "Mantener mi cancelación",
+    "hi": "मेरा रद्दीकरण बनाए रखें",
+    "tr": "İptalimi koru",
+    "bn": "আমার বাতিলকরণ বহাল রাখুন",
+    "ar": "الإبقاء على الإلغاء",
+    "id": "Tetap batalkan",
+    "fil": "Panatilihin ang pagkansela"
+  },
+  "ui_signup_offer_consent": {
+    "source": "I would like Norva tips and personal offers by email. I can unsubscribe at any time.",
+    "refs": [
+      "public/account.html"
+    ],
+    "en": "I would like Norva tips and personal offers by email. I can unsubscribe at any time.",
+    "fr": "Je souhaite recevoir les conseils et offres personnelles de Norva par e-mail. Je peux me désinscrire à tout moment.",
+    "pt-BR": "Quero receber dicas e ofertas pessoais da Norva por e-mail. Posso cancelar a inscrição a qualquer momento.",
+    "es": "Quiero recibir consejos y ofertas personales de Norva por correo. Puedo darme de baja cuando quiera.",
+    "hi": "मैं ईमेल से Norva के सुझाव और व्यक्तिगत ऑफ़र पाना चाहता/चाहती हूँ। मैं कभी भी सदस्यता छोड़ सकता/सकती हूँ।",
+    "tr": "Norva ipuçlarını ve kişisel teklifleri e-postayla almak istiyorum. İstediğim zaman vazgeçebilirim.",
+    "bn": "আমি ইমেলে Norva-এর পরামর্শ ও ব্যক্তিগত অফার পেতে চাই। যেকোনো সময় বন্ধ করতে পারি।",
+    "ar": "أرغب في تلقي نصائح Norva وعروضي الشخصية عبر البريد الإلكتروني. يمكنني إلغاء الاشتراك في أي وقت.",
+    "id": "Saya ingin menerima tips dan penawaran pribadi Norva melalui email. Saya dapat berhenti berlangganan kapan saja.",
+    "fil": "Gusto kong makatanggap ng mga tip at personal na alok ng Norva sa email. Maaari akong mag-unsubscribe anumang oras."
   }
 }

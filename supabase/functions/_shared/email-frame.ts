@@ -24,7 +24,7 @@ export interface EmailFrame {
   footerHtml?: string;
   code?: string;
   fallbackUrl?: string;
-  lang?: 'en' | 'fr';
+  lang?: string;
   artwork?: EmailArtwork | false;
 }
 
@@ -42,7 +42,7 @@ export function renderEmailFrame(o: EmailFrame): string {
   const fallback = o.fallbackUrl ? `<tr><td class="nv-pad" style="padding:0 40px 32px;color:${COLOR.secondary};font-family:${FONT};font-size:14px;line-height:22px;word-break:break-all;overflow-wrap:anywhere">If the button doesn't work, copy and paste this link:<br><a href="${escapeEmail(o.fallbackUrl)}" style="color:${COLOR.highlight};text-decoration:underline;word-break:break-all;overflow-wrap:anywhere">${escapeEmail(o.fallbackUrl)}</a></td></tr>` : '';
   const note = o.noteHtml ? `<tr><td class="nv-pad" style="padding:24px 40px 32px;border-top:1px solid #27272a;color:${COLOR.secondary};font-family:${FONT};font-size:14px;line-height:23px">${o.noteHtml}</td></tr>` : '';
   return `<!doctype html>
-<html lang="${o.lang === 'fr' ? 'fr' : 'en'}" dir="ltr"><head>
+<html lang="${escapeEmail(o.lang || 'en')}" dir="${o.lang === 'ar' ? 'rtl' : 'ltr'}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="x-apple-disable-message-reformatting"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">
 <meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark">

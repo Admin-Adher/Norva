@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=ec4b76fc30"></script>
+    <script src="/js/i18n.js?v=9b47ddaa7a"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b10">
     <title data-i18n="ui_web_070ab76e8398">Norva Account</title>
@@ -390,6 +390,9 @@
         html.native-app .onb-slide h2 { font-size: 19px; margin-bottom: 6px; }
         html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
         html.native-app .onb-dots { margin-top: 10px; }
+        .signup-email-choice { display:flex; gap:12px; align-items:flex-start; min-height:44px; margin:16px 0; padding:8px 0; font-size:13px; line-height:1.5; cursor:pointer; }
+        .signup-email-choice input { flex:0 0 auto; width:20px; height:20px; margin-top:2px; }
+        html.native-app .signup-email-choice { display:none; }
     </style>
     <link id="premium-auth-style" rel="stylesheet" href="/css/account-premium.css?v=3" media="not all">
     <script>
@@ -583,6 +586,10 @@
                     <input id="signup-email" type="email" autocomplete="email" placeholder="name@example.com" required data-i18n-placeholder="ui_web_7b17fb0bd173">
                     <div class="email-assist" id="signup-email-assist" role="status" aria-live="polite" hidden></div>
                 </div>
+                <label class="signup-email-choice" id="signup-email-choice">
+                    <input type="checkbox" id="signup-marketing-opt-in">
+                    <span data-i18n="ui_signup_offer_consent">I would like Norva tips and personal offers by email. I can unsubscribe at any time.</span>
+                </label>
                 <div id="signup-passwordless" data-passwordless>
                     <button class="primary" type="submit" id="signup-magic-primary" data-i18n="ui_web_91fbfebf41d8">Email me a sign-in link</button>
                     <p class="auth-hint">
@@ -675,6 +682,7 @@
 
     <script src="/js/cloudApi.js?v=6c7fcef46b"></script>
     <script src="/js/authApi.js?v=be61dee633"></script>
+    <script src="/js/signup-email-preference.js?v=1"></script>
     <script>
         const params = new URLSearchParams(location.search);
         const rawReturnTo = params.get('returnTo') || '';
@@ -1024,7 +1032,8 @@
         async function capturePostAuthAttribution(context) {
             const [signupAttribution, partnerReferral] = await Promise.all([
                 capturePendingSignupAttribution(context),
-                capturePendingPartnerReferral()
+                capturePendingPartnerReferral(),
+                window.NorvaSignupEmailPreference?.apply()
             ]);
             return { signupAttribution, partnerReferral };
         }
@@ -1455,6 +1464,10 @@
         forms.signup.addEventListener('submit', async event => {
             event.preventDefault();
             clearAuthHelp();
+            if (!isNativeApp) window.NorvaSignupEmailPreference?.remember(
+                document.getElementById('signup-email').value,
+                document.getElementById('signup-marketing-opt-in').checked
+            );
             // Passwordless sign-up (default on web): confirm the address, then
             // prove mailbox ownership before any account can be created.
             if (document.getElementById('signup-password-wrap').hidden) {

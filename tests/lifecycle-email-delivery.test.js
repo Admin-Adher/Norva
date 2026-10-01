@@ -158,7 +158,8 @@ test('billing events use an immutable journal bridge and every supported produce
     'renderPaymentRecovered', 'renderAccessExpired', 'renderRefundConfirmed',
   ]) assert.match(templates, new RegExp(`export function ${renderer}`));
   for (const flow of [
-    'cancellation_confirmed', 'subscription_resumed', 'plan_change_scheduled',
+    'subscription_resumed', 'plan_change_scheduled',
     'plan_change_applied', 'payment_recovered', 'access_expired', 'refund_confirmed',
   ]) assert.match(templates, new RegExp(`flow: "${flow}"`));
+  assert.match(read('supabase/functions/_shared/cancellation-email.ts'), /value: "cancellation_confirmed"/);
 });

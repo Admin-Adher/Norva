@@ -1616,7 +1616,13 @@ Deno.serve(async (req) => {
       status?: string; access_until?: string | null; applied?: boolean;
     } | null;
     if (!action?.status) return json({ error: "Could not cancel the plan" }, 503);
-    if (action.applied) await logCancelFeedback(db, user.id, reason, "cancelled", action.status);
+    if (action.applied) {
+      await logCancelFeedback(db, user.id, reason, "cancelled", action.status);
+      // Notification delivery must never turn a committed cancellation into an
+      // apparent failure. The durable intent and minutely worker own retries.
+      try { await db.rpc("norva_dispatch_billing_confirmations"); }
+      catch (_) { console.warn("[norva-revolut] cancellation email dispatch deferred"); }
+    }
     return json({ ok: true, status: action.status, access_until: action.access_until ?? null });
   }
 

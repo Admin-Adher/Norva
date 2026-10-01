@@ -200,12 +200,13 @@ async function queueUserEmail(
   const { data: u } = await db.auth.admin.getUserById(userId);
   const email = u?.user?.email ?? null;
   if (!email) return { durable: false, created: false, outboxId: null };
+  const { data: profile } = await db.from("cloud_profiles").select("locale").eq("id", userId).maybeSingle();
   const unsubscribeUrl = opts.marketing
     ? `${UNSUBSCRIBE_URL}?token=${encodeURIComponent(await makeUnsubscribeToken(userId))}`
     : undefined;
   const rendered = make(firstNameOf(u?.user ?? null), {
     unsubscribeUrl,
-    locale: String(u?.user?.user_metadata?.language || u?.user?.user_metadata?.locale || "en"),
+    locale: String(profile?.locale || u?.user?.user_metadata?.language || u?.user?.user_metadata?.locale || "en"),
   });
   const unsubscribeHeaders = opts.marketing && unsubscribeUrl
     ? {
@@ -309,10 +310,10 @@ async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string
   for (const intent of intents) {
     try {
       const p = intent.payload ?? {};
-      const make = (firstName: string | null): Rendered => {
+      const make = (firstName: string | null, context: { locale?: string }): Rendered => {
         switch (intent.event_type) {
           case "cancellation_confirmed":
-            return renderCancellationConfirmed(firstName, { effectiveAt: intentIso(p.effective_at) });
+            return renderCancellationConfirmed(firstName, { effectiveAt: intentIso(p.effective_at), locale: context.locale });
           case "subscription_resumed":
             return renderSubscriptionResumed(firstName, { renewsAt: intentIso(p.renews_at) });
           case "plan_change_scheduled":
@@ -333,7 +334,7 @@ async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string
             throw new Error("unsupported_billing_intent");
         }
       };
-      const queued = await queueUserEmail(db, intent.user_id, (fn) => make(fn), {
+      const queued = await queueUserEmail(db, intent.user_id, (fn, context) => make(fn, context), {
         dedupeKey: await billingIntentDedupe(intent),
         markerKind: "billing_event",
         markerReference: `${intent.source_provider}:${intent.source_event_id}`.slice(0, 500),
@@ -348,6 +349,26 @@ async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string
       }
       if (queued.created) result.queued++;
       else result.deduped++;
+      // Keep the confirmation transactional. The optional offer is a separate
+      // marketing delivery so an opt-out (including at send time) can never
+      // suppress the cancellation receipt. The pre-expiry key also prevents a
+      // duplicate J-3 offer. Google Play uses its own producer and prices.
+      if (intent.event_type === "cancellation_confirmed" && intent.source_provider === "revolut"
+          && BILLING_LIVE && LC_WINBACK && MARKETING_READY) {
+        try {
+          if (await marketingEmailAllowed(db, intent.user_id)) {
+            const { data: offer, error: offerError } = await db.rpc("norva_retention_offer", { p_user: intent.user_id });
+            if (!offerError && offer?.id && offer.charge_mode === "next_cycle") {
+              const reference = `${offer.id}:pre`;
+              await queueUserEmail(db, intent.user_id,
+                (_name, context) => renderRetentionOffer({ ...offer, stage: "pre" }, context), {
+                  dedupeKey: `lifecycle:retention:${reference}`, marketing: true,
+                  markerKind: "retention", markerReference: reference,
+                });
+            }
+          }
+        } catch (_) { console.warn("[norva-lifecycle] post-cancellation offer deferred"); }
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : "billing_intent_enqueue_failed";
       const { data: failed, error: failError } = await db.rpc("fail_lifecycle_billing_intent", {
@@ -1043,6 +1064,9 @@ Deno.serve(async (req) => {
   if (authErr || ok !== true) return json({ error: "Unauthorized" }, 403);
 
   try {
+    if (url.pathname.endsWith("/cron/billing-events")) {
+      return json({ ok: true, billing_events: await runBillingEventIntents(db) });
+    }
     if (url.pathname.endsWith("/cron/resend-contacts")) {
       // Contact/Segment reconciliation owns a full-access Resend credential and
       // therefore runs only in the private host-side ops worker. Never proxy it
@@ -1060,9 +1084,9 @@ Deno.serve(async (req) => {
     };
     // The database is the activation gate. All four behavioral journeys ship
     // draft/0%, so deploying this worker alone cannot contact anyone.
+    out.billing_events = await runBillingEventIntents(db); // always active (transactional)
     out.behavioral = await runBehavioralLifecycle(db);
     out.welcome = await runWelcome(db);              // always active (transactional)
-    out.billing_events = await runBillingEventIntents(db); // always active (transactional)
     if (BILLING_LIVE && LC_DUNNING) out.dunning = await runDunning(db);
     if (BILLING_LIVE && LC_RENEWAL) out.renewal = await runRenewalNotices(db);
     // Expiry is never allowed to run without the warning/dunning flow, even if
