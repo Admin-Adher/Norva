@@ -82,7 +82,7 @@ namespace "tv.norva.phone"
 
 def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
     from("../../../public") {
-        include "js/api.js", "js/utils/standalone.js"
+        include "js/api.js", "js/utils/standalone.js", "js/utils/playbackHealth.js"
         include "subscribe.html", "subscription.html", "css/subscription.css", "css/commerce.css", "css/i18n.css"
         include "css/main.css", "js/utils/mediaUtils.js", "js/pages/WatchPage.js"
         include "js/pages/Settings.js"

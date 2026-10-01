@@ -14,13 +14,15 @@ let activeLiveModeScanJobId = null;
 const TYPE_TO_DB = {
     channel: 'live',
     movie: 'movie',
-    series: 'series'
+    series: 'series',
+    episode: 'episode'
 };
 
 const DB_TO_TYPE = {
     live: 'channel',
     movie: 'movie',
-    series: 'series'
+    series: 'series',
+    episode: 'episode'
 };
 
 function normalizeItemType(itemType) {
@@ -360,7 +362,7 @@ router.get('/', (req, res) => {
             sql += ' AND type = ?';
             params.push(TYPE_TO_DB[normalized]);
         } else {
-            sql += ` AND type IN ('live', 'movie', 'series')`;
+            sql += ` AND type IN ('live', 'movie', 'series', 'episode')`;
         }
 
         if (includeOk !== 'true' && includeModes !== 'true') {
@@ -598,18 +600,11 @@ router.post('/report', (req, res) => {
             WHERE source_id = ? AND type = ? AND item_id = ?
         `).get(sourceId, dbType, itemId);
 
+        if (!row) return res.json({ persisted: false, ignored: true, reason: 'item-not-indexed' });
         res.json({
             success: true,
             updated: result.changes,
-            entry: row ? rowToStatus(row) : {
-                source_id: sourceId,
-                item_id: itemId,
-                item_type: itemType,
-                status,
-                failures: status === 'broken' ? 1 : 0,
-                last_error: status === 'broken' ? reason : null,
-                updated_at: now
-            }
+            entry: rowToStatus(row)
         });
     } catch (err) {
         console.error('Error reporting playback status:', err);

@@ -528,6 +528,11 @@ async function handleRequest(req: Request): Promise<Response> {
       const result = await getPlaybackLanguageValidation(segments[2], identity.userId, supabase);
       return json(req, result.body, result.status);
     }
+    if (segments[0] === "playback" && segments[1] === "health" && !segments[2]
+      && (req.method === "GET" || req.method === "POST")) {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await playbackHealth(req, identity.userId, supabase, identity.deviceId ?? null));
+    }
     if (req.method === "POST" && segments[0] === "playback" && segments[1] === "events") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await recordPlaybackEvent(req, identity.userId, supabase, identity.deviceId ?? null), 201);
@@ -6799,6 +6804,39 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     mediaCacheWorkerRevoked,
     mediaCacheErrors: mediaCacheErrors.length,
   };
+}
+
+async function playbackHealth(req: Request, userId: string, db: SupabaseClient, deviceId: string | null) {
+  if (req.method === "GET") {
+    const params = new URL(req.url).searchParams;
+    const source = params.get("sourceId") || null;
+    const after = params.get("after") || null;
+    const itemType = params.get("itemType") || null;
+    if ((source && !PLAYBACK_SESSION_UUID_PATTERN.test(source)) || (after && !PLAYBACK_SESSION_UUID_PATTERN.test(after))
+      || (itemType && !["movie", "episode", "series", "channel"].includes(itemType))) {
+      throw new HttpError(400, "Invalid playback health filter");
+    }
+    if (source) await assertOwnedSource(source, userId, db);
+    const { data, error } = await db.rpc("norva_list_playback_health", {
+      p_user: userId, p_source: source, p_type: itemType, p_after: after,
+    });
+    if (error) throwDb(error, "Unable to load playback health");
+    return data;
+  }
+  const body = await readJson(req);
+  const sessionId = stringOr(body.sessionId, "");
+  const status = stringOr(body.status, "");
+  if (!PLAYBACK_SESSION_UUID_PATTERN.test(sessionId) || !["ok", "broken"].includes(status)) {
+    throw new HttpError(400, "Playback session and status are required");
+  }
+  // No client-supplied owner, source, media identity or revision is trusted.
+  const { data, error } = await db.rpc("norva_record_playback_health", {
+    p_user: userId, p_session: sessionId, p_status: status,
+    p_reason: stringOr(body.reason, "").slice(0, 500), p_device: deviceId,
+  });
+  if (error?.code === "P0002") throw new HttpError(404, "Playback session not found");
+  if (error) throwDb(error, "Unable to save playback health");
+  return data;
 }
 
 async function recordPlaybackEvent(

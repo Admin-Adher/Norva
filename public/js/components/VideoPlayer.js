@@ -2130,7 +2130,7 @@ class VideoPlayer {
         }
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
-            PlaybackHealth.report({ ...target, status: 'ok' }).catch(() => { });
+            PlaybackHealth.report({ ...target, status: 'ok', sessionId: this.currentCloudPlaybackSessionId }).catch(() => { });
         }
         // A fresh live channel starts ~1 segment from the edge — begin tracking the gap.
         if (this.isLivePlayback()) this.startLiveSyncMonitor();
@@ -2546,7 +2546,7 @@ class VideoPlayer {
         }
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
-            PlaybackHealth.report({ ...target, status: 'broken', reason }).catch(() => { });
+            PlaybackHealth.report({ ...target, status: 'broken', reason, sessionId: this.currentCloudPlaybackSessionId }).catch(() => { });
         }
     }
 
