@@ -3656,16 +3656,27 @@ function classifyM3uSyncFailure(error: unknown): {
 
 // Kick a fresh finalize isolate (resumes from the persisted finalize cursor).
 async function selfInvokeFinalize(sourceId: string, country: string | null) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return false;
   const q = country ? `?country=${encodeURIComponent(country)}` : "";
-  try {
-    await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}${q}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
-    });
-  } catch (error) {
-    console.error("[norva-source-sync] self-invoke finalize failed", sourceId, error);
+  // The HTTP request alone is not a handoff: proxy errors and a rejected source
+  // used to disappear silently. Retry bounded transport/server failures. Every
+  // receiver still takes the same CAS claim, including ambiguous timeout retries.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}${q}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
+        signal: AbortSignal.timeout(3500),
+      });
+      if ([401, 403, 404].includes(response.status)) break;
+      const receipt = response.ok ? await response.json().catch(() => null) : null;
+      if (receipt?.ok === true && receipt?.started === true && receipt?.sourceId === sourceId) return true;
+      if (response.ok && receipt?.ok === false) break;
+    } catch (_) { /* bounded retry; the durable cursor remains authoritative */ }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
   }
+  console.warn("[norva-source-sync] finalize handoff not accepted; watchdog will resume", sourceId);
+  return false;
 }
 
 type FinalizeCloudSourceOptions = {

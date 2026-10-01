@@ -102,7 +102,8 @@ export async function selectionSnapshotMovieManifests(rows) {
 // Read-then-upsert used to race a newer probe and mistake another file's
 // observation for this movie. The database now performs exact-file checks and
 // preserves even an explicitly unidentified later observation.
-export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
+export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId, rows, generationFence,
+  getGenerationFence = () => generationFence, assertSourceCurrent = async()=>{} }) {
   if (!await isDiscoverySourceId(sourceId, userId)) return {seeded:0};
   const selected = await selectionSnapshotMovieManifests(rows);
   if (!selected.length) return {seeded:0};
@@ -112,7 +113,7 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
   for (let offset=0;offset<selected.length;offset+=50) {
     await assertSourceCurrent();
     const {data,error}=await db.rpc('hydrate_selection_snapshot_movie_languages',{
-      p_user_id:userId,p_source_id:sourceId,...generationFence,
+      p_user_id:userId,p_source_id:sourceId,...getGenerationFence(),
       p_files:selected.slice(offset,offset+50),
     });
     if(error)throw error;
@@ -125,7 +126,8 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
 // Series catalogue badges/facets use an unordered union of owned episode
 // observations. The database validates the active parent/file binding and the
 // audited media URL hash; ordered track maps remain attached to each episode.
-export async function hydrateSelectionSnapshotSeriesTracks({ db, userId, sourceId, rows, generationFence, assertSourceCurrent = async()=>{} }) {
+export async function hydrateSelectionSnapshotSeriesTracks({ db, userId, sourceId, rows, generationFence,
+  getGenerationFence = () => generationFence, assertSourceCurrent = async()=>{} }) {
   if (!await isDiscoverySourceId(sourceId, userId)) return {seeded:0};
   const parentIds = [...new Set(rows.filter(row => row.item_type === 'series'
     && row.metadata?.seriesDelivery === 'selection'
@@ -136,7 +138,7 @@ export async function hydrateSelectionSnapshotSeriesTracks({ db, userId, sourceI
   for (let offset=0; offset<parentIds.length; offset+=50) {
     await assertSourceCurrent();
     const {data,error} = await db.rpc('hydrate_selection_episode_file_languages', {
-      p_user_id:userId,p_source_id:sourceId,...generationFence,
+      p_user_id:userId,p_source_id:sourceId,...getGenerationFence(),
       p_parent_series_ids:parentIds.slice(offset,offset+50),
     });
     if (error) throw error;
