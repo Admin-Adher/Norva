@@ -1132,5 +1132,357 @@
     "ar": "أرغب في تلقي نصائح Norva وعروضي الشخصية عبر البريد الإلكتروني. يمكنني إلغاء الاشتراك في أي وقت.",
     "id": "Saya ingin menerima tips dan penawaran pribadi Norva melalui email. Saya dapat berhenti berlangganan kapan saja.",
     "fil": "Gusto kong makatanggap ng mga tip at personal na alok ng Norva sa email. Maaari akong mag-unsubscribe anumang oras."
+  },
+  "ui_play_retention_title": {
+    "source": "Continue with your Google Play offer",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Continue with your Google Play offer",
+    "fr": "Continuez avec votre offre Google Play",
+    "pt-BR": "Continue com sua oferta do Google Play",
+    "es": "Continúa con tu oferta de Google Play",
+    "hi": "अपने Google Play ऑफ़र के साथ जारी रखें",
+    "tr": "Google Play teklifinizle devam edin",
+    "bn": "আপনার Google Play অফার নিয়ে চালিয়ে যান",
+    "ar": "تابع مع عرض Google Play الخاص بك",
+    "id": "Lanjutkan dengan penawaran Google Play Anda",
+    "fil": "Magpatuloy sa iyong alok sa Google Play"
+  },
+  "ui_play_retention_buy": {
+    "source": "Continue with Google Play",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Continue with Google Play",
+    "fr": "Continuer avec Google Play",
+    "pt-BR": "Continuar com o Google Play",
+    "es": "Continuar con Google Play",
+    "hi": "Google Play के साथ जारी रखें",
+    "tr": "Google Play ile devam et",
+    "bn": "Google Play দিয়ে চালিয়ে যান",
+    "ar": "المتابعة عبر Google Play",
+    "id": "Lanjutkan dengan Google Play",
+    "fil": "Magpatuloy sa Google Play"
+  },
+  "ui_play_retention_no": {
+    "source": "No thanks",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "No thanks",
+    "fr": "Non merci",
+    "pt-BR": "Não, obrigado",
+    "es": "No, gracias",
+    "hi": "नहीं, धन्यवाद",
+    "tr": "Hayır, teşekkürler",
+    "bn": "না, ধন্যবাদ",
+    "ar": "لا، شكرًا",
+    "id": "Tidak, terima kasih",
+    "fil": "Hindi, salamat"
+  },
+  "ui_play_retention_loading": {
+    "source": "Checking your offer…",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Checking your offer…",
+    "fr": "Vérification de votre offre…",
+    "pt-BR": "Verificando sua oferta…",
+    "es": "Comprobando tu oferta…",
+    "hi": "आपका ऑफ़र जाँचा जा रहा है…",
+    "tr": "Teklifiniz kontrol ediliyor…",
+    "bn": "আপনার অফার যাচাই করা হচ্ছে…",
+    "ar": "جارٍ التحقق من عرضك…",
+    "id": "Memeriksa penawaran Anda…",
+    "fil": "Sinusuri ang iyong alok…"
+  },
+  "ui_play_retention_retry": {
+    "source": "Try again",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Try again",
+    "fr": "Réessayer",
+    "pt-BR": "Tentar novamente",
+    "es": "Reintentar",
+    "hi": "फिर कोशिश करें",
+    "tr": "Tekrar dene",
+    "bn": "আবার চেষ্টা করুন",
+    "ar": "إعادة المحاولة",
+    "id": "Coba lagi",
+    "fil": "Subukan muli"
+  },
+  "ui_play_retention_error": {
+    "source": "Confirmation is temporarily unavailable. Check your subscription in Google Play before trying again.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Confirmation is temporarily unavailable. Check your subscription in Google Play before trying again.",
+    "fr": "La confirmation est momentanément indisponible. Vérifiez l’état de votre abonnement dans Google Play avant de réessayer.",
+    "pt-BR": "A confirmação está temporariamente indisponível. Confira sua assinatura no Google Play antes de tentar novamente.",
+    "es": "La confirmación no está disponible temporalmente. Revisa tu suscripción en Google Play antes de reintentar.",
+    "hi": "फ़िलहाल पुष्टि उपलब्ध नहीं है। फिर कोशिश करने से पहले Google Play में अपना सब्सक्रिप्शन जाँचें।",
+    "tr": "Onay geçici olarak kullanılamıyor. Tekrar denemeden önce Google Play aboneliğinizi kontrol edin.",
+    "bn": "নিশ্চিতকরণ সাময়িকভাবে উপলব্ধ নয়। আবার চেষ্টা করার আগে Google Play-তে আপনার সাবস্ক্রিপশন দেখুন।",
+    "ar": "التأكيد غير متاح مؤقتًا. تحقّق من اشتراكك في Google Play قبل إعادة المحاولة.",
+    "id": "Konfirmasi sementara tidak tersedia. Periksa langganan Anda di Google Play sebelum mencoba lagi.",
+    "fil": "Pansamantalang hindi available ang kumpirmasyon. Suriin ang iyong subscription sa Google Play bago subukang muli."
+  },
+  "ui_play_retention_pending": {
+    "source": "Google Play confirmation received. Your access is syncing. Please do not pay again.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Google Play confirmation received. Your access is syncing. Please do not pay again.",
+    "fr": "Confirmation Google Play reçue. Votre accès est en cours de synchronisation. Ne recommencez pas le paiement.",
+    "pt-BR": "Confirmação do Google Play recebida. Seu acesso está sendo sincronizado. Não faça outro pagamento.",
+    "es": "Confirmación de Google Play recibida. Estamos sincronizando tu acceso. No vuelvas a pagar.",
+    "hi": "Google Play की पुष्टि मिल गई है। आपका ऐक्सेस सिंक हो रहा है। दोबारा भुगतान न करें।",
+    "tr": "Google Play onayı alındı. Erişiminiz eşitleniyor. Lütfen tekrar ödeme yapmayın.",
+    "bn": "Google Play-এর নিশ্চিতকরণ পাওয়া গেছে। আপনার অ্যাক্সেস সিঙ্ক হচ্ছে। আবার পেমেন্ট করবেন না।",
+    "ar": "تم استلام تأكيد Google Play. جارٍ مزامنة وصولك. لا تدفع مرة أخرى.",
+    "id": "Konfirmasi Google Play diterima. Akses Anda sedang disinkronkan. Jangan membayar lagi.",
+    "fil": "Natanggap ang kumpirmasyon ng Google Play. Sini-sync ang iyong access. Huwag magbayad muli."
+  },
+  "ui_play_retention_checking": {
+    "source": "Checking with Google Play. Please do not pay again.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Checking with Google Play. Please do not pay again.",
+    "fr": "Vérification auprès de Google Play en cours. Ne recommencez pas le paiement.",
+    "pt-BR": "Verificando com o Google Play. Não faça outro pagamento.",
+    "es": "Comprobando con Google Play. No vuelvas a pagar.",
+    "hi": "Google Play से जाँच की जा रही है। दोबारा भुगतान न करें।",
+    "tr": "Google Play ile kontrol ediliyor. Lütfen tekrar ödeme yapmayın.",
+    "bn": "Google Play-এর সঙ্গে যাচাই চলছে। আবার পেমেন্ট করবেন না।",
+    "ar": "جارٍ التحقق مع Google Play. لا تدفع مرة أخرى.",
+    "id": "Memeriksa dengan Google Play. Jangan membayar lagi.",
+    "fil": "Sinusuri sa Google Play. Huwag magbayad muli."
+  },
+  "ui_play_retention_confirmed": {
+    "source": "Your Google Play promotional purchase is confirmed.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Your Google Play promotional purchase is confirmed.",
+    "fr": "Votre achat promotionnel Google Play est confirmé.",
+    "pt-BR": "Sua compra promocional do Google Play foi confirmada.",
+    "es": "Tu compra promocional de Google Play está confirmada.",
+    "hi": "Google Play पर आपकी ऑफ़र वाली खरीद की पुष्टि हो गई है।",
+    "tr": "Google Play indirimli satın alımınız onaylandı.",
+    "bn": "Google Play-তে আপনার ছাড়ের কেনাকাটা নিশ্চিত হয়েছে।",
+    "ar": "تم تأكيد شرائك بالعرض الترويجي عبر Google Play.",
+    "id": "Pembelian promosi Google Play Anda telah dikonfirmasi.",
+    "fil": "Kumpirmado na ang iyong pagbili sa promosyon sa Google Play."
+  },
+  "ui_play_retention_check": {
+    "source": "Check confirmation",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Check confirmation",
+    "fr": "Vérifier la confirmation",
+    "pt-BR": "Verificar confirmação",
+    "es": "Comprobar confirmación",
+    "hi": "पुष्टि जाँचें",
+    "tr": "Onayı kontrol et",
+    "bn": "নিশ্চিতকরণ দেখুন",
+    "ar": "التحقق من التأكيد",
+    "id": "Periksa konfirmasi",
+    "fil": "Suriin ang kumpirmasyon"
+  },
+  "ui_play_retention_manage": {
+    "source": "Manage in Google Play",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Manage in Google Play",
+    "fr": "Gérer dans Google Play",
+    "pt-BR": "Gerenciar no Google Play",
+    "es": "Gestionar en Google Play",
+    "hi": "Google Play में प्रबंधित करें",
+    "tr": "Google Play’de yönet",
+    "bn": "Google Play-তে পরিচালনা করুন",
+    "ar": "الإدارة في Google Play",
+    "id": "Kelola di Google Play",
+    "fil": "Pamahalaan sa Google Play"
+  },
+  "ui_play_retention_cancelled": {
+    "source": "Purchase cancelled. Your subscription stays cancelled. You can try again in a few minutes.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Purchase cancelled. Your subscription stays cancelled. You can try again in a few minutes.",
+    "fr": "Achat annulé. Votre abonnement reste résilié. Vous pourrez réessayer dans quelques minutes.",
+    "pt-BR": "Compra cancelada. Sua assinatura continua cancelada. Você pode tentar novamente em alguns minutos.",
+    "es": "Compra cancelada. Tu suscripción sigue cancelada. Puedes reintentarlo en unos minutos.",
+    "hi": "खरीद रद्द हो गई। आपका सब्सक्रिप्शन रद्द ही रहेगा। कुछ मिनट बाद फिर कोशिश कर सकते हैं।",
+    "tr": "Satın alma iptal edildi. Aboneliğiniz iptal edilmiş olarak kalır. Birkaç dakika sonra tekrar deneyebilirsiniz.",
+    "bn": "কেনাকাটা বাতিল হয়েছে। আপনার সাবস্ক্রিপশন বাতিলই থাকবে। কয়েক মিনিট পরে আবার চেষ্টা করতে পারেন।",
+    "ar": "تم إلغاء الشراء. يظل اشتراكك ملغيًا. يمكنك إعادة المحاولة بعد بضع دقائق.",
+    "id": "Pembelian dibatalkan. Langganan Anda tetap dibatalkan. Anda dapat mencoba lagi dalam beberapa menit.",
+    "fil": "Nakansela ang pagbili. Mananatiling kanselado ang subscription mo. Maaari mong subukan muli pagkalipas ng ilang minuto."
+  },
+  "ui_play_retention_monthly": {
+    "source": "{{price}}/month for 3 months, then {{regular}}/month.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "{{price}}/month for 3 months, then {{regular}}/month.",
+    "fr": "{{price}}/mois pendant 3 mois, puis {{regular}}/mois.",
+    "pt-BR": "{{price}}/mês por 3 meses, depois {{regular}}/mês.",
+    "es": "{{price}}/mes durante 3 meses, después {{regular}}/mes.",
+    "hi": "3 महीने तक {{price}}/माह, फिर {{regular}}/माह।",
+    "tr": "3 ay boyunca {{price}}/ay, ardından {{regular}}/ay.",
+    "bn": "3 মাসের জন্য {{price}}/মাস, তারপর {{regular}}/মাস।",
+    "ar": "{{price}} شهريًا لمدة 3 أشهر، ثم {{regular}} شهريًا.",
+    "id": "{{price}}/bulan selama 3 bulan, lalu {{regular}}/bulan.",
+    "fil": "{{price}}/buwan sa loob ng 3 buwan, pagkatapos ay {{regular}}/buwan."
+  },
+  "ui_play_retention_annual": {
+    "source": "{{price}} for your next year, then {{regular}}/year.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "{{price}} for your next year, then {{regular}}/year.",
+    "fr": "{{price}} pour la prochaine année, puis {{regular}}/an.",
+    "pt-BR": "{{price}} pelo próximo ano, depois {{regular}}/ano.",
+    "es": "{{price}} por el próximo año, después {{regular}}/año.",
+    "hi": "अगले वर्ष के लिए {{price}}, फिर {{regular}}/वर्ष।",
+    "tr": "Gelecek yıl için {{price}}, ardından {{regular}}/yıl.",
+    "bn": "পরের বছরের জন্য {{price}}, তারপর {{regular}}/বছর।",
+    "ar": "{{price}} للسنة المقبلة، ثم {{regular}} سنويًا.",
+    "id": "{{price}} untuk tahun berikutnya, lalu {{regular}}/tahun.",
+    "fil": "{{price}} para sa susunod na taon, pagkatapos ay {{regular}}/taon."
+  },
+  "ui_play_retention_timing": {
+    "source": "Your current access is preserved until {{date}}. First discounted payment on that date.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Your current access is preserved until {{date}}. First discounted payment on that date.",
+    "fr": "Votre accès actuel est conservé jusqu’au {{date}}. Premier paiement réduit à cette date.",
+    "pt-BR": "Seu acesso atual é mantido até {{date}}. Primeiro pagamento com desconto nessa data.",
+    "es": "Tu acceso actual se conserva hasta el {{date}}. Primer pago con descuento en esa fecha.",
+    "hi": "आपका मौजूदा ऐक्सेस {{date}} तक बना रहेगा। पहला रियायती भुगतान उसी तारीख को होगा।",
+    "tr": "Mevcut erişiminiz {{date}} tarihine kadar korunur. İlk indirimli ödeme bu tarihte yapılır.",
+    "bn": "আপনার বর্তমান অ্যাক্সেস {{date}} পর্যন্ত থাকবে। প্রথম ছাড়ের পেমেন্ট সেই তারিখে হবে।",
+    "ar": "يُحفظ وصولك الحالي حتى {{date}}. ستكون أول دفعة مخفّضة في ذلك التاريخ.",
+    "id": "Akses Anda saat ini tetap berlaku hingga {{date}}. Pembayaran diskon pertama pada tanggal tersebut.",
+    "fil": "Mananatili ang kasalukuyan mong access hanggang {{date}}. Sa petsang iyon ang unang bayad na may diskuwento."
+  },
+  "ui_play_retention_expired": {
+    "source": "Payment follows your Google Play confirmation.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Payment follows your Google Play confirmation.",
+    "fr": "Le paiement aura lieu après votre confirmation Google Play.",
+    "pt-BR": "O pagamento ocorre após sua confirmação no Google Play.",
+    "es": "El pago se realiza tras tu confirmación en Google Play.",
+    "hi": "Google Play में आपकी पुष्टि के बाद भुगतान होगा।",
+    "tr": "Ödeme, Google Play onayınızdan sonra yapılır.",
+    "bn": "Google Play-তে আপনার নিশ্চিতকরণের পর পেমেন্ট হবে।",
+    "ar": "يتم الدفع بعد تأكيدك في Google Play.",
+    "id": "Pembayaran dilakukan setelah konfirmasi Anda di Google Play.",
+    "fil": "Magaganap ang pagbabayad pagkatapos mong magkumpirma sa Google Play."
+  },
+  "ui_play_retention_terms": {
+    "source": "Automatically renews; cancel in Google Play. Personal, non-stackable offer, once every twelve months.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Automatically renews; cancel in Google Play. Personal, non-stackable offer, once every twelve months.",
+    "fr": "Renouvellement automatique, résiliable dans Google Play. Offre personnelle, non cumulable, une fois sur douze mois.",
+    "pt-BR": "Renovação automática; cancele no Google Play. Oferta pessoal, não cumulativa, uma vez a cada doze meses.",
+    "es": "Renovación automática; cancela en Google Play. Oferta personal, no acumulable, una vez cada doce meses.",
+    "hi": "अपने-आप नवीनीकरण होगा; Google Play में रद्द करें। निजी ऑफ़र, अन्य ऑफ़र के साथ नहीं, हर बारह महीने में एक बार।",
+    "tr": "Otomatik yenilenir; Google Play’de iptal edebilirsiniz. Kişisel, başka tekliflerle birleştirilemez, on iki ayda bir kez.",
+    "bn": "স্বয়ংক্রিয়ভাবে নবায়ন হয়; Google Play-তে বাতিল করুন। ব্যক্তিগত অফার, অন্য অফারের সঙ্গে নয়, প্রতি বারো মাসে একবার।",
+    "ar": "يتجدد تلقائيًا؛ يمكنك الإلغاء في Google Play. عرض شخصي، لا يُجمع مع عروض أخرى، مرة كل اثني عشر شهرًا.",
+    "id": "Diperpanjang otomatis; batalkan di Google Play. Penawaran pribadi, tidak dapat digabungkan, sekali setiap dua belas bulan.",
+    "fil": "Awtomatikong mare-renew; kanselahin sa Google Play. Personal na alok, hindi maaaring isabay sa iba, isang beses bawat labindalawang buwan."
+  },
+  "ui_play_retention_push": {
+    "source": "Receive offers for my Google Play subscription by notification",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Receive offers for my Google Play subscription by notification",
+    "fr": "Recevoir les offres de mon abonnement Google Play par notification",
+    "pt-BR": "Receber ofertas da minha assinatura do Google Play por notificação",
+    "es": "Recibir ofertas de mi suscripción de Google Play por notificación",
+    "hi": "मेरे Google Play सब्सक्रिप्शन के ऑफ़र सूचनाओं से पाएँ",
+    "tr": "Google Play aboneliğime ait teklifleri bildirimle al",
+    "bn": "আমার Google Play সাবস্ক্রিপশনের অফার বিজ্ঞপ্তিতে পেতে চাই",
+    "ar": "تلقي عروض اشتراكي في Google Play عبر الإشعارات",
+    "id": "Terima penawaran langganan Google Play saya melalui notifikasi",
+    "fil": "Tumanggap ng mga alok para sa aking Google Play subscription sa mga notification"
+  },
+  "ui_play_retention_update": {
+    "source": "Update Norva on Android to view your offer.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Update Norva on Android to view your offer.",
+    "fr": "Mettez Norva à jour sur Android pour consulter votre offre.",
+    "pt-BR": "Atualize o Norva no Android para ver sua oferta.",
+    "es": "Actualiza Norva en Android para ver tu oferta.",
+    "hi": "अपना ऑफ़र देखने के लिए Android पर Norva अपडेट करें।",
+    "tr": "Teklifinizi görmek için Android’de Norva’yı güncelleyin.",
+    "bn": "অফার দেখতে Android-এ Norva আপডেট করুন।",
+    "ar": "حدّث Norva على Android للاطلاع على عرضك.",
+    "id": "Perbarui Norva di Android untuk melihat penawaran Anda.",
+    "fil": "I-update ang Norva sa Android para makita ang iyong alok."
+  },
+  "ui_play_retention_open": {
+    "source": "Open Google Play",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Open Google Play",
+    "fr": "Ouvrir Google Play",
+    "pt-BR": "Abrir Google Play",
+    "es": "Abrir Google Play",
+    "hi": "Google Play खोलें",
+    "tr": "Google Play’i aç",
+    "bn": "Google Play খুলুন",
+    "ar": "فتح Google Play",
+    "id": "Buka Google Play",
+    "fil": "Buksan ang Google Play"
+  },
+  "ui_play_retention_support": {
+    "source": "Playback problem? Contact support to resolve it.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Playback problem? Contact support to resolve it.",
+    "fr": "Un problème de lecture ? Contactez le support pour le résoudre.",
+    "pt-BR": "Problema na reprodução? Fale com o suporte para resolver.",
+    "es": "¿Problemas de reproducción? Contacta con soporte para resolverlos.",
+    "hi": "चलाने में समस्या है? समाधान के लिए सहायता टीम से संपर्क करें।",
+    "tr": "Oynatma sorunu mu var? Çözmek için destek ekibiyle iletişime geçin.",
+    "bn": "প্লেব্যাকে সমস্যা? সমাধানের জন্য সহায়তা দলের সঙ্গে যোগাযোগ করুন।",
+    "ar": "هل تواجه مشكلة في التشغيل؟ تواصل مع الدعم لحلها.",
+    "id": "Ada masalah pemutaran? Hubungi dukungan untuk menyelesaikannya.",
+    "fil": "May problema sa pag-play? Makipag-ugnayan sa support para malutas ito."
+  },
+  "ui_play_retention_declined": {
+    "source": "Offer declined. No reminders will be sent.",
+    "refs": [
+      "public/js/components/PlayRetentionCard.js"
+    ],
+    "en": "Offer declined. No reminders will be sent.",
+    "fr": "Offre refusée. Aucun rappel ne sera envoyé.",
+    "pt-BR": "Oferta recusada. Nenhum lembrete será enviado.",
+    "es": "Oferta rechazada. No se enviarán recordatorios.",
+    "hi": "ऑफ़र अस्वीकार किया गया। कोई रिमाइंडर नहीं भेजा जाएगा।",
+    "tr": "Teklif reddedildi. Hatırlatma gönderilmeyecek.",
+    "bn": "অফার প্রত্যাখ্যান করা হয়েছে। কোনো রিমাইন্ডার পাঠানো হবে না।",
+    "ar": "تم رفض العرض. لن تُرسل تذكيرات.",
+    "id": "Penawaran ditolak. Pengingat tidak akan dikirim.",
+    "fil": "Tinanggihan ang alok. Walang ipapadalang paalala."
   }
 }

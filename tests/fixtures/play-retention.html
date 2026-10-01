@@ -2,11 +2,13 @@
 <main style="padding:16px"><section id="settings-play-retention" class="settings-section play-retention-card" hidden></section></main>
 <script>
 window.NorvaI18n={language:new URLSearchParams(location.search).get('lang')||'fr'};
-window.calls=[]; window.failNext=true;
+window.calls=[]; window.failNext=true; window.confirmation='available'; window.statusFail=false;
 window.qaApp={currentUser:{id:'00000000-0000-4000-8000-000000000902'}};
 window.NorvaBilling={hasPlayRetention:()=>true,playRetentionOffer:async()=>({pushOptIn:false,offer:{
  id:'00000000-0000-4000-8000-000000000904',period:'monthly',priceString:'3,99 €',regularPriceString:'4,99 €',
  priceMicros:3990000,regularPriceMicros:4990000,currencyCode:'EUR',preserveAccess:true,accessUntil:'2026-10-01T12:00:00Z'}}),
- playRetentionAction:async b=>{calls.push(b);},purchasePlayRetention:async()=>{calls.push('purchase');if(failNext){failNext=false;throw Error('private-provider-error');}return {confirmationPending:true};}};
+ playRetentionAction:async b=>{calls.push(b);},
+ playRetentionStatus:async()=>{calls.push('status');if(statusFail)throw Error('private-provider-error');return {confirmation:{state:confirmation}};},
+ purchasePlayRetention:async()=>{calls.push('purchase');if(failNext){failNext=false;throw Error('private-provider-error');}confirmation='pending';return {confirmationPending:true};}};
 </script><script src="/js/components/PlayRetentionCard.js"></script>
 <script>NorvaPlayRetentionCard.refresh(qaApp,{projection:{provider:'google_play'}});</script></body></html>

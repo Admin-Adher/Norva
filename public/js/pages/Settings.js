@@ -688,7 +688,7 @@ class SettingsPage {
                 button.style.display = '';
                 button.textContent = String(window.NorvaI18n?.language || '').startsWith('fr') ? 'Gérer dans Google Play' : 'Manage in Google Play';
             }
-            window.NorvaPlayRetentionCard?.refresh(this.app, decision);
+            window.NorvaPlayRetentionCard?.refresh(this.app, decision, () => this.refreshAccessCard());
 
             if (decision.failOpen && !observing) {
                 hint.textContent = (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_b016cf047253", {defaultValue: "{{p0}} Last known access is being honored while billing is checked.", p0:(hint.textContent)}) : `${hint.textContent} Last known access is being honored while billing is checked.`);

@@ -543,16 +543,22 @@
       || (Number(version[1]) === 1 && (Number(version[2]) > 3 || (Number(version[2]) === 3 && Number(version[3]) >= 24))));
   }
 
-  async function playRetentionAction(body) {
+  async function playRetentionAction(body, offerId) {
     const token = await sessionToken();
     if (!token) throw err('Sign in required', 'auth_required');
-    const res = await fetch('https://api.norva.tv/functions/v1/norva-cloud/billing/play-retention', {
+    const res = await fetch('https://api.norva.tv/functions/v1/norva-cloud/billing/play-retention' +
+      (offerId ? '?offerId=' + encodeURIComponent(offerId) : ''), {
       method: body ? 'POST' : 'GET', headers: { 'Authorization': 'Bearer ' + token,
         'apikey': (window.NorvaAuth && NorvaAuth.publishableKey) || '', 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) throw err('Offer temporarily unavailable', 'retention_unavailable');
     return res.json();
+  }
+
+  function playRetentionStatus(offerId) {
+    return playRetentionAction(undefined, offerId);
   }
 
   async function playRetentionOffer(userId) {
@@ -571,7 +577,7 @@
   }
 
   window.NorvaBilling = {
-    hasPlayRetention, playRetentionAction, playRetentionOffer, purchasePlayRetention,
+    hasPlayRetention, playRetentionAction, playRetentionStatus, playRetentionOffer, purchasePlayRetention,
     isNative: isNative,
     isTvShell: isTvShell,
     hasNativeBilling: hasNativeBilling,

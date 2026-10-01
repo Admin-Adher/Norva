@@ -1,5 +1,7 @@
 -- Run in a network-isolated schema clone only. Synthetic account and rollback.
 begin;
+insert into public.cloud_play_retention_policy default values
+on conflict(singleton) do update set enabled=false,communications_enabled=false;
 set local session_replication_role=replica;
 insert into auth.users(id,email,email_confirmed_at,created_at)
 values('00000000-0000-4000-8000-000000000902','play-retention@example.test',now(),now());

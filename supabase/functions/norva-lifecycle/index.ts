@@ -313,7 +313,8 @@ async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string
       const make = (firstName: string | null, context: { locale?: string }): Rendered => {
         switch (intent.event_type) {
           case "cancellation_confirmed":
-            return renderCancellationConfirmed(firstName, { effectiveAt: intentIso(p.effective_at), locale: context.locale });
+            return renderCancellationConfirmed(firstName, { effectiveAt: intentIso(p.effective_at), locale: context.locale,
+              provider: intent.source_provider === 'revolut' ? 'revolut' : p.store === 'PLAY_STORE' ? 'google_play' : 'store' });
           case "subscription_resumed":
             return renderSubscriptionResumed(firstName, { renewsAt: intentIso(p.renews_at) });
           case "plan_change_scheduled":
@@ -502,8 +503,11 @@ async function runPlayRetention(db: SupabaseClient): Promise<number> {
     } else if (offer.channel === "push") {
       const { data: authorization, error: authError } = await db.rpc("norva_play_retention_claim_push", { p_delivery: offer.deliveryId });
       if (authError || !authorization?.token) continue;
-      const { data: account } = await db.auth.admin.getUserById(authorization.user_id);
-      const copy = playRetentionCopy(offer.period, account?.user?.user_metadata?.language || "en");
+      const [{ data: account }, { data: profile }] = await Promise.all([
+        db.auth.admin.getUserById(authorization.user_id),
+        db.from("cloud_profiles").select("locale").eq("id", authorization.user_id).maybeSingle(),
+      ]);
+      const copy = playRetentionCopy(offer.period, profile?.locale || account?.user?.user_metadata?.language || account?.user?.user_metadata?.locale || "en");
       const expires = Math.min(Date.now() + 3600_000, new Date(offer.expiresAt).getTime());
       const sent = await sendFcmPush(authorization.token, {
         title: copy.title, body: copy.terms, dataOnly: true,
@@ -1071,6 +1075,9 @@ Deno.serve(async (req) => {
     if (url.pathname.endsWith("/cron/billing-events")) {
       return json({ ok: true, billing_events: await runBillingEventIntents(db) });
     }
+    if (url.pathname.endsWith("/cron/play-retention")) {
+      return json({ ok: true, playRetention: await runPlayRetention(db) });
+    }
     if (url.pathname.endsWith("/cron/resend-contacts")) {
       // Contact/Segment reconciliation owns a full-access Resend credential and
       // therefore runs only in the private host-side ops worker. Never proxy it
@@ -1099,8 +1106,10 @@ Deno.serve(async (req) => {
     // Web retention has its own database communication gate. Publishing it must
     // not enable unrelated billing marketing or Google Play campaigns.
     if (MARKETING_READY) out.retention = await runRetentionOffers(db);
+    // Google Play has its own policy, consent and final delivery guards in SQL.
+    // Do not couple mobile campaigns to Revolut's legacy billing switches.
+    out.playRetention = await runPlayRetention(db);
     if (BILLING_LIVE && LC_WINBACK) {
-      out.playRetention = await runPlayRetention(db);
       out.winback = await runWinback(db);
     }
     if (BILLING_LIVE && LC_ABANDONED) out.abandoned = await runAbandoned(db);
