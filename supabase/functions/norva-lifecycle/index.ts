@@ -354,12 +354,16 @@ async function runBillingEventIntents(db: SupabaseClient): Promise<Record<string
       // suppress the cancellation receipt. The pre-expiry key also prevents a
       // duplicate J-3 offer. Google Play uses its own producer and prices.
       if (intent.event_type === "cancellation_confirmed" && intent.source_provider === "revolut"
-          && BILLING_LIVE && LC_WINBACK && MARKETING_READY) {
+          && MARKETING_READY) {
         try {
           if (await marketingEmailAllowed(db, intent.user_id)) {
             const { data: offer, error: offerError } = await db.rpc("norva_retention_offer", { p_user: intent.user_id });
             if (!offerError && offer?.id && offer.charge_mode === "next_cycle") {
               const reference = `${offer.id}:pre`;
+              const { data: allowed } = await db.rpc("norva_retention_delivery_allowed", {
+                p_user: intent.user_id, p_reference: reference,
+              });
+              if (allowed !== true) continue;
               await queueUserEmail(db, intent.user_id,
                 (_name, context) => renderRetentionOffer({ ...offer, stage: "pre" }, context), {
                   dedupeKey: `lifecycle:retention:${reference}`, marketing: true,
@@ -1092,8 +1096,10 @@ Deno.serve(async (req) => {
     // Expiry is never allowed to run without the warning/dunning flow, even if
     // an environment variable is accidentally toggled in isolation.
     if (BILLING_LIVE && LC_DUNNING && LC_EXPIRE) out.expired_past_due = await runExpirePastDue(db);
+    // Web retention has its own database communication gate. Publishing it must
+    // not enable unrelated billing marketing or Google Play campaigns.
+    if (MARKETING_READY) out.retention = await runRetentionOffers(db);
     if (BILLING_LIVE && LC_WINBACK) {
-      out.retention = await runRetentionOffers(db);
       out.playRetention = await runPlayRetention(db);
       out.winback = await runWinback(db);
     }

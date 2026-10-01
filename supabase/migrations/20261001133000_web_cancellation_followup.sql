@@ -1,6 +1,11 @@
 -- Web retention is available after cancellation. Google Play keeps its own
 -- product/offer eligibility and its cross-channel twelve-month exclusion.
 begin;
+alter table public.cloud_retention_policy
+  add column communications_enabled boolean not null default false,
+  add column communications_enabled_at timestamptz,
+  add constraint retention_communications_start_required
+    check(not communications_enabled or communications_enabled_at is not null);
 do $patch$
 declare original text; revised text;
 begin
@@ -20,6 +25,20 @@ begin
       set available_at=least(cloud_retention_offers.available_at,excluded.available_at)
       where cloud_retention_offers.state=''offered'';');
   if revised=original then raise exception 'retention offer conflict contract changed'; end if;
+  execute revised;
+  original:=pg_get_functiondef('public.norva_retention_delivery_allowed(uuid,text)'::regprocedure);
+  revised:=replace(original,'if not public.norva_marketing_email_allowed(p_user)',
+    'if not coalesce((select communications_enabled from public.cloud_retention_policy where singleton),false)
+    or not public.norva_marketing_email_allowed(p_user)');
+  if revised=original then raise exception 'retention communications guard changed'; end if;
+  execute revised;
+  original:=pg_get_functiondef('public.norva_retention_candidates()'::regprocedure);
+  revised:=replace(original,
+    'and current_period_end between now()-interval ''7 days'' and now()+interval ''3 days''',
+    'and (current_period_end between now()-interval ''7 days'' and now()+interval ''3 days''
+      or (current_period_end>now() and last_event_at >=
+        (select communications_enabled_at from public.cloud_retention_policy where singleton)))');
+  if revised=original then raise exception 'retention candidate timing contract changed'; end if;
   execute revised;
 end;
 $patch$;

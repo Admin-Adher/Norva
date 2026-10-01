@@ -15,6 +15,7 @@ The ordinary QA account's cancellation intents at 13:03:37 and 13:11:18 UTC stay
 - Eligible web users see a personal offer immediately after successful cancellation. Cancellation is confirmed first. Prices, duration, next price, first-charge date and an explicit keep-cancellation option are displayed. No automatic resumption.
 - The existing server-owned offer is available immediately instead of starting at J−3. Existing annual/monthly terms, ownership, noncumulative pricing, twelve-month consumption limit, billing locks and cross-channel exclusions remain active.
 - A separate consent-gated offer email uses the existing pre-expiry delivery key, preventing a second J−3 offer. Its final delivery gate rejects withdrawn consent, declined/accepted offers and subscriptions moved to Google Play. Closing the dialog is not acceptance; declining stops reminders for that offer.
+- Production inspection found both generic lifecycle marketing switches off. Web retention therefore gains a dedicated database communications gate and rollout timestamp, independent of those switches. The immediate follow-up retry cohort starts with cancellations after activation; it does not backfill all earlier cancellations. Google Play's offer and communication switches are also off and remain unchanged.
 - Signup offers a separate unchecked opt-in. Only a recent positive choice matching the authenticated, verified email can be saved; authentication does not depend on marketing. Existing unsubscribes are not backfilled or reset.
 
 ## Consent rationale
