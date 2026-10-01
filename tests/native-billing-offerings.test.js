@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const targets = [
@@ -94,13 +95,62 @@ for (const target of targets) {
   });
 }
 
-test('Play Subscribe in Settings is limited to the customer-success test account', () => {
-  const settings = read('public/js/pages/Settings.js');
-  assert.match(settings, /customersuccess\.kang@gmail\.com/);
-  assert.match(settings, /isPlayBillingTestAccount/);
-  assert.match(settings, /nativePlayBillingChannelReady/);
-  assert.match(settings, /NorvaBillingNative/);
-  assert.match(read('public/app.html'), /Settings\.js\?v=[0-9a-f]+/);
+function settingsAccess({ status = 'expired', provider = 'revolut', channel = true, tv = false, reject = false } = {}) {
+  const elements = new Map(['plan', 'hint', 'manage-plan-btn'].map(name =>
+    ['settings-access-' + name, { style: {}, textContent: '' }]));
+  const button = { style: {}, textContent: '' };
+  elements.set('settings-manage-plan-btn', button);
+  const window = {
+    location: { search: '' },
+    NorvaBillingNative: channel ? { postMessage() {} } : undefined,
+    NorvaCloud: { entitlements: { async get() {
+      if (reject) throw Error('unavailable');
+      return { status, projection: { provider } };
+    } } },
+  };
+  const context = vm.createContext({ window, navigator: { userAgent: tv ? 'NorvaTV-AndroidTV' : 'NorvaTV-AndroidPhone' },
+    document: { documentElement: { classList: { contains: () => tv } }, getElementById: id => elements.get(id) },
+    console: { warn() {} } });
+  vm.runInContext(read('public/js/pages/Settings.js'), context);
+  const page = Object.create(window.SettingsPage.prototype);
+  page.app = { currentUser: { cloud: true, email: 'ordinary@example.test' } };
+  return { page, button };
+}
+
+test('ordinary phone customers can subscribe after web expiry through the current native bridge', async () => {
+  for (const status of ['expired', 'none']) {
+    const { page, button } = settingsAccess({ status });
+    const pending = page.refreshAccessCard();
+    assert.equal(button.style.display, 'none', 'wait for membership before showing purchase');
+    await pending;
+    assert.equal(button.style.display, '');
+    assert.equal(button.textContent, 'Subscribe');
+  }
+});
+
+test('native Settings does not offer a second subscription on a live web membership', async () => {
+  for (const status of ['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace', 'revoked', 'refunded', 'fraud']) {
+    const { page, button } = settingsAccess({ status });
+    await page.refreshAccessCard();
+    assert.equal(button.style.display, 'none', status);
+  }
+});
+
+test('missing bridge, TV, included access and uncertain membership keep purchase hidden', async () => {
+  for (const options of [{ channel: false }, { tv: true }, { reject: true }, { status: 'active', provider: 'manual' }]) {
+    const { page, button } = settingsAccess(options);
+    await page.refreshAccessCard();
+    assert.equal(button.style.display, 'none');
+  }
+});
+
+test('Play members retain management without overriding a hard block', async () => {
+  for (const status of ['active', 'expired', 'revoked']) {
+    const { page, button } = settingsAccess({ status, provider: 'google_play' });
+    await page.refreshAccessCard();
+    assert.equal(button.style.display, status === 'revoked' ? 'none' : '');
+    if (status !== 'revoked') assert.equal(button.textContent, 'Manage in Google Play');
+  }
 });
 
 test('Android TV delegates purchases to the web and ships no native billing surface', () => {
