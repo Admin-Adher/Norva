@@ -179,7 +179,7 @@ test('checkout shows a calendar first-charge date and blocks stale price fallbac
   assert.match(checkout, /First payment on/);
   assert.match(checkout, /if \(!serverFirstChargeAt\) return '—'/,
     'the UI must never manufacture a first-charge date locally');
-  assert.match(checkout, /first payment is scheduled for '[\s\S]{0,100}trialChargeDate\(\)/i);
+  assert.match(checkout, /checkoutSuccessText\(copy\[1\], \{ date: trialChargeDate\(\) \}\)/);
   assert.match(checkout, /id="sum-amount">—<\/span>/);
   assert.match(checkout, /class="quote-pending"/);
   assert.match(checkout, /id="commercial-terms"/);
@@ -207,7 +207,7 @@ test('resubscribe copy reflects an immediate captured payment without false reas
   const checkout = read('public/checkout-revolut.html');
   assert.match(checkout, /your plan starts only after today\\'s payment is confirmed/i);
   assert.match(checkout, /Billed today:[\s\S]{0,180}displayMoney\(displayPrice\)/);
-  assert.match(checkout, /Today\\'s payment was confirmed/);
+  assert.match(checkout, /Today's payment was confirmed/);
   assert.match(checkout, /Your payment may still be processing[\s\S]{0,160}Don't submit it again/);
 });
 

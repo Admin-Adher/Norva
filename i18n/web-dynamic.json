@@ -1,7 +1,9 @@
 {
   "ui_source_file_incomplete": {
     "source": "This version was found incomplete during its last check. Playback or resume may fail.",
-    "refs": ["public/js/pages/MoviesPage.js"],
+    "refs": [
+      "public/js/pages/MoviesPage.js"
+    ],
     "en": "This version was found incomplete during its last check. Playback or resume may fail.",
     "fr": "Cette version a été détectée comme incomplète lors de sa dernière vérification. La lecture ou la reprise peut échouer.",
     "pt-BR": "Esta versão estava incompleta na última verificação. A reprodução ou a retomada pode falhar.",
@@ -24218,7 +24220,9 @@
   },
   "ui_watch_buffering": {
     "source": "Buffering…",
-    "refs": ["public/js/pages/WatchPage.js"],
+    "refs": [
+      "public/js/pages/WatchPage.js"
+    ],
     "en": "Buffering…",
     "fr": "Chargement de la vidéo…",
     "pt-BR": "Carregando vídeo…",
@@ -24232,7 +24236,10 @@
   },
   "ui_watch_preparing_video": {
     "source": "Preparing your video",
-    "refs": ["public/app.html", "public/js/pages/WatchPage.js"],
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
     "en": "Preparing your video",
     "fr": "Préparation de votre vidéo",
     "pt-BR": "Preparando seu vídeo",
@@ -24246,7 +24253,10 @@
   },
   "ui_watch_preparing_video_help": {
     "source": "Playback will start automatically when your video is ready.",
-    "refs": ["public/app.html", "public/js/pages/WatchPage.js"],
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
     "en": "Playback will start automatically when your video is ready.",
     "fr": "La lecture démarrera automatiquement dès que la vidéo sera prête.",
     "pt-BR": "A reprodução começará automaticamente quando seu vídeo estiver pronto.",
@@ -24260,7 +24270,9 @@
   },
   "ui_watch_preparing_video_offline": {
     "source": "Check your internet connection to continue preparing your video.",
-    "refs": ["public/js/pages/WatchPage.js"],
+    "refs": [
+      "public/js/pages/WatchPage.js"
+    ],
     "en": "Check your internet connection to continue preparing your video.",
     "fr": "Vérifiez votre connexion Internet pour poursuivre la préparation de votre vidéo.",
     "pt-BR": "Verifique sua conexão com a internet para continuar preparando seu vídeo.",
@@ -24287,5 +24299,117 @@
     "ar": "نظام المعاملات",
     "id": "Sistem transaksional",
     "fil": "Sistema ng transaksyon"
+  },
+  "ui_checkout_trial_success_body": {
+    "source": "You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for {{date}}, then your plan renews automatically unless you cancel.",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for {{date}}, then your plan renews automatically unless you cancel.",
+    "fr": "Vous avez un accès complet à Norva sur le Web, sur mobile Android (téléphone et tablette) et Android TV. Votre premier paiement est prévu le {{date}}, puis votre abonnement se renouvelle automatiquement sauf résiliation.",
+    "pt-BR": "Você tem acesso completo ao Norva na Web, em dispositivos Android (celular e tablet) e no Android TV. Seu primeiro pagamento está previsto para {{date}}. Depois, sua assinatura será renovada automaticamente, a menos que você cancele.",
+    "es": "Tienes acceso completo a Norva en la web, en dispositivos Android (teléfono y tableta) y en Android TV. Tu primer pago está previsto para el {{date}}. Después, tu suscripción se renovará automáticamente salvo que la canceles.",
+    "hi": "आपको वेब, Android मोबाइल (फ़ोन और टैबलेट) और Android TV पर Norva का पूरा ऐक्सेस मिल गया है। आपका पहला भुगतान {{date}} को निर्धारित है। इसके बाद, रद्द न करने पर आपकी सदस्यता अपने आप नवीनीकृत होगी।",
+    "tr": "Norva’ya web, Android mobil (telefon ve tablet) ve Android TV üzerinden tam erişiminiz var. İlk ödemeniz {{date}} tarihinde yapılacak. Ardından iptal etmediğiniz sürece aboneliğiniz otomatik olarak yenilenir.",
+    "bn": "ওয়েব, Android মোবাইল (ফোন ও ট্যাবলেট) এবং Android TV-তে Norva-র সম্পূর্ণ সুবিধা পাবেন। আপনার প্রথম পেমেন্টের তারিখ {{date}}। এরপর বাতিল না করলে আপনার সাবস্ক্রিপশন স্বয়ংক্রিয়ভাবে নবায়ন হবে।",
+    "ar": "لديك وصول كامل إلى Norva على الويب وأجهزة Android (الهاتف والجهاز اللوحي) وAndroid TV. موعد دفعتك الأولى هو {{date}}، ثم يتجدد اشتراكك تلقائيًا ما لم تلغه.",
+    "id": "Anda memiliki akses penuh ke Norva di web, perangkat Android (ponsel dan tablet), serta Android TV. Pembayaran pertama dijadwalkan pada {{date}}. Setelah itu, langganan diperpanjang otomatis kecuali Anda membatalkannya.",
+    "fil": "May ganap kang access sa Norva sa web, Android mobile (telepono at tablet), at Android TV. Nakatakda ang unang bayad mo sa {{date}}. Pagkatapos nito, awtomatikong mare-renew ang subscription mo maliban kung kakanselahin mo ito."
+  },
+  "ui_checkout_plan_success_body": {
+    "source": "Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.",
+    "fr": "Votre forfait actuel reste inchangé jusqu’au renouvellement. Le nouveau forfait et son tarif prendront effet à votre prochaine échéance. Aucun paiement n’est donc effectué aujourd’hui.",
+    "pt-BR": "Seu plano atual permanece igual até a renovação. O novo plano e preço entram em vigor na próxima data de cobrança. Nada será cobrado hoje.",
+    "es": "Tu plan actual se mantiene hasta la renovación. El nuevo plan y su precio se aplicarán en tu próxima fecha de facturación. Hoy no se cobra nada.",
+    "hi": "नवीनीकरण तक आपका मौजूदा प्लान नहीं बदलेगा। नया प्लान और कीमत अगली बिलिंग तारीख से लागू होंगे। आज कोई शुल्क नहीं लिया जाएगा।",
+    "tr": "Mevcut planınız yenilemeye kadar değişmez. Yeni plan ve fiyat bir sonraki fatura tarihinde yürürlüğe girer. Bugün ücret alınmaz.",
+    "bn": "নবায়ন পর্যন্ত আপনার বর্তমান প্ল্যান অপরিবর্তিত থাকবে। পরবর্তী বিলের তারিখে নতুন প্ল্যান ও মূল্য কার্যকর হবে। আজ কোনো টাকা কাটা হবে না।",
+    "ar": "تبقى خطتك الحالية دون تغيير حتى التجديد. تبدأ الخطة الجديدة وسعرها في موعد الفوترة المقبل، ولن يُحصّل أي مبلغ اليوم.",
+    "id": "Paket saat ini tetap berlaku hingga perpanjangan. Paket dan harga baru mulai berlaku pada tanggal penagihan berikutnya. Tidak ada tagihan hari ini.",
+    "fil": "Hindi magbabago ang kasalukuyan mong plan hanggang sa renewal. Magsisimula ang bagong plan at presyo sa susunod mong petsa ng pagsingil. Walang sisingilin ngayon."
+  },
+  "ui_checkout_resubscribe_title": {
+    "source": "Welcome back — your plan is active",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "Welcome back — your plan is active",
+    "fr": "Bon retour ! Votre abonnement est actif",
+    "pt-BR": "Bem-vindo de volta! Sua assinatura está ativa",
+    "es": "¡Te damos la bienvenida de nuevo! Tu suscripción está activa",
+    "hi": "वापसी पर स्वागत है — आपकी सदस्यता सक्रिय है",
+    "tr": "Tekrar hoş geldiniz — aboneliğiniz aktif",
+    "bn": "আবার স্বাগতম — আপনার সাবস্ক্রিপশন সক্রিয়",
+    "ar": "مرحبًا بعودتك — اشتراكك مفعّل",
+    "id": "Selamat datang kembali — langganan Anda aktif",
+    "fil": "Maligayang pagbabalik — aktibo na ang subscription mo"
+  },
+  "ui_checkout_resubscribe_body": {
+    "source": "Today's payment was confirmed. Your receipt is on its way by email.",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "Today's payment was confirmed. Your receipt is on its way by email.",
+    "fr": "Le paiement d’aujourd’hui est confirmé. Votre reçu vous sera envoyé par e-mail.",
+    "pt-BR": "O pagamento de hoje foi confirmado. Seu recibo será enviado por e-mail.",
+    "es": "El pago de hoy está confirmado. Recibirás el recibo por correo electrónico.",
+    "hi": "आज के भुगतान की पुष्टि हो गई है। आपकी रसीद ईमेल से भेजी जा रही है।",
+    "tr": "Bugünkü ödemeniz onaylandı. Makbuzunuz e-postayla gönderiliyor.",
+    "bn": "আজকের পেমেন্ট নিশ্চিত হয়েছে। আপনার রসিদ ইমেলে পাঠানো হচ্ছে।",
+    "ar": "تم تأكيد دفعة اليوم. سيصلك الإيصال عبر البريد الإلكتروني.",
+    "id": "Pembayaran hari ini telah dikonfirmasi. Tanda terima dikirim melalui email.",
+    "fil": "Nakumpirma ang bayad ngayong araw. Ipapadala ang resibo mo sa email."
+  },
+  "ui_checkout_card_success_title": {
+    "source": "Payment method updated",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "Payment method updated",
+    "fr": "Moyen de paiement mis à jour",
+    "pt-BR": "Forma de pagamento atualizada",
+    "es": "Método de pago actualizado",
+    "hi": "भुगतान का तरीका अपडेट हो गया",
+    "tr": "Ödeme yöntemi güncellendi",
+    "bn": "পেমেন্ট পদ্ধতি আপডেট হয়েছে",
+    "ar": "تم تحديث طريقة الدفع",
+    "id": "Metode pembayaran diperbarui",
+    "fil": "Na-update ang paraan ng pagbabayad"
+  },
+  "ui_checkout_card_success_body": {
+    "source": "Your new card is saved and will be used for your Norva payments from now on.",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "Your new card is saved and will be used for your Norva payments from now on.",
+    "fr": "Votre nouvelle carte est enregistrée et sera utilisée pour vos prochains paiements Norva.",
+    "pt-BR": "Seu novo cartão foi salvo e será usado nos próximos pagamentos do Norva.",
+    "es": "Tu nueva tarjeta está guardada y se utilizará para tus próximos pagos de Norva.",
+    "hi": "आपका नया कार्ड सेव हो गया है और आगे Norva के भुगतान के लिए इस्तेमाल होगा।",
+    "tr": "Yeni kartınız kaydedildi ve bundan sonraki Norva ödemelerinizde kullanılacak.",
+    "bn": "আপনার নতুন কার্ড সংরক্ষিত হয়েছে এবং পরবর্তী Norva পেমেন্টে ব্যবহৃত হবে।",
+    "ar": "تم حفظ بطاقتك الجديدة وستُستخدم لدفعات Norva المقبلة.",
+    "id": "Kartu baru Anda telah disimpan dan akan digunakan untuk pembayaran Norva berikutnya.",
+    "fil": "Na-save na ang bagong card mo at gagamitin ito para sa mga susunod mong bayad sa Norva."
+  },
+  "ui_checkout_effective_date": {
+    "source": "Effective {{date}}.",
+    "refs": [
+      "public/checkout-revolut.html"
+    ],
+    "en": "Effective {{date}}.",
+    "fr": "Prend effet le {{date}}.",
+    "pt-BR": "Em vigor a partir de {{date}}.",
+    "es": "En vigor a partir del {{date}}.",
+    "hi": "{{date}} से लागू।",
+    "tr": "{{date}} tarihinde yürürlüğe girer.",
+    "bn": "{{date}} থেকে কার্যকর।",
+    "ar": "يسري اعتبارًا من {{date}}.",
+    "id": "Berlaku mulai {{date}}.",
+    "fil": "Magkakabisa sa {{date}}."
   }
 }

@@ -2,7 +2,7 @@
 <html lang="en" class="quote-pending">
 <head>
   <meta charset="UTF-8">
-    <script src="/js/i18n.js?v=9aaeb89dcc"></script>
+    <script src="/js/i18n.js?v=ec4b76fc30"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090b10">
   <title data-i18n="ui_web_6f36bcfd9969">Norva — Secure checkout</title>
@@ -422,7 +422,7 @@
       function trialChargeDate() {
         if (!serverFirstChargeAt) return '—';
         const date = new Date(serverFirstChargeAt);
-        try { return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); }
+        try { return date.toLocaleDateString(globalThis.NorvaI18n?.language || document.documentElement.lang || 'en', { year: 'numeric', month: 'long', day: 'numeric' }); }
         catch (_) { return date.toISOString().slice(0, 10); }
       }
       function stopCheckoutCountdown() {
@@ -870,17 +870,33 @@
 
       // ── Completion ────────────────────────────────────────────────────────
       const DONE_STATUSES = ['trialing', 'active', 'plan_change_scheduled', 'plan_changed', 'updated', 'retrying'];
-      const SUCCESS_COPY = {
-        trial_setup: ['Your free trial has started',
-          'You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for ' + trialChargeDate() +
-          ', then your selected plan renews automatically unless you cancel.'],
-        plan_change: ['Plan change confirmed',
-          'Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.'],
-        resubscribe: ['Welcome back — your plan is active',
-          'Today\'s payment was confirmed. Your receipt is on its way by email.'],
-        card_update: ['Payment method updated',
-          'Your new card is saved and will be used for your Norva payments from now on.'],
-      };
+      const SUCCESS_DEFAULTS = {
+        "ui_web_e1b66617c8d2": "Your free trial has started",
+        "ui_web_1e16b9e4c26e": "Plan change confirmed",
+        "ui_checkout_trial_success_body": "You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for {{date}}, then your plan renews automatically unless you cancel.",
+        "ui_checkout_plan_success_body": "Your current plan stays unchanged until renewal. The new plan and price will start together at your next billing date, so nothing is charged today.",
+        "ui_checkout_resubscribe_title": "Welcome back — your plan is active",
+        "ui_checkout_resubscribe_body": "Today's payment was confirmed. Your receipt is on its way by email.",
+        "ui_checkout_card_success_title": "Payment method updated",
+        "ui_checkout_card_success_body": "Your new card is saved and will be used for your Norva payments from now on.",
+        "ui_checkout_effective_date": "Effective {{date}}."
+};
+      function checkoutSuccessText(key, values) {
+        const args = values || {};
+        const fallback = SUCCESS_DEFAULTS[key];
+        return globalThis.NorvaI18n?.t(key, Object.assign({ defaultValue: fallback }, args))
+          ?? fallback.replace(/\{\{(\w+)\}\}/g, (_, name) => String(args[name] ?? ''));
+      }
+      function successCopy(kind) {
+        const keys = {
+          trial_setup: ['ui_web_e1b66617c8d2', 'ui_checkout_trial_success_body'],
+          plan_change: ['ui_web_1e16b9e4c26e', 'ui_checkout_plan_success_body'],
+          resubscribe: ['ui_checkout_resubscribe_title', 'ui_checkout_resubscribe_body'],
+          card_update: ['ui_checkout_card_success_title', 'ui_checkout_card_success_body'],
+        };
+        const copy = keys[kind] || keys.trial_setup;
+        return [checkoutSuccessText(copy[0]), checkoutSuccessText(copy[1], { date: trialChargeDate() })];
+      }
       let finishing = false;
       let checkoutCompleted = false;
       async function finish(orderId) {
@@ -932,19 +948,15 @@
         try { sessionStorage.removeItem('norva-revolut-current-order'); } catch (_) {}
         document.getElementById('checkout-view').style.display = 'none';
         const success = document.getElementById('success-view');
-        const copy = SUCCESS_COPY[checkoutKind] || SUCCESS_COPY.trial_setup;
+        const copy = successCopy(checkoutKind);
         success.querySelector('h2').textContent = copy[0];
         let successMessage = copy[1];
-        if (checkoutKind === 'trial_setup') {
-          successMessage = 'You have full access to Norva on Web, Android mobile (phone and tablet), and Android TV. Your first payment is scheduled for ' +
-            trialChargeDate() + ', then your selected plan renews automatically unless you cancel.';
-        }
         if (checkoutKind === 'plan_change' && confirmed && confirmed.effective_at) {
           const effectiveDate = new Date(confirmed.effective_at);
           if (!Number.isNaN(effectiveDate.getTime())) {
-            successMessage += ' Effective ' + effectiveDate.toLocaleDateString('en-US', {
+            successMessage += ' ' + checkoutSuccessText('ui_checkout_effective_date', { date: effectiveDate.toLocaleDateString(globalThis.NorvaI18n?.language || document.documentElement.lang || 'en', {
               year: 'numeric', month: 'long', day: 'numeric'
-            }) + '.';
+            }) });
           }
         }
         success.querySelector('p').textContent = successMessage;
