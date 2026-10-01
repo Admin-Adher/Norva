@@ -623,10 +623,20 @@ async function proxyPlayback(request, env, claims, ctx) {
   const targetUrl = new URL(claims.url);
   const selectionOrigin = selectionVodOrigin(targetUrl);
   if (selectionOrigin) {
-    const response = await proxySelectionVodOrigin(request, selectionOrigin,
-      url => signedRelayUrl(url, claims, env, request));
-    mergeCors(response.headers, corsHeaders(request, env));
-    return withRelayPlaybackLiveness(response, request, env, claims);
+    try {
+      const response = await proxySelectionVodOrigin(request, selectionOrigin,
+        url => signedRelayUrl(url, claims, env, request));
+      mergeCors(response.headers, corsHeaders(request, env));
+      return withRelayPlaybackLiveness(response, request, env, claims);
+    } catch (error) {
+      const responseHeaders = new Headers({ 'Cache-Control': 'no-store' });
+      if (typeof error?.selectionStage === 'string') responseHeaders.set('X-Norva-Selection-Stage', error.selectionStage);
+      if (Number.isInteger(error?.upstreamStatus)) responseHeaders.set('X-Norva-Upstream-Status', String(error.upstreamStatus));
+      mergeCors(responseHeaders, corsHeaders(request, env));
+      return new Response(request.method === 'HEAD' ? null : 'Selection programme is temporarily unavailable', {
+        status: 502, headers: responseHeaders,
+      });
+    }
   }
   const headers = new Headers();
   copyHeader(request.headers, headers, "accept");
