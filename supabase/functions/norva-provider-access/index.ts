@@ -247,7 +247,7 @@ async function routeRequest(req, requestId) {
   if (req.method === "GET" && match.kind === "collection") {
     const result = await rpc("norva_get_pending_credential_transition", {
       p_source_id: source.id, p_user_id: user.id,
-    });
+    }, { allowNull: true });
     return successResponse(req, requestId, "PendingCredentialCandidate", {
       candidate: result ? sanitizeCredentialCandidate(result, source.id) : null,
     }, 200);
@@ -1353,6 +1353,7 @@ function normalizeStrongIdentity(value) {
 async function rpc(name, params, context = {}) {
   const { data, error } = await admin.rpc(name, params);
   if (error) throw mapRpcError(error, context);
+  if (data === null && context.allowNull === true) return null;
   if (data === null || data === undefined) throw new ContractError("INVARIANT_VIOLATION");
   return data;
 }

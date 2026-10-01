@@ -60,6 +60,50 @@ function accessCycleHarness(body) {
   return { calls, ...vm.runInNewContext(`(() => { ${functions}; return { createProviderAccessCycle, updateProviderAccessCycle }; })()`, context) };
 }
 
+test('pending credential discovery returns an empty success while retaining ownership and database error checks', async () => {
+  for (const scenario of [
+    { data: null, expected: null },
+    { data: { transitionId: 'candidate' }, expected: { candidateId: 'candidate' } },
+    { data: null, error: { code: '42501' }, rejects: true },
+    { data: undefined, rejects: true },
+  ]) {
+    const calls = [];
+    const harness = vm.runInNewContext(`(() => {
+      ${section('async function routeRequest', '\nfunction routeSegments')}
+      ${section('async function rpc(', '\nasync function getRuntimeConfig')}
+      return { routeRequest, rpc };
+    })()`, {
+      URL,
+      ContractError: class extends Error { constructor(code) { super(code); this.code = code; } },
+      routeSegments: () => ['v1', 'sources', 'source', 'credential-candidates'],
+      matchNotificationRoute: () => null,
+      matchProviderRoute: () => ({ resource: 'credential', kind: 'collection', sourceId: 'source' }),
+      requireUserJwt: async () => { calls.push('auth'); return { id: 'owner' }; },
+      requireProviderAccessRolloutEligibility: async () => { calls.push('rollout'); },
+      requireOwnedSource: async (source, owner) => {
+        assert.equal(source, 'source'); assert.equal(owner, 'owner');
+        calls.push('ownership'); return { id: source };
+      },
+      admin: { rpc: async (name, params) => {
+        calls.push(name); assert.equal(params.p_source_id, 'source'); assert.equal(params.p_user_id, 'owner');
+        return { data: scenario.data, error: scenario.error || null };
+      } },
+      sanitizeCredentialCandidate: value => ({ candidateId: value.transitionId }),
+      successResponse: (_req, _id, kind, data, status) => ({ kind, data, status }),
+    });
+    const request = harness.routeRequest({ method: 'GET', url: 'https://norva.test/v1/sources/source/credential-candidates' }, 'request');
+    if (scenario.rejects) await assert.rejects(request, error => error.code === 'INVARIANT_VIOLATION');
+    else assert.deepEqual(JSON.parse(JSON.stringify(await request)), {
+      kind: 'PendingCredentialCandidate', data: { candidate: scenario.expected }, status: 200,
+    });
+    assert.deepEqual(calls, ['auth', 'rollout', 'ownership', 'norva_get_pending_credential_transition']);
+    if (scenario.data === null && !scenario.error) {
+      await assert.rejects(harness.rpc('required-result', { p_source_id: 'source', p_user_id: 'owner' }),
+        error => error.code === 'INVARIANT_VIOLATION');
+    }
+  }
+});
+
 test('conflicting calendar inputs are rejected before cycle create or update reaches business services', async () => {
   for (const method of ['createProviderAccessCycle', 'updateProviderAccessCycle']) {
     const harness = accessCycleHarness({ startedOn: '2026-09-20', expiresOn: '2026-09-28',
