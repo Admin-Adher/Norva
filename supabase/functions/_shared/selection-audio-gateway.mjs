@@ -18,7 +18,7 @@ const safeCodec = value => typeof value === 'string' && /^[a-zA-Z0-9_.-]{1,32}$/
 // text (even an identifier-shaped string) is never a safe diagnostic.
 const diagnosticCodes = new Set(['codec_probe_timeout', 'strict_lid_extraction_timeout',
   'strict_lid_request_timeout', 'strict_lid_drain_failed', 'strict_lid_window_claims_invalid',
-  'strict_lid_receipts_invalid', 'strict_lid_checkpoint_reset_required', 'MP4_DECLARED_MEDIA_EXCEEDS_FILE',
+  'strict_lid_receipts_invalid', 'strict_lid_checkpoint_reset_required', 'MP4_DECLARED_MEDIA_EXCEEDS_FILE', 'VOD_CHANGED',
   'LID_CAPTURE_DISABLED', 'LID_CAPTURE_CLAIMS_INVALID', 'LID_CAPTURE_DEDICATED_ROUTE_REQUIRED',
   'LANGUAGE_ENRICHMENT_CAPACITY_BUSY', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_ALREADY_RUNNING',
   'LID_CAPTURE_COMPUTE_BUSY', 'account_busy', 'background_busy', 'viewer_preempted',
