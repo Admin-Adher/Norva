@@ -5,6 +5,17 @@
  */
 const PlaybackHealth = {
     statuses: new Map(),
+    context: null,
+
+    syncContext() {
+        const cloud = window.NorvaCloud;
+        const next = [cloud?.token || '', cloud?.deviceToken || '', cloud?.catalogVisibility?.epoch?.() || ''];
+        if (!this.context || next.some((value, index) => value !== this.context[index])) {
+            this.statuses.clear();
+            this.context = next;
+        }
+        return this.context;
+    },
 
     key(sourceId, itemType, itemId) {
         return `${sourceId}:${itemType}:${itemId}`;
@@ -12,37 +23,58 @@ const PlaybackHealth = {
 
     setStatus(entry) {
         if (!entry) return;
+        this.syncContext();
         const sourceId = entry.source_id ?? entry.sourceId;
         const itemType = entry.item_type ?? entry.itemType;
         const itemId = entry.item_id ?? entry.itemId;
         if (sourceId == null || !itemType || itemId == null) return;
 
-        this.statuses.set(this.key(sourceId, itemType, itemId), {
+        const key = this.key(sourceId, itemType, itemId);
+        const previous = this.statuses.get(key);
+        const updatedAt = entry.updated_at || entry.updatedAt || null;
+        const sessionOrder = /^\d+$/.test(String(entry.session_order ?? '')) ? String(entry.session_order) : null;
+        if (previous?.sessionOrder && sessionOrder) {
+            if (BigInt(previous.sessionOrder) > BigInt(sessionOrder)) return false;
+            if (previous.sessionOrder === sessionOrder && previous.status === 'ok' && entry.status === 'broken') return false;
+        }
+        const time = value => typeof value === 'number' ? value : Date.parse(value);
+        if ((!previous?.sessionOrder || !sessionOrder || previous.sessionOrder === sessionOrder)
+            && previous && time(previous.updatedAt) > time(updatedAt)) return false;
+        this.statuses.set(key, {
             status: entry.status || 'unknown',
+            sessionOrder,
+            unavailable: typeof entry.unavailable === 'boolean' ? entry.unavailable : undefined,
             failures: entry.failures || 0,
             lastError: entry.last_error || entry.lastError || null,
-            updatedAt: entry.updated_at || entry.updatedAt || null,
+            updatedAt,
             mode: entry.mode || entry.playback_mode || entry.playbackMode || 'unknown',
             modeReason: entry.mode_reason || entry.playback_mode_reason || entry.modeReason || null,
             modeCheckedAt: entry.mode_checked_at || entry.playback_mode_checked_at || entry.modeCheckedAt || null
         });
+        return true;
     },
 
     async load(options = {}) {
         if (!window.API?.playbackStatus?.getAll) return [];
+        const context = this.syncContext();
+        const before = new Map(this.statuses);
         try {
             const entries = await API.playbackStatus.getAll(options);
+            if (this.syncContext() !== context) return [];
             if (!Array.isArray(entries)) return [];
             const sourceFilter = options.sourceId != null ? String(options.sourceId) : null;
             const typeFilter = options.itemType || null;
 
             for (const key of [...this.statuses.keys()]) {
                 const [sourceId, itemType] = key.split(':');
-                if ((!sourceFilter || sourceId === sourceFilter) && (!typeFilter || itemType === typeFilter)) {
+                if ((!sourceFilter || sourceId === sourceFilter) && (!typeFilter || itemType === typeFilter)
+                    && this.statuses.get(key) === before.get(key)) {
                     this.statuses.delete(key);
                 }
             }
 
+            // Server session order/timestamps decide whether an entry is newer.
+            // Another load finishing meanwhile must not suppress a later recovery.
             (entries || []).forEach(entry => this.setStatus(entry));
             return entries || [];
         } catch (err) {
@@ -52,16 +84,19 @@ const PlaybackHealth = {
     },
 
     isBroken(sourceId, itemType, itemId) {
+        this.syncContext();
         return this.statuses.get(this.key(sourceId, itemType, itemId))?.status === 'broken';
     },
 
     isUnavailable(sourceId, itemType, itemId) {
+        this.syncContext();
         const entry = this.statuses.get(this.key(sourceId, itemType, itemId));
         return this.isUnavailableEntry(entry);
     },
 
     isUnavailableEntry(entry) {
         if (!entry || entry.status !== 'broken') return false;
+        if (typeof entry.unavailable === 'boolean') return entry.unavailable;
         return !this.isTransientFailure(entry.lastError || entry.modeReason || '');
     },
 
@@ -73,6 +108,7 @@ const PlaybackHealth = {
     },
 
     getMode(sourceId, itemType, itemId) {
+        this.syncContext();
         return this.statuses.get(this.key(sourceId, itemType, itemId))?.mode || 'unknown';
     },
 
@@ -80,29 +116,22 @@ const PlaybackHealth = {
         return this.getMode(sourceId, itemType, itemId) === 'direct_hls';
     },
 
-    async report({ sourceId, itemType, itemId, status, reason = '' }) {
+    async report({ sourceId, itemType, itemId, status, reason = '', sessionId = null }) {
         if (sourceId == null || !itemType || itemId == null || !status) return null;
         if (status === 'broken' && /empty src/i.test(String(reason))) return null;
-
-        const fallbackEntry = {
-            source_id: sourceId,
-            item_type: itemType,
-            item_id: itemId,
-            status,
-            last_error: status === 'broken' ? reason : null,
-            updated_at: Date.now()
-        };
+        const context = this.syncContext();
 
         try {
-            const result = await API.playbackStatus.report({ sourceId, itemType, itemId, status, reason });
-            const entry = result?.entry || fallbackEntry;
-            this.setStatus(entry);
-            window.dispatchEvent(new CustomEvent('playbackStatusChanged', { detail: entry }));
+            const result = await API.playbackStatus.report({ sourceId, itemType, itemId, status, reason, sessionId });
+            if (this.syncContext() !== context) return null;
+            if (result?.ignored || result?.persisted === false) return result;
+            if (!result?.entry) throw new Error('Playback health was not acknowledged');
+            const entry = result.entry;
+            if (this.setStatus(entry)) window.dispatchEvent(new CustomEvent('playbackStatusChanged', { detail: entry }));
             return result;
         } catch (err) {
             console.warn('[PlaybackHealth] Failed to report status:', err.message);
-            this.setStatus(fallbackEntry);
-            window.dispatchEvent(new CustomEvent('playbackStatusChanged', { detail: fallbackEntry }));
+            // A failed write is not evidence that this title is unavailable.
             return null;
         }
     }

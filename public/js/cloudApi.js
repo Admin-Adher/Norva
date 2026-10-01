@@ -5125,6 +5125,8 @@
                 `/playback/sessions/${encodeURIComponent(id)}/provider-failure`,
                 failure
             ),
+            health: (params = {}) => playbackSessionRequest('GET', `/playback/health${query(params)}`),
+            reportHealth: (body) => playbackSessionRequest('POST', '/playback/health', body),
             event: (event) => playbackSessionRequest('POST', '/playback/events', event),
             summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`),
             // Phase 3 AI subtitles (whisper transcript): read the cross-user cache state

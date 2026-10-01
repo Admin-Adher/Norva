@@ -2495,7 +2495,28 @@ const CloudAdapter = (() => {
             return items.map(normalizeRecentItem);
         }
         if (path.startsWith('/channels/')) return { success: true };
-        if (path.startsWith('/playback-status')) return method === 'GET' ? [] : { success: true, cloud: true };
+        if (path === '/playback-status' && method === 'GET') {
+            const params = { itemType: query.get('itemType') || undefined };
+            if (query.get('sourceId')) params.sourceId = await resolveSourceId(query.get('sourceId'));
+            const entries = [];
+            for (let page = 0; page < 100; page++) {
+                const result = await NorvaCloud.playback.health(params);
+                if (!Array.isArray(result?.entries)) throw new Error('Invalid playback health response');
+                entries.push(...result.entries.map(entry => ({ ...entry, source_id: localSourceId(entry.source_id) })));
+                if (result.entries.length < 500) return entries;
+                const after = result.entries.at(-1)?.cursor;
+                if (!after || after === params.after) throw new Error('Invalid playback health cursor');
+                params.after = after;
+            }
+            // A partial snapshot must not silently clear the rest of the cache.
+            throw new Error('Playback health snapshot exceeds page limit');
+        }
+        if (path === '/playback-status/report' && method === 'POST') {
+            if (!data?.sessionId) return { persisted: false, ignored: true, reason: 'session-required' };
+            const result = await NorvaCloud.playback.reportHealth({ sessionId: data.sessionId, status: data.status, reason: data.reason });
+            return result?.entry ? { ...result, entry: { ...result.entry, source_id: localSourceId(result.entry.source_id) } } : result;
+        }
+        if (path.startsWith('/playback-status/')) throw new Error('Playback status operation is not available in cloud mode');
         if (path.startsWith('/tmdb')) return { enabled: false, cloud: true };
         if (path === '/settings' || path === '/settings/defaults') {
             if (method === 'DELETE') {

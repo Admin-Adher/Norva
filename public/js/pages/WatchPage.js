@@ -8670,15 +8670,15 @@ class WatchPage {
         }
         return {
             sourceId: this.content.sourceId,
-            itemType: 'series',
-            itemId: this.content.seriesId || this.content.id
+            itemType: 'episode',
+            itemId: this.content.id
         };
     }
 
     async reportPlaybackStatus(status, reason = '') {
         const target = this.getPlaybackHealthTarget();
         if (!target || !window.PlaybackHealth?.report) return;
-        await PlaybackHealth.report({ ...target, status, reason });
+        await PlaybackHealth.report({ ...target, status, reason, sessionId: this.currentCloudPlaybackSessionId });
     }
 
     /**

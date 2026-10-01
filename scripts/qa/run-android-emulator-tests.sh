@@ -113,14 +113,28 @@ wait_for_phone_home() {
   local home_component home_package home_activity home_full home_short window_state anr_events
   local setup_complete device_provisioned previous_home=''
   local deadline=$((SECONDS + 45))
-  local stable_focus=0
-  timeout 15s adb shell am start -W -a android.intent.action.MAIN \
-    -c android.intent.category.HOME >/dev/null
+  local stable_focus=0 home_started=0
   while (( SECONDS < deadline )); do
-    anr_events="$(timeout 5s adb logcat -b events -d -s am_anr:I '*:S')"
+    # Font/navigation configuration can briefly disconnect the emulator after
+    # sys.boot_completed. Retry readiness observations within the SAME deadline;
+    # never reboot, clear an ANR, or retry an actual instrumentation failure.
+    if (( home_started == 0 )); then
+      if ! timeout 5s adb shell am start -W -a android.intent.action.MAIN \
+        -c android.intent.category.HOME >> "$diagnostic_dir/readiness-launch.txt" 2>&1; then
+        sleep 2
+        continue
+      fi
+      home_started=1
+    fi
     # API 35 prints mCurrentFocus under DisplayContent, outside the "windows"
     # subsection. Include that section so a healthy HOME is not rejected.
-    window_state="$(timeout 5s adb shell dumpsys window | tr -d '\r')"
+    if ! anr_events="$(timeout 5s adb logcat -b events -d -s am_anr:I '*:S')" \
+      || ! window_state="$(timeout 5s adb shell dumpsys window | tr -d '\r')"; then
+      stable_focus=0
+      home_started=0
+      sleep 2
+      continue
+    fi
     if grep -q 'am_anr' <<< "$anr_events" \
       || grep -q 'Application Not Responding' <<< "$window_state"; then
       printf '%s\n' "$anr_events" > "$diagnostic_dir/readiness-anr.txt"
@@ -129,12 +143,17 @@ wait_for_phone_home() {
       echo "Android QA readiness failed: emulator ANR before instrumentation; dialogue left intact" >&2
       return 1
     fi
-    setup_complete="$(timeout 5s adb shell settings get secure user_setup_complete | tr -d '\r')"
-    device_provisioned="$(timeout 5s adb shell settings get global device_provisioned | tr -d '\r')"
     # The first boot replaces its temporary setup HOME with the launcher.
     # Resolve again after every observation instead of retaining the setup target.
-    home_component="$(timeout 5s adb shell cmd package resolve-activity --brief --user 0 \
-      -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+    if ! setup_complete="$(timeout 5s adb shell settings get secure user_setup_complete | tr -d '\r')" \
+      || ! device_provisioned="$(timeout 5s adb shell settings get global device_provisioned | tr -d '\r')" \
+      || ! home_component="$(timeout 5s adb shell cmd package resolve-activity --brief --user 0 \
+        -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"; then
+      stable_focus=0
+      home_started=0
+      sleep 2
+      continue
+    fi
     home_full=''
     home_short=''
     if [[ "$home_component" =~ ^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$ ]]; then
@@ -166,7 +185,7 @@ wait_for_phone_home() {
     fi
     sleep 2
   done
-  printf '%s\n' "$window_state" > "$diagnostic_dir/readiness-windows.txt"
+  printf '%s\n' "${window_state:-transport unavailable}" > "$diagnostic_dir/readiness-windows.txt"
   timeout 5s adb exec-out screencap -p > "$diagnostic_dir/readiness-screen.png" || true
   echo "Android QA readiness failed: HOME did not acquire stable window focus before the readiness deadline" >&2
   return 1
