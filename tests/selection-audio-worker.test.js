@@ -98,6 +98,29 @@ test('failure reporting honors a lost lease and the persisted interruption retry
   }
 });
 
+test('confirmed truncated capture persists its terminal reason without resetting receipts or hydrating a language', async () => {
+  const { SelectionAudioGatewayError } = await gatewayModule;
+  const job = { ...baseJob(), attempt_count:5, profile:profile(),
+    progress:{ trackPosition:0, receipts:[receipt(1),receipt(2),receipt(3)], tracks:[], evidence:[] } };
+  const before = clone(job);
+  const run = await harness({ job });
+  run.gateway.getCaptureStatus = async () => ({ captured:false, providerDrained:true });
+  run.gateway.captureWindow = async args => {
+    assert.equal(args.windowOrdinal,4);
+    throw new SelectionAudioGatewayError('SELECTION_AUDIO_SOURCE_TRUNCATED', {
+      status:422, retryable:false, providerDrained:true, stage:'capture',
+      gatewayCode:'MP4_DECLARED_MEDIA_EXCEEDS_FILE',
+    });
+  };
+  const result = await run.run({ captureEnabled:true });
+  assert.equal(result.state,'failed');
+  assert.deepEqual(run.finishes,[{ result:null, errorCode:'SELECTION_AUDIO_SOURCE_TRUNCATED', retryable:false }]);
+  assert.deepEqual(job,before);
+  assert.equal(run.checkpoints.length,0);
+  assert.equal(run.events.includes('hydrate'),false);
+  assert.equal(result.diagnostic.gatewayCode,'MP4_DECLARED_MEDIA_EXCEEDS_FILE');
+});
+
 test('Selection captures after a miss, persists drain checkpoint, computes locally, and ACKs only durable evidence', async () => {
   for (const cached of [false,true]) {
     const run = await harness(); const events = run.events;
