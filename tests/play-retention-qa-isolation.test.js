@@ -5,6 +5,17 @@ const owner='00000000-0000-4000-8000-000000000902';
 const now=Date.parse('2026-10-01T18:00:00Z');
 const config={mode:'isolated-google-play-retention',userId:owner,runId:'00000000-0000-4000-8000-000000000903',
   url:'http://norva-play-retention-qa-rest:3000',key:'x'.repeat(40),createdAt:'2026-10-01T17:00:00Z',expiresAt:'2026-10-01T20:00:00Z'};
+
+test('self-host worker exposes only the exact optional config to its two consumers',()=>{
+  const fs=require('node:fs'),path=require('node:path'),{transformSync}=require('esbuild');
+  const source=fs.readFileSync(path.join(__dirname,'../supabase/functions/main/index.ts'),'utf8');
+  const body=source.match(/function playQaStaticFiles\(serviceName: string\) \{[\s\S]*?\n\}/)[0];
+  const select=new Function(transformSync(body,{loader:'ts'}).code+';return playQaStaticFiles;')();
+  for(const name of ['norva-cloud','norva-billing-webhook'])
+    assert.deepEqual(select(name),['/home/deno/functions/_shared/play-retention-qa.config.json']);
+  for(const name of ['norva-playback','norva-source-sync','../../_shared','norva-cloud--p2',''])
+    assert.deepEqual(select(name),[]);
+});
 test('isolated Play QA requires one exact owner, fixed private endpoint and bounded expiry',async()=>{
   const {validPlayQaConfig}=await modulePromise;
   assert.equal(validPlayQaConfig(config,owner,now),true);
