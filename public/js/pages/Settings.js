@@ -79,15 +79,6 @@ window.NorvaSettingsNavigation = Object.freeze({
 // True once the native APK exposes the Play Billing purchase bridge. In-app
 // purchase is allowed by stores (only external web payment links are not), so
 // when this bridge is present we can surface an in-app "Subscribe" action.
-const PLAY_BILLING_TEST_EMAILS = ['customersuccess.kang@gmail.com'];
-
-function isPlayBillingTestAccount(app) {
-    const email = String(app?.currentUser?.email || window.NorvaAuth?.getSession?.()?.user?.email || '')
-        .trim()
-        .toLowerCase();
-    return PLAY_BILLING_TEST_EMAILS.indexOf(email) !== -1;
-}
-
 function nativePlayBillingChannelReady() {
     if (isTvSettingsShell()) return false;
     if (window.NorvaBilling && typeof window.NorvaBilling.hasNativeBilling === 'function') {
@@ -97,10 +88,8 @@ function nativePlayBillingChannelReady() {
     return !!(channel && typeof channel.postMessage === 'function');
 }
 
-function nativeBillingReady(app) {
-    const bridge = window.NorvaTVCloud || window.NodeCastNative;
-    if (bridge && typeof bridge.purchase === 'function') return true;
-    return isPlayBillingTestAccount(app) && nativePlayBillingChannelReady();
+function nativeBillingReady() {
+    return nativePlayBillingChannelReady();
 }
 
 class SettingsPage {
@@ -633,8 +622,11 @@ class SettingsPage {
             if (isTvSettingsShell()) {
                 button.style.display = 'none';
             } else if (isNativeShell()) {
-                const ready = nativeBillingReady(this.app);
-                button.style.display = ready ? '' : 'none';
+                const ready = nativeBillingReady();
+                // Wait for the current account's membership before offering a
+                // purchase. A previous account or another live rail must not
+                // briefly expose a second subscription.
+                button.style.display = 'none';
                 if (ready) button.textContent = (globalThis.NorvaI18n?.t("ui_web_cc0e38da9c41", { defaultValue: "Subscribe" }) ?? 'Subscribe');
             } else {
                 button.style.display = '';
@@ -661,6 +653,8 @@ class SettingsPage {
                 .includes(String(decision.status || '').toLowerCase());
             const includedAccess = String(decision.status || '').toLowerCase() === 'active'
                 && (provider === 'system' || provider === 'manual');
+            const liveMembership = ['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace']
+                .includes(String(decision.status || '').toLowerCase());
 
             plan.textContent = this.accessLabel(decision);
             hint.textContent = isTvSettingsShell()
@@ -684,9 +678,13 @@ class SettingsPage {
                 button.textContent = (globalThis.NorvaI18n?.t("ui_web_2d5ab37c33fc", { defaultValue: "Manage plan" }) ?? 'Manage plan');
             }
 
-            if (provider === 'google_play' && isNativeShell() && !isTvSettingsShell() && button) {
-                button.style.display = '';
-                button.textContent = String(window.NorvaI18n?.language || '').startsWith('fr') ? 'Gérer dans Google Play' : 'Manage in Google Play';
+            if (isNativeShell() && !isTvSettingsShell() && button && !includedAccess && !hardBlocked) {
+                if (provider === 'google_play') {
+                    button.style.display = '';
+                    button.textContent = String(window.NorvaI18n?.language || '').startsWith('fr') ? 'Gérer dans Google Play' : 'Manage in Google Play';
+                } else if (!liveMembership && nativeBillingReady()) {
+                    button.style.display = '';
+                }
             }
             window.NorvaPlayRetentionCard?.refresh(this.app, decision, () => this.refreshAccessCard());
 

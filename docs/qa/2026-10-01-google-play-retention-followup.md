@@ -52,3 +52,31 @@ Sources: [Google subscription replacement modes](https://developer.android.com/g
 - Real-time notifications were enabled and saved in Play Console for subscriptions/voided purchases on that exact topic. The test failed: Google Play's official notification service lacks topic Publisher permission. The topic-scoped grant is prepared, awaiting user confirmation; no broader IAM change was made.
 - The existing RevenueCat webhook points to `/functions/v1/norva-billing-webhook`, both environments, all events. The official dashboard TEST reached Norva and passed authentication/signature validation, but returned `403 revenuecat_app_not_allowed`: its synthetic application id is not the production phone id. TEST now returns an acknowledgement after both authentication guards and before business-event allowlisting, with no business processing. Real purchases and transfers retain their application restriction. Three executable preflight cases and the existing 23 billing/transfer checks passed.
 - Full Android regression run 36876153585 initially passed five configurations. Gesture/font 1.0 stopped in `CatalogVersionTagsWebViewTest` after WebView renderer crashes (code -1); no promotion assertion failed. Only the failed job was replayed. Final result is recorded below when available.
+
+### RevenueCat transport verified
+
+At 2026-10-01 14:45 UTC, the diagnostic-only webhook acknowledgement was deployed on both current Edge replicas. A concurrent VOD deployment had moved their functions mount; the guarded rollout stopped before mutation, then verified that all five retention files were preserved on the new active mount before patching the single webhook file. Both replicas passed health checks. Backup: `/home/adrien/.norva/play-retention-release-20261001/webhook-active-backup-20261001T144512Z.ts`.
+
+The official RevenueCat "Resend Test Event" then returned HTTP 200 and exactly `{"ok":true,"test":true}`. This verifies RevenueCat-to-Norva connectivity, authorization and signature validation. It does not prove a store purchase or Google-to-RevenueCat RTDN delivery.
+
+PR [548](https://github.com/Admin-Adher/Norva/pull/548) is merged as `44698d17100bccc6ec59c18171a9b8f1ce04ed1e`. The final code change after the successful focused emulator suite affects only the server diagnostic event path and its tests; the mobile UI is unchanged. Full Android regression remains in progress. Cloudflare publication run [36879181135](https://github.com/Admin-Adher/Norva/actions/runs/36879181135) is in progress at this entry.
+
+### Client publication and final gate
+
+Cloudflare production publication 36879181135 passed. Production `PlayRetentionCard.js`, `billing.js` and `Settings.js` hashes match the release. The current application's versioned translation script `/js/i18n.js?v=8514b85c61` matches merged commit `44698d17` and contains the retention translations; the unversioned CDN URL still exposes an older cached asset and was not used as release evidence.
+
+Full emulator run 36876153585 passed all six configurations after the one failed-job replay. A separate automatic run at the diagnostic-only server commit (36878575297) again lost a WebView renderer, this time during `ContextualLanguageInstrumentedTest.attachedFiltersKeepScopeWithKeyboard` (code -1, empty failure, suite interrupted at 11/65). This is recorded as an unresolved general-suite instability, not a passed full run at that commit. The dedicated four-configuration retention replay remains passed; no production Android/retention UI source changed between these commits.
+
+Remaining actions: approve the prepared topic-scoped Google publisher permission, resend the Play RTDN test and verify RevenueCat's received timestamp, then validate one real eligible promotional purchase and preserved billing date. Production currently has no Google Play entitlement suitable for that purchase. Campaign flags remain off; no user purchase, trial date, consent or entitlement has been fabricated.
+
+## Approved Google notification permission — 1 October, 14:57 UTC
+
+The user explicitly approved the prepared permission. The official principal `google-play-developer-notifications@system.gserviceaccount.com` was granted Pub/Sub Publisher on the single topic `norva-rtdn`. Google Cloud confirmed the policy update; no project-wide role was granted.
+
+The Play Console test was resent. RevenueCat Phone now shows `Last received 2026-10-01, 2:57 p.m. UTC` on the exact topic `projects/norva-ecosystem/topics/norva-rtdn`. This completes the Google Play-to-RevenueCat transport check; the separate RevenueCat-to-Norva diagnostic already returned HTTP 200. The optional "Track new purchases from server-to-server notifications" remains unchanged.
+
+Production still has zero Google Play entitlement projections and zero eligible subscriptions. A real offer test needs an ordinary Play customer with cancelled access ending within three days. A new seven-day trial begun today cannot truthfully be treated as J-3 today. The user was asked to reconnect the phone and open a test account without an active Revolut subscription. No device is detected by ADB at this check. Financial confirmation remains a user action, and campaigns remain disabled.
+
+### Additional general Android-suite diagnosis
+
+Run 36878575297 finished with three phone jobs failing and three configurations succeeding. The three-button/font 1.0 artifact has an empty test failure and an instrumentation interruption (11/65), rather than a recorded promotion assertion. Continuous logcat exited 255 at 14:47:54 without the harness stopping it; the app PID remained visible through 14:48:05, and ADB stayed available after a transport change. Renderer `code -1` messages also occur at normal fixture teardown and are not sufficient to establish the root cause. The earlier wording identifying renderer crashes as the cause is therefore superseded: the general-suite interruption remains unexplained. The dedicated retention matrix and the six-configuration replay at the unchanged UI commit are passed evidence; this later general run is not counted as passed.
