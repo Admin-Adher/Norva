@@ -132,7 +132,7 @@
 <p>Short clips, live-like media, credits, trailers, and items with unusual duration metadata can make a simple percentage rule unreliable.</p>
 <h2 id="resume-behavior-is-a-third-question">Resume behavior is a third question</h2>
 <p>The resume point is the position the player offers or uses when the item opens again. It may be derived from the saved position, adjusted to avoid replaying a few seconds, or omitted after completion. This behavior should not be assumed from the completion badge alone.</p>
-<p>See resume point versus bookmark for another important state boundary.</p>
+<p>See <a href="/blog/resume-point-vs-bookmark/">resume point versus bookmark</a> for another important state boundary.</p>
 <h2 id="synchronization-can-affect-each-state-differently">Synchronization can affect each state differently</h2>
 <p>Across supported screens, a position update and completion update may be separate records or events. A stale screen could show the correct completion badge but an old progress bar, or the reverse. Record both before refreshing.</p>
 <p>Norva can keep viewing progress across supported devices under the same account, but exact behavior still depends on current implementation, media identity, profile, source, device, and connectivity.</p>
@@ -172,6 +172,12 @@
           <div class="card-title">The Complete Glossary of Media Player Terms</div>
 
           <p>A practical glossary separates the media, catalog, playback, synchronization, format, storage, security, device, and subscription concepts users encounter.</p>
+        </a>
+        <a class="card" href="/blog/resume-point-vs-bookmark/">
+          <span class="tag">Media Player Glossary &amp; Concepts</span>
+          <div class="card-title">Resume Point vs. Bookmark: Two Different Saved States</div>
+
+          <p>A resume point supports continuation from current progress; a bookmark preserves a chosen reference and may outlive later playback updates.</p>
         </a>
       </div>
     </section>
