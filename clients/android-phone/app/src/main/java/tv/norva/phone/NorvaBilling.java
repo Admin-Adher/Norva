@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import com.revenuecat.purchases.CustomerInfo;
+import com.revenuecat.purchases.CacheFetchPolicy;
 import com.revenuecat.purchases.EntitlementInfo;
 import com.revenuecat.purchases.Offering;
 import com.revenuecat.purchases.Offerings;
@@ -337,7 +338,9 @@ final class NorvaBilling {
                                         || !intro.getCurrencyCode().equals(expected.optString("currencyCode"))) {
                                     finishPurchaseError(operation, cb, "retention_price_changed"); return;
                                 }
-                                purchases.getCustomerInfo(new ReceiveCustomerInfoCallback() {
+                                // A cancellation can have reached our webhook while the SDK
+                                // still caches willRenew=true. Never gate a purchase on that cache.
+                                purchases.getCustomerInfo(CacheFetchPolicy.FETCH_CURRENT, new ReceiveCustomerInfoCallback() {
                                     @Override public void onError(PurchasesError error) { finishPurchaseError(operation, cb, "retention_unavailable"); }
                                     @Override public void onReceived(CustomerInfo info) {
                                         if (!isOperationActive(operation)) return;

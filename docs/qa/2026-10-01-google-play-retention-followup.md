@@ -151,3 +151,39 @@ Related published client fix: PR 551 / merge `6fec768b424355d9feccc27c40a22c5943
 Remaining scope: the monthly three-discounted-cycle promotion has not been replayed end to end. Also, the UI stays pending until the first discounted renewal receipt supplies the offer code; immediate confirmation of a scheduled promotion before that boundary is not established. Campaigns remain disabled. No production renewal timing or global commercial readiness is claimed by this sandbox test.
 
 Cleanup: the promoted test subscription was cancelled in Google Play after verification. Play visibly confirmed Annulé, with existing test access retained until 20:20 Paris and the fictitious instrument still selected. No other subscription was touched. Seventeen focused retention, delivery and isolation tests passed. The VFS correction and this evidence are tracked in PR 552.
+
+## Scheduled confirmation correction and monthly scenario preparation
+
+PR 552 merged as `f468172b5181c1505df44d0ab3eb201b91cde78d`. PR 553 adds server-side Google Orders / Subscriptions v2 verification for a signed INITIAL_PURCHASE tied to an existing claimed offer. It requires the exact order, product, base plan, offer, environment, active renewal and preserved access boundary. Only an allowlisted proof is journaled; purchase tokens remain transient. The SQL consumer also requires the matching claim ID. This can confirm the promotion during the remaining-access interval instead of waiting for RevenueCat's first discounted renewal.
+
+The Node checks cover wrong environment/order/plan/offer, cancelled renewal, shortened access, duplicate lines, owner scoping and sanitized retry errors. A rollback SQL test in the network-isolated proof database rejects the wrong claim, accepts matching authority and preserves the acceptance date under duplicate delivery. The webhook module is deployed to the two Edge replicas; the new trigger is installed only in QA pending the physical monthly replay. Production campaigns are still disabled.
+
+The annual QA database was retained as `norva_play_retention_annual_20261001` inside the disposable QA container. The original QA database name now holds an empty schema clone and the one QA owner for an independent monthly scenario; no real client's anti-abuse history was reset. Its restored grants include extension access and the private financial-fact ingestion function. Google Play Billing Lab sign-in was completed manually by the user. It displayed no manageable subscription after the annual cancellation. The phone then moved to another application; physical testing was paused and the user was asked to reopen Norva. No monthly promotional purchase has yet occurred in this scenario.
+
+## Monthly promotion and confirmation before expiry (1 October, 20:21 Paris)
+
+This physical replay supersedes the monthly-pending statements above. The isolated owner bought Norva Family monthly using the explicitly labelled Google license-test instrument, cancelled it in Play, and received the genuine cancellation webhook. The offer page displayed EUR 7.59/month for three cycles, then EUR 9.49/month. No real card purchase occurred.
+
+- Previous test access boundary: 18:22:17.269 UTC. Promotional INITIAL_PURCHASE `8AE26F2A-C783-4230-9174-12A5B2CF51E7` occurred at 18:21:29.550 UTC.
+- Google authority identified `retention-monthly-20`, matching claim `e3cd4cd4-5af4-4a51-833b-d606df7d695e`, SANDBOX and a new boundary at 18:22:41.234 UTC. Remaining access was not shortened (+23.965 seconds in the accelerated sandbox).
+- The physical phone visibly confirmed the promotion at 18:21:53 UTC, before the previous expiry. The offer is accepted and linked to the initial receipt; subsequent receipts do not reset that acceptance timestamp.
+- Initial attempts exposed stale RevenueCat CustomerInfo after cancellation: the native eligibility check retained the previous renewal state until cache refresh. The purchase path now requests FETCH_CURRENT before applying its existing store/renewal eligibility checks. This requires the new Android 1.3.29 (43) bundle; it is not included in the phone's installed 1.3.28.
+- Twenty-one focused Node tests passed. SQL rollback verification rejects a wrong claim and preserves acceptance under duplicate delivery. The verified scheduled-confirmation trigger has now also been applied to production, with its PRODUCTION-only environment guard intact and a rollback copy retained on the server.
+- Production mobile campaign and communication flags remain false. The production QA owner has zero SANDBOX entitlement events. The sandbox database and operator configuration remain isolated.
+
+Renewal-cycle evidence and Android release status are recorded below once complete.
+
+### Monthly cycle completion and cleanup
+
+Genuine sandbox renewal receipts prove exactly three reduced cycles followed by the ordinary price:
+
+| UTC purchase time | EUR | Receipt |
+| --- | ---: | --- |
+| 18:22:41.234 | 7.59 | C88D1394-B83C-400F-897C-A3CA398AFB5B |
+| 18:27:41.234 | 7.59 | D3653687-9858-4F0A-9EEC-BA8D9C978163 |
+| 18:32:41.234 | 7.59 | 03AB7DF2-B4F8-4274-9208-DFA09E029965 |
+| 18:37:41.234 | 9.49 | Normal-price RENEWAL, no offer code |
+
+The first three identify retention-monthly-20. A new offer lookup returns null after acceptance. The physical Google Play UI then showed the next normal EUR 9.49 test charge, and the operator cancelled only this fictional Norva subscription. Play confirmed Annulé with remaining access until 20:42 Paris and Carte test, toujours approuvée. No unrelated subscription was changed.
+
+Android 1.3.29 (43) is submitted on the production track at 100%, not internal testing. Google shows the change under review/pre-review checks; availability is not yet claimed. Nine release-note languages are supplied. The only bundle warnings concern absent deobfuscation/native debug symbols; device compatibility is unchanged. Signed build 36907223342 passed. Focused emulator run 36906943420 passed all six configurations for the same native source (only version metadata changed afterward). Cloud contracts, phone JVM/lint/build and TV build passed on caf88a55; the version-pinning tests were updated to 43/1.3.29 after the initial version-only failure. No campaign has been enabled while the native update awaits Google approval.

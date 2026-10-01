@@ -48,6 +48,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { playQaContext } from "../_shared/play-retention-qa.mjs";
+import { scheduledPlayOffer } from "../_shared/play-retention-authority.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   canGrantRevenueCatAccess,
@@ -470,9 +471,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    const scheduledOffer = await scheduledPlayOffer(admin, userId, event, {
+      serviceAccountJson: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+      packageName: GOOGLE_PLAY_PACKAGE_NAME,
+    });
     await recordProcessedEvent(admin, userId, eventId, eventType, {
       ...event,
       _norva: {
+        play_retention: scheduledOffer,
         projection_applied: projectionApplied,
         plan_mapping: resolution.mapping,
         previous_status: existingProjection?.status ?? null,
