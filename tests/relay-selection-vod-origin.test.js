@@ -93,3 +93,35 @@ export default { async fetch(request) {
     assert.equal(bytes[188], 71);
   } finally { await mf.dispose(); }
 });
+
+test('real Workers outbound fetch accepts the request mode and never follows redirects', async () => {
+  const { Miniflare } = createRequire(import.meta.url)('miniflare');
+  const helper = readFileSync(new URL('../services/norva-relay/src/selectionVodOrigin.mjs', import.meta.url), 'utf8');
+  for (const status of [200, 302]) {
+    let requests = 0;
+    const mf = new Miniflare({ modules:true, compatibilityDate:'2026-06-18', host:'127.0.0.1', port:0,
+      outboundService: async request => {
+        requests++;
+        assert.equal(request.url, origin);
+        return new Response('#EXTM3U\n#EXTINF:5,\nsegment\n#EXT-X-ENDLIST', {
+          status, headers: status === 302 ? {location:'https://attacker.test/private'} : {},
+        });
+      },
+      script:helper + `
+export default {async fetch(request) {
+  try { return await proxySelectionVodOrigin(request,new URL('${origin}'),async u=>u); }
+  catch(error) { return Response.json({stage:error.selectionStage,upstreamStatus:error.upstreamStatus},{status:502}); }
+}};` });
+    try {
+      const response = await fetch((await mf.ready).toString());
+      if (status === 200) {
+        assert.equal(response.status, 200);
+        assert.match(await response.text(), /^#EXTM3U/);
+      } else {
+        assert.equal(response.status, 502);
+        assert.deepEqual(await response.json(), {stage:'origin_status',upstreamStatus:302});
+      }
+      assert.equal(requests, 1);
+    } finally { await mf.dispose(); }
+  }
+});
