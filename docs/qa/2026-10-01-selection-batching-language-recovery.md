@@ -17,6 +17,7 @@ accounts were retained. No manual finalizer kick occurred during the timed run.
   not require waiting for completion.
 - Final inventory: 8,611 raw entries: 7,724 movies, 276 series, 590 episodes and
   21 live entries; 8,000 bound movie/series variants.
+- Foreign owner/source linkage mismatches among those 8,000 variants: **zero**.
 
 This is **not quasi-instantaneous full activation**. Per-owner bindings, file
 observations, visibility indexes and rollups still require database writes.
@@ -75,6 +76,9 @@ The local-capture recovery branch and actual provider-error accounting are retai
 
 - Movie facets, illustrated movie and series lists and Live TV navigation were
   present after full activation; trial indicator remained at seven days.
+- Selecting the series Drama category returned 149 titles. The TV guide showed
+  its 20 logical channels in 11 groups. The QA account was left on Home, with
+  the test playback closed and the temporary series category filter cleared.
 - Downton Abbey: A New Era displayed the newly identified Portuguese badge and
   French synopsis. Video reached readyState 4, 1280 x 720, playing at 13.620 s
   by 22.597 s after Play (consistent with about 9 s startup, not first-frame timing).
@@ -92,3 +96,22 @@ The local-capture recovery branch and actual provider-error accounting are retai
 
 No claim of Android runtime replay, load-test capacity, elimination of every
 unknown audio language or instantaneous full activation follows from this run.
+
+## Worker release and remaining queue
+
+PR 542 merged as `61c708f1310159a76729d20a27a7b72deadc4ec8`.
+The normal Selection worker stopped cleanly with exit code 0, was patched and
+restarted at **2026-10-01 10:28:13.991 UTC**; neither Gateway was restarted for
+this worker correction. Runtime SHA-256:
+`6fdec2265c3f8fc875a043a4c752a52dea378390aea5fb6012ca76e00cfcaf25`.
+The deployed file was read back and matched; worker running, restart count zero.
+Cloud-contract CI and Android APK builds succeeded for this commit; its Windows
+artifact build was still running at the check (no Windows application code changed).
+
+At 10:31 UTC, the 511 recovered jobs included 19 queued, one running and 491
+waiting to retry, mostly after capacity or viewer-priority deferral. None of
+these 511 had yet published a completed language result; the three canary
+results are separate. Maximum attempt count was two. This queue snapshot does
+not certify that all 511 files remain reachable or will yield identifiable speech.
+The regular worker continues independently in production, respecting its
+existing file/host/network/CPU limits and actual viewer priority.
