@@ -412,6 +412,11 @@ function sanitizeVerification(value) {
 export function sanitizeCatalogVariant(value) {
   const source = isRecord(value) ? value : {};
   const result = pick(source, MEDIA_SCALAR_FIELDS);
+  const integrity = source.source_integrity;
+  if (isRecord(integrity) && integrity.status === 'incomplete'
+    && typeof integrity.checkedAt === 'string' && Number.isFinite(Date.parse(integrity.checkedAt))) {
+    result.source_integrity = { status:'incomplete', checkedAt:new Date(integrity.checkedAt).toISOString() };
+  }
   applyPublicImages(result, source);
   const providerAudio = publicProviderAudioLanguages(source);
   if (providerAudio.length) {

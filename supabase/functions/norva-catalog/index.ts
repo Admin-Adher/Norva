@@ -1,6 +1,7 @@
 import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 import { supplementSelectionEditorial, supplementSelectionExtras } from "../_shared/selection-editorial-supplements.mjs";
 import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_shared/catalog-audio-job-status.mjs";
+import { attachSelectionSourceIntegrity } from "../_shared/selection-source-integrity.mjs";
 // SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
 // supabase/functions tree, so sibling ../_shared imports stay available. A push
 // to main validates this code but does not reload production: update the server
@@ -3542,6 +3543,9 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
 
   await attachSelectionAudioFileIdentity(variants, userId);
 
+  try { await attachSelectionSourceIntegrity({ db, userId, variants }); }
+  catch (_) { /* Missing advisory evidence must not block browsing or playback. */ }
+
   try { await attachAudioJobStates(db, variants, userId); }
   catch (_) { /* Unknown language remains unknown if job evidence is unavailable. */ }
 
@@ -3731,6 +3735,8 @@ async function attachFlatMediaFileLanguages(
       userId,
     );
     await attachSelectionAudioFileIdentity([...variantByExactFile.values()], userId);
+    try { await attachSelectionSourceIntegrity({ db, userId, variants:[...variantByExactFile.values()] }); }
+    catch (_) { /* A file warning is optional; source availability is unchanged. */ }
     try { await attachAudioJobStates(db, [...variantByExactFile.values()], userId); }
     catch (_) { /* Activity needs a live task, never a guessed pending status. */ }
     for (const item of items) {
@@ -3739,6 +3745,7 @@ async function attachFlatMediaFileLanguages(
       if (!variant) continue;
 
       Object.assign(item, audioJobFields(variant.__audio_job_status));
+      item.source_integrity = variant.__source_integrity;
 
       // Gateway probes persist these facts on cloud_title_variants. Project them
       // back onto the exact cloud_media_items row so the next launch can route
@@ -4382,6 +4389,7 @@ function titleVariantItem(variant: JsonRecord) {
     posterUrl: variant.poster_url,
     playback_hint: recordOrEmpty(variant.playback_hint),
     playbackHint: recordOrEmpty(variant.playback_hint),
+    source_integrity: variant.__source_integrity,
     codec_profile: recordOrEmpty(variant.codec_profile),
     codecProfile: recordOrEmpty(variant.codec_profile),
     audio_tracks: audioTracks,

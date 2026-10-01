@@ -1,4 +1,18 @@
 {
+  "ui_source_file_incomplete": {
+    "source": "This version was found incomplete during its last check. Playback or resume may fail.",
+    "refs": ["public/js/pages/MoviesPage.js"],
+    "en": "This version was found incomplete during its last check. Playback or resume may fail.",
+    "fr": "Cette version a été détectée comme incomplète lors de sa dernière vérification. La lecture ou la reprise peut échouer.",
+    "pt-BR": "Esta versão estava incompleta na última verificação. A reprodução ou a retomada pode falhar.",
+    "es": "Esta versión estaba incompleta en la última comprobación. La reproducción o la reanudación puede fallar.",
+    "hi": "पिछली जाँच में यह संस्करण अधूरा पाया गया था। इसे चलाने या वहीं से फिर शुरू करने में समस्या हो सकती है।",
+    "tr": "Son kontrolde bu sürümün eksik olduğu tespit edildi. Oynatma veya kaldığınız yerden devam etme başarısız olabilir.",
+    "bn": "শেষ পরীক্ষায় এই সংস্করণটি অসম্পূর্ণ পাওয়া গেছে। চালানো বা আগের জায়গা থেকে আবার শুরু করা ব্যর্থ হতে পারে।",
+    "ar": "تبيّن في آخر فحص أن هذه النسخة غير مكتملة. قد يتعذّر تشغيلها أو استئنافها.",
+    "id": "Versi ini ditemukan tidak lengkap pada pemeriksaan terakhir. Pemutaran atau melanjutkan tontonan mungkin gagal.",
+    "fil": "Hindi kumpleto ang bersyong ito noong huling pagsusuri. Maaaring mabigo ang pag-play o pagpapatuloy."
+  },
   "ui_web_1cf20507a71f": {
     "source": "Connecting your screen",
     "refs": [

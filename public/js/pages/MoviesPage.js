@@ -3009,6 +3009,20 @@ class MoviesPage {
         this.renderFicheExtras(this.currentMovieGroup?.representative || movie);
     }
 
+    updateSourceIntegrityWarning(movie) {
+        const warning = document.getElementById('movie-detail-integrity');
+        if (!warning) return;
+        const integrity = movie?.source_integrity;
+        const checkedAt = typeof integrity?.checkedAt === 'string' ? Date.parse(integrity.checkedAt) : NaN;
+        const age = Date.now() - checkedAt;
+        const visible = integrity?.status === 'incomplete' && Number.isFinite(age) && age >= 0 && age <= 24 * 3600_000;
+        warning.classList.toggle('hidden', !visible);
+        warning.textContent = visible
+            ? (globalThis.NorvaI18n?.t('ui_source_file_incomplete', { defaultValue:'This version was found incomplete during its last check. Playback or resume may fail.' })
+                ?? 'This version was found incomplete during its last check. Playback or resume may fail.')
+            : '';
+    }
+
     showMovieDetails(group, selectedMovie = null, {
         versions = null,
         focusVersions = false,
@@ -3026,6 +3040,7 @@ class MoviesPage {
         this.currentMovieGroup = group;
         this.currentMovieVersions = ordered;
         this.currentMovie = movie;
+        this.updateSourceIntegrityWarning(movie);
         // Remember the open fiche so a page refresh restores it (see app.restoreOpenFiche).
         // Skipped on TV: the panel is derived live from grid focus, not a persisted "open" state.
         if (!isTv) {

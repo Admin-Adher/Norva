@@ -100,7 +100,7 @@ public class CatalogVersionTagsWebViewTest {
                 String html = "<!doctype html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
                     + "<link rel='stylesheet' href='/css/main.css'><script src='/js/i18n.js'></script>"
                     + "<script src='/js/utils/mediaUtils.js'></script><script src='/js/pages/MoviesPage.js'></script><script src='/js/pages/SeriesPage.js'></script></head>"
-                    + "<body><main><section id='fixture-section' class='movie-versions-section'><h1>Synthetic version fixture</h1><p id='summary'></p><div id='versions' class='movie-versions-list'></div></section></main></body></html>";
+                    + "<body><main><section id='fixture-section' class='movie-versions-section'><h1>Synthetic version fixture</h1><p id='movie-detail-integrity' class='movie-detail-integrity hidden' role='status' aria-live='polite'></p><p id='summary'></p><div id='versions' class='movie-versions-list'></div></section></main></body></html>";
                 view.loadDataWithBaseURL("https://norva-tags.test/", html, "text/html", "UTF-8", null);
             });
             try {
@@ -131,7 +131,13 @@ public class CatalogVersionTagsWebViewTest {
     }
 
     private static String fixtureScript(String locale, String kind, int width) {
-        return "(()=>{try{const api=NorvaI18n,M=MediaUtils;api.setPreference('"+locale+"');"
+        return "(()=>{try{const api=NorvaI18n,M=MediaUtils;if(!api.setPreference('"+locale+"')||api.language!=='"+locale+"')return 'locale not applied';"
+            + "const warn=document.getElementById('movie-detail-integrity'),renderWarning=MoviesPage.prototype.updateSourceIntegrityWarning;renderWarning.call({},{});"
+            + "if('"+kind+"'==='movie'){const bad={source_integrity:{status:'incomplete',checkedAt:new Date().toISOString()}};renderWarning.call({},bad);"
+            + "if(warn.classList.contains('hidden')||warn.textContent!==api.t('ui_source_file_incomplete')||warn.textContent==='ui_source_file_incomplete')return 'integrity warning missing';"
+            + "const r=warn.getBoundingClientRect();if(r.left< -1||r.right>innerWidth+1||warn.scrollWidth>warn.clientWidth+1)return 'integrity warning overflow';"
+            + "if(warn.getAttribute('role')!=='status'||warn.getAttribute('aria-live')!=='polite')return 'integrity announcement missing';"
+            + "renderWarning.call({},{});if(!warn.classList.contains('hidden')||warn.textContent)return 'integrity warning crosses versions';renderWarning.call({},bad);}"
             + "const prefixes=['AR','DE','GR','HU','NL','PL','RU','SO'];const unknown=prefixes.map((p,i)=>({raw_title:p+' - Example Film',name:p+' - Example Film',stream_id:'fixture-'+i,series_id:'fixture-'+i,sourceId:'synthetic',container_extension:'mkv',audio_language_validation_status:'not_analyzed'}));"
             + "const verified=unknown.map(x=>({...x,stream_id:x.stream_id+'-verified',series_id:x.series_id+'-verified',audio_language_validation_status:'verified',audio_tracks_scope:'file',audio_tracks:[{index:0,lang:'eng'}]}));"
             + "const section=document.querySelector('main section'),list=document.getElementById('versions');"
@@ -154,6 +160,13 @@ public class CatalogVersionTagsWebViewTest {
     }
 
     private static void saveCapture(android.app.Instrumentation instrumentation, WebView view, String name) throws Exception {
+        // DOM assertions complete before Chromium necessarily paints the frame.
+        // Wait for the exact visual state before drawing a diagnostic bitmap.
+        CountDownLatch visualReady = new CountDownLatch(1);
+        instrumentation.runOnMainSync(() -> view.postVisualStateCallback(System.nanoTime(), new WebView.VisualStateCallback() {
+            @Override public void onComplete(long requestId) { visualReady.countDown(); }
+        }));
+        assertTrue("Chromium visual state ready for " + name, visualReady.await(20, TimeUnit.SECONDS));
         AtomicReference<Exception> failure = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
             Bitmap bitmap = Bitmap.createBitmap(view.getWidth(), view.getHeight(), Bitmap.Config.ARGB_8888);
