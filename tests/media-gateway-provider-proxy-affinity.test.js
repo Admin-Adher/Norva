@@ -351,12 +351,12 @@ test('gateway uses the canonical provider key on every provider network lane', (
   );
   assert.match(
     gateway,
-    /function proxyEnvFor\(key, pinnedRoute = null\) \{[\s\S]{0,400}poolIndexForKey\(key\)/,
+    /function proxyEnvFor\(key, pinnedRoute = null\) \{[\s\S]{0,500}poolIndexForKey\(key\)/,
     'FFmpeg and FFprobe lanes must resolve the same targeted slot as HTTP',
   );
   assert.match(
     gateway,
-    /function proxyEnvFor\(key, pinnedRoute = null\) \{[\s\S]{0,400}providerHttpProxyUrls\[pinnedIndex \?\? poolIndexForKey\(key\)\]/,
+    /function proxyEnvFor\(key, pinnedRoute = null\) \{[\s\S]{0,500}providerHttpProxyUrls\[pinnedIndex \?\? poolIndexForKey\(key\)\]/,
     'FFmpeg and FFprobe must retain the matching HTTP proxy slot',
   );
 });

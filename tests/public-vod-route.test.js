@@ -21,3 +21,13 @@ test('direct route cannot be inferred from a zero slot alone', () => {
     assert.equal(isPublicDirectRoute({ nodeTransport:'direct', slot:0 }), false);
     assert.equal(isPublicDirectRoute(null), false);
 });
+test('the actual FFmpeg environment removes proxy variables only for the qualified route', () => {
+    const source = require('node:fs').readFileSync('services/media-gateway/src/index.js','utf8');
+    const code = source.slice(source.indexOf('function proxyEnvFor('), source.indexOf('function redactStrictLidLoopback('));
+    const context = { isPublicDirectRoute, process:{env:{https_proxy:'old',ALL_PROXY:'old',KEEP:'value'}},
+        providerHttpProxyUrls:['configured-proxy'],poolIndexForKey:()=>0 };
+    require('node:vm').runInNewContext(code,context);
+    const direct = context.proxyEnvFor('public',publicVodDirectRoute(base+'film.mp4'));
+    assert.equal(direct.https_proxy,undefined); assert.equal(direct.ALL_PROXY,undefined); assert.equal(direct.KEEP,'value');
+    assert.equal(context.proxyEnvFor('ordinary').https_proxy,'configured-proxy');
+});

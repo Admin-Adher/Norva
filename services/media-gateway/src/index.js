@@ -972,6 +972,7 @@ function pinnedProxyAgentFactory(key) {
 }
 // Spawn env routing a child (ffmpeg/ffprobe) through this key's sticky pool IP.
 function proxyEnvFor(key, pinnedRoute = null) {
+    if (isPublicDirectRoute(pinnedRoute)) return loopbackOnlyEnv();
     if (!providerHttpProxyUrls.length) return undefined;
     const pinnedSlot = Number(pinnedRoute?.ffmpegSlot || pinnedRoute?.slot);
     const pinnedIndex = Number.isInteger(pinnedSlot) && pinnedSlot >= 1

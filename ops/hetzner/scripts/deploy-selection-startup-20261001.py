@@ -40,7 +40,7 @@ def replace_gateway(name,port,image):
     config=dict(old['Config']); config['Image']=image
     config['HostConfig']=old['HostConfig']
     config['NetworkingConfig']={'EndpointsConfig':{network:{'Aliases':[name]} for network in old['NetworkSettings']['Networks']}}
-    backup=name+'-before-selection-20261001'
+    backup=name+'-before-selection-'+BASE[7:19]
     run('docker','rename',name,backup)
     created=False
     try:
