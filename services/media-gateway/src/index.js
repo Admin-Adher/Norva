@@ -6465,9 +6465,28 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 if (!context.effectiveUrlIdentitySha256) {
                     context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
                 }
-                if (rangeReuse?.confirm({ validator: observedValidator, fileSizeBytes: range.total,
-                    effectiveUrlIdentitySha256: observedEffectiveUrlIdentitySha256 })) {
-                    strictRangeCollector = createStrictRangeCollector(remainingRange.start);
+                try {
+                    if (rangeReuse?.confirm({ validator: observedValidator, fileSizeBytes: range.total,
+                        effectiveUrlIdentitySha256: observedEffectiveUrlIdentitySha256 })) {
+                        strictRangeCollector = createStrictRangeCollector(remainingRange.start);
+                    }
+                } catch (error) {
+                    // An optional fragment from a PREVIOUS broker is not an
+                    // identity pin requested by this caller. Before any byte
+                    // has been consumed, a new signed CDN path may discard that
+                    // fragment and proceed using only this fresh exact response.
+                    // Same strong ETag/size remain mandatory; explicit pins and
+                    // every later response still use the terminal fences above.
+                    const coldTargetMiss = error?.code === 'VOD_CHANGED'
+                        && context.allowInitialRangeCacheTargetMiss
+                        && context.providerFetches === 1 && context.providerBytes === 0
+                        && rangeReuse?.prior?.validator?.kind === 'etag'
+                        && observedValidator?.kind === 'etag'
+                        && rangeReuse.prior.validator.value === observedValidator.value
+                        && rangeReuse.prior.effectiveUrlIdentitySha256 !== observedEffectiveUrlIdentitySha256;
+                    if (!coldTargetMiss) throw error;
+                    rangeReuse.invalidate();
+                    context.effectiveUrlIdentitySha256 = observedEffectiveUrlIdentitySha256;
                 }
                 if (!context.strictResolvedSourceUrl) {
                     context.strictResolvedSourceUrl = observedEffectiveUrl;
@@ -7051,6 +7070,8 @@ async function createStrictLidBroker(options = {}) {
         pathPrefix,
         effectiveUrlSha256: expectedEffectiveUrlSha256,
         effectiveUrlIdentitySha256: expectedEffectiveUrlIdentitySha256 || rangeReuse?.prior?.effectiveUrlIdentitySha256 || null,
+        allowInitialRangeCacheTargetMiss: Boolean(rangeReuse?.prior)
+            && !options.expectedValidator && !options.effectiveUrlSha256 && !options.effectiveUrlIdentitySha256,
         onProviderIdentity,
         providerIdentityReported: false,
         terminalError: null,
