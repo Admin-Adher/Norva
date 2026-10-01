@@ -2789,7 +2789,10 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
         p_expected_checkpoint_revision: run.checkpointRevision,
         p_action_kind: action.categoryKind,
         p_catalog_version: state.catalogVersion,
-        p_limit: 200,
+        // Live orphan cleanup includes per-channel guards and referential
+        // checks. Use smaller slices so those deletes can checkpoint before
+        // the database statement deadline instead of retrying the same batch.
+        p_limit: action.categoryKind === "live" ? 25 : 200,
       }));
       visibilityEpoch = activeVisibilityEpoch(
         pruned,
@@ -3614,6 +3617,13 @@ async function settleJob(job, workerId, outcome, errorCode, retryAfterSeconds) {
 
 function normalizeWorkerFault(error) {
   if (error instanceof WorkerFault) return error;
+  // The staging importer uses the database client directly, so its SQL faults
+  // do not pass through workerRpc. Preserve the same durable retry semantics.
+  if (isStaleDatabaseConflict(error) || ["40P01", "55P03", "57014"].includes(error?.code)) {
+    const fault = new WorkerFault("stale", true);
+    fault.code = error.code;
+    return fault;
+  }
   return new WorkerFault("internal_error", false);
 }
 
