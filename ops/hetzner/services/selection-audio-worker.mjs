@@ -188,11 +188,13 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
       if (!await repository.deferCapture(job)) return { state:'lease_lost' };
       return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY', diagnostic:selectionAudioFailureDiagnostic(error) };
     }
-    if (error.code === 'SELECTION_AUDIO_CAPACITY_BUSY' && error.providerDrained === true) {
-      // A local capacity refusal is not a provider failure. Preserve all
-      // receipts/profile and give back only this claim's retry debit by CAS.
+    if (['SELECTION_AUDIO_CAPACITY_BUSY', 'SELECTION_AUDIO_VIEWER_BUSY'].includes(error.code)
+      && error.providerDrained === true) {
+      // Capacity refusal or yielding to a viewer is not a failed analysis.
+      // Require the Gateway's drain attestation before returning the retry debit.
+      // Preserve receipts/profile and return only this claim's retry debit by CAS.
       if (!await repository.deferAdmission(job)) return { state: 'lease_lost' };
-      return { state: 'retry_wait', error: 'SELECTION_AUDIO_CAPACITY_BUSY', diagnostic:selectionAudioFailureDiagnostic(error) };
+      return { state: 'retry_wait', error: error.code, diagnostic:selectionAudioFailureDiagnostic(error) };
     }
     if (error.resetRequired) {
       profile = null;

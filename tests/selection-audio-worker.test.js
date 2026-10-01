@@ -197,11 +197,11 @@ test('Selection local failures preserve audio and retry locally; lease loss and 
   }
 });
 
-test('attested local capacity preserves the checkpoint and returns the admission debit without finalizing', async () => {
-  for (const owned of [false,true]) {
-    const job = { ...baseJob(), profile:profile(), progress:{ trackPosition:0, receipts:[receipt(1)], tracks:[], evidence:[] } };
+test('attested capacity or viewer preemption preserves evidence and refunds admission even on the last attempt', async () => {
+  for (const code of ['SELECTION_AUDIO_CAPACITY_BUSY','SELECTION_AUDIO_VIEWER_BUSY']) for (const owned of [false,true]) {
+    const job = { ...baseJob(), attempt_count:8, profile:profile(), progress:{ trackPosition:0, receipts:[receipt(1)], tracks:[], evidence:[] } };
     const run = await harness({ job, analyze:() => { throw Object.assign(Error('capacity'), {
-      code:'SELECTION_AUDIO_CAPACITY_BUSY', providerDrained:true, retryable:true,
+      code, providerDrained:true, retryable:true,
     }); } });
     let deferred = 0;
     run.repository.deferAdmission = async current => { assert.equal(current, job); deferred++; return owned; };
@@ -209,6 +209,15 @@ test('attested local capacity preserves the checkpoint and returns the admission
     assert.equal(deferred, 1); assert.equal(run.finishes.length, 0); assert.equal(run.windows.length, 1);
     assert.deepEqual(job.progress.receipts, [receipt(1)]);
   }
+});
+
+test('unattested viewer refusal cannot refund the bounded retry budget', async () => {
+  const run = await harness({ job:{...baseJob(),attempt_count:8}, analyze:()=>{
+    throw Object.assign(Error('busy'),{code:'SELECTION_AUDIO_VIEWER_BUSY',retryable:true,providerDrained:false});
+  }});
+  run.repository.deferAdmission = async () => { throw Error('unproved drain must not defer admission'); };
+  assert.equal((await run.run()).state,'failed');
+  assert.equal(run.finishes.length,1);
 });
 
 test('ambiguous audio completes durably as unidentified and never promotes a candidate', async () => {
