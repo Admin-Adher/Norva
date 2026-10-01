@@ -3617,6 +3617,13 @@ async function settleJob(job, workerId, outcome, errorCode, retryAfterSeconds) {
 
 function normalizeWorkerFault(error) {
   if (error instanceof WorkerFault) return error;
+  // The staging importer uses the database client directly, so its SQL faults
+  // do not pass through workerRpc. Preserve the same durable retry semantics.
+  if (isStaleDatabaseConflict(error) || ["40P01", "55P03", "57014"].includes(error?.code)) {
+    const fault = new WorkerFault("stale", true);
+    fault.code = error.code;
+    return fault;
+  }
   return new WorkerFault("internal_error", false);
 }
 

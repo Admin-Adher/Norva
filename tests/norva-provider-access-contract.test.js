@@ -801,6 +801,27 @@ test('live prune resumes small slices with the returned epoch before advancing t
   assert.equal(progress.action, 'vod_streams');
 });
 
+test('raw staging database deadlines retry without converting typed provider failures', () => {
+  class WorkerFault extends Error {
+    constructor(queueCode, retryable) { super(queueCode); this.queueCode = queueCode; this.retryable = retryable; }
+  }
+  const normalize = vm.runInNewContext(`(${functionExpression('normalizeWorkerFault', 'function retryDelaySeconds')})`, {
+    WorkerFault, isStaleDatabaseConflict: error => error?.code === '40001' && error?.details === 'reason=credential_job_checkpoint_changed',
+  });
+  for (const code of ['40P01', '55P03', '57014', '40001']) {
+    const result = normalize({ code, details: 'reason=credential_job_checkpoint_changed' });
+    assert.equal(result.queueCode, 'stale');
+    assert.equal(result.retryable, true);
+    assert.equal(result.code, code);
+  }
+  const rejected = new WorkerFault('auth_rejected', false);
+  assert.equal(normalize(rejected), rejected);
+  for (const error of [null, new Error('unexpected'), { code: '23505' }, { code: '401' }]) {
+    assert.equal(normalize(error).queueCode, 'internal_error');
+    assert.equal(normalize(error).retryable, false);
+  }
+});
+
 test('identity validation is bounded, complete and persists only comparator metrics', () => {
   const validation = section('async function validateCredentialCandidateJob', '\nfunction isCredentialTransportOnly');
   assert.match(validation, /gatewayAccountInfo/);
