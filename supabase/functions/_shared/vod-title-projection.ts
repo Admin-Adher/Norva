@@ -566,20 +566,27 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
 }
 
 async function hydrateSelectionProjection(options: ProjectionOptions, rows: ProjectionRow[]) {
+  // An earlier 50-file hydration chunk can invalidate this owner's catalogue
+  // cache. Read the fence only after assertSourceCurrent re-proves the same
+  // generation/config/source authority and adopts its current cache epoch.
+  const getGenerationFence = () => catalogGenerationRpcFence(options.generation);
   await hydrateSelectionSnapshotMovieTracks({
     db: options.db, userId: options.userId, sourceId: options.sourceId,
     rows, generationFence: catalogGenerationRpcFence(options.generation),
+    getGenerationFence,
     assertSourceCurrent: options.assertSourceCurrent,
   });
   if (options.generation.kind === "active") {
     await hydrateSelectionAudioResults({
       db: options.db, userId: options.userId, sourceId: options.sourceId,
       rows, generationFence: catalogGenerationRpcFence(options.generation),
+      getGenerationFence,
       assertSourceCurrent: options.assertSourceCurrent,
     });
     await hydrateSelectionSnapshotSeriesTracks({
       db: options.db, userId: options.userId, sourceId: options.sourceId,
       rows, generationFence: catalogGenerationRpcFence(options.generation),
+      getGenerationFence,
       assertSourceCurrent: options.assertSourceCurrent,
     });
   }
