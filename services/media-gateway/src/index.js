@@ -6695,6 +6695,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     validatorKind: context.validator?.kind,
                     targetIdentityMatch: diagnosticTargetIdentityMatch,
                 })));
+                // Cache revalidation can reject a changed representation before
+                // the broker has pinned its own effective URL. Preserve that
+                // terminal fence instead of wrapping it as a transport failure
+                // (which would also permit finite-playback reconnect attempts).
+                if (error?.code === 'VOD_CHANGED' && !context.terminalError) {
+                    markStrictLidTerminal(context, error);
+                }
                 if (context.terminalError) {
                     context.finiteResumeRanges?.invalidate();
                     await closeStrictLidBrokerProviderFetch(context, attempt, 'failed');

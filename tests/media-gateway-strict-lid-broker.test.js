@@ -649,6 +649,41 @@ function sendExactRange(req, res, data, options = {}) {
   res.end(options.body || body);
 }
 
+test('a cached representation changing CDN identity stays VOD_CHANGED without retry or cached bytes', async t => {
+  const { createStrictLidBroker, strictLidEffectiveUrlIdentitySha256 } = brokerHarness();
+  {
+    const pathPrefix = 'strict-lid';
+    const cache = new StrictLidRangeReuse();
+    const binding = { userHash:'a'.repeat(64), sourceUrlHash:'b'.repeat(64),
+      profileHash:'c'.repeat(64), fileSizeBytes:5000 };
+    const prior = cache.begin(binding);
+    prior.confirm({ validator:{ kind:'etag', value:'"stable"' }, fileSizeBytes:5000,
+      effectiveUrlIdentitySha256:strictLidEffectiveUrlIdentitySha256('https://cdn.example/old/file.mp4') });
+    prior.remember(0, Buffer.alloc(5000, 0x61), { providerDrained:true });
+    let calls = 0;
+    const broker = await createStrictLidBroker({ sourceUrl:'https://provider.example/file.mp4',
+      fileSizeBytes:5000, pathPrefix, releaseDelayMs:0, rangeReuse:cache.begin(binding),
+      fetchImpl:async (_url, options) => {
+        calls++;
+        const [,a,b] = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+        const start = Number(a), end = Number(b);
+        const response = new Response(Buffer.alloc(end-start+1, 0x62), { status:206,
+          headers:{ 'Content-Range':`bytes ${start}-${end}/5000`, 'Content-Length':String(end-start+1), ETag:'"stable"' } });
+        Object.defineProperty(response, 'url', { value:'https://cdn.example/new/file.mp4' });
+        return response;
+      } });
+    t.after(() => broker.close());
+    const response = await fetch(broker.inputUrl, { headers:{ Range:'bytes=0-4999' } });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, 'VOD_CHANGED');
+    assert.equal(broker.terminalError.code, 'VOD_CHANGED');
+    assert.equal(calls, 1, 'changed representation is never retried within this broker');
+    assert.equal(cache.snapshot().bytes, 0);
+    assert.equal(cache.snapshot().reusedBytes, 0);
+    await broker.close();
+  }
+});
+
 test('strict range reuse revalidates across brokers and fetches only missing bytes on the same mono account', async t => {
   const data = Buffer.alloc(40000, 0x69); const requests = []; let bytes = 0; let active = 0; let maximum = 0;
   const provider = http.createServer((req, res) => {

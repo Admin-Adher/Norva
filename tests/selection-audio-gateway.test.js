@@ -286,3 +286,18 @@ test('only exact drained capture evidence persists a truncated source classifica
     await assert.rejects(gateway.getCaptureStatus(args), { code:'SELECTION_AUDIO_GATEWAY_REJECTED' });
   }
 });
+
+test('changed representation remains a bounded retry diagnostic, never a truncated-file assertion', async () => {
+  const { selectionAudioFailureDiagnostic } = await lib;
+  const { gateway, file, calls } = await setup(url => url.endsWith('/probe-audio')
+    ? json(probePayload()) : json({ ...drain, code:'VOD_CHANGED', message:'private upstream details' }, 502));
+  const profile = await gateway.probe(file);
+  await assert.rejects(gateway.captureWindow({ file, profile, jobId, subjectId, trackIndex:1, windowOrdinal:1 }), error => {
+    assert.equal(error.code, 'SELECTION_AUDIO_GATEWAY_REJECTED');
+    assert.equal(error.retryable, true);
+    assert.deepEqual(selectionAudioFailureDiagnostic(error), { stage:'capture', status:502, gatewayCode:'VOD_CHANGED' });
+    assert.equal(JSON.stringify(error).includes('private upstream details'), false);
+    return true;
+  });
+  assert.equal(calls.length, 2, 'one probe and one capture; no hidden client retry');
+});
