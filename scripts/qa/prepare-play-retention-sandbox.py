@@ -79,6 +79,9 @@ try:
       set session_replication_role=origin;
       alter role service_role bypassrls;
       grant usage on schema public to service_role;
+      grant usage on schema extensions,affiliate_private to service_role;
+      grant execute on function affiliate_private.partners_worker_financial_fact_ingest(
+        text,text,text,text,uuid,text,text,text,text,integer,bigint,bigint,bigint,bigint,timestamptz) to service_role;
       grant all on all tables in schema public to service_role;
       grant all on all sequences in schema public to service_role;
       grant execute on all functions in schema public to service_role;
