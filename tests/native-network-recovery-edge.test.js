@@ -52,6 +52,62 @@ test('native recovery receives the same renewable lease marker as browser native
   assert.ok(binding.indexOf('stripMkvH264FastStartInternalHints') < binding.indexOf('__norvaNativeMp4SessionV1'));
 });
 
+for (const scenario of ['missing', 'cached', 'coordinator-refused', 'probe-failed']) {
+  test(`native movie preparation is fenced by the session coordinator (${scenario})`, async () => {
+    const body = section('let nativeAccessProof =', '\n    // In-browser engine:');
+    const events = [];
+    const proof = { fileSizeBytes: 123456, durationSeconds: 120 };
+    class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
+    const context = {
+      HttpError, URL, AbortSignal, performance, console: { info() {} },
+      nativeNetworkRecovery: true, itemType: 'movie', itemId: 'movie', mode: 'relay',
+      resolved: { playbackHint: {} }, nativeMp4Proof: null, serverNativeProviderMp4: false,
+      episodeCoordinates: null, userId: 'owner', sourceId: 'source', deviceId: 'device',
+      providerAccountHash: 'account-hash', targetUrlHash: 'target-hash', targetUrl: 'https://owned.test/movie.mkv',
+      playbackCreatedAt: 'created', supersededSessionIds: ['old'], transportExpiresAt: 'expires',
+      session: { id: 'session' }, db: {}, userAgent: 'native-agent',
+      startupTrace: {}, startupTraceAt: 'now', startupTraceStarted: performance.now(), markStartup() {},
+      nativeVodFileProof: () => null,
+      loadNativeMovieAccessProof: async () => { events.push('cached'); return scenario === 'cached' ? proof : null; },
+      prepareEdgeSessionCoordinator: async () => {
+        events.push('coordinate'); return scenario === 'coordinator-refused' ? null : { lockId: 'lock', waitMs: 50 };
+      },
+      sleep: async ms => { assert.equal(ms, 50); events.push('drain'); },
+      prepareNativeMovieAccessProof: async options => {
+        assert.equal(options.userId, 'owner'); assert.equal(options.sourceId, 'source');
+        assert.equal(options.itemId, 'movie'); assert.equal(options.targetUrl, 'https://owned.test/movie.mkv');
+        events.push('probe'); if (scenario === 'probe-failed') throw new HttpError(503, 'no proof'); return proof;
+      },
+      loadSourceConfigRevision: async () => 1, createSharedFragmentGrant: async () => null,
+      createBytePipeCapability: async (_id, _user, url, _exp, _db, _ua, scope, size) => {
+        assert.equal(url, 'https://owned.test/movie.mkv'); assert.equal(scope, 'native-vod-recovery');
+        assert.equal(size, 123456); events.push('capability');
+        return { gatewayUrl: 'https://gateway.test', gatewayPublicBaseUrl: 'https://gateway.test', capability: 'private', serviceToken: 'secret' };
+      },
+      fetch: async url => {
+        assert.equal(url, 'https://gateway.test/native-sessions'); events.push('grant');
+        return { ok: true, json: async () => ({ url: 'https://gateway.test/native.mp4' }) };
+      },
+      validNativeMp4Grant: () => true,
+      commitEdgeSessionCoordinator: async () => { events.push('commit'); return { ok: true }; },
+      bindPreparedPlaybackReceipt: async () => events.push('receipt'),
+      expirePlaybackSession: async () => events.push('expire'),
+      abortEdgeSessionCoordinator: async () => events.push('abort'),
+      publicPlaybackSession: value => value,
+    };
+    const run = vm.runInNewContext(stripTypeScriptTypes(`(async function(){${body}})`), context);
+    if (scenario === 'coordinator-refused' || scenario === 'probe-failed') {
+      await assert.rejects(run(), error => error.status === 503);
+      assert.deepEqual(events, scenario === 'coordinator-refused'
+        ? ['cached', 'coordinate', 'expire'] : ['cached', 'coordinate', 'drain', 'probe', 'expire', 'abort']);
+    } else {
+      const result = await run(); assert.equal(result.playback.transport, 'native-raw-recovery');
+      assert.deepEqual(events, ['cached', 'coordinate', 'drain', ...(scenario === 'missing' ? ['probe'] : []),
+        'capability', 'grant', 'commit', 'receipt']);
+    }
+  });
+}
+
 test('explicit native Live recovery bypasses browser TS promotion without selecting finite native playback', () => {
   const policy = section('const nativeNetworkRecovery =', '\n  const serverOwnedEpisodeGateway');
   const routing = section('const serverPromotedRelay =', '\n  if (serverPromotedRelay');

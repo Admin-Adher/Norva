@@ -4958,7 +4958,13 @@ async function handleProbeAudioRequest(req, res, options = {}) {
         if (probeKey && accountExtractions.get(probeKey)?.size) {
             return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
         }
-        networkLease = options.claimNetwork?.(url, null, true, req.body?.enrichmentFileKey) || null;
+        // This endpoint requires the service credential. A viewer recovery has
+        // already acquired the Edge playback coordinator and exact-file lease;
+        // unrelated catalogue enrichment capacity must not deny that playback.
+        // Keep the account/extraction guards above and the cancellable probe
+        // ledger below, including its provider-drain attestation.
+        networkLease = req.body?.playbackPreparation === true ? null
+            : options.claimNetwork?.(url, null, true, req.body?.enrichmentFileKey) || null;
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.

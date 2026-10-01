@@ -29,13 +29,14 @@ function claim(gate, key) {
     };
 }
 
-function probeFixture({ probeBarrier, drainBarrier, drainFails = false } = {}) {
+function probeFixture({ probeBarrier, drainBarrier, drainFails = false, accountBusy = false, extractionBusy = false } = {}) {
     let probes = 0;
     const profile = { probeSource: 'gatewayprobe', audioTracks: [{ index: 1, language: 'en' }], subtitles: [] };
     const run = vm.runInNewContext(`(${section('async function handleProbeAudioRequest(', "app.post('/probe-audio'").trim()})`, {
         createProviderProbeDrainState: () => ({ providerProbeStarted: false }),
         isHttpUrl: () => true, sanitizeUserAgent: x => x,
-        proxyKeyFromUrl: x => x, accountSlotBusyLocally: () => false, accountExtractions: new Map(),
+        proxyKeyFromUrl: x => x, accountSlotBusyLocally: () => accountBusy,
+        accountExtractions: new Map(extractionBusy ? [['https://fixture.invalid/file', new Set(['job'])]] : []),
         ACCOUNT_ACTIVITY_KIND_CATALOG_REFRESH: 'fixture',
         probeCodecProfile: async (_url, _ua, options) => {
             probes++; options.providerDrainState.providerProbeStarted = true;
@@ -79,6 +80,39 @@ test('actual probe cleanup uncertainty never frees a provider reservation or att
     await f.run({ body: { url: 'https://fixture.invalid/file' } }, res, { claimNetwork: claim(gate, 'account') });
     assert.equal(res.statusCode, 502); assert.equal(res.payload.code, 'provider_drain_unconfirmed');
     assert.notEqual(res.payload.providerDrained, true); assert.equal(gate.snapshot().active, 1);
+});
+
+test('viewer preparation survives unrelated background saturation and waits for its own drain', async () => {
+    const gate = createEnrichmentNetworkAdmission({ maximum: 1 });
+    const occupied = gate.acquire({ accountKey: 'background', hostKey: 'fixture.invalid' });
+    const drainBarrier = deferred(); const f = probeFixture({ drainBarrier }); const res = response();
+    const pending = f.run({ body: { url: 'https://fixture.invalid/file', playbackPreparation: true } }, res,
+        { claimNetwork: () => { throw Error('viewer must not enter the background quota'); } });
+    await new Promise(r => setImmediate(r));
+    assert.equal(f.probes(), 1); assert.equal(res.writableEnded, undefined);
+    assert.equal(gate.snapshot().active, 1);
+    drainBarrier.resolve(); await pending;
+    assert.equal(res.statusCode, 200); assert.equal(res.payload.providerDrained, true);
+    assert.equal(gate.snapshot().active, 1);
+    occupied.release({ providerDrained: true });
+});
+
+for (const scenario of [
+    { accountBusy: true, status: 409 }, { extractionBusy: true, status: 429 },
+    { drainFails: true, status: 502 },
+]) test(`viewer preparation preserves account safety: ${Object.keys(scenario)[0]}`, async () => {
+    const f = probeFixture(scenario); const res = response();
+    await f.run({ body: { url: 'https://fixture.invalid/file', playbackPreparation: true } }, res);
+    assert.equal(res.statusCode, scenario.status);
+    if (scenario.drainFails) assert.notEqual(res.payload.providerDrained, true);
+    else assert.equal(f.probes(), 0);
+});
+
+test('a non-boolean playback marker cannot skip background admission', async () => {
+    const f = probeFixture(); const res = response();
+    await f.run({ body: { url: 'https://fixture.invalid/file', playbackPreparation: 'true' } }, res,
+        { claimNetwork: () => { throw Object.assign(Error('busy'), { status: 429 }); } });
+    assert.equal(res.statusCode, 429); assert.equal(f.probes(), 0);
 });
 
 function strictFixture({ closeFails = false } = {}) {

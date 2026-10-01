@@ -1182,6 +1182,43 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, user
   return { window, play, navigate, launches, resolutions, savedHistory, scheduled, expired, notices };
 }
 
+for (const invalidation of ['none', 'route', 'closed']) {
+  test(`asynchronous native recovery exhaustion answers only its still-active token (${invalidation})`, async () => {
+    const fixture = nativeVodIntentFixture();
+    await fixture.play('episode');
+    const initialSession = fixture.launches[0].sessionId;
+    let requests = 0;
+    fixture.window.API.proxy.xtream.getStreamUrl = async () => {
+      requests += 1;
+      if (requests === 3) {
+        if (invalidation === 'route') fixture.navigate('#home');
+        if (invalidation === 'closed') fixture.window.__norvaNative.onPlaybackClosed(initialSession, 'back');
+      }
+      throw new Error('profile unavailable https://provider.example/private');
+    };
+    assert.equal(fixture.window.__norvaNative.retryPlayback(
+      'fixture-source', 'episode', 'episode', 120, 'provider_html_response', 'pending-token'
+    ), 'scheduled');
+    for (let i = 0; i < fixture.scheduled.length; i += 1) {
+      assert.ok(i < 3, 'a failed resolution must retain its bounded retry budget');
+      await fixture.scheduled[i].callback();
+    }
+    assert.equal(requests, 3);
+    const failures = fixture.launches.filter(payload => payload.recoveryError);
+    assert.equal(failures.length, invalidation === 'none' ? 1 : 0);
+    if (invalidation === 'none') {
+      assert.deepEqual(failures[0], {
+        sourceId: 'fixture-source', itemType: 'episode', itemId: 'episode',
+        recoveryToken: 'pending-token', recoveryError: 'resolution_unavailable',
+      });
+      assert.equal(fixture.window.__norvaNative.retryPlayback(
+        'fixture-source', 'episode', 'episode', 120, 'provider_html_response', 'pending-token'
+      ), 'cancelled', 'an answered request cannot be resurrected');
+    }
+    assert.equal(fixture.launches.filter(payload => payload.url).length, 1, 'failure never launches another player');
+  });
+}
+
 for (const phase of ['release', 'catalogue-preparation', 'resolution']) {
   test(`native VOD token deadline during ${phase} cannot launch or retry a late replacement`, async () => {
     let now = 0; let blockRelease = false;

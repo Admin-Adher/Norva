@@ -895,6 +895,25 @@
                     || NATIVE_LIVE_RECOVERY_DELAYS_MS[NATIVE_LIVE_RECOVERY_DELAYS_MS.length - 1])
                 : (NATIVE_RECOVERY_DELAYS_MS[attempt]
                     || NATIVE_RECOVERY_DELAYS_MS[NATIVE_RECOVERY_DELAYS_MS.length - 1]));
+            const rejectPendingNativeRecovery = () => {
+                if (!recoveryToken || typeof bridge.playVideoJson !== 'function'
+                    || scheduledGeneration !== nativeIntentGeneration
+                    || activeNativeIntentKey !== key
+                    || currentNativeRoute() !== activeNativeIntentRoute
+                    || !isNativeRecoveryTokenCurrent(key, recoveryToken)) return;
+                // The initial evaluateJavascript call already returned "scheduled".
+                // An asynchronous failure must answer that same native request,
+                // otherwise its spinner waits for the full host timeout. Native
+                // validates the token and item before accepting this empty-URL
+                // rejection, using the same path as its synchronous rejection.
+                try {
+                    bridge.playVideoJson(JSON.stringify({
+                        sourceId: String(sourceId), itemType, itemId: String(itemId),
+                        recoveryToken, recoveryError: 'resolution_unavailable'
+                    }));
+                    retireNativeRecoveryToken(key);
+                } catch (_) { /* The native timeout still covers a broken bridge. */ }
+            };
             setTimeout(async () => {
                 if (scheduledGeneration !== nativeIntentGeneration
                     || activeNativeIntentKey !== key
@@ -918,10 +937,11 @@
                     }
                     if (error?.code === 'native_live_cleanup_failed') {
                         surfaceNativeRecoveryFailure('session_release_failed');
+                        rejectPendingNativeRecovery();
                         return;
                     }
                     console.warn(`[Native] Fresh playback retry ${attempt + 1} failed:`, error?.message || error);
-                    window.__norvaNative.retryPlayback(
+                    const retryStatus = window.__norvaNative.retryPlayback(
                         sourceId,
                         itemType,
                         itemId,
@@ -929,6 +949,7 @@
                         reason || 'resolve_failed',
                         recoveryToken
                     );
+                    if (retryStatus !== 'scheduled') rejectPendingNativeRecovery();
                 }
             }, recoveryDelayMs);
             return 'scheduled';
