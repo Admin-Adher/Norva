@@ -882,9 +882,13 @@
           'Your new card is saved and will be used for your Norva payments from now on.'],
       };
       let finishing = false;
+      let checkoutCompleted = false;
       async function finish(orderId) {
-        if (finishing) return;
+        if (finishing || checkoutCompleted) return;
         finishing = true;
+        submitting = true;
+        syncPayAvailability();
+        statusEl.classList.remove('show');
         loading.classList.remove('hide');
         loading.style.display = 'grid';
         loading.firstElementChild.innerHTML = '<div class="spinner"></div><norva-i18n data-i18n="ui_web_fae6ce42a3ec">Finalizing…</norva-i18n>';
@@ -923,6 +927,8 @@
           statusEl.appendChild(retryFinalize);
           return;
         }
+        checkoutCompleted = true;
+        loading.classList.add('hide');
         try { sessionStorage.removeItem('norva-revolut-current-order'); } catch (_) {}
         document.getElementById('checkout-view').style.display = 'none';
         const success = document.getElementById('success-view');
@@ -976,7 +982,7 @@
       let submitting = false;
       let bootPromise = null;
       function syncPayAvailability() {
-        payBtn.disabled = submitting || !cardField || !cardValid || !commercialQuote;
+        payBtn.disabled = submitting || finishing || checkoutCompleted || !cardField || !cardValid || !commercialQuote;
       }
       function trackBeginCheckoutOnce(data, quote) {
         const orderId = String((data && data.order_id) || '');
@@ -1067,13 +1073,13 @@
             // card payments (auth rates / fewer issuer declines), and we don't collect an
             // address elsewhere to pass on submit — so the field must stay visible.
             onSuccess: function () { finish(currentOrderId); },
-            onError: function (err) {
-              trackCheckout('journey_error', { outcome: 'error', failureFamily: 'payment_declined' });
-              submitting = false;
-              syncPayAvailability();
-              setStatus((globalThis.NorvaI18n?.t("ui_web_8e3f4356aa55", { defaultValue: "Payment could not be completed. Please check your card and try again." }) ?? 'Payment could not be completed. Please check your card and try again.'), true);
+            onError: function () {
+              // Releasing a successful verification hold can race the widget's
+              // result. Only our owned-order confirmation decides the outcome.
+              finish(currentOrderId);
             },
             onValidation: function (errors) {
+              if (submitting || finishing || checkoutCompleted) return;
               const validationErrors = Array.isArray(errors) ? errors : [];
               cardValid = validationErrors.length === 0;
               if (validationErrors.length) {
@@ -1085,6 +1091,7 @@
               syncPayAvailability();
             },
             onCancel: function () {
+              if (submitting || finishing || checkoutCompleted) { finish(currentOrderId); return; }
               trackCheckout('journey_error', { outcome: 'cancelled', failureFamily: 'cancelled' });
               submitting = false;
               syncPayAvailability();
