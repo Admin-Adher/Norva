@@ -3739,6 +3739,8 @@ async function attachFlatMediaFileLanguages(
       userId,
     );
     await attachSelectionAudioFileIdentity([...variantByExactFile.values()], userId);
+    try { await attachSharedSelectionFileFacts(db, [...variantByExactFile.values()], userId); }
+    catch (_) { /* A missing shared proof keeps the existing owned path. */ }
     try { await attachSelectionSourceIntegrity({ db, userId, variants:[...variantByExactFile.values()] }); }
     catch (_) { /* A file warning is optional; source availability is unchanged. */ }
     try { await attachAudioJobStates(db, [...variantByExactFile.values()], userId); }
@@ -3796,6 +3798,10 @@ async function attachFlatMediaFileLanguages(
         item.audioLanguageValidationStatus = validationStatus;
         item.audio_language_verified_at = variant.__file_audio_verified_at;
         item.audioLanguageVerifiedAt = variant.__file_audio_verified_at;
+        if (Array.isArray(variant.__file_audio_tracks)) {
+          item.audio_tracks = item.audioTracks = variant.__file_audio_tracks;
+          item.audio_tracks_scope = item.audioTracksScope = "file";
+        }
       }
       if (variant.__file_subtitle_observed === true) {
         item.subtitle_languages = variant.__file_subtitle_languages;
@@ -3804,6 +3810,10 @@ async function attachFlatMediaFileLanguages(
         item.subtitleLanguagesScope = "file";
         item.subtitle_languages_observed = true;
         item.subtitleLanguagesObserved = true;
+        if (Array.isArray(variant.__file_subtitle_tracks)) {
+          item.subtitle_tracks = item.subtitleTracks = variant.__file_subtitle_tracks;
+          item.subtitle_tracks_scope = item.subtitleTracksScope = "file";
+        }
       }
     }
   } catch (_) {
