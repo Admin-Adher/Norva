@@ -41,7 +41,7 @@ SQL times are not browser first-paint or end-to-end activation measurements.
 ## Release and rollback
 
 `ops/hetzner/scripts/deploy-selection-shared-20261001.py` checks installed hashes,
-applies the five migrations with enrollment disabled, installs four Edge files,
+applies the seven migrations with enrollment disabled, installs four Edge files,
 publishes a freshly fetched public manifest with exact recipe/file evidence and
 complete Live variants, then enables new enrollment globally.
 
@@ -56,5 +56,16 @@ not an automatic rolling metadata-refresh implementation.
 
 ## Production evidence
 
-Pending production rollout and fresh enrollment replay. No end-to-end latency
-claim follows from the isolated database measurements above.
+First production button click: 11:40:49.159 UTC. Source created at 11:40:50.209;
+shared source ready at 11:40:50.254: about 1.1 s from click, zero physical media.
+The first Home render exposed a re-enrollment regression: retained logical title
+IDs forced shared variants through the old per-title owner scan. New enrollments
+were disabled while the QA membership stayed available for diagnosis.
+
+The follow-up bounds owner lookup and uses the prepared title metadata whenever
+there is no currently visible physical variant. Old logical IDs are retained.
+Hydration avoids running the physical runtime for these cards. A new fixture
+retains an entire previous 6,432-title inventory, then checks both new owners,
+mixed providers, exact file binding, languages and visibility. It passes: Home
+selection/hydration/cursor 133 ms; grid/search/genres 473 ms; lazy film 70 ms.
+Production replay after this correction remains to be recorded below.
