@@ -74,6 +74,19 @@ begin
   if exists(select 1 from jsonb_array_elements(page->'items') x where (x->>'id')::uuid=any(ids)) then raise exception 'Home paging repeated items'; end if;
   raise notice 'Home selection, hydration and cursor ms %',1000*extract(epoch from clock_timestamp()-started);
   started:=clock_timestamp();
+  page:=public.norva_select_catalog_title_ordered_page(u,'series','home_recent',18,54,null,epoch);
+  if jsonb_array_length(page->'items')<>18 then raise exception 'Series Home page incomplete'; end if;
+  select array_agg((value->>'id')::uuid) into ids from jsonb_array_elements(page->'items');
+  result:=public.norva_get_visible_catalog_titles_by_ids(u,ids,epoch);
+  if jsonb_array_length(result->'items')<>18 then raise exception 'Series Home hydration incomplete'; end if;
+  raise notice 'Series Home selection and hydration ms %',1000*extract(epoch from clock_timestamp()-started);
+  select array_agg(id) into ids from public.selection_shared_visible_variants
+    where user_id=u and item_type='movie' and raw_title ilike '%Downton%';
+  result:=public.norva_selection_shared_file_facts(u,ids);
+  if jsonb_array_length(result)<1 or result->0->'fileTags'->>'probedAt' is null then
+    raise exception 'Shared file proof absent during browsing'; end if;
+  if public.norva_selection_shared_file_facts(u2,ids)<>'[]'::jsonb then raise exception 'Foreign file proof leaked'; end if;
+  started:=clock_timestamp();
   result:=public.list_media_items_deduped(u,'movie',s,null,null,null,null,null,null,'default',36,0);
   if jsonb_array_length(result->'items')<36 then raise exception 'Media page omitted shared films'; end if;
   select count(*) into n from public.search_media_items(u,'movie','Creed',24,false);

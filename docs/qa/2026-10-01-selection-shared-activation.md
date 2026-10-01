@@ -17,7 +17,7 @@ The cloud adapters and scheduled sync adapter all recognize shared enrollment.
 
 ## Predeployment evidence
 
-62 focused JavaScript tests passed. All three affected Edge entrypoints bundle.
+67 focused JavaScript tests passed. All four affected Edge entrypoints bundle.
 Real PostgreSQL schema-clone testing used `norva_selection_shared_qa_20261001`,
 public catalogue data only and synthetic users inside a rollback transaction.
 Tests execute as the actual service role after fixture setup.
@@ -41,7 +41,7 @@ SQL times are not browser first-paint or end-to-end activation measurements.
 ## Release and rollback
 
 `ops/hetzner/scripts/deploy-selection-shared-20261001.py` checks installed hashes,
-applies the seven migrations with enrollment disabled, installs four Edge files,
+applies the eight migrations with enrollment disabled, installs seven Edge files,
 publishes a freshly fetched public manifest with exact recipe/file evidence and
 complete Live variants, then enables new enrollment globally.
 
@@ -69,3 +69,17 @@ retains an entire previous 6,432-title inventory, then checks both new owners,
 mixed providers, exact file binding, languages and visibility. It passes: Home
 selection/hydration/cursor 133 ms; grid/search/genres 473 ms; lazy film 70 ms.
 Production replay after this correction remains to be recorded below.
+
+The series replay additionally caught an anti-join plan which repeatedly scanned
+historical physical variants. The corrected indexed predicate is inside each
+physical view branch, before sorting and runtime hydration. Production series
+Home selection returned 18 rows in 192 ms; movie selection plus hydration of 96
+rows took 675 ms, genre counts 270 ms. The rollback fixture now explicitly checks
+series selection and hydration too (37 ms with 6,432 retained identities).
+
+Virtual variants now read their exact shared file tags through a bounded,
+service-only, owner-scoped RPC, rather than waiting for private observation rows.
+Source, variant, owner, external file ID and URL digest are checked. Series use
+language sets, never a synthetic episode track map. Tests reject foreign and
+changed-file evidence and keep unknown languages unknown. This follow-up was
+installed and hash-verified on both Edge replicas.

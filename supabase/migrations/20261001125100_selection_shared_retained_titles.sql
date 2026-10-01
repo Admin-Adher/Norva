@@ -140,7 +140,11 @@ select
 from public.selection_shared_visible_enrollments e join public.selection_shared_releases r on r.id=e.release_id
 join public.selection_shared_titles t on t.release_id=e.release_id
 left join public.cloud_titles owned on owned.user_id=e.user_id and owned.item_type=t.item_type and owned.identity_key=t.identity_key
-where not exists(select 1 from public.selection_shared_runtime_physical_variants v where v.user_id=e.user_id and v.title_id=owned.id);
+where not exists(select 1 from public.cloud_title_variants v
+  left join public.cloud_source_catalog_heads head on head.user_id=v.user_id and head.source_id=v.source_id
+  where v.user_id=e.user_id and v.title_id=owned.id
+    and public.norva_source_catalog_visible_internal(v.source_id,v.user_id)
+    and (v.generation_id is null or v.generation_id=head.active_generation_id));
 
 create or replace view public.cloud_catalog_visible_titles with(security_invoker=true,security_barrier=true) as
  select * from public.selection_shared_physical_titles union all select * from public.selection_shared_visible_titles;

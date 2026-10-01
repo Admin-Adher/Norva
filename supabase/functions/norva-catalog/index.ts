@@ -2,6 +2,7 @@ import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 import { supplementSelectionEditorial, supplementSelectionExtras } from "../_shared/selection-editorial-supplements.mjs";
 import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_shared/catalog-audio-job-status.mjs";
 import { attachSelectionSourceIntegrity } from "../_shared/selection-source-integrity.mjs";
+import { attachSharedSelectionFileFacts } from "../_shared/selection-shared-file-facts.mjs";
 // SELF-HOST DEPLOY NOTE: the Hetzner edge-runtime mounts the complete
 // supabase/functions tree, so sibling ../_shared imports stay available. A push
 // to main validates this code but does not reload production: update the server
@@ -3542,6 +3543,9 @@ async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>,
   if (!variants.length) return;
 
   await attachSelectionAudioFileIdentity(variants, userId);
+
+  try { await attachSharedSelectionFileFacts(db, variants, userId); }
+  catch (_) { /* Rolling schema deployment: unknown remains unknown. */ }
 
   try { await attachSelectionSourceIntegrity({ db, userId, variants }); }
   catch (_) { /* Missing advisory evidence must not block browsing or playback. */ }
