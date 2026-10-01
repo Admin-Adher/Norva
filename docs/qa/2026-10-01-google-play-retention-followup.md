@@ -114,3 +114,19 @@ The existing three-person testing list was not enabled. A separate one-person li
 Production campaign switches remain disabled. The current webhook deliberately ignores sandbox receipts when `NORVA_RC_ACCEPT_SANDBOX=false`, and retention eligibility requires production purchase authority. These guards were not weakened. A future no-charge replay must prove the Google Play test notice and fictitious instrument, observe RevenueCat sandbox events separately, and use an isolated QA backend path if full Norva retention state is exercised. Sandbox accelerated dates cannot by themselves certify real production renewal timing.
 
 Official references: [Google Play billing tests](https://developer.android.com/google/play/billing/test), [RevenueCat Google Play sandbox](https://www.revenuecat.com/docs/test-and-launch/sandbox/google-play-store). Google documents license-test payment instruments without real charges, a visible test notice, repeated offer tests in Play Billing Lab, and accelerated renewal timing. A test track alone does not prevent charges.
+
+## No-charge purchase verified on the production phone
+
+On 1 October around 18:40 Europe/Paris, the persisted single-account license-testing configuration was replayed on the physical phone. Refreshing the Play Store cache alone initially left the real-card sheet unchanged; that sheet was dismissed without purchase. The user then authorized installing the official Google Play Billing Lab. It was already installed and signed into the expected Google billing account when control resumed.
+
+Play Billing Lab accepted France and repeated introductory/free-trial testing until 20:39. The next Norva monthly purchase sheet explicitly displayed **Carte test, toujours approuvée** and **Il s'agit d'un abonnement test … Il ne vous sera pas facturé**. Only after both signals were visible was Subscribe pressed. No real card purchase was submitted.
+
+- Google Play accepted the fictitious purchase with a three-minute test trial and five-minute test renewal period.
+- RevenueCat sandbox history records `INITIAL_PURCHASE`, `norva_plus:monthly`, offer `freetrial-monthly`, environment `SANDBOX`, price zero. Its Norva webhook destination is marked Delivered at 16:41 UTC.
+- The trial converted in sandbox at 16:43 UTC. Play Billing Lab showed Active with the next renewal at 18:48 Europe/Paris. RevenueCat also records this test conversion; its EUR 4.99 amount is simulated sandbox accounting, not a real charge.
+- The test subscription was cancelled through the phone's official Google Play subscription UI. Google confirmed Annulé with access ending at the existing 18:48 test boundary, and continued to show the fictitious payment instrument. No other subscription or payment setting was changed.
+- RevenueCat records `CANCELLATION` at 16:47 UTC and the Norva webhook destination is marked Delivered at that same minute. Before expiry its entitlement correctly switched from renews to expires at the unchanged boundary.
+
+Production isolation was checked directly: both Edge replicas have `NORVA_RC_ACCEPT_SANDBOX=false`; mobile retention `enabled` and `communications_enabled` remain false. The webhook logs record ignored sandbox events. No sandbox purchase was reclassified as production, no production entitlement or trial date was fabricated, and no campaign was enabled.
+
+The native checkout's generic success screen displays a one-week trial/access message even for this accelerated sandbox purchase, whereas server-authoritative Settings still says the QA account is expired because sandbox receipts are intentionally ignored. Thus this replay validates the no-charge Google/RevenueCat transport, **not** full Norva membership activation, retention eligibility, a promotional purchase, or production billing-date preservation. Full retention QA needs an isolated sandbox backend/configuration; merely switching the production sandbox acceptance flag globally is not an acceptable substitute.
