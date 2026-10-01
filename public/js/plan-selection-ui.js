@@ -135,6 +135,7 @@
         if (input) input.checked = on;
       });
       sync();
+      if (typeof config.onSelectionChange === 'function') config.onSelectionChange(card);
       if (options && options.focus) {
         const input = card.querySelector('.plan-choice-input');
         if (input) input.focus({ preventScroll: true });

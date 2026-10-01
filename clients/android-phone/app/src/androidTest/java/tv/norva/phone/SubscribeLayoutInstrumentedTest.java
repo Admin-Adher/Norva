@@ -18,7 +18,16 @@ public class SubscribeLayoutInstrumentedTest {
     private static final String BILLING = "window.NorvaAuth={getSession:()=>null};"
         + "window.NorvaCloud={entitlements:{device:async()=>({status:'none'})},billing:{trialEligibility:async()=>({eligible:true})}};"
         + "window.NorvaBilling={isNative:()=>false,isTvShell:()=>false,isRevolutEnabled:()=>true,hasNativeBilling:()=>false,isWebBillingConfigured:()=>false,"
-        + "revolutPrices:async()=>({prices:{plus:{monthly:499,annual:4199},family:{monthly:899,annual:7499}}}),purchase:()=>{throw Error('Offline fixture');}};";
+        + "revolutPrices:async()=>({prices:{plus:{monthly:499,annual:4399},family:{monthly:949,annual:7999}}}),purchase:()=>{throw Error('Offline fixture');}};";
+    private static final String NATIVE_BILLING = "window.NorvaAuth={getSession:()=>({user:{id:'offline-qa'}})};"
+        + "window.NorvaCloud={entitlements:{get:async()=>({status:'none'})},billing:{trialEligibility:async()=>({eligible:false})}};"
+        + "window.NorvaBilling={isNative:()=>true,isTvShell:()=>false,isRevolutEnabled:()=>false,hasNativeBilling:()=>true,isWebBillingConfigured:()=>false,"
+        + "nativeOfferings:async()=>({appUserId:'offline-qa',currentOfferingId:'default',packages:["
+        + "['$rc_monthly','norva_plus','P1M',4990000],['$rc_annual','norva_plus','P1Y',43990000],"
+        + "['family_monthly','norva_family','P1M',9490000],['family_annual','norva_family','P1Y',79990000]"
+        + "].map(([packageId,productId,periodIso8601,priceMicros])=>({packageId,productId,periodIso8601,priceMicros,"
+        + "offeringId:'default',currencyCode:'EUR',priceString:(priceMicros/1000000)+' EUR',supported:true,trialEligibility:'ineligible'}))}),"
+        + "purchase:()=>{throw Error('Offline fixture');}};";
 
     private static String evaluate(android.app.Instrumentation instrumentation, WebView view, String js) throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
@@ -28,10 +37,11 @@ public class SubscribeLayoutInstrumentedTest {
         return result.get();
     }
 
-    @Test public void portraitLocalesReflowAtBothTextZooms() throws Exception { verifyAtWidth(360, 800); }
-    @Test public void landscapeLocalesReflowAtBothTextZooms() throws Exception { verifyAtWidth(844, 390); }
+    @Test public void portraitLocalesReflowAtBothTextZooms() throws Exception { verifyAtWidth(360, 800, false); }
+    @Test public void landscapeLocalesReflowAtBothTextZooms() throws Exception { verifyAtWidth(844, 390, false); }
+    @Test public void nativeSavingsFollowSelectedPlanInEveryLocale() throws Exception { verifyAtWidth(360, 800, true); }
 
-    private void verifyAtWidth(int width, int height) throws Exception {
+    private void verifyAtWidth(int width, int height, boolean nativeBilling) throws Exception {
         final android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         final android.content.Context context = instrumentation.getTargetContext();
         final AtomicReference<WebView> holder = new AtomicReference<>();
@@ -45,7 +55,7 @@ public class SubscribeLayoutInstrumentedTest {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
                     String asset = request.getUrl().getPath();
                     if ("/js/cloudApi.js".equals(asset) || "/js/authApi.js".equals(asset) || "/js/billing.js".equals(asset))
-                        return new WebResourceResponse("text/javascript", "UTF-8", new ByteArrayInputStream(BILLING.getBytes(StandardCharsets.UTF_8)));
+                        return new WebResourceResponse("text/javascript", "UTF-8", new ByteArrayInputStream((nativeBilling ? NATIVE_BILLING : BILLING).getBytes(StandardCharsets.UTF_8)));
                     try {
                         String type = asset.endsWith(".css") ? "text/css" : asset.endsWith(".js") ? "text/javascript" : asset.endsWith(".html") ? "text/html" : asset.endsWith(".svg") ? "image/svg+xml" : asset.endsWith(".woff2") ? "font/woff2" : "image/png";
                         return new WebResourceResponse(type, "UTF-8", instrumentation.getContext().getAssets().open(asset.substring(1)));
@@ -74,6 +84,7 @@ public class SubscribeLayoutInstrumentedTest {
                 evaluate(instrumentation, holder.get(), "window.subscribeResult='pending';(async()=>{try{const pause=()=>new Promise(r=>setTimeout(r,120));await pause();"
                     + "if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);"
                     + "for(const locale of NorvaI18n.locales){NorvaI18n.setPreference(locale.code);document.querySelector('[data-period=annual]').click();await pause();"
+                    + "const saving=document.querySelector('.toggle .save');for(const [plan,percent] of [['plus',27],['family',30],['plus',27]]){document.querySelector('[data-plan='+plan+'] .plan-choice-input').click();if(saving.hidden||saving.textContent!==NorvaPlanSelectionUi.copy.savePercent(percent))throw Error('annual saving '+plan+' '+locale.code+' '+saving.textContent);}"
                     + "if(document.documentElement.scrollWidth>innerWidth+2)throw Error('overflow '+locale.code);"
                     + "const title=document.querySelector('.shared-benefits h2');if(title.getBoundingClientRect().height>90)throw Error('title '+locale.code);"
                     + "if(document.querySelector('#continue-plan').disabled)throw Error('disabled '+locale.code);"
@@ -87,7 +98,7 @@ public class SubscribeLayoutInstrumentedTest {
                 for (int attempt=0;attempt<80 && "\"pending\"".equals(result);attempt++) {
                     Thread.sleep(200); result=evaluate(instrumentation,holder.get(),"window.subscribeResult");
                 }
-                assertEquals("10 locales; width="+width+"; textZoom="+zoom, "\"ok\"", result);
+                assertEquals("10 locales; width="+width+"; textZoom="+zoom+"; native="+nativeBilling, "\"ok\"", result);
             }
             System.out.println("SUBSCRIBE_WEBVIEW_OK locales=10 width="+width+" textZooms=100,130 conditions=20");
         } finally { instrumentation.runOnMainSync(() -> holder.get().destroy()); }

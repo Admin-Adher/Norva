@@ -296,7 +296,7 @@
 
         <div class="toggle" role="group" aria-label="Billing period" data-i18n-aria-label="ui_web_a4a987fb16d9">
           <button type="button" class="period" data-period="monthly" aria-pressed="false" data-i18n="ui_web_9b11f6b707d2">Monthly</button>
-          <button type="button" class="period active" data-period="annual" aria-pressed="true"><norva-i18n data-i18n="ui_web_2c5e81714652">Annual </norva-i18n><span class="save" data-i18n="ui_web_bc2127f14840">Save 30%</span></button>
+          <button type="button" class="period active" data-period="annual" aria-pressed="true"><norva-i18n data-i18n="ui_web_2c5e81714652">Annual </norva-i18n><span class="save" hidden></span></button>
         </div>
 
         <div class="promo-countdown" id="promo-countdown" role="timer" aria-live="off" aria-atomic="true" hidden>
@@ -496,8 +496,9 @@
       let entitlementResolved = false;
       let webPricesReady = !webPricesRequired;
       let webPricesError = '';
+      let annualSavingsByPlan = Object.create(null);
       const planSelection = window.NorvaPlanSelectionUi
-        ? window.NorvaPlanSelectionUi.init({ rootSelector: '#plans', defaultPlan: 'plus' })
+        ? window.NorvaPlanSelectionUi.init({ rootSelector: '#plans', defaultPlan: 'plus', onSelectionChange: refreshAnnualSavingCopy })
         : null;
 
       if (nativeOffersRequired) document.documentElement.classList.add('native-prices-pending');
@@ -806,15 +807,18 @@
         return labels;
       }, { other: (globalThis.NorvaI18n?.t('ui_web_7519da60f676', { defaultValue: 'Limited Offer' }) ?? 'Limited Offer') });
       let livePromos = null; // { plan: { period: { base_cents, event } } } when a promo is live
-      let annualSavingCopy = null;
-      function refreshAnnualSavingCopy() {
+      function refreshAnnualSavingCopy(selectedCard) {
         const badge = document.querySelector('.toggle .save');
-        if (!badge || !annualSavingCopy) return;
+        if (!badge) return;
+        const card = selectedCard || planSelection?.selectedCard();
+        const saving = annualSavingsByPlan[card?.dataset.plan];
+        badge.hidden = !saving;
+        if (!saving) return;
         badge.removeAttribute('data-i18n');
-        if (annualSavingCopy.bestValue) {
+        if (saving.bestValue) {
           badge.textContent = globalThis.NorvaI18n?.t('ui_web_b4d06debb5f8', { defaultValue: 'Best value' }) ?? 'Best value';
-        } else if (annualSavingCopy.min > 0) {
-          badge.textContent = copy.savePercent(annualSavingCopy.min, annualSavingCopy.max);
+        } else if (saving.percent > 0) {
+          badge.textContent = copy.savePercent(saving.percent);
         }
       }
       let liveCampaignBg = null; // uploaded campaign background URL (overrides the event theme)
@@ -1118,24 +1122,15 @@
           // The store owns the prices, so it also owns any annual-savings claim.
           // Recompute the badge from the exact localized monthly/yearly packages;
           // never leave the static web percentage beside a different Play price.
-          const nativeSavings = Array.from(document.querySelectorAll('.card')).map(function (card) {
-            const monthly = Number(card.dataset.monthly);
-            const annual = Number(card.dataset.annual);
-            return monthly > 0 && annual > 0 ? Math.round((1 - annual / (monthly * 12)) * 100) : 0;
-          }).filter(function (saving) { return saving > 0 && saving < 100; });
-          const nativeSaveBadge = document.querySelector('.toggle .save');
-          if (nativeSaveBadge) {
-            if (nativeSavings.length) {
-              const minSaving = Math.min.apply(Math, nativeSavings);
-              const maxSaving = Math.max.apply(Math, nativeSavings);
-              annualSavingCopy = { min: minSaving, max: maxSaving };
-              nativeSaveBadge.removeAttribute('data-i18n');
-              nativeSaveBadge.textContent = copy.savePercent(minSaving, maxSaving);
-              nativeSaveBadge.hidden = false;
-            } else {
-              nativeSaveBadge.hidden = true;
-            }
-          }
+          annualSavingsByPlan = Object.create(null);
+          completePlans.forEach(function (card) {
+            const monthly = byPackage[card.dataset.packageMonthly];
+            const annual = byPackage[card.dataset.packageAnnual];
+            if (monthly.currencyCode !== annual.currencyCode) return;
+            const percent = Math.round((1 - Number(annual.priceMicros) / (Number(monthly.priceMicros) * 12)) * 100);
+            if (percent > 0 && percent < 100) annualSavingsByPlan[card.dataset.plan] = { percent };
+          });
+          refreshAnnualSavingCopy();
           nativeOfferByPackage = byPackage;
           nativeCurrentOfferingId = currentOfferingId;
           const nativeOffers = Object.keys(byPackage).map(function (key) { return byPackage[key]; });
@@ -1148,6 +1143,8 @@
           applyPeriod(period);
         } catch (error) {
           nativeOffersReady = false;
+          annualSavingsByPlan = Object.create(null);
+          refreshAnnualSavingCopy();
           nativeCurrentOfferingId = '';
           nativeOfferByPackage = Object.create(null);
           nativeOffersError = String(error && (error.code || error.message) || 'unavailable');
@@ -1563,13 +1560,18 @@
           // computed from BASE prices — a temporary monthly promo (e.g. $3/mo
           // for 3 months) must not distort the annual-vs-monthly comparison
           // (it was reading the promo price and printing a nonsense « Save 3% »).
-          let best = 0;
+          annualSavingsByPlan = Object.create(null);
           Object.keys(prices).forEach(function (k) {
             const pl = prices[k];
             const pr = livePromos && livePromos[k];
             const baseM = (pr && pr.monthly && pr.monthly.base_cents) || (pl && pl.monthly);
             const baseA = (pr && pr.annual && pr.annual.base_cents) || (pl && pl.annual);
-            if (baseM && baseA) best = Math.max(best, 1 - baseA / (12 * baseM));
+            const percent = baseM && baseA ? Math.round((1 - baseA / (12 * baseM)) * 100) : 0;
+            if (pr && pr.annual && pr.annual.ref_cents) {
+              annualSavingsByPlan[k] = { bestValue: true };
+            } else if (percent > 0 && percent < 100) {
+              annualSavingsByPlan[k] = { percent };
+            }
           });
           // If the configured base prices carry no real annual discount
           // (annual ≈ 12×monthly), the badge must DISAPPEAR — leaving the
@@ -1578,27 +1580,7 @@
           // Same when a « 12× monthly » anchored promo is live: its −X% « vs
           // monthly billing » on the card is the SAME comparison — showing
           // both would double-claim the saving (30% and 42% look stackable).
-          const refAnchorLive = Boolean(livePromos && Object.keys(livePromos).some(function (k) {
-            return livePromos[k] && livePromos[k].annual && livePromos[k].annual.ref_cents;
-          }));
-          const save = document.querySelector('.toggle .save');
-          if (save) {
-            if (refAnchorLive) {
-              // The card carries the numbers (−42% vs monthly billing); the
-              // toggle keeps a non-numeric nudge — no double claim possible.
-              annualSavingCopy = { bestValue: true };
-              save.removeAttribute('data-i18n');
-              save.textContent = (globalThis.NorvaI18n?.t("ui_web_b4d06debb5f8", { defaultValue: "Best value" }) ?? 'Best value');
-              save.hidden = false;
-            } else if (best > 0.01) {
-              annualSavingCopy = { min: Math.round(best * 100) };
-              save.removeAttribute('data-i18n');
-              save.textContent = copy.savePercent(Math.round(best * 100));
-              save.hidden = false;
-            } else {
-              save.hidden = true;
-            }
-          }
+          refreshAnnualSavingCopy();
           webPricesReady = true;
           webPricesError = '';
           document.documentElement.classList.remove('prices-pending');
