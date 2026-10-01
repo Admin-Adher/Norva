@@ -3553,7 +3553,7 @@ async function loadSourceItems(
   for (let offset = Math.max(0, options.offset ?? 0); rows.length < maxRows; offset += pageSize) {
     let query = db
       .from("cloud_media_items")
-      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
+      .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available")
       .eq("source_id", sourceId)
       .eq("user_id", userId)
       .eq("generation_id", generation.generationId);
@@ -3701,21 +3701,25 @@ async function replaceSourceItems(
   const catalogVersion = preserveUntilSaved ? Date.now() : null;
   await heartbeat();
   if (!preserveUntilSaved) await clearCatalogGenerationMediaItems(db, sourceId, userId, generation, heartbeat);
-  for (let index = 0; index < rows.length; index += 500) {
+  for (let index = 0; index < rows.length;) {
+    // The first Selection screen contains 12 films and four series. Publish it
+    // without waiting for an unrelated 500-row raw write to finish.
+    const batchSize = index === 0 && onFirstBatchSaved ? 16 : 500;
     await heartbeat();
     const write = async () => {
-      const chunk = withCatalogGenerationRows(rows.slice(index, index + 500).map(row =>
+      const chunk = withCatalogGenerationRows(rows.slice(index, index + batchSize).map(row =>
         preserveUntilSaved ? { ...row, catalog_version: catalogVersion } : row
       ), generation);
       return await db.from("cloud_media_items")
         .upsert(chunk, { onConflict: "source_id,generation_id,item_type,external_id" })
-        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
+        .select("id,source_id,generation_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint,available");
     };
     const { data, error } = await writeM3uEpochBatch({ generation, write,
       adopt: () => adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, generation) });
     if (error) throwDb(error, "Unable to save cloud media items");
     if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
     if (index === 0 && savedRows.length) await onFirstBatchSaved?.(savedRows);
+    index += batchSize;
   }
   if (preserveUntilSaved) {
     for (let guard = 0; guard < 600; guard += 1) {
