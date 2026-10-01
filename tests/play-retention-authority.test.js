@@ -37,3 +37,27 @@ test('unrelated webhook events never contact Google or read claims',async()=>{
  {type:'INITIAL_PURCHASE',store:'PLAY_STORE',offer_code:'known'}])
  assert.equal(await scheduledPlayOffer({from(){throw Error('unexpected');}},'user',event,{}),null);
 });
+test('store lookup is owner-scoped and sanitized; unavailable authority remains retryable',async()=>{
+ const {scheduledPlayOffer}=await mod;
+ const f=fixture();Object.assign(f.event,{type:'INITIAL_PURCHASE',store:'PLAY_STORE'});
+ const filters=[];
+ const q={select(){return this;},eq(k,v){filters.push([k,v]);return this;},not(){return this;},
+  order(){return this;},limit(){return this;},maybeSingle:async()=>({data:f.claim})};
+ const db={from(name){assert.equal(name,'cloud_play_retention_offers');return q;}};
+ const config={packageName:'tv.norva.phone',serviceAccountJson:JSON.stringify({type:'service_account',
+  client_email:'qa@example.test',private_key:'-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----'})};
+ const deps={order:async()=>f.order,token:async()=>'private-token',fetch:async(url,opts)=>{
+  assert.equal(url,'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/tv.norva.phone/purchases/subscriptionsv2/tokens/secret');
+  assert.equal(opts.redirect,'error');assert.ok(opts.signal);
+  return new Response(JSON.stringify(f.subscription));
+ }};
+ assert.equal((await scheduledPlayOffer(db,'owner',f.event,config,deps)).offerId,f.claim.offer_id);
+ assert.ok(filters.some(([k,v])=>k==='user_id'&&v==='owner'));
+ await assert.rejects(scheduledPlayOffer(db,'owner',f.event,config,{...deps,fetch:async()=>{
+  throw Error('sensitive-url-and-token');
+ }}),e=>e.message==='play_retention_store_verification_unavailable');
+ q.maybeSingle=async()=>({data:null});
+ assert.equal(await scheduledPlayOffer(db,'owner',f.event,{},{}),null);
+ q.maybeSingle=async()=>({error:{code:'db'}});
+ await assert.rejects(scheduledPlayOffer(db,'owner',f.event,{},{}),/play_retention_claim_unavailable/);
+});
