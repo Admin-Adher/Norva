@@ -45,6 +45,12 @@ async function fixture(initial = []) {
   class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
   const context = vm.createContext({ Request, URL, JSON, ...identity, selectionEnrollment, HttpError,
     bindCommittedSourceCreationReceipt,
+    activateSharedSelection: async ({sourceId}) => {
+      events.push('shared:' + sourceId);
+      if (!context.sharedReady) return false;
+      rows.find(row => row.id === sourceId).sync_status = 'ready';
+      return true;
+    },
     readJson: request => request.json(), stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     stringOrNull: value => typeof value === 'string' ? value : null,
     recordOrEmpty: value => value && typeof value === 'object' ? value : {}, compactRecord: value => value,
@@ -110,6 +116,16 @@ test('real POST route creates a new incarnation after deletion and leaves the te
   const again = await f.click();
   assert.equal(again.body.source.id, result.body.source.id);
   assert.equal(again.body.syncStarted, false);
+  assert.equal(f.db.inserts, 1);
+});
+
+test('a published shared catalog is ready in the POST response and starts no owner importer', async () => {
+  const f = await fixture(); f.context.sharedReady = true;
+  const result = await f.click();
+  assert.equal(result.body.source.sync_status, 'ready');
+  assert.equal(f.events.filter(event => event.startsWith('sync:')).length, 0);
+  assert.equal(f.events.filter(event => event.startsWith('shared:')).length, 1);
+  await f.click();
   assert.equal(f.db.inserts, 1);
 });
 
