@@ -1910,6 +1910,26 @@ test('finite seek broker expands only a proven sequential local read after its f
   assert.equal(broker.completedProviderFetches, 3);
 });
 
+test('a bounded first continuation grows to steady playback without changing bytes or overlap', async t => {
+  const data = Buffer.from(Array.from({ length: 64 }, (_, i) => i));
+  const calls = []; let active = 0, peak = 0;
+  const provider = http.createServer((req, res) => {
+    calls.push(req.headers.range); active++; peak = Math.max(peak, active);
+    res.once('finish', () => active--);
+    sendExactRange(req, res, data, { etag: '"staged-startup"' });
+  });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    dispatcher: null, pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 8,
+    finiteInitialSequentialWindowBytes: 16, finiteSequentialWindowBytes: 24,
+    finiteCacheBytes: 64, releaseDelayMs: 0, completedReleaseDelayMs: 0 });
+  t.after(() => broker.close());
+  const response = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-63' } });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);
+  assert.deepEqual(calls, ['bytes=0-7', 'bytes=8-23', 'bytes=24-47', 'bytes=48-63']);
+  assert.equal(peak, 1); assert.equal(active, 0); assert.equal(broker.interruptedProviderFetches, 0);
+});
+
 test('finite seek broker primes one pinned route before its base and sequential windows', async (t) => {
   const { createStrictLidBroker } = brokerHarness();
   const data = Buffer.from(Array.from({ length: 64 }, (_, index) => index));

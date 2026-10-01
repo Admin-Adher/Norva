@@ -4225,6 +4225,10 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // few packets. Keep a bounded preceding slice in this session.
                 finiteSeekLookbehindBytes: claims.nativeContainer === 'ts' ? 64 * 1024 : 0,
                 finiteSequentialWindowBytes: 8 * 1024 * 1024,
+                // A TS decoder may still request its longer keyframe pre-roll
+                // after reading the first body. Finish this bounded transfer
+                // before growing steady playback to the normal 8 MiB windows.
+                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024 : 0,
                 // Native extractors read the header, then tail/index, then the
                 // resume position. Complete a bounded header before the first
                 // seek so its prefix can be reused without a second provider
@@ -4233,7 +4237,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 finiteWarmupCueGraceMs: 0, finiteResumeRanges: resumeRanges,
                 finiteCacheBytes: 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
-                finiteSeekContinuationGraceMs: 50, finiteAbandonedDrainMs: 750,
+                finiteSeekContinuationGraceMs: 50,
+                finiteAbandonedDrainMs: claims.nativeContainer === 'ts' ? 1500 : 750,
                 // MP4 also returns to its cached prefix after reading tail
                 // metadata, then seeks to the resume point. Give that seek a
                 // short grace before opening a body that would be superseded.
@@ -4958,7 +4963,13 @@ async function handleProbeAudioRequest(req, res, options = {}) {
         if (probeKey && accountExtractions.get(probeKey)?.size) {
             return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
         }
-        networkLease = options.claimNetwork?.(url, null, true, req.body?.enrichmentFileKey) || null;
+        // This endpoint requires the service credential. A viewer recovery has
+        // already acquired the Edge playback coordinator and exact-file lease;
+        // unrelated catalogue enrichment capacity must not deny that playback.
+        // Keep the account/extraction guards above and the cancellable probe
+        // ledger below, including its provider-drain attestation.
+        networkLease = req.body?.playbackPreparation === true ? null
+            : options.claimNetwork?.(url, null, true, req.body?.enrichmentFileKey) || null;
         // Register the provider-connected ffprobe in the same preemption ledger
         // as LID/transcription. A viewer pressing Play can therefore kill this
         // short background probe immediately instead of waiting for its timeout.
@@ -6145,7 +6156,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 const effectiveWindowBytes = finiteWindowIsWarmup
                     ? context.finiteWarmupWindowBytes
                     : (regularProviderWindowsCompleted > 0 || forwarded >= context.finiteWindowBytes
-                        ? context.finiteSequentialWindowBytes
+                        ? context.finiteInitialSequentialWindowBytes > 0
+                            && forwarded < context.finiteInitialSequentialWindowBytes
+                            ? context.finiteInitialSequentialWindowBytes : context.finiteSequentialWindowBytes
                         : context.finiteWindowBytes);
                 finiteWindowRange = finiteMkvSeekWindowRange({
                     start: range.start + forwarded,
@@ -7115,6 +7128,10 @@ async function createStrictLidBroker(options = {}) {
     context.finiteWarmupWindowBytes = Number.isFinite(Number(options.finiteWarmupWindowBytes))
         ? Math.max(0, Math.min(context.finiteWindowBytes, Number(options.finiteWarmupWindowBytes)))
         : 0;
+    context.finiteInitialSequentialWindowBytes = Number.isSafeInteger(options.finiteInitialSequentialWindowBytes)
+        && options.finiteInitialSequentialWindowBytes > 0
+        ? Math.max(context.finiteWindowBytes,
+            Math.min(context.finiteSequentialWindowBytes, options.finiteInitialSequentialWindowBytes)) : 0;
     context.finiteResumePrefixTargetBytes = Math.min(
         context.fileSizeBytes,
         context.finiteWindowBytes,

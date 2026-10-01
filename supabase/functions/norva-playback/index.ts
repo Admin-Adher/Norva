@@ -2756,12 +2756,13 @@ async function createPlaybackSessionCore(
     if (nativeNetworkRecovery && itemType === "movie" && !nativeAccessProof) {
       nativeAccessProof = await loadNativeMovieAccessProof({ db, userId, sourceId, itemId });
     }
+    const nativeMovieRecovery = nativeNetworkRecovery && itemType === "movie";
     const nativeEpisodeRecovery = nativeNetworkRecovery && itemType === "series" && Boolean(episodeCoordinates);
-    if (nativeNetworkRecovery && !nativeAccessProof && !nativeEpisodeRecovery) {
+    if (nativeNetworkRecovery && !nativeAccessProof && !nativeMovieRecovery && !nativeEpisodeRecovery) {
       await expirePlaybackSession(session.id, userId, db);
       throw new HttpError(503, "Exact native media profile is not yet available");
     }
-    if ((serverNativeProviderMp4 || nativeNetworkRecovery) && (nativeAccessProof || nativeEpisodeRecovery)) {
+    if ((serverNativeProviderMp4 || nativeNetworkRecovery) && (nativeAccessProof || nativeMovieRecovery || nativeEpisodeRecovery)) {
       const nativeCoordination = await prepareEdgeSessionCoordinator({
         userId, sourceId, deviceId, providerAccountHash, itemType, itemId, targetUrlHash,
         playbackCreatedAt, supersededSessionIds, expiresAt: transportExpiresAt,
@@ -2772,6 +2773,13 @@ async function createPlaybackSessionCore(
       }
       try {
         if (nativeCoordination.waitMs) await sleep(nativeCoordination.waitMs);
+        // A new movie may not have an observed profile yet. Prepare its exact
+        // file only after the prior reader is drained, just as for episodes.
+        if (nativeMovieRecovery && !nativeAccessProof) {
+          nativeAccessProof = await prepareNativeMovieAccessProof({
+            db, userId, sourceId, itemId, targetUrl, userAgent,
+          });
+        }
         // The previous reader is drained before opening an exact episode probe.
         if (nativeEpisodeRecovery) {
           nativeAccessProof = await loadNativeEpisodeAccessProof({
@@ -7771,6 +7779,56 @@ async function loadNativeMovieAccessProof(options: {
 }
 
 // Exact membership and the playback coordinator must precede this probe.
+// Cached evidence remains a read-only fast path in loadNativeMovieAccessProof.
+async function prepareNativeMovieAccessProof(options: {
+  db: SupabaseClient; userId: string; sourceId: string; itemId: string;
+  targetUrl: string; userAgent: string | null;
+}) {
+  const { db, userId, sourceId, itemId, targetUrl, userAgent } = options;
+  const { data: owned, error } = await db.from("cloud_catalog_visible_title_variants")
+    .select("id").eq("user_id", userId).eq("source_id", sourceId)
+    .eq("item_type", "movie").eq("external_id", itemId).maybeSingle();
+  if (error || !owned?.id) throw new HttpError(409, "Exact movie ownership changed");
+  const identity = await resolveSourceIdentity(sourceId, userId, db);
+  const runtime = await getRuntimeConfig(db);
+  const route = await mediaGatewayRouteForPlaybackUser(runtime, userId);
+  if (!route) throw new HttpError(503, "Media gateway is not configured");
+  const leaseOwner = `native-movie:${crypto.randomUUID()}`;
+  if (!await claimProviderFileProbeStrict(db, identity.key, leaseOwner, 90)) {
+    throw new HttpError(503, "Exact movie preparation is busy");
+  }
+  let drained = false;
+  try {
+    const response = await fetch(`${route.url}/probe-audio`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${route.token}` },
+      body: JSON.stringify({ url: targetUrl, userAgent: userAgent || "VLC/3.0.20 LibVLC/3.0.20", refreshCodecProfile: true, playbackPreparation: true }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const info = recordOrEmpty(await response.json().catch(() => ({})));
+    drained = providerProbeResponseAllowsLeaseRelease(response.status,
+      sanitizedProviderErrorCode(info.code), info, () => {});
+    const proof = response.ok && drained && nativeVodFileProof({ codecProfile: info.codecProfile });
+    if (!proof) throw new HttpError(503, "Exact movie preparation is temporarily unavailable");
+    // The shared observation RPC compares this exact owner profile before it
+    // accepts a cache entry. Persist through the generation-fenced writer first.
+    await persistObservedCodecProfile(db, {
+      userId, sourceId, itemId, itemType: "movie", variantId: owned.id,
+      codecProfile: info.codecProfile, startupMs: null, audioMode: null, strict: true,
+    });
+    await shareObservedGatewayFile(db, {
+      userId, sourceId, itemId, variantId: owned.id, itemType: "movie", profile: info.codecProfile,
+      audioProbeComplete: info.audioProbeComplete === true,
+      subtitleProbeComplete: info.subtitleProbeComplete === true,
+    });
+    return proof;
+  } finally {
+    // An unfinished request keeps its bounded lease; it must not allow another
+    // attempt to open a concurrent reader on a one-slot provider account.
+    if (drained) await releaseProviderFileProbe(db, identity.key, leaseOwner);
+  }
+}
+
+// Exact membership and the playback coordinator must precede this probe.
 async function loadNativeEpisodeAccessProof(options: {
   db: SupabaseClient; userId: string; sourceId: string; itemId: string;
   targetUrl: string; userAgent: string | null; episodeCoordinates: JsonRecord;
@@ -7799,7 +7857,7 @@ async function loadNativeEpisodeAccessProof(options: {
   try {
     const response = await fetch(`${route.url}/probe-audio`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${route.token}` },
-      body: JSON.stringify({ url: targetUrl, userAgent: userAgent || "VLC/3.0.20 LibVLC/3.0.20", refreshCodecProfile: true }),
+      body: JSON.stringify({ url: targetUrl, userAgent: userAgent || "VLC/3.0.20 LibVLC/3.0.20", refreshCodecProfile: true, playbackPreparation: true }),
       signal: AbortSignal.timeout(20_000),
     });
     const info = recordOrEmpty(await response.json().catch(() => ({})));
