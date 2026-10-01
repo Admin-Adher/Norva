@@ -331,8 +331,9 @@ public final class FirstFrameFixtureInstrumentedTest {
                     if (!"network-fixture".equals(intent.getStringExtra(PlayerActivity.EXTRA_ITEM_ID))) return;
                     try {
                         assertEquals(expectedReason, intent.getStringExtra("retryReason"));
-                        assertTrue("Refusal must reach the resolver promptly, without timed retries",
-                                SystemClock.elapsedRealtime() - blocked.firstRequestAt.get() < 1500);
+                        long refusalElapsedMs = SystemClock.elapsedRealtime() - blocked.firstRequestAt.get();
+                        assertTrue("Refusal must reach the resolver promptly, without timed retries; elapsedMs=" + refusalElapsedMs,
+                                refusalElapsedMs < 1500);
                         assertEquals(3L, intent.getLongExtra("positionSeconds", -1));
                         assertEquals(1, recoveries.incrementAndGet());
                         String payload = new org.json.JSONObject().put("url", raw.url())

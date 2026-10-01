@@ -25,6 +25,20 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 @androidx.media3.common.util.UnstableApi
 public final class NativeOwnedVodTimelineInstrumentedTest {
+    private static String safeError(androidx.media3.common.PlaybackException error) {
+        if (error == null) return "none";
+        String result = error.getErrorCodeName();
+        Throwable cause = error;
+        for (int depth = 0; cause != null && depth < 8; depth++, cause = cause.getCause()) {
+            if (cause instanceof androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException http =
+                        (androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) cause;
+                return result + " httpStatus=" + http.responseCode + " requestedByte=" + http.dataSpec.position
+                        + " requestedLength=" + http.dataSpec.length;
+            }
+        }
+        return result;
+    }
     private static ExoPlayer player(Activity activity) throws Exception {
         Field field = activity.getClass().getDeclaredField("player");
         field.setAccessible(true);
@@ -42,7 +56,7 @@ public final class NativeOwnedVodTimelineInstrumentedTest {
         long started = SystemClock.elapsedRealtime();
         do {
             instrumentation.runOnMainSync(() -> {
-                assertNull("Native playback error", player.getPlayerError());
+                assertNull("Native playback error at targetMs=" + target + " " + safeError(player.getPlayerError()), player.getPlayerError());
                 state[0] = player.getCurrentPosition();
                 state[1] = player.getVideoDecoderCounters() == null ? 0 : player.getVideoDecoderCounters().renderedOutputBufferCount;
                 state[2] = player.getAudioDecoderCounters() == null ? 0 : player.getAudioDecoderCounters().renderedOutputBufferCount;
