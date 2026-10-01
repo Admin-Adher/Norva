@@ -80,3 +80,19 @@ Production still has zero Google Play entitlement projections and zero eligible 
 ### Additional general Android-suite diagnosis
 
 Run 36878575297 finished with three phone jobs failing and three configurations succeeding. The three-button/font 1.0 artifact has an empty test failure and an instrumentation interruption (11/65), rather than a recorded promotion assertion. Continuous logcat exited 255 at 14:47:54 without the harness stopping it; the app PID remained visible through 14:48:05, and ADB stayed available after a transport change. Renderer `code -1` messages also occur at normal fixture teardown and are not sufficient to establish the root cause. The earlier wording identifying renderer crashes as the cause is therefore superseded: the general-suite interruption remains unexplained. The dedicated retention matrix and the six-configuration replay at the unchanged UI commit are passed evidence; this later general run is not counted as passed.
+
+## Ordinary phone customer sign-in and missing purchase entry
+
+The user reconnected the phone and explicitly asked the agent to sign it into the QA account. Production 1.3.28 (42) is installed. The existing September 24 ordinary QA account was signed in through its genuine email OTP delivered to the user's personal Gmail. No unrelated organization mailbox was used. The Settings screen confirms this account; its Revolut projection is expired as of 2026-10-01 06:23:01.964 UTC, with the consumed-trial history intact.
+
+Runtime inspection found only Contact support beneath Plan expired. The cause was an obsolete Settings allowlist for a single customer-success email. The release APK now exposes the account-bound WebMessage billing channel, but Settings still required that old address to recognize it.
+
+PR [549](https://github.com/Admin-Adher/Norva/pull/549), merged as `8c38067a89f7e3fbce3398ddb880ce3394a3f5ff`, removes this email restriction and recognizes the actual supported channel. The purchase entry waits for the authoritative membership response. It stays hidden for a live web subscription, included access, hard blocks, TV, missing bridge, or a failed membership lookup. Existing Play membership keeps Play management. No native APK or store offer was changed.
+
+Verification: 30 focused Node checks passed. Focused Android run [36882726929](https://github.com/Admin-Adher/Norva/actions/runs/36882726929) passed all four phone configurations (gesture/three-button, font 1.0/1.3), including Settings entry, retention and subscription layout, plus both TV configurations. Generated asset metadata was refreshed separately and the latest cloud-contract suite passed. The general automatic suite is separate from this successful focused replay. Production client publication and the genuine Google Play sheet remain to be recorded below. Mobile campaign flags remain disabled.
+
+### Entry correction published; phone handed back
+
+Cloudflare production run [36883440504](https://github.com/Admin-Adher/Norva/actions/runs/36883440504) succeeded, including its regression gate. The public application references `/js/pages/Settings.js?v=995a273060`; the served script matches the local corrected file (normalized SHA-256 `995a273060df567c6d4cb71e932b7e7570c356c226ab449aebcc2999c798defc`) and no longer contains the email allowlist.
+
+Before the final production replay the phone moved to another application. The user said they would notify us when it becomes available. No further phone input was sent. The QA account is signed in, but the newly published purchase entry and actual Google Play checkout have not yet been replayed on that phone. No purchase was initiated or confirmed. The existing QA account's web trial is already consumed; do not promise a new free trial or reset that history. The store's exact offer and financial terms must be inspected before the user confirms anything. Real promotional purchase, preserved billing date and campaign activation remain outstanding.

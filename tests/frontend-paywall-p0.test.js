@@ -152,9 +152,12 @@ test('native billing reads localized RevenueCat offers and fails closed without 
   assert.match(subscribe, /offer\.supported !== true/);
   assert.match(subscribe, /offeringId: selectedOffer \? selectedOffer\.offeringId/);
   assert.match(subscribe, /nativeCurrencies\.size !== 1/);
-  assert.match(subscribe, /annual \/ \(monthly \* 12\)/,
+  assert.match(subscribe, /Number\(annual\.priceMicros\) \/ \(Number\(monthly\.priceMicros\) \* 12\)/,
     'native savings must be recomputed from exact Google Play prices');
-  assert.match(subscribe, /nativeSaveBadge\.textContent = copy\.savePercent\(minSaving, maxSaving\)/);
+  assert.match(subscribe, /annualSavingsByPlan\[card\?\.dataset\.plan\]/,
+    'the annual badge must describe the selected plan, not a range across plans');
+  assert.match(subscribe, /onSelectionChange: refreshAnnualSavingCopy/);
+  assert.match(subscribe, /badge\.textContent = copy\.savePercent\(saving\.percent\)/);
 });
 
 test('Android TV has one external purchase path and native prices cannot be overwritten by web prices', () => {
