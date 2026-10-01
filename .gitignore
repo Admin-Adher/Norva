@@ -89,3 +89,6 @@ norva-selfhost-*.tar.gz*
 # placeholders. Left untracked AND unignored, one `git add -A` would have
 # published live database credentials into the repository.
 ops/hetzner/kong/
+
+# Expiring isolated Google Play QA credential, created only on the operator host.
+play-retention-qa.config.json

@@ -47,6 +47,7 @@
 //     When configured, a missing or non-allowlisted event.app_id fails closed.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { playQaContext } from "../_shared/play-retention-qa.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   canGrantRevenueCatAccess,
@@ -160,11 +161,12 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 }
 
-const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+const productionAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
 Deno.serve(async (req) => {
+  let admin = productionAdmin;
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
   }
@@ -249,11 +251,19 @@ Deno.serve(async (req) => {
     event.environment ?? event.purchase_environment ?? "PRODUCTION",
   ).toUpperCase();
   if (purchaseEnvironment === "SANDBOX" && !ACCEPT_SANDBOX) {
-    console.warn("[norva-billing-webhook] sandbox event ignored", {
-      type: eventType,
-      id: eventId,
-    });
-    return json({ ok: true, skipped: "sandbox" });
+    // Both webhook signatures and the application allowlist already passed.
+    // An operator's expiring QA context uses a separate, attested database.
+    // The receipt remains SANDBOX; production access and campaigns stay untouched.
+    try {
+      const qa = event.store === "PLAY_STORE" ? await playQaContext(resolveUserId(event), createClient) : null;
+      if (qa) admin = qa.db;
+      else {
+        console.warn("[norva-billing-webhook] sandbox event ignored", { type: eventType, id: eventId });
+        return json({ ok: true, skipped: "sandbox" });
+      }
+    } catch (_) {
+      return json({ error: "sandbox_qa_unavailable" }, 503);
+    }
   }
 
   // App User ID is our Supabase user id. Anything that isn't a known user
