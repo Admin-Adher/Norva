@@ -57,8 +57,8 @@ test('production checkout keeps the real payment action before optional schedule
   assert.match(checkout, /revolutCreateOrder\(\{ plan, period, returnTo, intent, placement, retentionOfferId \}\)/);
   assert.match(checkout, /applyServerCommercialTerms\(data\)/);
   assert.doesNotMatch(checkout, /\.timeline-value\s*\{[^}]*margin-top:\s*-\d/i);
-  assert.match(checkout, /toLocaleDateString\('en-US'/,
-    'an English checkout must not mix a browser-locale date into its chrome');
+  assert.match(checkout, /toLocaleDateString\(globalThis\.NorvaI18n\?\.language \|\| document\.documentElement\.lang \|\| 'en'/,
+    'checkout dates must follow the selected Norva language, not an unrelated browser default');
   assert.match(commerceCss, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(84px,\s*auto\)/,
     'the price column must not collapse the plan copy on desktop');
   assert.match(commerceCss, /#commercial-terms\s*\{[\s\S]{0,120}max-width:\s*180px/,
