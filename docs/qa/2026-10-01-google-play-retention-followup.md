@@ -149,3 +149,5 @@ Runtime corrections: the Edge worker virtual filesystem must explicitly include 
 Related published client fix: PR 551 / merge `6fec768b424355d9feccc27c40a22c5943c35447`, deployment run 36898575845; focused emulator run 36897208391 passed all six configurations. Native billing remains restricted to trusted subscription pages.
 
 Remaining scope: the monthly three-discounted-cycle promotion has not been replayed end to end. Also, the UI stays pending until the first discounted renewal receipt supplies the offer code; immediate confirmation of a scheduled promotion before that boundary is not established. Campaigns remain disabled. No production renewal timing or global commercial readiness is claimed by this sandbox test.
+
+Cleanup: the promoted test subscription was cancelled in Google Play after verification. Play visibly confirmed Annulé, with existing test access retained until 20:20 Paris and the fictitious instrument still selected. No other subscription was touched. Seventeen focused retention, delivery and isolation tests passed. The VFS correction and this evidence are tracked in PR 552.
