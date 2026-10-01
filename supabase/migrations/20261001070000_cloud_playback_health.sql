@@ -1,11 +1,15 @@
 -- Playback health is owner-local evidence, never a provider-global availability
 -- verdict. Bind it to the server-created session and source configuration.
 alter table public.cloud_playback_sessions
-  add column health_source_revision bigint;
+  add column health_source_revision bigint,
+  add column health_session_order bigint;
+create sequence public.cloud_playback_health_session_order;
+revoke all on sequence public.cloud_playback_health_session_order from public, anon, authenticated;
 
 create function public.norva_bind_playback_health_revision()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
+  new.health_session_order := nextval('public.cloud_playback_health_session_order');
   select l.config_revision into new.health_source_revision
   from public.cloud_source_lifecycle l
   where l.source_id = new.source_id and l.user_id = new.user_id
@@ -27,6 +31,7 @@ create table public.cloud_playback_health (
   status text not null check (status in ('ok', 'broken')),
   failure_category text,
   session_id uuid not null,
+  session_order bigint not null,
   session_started_at timestamptz not null,
   updated_at timestamptz not null default now(),
   unique (user_id, source_id, source_revision, item_type, item_id)
@@ -78,14 +83,15 @@ begin
     when p_reason ~* '(timeout|network|econn|dns|502|503|504)' then 'network'
     else 'playback' end;
   insert into public.cloud_playback_health as current
-    (user_id,source_id,source_revision,item_type,item_id,status,failure_category,session_id,session_started_at)
-  values (p_user,s.source_id,revision,media_type,s.item_id,p_status,category,s.id,s.created_at)
+    (user_id,source_id,source_revision,item_type,item_id,status,failure_category,session_id,session_order,session_started_at)
+  values (p_user,s.source_id,revision,media_type,s.item_id,p_status,category,s.id,s.health_session_order,s.created_at)
   on conflict (user_id,source_id,source_revision,item_type,item_id) do update
     set status = excluded.status, failure_category = excluded.failure_category,
-        session_id = excluded.session_id, session_started_at = excluded.session_started_at, updated_at = now()
+        session_id = excluded.session_id, session_order = excluded.session_order,
+        session_started_at = excluded.session_started_at, updated_at = now()
     -- Arrival order is not playback order. A decoded first frame also wins
     -- over an earlier startup failure arriving late within the same session.
-    where (excluded.session_started_at, excluded.session_id) > (current.session_started_at, current.session_id)
+    where excluded.session_order > current.session_order
        or (excluded.session_id = current.session_id and current.status <> 'ok')
   returning * into h;
   if h.id is null then
@@ -94,7 +100,7 @@ begin
   return jsonb_build_object('persisted', true, 'entry', jsonb_build_object(
     'source_id',h.source_id,'item_type',h.item_type,'item_id',h.item_id,
     'status',h.status,'last_error',h.failure_category,'updated_at',h.updated_at,
-    'source_revision',h.source_revision,'unavailable',false));
+    'source_revision',h.source_revision,'session_order',h.session_order::text,'unavailable',false));
 end;
 $$;
 revoke all on function public.norva_record_playback_health(uuid,uuid,text,text,uuid) from public, anon, authenticated;
@@ -106,7 +112,7 @@ create function public.norva_list_playback_health(
   select jsonb_build_object('entries',coalesce(jsonb_agg(jsonb_build_object(
     'source_id',h.source_id,'item_type',h.item_type,'item_id',h.item_id,
     'status',h.status,'last_error',h.failure_category,'updated_at',h.updated_at,
-    'source_revision',h.source_revision,'unavailable',false,'cursor',h.id
+    'source_revision',h.source_revision,'session_order',h.session_order::text,'unavailable',false,'cursor',h.id
   ) order by h.id),'[]'::jsonb)) from (
     select h.* from public.cloud_playback_health h
     join public.cloud_source_lifecycle l on l.source_id=h.source_id and l.user_id=h.user_id

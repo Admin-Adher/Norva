@@ -32,10 +32,17 @@ const PlaybackHealth = {
         const key = this.key(sourceId, itemType, itemId);
         const previous = this.statuses.get(key);
         const updatedAt = entry.updated_at || entry.updatedAt || null;
+        const sessionOrder = /^\d+$/.test(String(entry.session_order ?? '')) ? String(entry.session_order) : null;
+        if (previous?.sessionOrder && sessionOrder) {
+            if (BigInt(previous.sessionOrder) > BigInt(sessionOrder)) return false;
+            if (previous.sessionOrder === sessionOrder && previous.status === 'ok' && entry.status === 'broken') return false;
+        }
         const time = value => typeof value === 'number' ? value : Date.parse(value);
-        if (previous && time(previous.updatedAt) > time(updatedAt)) return false;
+        if ((!previous?.sessionOrder || !sessionOrder || previous.sessionOrder === sessionOrder)
+            && previous && time(previous.updatedAt) > time(updatedAt)) return false;
         this.statuses.set(key, {
             status: entry.status || 'unknown',
+            sessionOrder,
             unavailable: typeof entry.unavailable === 'boolean' ? entry.unavailable : undefined,
             failures: entry.failures || 0,
             lastError: entry.last_error || entry.lastError || null,

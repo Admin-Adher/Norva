@@ -4,7 +4,7 @@ declare
  other_u uuid := '22222222-2222-4222-8222-222222222222';
  src uuid := '33333333-3333-4333-8333-333333333333';
  dev uuid := '44444444-4444-4444-8444-444444444444';
- old_session uuid := '55555555-5555-4555-8555-555555555555';
+ old_session uuid := '99999999-9999-4999-8999-999999999999';
  new_session uuid := '66666666-6666-4666-8666-666666666666';
  r jsonb;
 begin
@@ -13,7 +13,7 @@ begin
  insert into cloud_source_lifecycle values(src,u,7,'active','visible');
  insert into cloud_playback_sessions(id,user_id,source_id,device_id,item_type,item_id,created_at)
  values(old_session,u,src,dev,'series','episode-2','2026-10-01T00:00:00Z'),
-       (new_session,u,src,dev,'series','episode-2','2026-10-01T00:01:00Z');
+       (new_session,u,src,dev,'series','episode-2','2026-10-01T00:00:00Z');
  if (select health_source_revision from cloud_playback_sessions where id=old_session) <> 7 then
    raise exception 'revision not snapshotted';
  end if;

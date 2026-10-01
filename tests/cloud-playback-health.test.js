@@ -83,6 +83,17 @@ test('out-of-order HTTP acknowledgements cannot replace a newer recovery', async
   assert.equal(events.length, 1);
 });
 
+test('server session order beats equal/coarse timestamps and late failures within a recovered session', () => {
+  const { health } = harness();
+  const timestamp = '2026-10-01T10:00:00Z';
+  health.setStatus({ ...target, updated_at: timestamp, session_order: '9007199254740993', status: 'ok' });
+  health.setStatus({ ...target, updated_at: timestamp, session_order: '9007199254740992' });
+  health.setStatus({ ...target, updated_at: timestamp, session_order: '9007199254740993' });
+  assert.equal(health.isBroken('source', 'episode', 'episode-2'), false);
+  health.setStatus({ ...target, updated_at: timestamp, session_order: '9007199254740994' });
+  assert.equal(health.isBroken('source', 'episode', 'episode-2'), true);
+});
+
 test('switching account or source visibility discards cached and in-flight health', async () => {
   let resolve;
   const { health, window, events } = harness(() => new Promise(done => { resolve = done; }));

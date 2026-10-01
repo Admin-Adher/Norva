@@ -66,3 +66,20 @@ have not run yet. Remaining: CI/emulator verification, review, deployment of
 migration then playback edge then web assets, and authenticated production
 cross-device/readback proof. Pre-migration sessions intentionally remain
 unbound rather than being assigned an invented historical source revision.
+
+## Concurrency review and CI
+
+PR532 initial head `950f7703` passed the required SQL and full cloud-contract
+regression job110229096286. Phone gesture/130% job110229096325 failed before
+instrumentation: ADB became offline after emulator boot/navigation setup.
+The other jobs were still running; GitHub rejected a targeted rerun with403
+because the workflow was active. No rerun was started and no assertions changed.
+
+Review then replaced timestamp/UUID ordering with a server-assigned sequence:
+equal timestamps and arbitrary UUID order cannot let an older session win.
+The client preserves this ordering as a decimal string/BigInt, including values
+beyond Number.MAX_SAFE_INTEGER. The expanded12-test health suite passed.
+The updated migration and SQL fixture (equal timestamps, reversed UUID order)
+also passed in disposable PostgreSQL `norva_health_qa_20261001_v2`.
+This refinement needs fresh exact-head CI/emulator evidence; the initial head's
+results do not certify the refined version. Production remains unchanged.
