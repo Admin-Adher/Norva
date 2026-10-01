@@ -11,6 +11,7 @@ module.exports = function brokerHarness() {
         crypto: require('node:crypto'), http: require('node:http'),
         undiciRequest: require('undici').request, Readable: require('node:stream').Readable,
         createStrictRangeCollector: require('../../services/media-gateway/src/strict-lid-range-reuse').createStrictRangeCollector,
+        createMp4SizeEvidence: require('../../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
         FFMPEG_USER_AGENT: 'Norva-Native-Index-Test/1', FINITE_MKV_SEEK_WINDOW_BYTES: 1024 * 1024,
         FINITE_MKV_SEEK_CACHE_BYTES: 64 * 1024 * 1024, PROVIDER_SLOT_RELEASE_DELAY_MS: 0,
         STRICT_LID_BROKER_FIRST_BYTE_TIMEOUT_MS: 30000, STRICT_LID_BROKER_IDLE_TIMEOUT_MS: 15000,

@@ -41,6 +41,14 @@ test('only immutable audited file + URL digest may reach the gateway', async () 
   assert.equal(calls.length, 0);
 });
 
+test('confirmed incomplete media is terminal while its fixed diagnostic is preserved', async () => {
+  const { gateway, file, calls } = await setup(() => json({ ...drain,
+    code:'MP4_DECLARED_MEDIA_EXCEEDS_FILE' }, 422));
+  await assert.rejects(gateway.probe(file), { code:'SELECTION_AUDIO_GATEWAY_REJECTED',
+    retryable:false, status:422, providerDrained:true, gatewayCode:'MP4_DECLARED_MEDIA_EXCEEDS_FILE' });
+  assert.equal(calls.length, 1);
+});
+
 test('probe returns a serializable exact-file fingerprint and normalizes und without inventing a language', async () => {
   const { gateway, file, calls } = await setup();
   const profile = await gateway.probe(file);

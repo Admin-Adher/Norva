@@ -21,7 +21,7 @@ const diagnosticCodes = new Set(['LID_CAPTURE_CANCELLED', 'LID_CAPTURE_GROUP_INV
     'LANGUAGE_VALIDATION_VIEWER_PREEMPTED', 'LANGUAGE_ENRICHMENT_CAPACITY_BUSY',
     'PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT',
     'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'PROVIDER_FETCH_FAILED',
-    'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'UND_ERR_ABORTED', 'ABORT_ERR']);
+    'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH', 'MP4_DECLARED_MEDIA_EXCEEDS_FILE', 'UND_ERR_ABORTED', 'ABORT_ERR']);
 const diagnosticErrorNames = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AbortError']);
 
 // A capture response never includes a language or a receipt. The caller must
@@ -136,7 +136,8 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
             observe(stage, cause, startedAt, sourceDrained, audioMilliseconds, requestedMilliseconds);
             network?.observe?.({ ok:false, drained:sourceDrained,
                 neutral:!broker || signal?.aborted || ['LANGUAGE_VALIDATION_VIEWER_PREEMPTED',
-                    'LANGUAGE_ENRICHMENT_CAPACITY_BUSY','SELECTION_ENRICHMENT_TARGET_NOT_APPROVED'].includes(cause?.code),
+                    'LANGUAGE_ENRICHMENT_CAPACITY_BUSY','SELECTION_ENRICHMENT_TARGET_NOT_APPROVED',
+                    'MP4_DECLARED_MEDIA_EXCEEDS_FILE'].includes(cause?.code),
                 retryAfterSeconds:cause?.retryAfterSeconds });
             const code = sourceDrained && /^[A-Z][A-Z0-9_]{1,79}$/.test(cause?.code || '')
                 ? cause.code : (sourceDrained ? 'LID_CAPTURE_FAILED' : 'LID_CAPTURE_DRAIN_UNCONFIRMED');
