@@ -45,7 +45,7 @@ export async function proxySelectionVodOrigin(request, target, sign, fetcher = f
   };
   try {
     const response = await fetcher(target.href, {
-      method: 'GET', redirect: 'error', signal: abort.signal,
+      method: 'GET', redirect: 'manual', signal: abort.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://ww7.vcdnlare.com/',
