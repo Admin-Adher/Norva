@@ -3116,10 +3116,9 @@ function activeTitlePayload(job, mediaRows) {
     const metadata = rpcObject(media.metadata ?? {});
     const tmdb = nullableString(metadata.providerTmdbId);
     const imdb = nullableString(metadata.providerImdbId);
-    const normalized = normalizedTitleIdentity(media.title);
     const identity = tmdb ? { key: `tmdb:${tmdb}`, source: "provider_tmdb" }
       : imdb ? { key: `imdb:${imdb}`, source: "provider_imdb" }
-        : { key: `norm:${normalized}`, source: "normalized" };
+        : { key: `norm:${normalizedTitleIdentity(media.title)}`, source: "normalized" };
     if (!titles.has(identity.key)) {
       titles.set(identity.key, {
         user_id: job.userId, item_type: media.item_type, identity_key: identity.key,
