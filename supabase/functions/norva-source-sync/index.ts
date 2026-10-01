@@ -1,4 +1,5 @@
 import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
+import { activateSharedSelection } from "../_shared/selection-shared-catalog.mjs";
 import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
 import { maintainCatalogBackgroundOwners } from "../_shared/catalog-background-owner-workflow.mjs";
@@ -865,6 +866,13 @@ async function syncCloudSource(
     }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     await assertCatalogSnapshotCurrent(sourceId, userId, accessSnapshot, db);
+    if (source.source_type === "m3u" && await activateSharedSelection({ db, userId, sourceId, config })) {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+        m3uLeaseToken = null;
+      }
+      return { sourceId, status: "ready", started: false, sharedCatalog: true };
+    }
     const syncOpts = { previousSignature, force: opts.force, rawOnly: false,
       projectionComplete: recordOrEmpty(recordOrEmpty(recordOrEmpty(baseHint.syncProgress).steps).finalize).status === "done",
     };

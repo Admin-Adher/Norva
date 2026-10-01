@@ -1,6 +1,7 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { processAutomaticVodLanguageFile, processAutomaticVodLanguageBatch } from "../_shared/automatic-vod-language-fleet.mjs";
 import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
+import { bindSharedSelectionFile } from "../_shared/selection-shared-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
 import { selectionSnapshotPlaybackTags } from "../_shared/selection-snapshot-tracks.mjs";
 import { resolveOwnedSelectionEpisode } from "../_shared/selection-series-info.mjs";
@@ -2208,6 +2209,7 @@ async function createPlaybackSessionCore(
   // resolved or hashed. Client-provided URLs are deliberately ignored.
   await assertOwnedSource(sourceId, userId, db);
   await assertSourceCatalogVisible(sourceId, userId, db);
+  await bindSharedSelectionFile({ db, userId, sourceId, itemType, itemId });
   const playbackGeneration = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
   if (deviceId) await assertOwnedDevice(deviceId, userId, db);
   markStartup("ownershipMs");

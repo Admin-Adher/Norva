@@ -13,6 +13,7 @@ import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { isM3uSeriesId, isM3uEpisodeId, loadM3uSeriesInfo, resolveOwnedM3uEpisode } from "../_shared/m3u-series-info.mjs";
 import { buildM3uCatalogRows, m3uCatalogCounts } from "../_shared/m3u-media-classification.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch, withActiveCatalogEpochRetry } from "../_shared/catalog-generation.ts";
+import { activateSharedSelection, bindSharedSelectionFile } from "../_shared/selection-shared-catalog.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { playbackTransportExpiresAt } from "../_shared/playback-expiry.mjs";
 import { formatSourceSyncError } from "../_shared/source-sync-error.mjs";
@@ -1609,7 +1610,9 @@ async function createSource(req: Request, userId: string, db: SupabaseClient, en
     if (error) throwDb(error, "Unable to create source");
     bindCommittedSourceCreationReceipt(req, data.id);
 
-    if (syncNow) {
+    const sharedReady = syncNow && selectionId
+      ? await activateSharedSelection({ db, userId, sourceId: data.id, config: rawConfig }) : false;
+    if (syncNow && !sharedReady) {
       waitUntil(syncCloudSource(data.id, userId, db));
     }
 
@@ -2755,6 +2758,13 @@ async function syncCloudSource(
     }
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     await assertCurrent();
+    if (selection && await activateSharedSelection({ db, userId, sourceId, config })) {
+      if (m3uLeaseToken) {
+        await settleM3uSyncLease(db, sourceId, userId, m3uLeaseToken, "success", null);
+        m3uLeaseToken = null;
+      }
+      return;
+    }
     const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
       await heartbeatM3uSyncLease();
       progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
@@ -4733,6 +4743,7 @@ async function setRating(req: Request, userId: string, db: SupabaseClient) {
     }
 
     const profileId = await resolveProfileId(req, userId, db, { mutation: true });
+    await bindSharedSelectionFile({ db, userId, sourceId, itemType, itemId });
     const identity = await resolveRatingTitleIdentity(
       db,
       userId,
