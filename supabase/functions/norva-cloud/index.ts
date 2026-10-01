@@ -1,4 +1,5 @@
 import { playRetention } from "../_shared/play-retention.ts";
+import { playQaContext } from "../_shared/play-retention-qa.mjs";
 import { refreshHistoryEditorial } from "../_shared/history-editorial.mjs";
 import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
 import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
@@ -632,7 +633,9 @@ async function route(
   const user = await requireUser(req, db);
 
   if (scope === "billing" && id === "play-retention" && !action) {
-    return await playRetention(req, user.id, db);
+    const qa = await playQaContext(user.id, createClient);
+    const result = await playRetention(req, user.id, qa?.db ?? db);
+    return qa ? { ...result, body: { ...result.body, qa: qa.metadata } } : result;
   }
 
   // Presence gate: the user is actively using the app/site — stand their probes

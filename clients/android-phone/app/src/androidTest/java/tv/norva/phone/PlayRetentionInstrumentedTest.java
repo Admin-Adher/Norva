@@ -25,6 +25,7 @@ public class PlayRetentionInstrumentedTest {
             v.setWebViewClient(new WebViewClient(){
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest req){
                     String p=req.getUrl().getPath();
+                    if ("/subscription".equals(p)) p="/play-retention.html";
                     try{return new WebResourceResponse(p.endsWith(".js")?"text/javascript":p.endsWith(".css")?"text/css":"text/html","UTF-8",i.getContext().getAssets().open(p.substring(1)));}
                     catch(Exception e){return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));}
                 }
@@ -33,7 +34,7 @@ public class PlayRetentionInstrumentedTest {
             float d=i.getTargetContext().getResources().getDisplayMetrics().density;
             int w=Math.round(360*d),h=Math.round(800*d);
             v.measure(android.view.View.MeasureSpec.makeMeasureSpec(w,1073741824),android.view.View.MeasureSpec.makeMeasureSpec(h,1073741824));v.layout(0,0,w,h);
-            v.loadUrl("https://play-retention.test/play-retention.html");
+            v.loadUrl("https://play-retention.test/subscription");
         });
         try{
             assertTrue(loaded.await(30,TimeUnit.SECONDS));WebView v=holder.get();
@@ -53,6 +54,11 @@ public class PlayRetentionInstrumentedTest {
                 +"await NorvaPlayRetentionCard.refresh(qaApp,{projection:{provider:'google_play'}});"
                 +"root.querySelectorAll('button')[1].click();await wait();if(!calls.some(c=>c.action==='decline'))throw Error('decline missing');"
                 +"if(document.activeElement.getAttribute('role')!=='status')throw Error('decline focus');"
+                +"history.replaceState({},'', '/app#settings');const nativeBefore=calls.filter(c=>c==='nativeOffer').length;"
+                +"await NorvaPlayRetentionCard.refresh(qaApp,{projection:{provider:'google_play'}});"
+                +"const entry=root.querySelector('a[href^=\"/subscription?\"]');"
+                +"if(!entry||root.querySelector('.play-retention-actions button'))throw Error('Settings must lead to trusted payment page');"
+                +"if(calls.filter(c=>c==='nativeOffer').length!==nativeBefore)throw Error('untrusted native offer call');"
                 +"await NorvaPlayRetentionCard.refresh(qaApp,{projection:{provider:'revolut'}});if(!root.hidden)throw Error('web rail leak');"
                 +"window.proof='ok';}catch(e){window.proof=String(e);}})();");
             String result="\"pending\"";

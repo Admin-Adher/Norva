@@ -153,6 +153,7 @@
     </aside>
     <section class="account-panel" aria-labelledby="page-title">
       <div id="content" aria-live="polite" aria-busy="true"><div class="loading" data-i18n="ui_web_e31e45f4afbd">Loading your subscription…</div></div>
+      <section id="settings-play-retention" class="play-retention-card" hidden></section>
       <p class="note" id="store-note"></p>
     </section>
     </div>
@@ -178,6 +179,7 @@
   <script src="/js/billing-config.js?v=8"></script>
   <script src="/js/billing.js?v=17"></script>
   <script src="/js/components/RetentionOffer.js?v=2"></script>
+  <script src="/js/components/PlayRetentionCard.js?v=1"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
@@ -950,13 +952,30 @@
         content.appendChild(row);
       }
 
-      getDecision().then(function (decision) {
+      async function initializeSubscription() {
+        if (params.get('playRetentionQa') === '1') {
+          // Query parameters alone cannot enable QA. Only a server-attested,
+          // expiring context for this authenticated owner can render this page.
+          const probe = await window.NorvaBilling.playRetentionAction();
+          if (probe?.qa?.mode !== 'sandbox' || Date.parse(probe.qa.expiresAt) <= Date.now()) {
+            throw new Error('QA unavailable');
+          }
+          content.replaceChildren(el('p', 'msg', 'Test Google Play isolé — utilisez uniquement la carte fictive. Aucun accès de production n’est modifié.'));
+          content.setAttribute('aria-busy', 'false');
+          await window.NorvaPlayRetentionCard.refresh({currentUser:{id:appUserId()}}, {projection:{provider:'google_play'}});
+          return;
+        }
+        const decision = await getDecision();
         render(decision);
         if (entProvider(decision) === 'revolut' && ['cancelled_at_period_end', 'expired'].includes(decision.status)) {
           window.NorvaRetentionOffer?.mount(content);
         }
         initMarketingPreference();
-      }).catch(function () { render(null); });
+        if (entProvider(decision) === 'google_play') {
+          await window.NorvaPlayRetentionCard.refresh({currentUser:{id:appUserId()}}, decision, () => location.reload());
+        }
+      }
+      initializeSubscription().catch(function () { render(null); });
     })();
   </script>
 </body>

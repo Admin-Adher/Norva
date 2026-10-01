@@ -74,6 +74,9 @@
     const uid = String(app?.currentUser?.id || app?.currentUser?.userId || '');
     const text = copy(), billing = window.NorvaBilling;
     if (!billing) return;
+    // The native bridge deliberately accepts purchases only on billing pages.
+    // Settings may discover an offer over HTTP, then lead to that trusted page.
+    const paymentPage = /^\/subscription(?:\.html)?$/.test(window.location?.pathname || '');
     const current = () => root.isConnected && seq === generation && uid === String(app?.currentUser?.id || app?.currentUser?.userId || '');
     const status = node('p', '', 'setting-hint'); status.setAttribute('role', 'status');
     const content = node('div', '', 'play-retention-content');
@@ -128,7 +131,8 @@
     async function load() {
       root.hidden = false; content.replaceChildren(); status.textContent = text.loading;
       try {
-        const response = billing.hasPlayRetention() ? await billing.playRetentionOffer(uid) : await billing.playRetentionAction();
+        const response = billing.hasPlayRetention() && paymentPage
+          ? await billing.playRetentionOffer(uid) : await billing.playRetentionAction();
         if (!current()) return;
         offer = response?.offer; status.textContent = '';
         if (response?.confirmation?.state === 'confirmed') {
@@ -151,6 +155,11 @@
           content.append(node('p', text.update));
           const link = node('a', text.open, 'btn btn-primary');
           link.href = 'https://play.google.com/store/apps/details?id=tv.norva.phone'; content.append(link);
+        } else if (offer?.id && !paymentPage) {
+          content.append(node('h3', text.title));
+          const link = node('a', text.buy, 'btn btn-primary');
+          link.href = '/subscription?returnTo=' + encodeURIComponent('/app#settings');
+          content.append(link);
         } else if (offer?.id) {
           content.append(node('h3', text.title), node('p', offer.period === 'monthly'
             ? text.monthly(offer.priceString, offer.regularPriceString) : text.annual(offer.priceString, offer.regularPriceString), 'play-retention-price'));
