@@ -5,7 +5,7 @@ import { maintainCatalogBackgroundOwners } from "../_shared/catalog-background-o
 import { acceptAutomaticTmdbSearchMatch, isMissingTmdbTitle } from "../_shared/tmdb-enrichment-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_PLAYLIST_URL, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
-import { initialTitleBatchLimit, activeFinalizeLeaseCount, writeSelectionBatch, registerM3uEpochSnapshot, mayAdoptM3uUserEpoch, retryM3uEpochOperation } from "../_shared/selection-initial-import.mjs";
+import { initialTitleBatchLimit, preparedSelectionThrottle, activeFinalizeLeaseCount, writeSelectionBatch, registerM3uEpochSnapshot, mayAdoptM3uUserEpoch, retryM3uEpochOperation } from "../_shared/selection-initial-import.mjs";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   buildLiveMaterializationPlan,
@@ -3330,11 +3330,13 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       throw guardError;
     }
     let result: JsonRecord;
+    let activeFinalizers: number | null = null;
+    const batchStartedAt = Date.now();
     try {
       // Bound title work across current lease holders. Recount every batch so a
       // newly arriving import reduces the next batch; errors use 60, never 150.
       // The count is advisory: CAS leases and all catalogue/run guards stay authoritative.
-      const activeFinalizers = phase === "titles" ? await activeFinalizeLeaseCount(db) : null;
+      activeFinalizers = phase === "titles" ? await activeFinalizeLeaseCount(db) : null;
       const batchLimit = phase === "titles"
         ? isSelection && preparedSelectionBatch && activeFinalizers === 1 ? 500
           : initialTitleBatchLimit(isSelection, firstSliceReady, activeFinalizers)
@@ -3385,7 +3387,9 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       return hint;
     });
     if (result.browseReady === true || result.usable === true) firstSliceReady = true;
-    const throttleMs = src0?.source_type === "m3u" && phase === "live" ? firstSliceThrottleMs : firstSliceReady ? longThrottleMs : firstSliceThrottleMs;
+    const ordinaryThrottleMs = src0?.source_type === "m3u" && phase === "live" ? firstSliceThrottleMs : firstSliceReady ? longThrottleMs : firstSliceThrottleMs;
+    const throttleMs = preparedSelectionThrottle({ isSelection, prepared: preparedSelectionBatch,
+      activeFinalizers, elapsedMs: Date.now() - batchStartedAt, ordinaryMs: ordinaryThrottleMs });
     if (throttleMs > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, throttleMs));
   }
   // Budget/guard hit before ready → continue in a fresh isolate.

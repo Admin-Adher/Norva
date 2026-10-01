@@ -3804,6 +3804,7 @@ function ffprobeTimeoutHarness() {
         spawn: () => child,
         FFPROBE_PATH: 'ffprobe',
         proxyEnvFor: () => undefined,
+        providerNodeRouteForSession: () => null,
         proxyKeyFromUrl: () => 'provider/account',
         viewerPlaybackActiveLocally: () => false,
         accountExtractions: new Map(),

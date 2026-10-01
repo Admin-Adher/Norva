@@ -8429,6 +8429,7 @@ function initializeStrictLidCapturePipeline(store) {
         },
         openBroker: (context, signal, network) => createStrictLidBroker({ sourceUrl: context.url,
             fileSizeBytes: context.fileSizeBytes, userAgent: context.ua, abortSignal: signal,
+            dispatcherFactory: pinnedProxyAgentFactoryForRoute(providerNodeRouteForSession({ sourceUrl: context.url })),
             assertProviderTarget: target => {
                 context.selectionCapability?.assertTarget(target);
                 if (!network.reserveTarget(new URL(target).host.toLowerCase())) {
@@ -21130,7 +21131,8 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
         }
         const child = spawn(FFPROBE_PATH, args, {
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: options.loopbackBroker === true ? loopbackOnlyEnv() : proxyEnvFor(proxyKeyFromUrl(sourceUrl)),
+            env: options.loopbackBroker === true ? loopbackOnlyEnv()
+                : proxyEnvFor(proxyKeyFromUrl(sourceUrl), providerNodeRouteForSession({ sourceUrl })),
         });
         if (backgroundKey && providerDrainState) {
             providerDrainState.providerProbeStarted = true;

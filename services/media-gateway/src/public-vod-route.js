@@ -1,15 +1,17 @@
 'use strict';
 
-// This public, credential-free Selection bucket was replayed directly from the
+// These public, credential-free Selection paths were replayed directly from the
 // Gateway. Never extend this decision to arbitrary provider hosts or accounts.
 function publicVodDirectRoute(sourceUrl) {
     try {
         const url = new URL(sourceUrl);
         if (url.protocol !== 'https:' || url.username || url.password || url.port
-            || url.search || url.hash
-            || url.hostname !== 'objectstorage.us-phoenix-1.oraclecloud.com'
-            || !url.pathname.startsWith('/n/axa4wow3dcia/b/bucket-20201001-1658/o/')
-            || !/\.mp4$/i.test(url.pathname)) return null;
+            || url.search || url.hash || !/\.mp4$/i.test(url.pathname)) return null;
+        const oracle = url.hostname === 'objectstorage.us-phoenix-1.oraclecloud.com'
+            && url.pathname.startsWith('/n/axa4wow3dcia/b/bucket-20201001-1658/o/');
+        const sandro = url.hostname === 'sandroflix.sandrostoreps3.workers.dev'
+            && url.pathname.startsWith('/content/filmes/');
+        if (!oracle && !sandro) return null;
         return { slot: 0, ffmpegSlot: 0, nodeTransport: 'direct', ffmpegTransport: 'direct',
             selectionReason: 'qualified-public-vod', controlStatus: 'public-direct' };
     } catch (_) { return null; }

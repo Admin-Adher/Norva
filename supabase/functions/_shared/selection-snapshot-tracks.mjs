@@ -1,6 +1,7 @@
 import { isDiscoverySourceId } from './discovery-catalog.mjs';
 import { SELECTION_TESTED_VOD_FEEDS, testedSelectionVodEntries } from './selection-tested-vod.mjs';
 import { selectionVodIdentity, selectionVodExternalId, SELECTION_VOD_REVISION } from './selection-vod.mjs';
+import { selectionHydrationBatches } from './selection-hydration-batches.mjs';
 
 let snapshotPromise;
 function snapshot() {
@@ -110,11 +111,11 @@ export async function hydrateSelectionSnapshotMovieTracks({ db, userId, sourceId
   if (!generationFence?.p_generation_id) throw new Error('Selection track hydration requires a catalogue generation');
   let seeded=0;
   // Bodies stay bounded and the RPC does not enumerate unrelated source files.
-  for (let offset=0;offset<selected.length;offset+=50) {
+  for (const files of selectionHydrationBatches(selected)) {
     await assertSourceCurrent();
     const {data,error}=await db.rpc('hydrate_selection_snapshot_movie_languages',{
       p_user_id:userId,p_source_id:sourceId,...getGenerationFence(),
-      p_files:selected.slice(offset,offset+50),
+      p_files:files,
     });
     if(error)throw error;
     seeded+=Number(data)||0;
