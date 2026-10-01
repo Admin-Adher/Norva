@@ -58,6 +58,13 @@ const rrCounters = new Map<string, number>()
 // code refaisait Deno.env.toObject() + map à CHAQUE requête).
 const ENV_VARS = Object.entries(Deno.env.toObject())
 
+// User workers use a virtual filesystem. Expose only the optional expiring QA
+// config to its two consumers; this never adds an HTTP file-serving route.
+function playQaStaticFiles(serviceName: string) {
+  return ['norva-cloud', 'norva-billing-webhook'].includes(serviceName)
+    ? ['/home/deno/functions/_shared/play-retention-qa.config.json'] : []
+}
+
 // NOTE:(kallebysantos) We don't check for valid keys but just the bare array parsing,
 // let this for 'jose' lib verification
 export function parseJwks(raw: string | undefined): jose.JSONWebKeySet | null {
@@ -234,6 +241,7 @@ Deno.serve(async (req: Request) => {
       noModuleCache,
       importMapPath,
       envVars: ENV_VARS,
+      staticPatterns: playQaStaticFiles(service_name),
       ...sourceSyncCpuLimits(service_name),
     })
     return await worker.fetch(req)
