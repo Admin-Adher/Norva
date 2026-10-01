@@ -724,8 +724,8 @@ class SeriesPage {
             // otherwise leaves the header count blank).
             if (this.countEl && typeof payload?.count === 'number') {
                 this.countEl.textContent = this._isTvMode()
-                    ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_5fd765f29ee9", {defaultValue: "{{p0}}{{p1}} titles", p0:(this.bucketRenderedCount || 0),p1:(this.bucketHasMore ? '+' : '')}) : `${this.bucketRenderedCount || 0}${this.bucketHasMore ? '+' : ''} titles`)
-                    : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_117bd4782d6b", {defaultValue: "{{p0}} titles", p0:(payload.count)}) : `${payload.count} titles`);
+                    ? MediaUtils.catalogCount(`${this.bucketRenderedCount || 0}${this.bucketHasMore ? '+' : ''}`)
+                    : MediaUtils.catalogCount(payload.count);
             }
             // A source/favorites filter can remove a whole server page.
             // Keep paging while the loader is still empty instead of requiring a
@@ -1751,14 +1751,14 @@ class SeriesPage {
 
     updateResultChrome(cards) {
         if (this.countEl) {
-            let total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} series`;
+            let total = MediaUtils.catalogCount(cards.length, this.groupDuplicates ? 'titles' : 'series');
             // The server count is exact for every server-side dimension (search,
             // sort, year, rating, added) — only client-only filters force the
             // open-ended "N+" fallback.
             if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasClientOnlyFilters()) {
-                total = `${this.cloudTotal} titles`;
+                total = MediaUtils.catalogCount(this.cloudTotal);
             } else if (this.isCloudPagedMode() && this.cloudHasMore) {
-                total = `${cards.length}+ titles`;
+                total = MediaUtils.catalogCount(`${cards.length}+`);
             }
             this.countEl.textContent = total;
         }

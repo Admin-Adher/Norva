@@ -2499,6 +2499,15 @@ const MediaUtils = (() => {
         };
     }
 
+    // Label/value wording works for zero, one and open-ended counts in every locale.
+    function catalogCount(value, unit = 'titles') {
+        const kind = ['movies', 'series'].includes(unit) ? unit : 'titles';
+        const label = { titles: 'Titles', movies: 'Movies', series: 'Series' }[kind];
+        return globalThis.NorvaI18n?.t(`ui_catalog_count_${kind}`, {
+            defaultValue: `${label}: {{value}}`, value: String(value)
+        }) ?? `${label}: ${value}`;
+    }
+
     // Capture time wins over delivery time (an offline device can upload later).
     // Scope before deduplication so another provider cannot hide the selected copy.
     function recentHistory(items = [], sourceId = '') {
@@ -2552,7 +2561,7 @@ const MediaUtils = (() => {
         providerAudioLanguages, providerAudioStatusLabel, providerAudioBadge,
         catalogLanguageInfo, languageBadgeHtml,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
-        versionDescriptor,
+        versionDescriptor, catalogCount,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
         playbackHintFromItem, applyPlaybackPreferencesToHint, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
         enhanceRailScroll, openTrailerLightbox, tmdbSrcset, isRecentlyAdded

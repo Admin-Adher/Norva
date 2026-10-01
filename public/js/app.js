@@ -2400,10 +2400,9 @@ class App {
             let activeCount = 0;
 
             const syncAccessibleLabel = (expanded) => {
-                const action = expanded ? 'Hide' : 'Show';
-                const suffix = activeCount ? `, ${activeCount} active` : '';
                 label.textContent = expanded ? (globalThis.NorvaI18n?.t("ui_web_9e6ea475a239", { defaultValue: "Hide filters" }) ?? 'Hide filters') : (globalThis.NorvaI18n?.t("ui_web_b1ab49a6fedc", { defaultValue: "More filters" }) ?? 'More filters');
-                button.setAttribute('aria-label', (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_533413439ba6", {defaultValue: "{{p0}} {{p1}} filters{{p2}}", p0:(action),p1:(key),p2:(suffix)}) : `${action} ${key} filters${suffix}`));
+                const activeLabel = globalThis.NorvaI18n?.t('ui_web_b6a3677ce85e', { defaultValue: 'Active filters' }) ?? 'Active filters';
+                button.setAttribute('aria-label', label.textContent + (activeCount ? `. ${activeLabel}: ${activeCount}` : ''));
             };
             const setExpanded = (expanded) => {
                 button.setAttribute('aria-expanded', String(expanded));
