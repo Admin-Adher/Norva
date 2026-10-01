@@ -104,3 +104,18 @@ took 48 s before returning HTTP 206 video/mp4. Its playback is not certified by
 this activation work. TV displayed 20 logical channels / 21 variants with their
 groups. Downton's previously missing Portuguese file label is now displayed in
 search, and Creed II exposes its PT/EN exact-file tracks.
+
+Final activation replay after the physical-scan optimization: button click
+12:23:01.155 UTC, source generation 9 created 12:23:02.354, ready
+12:23:02.411 (**1.256 s click-to-ready**). Exactly **8,611 visible media entries,
+zero physical media copies**. The browser still showed preparation at 3.57 s;
+the next observation at **9.44 s** showed the complete Home hero, film rails,
+series rails and language badges. Thus the observed UI bound is under 10 s,
+not an assertion of a subsecond first paint. There is no remaining per-account
+full-import task to wait for. Admission is enabled globally.
+
+All seven deployed runtime files were rechecked against both Edge containers.
+The follow-up PR checks passed for cloud contracts, Edge type-check, disposable
+Supabase migrations, mocked Web/mobile journeys, notification policy, GoTrue
+acceptance, and Android Phone/TV compile/tests. No Android player or client UI
+code was changed by this release; native runtime playback was not replayed here.
