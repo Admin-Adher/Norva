@@ -84,6 +84,25 @@ test('missing series evidence stays unidentified and movie cards cannot inherit 
   assert.equal(win.MediaUtils.versionDescriptor(movie).headline, 'Language unidentified');
 });
 
+test('Home grouped series retain owned episode languages without manufacturing file tracks', async () => {
+  const { selectionSeriesTitleLanguageFields } = await mod('selection-series-languages.mjs');
+  const variants = [
+    { item_type: 'series', __series_languages: { audio: ['es'], audioObserved: true } },
+    { item_type: 'series', __series_languages: { audio: ['en', 'und'], audioObserved: true } },
+    { item_type: 'movie', __series_languages: { audio: ['fr'], audioObserved: true } },
+    { item_type: 'series', __series_languages: { audio: ['de'], audioObserved: false } },
+  ];
+  const fields = selectionSeriesTitleLanguageFields({ item_type: 'series' }, variants);
+  const card = { item_type: 'series', audioLanguages: [], audioTracks: [], audioTracksScope: 'file', ...fields };
+  assert.deepEqual(card.audioLanguages, ['en', 'es']);
+  assert.equal(card.audioLanguagesScope, 'series');
+  assert.equal(card.audioLanguageValidationStatus, 'probed_union');
+  assert.match(win.MediaUtils.versionLanguageBadge(card), /EN.*ES/);
+  assert.deepEqual(card.audioTracks, []);
+  assert.deepEqual(selectionSeriesTitleLanguageFields({ item_type: 'movie' }, variants), {});
+  assert.deepEqual(selectionSeriesTitleLanguageFields({ item_type: 'series' }, []), {});
+});
+
 test('re-enrolled series retain their own episode evidence across Selection generations', async () => {
   const { discoverySourceId } = await mod('discovery-catalog.mjs');
   const { attachSelectionSeriesLanguages } = await mod('selection-series-languages.mjs');

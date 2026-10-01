@@ -25,6 +25,22 @@ export function selectionSeriesLanguageFields(summary) {
   return result;
 }
 
+// Grouped Home cards need the owned episode language sets at title level too.
+// Keep the series scope: these sets cannot be used as an episode stream map.
+export function selectionSeriesTitleLanguageFields(title, variants) {
+  if (title.item_type !== 'series') return {};
+  const summaries = variants.filter(v => v.item_type === 'series').map(v => v.__series_languages).filter(Boolean);
+  if (!summaries.length) return {};
+  const summary = { audio: [], subtitles: [], audioObserved: false, subtitleObserved: false };
+  for (const [field, flag] of [['audio', 'audioObserved'], ['subtitles', 'subtitleObserved']]) {
+    const observed = summaries.filter(s => s[flag] === true);
+    summary[flag] = observed.length > 0;
+    summary[field] = [...new Set(observed.flatMap(s => s[field] || [])
+      .filter(l => /^[a-z]{2,3}$/.test(l) && !['und', 'mul', 'zxx', 'mis'].includes(l)))].sort();
+  }
+  return selectionSeriesLanguageFields(summary);
+}
+
 async function allRows(query) {
   const rows = [];
   for (let offset = 0; ; offset += 1000) {

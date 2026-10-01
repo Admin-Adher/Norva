@@ -11,7 +11,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceIds, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { providerAudioFacet, selectionProviderAudioLanguages, catalogProviderAudioLanguages, catalogVariantMatchesAudio } from "../_shared/selection-provider-languages.mjs";
 import { attachOwnedProviderLanguageDeclarations, useCachedAudioLanguageEvidence } from "../_shared/owned-provider-language-declarations.mjs";
-import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields } from "../_shared/selection-series-languages.mjs";
+import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields, selectionSeriesTitleLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
@@ -4247,6 +4247,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     audio_language_validation_status: titleAudioValidationStatus,
     audioLanguageValidationStatus: titleAudioValidationStatus,
     ...audioJobFields(titleAudioJobState(variants)),
+    ...selectionSeriesTitleLanguageFields(title, variants),
     // Ordered per-track map so the player labels each engine audio stream by absolute
     // index — real language names with NO playback-time probe.
     audio_tracks: numberOr(title.variant_count, variants.length) <= 1
