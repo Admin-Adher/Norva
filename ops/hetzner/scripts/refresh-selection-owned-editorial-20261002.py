@@ -8,6 +8,7 @@ backfills until two complete zero-write passes, then enables bounded maintenance
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -46,6 +47,7 @@ def immutable():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--resume', action='store_true', help='Resume an inspected interrupted apply, retaining its backup')
     args = parser.parse_args()
     total = int(sql('select count(*) from (' + SOURCE_SCOPE + ') s;'))
     migration = (ROOT / MIGRATION).read_text(encoding='utf-8-sig')
@@ -57,18 +59,29 @@ def main():
         return
     assert total <= 100, 'One proof pass must cover every eligible source'
     assert not (ROOT / 'owned-refresh.safe.json').exists(), 'Completed receipt exists'
-    backup = ROOT / 'before-owned-refresh'; backup.mkdir(mode=0o700, exist_ok=False)
-    rows = sql('select to_jsonb(t) from public.cloud_titles t where exists(select 1 from ('
+    backup = ROOT / 'before-owned-refresh'
+    if args.resume:
+        assert backup.is_dir() and (backup / 'owned-titles.private.jsonl').exists(), 'Original backup required'
+    else:
+        backup.mkdir(mode=0o700, exist_ok=False)
+        rows = sql('select to_jsonb(t) from public.cloud_titles t where exists(select 1 from ('
                + SOURCE_SCOPE + ') s join public.cloud_title_variants v on v.user_id=s.user_id '
                'and v.source_id=s.id and v.generation_id=s.generation_id where v.user_id=t.user_id '
                'and v.title_id=t.id) order by t.user_id,t.id;')
-    (backup / 'owned-titles.private.jsonl').write_text(rows + '\n')
-    (backup / 'owned-titles.private.jsonl').chmod(0o600)
-    mirror = sql("select pg_get_functiondef('public.cloud_titles_mirror_to_catalog()'::regprocedure);")
-    (backup / 'mirror.sql').write_text(mirror)
+        (backup / 'owned-titles.private.jsonl').write_text(rows + '\n')
+        (backup / 'owned-titles.private.jsonl').chmod(0o600)
+        mirror = sql("select pg_get_functiondef('public.cloud_titles_mirror_to_catalog()'::regprocedure);")
+        (backup / 'mirror.sql').write_text(mirror)
     before = immutable()
+    (backup / 'immutable.safe.json').write_text(json.dumps(before, indent=2))
     if not installed:
         sql(migration)
+    else:
+        # After an inspected interruption, replace only the two reviewed RPCs.
+        # The installed mirror/maintenance guards and cursor table stay intact.
+        functions = re.findall(r'create function public\.norva_refresh_selection_owned_editorial(?:_all)?\(.*?end \$f\$;', migration, re.S)
+        assert len(functions) == 2, 'Reviewed RPC source contract changed'
+        sql('\n'.join(f.replace('create function ', 'create or replace function ', 1) for f in functions))
     receipts, zeros = [], 0
     for iteration in range(40):
         began = time.monotonic()

@@ -115,6 +115,9 @@ begin
  snap:=public.norva_get_catalog_write_snapshot(sources[3],readers[3]);
  receipt:=public.norva_refresh_selection_owned_editorial(readers[3],sources[3],(snap->>'generationId')::uuid,100);
  if receipt->>'updatedTitles'<>'0' then raise exception 'Private legacy URL overwritten'; end if;
+ receipt:=public.norva_refresh_selection_owned_editorial_all(100,100);
+ if (receipt->>'sources')::int<3 or receipt->>'updatedTitles' is null then
+   raise exception 'Fleet cursor wrapper did not visit the legacy fixtures: %',receipt; end if;
  if before_files<>(select md5(jsonb_agg(to_jsonb(m) order by id)::text) from public.cloud_media_items m where user_id=any(readers))
    or before_variants<>(select md5(jsonb_agg(to_jsonb(v) order by id)::text) from public.cloud_title_variants v where user_id=any(readers))
    or before_shared<>(select md5(jsonb_agg(to_jsonb(m) order by item_type,external_id)::text) from public.selection_shared_media m where release_id=rel) then

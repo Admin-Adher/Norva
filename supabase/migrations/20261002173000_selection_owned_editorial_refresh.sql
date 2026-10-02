@@ -123,7 +123,7 @@ grant select,insert,update,delete on public.selection_owned_editorial_refresh_cu
 
 create function public.norva_refresh_selection_owned_editorial_all(p_per_source int default 100,p_sources int default 20)
 returns jsonb language plpgsql security definer set search_path='' set jit=off as $f$
-declare s record; snap jsonb; receipt jsonb; n int:=0; seen int:=0; skipped int:=0;
+declare v_source record; snap jsonb; receipt jsonb; n int:=0; seen int:=0; skipped int:=0;
 begin
  perform public.norva_credential_require_service_role();
  if p_per_source is null or p_per_source not between 1 and 500 or p_sources is null or p_sources not between 1 and 100 then
@@ -133,17 +133,17 @@ begin
    select s.id from public.cloud_sources s join public.cloud_source_catalog_heads h on h.source_id=s.id and h.user_id=s.user_id
    where s.enabled and s.source_type='m3u' and h.active_generation_id is not null
      and public.norva_selection_source_identity_valid(s.id,s.user_id) on conflict do nothing;
- for s in select s.id,s.user_id from public.cloud_sources s join public.selection_owned_editorial_refresh_cursors c on c.source_id=s.id
+ for v_source in select s.id,s.user_id from public.cloud_sources s join public.selection_owned_editorial_refresh_cursors c on c.source_id=s.id
    where s.enabled and s.source_type='m3u' and public.norva_selection_source_identity_valid(s.id,s.user_id)
    order by c.last_checked_at,s.id limit p_sources loop
    begin
-     snap:=public.norva_get_catalog_write_snapshot(s.id,s.user_id);
+     snap:=public.norva_get_catalog_write_snapshot(v_source.id,v_source.user_id);
      if snap->>'isCatalogVisible'='true' and snap->>'generationId' is not null then
-       receipt:=public.norva_refresh_selection_owned_editorial(s.user_id,s.id,(snap->>'generationId')::uuid,p_per_source);
+       receipt:=public.norva_refresh_selection_owned_editorial(v_source.user_id,v_source.id,(snap->>'generationId')::uuid,p_per_source);
        n:=n+(receipt->>'updatedTitles')::int; seen:=seen+1;
      else skipped:=skipped+1; end if;
    exception when sqlstate 'PT409' then skipped:=skipped+1; end;
-   update public.selection_owned_editorial_refresh_cursors set last_checked_at=statement_timestamp() where source_id=s.id;
+   update public.selection_owned_editorial_refresh_cursors set last_checked_at=statement_timestamp() where source_id=v_source.id;
  end loop;
  return jsonb_build_object('updatedTitles',n,'sources',seen,'hiddenOrChanged',skipped);
 end $f$;
