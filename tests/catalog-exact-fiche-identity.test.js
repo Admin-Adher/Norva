@@ -37,18 +37,22 @@ test('exact fiche lookup is owner/source/file scoped and hydrates the current lo
   const result = await f.run(url(), 'owner');
   assert.deepEqual(f.filters, { user_id: 'owner', source_id: sourceId, item_type: 'movie', external_id: 'provider-file' });
   assert.equal(f.reads[0], 'cloud_catalog_visible_title_variants');
-  assert.equal(result.catalogTitleItems[0].overview, 'Synopsis actuel');
+  assert.equal(result.items[0].overview, 'Synopsis actuel');
   assert.equal(result.count, 1);
   assert.equal(result.hasMore, false);
+  const { sanitizeCatalogMediaPayload } = await import('../supabase/functions/_shared/catalog-public-view.mjs');
+  const publicResponse = sanitizeCatalogMediaPayload(result);
+  assert.equal(publicResponse.items.length, 1, 'the production response filter must retain exact fiche items');
+  assert.equal(publicResponse.items[0].overview, 'Synopsis actuel');
 });
 test('series lookup uses the parent series identity and the same localized projection', async () => {
   const f = fixture({ title: { id: 'current-title', item_type: 'series' } });
-  assert.equal((await f.run(url('series'), 'owner')).catalogTitleItems[0].item_type, 'series');
+  assert.equal((await f.run(url('series'), 'owner')).items[0].item_type, 'series');
 });
 test('missing or ambiguous file identity never guesses a homonym', async () => {
   for (const matches of [[], [{ title_id: 'a' }, { title_id: 'b' }]]) {
     const f = fixture({ matches });
-    assert.equal((await f.run(url(), 'owner')).catalogTitleItems.length, 0);
+    assert.equal((await f.run(url(), 'owner')).items.length, 0);
     assert.equal(f.reads.includes('hydrate'), false);
   }
 });
@@ -56,7 +60,7 @@ test('visibility changes and cross-source provider-ID collisions fail closed', a
   for (const values of [{ title: null }, { title: { item_type: 'series' } },
     { variants: [{ source_id: foreignSource, external_id: 'provider-file' }] }]) {
     const f = fixture(values);
-    assert.equal((await f.run(url(), 'owner')).catalogTitleItems.length, 0);
+    assert.equal((await f.run(url(), 'owner')).items.length, 0);
   }
 });
 test('invalid or incomplete identity is rejected before database access', async () => {
@@ -75,7 +79,7 @@ test('cloud adapter preserves localized editorial data and exact-file language s
   const requests = [], storage = new Map([['norva-cloud-session', JSON.stringify({ access_token: 'fixture', user: { id: 'owner' } })]]);
   const NorvaCloud = { contentLanguage: () => 'fr', mediaItems: { list: async params => {
     requests.push(params);
-    return { catalogTitleItems: [{ id: 'current-title', item_type: 'movie', title: 'Titre traduit',
+    return { items: [{ id: 'current-title', item_type: 'movie', title: 'Titre traduit',
       poster_url: 'https://example.invalid/current.jpg', year: 2022,
       metadata: { tmdb: { title: 'English title', overview: 'English synopsis' } },
       data: { overview: 'Synopsis actuel', genres: ['Drama'] },

@@ -951,8 +951,8 @@ const CloudAdapter = (() => {
             offset: normalizedOffset
         }, options);
         syncVisibilityEpoch(payload);
-        const items = externalId && Array.isArray(payload.catalogTitleItems)
-            ? payload.catalogTitleItems.flatMap(item => normalizeHomeRailItem({ ...item,
+        const items = externalId && Array.isArray(payload.items)
+            ? payload.items.flatMap(item => normalizeHomeRailItem({ ...item,
                 data: { ...item.data, title: item.title || item.name } }).variants)
             : (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
