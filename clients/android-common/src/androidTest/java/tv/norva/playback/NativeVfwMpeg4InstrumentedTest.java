@@ -6,6 +6,7 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.view.KeyEvent;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.C;
 import androidx.media3.common.Tracks;
@@ -72,8 +73,13 @@ public final class NativeVfwMpeg4InstrumentedTest {
             assertTrue("No audio progress",observed[2]>10);
             assertTrue("Resume position lost",observed[0]>=4000&&observed[0]<10000);
             ins.runOnMainSync(()->player.seekTo(7000));SystemClock.sleep(1200);
-            ins.runOnMainSync(()->{assertNull(player.getPlayerError());assertTrue(player.getCurrentPosition()>=7000);opened.onBackPressed();});
-            ins.waitForIdleSync();assertTrue(activity.isFinishing()||activity.isDestroyed());
+            ins.runOnMainSync(()->{assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=7000);});
+            // Exercise the platform Back dispatch, including TV's key handler.
+            // Calling deprecated Activity.onBackPressed bypasses that handler.
+            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            long backDeadline=SystemClock.elapsedRealtime()+3000;
+            while(!activity.isFinishing()&&!activity.isDestroyed()&&SystemClock.elapsedRealtime()<backDeadline)SystemClock.sleep(50);
+            assertTrue("Back must close the real player",activity.isFinishing()||activity.isDestroyed());
         } finally {
             if(activity!=null&&!activity.isDestroyed()){final Activity opened=activity;ins.runOnMainSync(opened::finish);}
             ins.removeMonitor(monitor);fixture.delete();
