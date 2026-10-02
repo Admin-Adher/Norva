@@ -44,7 +44,7 @@ function fakeDb(initial=[]) {
   const rows=structuredClone(initial), writes=[];
   return {rows,writes,from(table){assert.equal(table,'admin_alert_delivery_state');return {
     select:async()=>({data:rows}),
-    upsert:async(items)=>{writes.push({type:'upsert',items});for(const i of items){const idx=rows.findIndex(r=>r.category===i.category&&r.channel===i.channel&&r.key===i.key);if(idx<0)rows.push(i);else rows[idx]=i;}return {error:null};},
+    upsert:async(items)=>{items=Array.isArray(items)?items:[items];writes.push({type:'upsert',items});for(const i of items){const idx=rows.findIndex(r=>r.category===i.category&&r.channel===i.channel&&r.key===i.key);if(idx<0)rows.push(i);else rows[idx]=i;}return {error:null};},
     delete(){const filter={};return {eq(k,v){filter[k]=v;return this;},async in(k,values){writes.push({type:'delete',filter,values});for(let i=rows.length-1;i>=0;i--)if(Object.entries(filter).every(([k,v])=>rows[i][k]===v)&&values.includes(rows[i][k]))rows.splice(i,1);return {error:null};}};}
   };}};
 }
@@ -102,4 +102,25 @@ test('trial outbox is authoritative, idempotent, leased, private and not backfil
   const sql=fs.readFileSync(path.join(root,'supabase/migrations/20260904194500_trial_telegram_outbox.sql'),'utf8');
   for(const expected of ['after insert or update on public.cloud_entitlement_projection',"new.status <> 'trialing'",'new.trial_consumed_at is null','new.trial_ends_at <= clock_timestamp()','old.trial_consumed_at is not null','admin_internal_accounts','on conflict(user_id) do nothing','for update skip locked','lease_token=p_lease','attempt_count >= 12','enable row level security'])assert.ok(sql.includes(expected),expected);
   assert.doesNotMatch(sql,/insert into public.cloud_trial_telegram_outbox[\s\S]{0,150}select /i);
+});
+
+test('LID fallback and cron recovery require a stable healthy interval',async()=>{
+ const db=fakeDb([{category:'catalogue',channel:'telegram',key:'lid_runtime_degraded',details:'fallback',last_alerted_at:new Date().toISOString()}]);
+ const run=opsRuntime();
+ await run.api.dispatchOpsNotifications(db,[],'');
+ assert.equal(run.calls.length,0);assert.ok(db.rows[0].healthy_since);
+ await run.api.dispatchOpsNotifications(db,[{key:'lid_runtime_degraded',detail:'fallback'}],'');
+ assert.equal(run.calls.length,0);assert.equal(db.rows[0].healthy_since,null);
+ await run.api.dispatchOpsNotifications(db,[],'');
+ db.rows[0].healthy_since=new Date(Date.now()-31*60000).toISOString();
+ await run.api.dispatchOpsNotifications(db,[],'');
+ assert.equal(run.calls.length,1);assert.match(run.calls[0].text,/résolu/);assert.equal(db.rows.length,0);
+});
+test('real LID failure bypasses fallback cooldown and infrastructure outage stays immediate',async()=>{
+ const db=fakeDb([{category:'catalogue',channel:'telegram',key:'lid_runtime_degraded',details:'fallback',last_alerted_at:new Date().toISOString()}]);
+ const run=opsRuntime();
+ await run.api.dispatchOpsNotifications(db,[{key:'lid_runtime_degraded',detail:'fallback'},{key:'lid_runtime_failure',detail:'engine failed'},{key:'gateway_down',detail:'down'}],'');
+ assert.equal(run.calls.length,1);assert.match(run.calls[0].text,/engine failed/);assert.match(run.calls[0].text,/down/);
+ assert.equal(run.api.opsRecoveryDelay('gateway_down'),0);
+ assert.equal(run.api.opsReminderDelay('lid_runtime_degraded'),86400000);
 });
