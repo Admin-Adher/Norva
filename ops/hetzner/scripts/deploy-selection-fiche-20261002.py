@@ -40,7 +40,7 @@ def health(name):
 def main():
     p = argparse.ArgumentParser(); p.add_argument('--apply', action='store_true')
     p.add_argument('--expected-sha256', default=EXPECTED)
-    p.add_argument('--revision', type=int, choices=[1, 2], default=1)
+    p.add_argument('--revision', type=int, choices=[1, 2, 3], default=1)
     args = p.parse_args()
     names = ['norva-edge-functions', 'norva-edge-functions-2']
     before = {name: inspect(name) for name in names}
@@ -57,7 +57,7 @@ def main():
         return
     env_path = STACK / '.env'; original = env_path.read_text(); lines = original.splitlines()
     assert sum(v.startswith('NORVA_EDGE_FUNCTIONS_ROOT=') for v in lines) == 1
-    suffix = '-fiche' if args.revision == 1 else '-fiche-v2'
+    suffix = '-fiche' if args.revision == 1 else '-fiche-v' + str(args.revision)
     backup = ROOT / ('before-artwork-deployment' + suffix); backup.mkdir(mode=0o700, exist_ok=False)
     (backup / 'stack.env').write_text(original); (backup / 'stack.env').chmod(0o600)
     target = ROOT / ('runtime-fiche-functions' + suffix); shutil.copytree(runtime, target)

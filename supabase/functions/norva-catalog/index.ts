@@ -1192,7 +1192,11 @@ async function attachOwnedMediaEditorialMetadata(
         row.provider_tmdb_id = title.provider_tmdb_id;
         row.providerTmdbId = title.provider_tmdb_id;
         row.match_status = title.match_status;
-        row.tmdb = { ...recordOrEmpty(editorial.tmdb), overview: editorial.overview, genres: editorial.genres };
+        // Flat-grid clients prefer tmdb.title when no logical title ID is
+        // exposed. Keep that field aligned with the same localized projection
+        // used by rail and restored fiches, rather than the catalogue base title.
+        row.tmdb = { ...recordOrEmpty(editorial.tmdb), title: editorial.title,
+          overview: editorial.overview, genres: editorial.genres };
         row.metadata = { ...recordOrEmpty(row.metadata), providerTmdbId: title.provider_tmdb_id,
           overview: editorial.overview, tmdb: row.tmdb };
         if (editorial.overview) row.plot = editorial.overview;

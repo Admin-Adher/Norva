@@ -12,7 +12,7 @@ const mediaId = '11111111-1111-4111-a111-111111111111';
 const titleId = '22222222-2222-4222-a222-222222222222';
 function fixture({ foreign = false, stale = false, ambiguous = false, progressive = false, published = false, otherGeneration = false,
   groupedEditorial = false, trusted = true, wrongTmdb = false, singleSource = false,
-  itemType = 'movie', localized = true } = {}) {
+  itemType = 'movie', localized = true, editorialTitle = 'Inception' } = {}) {
   const generation = progressive || published ? 'active-generation' : null;
   const row = { id: mediaId, source_id: 'owned-source', generation_id: generation,
     metadata: { plot: 'Provider credits' }, audio_languages: ['hi'], playback_hint: { streamId: 'provider-file' } };
@@ -49,8 +49,8 @@ function fixture({ foreign = false, stale = false, ambiguous = false, progressiv
     flatMediaBlocksGlobalTitleOverlay: item => Boolean(item.generation_id),
     flatMediaGlobalLocalizedTitle: new WeakSet(),
     stringOrNull: value => value || null, recordOrEmpty: value => value || {},
-    titleRailItem: () => ({ title: 'Inception', name: 'Inception', overview: 'Résumé TMDB',
-      genres: ['Action'], tmdb: { overview: 'Résumé TMDB' }, audio_languages: ['en'], id: 'must-not-copy' }),
+    titleRailItem: () => ({ title: editorialTitle, name: editorialTitle, overview: 'Résumé TMDB',
+      genres: ['Action'], tmdb: { title: 'English base title', overview: 'Résumé TMDB' }, audio_languages: ['en'], id: 'must-not-copy' }),
   };
   vm.runInNewContext(compiled, sandbox);
   return { row, calls, run: () => sandbox.module.exports([row], 'owner', itemType, 'fr') };
@@ -74,6 +74,18 @@ test('progressive media keeps the owned title proof without applying a second fu
   assert.equal(f.row.metadata.providerTmdbId, '27205');
   assert.equal(f.row.runtime, undefined);
   assert.equal(f.row.title, undefined);
+});
+
+test('published flat movie and series titles agree with localized rail and restored fiches', async () => {
+  for (const itemType of ['movie', 'series']) {
+    const f = fixture({ published: true, itemType, editorialTitle: 'Titre français' });
+    await f.run();
+    assert.equal(f.row.title, 'Titre français');
+    assert.equal(f.row.tmdb.title, 'Titre français');
+    assert.equal(f.row.metadata.tmdb.title, 'Titre français');
+    assert.equal(f.row.id, mediaId);
+    assert.deepEqual(f.row.audio_languages, ['hi']);
+  }
 });
 test('foreign, ambiguous and stale title ownership never replaces provider metadata', async () => {
   for (const options of [{ foreign: true }, { ambiguous: true }, { stale: true }, { progressive: true, otherGeneration: true }]) {
