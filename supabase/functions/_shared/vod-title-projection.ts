@@ -1330,7 +1330,9 @@ function matchCatalogValidationCandidate(
       confidence: titleConfidence(candidate.title, title, candidate.year, cachedYear),
     }))
     .sort((a, b) => b.confidence - a.confidence)[0];
-  if (!best || best.confidence < 0.58) return null;
+  // Provider IDs and old cache flags can both be wrong. A partial title such
+  // as "A Baleia" must not reuse "A Baleia Mágica" (or its artwork/year).
+  if (!best || best.confidence < 0.9) return null;
   return { title: best.title, year: cachedYear, confidence: best.confidence };
 }
 
@@ -1409,7 +1411,9 @@ export async function validateTmdbCandidate(
   const best = ranked[0];
   const title = best?.cand || stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
   const confidence = best?.score ?? 0;
-  const valid = confirmed || confidence >= 0.58;
+  const incompatibleYear = Boolean(candidate.year && year
+    && Math.abs(Number(candidate.year) - Number(year)) > 1);
+  const valid = !incompatibleYear && (confirmed || confidence >= 0.9);
   return {
     valid,
     title: title || null,
@@ -1419,7 +1423,7 @@ export async function validateTmdbCandidate(
     confidence,
     i18n: Object.keys(i18n).length ? i18n : undefined,
     reason: valid
-      ? (confirmed && confidence < 0.58 ? "poster_path_confirmed" : "title_year_sanity_check_passed")
+      ? (confirmed ? "poster_path_confirmed" : "title_year_sanity_check_passed")
       : "title_year_sanity_check_failed",
     details: compactRecord({
       id: details.id,

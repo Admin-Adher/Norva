@@ -49,7 +49,7 @@ begin
  insert into public.catalog_titles(item_type,provider_tmdb_id,title,original_title,release_year,poster_url,backdrop_url,metadata)
  values('movie','49478','Warriors of Virtue','Warriors of Virtue',1997,
    'https://image.tmdb.org/t/p/w500/qa-warriors.jpg','https://image.tmdb.org/t/p/w780/qa-warriors.jpg',
-   '{"tmdb":{"id":49478,"title":"Warriors of Virtue","overview":"Public QA overview","runtime":103,"vote_average":4.8,"genres":[{"id":28,"name":"Action"}],"audioTracks":[{"lang":"xx"}],"providerPassword":"do-not-publish"},"i18n":{"fr":{"title":"Magic warriors","overview":"Synopsis public QA","token":"do-not-publish"}},"tmdbValidation":{"valid":true},"accountSecret":"do-not-publish"}')
+   '{"tmdb":{"id":49478,"title":"Warriors of Virtue","overview":"Public QA overview","runtime":103,"vote_average":4.8,"genres":[{"id":28,"name":"Action"}],"audioTracks":[{"lang":"xx"}],"providerPassword":"do-not-publish"},"i18n":{"fr":{"title":"Magic warriors","overview":"Synopsis public QA","token":"do-not-publish"}},"tmdbValidation":{"valid":true,"confidence":0.923},"accountSecret":"do-not-publish"}')
  on conflict(item_type,provider_tmdb_id) do update set metadata=excluded.metadata,poster_url=excluded.poster_url,
    backdrop_url=excluded.backdrop_url,release_year=excluded.release_year;
  select md5(coalesce(jsonb_agg(to_jsonb(m) order by item_type,external_id)::text,'')) into before_raw
