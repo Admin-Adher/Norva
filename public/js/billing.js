@@ -538,9 +538,11 @@
   }
 
   function hasPlayRetention() {
+    // 1.3.29 refreshes Google subscription state before accepting a retention
+    // purchase. Earlier bridges can retain willRenew=true after cancellation.
     const version = (navigator.userAgent || '').match(/NorvaTV-AndroidPhone\/(\d+)\.(\d+)\.(\d+)/);
     return hasNativeBilling() && !!version && (Number(version[1]) > 1
-      || (Number(version[1]) === 1 && (Number(version[2]) > 3 || (Number(version[2]) === 3 && Number(version[3]) >= 24))));
+      || (Number(version[1]) === 1 && (Number(version[2]) > 3 || (Number(version[2]) === 3 && Number(version[3]) >= 29))));
   }
 
   async function playRetentionAction(body, offerId) {
