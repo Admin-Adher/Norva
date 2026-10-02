@@ -49,7 +49,7 @@ ${alternates.map(item => `  <link rel="alternate" hreflang="${escapeAttr(item.hr
 ${jsonLdBlocks.map((b) => `  <script type="application/ld+json">\n${b}\n  </script>`).join('\n')}
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="${i18nAsset('js/marketing.js')}"></script>
-  <script defer src="/js/consent-banner.js?v=1"></script>`;
+  <script defer src="${i18nAsset('js/consent-banner.js')}"></script>`;
 
 function languagePicker(items = [], ui = EN_UI, language = 'en', isArticle = false) {
   const links = items.filter(item => item.code !== 'x-default');
