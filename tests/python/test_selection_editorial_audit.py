@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2] / 'ops/hetzner/scripts'
 
@@ -17,9 +18,97 @@ rescue = load('rescue-selection-tmdb-20261002.py')
 probe = load('probe-selection-editorial-identities-20261002.py')
 repair = load('repair-selection-editorial-20261002.py')
 remainder = load('audit-selection-remainder-20261002.py')
+deep = load('audit-selection-deeper-search-20261002.py')
+units = load('prove-selection-source-units-20261002.py')
+duration = load('prove-selection-media-duration-20261002.py')
 
 
 class IdentityEvidence(unittest.TestCase):
+    def test_wider_search_does_not_stop_on_first_locale_empty_stub(self):
+        class Api(deep.WiderTmdb):
+            def __init__(self):
+                self.locales = []
+            def get(self, endpoint, **params):
+                self.locales.append(params['language'])
+                data = [{'id': 1, 'name': 'Special Ops'}]
+                if params['language'] == 'en-US':
+                    data.append({'id': 2, 'name': 'Special Ops', 'first_air_date': '2020-03-17'})
+                return {'results': data, 'total_pages': 1}
+            def details(self, kind, ident):
+                return {'id': ident, 'name': 'Special Ops'}
+        api = Api()
+        found, cap = api.search('series', 'Special Ops', None)
+        self.assertEqual({d['id'] for d in found}, {1, 2})
+        self.assertIn('fr-FR', api.locales)
+        self.assertFalse(cap)
+
+    def test_hls_duration_requires_endlist_and_never_downloads_segments(self):
+        class Response:
+            url = 'https://public.invalid/movie.m3u8'
+            def __init__(self, value):
+                self.value = value
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def read(self, size):
+                return self.value
+        terminal = b'#EXTM3U\n#EXTINF:6.5,\n1.ts\n#EXTINF:7.0,\n2.ts\n#EXT-X-ENDLIST\n'
+        with patch.object(duration.urllib.request, 'urlopen', return_value=Response(terminal)) as opened:
+            self.assertEqual(duration.playlist_duration(Response.url), 13.5)
+            self.assertEqual(opened.call_count, 1)
+        with patch.object(duration.urllib.request, 'urlopen', return_value=Response(terminal.replace(b'#EXT-X-ENDLIST', b''))):
+            with self.assertRaises(ValueError):
+                duration.playlist_duration(Response.url)
+
+    def test_candidate_discovery_does_not_supply_identity_confidence(self):
+        d = {'id': 1, 'title': 'As Aventuras de Tintim', 'release_date': '2011-01-01'}
+        self.assertGreater(deep.discovery_score('As Aventuras de TimTim', d), 0.9)
+        self.assertIsNone(remainder.assess({'title': 'As Aventuras de TimTim'}, [d],
+          [('provider_title', 'As Aventuras de TimTim')])[0])
+
+    def test_compact_alias_requires_raw_year_and_matching_feed_group(self):
+        row = {'item_type': 'movie', 'title': '192021', 'provider_units': [
+          {'title': '192021 Telugu', 'provider_year': 2023, 'provider_group': 'Movies / Telugu / 2023'}]}
+        d = {'id': 1, 'title': '19.20.21', 'release_date': '2023-03-03'}
+        self.assertEqual(units.assess(row, [d])[0][0]['id'], 1)
+        row['provider_units'][0]['provider_group'] = 'Movies / Telugu / 1990'
+        self.assertEqual(units.assess(row, [d])[1], 'conflicting_or_unverified_provider_year')
+
+    def test_series_later_season_uses_its_date_and_does_not_select_empty_stub(self):
+        row = {'item_type': 'series', 'title': 'Special Ops', 'provider_units': [
+          {'title': 'Special Ops Season 2', 'provider_year': 2025, 'provider_group': 'Movies / Telugu / 2025',
+           'source_unit': {'baseTitle': 'Special Ops', 'seasons': [2]}}]}
+        d = {'id': 1, 'name': 'Special OPS', 'first_air_date': '2020-03-17',
+             'seasons': [{'season_number': 1, 'air_date': '2020-03-17'}, {'season_number': 2, 'air_date': '2025-07-18'}]}
+        stub = {'id': 2, 'name': 'Special Ops', 'seasons': []}
+        self.assertEqual(units.assess(row, [d, stub])[0][0]['id'], 1)
+        d['seasons'][1]['air_date'] = '2022-01-01'
+        self.assertIsNone(units.assess(row, [d, stub])[0])
+
+    def test_source_units_cannot_override_conflicting_other_variant(self):
+        row = {'item_type': 'movie', 'title': 'Antony', 'provider_units': [
+          {'title': 'Antony', 'provider_year': 2023, 'provider_group': 'Movies / Telugu / 2023'},
+          {'title': 'Antony', 'provider_year': 2018, 'provider_group': 'Movies / Telugu / 2018'}]}
+        self.assertIsNone(units.assess(row, [{'id': 1, 'title': 'Antony', 'release_date': '2023-12-01'}])[0])
+
+    def test_source_season_conflict_and_homonyms_remain_ambiguous(self):
+        row = {'item_type': 'series', 'title': 'Example', 'provider_units': [
+          {'title': 'Example Season 1', 'provider_year': 2023, 'provider_group': 'Movies / Hindi / 2023',
+           'source_unit': {'baseTitle': 'Example', 'seasons': [1]}}]}
+        ds = [{'id': n, 'name': 'Example', 'seasons': [{'season_number': 1, 'air_date': '2023-01-01'}]} for n in [1, 2]]
+        self.assertEqual(units.assess(row, ds)[1], 'ambiguous_source_units')
+        row['provider_units'][0]['source_unit']['baseTitle'] = 'Another Example'
+        self.assertEqual(units.assess(row, ds)[1], 'source_unit_title_conflict')
+
+    def test_duration_typo_discovery_preserves_sequel_markers(self):
+        self.assertEqual(duration.duration_alias('As Aventuras de TimTim', {'title': 'As Aventuras de Tintim'}), 'single_character_typo')
+        self.assertIsNone(duration.duration_alias('Harry Potter 2 Example', {'title': 'Harry Potter 3 Example'}))
+        self.assertIsNone(duration.duration_alias('Very Long Example II', {'title': 'Very Long Example III'}))
+        self.assertIsNone(duration.duration_alias('Very Long Example Title', {'title': 'Very Long Example Title II'}))
+        self.assertIsNone(duration.duration_alias('A Bala', {'title': 'A Bola'}))
+        self.assertIsNone(duration.duration_alias('Very Long Inaccurate Title', {'title': 'Very Long Different Title'}))
+
     def test_numeric_title_is_not_a_release_year(self):
         self.assertIsNone(audit.title_year('1917'))
         self.assertEqual(audit.title_year('1917 (2019)'), 2019)

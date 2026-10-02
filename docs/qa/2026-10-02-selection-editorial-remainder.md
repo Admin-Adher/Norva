@@ -1,5 +1,7 @@
 # Norva Selection — complément de correction des fiches
 
+**Actualisation :** une passe ultérieure a corrigé 34 fiches supplémentaires. Les mesures les plus récentes sont dans [le rapport des preuves source](2026-10-02-selection-source-proofs.md).
+
 ## Résultat en production
 
 Catalogue commun publié `b5bd1b07-3692-421a-bd8a-40c64a29b4ec`, 6 159 films et 273 séries. Cette passe complète [l'audit initial](2026-10-02-selection-tmdb-audit.md), sans certifier les autres fournisseurs ni l'objectif commercial complet.
