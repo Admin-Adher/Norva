@@ -2430,7 +2430,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 171;
+const GATEWAY_VERSION = 172;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -3433,6 +3433,26 @@ app.post('/provider-route/benchmark', requireGatewayAuth, async (req, res) => {
         protocol: 1,
         reason: scheduled.reason,
         queueDepth: providerRouteBenchmarkPending.size,
+    });
+});
+
+// Viewer startup may preempt probes, never another viewer sharing the same
+// public M3U URL/provider affinity. Account deletion retains its separate,
+// deliberately destructive endpoint below.
+app.post('/sessions/preempt-background-provider-affinities', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const values = Array.isArray(req.body?.affinityHashes) ? req.body.affinityHashes : [];
+    const affinityHashes = [...new Set(values.map((value) => String(value || '').trim().toLowerCase()))];
+    if (!affinityHashes.length || affinityHashes.length > 64
+        || affinityHashes.some((value) => !/^[a-f0-9]{64}$/.test(value))) {
+        return res.status(400).json({ error: 'affinityHashes must contain 1-64 SHA-256 values' });
+    }
+    const outcome = await stopProviderAffinities(affinityHashes, { backgroundOnly: true });
+    return res.status(outcome.providerDrained ? 200 : 409).json({
+        ok: outcome.providerDrained, protocol: 1, scope: 'auxiliary-only',
+        backgroundDrained: outcome.providerDrained,
+        stoppedExtractions: outcome.stoppedExtractions,
+        stoppedLanguageValidations: outcome.stoppedLanguageValidations,
     });
 });
 
@@ -22030,17 +22050,18 @@ function providerAffinityHashForGatewayKey(key) {
     return key ? sha256Hex(String(key)) : '';
 }
 
-async function stopProviderAffinities(affinityHashes) {
+async function stopProviderAffinities(affinityHashes, { backgroundOnly = false } = {}) {
     const requested = new Set(affinityHashes);
     providerMetadataPriorityFence.reserve(affinityHashes);
     const matches = (key) => requested.has(providerAffinityHashForGatewayKey(key));
-    const sessionsToStop = Array.from(sessions.values()).filter((session) => (
+    const sessionsToStop = backgroundOnly ? [] : Array.from(sessions.values()).filter((session) => (
         matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
     ));
     await Promise.allSettled(sessionsToStop.map((session) => (
         stopSession(session, { reason: 'account-deletion' })
     )));
-    const rawPumpsAborted = abortRawPumps((pump) => matches(pump?.proxyKey || ''), null, 'account deletion');
+    const rawPumpsAborted = backgroundOnly ? 0
+        : abortRawPumps((pump) => matches(pump?.proxyKey || ''), null, 'account deletion');
     let extractionsStopped = 0;
     const extractionStops = [];
     for (const [proxyKey, entries] of accountExtractions) {
@@ -22061,9 +22082,9 @@ async function stopProviderAffinities(affinityHashes) {
     await Promise.allSettled(languageValidationsToStop.map(([broker]) => (
         broker.close('viewer-preempted')
     )));
-    const remaining = Array.from(sessions.values()).some((session) => (
+    const remaining = (!backgroundOnly && (Array.from(sessions.values()).some((session) => (
         matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
-    )) || Array.from(rawPumps).some((pump) => matches(pump?.proxyKey || ''))
+    )) || Array.from(rawPumps).some((pump) => matches(pump?.proxyKey || ''))))
       || Array.from(accountExtractions).some(([proxyKey, entries]) => (
         matches(proxyKey) && Array.from(entries).some((entry) => !entry?.preempted || isUndrainedProviderMetadata(entry))
     )) || [...strictLidBrokers.values()].some((proxyKey) => matches(proxyKey));
