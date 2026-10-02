@@ -30,5 +30,26 @@ begin
    execute definition;
  end loop;
 end $guard$;
+-- Normalize already published endpoint-only artwork. This edits display fields
+-- only; public file manifests, playback variants and private metadata stay intact.
+do $cleanup$
+declare released uuid; owner_id uuid;
+begin
+ for released in with changed as (
+   update public.selection_shared_titles t set
+     poster_url=public.norva_selection_editorial_image(t.poster_url),
+     backdrop_url=public.norva_selection_editorial_image(t.backdrop_url)
+   where exists(select 1 from public.selection_shared_releases r where r.id=t.release_id and r.published_at is not null)
+     and (t.poster_url,t.backdrop_url) is distinct from
+       (public.norva_selection_editorial_image(t.poster_url),public.norva_selection_editorial_image(t.backdrop_url))
+   returning release_id
+ ) select distinct release_id from changed loop
+   update public.selection_shared_releases set editorial_updated_at=clock_timestamp() where id=released;
+   for owner_id in select distinct user_id from public.selection_shared_visible_enrollments where release_id=released loop
+     perform public.norva_bump_user_catalog_visibility_epoch(owner_id);
+     delete from public.cloud_catalog_facet_summary where user_id=owner_id;
+   end loop;
+ end loop;
+end $cleanup$;
 notify pgrst,'reload schema';
 commit;
