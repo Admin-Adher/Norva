@@ -16,8 +16,8 @@ namespace "tv.norva.tv"
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 36
-        versionCode 35
-        versionName "3.8.22-hybrid"
+        versionCode 36
+        versionName "3.8.23-hybrid"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Public routing configuration for the dedicated Android TV project.
         // Operators can still override it for an isolated build when needed.
