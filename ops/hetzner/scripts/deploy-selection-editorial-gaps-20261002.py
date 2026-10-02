@@ -35,7 +35,7 @@ def health(name):
     ip = next(iter(info['NetworkSettings']['Networks'].values()))['IPAddress']
     with urllib.request.urlopen('http://' + ip + ':9000/norva-playback/health', timeout=8) as r:
         data = json.load(r)
-    assert data.get('ok') and data.get('version') == 84, 'Edge health failed'
+    assert data.get('ok') and data.get('version') == 85, 'Edge health failed'
 
 
 def main():
