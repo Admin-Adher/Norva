@@ -14,12 +14,13 @@ import androidx.media3.extractor.PositionHolder;
 import androidx.media3.extractor.SeekMap;
 import androidx.media3.extractor.TrackOutput;
 import androidx.media3.extractor.ts.TsExtractor;
+import androidx.media3.extractor.mkv.MatroskaExtractor;
 import androidx.media3.extractor.text.SubtitleParser;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-/** Decode progressive TS before the requested position; keep Media3's sample target intact. */
+/** Preserve Media3 seeking while adapting known progressive TS and VFW MKV formats. */
 @UnstableApi
 public final class TsResumeExtractorsFactory implements ExtractorsFactory {
     private final ExtractorsFactory delegate;
@@ -50,6 +51,7 @@ public final class TsResumeExtractorsFactory implements ExtractorsFactory {
         Extractor[] result = extractors.clone();
         for (int i = 0; i < result.length; i++) {
             if (result[i] instanceof TsExtractor) result[i] = new PreRoll(result[i]);
+            else if (result[i] instanceof MatroskaExtractor) result[i] = new MatroskaFourccExtractor(result[i]);
         }
         return result;
     }
