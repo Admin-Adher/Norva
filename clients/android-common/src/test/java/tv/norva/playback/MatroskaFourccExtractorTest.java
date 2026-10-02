@@ -86,6 +86,30 @@ public final class MatroskaFourccExtractorTest {
         video.sampleMetadata(3000000L,1,40,12,null);assertArrayEquals(new Object[]{3000000L,1,40,12,null},(Object[])sample[0]);
         wrapped.seek(567890L,204000000L);assertEquals(567890L,fake.position);assertEquals(204000000L,fake.time);
     }
+    @Test public void interruptedHeaderReadCanBeRetriedWithoutConsumingBytes() throws Exception {
+        byte[] data=header(entry(7,1,"V_MS/VFW/FOURCC","XVID",new byte[0]));
+        int[] peek={0};boolean[] interrupted={false};
+        ExtractorInput input=(ExtractorInput)Proxy.newProxyInstance(ExtractorInput.class.getClassLoader(),new Class<?>[]{ExtractorInput.class},(p,m,a)->{
+            if(m.getName().equals("getPosition"))return 0L;
+            if(m.getName().equals("resetPeekPosition")){peek[0]=0;return null;}
+            if(m.getName().equals("peek")){
+                if(!interrupted[0]){interrupted[0]=true;throw new java.io.IOException("temporary fixture read");}
+                int n=Math.min((int)a[2],data.length-peek[0]);if(n==0)return -1;
+                System.arraycopy(data,peek[0],(byte[])a[0],(int)a[1],n);peek[0]+=n;return n;
+            }
+            throw new AssertionError(m.getName());
+        });
+        Fake fake=new Fake();Extractor wrapped=new MatroskaFourccExtractor(fake);Format[] received={null};
+        TrackOutput sink=(TrackOutput)Proxy.newProxyInstance(TrackOutput.class.getClassLoader(),new Class<?>[]{TrackOutput.class},(p,m,a)->{
+            if(m.getName().equals("format"))received[0]=(Format)a[0];return null;
+        });
+        wrapped.init(new ExtractorOutput(){public TrackOutput track(int id,int type){return sink;}public void endTracks(){}public void seekMap(SeekMap map){}});
+        try{wrapped.read(input,new PositionHolder());fail("Read must report the temporary error");}catch(java.io.IOException expected){}
+        assertEquals(0,peek[0]);wrapped.read(input,new PositionHolder());assertEquals(0,peek[0]);
+        fake.output.track(7,C.TRACK_TYPE_VIDEO).format(new Format.Builder().setSampleMimeType(MimeTypes.VIDEO_UNKNOWN).build());
+        assertEquals(MimeTypes.VIDEO_MP4V,received[0].sampleMimeType);
+        assertTrue(received[0].initializationData.isEmpty());
+    }
     static final class Fake implements Extractor {
         ExtractorOutput output;long position,time;
         public boolean sniff(ExtractorInput i){return true;}public void init(ExtractorOutput o){output=o;}

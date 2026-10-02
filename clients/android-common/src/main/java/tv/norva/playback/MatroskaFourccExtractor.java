@@ -61,7 +61,6 @@ final class MatroskaFourccExtractor implements Extractor {
     }
     @Override public int read(ExtractorInput input, PositionHolder position) throws IOException {
         if (!inspected && input.getPosition() == 0) {
-            inspected = true;
             byte[] prefix = new byte[MAX_HEADER_BYTES];
             int length = 0;
             try {
@@ -74,6 +73,9 @@ final class MatroskaFourccExtractor implements Extractor {
                     if (parsed != null) { mpeg4Tracks = parsed; break; }
                 }
             } finally { input.resetPeekPosition(); }
+            // A transient HTTP read can be retried at byte zero. Do not lose
+            // recognition permanently when the first peek did not complete.
+            inspected = true;
         }
         return delegate.read(input, position);
     }
