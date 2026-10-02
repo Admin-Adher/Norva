@@ -40,6 +40,24 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def official_translations(details):
+    """Choose populated fields per language; an empty region cannot erase one."""
+    preferred = {'fr': 'FR', 'en': 'US', 'pt': 'BR', 'es': 'ES', 'hi': 'IN',
+                 'tr': 'TR', 'bn': 'BD', 'ar': 'SA', 'id': 'ID', 'tl': 'PH'}
+    translations = (details.get('translations') or {}).get('translations') or []
+    translations = sorted(translations, key=lambda t: t.get('iso_3166_1') != preferred.get(t.get('iso_639_1')))
+    result = {}
+    for translation in translations:
+        lang = translation.get('iso_639_1'); data = translation.get('data') or {}
+        if not isinstance(lang, str) or len(lang) != 2 or not lang.isalpha():
+            continue
+        fields = {'title': data.get('title') or data.get('name'), 'overview': data.get('overview')}
+        for field, value in fields.items():
+            if isinstance(value, str) and value.strip():
+                result.setdefault(lang, {}).setdefault(field, value.strip())
+    return result
+
+
 def clean_title(value):
     text = str(value or '').replace('\u2019', "'")
     text = re.sub(r'^(?:[A-Z]{2}|4K|8K)(?:-[A-Z0-9]+)*\s+[-|▎]\s+', '', text)

@@ -27,6 +27,52 @@ full_apply = load('apply-selection-exhaustive-20261002.py')
 
 
 class IdentityEvidence(unittest.TestCase):
+    def test_every_stored_synopsis_language_is_checked_even_with_a_filled_fallback(self):
+        row = {'provider_tmdb_id': '1', 'metadata': {'tmdb': {'id': 1, 'overview': 'A valid fallback.'},
+          'i18n': {'ar': {'overview': 'https://github.com/not-a-synopsis'}, 'bn': {'overview': '   '}}}}
+        result = exhaustive.metadata_checks(row, None)
+        self.assertIn('synopsis_contains_link_requires_review', result['issues'])
+        self.assertNotIn('bn', result['storedSynopsisLanguages'])
+        self.assertTrue(result['hasFallbackSynopsis'])
+        row['metadata'] = {'i18n': {'pt': {'overview': 'Um resumo válido.'}}}
+        self.assertTrue(exhaustive.metadata_checks(row, None)['hasFallbackSynopsis'])
+
+    def test_empty_regional_translation_cannot_hide_an_available_synopsis(self):
+        details = {'translations': {'translations': [
+          {'iso_639_1': 'fr', 'iso_3166_1': 'FR', 'data': {'title': 'Titre', 'overview': 'Synopsis officiel.'}},
+          {'iso_639_1': 'fr', 'iso_3166_1': 'CA', 'data': {'title': 'Titre canadien', 'overview': ''}},
+          {'iso_639_1': 'pt', 'iso_3166_1': 'PT', 'data': {'overview': 'Texto disponível.'}},
+          {'iso_639_1': 'pt', 'iso_3166_1': 'BR', 'data': {'title': 'Título brasileiro', 'overview': '  '}}]}}
+        result = audit.official_translations(details)
+        self.assertEqual(result['fr'], {'title': 'Titre', 'overview': 'Synopsis officiel.'})
+        self.assertEqual(result['pt'], {'title': 'Título brasileiro', 'overview': 'Texto disponível.'})
+        row = {'metadata': {}, 'provider_tmdb_id': None}
+        self.assertEqual(exhaustive.metadata_checks(row, details)['missingAvailableTranslations'], ['fr', 'pt'])
+
+    def test_final_ledger_uses_narrowed_proof_and_rejects_a_stale_inventory(self):
+        import json
+        import tempfile
+        row = {'item_type': 'movie', 'identity_key': 'example', 'title': 'Example'}
+        receipt = {'sourceProofVersion': 4, 'inputHash': audit.digest(row),
+                   'status': 'unresolved', 'reason': 'truncated_candidates'}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for folder in ['qualified', 'year-review']:
+                (root / folder).mkdir()
+            name = exhaustive.receipt(row)
+            (root / 'qualified' / name).write_text(json.dumps(receipt))
+            with patch.object(exhaustive, 'ROOT', root):
+                self.assertEqual(exhaustive.final_receipt(row)['reason'], 'truncated_candidates')
+                narrowed = {**receipt, 'status': 'matched', 'tmdbId': '12', 'reason': None}
+                (root / 'year-review' / name).write_text(json.dumps(narrowed))
+                self.assertEqual(exhaustive.final_receipt(row)['tmdbId'], '12')
+                with self.assertRaises(AssertionError):
+                    exhaustive.final_receipt({**row, 'title': 'Changed source title'})
+                narrowed['sourceProofVersion'] = 3
+                (root / 'year-review' / name).write_text(json.dumps(narrowed))
+                with self.assertRaises(AssertionError):
+                    exhaustive.final_receipt(row)
+
     def test_complete_image_alias_and_raw_year_can_confirm_shortened_provider_label(self):
         row = {'item_type': 'movie', 'title': 'New Year Blue', 'provider_units': [
           {'title': 'New Year Blue', 'provider_year': 2021, 'provider_group': 'Movies / Telugu / 2021'}]}

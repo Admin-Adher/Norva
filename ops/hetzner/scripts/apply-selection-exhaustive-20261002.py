@@ -64,6 +64,32 @@ def candidate_poster(api, row, result):
     return current if good_artwork(current) else None
 
 
+def attach_proofs(change, row, result):
+    if result['evidence'] in ['source_media_year_alias', 'source_series_season_alias']:
+        seen = set(); proof = []
+        for unit in result['unitProof']:
+            key = audit.digest([unit['provider_year'], unit.get('source_unit'), unit.get('provider_group')])
+            if key not in seen:
+                seen.add(key); proof.append(unit)
+        assert len(proof) <= 40
+        change['sourceUnits'] = proof
+        if result['evidence'] == 'source_series_season_alias':
+            change['officialSeasons'] = [{'season_number': s['season_number'], 'air_date': s.get('air_date')}
+                                         for s in result['details'].get('seasons') or []]
+    if result['evidence'] == 'source_alias_file_duration':
+        change.update({'sourceTitleLabel': row['title'], 'expectedTargetUrl': result['expectedTargetUrl'],
+                       'fileDurationSeconds': result['durationProof']['seconds']})
+    if result['evidence'] == 'source_original_provider_id':
+        change['originalIdUnits'] = result['originalIdUnits']
+    if result['evidence'] == 'source_poster_confirmed' and result.get('originalPosterUnits'):
+        change['originalPosterUnits'] = result['originalPosterUnits']
+    if result['evidence'] == 'source_image_filename_exact_alias':
+        change.update({'expectedManifestPoster': row['manifest_poster'],
+                       'sourceImageLabel': next(v for k, v in result['aliasProof'] if k == 'image_filename')})
+    change.update({'releaseId': row['release_id'], 'manifestSha256': row['manifest_sha256']})
+    return change
+
+
 def build_plan():
     rows = json.loads((ROOT / 'inputs.json').read_text())
     qualified = json.loads((ROOT / 'qualified.safe.json').read_text())
@@ -118,27 +144,7 @@ def build_plan():
             checks.append({'title': row['title'], 'reason': 'no_verified_replacement_artwork'})
             if same:
                 change['poster'] = row['poster_url']
-        if r['evidence'] in ['source_media_year_alias', 'source_series_season_alias']:
-            seen = set(); proof = []
-            for u in r['unitProof']:
-                key = audit.digest([u['provider_year'], u.get('source_unit'), u.get('provider_group')])
-                if key not in seen:
-                    seen.add(key); proof.append(u)
-            assert len(proof) <= 40
-            change['sourceUnits'] = proof
-            if r['evidence'] == 'source_series_season_alias':
-                change['officialSeasons'] = [{'season_number': s['season_number'], 'air_date': s.get('air_date')}
-                                             for s in r['details'].get('seasons') or []]
-        if r['evidence'] == 'source_alias_file_duration':
-            change.update({'sourceTitleLabel': row['title'], 'expectedTargetUrl': r['expectedTargetUrl'],
-                           'fileDurationSeconds': r['durationProof']['seconds']})
-        if r['evidence'] == 'source_original_provider_id':
-            change['originalIdUnits'] = r['originalIdUnits']
-        if r['evidence'] == 'source_poster_confirmed' and r.get('originalPosterUnits'):
-            change['originalPosterUnits'] = r['originalPosterUnits']
-        if r['evidence'] == 'source_image_filename_exact_alias':
-            change.update({'expectedManifestPoster': row['manifest_poster'],
-                           'sourceImageLabel': next(v for k, v in r['aliasProof'] if k == 'image_filename')})
+        attach_proofs(change, row, r)
         if reassessment:
             change['rejectionReassessment'] = reassessment
         next_plot = change['editorial']['tmdb'].get('overview')
@@ -147,7 +153,6 @@ def build_plan():
           or available.get('issues') or not (md.get('tmdb') or {}).get('genres') and change['editorial']['tmdb'].get('genres'))
         if not useful:
             skips['verified_but_no_official_metadata_available'] += 1; continue
-        change.update({'releaseId': row['release_id'], 'manifestSha256': row['manifest_sha256']})
         changes.append(change)
     assert len(rows) == qualified['total']
     summary = {'inventoryRows': len(rows), 'changes': len(changes), 'skips': dict(skips),

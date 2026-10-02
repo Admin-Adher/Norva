@@ -44,14 +44,7 @@ def build_change(row, result):
                    'originalTitle': row['title']}
     else:
         details = result['details']
-        i18n = {}
-        for t in (details.get('translations') or {}).get('translations', []):
-            lang, data = t.get('iso_639_1'), t.get('data') or {}
-            if isinstance(lang, str) and len(lang) == 2 and lang.isalpha():
-                localized = {k: v.strip() for k, v in {'title': data.get('title') or data.get('name'),
-                                                      'overview': data.get('overview')}.items() if isinstance(v, str) and v.strip()}
-                if localized:
-                    i18n[lang] = localized
+        i18n = audit.official_translations(details)
         original_language = details.get('original_language')
         overview = next((v.strip() for v in [details.get('overview'), i18n.get('fr', {}).get('overview'),
                                             i18n.get('en', {}).get('overview'), i18n.get(original_language, {}).get('overview'),
@@ -62,7 +55,8 @@ def build_change(row, result):
         canonical = details.get('title') or details.get('name') or row['title']
         tmdb = {k: v for k, v in {'id': details['id'], 'title': canonical,
             'original_title': details.get('original_title') or details.get('original_name'), 'overview': overview,
-            'runtime': details.get('runtime'), 'vote_average': details.get('vote_average'),
+            'runtime': details.get('runtime'), 'number_of_seasons': details.get('number_of_seasons'),
+            'vote_average': details.get('vote_average'),
             'poster_path': details.get('poster_path'), 'backdrop_path': details.get('backdrop_path'),
             'release_date': details.get('release_date'), 'first_air_date': details.get('first_air_date'),
             'genres': [g['name'] for g in details.get('genres', [])], 'status': details.get('status'),

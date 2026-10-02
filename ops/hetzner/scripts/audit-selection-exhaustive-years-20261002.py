@@ -73,8 +73,9 @@ def work(api, row):
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--follow', action='store_true'); args = parser.parse_args()
     rows = json.loads((ROOT / 'inputs.json').read_text()); done = set(); tasks = []
-    api = audit.Tmdb(); began = time.time(); output = ROOT / 'year-review'; output.mkdir(mode=0o700, exist_ok=True)
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    api = audit.Tmdb(); api.request_interval = 1 / 24
+    began = time.time(); output = ROOT / 'year-review'; output.mkdir(mode=0o700, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=8) as pool:
         while len(done) < len(rows):
             ready = []
             for row in rows:
