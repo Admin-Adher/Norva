@@ -16,6 +16,7 @@ audit = load('audit-selection-tmdb-20261002.py')
 rescue = load('rescue-selection-tmdb-20261002.py')
 probe = load('probe-selection-editorial-identities-20261002.py')
 repair = load('repair-selection-editorial-20261002.py')
+remainder = load('audit-selection-remainder-20261002.py')
 
 
 class IdentityEvidence(unittest.TestCase):
@@ -70,6 +71,54 @@ class IdentityEvidence(unittest.TestCase):
         row = {'item_type': 'movie', 'identity_key': 'norm:movie:example:', 'title': 'Example',
                'provider_tmdb_id': '1', 'poster_url': None, 'manifest_poster': None, 'metadata': {}}
         self.assertIsNone(repair.build_change(row, {'status': 'request_error', 'oldRejected': True}))
+
+    def test_source_image_label_retains_numbers_and_ignores_opaque_tmdb_paths(self):
+        self.assertEqual(remainder.image_label('https://provider.invalid/11-11-Telugu.jpg'), '11 11 Telugu')
+        self.assertEqual(remainder.image_label('https://provider.invalid/Film-2-Tamil-Poster.jpg'), 'Film 2 Tamil')
+        self.assertIsNone(remainder.image_label('https://image.tmdb.org/t/p/w500/opaque.jpg'))
+        self.assertIsNone(remainder.image_label('https://provider.invalid/poster.jpg'))
+
+    def test_image_label_confirms_only_compatible_long_truncated_provider_title(self):
+        row = {'title': 'Arimapatti Sakthive'}
+        d = {'id': 1, 'title': 'Arimapatti Sakthivel', 'release_date': '2024-01-01'}
+        hit, reason, _ = remainder.assess(row, [d], [('provider_title', row['title']),
+                                                     ('image_filename', 'Arimapatti Sakthivel Tamil')])
+        self.assertEqual(hit[0], '1')
+        self.assertEqual(hit[1], 'source_image_filename_exact_alias')
+        self.assertIsNone(reason)
+        hit, reason, _ = remainder.assess({'title': 'Another Long Film'}, [d],
+          [('provider_title', 'Another Long Film'), ('image_filename', 'Arimapatti Sakthivel Tamil')])
+        self.assertIsNone(hit)
+        self.assertEqual(reason, 'image_title_conflict')
+
+    def test_source_year_conflict_and_numeric_names_remain_unresolved(self):
+        d = {'id': 1, 'title': '192021', 'release_date': '2023-01-01'}
+        self.assertEqual(remainder.assess({'title': '192021'}, [d], [('provider_title', '192021')])[1],
+                         'needs_independent_media_identity')
+        self.assertEqual(remainder.assess({'title': 'Example'}, [],
+          [('provider_title', 'Example 2023'), ('media_filename', 'Example 1990')])[1], 'conflicting_source_years')
+
+    def test_official_fallback_keeps_its_language_and_never_creates_french_translation(self):
+        d = {'translations': {'translations': [{'iso_639_1': 'ar', 'data': {'overview': 'نص رسمي'}}]}}
+        self.assertEqual(remainder.synopsis(d), ('ar', 'نص رسمي'))
+        self.assertEqual(remainder.synopsis({}), (None, None))
+
+    def test_complete_filename_does_not_choose_a_generic_title_homonym(self):
+        candidates = [{'id': 1, 'title': 'A Bela Adormecida'},
+          {'id': 2, 'title': 'Dragon Ball A Bela Adormecida no Castelo do Diabo'}]
+        hints = [('provider_title', 'A Bela Adormecida'),
+          ('media_filename', 'Dragon Ball A Bela Adormecida no Castelo do Diabo')]
+        hit, reason, _ = remainder.assess({'title': 'A Bela Adormecida'}, candidates, hints)
+        self.assertEqual(hit[0], '2')
+        self.assertEqual(hit[1], 'unique_source_filename_alias')
+        hints.append(('media_filename', 'Other Franchise A Bela Adormecida'))
+        self.assertIsNone(remainder.assess({'title': 'A Bela Adormecida'}, candidates, hints)[0])
+
+    def test_subtitle_prefix_does_not_drop_a_sequel_number(self):
+        self.assertTrue(remainder.prefix_alias('A Hora do Pesadelo 2', {'title': 'A Hora do Pesadelo 2 A Vingança'}))
+        self.assertFalse(remainder.prefix_alias('A Hora do Pesadelo', {'title': 'A Hora do Pesadelo 2 A Vingança'}))
+        self.assertFalse(remainder.prefix_alias('A Hora do Pesadelo 3', {'title': 'A Hora do Pesadelo 2 A Vingança'}))
+        self.assertFalse(remainder.prefix_alias('Demolidor', {'title': 'Demolidor O Homem Sem Medo'}))
 
 
 if __name__ == '__main__':

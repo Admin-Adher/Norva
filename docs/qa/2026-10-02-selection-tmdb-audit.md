@@ -1,5 +1,7 @@
 # Norva Selection — correspondances TMDB, cohérence des fiches et langues
 
+**Complément postérieur :** les manques ont été réduits à 153 films sans affiche, 646 films et 43 séries sans synopsis de secours. Voir [la passe complémentaire](2026-10-02-selection-editorial-remainder.md). Les mesures ci-dessous conservent le résultat de l'audit initial.
+
 ## Périmètre et résultat
 
 Contrôle du catalogue commun publié `b5bd1b07-3692-421a-bd8a-40c64a29b4ec` : **6 159 films et 273 séries**. Les nombres de cette note concernent Norva Selection ; ils ne certifient pas les autres catalogues fournisseurs ni l'objectif commercial complet.

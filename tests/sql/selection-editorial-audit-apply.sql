@@ -14,6 +14,8 @@ begin
  update public.selection_shared_rollout set enabled=true;
  update public.selection_shared_titles set provider_tmdb_id='999',match_status='provider_verified',metadata=old_md,
    poster_url='https://image.tmdb.org/t/p/w500/wrong.jpg' where release_id=rel and identity_key=key and item_type='movie';
+ update public.selection_shared_variants set poster_url='https://provider.invalid/Guerreiros-da-Virtude.jpg'
+   where release_id=rel and item_type='movie' and identity_key=key;
  for counter in 1..3 loop
    person:=gen_random_uuid(); readers:=array_append(readers,person);
    insert into auth.users(id,email,created_at,updated_at) values(person,'editorial-audit-'||person::text||'@example.invalid',now(),now());
@@ -56,6 +58,19 @@ begin
    perform public.norva_apply_selection_editorial_audit(rel,manifest,jsonb_build_array(jsonb_set(patch,'{editorial,tmdbValidation,confidence}','0.783')));
    raise exception 'Weak proof accepted';
  exception when invalid_parameter_value then null; end;
+ patch:=patch||jsonb_build_object('evidence','source_image_filename_exact_alias',
+   'expectedManifestPoster','https://provider.invalid/wrong.jpg','sourceImageLabel','Guerreiros da Virtude');
+ begin
+   perform public.norva_apply_selection_editorial_audit(rel,manifest,jsonb_build_array(patch));
+   raise exception 'Changed image filename proof accepted';
+ exception when sqlstate 'PT409' then null; end;
+ patch:=jsonb_set(patch,'{expectedManifestPoster}','"https://provider.invalid/Guerreiros-da-Virtude.jpg"');
+ begin
+   perform public.norva_apply_selection_editorial_audit(rel,manifest,jsonb_build_array(patch||
+     jsonb_build_object('evidence','source_title_prefix_file_duration','sourceTitleLabel','Guerreiros da Virtude',
+       'fileDurationSeconds',6000,'expectedTargetUrl','https://private.invalid/wrong.mp4')));
+   raise exception 'Foreign file duration proof accepted';
+ exception when sqlstate 'PT409' then null; end;
  receipt:=public.norva_apply_selection_editorial_audit(rel,manifest,jsonb_build_array(patch));
  if receipt->>'updatedTitles'<>'1' or receipt->>'ownedBindings'<>'1' then raise exception 'Qualified association not repaired: %',receipt; end if;
  if (select provider_tmdb_id from public.cloud_titles where id=ids[1])<>'49478'
@@ -64,6 +79,13 @@ begin
    raise exception 'Owner preference lost or association stale'; end if;
  if exists(select 1 from public.cloud_titles where id in(ids[2],ids[3]) and provider_tmdb_id<>'999') then
    raise exception 'Manual/private title overwritten'; end if;
+ select metadata into after_md from public.selection_shared_titles where release_id=rel and identity_key=key;
+ receipt:=public.norva_apply_selection_editorial_audit(rel,manifest,jsonb_build_array(patch||
+   jsonb_build_object('expectedId','49478','expectedPoster','https://image.tmdb.org/t/p/w500/correct.jpg',
+     'expectedMetadata',after_md,'evidence','source_title_prefix_file_duration','sourceTitleLabel','Guerreiros da Virtude',
+     'fileDurationSeconds',6000,'expectedTargetUrl',(select playback_hint->>'targetUrl' from public.selection_shared_variants
+       where release_id=rel and item_type='movie' and external_id=ext))));
+ if receipt->>'updatedTitles'<>'1' then raise exception 'Exact manifest duration evidence rejected'; end if;
  if (select metadata::text from public.selection_shared_titles where release_id=rel and identity_key=key) like '%never-publish%' then
    raise exception 'Unrelated metadata published'; end if;
  if (select visibility_epoch from public.cloud_user_catalog_visibility_epochs where user_id=readers[1])<=before_epoch then
