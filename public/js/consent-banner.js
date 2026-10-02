@@ -69,6 +69,20 @@
   var background = [];
   var backgroundObserver = null;
   var confirmPendingRelease = false;
+  var backBridgeInstalled = false;
+
+  function installBackBridge() {
+    if (backBridgeInstalled) return;
+    backBridgeInstalled = true;
+    // Pairing/account pages do not load the SPA D-pad module. The native shell
+    // still calls this same Back bridge before navigating or showing its exit UI.
+    window.__norvaTV = window.__norvaTV || {};
+    var previous = window.__norvaTV.handleBack;
+    window.__norvaTV.handleBack = function () {
+      if (el && tv) { hide(); return 'modal'; }
+      return typeof previous === 'function' ? previous() : 'none';
+    };
+  }
 
   function releaseConfirm(event) {
     if (event.type === 'keyup' && event.key !== 'Enter') return;
@@ -181,14 +195,14 @@
       '.norva-consent__card{animation:norva-consent-in .28s ease both}',
       '@media (max-width:560px){.norva-consent__actions{width:100%;margin-left:0}.norva-consent__btn{flex:1 1 auto}}',
       '.norva-consent--tv{padding:24px 48px;box-sizing:border-box}',
-      '.norva-consent--tv .norva-consent__card{max-width:960px;padding:24px;gap:16px 24px;border-radius:var(--radius-lg);background:var(--color-bg-secondary);color:var(--color-text-primary);border-color:var(--color-border-light);box-shadow:var(--shadow-lg)}',
-      '.norva-consent--tv .norva-consent__text{flex:1 1 400px;font-size:20px;line-height:1.45;color:var(--color-text-secondary)}',
+      '.norva-consent--tv .norva-consent__card{max-width:960px;padding:24px;gap:16px 24px;border-radius:var(--radius-lg,16px);background:var(--color-bg-secondary,var(--surface,var(--panel)));color:var(--color-text-primary,var(--text));border-color:var(--color-border-light,var(--line,var(--border,currentColor)));box-shadow:var(--shadow-lg,none)}',
+      '.norva-consent--tv .norva-consent__text{flex:1 1 400px;font-size:20px;line-height:1.45;color:var(--color-text-secondary,var(--muted))}',
       '.norva-consent--tv .norva-consent__actions{gap:16px}',
-      '.norva-consent--tv .norva-consent__btn{min-height:56px;min-width:144px;padding:16px 24px;font-size:20px;border-radius:var(--radius-md);background:var(--color-bg-tertiary);background-image:none;color:var(--color-text-primary);border:2px solid var(--color-border-light)}',
-      '.norva-consent--tv .norva-consent__link{display:inline-flex;align-items:center;min-height:48px;font-size:18px;color:var(--color-text-secondary);border-radius:var(--radius-sm)}',
-      '.norva-consent--tv .norva-consent__btn:focus,.norva-consent--tv .norva-consent__link:focus{outline:4px solid var(--color-accent-hover)!important;outline-offset:4px!important;box-shadow:none!important;transform:none!important}',
-      '.norva-consent--tv .norva-consent__btn:focus{background:var(--color-bg-active);border-color:var(--color-text-primary)}',
-      '.norva-consent--tv .norva-consent__btn:active{background:var(--color-accent-dim)}',
+      '.norva-consent--tv .norva-consent__btn{min-height:56px;min-width:144px;padding:16px 24px;font-size:20px;border-radius:var(--radius-md,10px);background:var(--color-bg-tertiary,var(--surface-2,var(--surface2,var(--panel-2,var(--surface)))));background-image:none;color:var(--color-text-primary,var(--text));border:2px solid var(--color-border-light,var(--line,var(--border,currentColor)))}',
+      '.norva-consent--tv .norva-consent__link{display:inline-flex;align-items:center;min-height:48px;font-size:18px;color:var(--color-text-secondary,var(--muted));border-radius:var(--radius-sm,6px)}',
+      '.norva-consent--tv .norva-consent__btn:focus,.norva-consent--tv .norva-consent__link:focus{outline:4px solid var(--color-accent-hover,var(--accent-hi,var(--accent)))!important;outline-offset:4px!important;box-shadow:none!important;transform:none!important}',
+      '.norva-consent--tv .norva-consent__btn:focus{background:var(--color-bg-active,var(--surface-2,var(--surface2,var(--panel-2,var(--surface,var(--panel,var(--color-bg-tertiary)))))));border-color:var(--color-text-primary,var(--text))}',
+      '.norva-consent--tv .norva-consent__btn:active{background:var(--color-accent-dim,var(--surface2,var(--panel-2)))}',
       '@media (prefers-reduced-motion:reduce){.norva-consent__card{animation:none}.norva-consent__btn{transition:none}}'
     ].join('');
     var s = document.createElement('style');
@@ -227,6 +241,7 @@
     });
     (document.body || document.documentElement).appendChild(el);
     if (tv) {
+      installBackBridge();
       containBackground();
       backgroundObserver = new MutationObserver(containBackground);
       backgroundObserver.observe(document.body, { childList: true });

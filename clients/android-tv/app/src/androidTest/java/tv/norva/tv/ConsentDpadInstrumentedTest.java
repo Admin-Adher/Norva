@@ -91,6 +91,22 @@ public class ConsentDpadInstrumentedTest {
             key(KeyEvent.KEYCODE_BACK);
             assertEquals("No implicit consent", "null", eval(view,"NorvaConsent.get()"));
             assertEquals("Settings opener restored", "\"opener\"", eval(view,"document.activeElement.id"));
+            // The pairing page has no SPA D-pad module: exercise the shared Back bridge.
+            instrumentation.runOnMainSync(() -> view.loadUrl("https://norva-consent.test/cloud-pair.html?device=tv"));
+            boolean pairingReady = false;
+            for (int i=0; i<100; i++) {
+                if ("true".equals(eval(view,"location.pathname==='/cloud-pair.html' && document.readyState==='complete' && !!window.NorvaConsent"))) { pairingReady=true; break; }
+                Thread.sleep(100);
+            }
+            assertTrue("Standalone pairing loaded", pairingReady);
+            eval(view,"NorvaConsent.open()");
+            assertEquals("Pairing consent opaque", "true", eval(view,"getComputedStyle(document.querySelector('.norva-consent__card')).backgroundColor!=='rgba(0, 0, 0, 0)'"));
+            key(KeyEvent.KEYCODE_DPAD_RIGHT);
+            assertEquals("Pairing Accept reachable", "\"granted\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
+            key(KeyEvent.KEYCODE_BACK);
+            assertEquals("Pairing native Back closes consent", "false", eval(view,"!!document.querySelector('.norva-consent')"));
+            assertEquals("Pairing dismissal grants nothing", "null", eval(view,"NorvaConsent.get()"));
+
         } finally { instrumentation.runOnMainSync(activity::finish); }
     }
     private void capture(ConsentQaActivity activity, WebView view, String name) {

@@ -1,7 +1,6 @@
 name: TV consent D-pad QA
 on:
-  push:
-    branches: [codex/tv-cookie-consent]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'public/js/consent-banner.js'
