@@ -68,10 +68,17 @@ def build_plan():
     rows = json.loads((ROOT / 'inputs.json').read_text())
     qualified = json.loads((ROOT / 'qualified.safe.json').read_text())
     assert qualified['allRowsExamined'] and qualified['rows'] == len(rows), 'Finish every title first'
+    years = json.loads((ROOT / 'years.safe.json').read_text())
+    assert years['allRowsExamined'] and years['rows'] == len(rows) and years['completedTasks'] == years['eligibleTasks']
     api = audit.Tmdb(); changes = []; skips = Counter(); checks = []
     for row in rows:
         r = json.loads((ROOT / 'qualified' / exhaustive.receipt(row)).read_text())
-        assert r['inputHash'] == audit.digest(row) and r.get('sourceProofVersion') == 3
+        narrowed = ROOT / 'year-review' / exhaustive.receipt(row)
+        if narrowed.exists():
+            n = json.loads(narrowed.read_text())
+            if n['status'] in ['matched', 'verified_existing']:
+                r = n
+        assert r['inputHash'] == audit.digest(row) and r.get('sourceProofVersion') == 4
         if r['status'] not in ['matched', 'verified_existing']:
             skips[r.get('reason') or 'unresolved'] += 1; continue
         md = row['metadata']; plot = (md.get('tmdb') or {}).get('overview') or md.get('overview') or md.get('plot')

@@ -76,10 +76,16 @@ def source_id(row, candidates, media):
 def work(api, row, media):
     base = json.loads((ROOT / 'identity' / exhaustive.receipt(row)).read_text())
     assert base['inputHash'] == audit.digest(row)
-    result = dict(base); result['rawSourceHash'] = audit.digest(media); result['sourceProofVersion'] = 3
+    result = dict(base); result['rawSourceHash'] = audit.digest(media); result['sourceProofVersion'] = 4
     if base['status'] == 'request_error':
         return result
     candidates = [api.details(row['item_type'], i) for i in base.get('candidateIds') or []]
+    if base['status'] == 'unresolved' and base.get('reason') != 'truncated_candidates':
+        chosen, reason, matching = exhaustive.independent_assessment(row, candidates, base.get('hints') or [], False)
+        if chosen:
+            result.update(chosen)
+            result.update({'status': 'verified_existing' if chosen['tmdbId'] == row['provider_tmdb_id'] else 'matched',
+                           'reason': None, 'matchingIds': matching})
     original_id = source_id(row, candidates, media)
     # A runtime cannot rule out a homonym omitted by an incomplete search.
     d, problem, proofs = (None, 'incomplete_candidate_set', []) if base.get('reason') == 'truncated_candidates' else durations_identity(row, candidates, media)
@@ -97,7 +103,7 @@ def work(api, row, media):
     else:
         d = None; evidence = None
     # Original raw logos are independent of the title recipe's enriched poster.
-    if not d and base['status'] not in ['matched', 'verified_existing'] and base.get('reason') != 'truncated_candidates' and media:
+    if not d and result['status'] not in ['matched', 'verified_existing'] and base.get('reason') != 'truncated_candidates' and media:
         paths = [audit.poster_path(m.get('poster_url')) for m in media]
         if all(paths) and len(set(paths)) == 1:
             path = paths[0]
@@ -108,7 +114,7 @@ def work(api, row, media):
                     d = proposed; evidence = 'source_poster_confirmed'
                     result['originalPosterUnits'] = [{'externalId': m['external_id'], 'poster': m['poster_url']} for m in media]
     if d:
-        if base['status'] in ['matched', 'verified_existing'] and str(d['id']) != base.get('tmdbId'):
+        if result['status'] in ['matched', 'verified_existing'] and str(d['id']) != result.get('tmdbId'):
             result.update({'status': 'unresolved', 'reason': 'original_source_and_search_disagree'})
             result.pop('details', None); result.pop('tmdbId', None)
             return result
@@ -120,9 +126,11 @@ def work(api, row, media):
         if ident in ((row['metadata'].get('tmdbSearchReview') or {}).get('rejectedTmdbIds') or []):
             result['protectedPreviousRejection'] = True
         result['metadataCheck'] = exhaustive.metadata_checks(row, d)
-    elif base['status'] == 'unresolved':
+    elif result['status'] == 'unresolved':
         result['durationReviewReason'] = problem
     result['metadataCheck'] = exhaustive.metadata_checks(row, result.get('details'))
+    if result.get('tmdbId') in ((row['metadata'].get('tmdbSearchReview') or {}).get('rejectedTmdbIds') or []):
+        result['protectedPreviousRejection'] = True
     return result
 
 
@@ -143,7 +151,7 @@ def main():
                 if f.exists():
                     old = json.loads(f.read_text())
                     assert old['inputHash'] == audit.digest(row)
-                    if old['status'] != 'request_error' and old.get('sourceProofVersion') == 3:
+                    if old['status'] != 'request_error' and old.get('sourceProofVersion') == 4:
                         done.add(f.name); continue
                 futures[pool.submit(work, api, row, by_key[(row['item_type'], row['identity_key'])])] = row
             for future in as_completed(futures):

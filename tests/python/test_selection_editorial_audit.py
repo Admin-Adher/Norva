@@ -27,6 +27,16 @@ full_apply = load('apply-selection-exhaustive-20261002.py')
 
 
 class IdentityEvidence(unittest.TestCase):
+    def test_complete_image_alias_and_raw_year_can_confirm_shortened_provider_label(self):
+        row = {'item_type': 'movie', 'title': 'New Year Blue', 'provider_units': [
+          {'title': 'New Year Blue', 'provider_year': 2021, 'provider_group': 'Movies / Telugu / 2021'}]}
+        d = {'id': 1, 'title': 'New Year Blues', 'release_date': '2021-02-10'}
+        hit, reason, _ = exhaustive.independent_assessment(row, [d], [
+          ('provider_title', row['title']), ('image_filename', 'New Year Blues Telugu')], False)
+        self.assertEqual(hit['tmdbId'], '1'); self.assertEqual(hit['evidence'], 'source_media_year_alias')
+        self.assertEqual(hit['aliasProof'][0][0], 'image_filename')
+        self.assertIsNone(reason)
+
     def test_old_poster_cannot_survive_a_different_identity_without_source_proof(self):
         class Api:
             def get(self, *args, **kwargs):

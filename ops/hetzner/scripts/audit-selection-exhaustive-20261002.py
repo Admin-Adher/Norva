@@ -8,8 +8,10 @@ import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import os
 from pathlib import Path
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -33,7 +35,9 @@ LANGUAGES = ['fr', 'en', 'pt', 'es', 'hi', 'tr', 'bn', 'ar', 'id', 'tl']
 
 def save(file, value):
     file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    file.write_text(json.dumps(value, ensure_ascii=False)); file.chmod(0o600)
+    temporary = file.with_name(file.name + '.' + str(os.getpid()) + '.' + str(threading.get_ident()) + '.tmp')
+    temporary.write_text(json.dumps(value, ensure_ascii=False)); temporary.chmod(0o600)
+    temporary.replace(file)
 
 
 def receipt(row):
@@ -106,8 +110,15 @@ def source_snapshot():
 
 def independent_assessment(row, candidates, hints, truncated):
     """Raw dates/seasons resolve homonyms, but never conceal source conflicts."""
-    chosen, reason, matching = deep.previous.assess(row, candidates, hints)
     supported, conflict = units.supported_units(row)
+    def dates_agree(d):
+        if row['item_type'] == 'movie':
+            return all(audit.year_ok(u['provider_year'], d) for u in supported)
+        seasons = {s.get('season_number'): s.get('air_date') or '' for s in d.get('seasons') or []}
+        return all(len(seasons.get(n, '')) >= 4 and abs(int(seasons[n][:4])-u['provider_year']) <= 1
+                   for u in supported for n in u['source_unit']['seasons'])
+    eligible = [d for d in candidates if not supported or dates_agree(d)]
+    chosen, reason, matching = deep.previous.assess(row, eligible, hints)
     if conflict:
         return None, conflict, matching
     if truncated:
@@ -125,8 +136,12 @@ def independent_assessment(row, candidates, hints, truncated):
     if chosen:
         ident, evidence, proof, year = chosen
         d = next(d for d in candidates if str(d.get('id')) == ident)
-        if supported and not units.unit_match(row, d, supported):
-            return None, 'official_identity_conflicts_with_raw_units', matching
+        if supported:
+            # The complete source filename/logo alias may be more precise
+            # than its shortened provider label. Its date must still agree.
+            return {'tmdbId': ident, 'evidence': 'source_series_season_alias'
+                    if row['item_type'] == 'series' else 'source_media_year_alias',
+                    'unitProof': supported, 'aliasProof': proof, 'details': d}, None, matching
         return {'tmdbId': ident, 'evidence': evidence, 'aliasProof': proof,
                 'sourceYear': year, 'details': d}, None, matching
     return None, reason or unit_reason or 'unresolved', matching

@@ -148,8 +148,9 @@ class Tmdb:
             try:
                 with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=12) as r:
                     payload = json.load(r)
-                file.write_text(json.dumps(payload, ensure_ascii=False))
-                file.chmod(0o600)
+                temporary = file.with_name(file.name + '.' + str(os.getpid()) + '.' + str(threading.get_ident()) + '.tmp')
+                temporary.write_text(json.dumps(payload, ensure_ascii=False))
+                temporary.chmod(0o600); temporary.replace(file)
                 return payload
             except urllib.error.HTTPError as e:
                 if e.code == 404:
