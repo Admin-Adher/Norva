@@ -1,5 +1,6 @@
 """Persist only the production image in the existing protected Compose override."""
 import datetime
+import argparse
 import json
 import os
 import pathlib
@@ -7,12 +8,16 @@ import re
 import subprocess
 
 root = pathlib.Path('/home/adrien/.norva/gateway-reference-rollout')
-root.mkdir(parents=True, exist_ok=True, mode=0o700)
 project = pathlib.Path('/home/adrien/.norva/nodemaven-switch-20260919')
 override = project / 'override.yml'
 envfile = project / '.env.media-vaapi'
 base = project / 'docker-compose.vaapi.yml'
-manifest = {'candidateImage':'sha256:dbfaaea9a69b41d58543f00086427963a3d75e7bafd1e8e7718a27547ab67118'}
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--expected-image', required=True)
+parser.add_argument('--apply', action='store_true')
+args = parser.parse_args()
+assert re.fullmatch(r'sha256:[a-f0-9]{64}', args.expected_image), 'invalid_image_digest'
+manifest = {'candidateImage': args.expected_image}
 live = json.loads(subprocess.check_output(['docker', 'inspect', 'norva-media-gateway']))[0]
 assert live['Image'] == manifest['candidateImage'] and live['State']['Running']
 assert not override.is_symlink() and override.parent.resolve() == project.resolve()
@@ -23,8 +28,14 @@ matches = list(re.finditer(pattern, old))
 assert len(matches) == 1, 'unexpected_gateway_image_declarations'
 new = re.sub(pattern, lambda match: match.group(1) + manifest['candidateImage'].encode()
              + match.group(2), old, count=1)
-assert new != old
+if new == old:
+    print(json.dumps({'changed': False, 'imageId': live['Image']}))
+    raise SystemExit(0)
+if not args.apply:
+    print(json.dumps({'wouldChange': True, 'imageId': live['Image']}))
+    raise SystemExit(0)
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+root.mkdir(parents=True, exist_ok=True, mode=0o700)
 backup = root / ('compose-override-before-' + stamp + '.yml')
 assert not backup.exists(), 'backup_already_exists'
 backup.write_bytes(old)

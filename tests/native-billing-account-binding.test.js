@@ -25,7 +25,7 @@ function supportedPackage(overrides = {}) {
   };
 }
 
-function loadBilling({ packageFactory = supportedPackage, legacy = false } = {}) {
+function loadBilling({ packageFactory = supportedPackage, legacy = false, userAgent = 'NorvaTV-AndroidPhone' } = {}) {
   const calls = { offerings: [], purchases: [], restores: [] };
   const window = {
     NORVA_BILLING_CONFIG: {},
@@ -86,7 +86,7 @@ function loadBilling({ packageFactory = supportedPackage, legacy = false } = {})
 
   const context = vm.createContext({
     window,
-    navigator: { userAgent: 'NorvaTV-AndroidPhone' },
+    navigator: { userAgent },
     localStorage: { getItem() { return null; } },
     URLSearchParams,
     setTimeout,
@@ -101,6 +101,22 @@ function loadBilling({ packageFactory = supportedPackage, legacy = false } = {})
   vm.runInContext(billingSource, context, { filename: 'billing.js' });
   return { billing: window.NorvaBilling, calls };
 }
+
+test('retention requires the shipped fresh-subscription-state fix before native purchase', async () => {
+  for (const version of ['1.3.23', '1.3.24', '1.3.28']) {
+    const { billing, calls } = loadBilling({ userAgent: `NorvaTV-AndroidPhone/${version}` });
+    assert.equal(billing.hasPlayRetention(), false);
+    assert.equal(await billing.playRetentionOffer('user-account-aaaaaaaa'), null);
+    await assert.rejects(billing.purchasePlayRetention('user-account-aaaaaaaa', { id: 'offer' }),
+      error => error.code === 'retention_unavailable');
+    assert.equal(calls.purchases.length, 0);
+  }
+  for (const version of ['1.3.29', '1.3.30', '1.4.0', '2.0.0']) {
+    assert.equal(loadBilling({ userAgent: `NorvaTV-AndroidPhone/${version}` }).billing.hasPlayRetention(), true);
+  }
+  assert.equal(loadBilling({ userAgent: 'NorvaTV-AndroidTV/3.8.22' }).billing.hasPlayRetention(), false);
+  assert.equal(loadBilling({ legacy: true, userAgent: 'NorvaTV-AndroidPhone/1.3.29' }).billing.hasPlayRetention(), false);
+});
 
 test('native offerings are cached per account and use page-scoped request ids', async () => {
   const { billing, calls } = loadBilling();
