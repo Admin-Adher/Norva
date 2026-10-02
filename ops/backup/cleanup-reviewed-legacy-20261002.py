@@ -49,6 +49,22 @@ def plan(s3, now):
 
 def run(s3, apply=False):
     now = dt.datetime.now(dt.timezone.utc)
+    if not apply:
+        # Follow-up audit: read-only accounting, including WAL upload dates.
+        all_objects = inventory(s3, '')
+        groups = {}
+        for prefix in ('db/', 'selfhost/dumps/', 'selfhost/base/', 'selfhost/wal/'):
+            objects = [o for o in all_objects if o['Key'].startswith(prefix)]
+            groups[prefix] = {
+                'count': len(objects), 'bytes': sum(o['Size'] for o in objects),
+                'oldest_upload': min((o['LastModified'] for o in objects), default=None),
+                'newest_upload': max((o['LastModified'] for o in objects), default=None),
+                'older_than_3_days_count': sum(now - o['LastModified'] > dt.timedelta(days=3) for o in objects),
+                'older_than_3_days_bytes': sum(o['Size'] for o in objects if now - o['LastModified'] > dt.timedelta(days=3)),
+            }
+        print(json.dumps({'read_only_storage_audit': True, 'time': now.isoformat(),
+                          'bucket_bytes': sum(o['Size'] for o in all_objects),
+                          'bucket_count': len(all_objects), 'groups': groups}, default=str))
     candidates, proof = plan(s3, now)
     result = {'time': now.isoformat(), 'apply': apply, 'proof': proof,
               'objects': [{'key': o['Key'], 'bytes': o['Size'], 'etag': o['ETag']} for o in candidates],
