@@ -12,6 +12,9 @@ begin
  select * into initial from public.selection_shared_titles where release_id=rel and title='Guerreiros da Virtude';
  key:=initial.identity_key; ext:=initial.default_external_id;
  if rel is null or key is null then raise exception 'Qualified public fixture missing'; end if;
+ -- Keep the bounded maintenance assertions independent of other fixture rows.
+ update public.selection_shared_titles set match_status='unmatched'
+   where not (release_id=rel and item_type='movie' and identity_key=key);
  update public.selection_shared_rollout set enabled=true;
  update public.selection_shared_titles set provider_tmdb_id=null,match_status='unmatched',poster_url=null,
    metadata='{}',genre_buckets=array['autres'] where release_id=rel and item_type='movie' and identity_key=key;
@@ -100,10 +103,48 @@ begin
    where user_id=reader and id=rid)<>'Synopsis public QA actualisé' then raise exception 'Later common metadata stayed stale'; end if;
  result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
  if result->>'updatedTitles'<>'0' then raise exception 'Maintenance repeated unchanged writes'; end if;
+ -- An otherwise valid same-ID cache row may still carry provider artwork.
+ -- It must not replace an official poster/backdrop or create a write loop.
+ execute 'reset role';
+ update public.catalog_titles set poster_url='https://provider.invalid/other.jpg',
+   backdrop_url='https://provider.invalid/other-backdrop.jpg'
+   where item_type='movie' and provider_tmdb_id='49478';
+ execute 'set local role service_role';
+ result:=public.norva_refresh_selection_shared_editorial(rel,manifest,'movie',array[key],donor,ds,donor_gen);
+ if result->>'updatedTitles'<>'0' then raise exception 'Provider artwork replaced official artwork'; end if;
+ result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
+ if result->>'updatedTitles'<>'0' or (select poster_url from public.selection_shared_titles
+   where release_id=rel and item_type='movie' and identity_key=key) not like '%qa-warriors.jpg' then
+   raise exception 'Maintenance downgrades official artwork'; end if;
+ if public.norva_selection_preferred_editorial_image(null,'https://provider.invalid/available.jpg')
+   <> 'https://provider.invalid/available.jpg' then raise exception 'Provider fallback was suppressed'; end if;
+ if public.norva_selection_preferred_editorial_image('https://provider.invalid/available.jpg','https://image.tmdb.org/t/p/w500/official.jpg')
+   <> 'https://image.tmdb.org/t/p/w500/official.jpg' then raise exception 'Official upgrade was suppressed'; end if;
+ -- Routine maintenance fills a new locale but cannot undo reviewed artwork,
+ -- its matching metadata path, or a populated reviewed synopsis.
+ execute 'reset role';
+ update public.selection_shared_titles set metadata=jsonb_set(jsonb_set(metadata,
+   '{tmdbSearchReview}','{"reviewedAt":"2026-10-02T00:00:00Z"}'),'{tmdb,poster_path}','"/qa-warriors.jpg"')
+   where release_id=rel and item_type='movie' and identity_key=key;
+ update public.catalog_titles set poster_url='https://image.tmdb.org/t/p/w500/other-official.jpg',
+   metadata=jsonb_set(jsonb_set(jsonb_set(metadata,'{tmdb,poster_path}','"/other-official.jpg"'),
+     '{i18n,fr,overview}','"Cache ancien à ignorer"'),'{i18n,pt}','{"overview":"Novo resumo oficial"}')
+   where item_type='movie' and provider_tmdb_id='49478';
+ execute 'set local role service_role';
+ result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
+ if result->>'updatedTitles'<>'1' or not exists(select 1 from public.selection_shared_titles
+   where release_id=rel and item_type='movie' and identity_key=key and poster_url like '%qa-warriors.jpg'
+     and metadata#>>'{tmdb,poster_path}'='/qa-warriors.jpg'
+     and metadata#>>'{i18n,fr,overview}'='Synopsis public QA actualisé'
+     and metadata#>>'{i18n,pt,overview}'='Novo resumo oficial') then
+   raise exception 'Reviewed editorial changed or new locale not filled'; end if;
+ result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
+ if result->>'updatedTitles'<>'0' then raise exception 'Reviewed maintenance rewrites unchanged rows'; end if;
  -- A provider size endpoint cannot replace the reviewed image. Both-invalid
  -- state is cleared once; no invented TMDB path and no repeat write.
  execute 'reset role';
- update public.catalog_titles set poster_url='https://image.tmdb.org/t/p/w600_and_h900_bestv2'
+ update public.catalog_titles set poster_url='https://image.tmdb.org/t/p/w600_and_h900_bestv2',
+   backdrop_url='https://image.tmdb.org/t/p/w780/qa-warriors.jpg'
    where item_type='movie' and provider_tmdb_id='49478';
  execute 'set local role service_role';
  result:=public.norva_refresh_selection_shared_editorial_from_cache(1);

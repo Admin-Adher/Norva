@@ -123,6 +123,27 @@ begin
  if (select metadata from public.catalog_titles where item_type='movie' and provider_tmdb_id='49478') is distinct from before_global
    or nullif(current_setting('norva.selection_owned_editorial_context',true),'') is not null then
    raise exception 'Owner refresh leaked private metadata into global cache or left mirror bypass active'; end if;
+ -- An ordinary refresh cannot remove a rejection of the active identity.
+ execute 'reset role';
+ update public.cloud_titles set metadata=jsonb_set(metadata,'{tmdbSearchReview,rejectedTmdbIds}','["49478","999"]') where id=ids[1];
+ execute 'set local role service_role';
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[1],sources[1],(snap->>'generationId')::uuid,100);
+ if not (select metadata#>'{tmdbSearchReview,rejectedTmdbIds}' from cloud_titles where id=ids[1]) @> '["49478"]' then
+   raise exception 'Owner rejection cleared without independent public reassessment'; end if;
+ -- A separately archived independent proof clears only the reassessed ID.
+ execute 'reset role';
+ update public.selection_shared_titles set metadata=jsonb_set(metadata,'{tmdbSearchReview,reassessments}',
+   jsonb_build_array(jsonb_build_object('tmdbId','49478','reason','independent_public_manifest_reassessment',
+     'evidence','source_media_year_alias','sourceProofSha256',repeat('a',64),
+     'previousReview','{"rejectedTmdbIds":["49478","999"]}'::jsonb))) where release_id=rel and identity_key=key;
+ execute 'set local role service_role';
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[1],sources[1],(snap->>'generationId')::uuid,100);
+ if (select metadata#>'{tmdbSearchReview,rejectedTmdbIds}' from cloud_titles where id=ids[1])<>'["999"]'::jsonb
+   or (select metadata#>>'{tmdbSearchReview,reassessments,0,tmdbId}' from cloud_titles where id=ids[1])<>'49478'
+   or (select metadata->>'privatePreference' from cloud_titles where id=ids[1])<>'keep' then
+   raise exception 'Independent owner reassessment lost proof, unrelated rejection or private fields'; end if;
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[1],sources[1],(snap->>'generationId')::uuid,100);
+ if receipt->>'updatedTitles'<>'0' then raise exception 'Owned reassessment replay is not idempotent'; end if;
  begin
    perform public.norva_refresh_selection_owned_editorial(readers[2],sources[1],(snap->>'generationId')::uuid,100);
    raise exception 'Foreign legacy owner accepted';

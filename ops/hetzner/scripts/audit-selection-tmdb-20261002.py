@@ -40,6 +40,24 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def official_translations(details):
+    """Choose populated fields per language; an empty region cannot erase one."""
+    preferred = {'fr': 'FR', 'en': 'US', 'pt': 'BR', 'es': 'ES', 'hi': 'IN',
+                 'tr': 'TR', 'bn': 'BD', 'ar': 'SA', 'id': 'ID', 'tl': 'PH'}
+    translations = (details.get('translations') or {}).get('translations') or []
+    translations = sorted(translations, key=lambda t: t.get('iso_3166_1') != preferred.get(t.get('iso_639_1')))
+    result = {}
+    for translation in translations:
+        lang = translation.get('iso_639_1'); data = translation.get('data') or {}
+        if not isinstance(lang, str) or len(lang) != 2 or not lang.isalpha():
+            continue
+        fields = {'title': data.get('title') or data.get('name'), 'overview': data.get('overview')}
+        for field, value in fields.items():
+            if isinstance(value, str) and value.strip():
+                result.setdefault(lang, {}).setdefault(field, value.strip())
+    return result
+
+
 def clean_title(value):
     text = str(value or '').replace('\u2019', "'")
     text = re.sub(r'^(?:[A-Z]{2}|4K|8K)(?:-[A-Z0-9]+)*\s+[-|▎]\s+', '', text)
@@ -119,6 +137,7 @@ class Tmdb:
         assert self.key, 'Existing TMDB credential unavailable'
         self.lock = threading.Lock()
         self.next_request = 0
+        self.request_interval = 0.125
         self.requests = 0
         self.cache = ROOT / 'public-api'
         self.cache.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -140,17 +159,28 @@ class Tmdb:
                 wait = max(0, self.next_request - time.monotonic())
                 if wait:
                     time.sleep(wait)
-                self.next_request = time.monotonic() + 0.125  # 8 rps across workers
+                # Operators may lower the interval to 1/24s for a complete
+                # inventory; all workers still share this rate limiter.
+                self.next_request = time.monotonic() + max(1 / 24, self.request_interval)
                 self.requests += 1
             try:
                 with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=12) as r:
                     payload = json.load(r)
-                file.write_text(json.dumps(payload, ensure_ascii=False))
-                file.chmod(0o600)
+                temporary = file.with_name(file.name + '.' + str(os.getpid()) + '.' + str(threading.get_ident()) + '.tmp')
+                temporary.write_text(json.dumps(payload, ensure_ascii=False))
+                temporary.chmod(0o600); temporary.replace(file)
                 return payload
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     return {'missing': True}
+                if e.code == 429:
+                    try:
+                        retry_after = min(60, max(1, float(e.headers.get('Retry-After', '1'))))
+                    except (TypeError, ValueError):
+                        retry_after = 1
+                    with self.lock:
+                        self.request_interval = min(1, max(0.125, self.request_interval * 2))
+                        self.next_request = max(self.next_request, time.monotonic() + retry_after)
                 if e.code not in [429, 500, 502, 503, 504]:
                     raise RuntimeError('TMDB HTTP ' + str(e.code)) from None
             except (TimeoutError, OSError):

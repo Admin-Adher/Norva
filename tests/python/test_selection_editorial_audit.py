@@ -21,9 +21,134 @@ remainder = load('audit-selection-remainder-20261002.py')
 deep = load('audit-selection-deeper-search-20261002.py')
 units = load('prove-selection-source-units-20261002.py')
 duration = load('prove-selection-media-duration-20261002.py')
+exhaustive = load('audit-selection-exhaustive-20261002.py')
+qualified = load('prove-selection-exhaustive-sources-20261002.py')
+full_apply = load('apply-selection-exhaustive-20261002.py')
 
 
 class IdentityEvidence(unittest.TestCase):
+    def test_every_stored_synopsis_language_is_checked_even_with_a_filled_fallback(self):
+        row = {'provider_tmdb_id': '1', 'metadata': {'tmdb': {'id': 1, 'overview': 'A valid fallback.'},
+          'i18n': {'ar': {'overview': 'https://github.com/not-a-synopsis'}, 'bn': {'overview': '   '}}}}
+        result = exhaustive.metadata_checks(row, None)
+        self.assertIn('synopsis_contains_link_requires_review', result['issues'])
+        self.assertNotIn('bn', result['storedSynopsisLanguages'])
+        self.assertTrue(result['hasFallbackSynopsis'])
+        row['metadata'] = {'i18n': {'pt': {'overview': 'Um resumo válido.'}}}
+        self.assertTrue(exhaustive.metadata_checks(row, None)['hasFallbackSynopsis'])
+
+    def test_empty_regional_translation_cannot_hide_an_available_synopsis(self):
+        details = {'translations': {'translations': [
+          {'iso_639_1': 'fr', 'iso_3166_1': 'FR', 'data': {'title': 'Titre', 'overview': 'Synopsis officiel.'}},
+          {'iso_639_1': 'fr', 'iso_3166_1': 'CA', 'data': {'title': 'Titre canadien', 'overview': ''}},
+          {'iso_639_1': 'pt', 'iso_3166_1': 'PT', 'data': {'overview': 'Texto disponível.'}},
+          {'iso_639_1': 'pt', 'iso_3166_1': 'BR', 'data': {'title': 'Título brasileiro', 'overview': '  '}}]}}
+        result = audit.official_translations(details)
+        self.assertEqual(result['fr'], {'title': 'Titre', 'overview': 'Synopsis officiel.'})
+        self.assertEqual(result['pt'], {'title': 'Título brasileiro', 'overview': 'Texto disponível.'})
+        row = {'metadata': {}, 'provider_tmdb_id': None}
+        self.assertEqual(exhaustive.metadata_checks(row, details)['missingAvailableTranslations'], ['fr', 'pt'])
+
+    def test_final_ledger_uses_narrowed_proof_and_rejects_a_stale_inventory(self):
+        import json
+        import tempfile
+        row = {'item_type': 'movie', 'identity_key': 'example', 'title': 'Example'}
+        receipt = {'sourceProofVersion': 4, 'inputHash': audit.digest(row),
+                   'status': 'unresolved', 'reason': 'truncated_candidates'}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for folder in ['qualified', 'year-review']:
+                (root / folder).mkdir()
+            name = exhaustive.receipt(row)
+            (root / 'qualified' / name).write_text(json.dumps(receipt))
+            with patch.object(exhaustive, 'ROOT', root):
+                self.assertEqual(exhaustive.final_receipt(row)['reason'], 'truncated_candidates')
+                narrowed = {**receipt, 'status': 'matched', 'tmdbId': '12', 'reason': None}
+                (root / 'year-review' / name).write_text(json.dumps(narrowed))
+                self.assertEqual(exhaustive.final_receipt(row)['tmdbId'], '12')
+                with self.assertRaises(AssertionError):
+                    exhaustive.final_receipt({**row, 'title': 'Changed source title'})
+                narrowed['sourceProofVersion'] = 3
+                (root / 'year-review' / name).write_text(json.dumps(narrowed))
+                with self.assertRaises(AssertionError):
+                    exhaustive.final_receipt(row)
+
+    def test_complete_image_alias_and_raw_year_can_confirm_shortened_provider_label(self):
+        row = {'item_type': 'movie', 'title': 'New Year Blue', 'provider_units': [
+          {'title': 'New Year Blue', 'provider_year': 2021, 'provider_group': 'Movies / Telugu / 2021'}]}
+        d = {'id': 1, 'title': 'New Year Blues', 'release_date': '2021-02-10'}
+        hit, reason, _ = exhaustive.independent_assessment(row, [d], [
+          ('provider_title', row['title']), ('image_filename', 'New Year Blues Telugu')], False)
+        self.assertEqual(hit['tmdbId'], '1'); self.assertEqual(hit['evidence'], 'source_media_year_alias')
+        self.assertEqual(hit['aliasProof'][0][0], 'image_filename')
+        self.assertIsNone(reason)
+
+    def test_old_poster_cannot_survive_a_different_identity_without_source_proof(self):
+        class Api:
+            def get(self, *args, **kwargs):
+                return {'posters': []}
+        row = {'item_type': 'movie', 'provider_tmdb_id': '1', 'poster_url': 'https://image.tmdb.org/t/p/w500/old.jpg'}
+        result = {'tmdbId': '2', 'details': {'id': 2}}
+        with patch.object(full_apply, 'good_artwork', return_value=True):
+            self.assertIsNone(full_apply.candidate_poster(Api(), row, result))
+
+    def test_tmdb_throttle_backs_off_all_workers(self):
+        import tempfile
+        import threading
+        import urllib.error
+        import io
+        api = audit.Tmdb.__new__(audit.Tmdb)
+        api.key = 'unit-test-key'; api.lock = threading.Lock(); api.next_request = 0
+        api.requests = 0; api.request_interval = 1 / 24
+        error = urllib.error.HTTPError('https://api.themoviedb.org/unit', 429, 'rate limited', {'Retry-After': '2'}, None)
+        with tempfile.TemporaryDirectory() as temp:
+            api.cache = Path(temp)
+            with patch.object(audit.urllib.request, 'urlopen', side_effect=[error, io.BytesIO(b'{"id":1}')]), \
+              patch.object(audit.time, 'sleep'), patch.object(audit.time, 'monotonic', return_value=100):
+                self.assertEqual(api.get('movie/1'), {'id': 1})
+        self.assertGreaterEqual(api.request_interval, 0.125)
+        self.assertEqual(api.requests, 2)
+
+    def test_exhaustive_source_conflict_cannot_be_hidden_by_exact_name(self):
+        row = {'item_type': 'movie', 'title': 'A Complete Example', 'provider_units': [
+          {'title': 'A Complete Example', 'provider_year': 2023, 'provider_group': 'Movies / Telugu / 1990'}]}
+        d = {'id': 1, 'title': 'A Complete Example', 'release_date': '2023-01-01'}
+        self.assertIsNone(exhaustive.independent_assessment(row, [d], [('provider_title', row['title'])], False)[0])
+
+    def test_exhaustive_truncated_homonym_set_cannot_certify_identity(self):
+        row = {'item_type': 'movie', 'title': 'A Complete Example', 'provider_units': []}
+        d = {'id': 1, 'title': 'A Complete Example'}
+        self.assertEqual(exhaustive.independent_assessment(row, [d], [('provider_title', row['title'])], True)[1], 'truncated_candidates')
+
+    def test_qualified_duration_requires_exact_url_sampling_receipt(self):
+        import hashlib
+        url = 'https://public.invalid/example.mp4'
+        media = {'external_id': 'sample', 'playback_hint': {'targetUrl': url}, 'metadata': {'duration': 6000,
+          'selectionPlaybackValidation': {'urlSha256': hashlib.sha256(url.encode()).hexdigest(),
+            'method': 'server-sampling-and-file-access', 'fileHttpStatus': 206,
+            'sourceCommit': 'abc', 'containerMetadataCheckedAt': '2026-09-07'}}}
+        self.assertEqual(qualified.qualified_duration(media)['seconds'], 6000)
+        media['playback_hint']['targetUrl'] = 'https://public.invalid/another.mp4'
+        self.assertIsNone(qualified.qualified_duration(media))
+
+    def test_mixed_qualified_versions_remain_unresolved(self):
+        import hashlib
+        def media(seconds, name):
+            url = 'https://public.invalid/' + name + '.mp4'
+            return {'external_id': name, 'playback_hint': {'targetUrl': url}, 'metadata': {'duration': seconds,
+              'selectionPlaybackValidation': {'urlSha256': hashlib.sha256(url.encode()).hexdigest(),
+                'method': 'server-sampling-and-file-access', 'fileHttpStatus': 206,
+                'sourceCommit': 'abc', 'containerMetadataCheckedAt': '2026-09-07'}}}
+        row = {'item_type': 'movie', 'title': 'Example'}
+        ds = [{'id': 1, 'title': 'Example', 'runtime': 100}, {'id': 2, 'title': 'Example', 'runtime': 80}]
+        hit, reason, proof = qualified.durations_identity(row, ds, [media(6000, 'first'), media(4800, 'second')])
+        self.assertIsNone(hit); self.assertEqual(reason, 'ambiguous_source_versions'); self.assertEqual(len(proof), 2)
+
+    def test_image_transport_failure_is_unknown_not_missing(self):
+        with patch.object(exhaustive.urllib.request, 'urlopen', side_effect=TimeoutError()):
+            result = exhaustive.check_artwork('https://public.invalid/poster.jpg')
+        self.assertEqual(result['status'], 'request_error')
+
     def test_wider_search_does_not_stop_on_first_locale_empty_stub(self):
         class Api(deep.WiderTmdb):
             def __init__(self):

@@ -124,7 +124,7 @@ def refresh_owners():
     receipts = json.loads(progress.read_text()) if progress.exists() else []
     zeros = 0
     for r in receipts:
-        zeros = zeros + r['sources'] + r['hiddenOrChanged'] if r['updatedTitles'] == 0 else 0
+        zeros = zeros + r['sources'] if r['updatedTitles'] == 0 else 0
     busy = 0
     for i in range(200):
         r = json.loads(owners.sql("set request.jwt.claim.role='service_role';select public.norva_refresh_selection_owned_editorial_all(100,10);"))
@@ -134,7 +134,8 @@ def refresh_owners():
         busy = 0; receipts.append(r)
         progress.write_text(json.dumps(receipts, indent=2))
         print(json.dumps({'pass': len(receipts), **r}), flush=True)
-        zeros = zeros + r['sources'] + r['hiddenOrChanged'] if r['updatedTitles'] == 0 else 0
+        # Hidden/skipped heads are not successful coverage of an active owner.
+        zeros = zeros + r['sources'] if r['updatedTitles'] == 0 else 0
         if zeros >= 2 * count:
             break
     assert zeros >= 2 * count, 'Owner refresh still pending; resume from cursor and receipts'
