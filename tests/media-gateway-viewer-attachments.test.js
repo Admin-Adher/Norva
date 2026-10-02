@@ -83,7 +83,7 @@ test('Gateway joins only a validated producer and rewrites every HLS edge with t
     gateway.indexOf('function requirePlaybackToken('),
     gateway.indexOf('function cors('),
   );
-  assert.match(gateway, /const GATEWAY_VERSION = 173/);
+  assert.match(gateway, /const GATEWAY_VERSION = 174/);
   assert.match(gateway, /function mediaCacheLiveJoinEnabled\([\s\S]*sharedMediaCachePublisher[\s\S]*mediaCacheProducerControl\.active/);
   assert.match(routes, /inspectMediaCacheLiveJoinGraph\(session\)/);
   assert.match(gateway, /topologyValidated: true/);
@@ -133,4 +133,44 @@ test('a viewer reattaching to bounded continuation recovers the original transpo
   assert.equal(session.completeCacheContinuationDemanded, false);
   assert.deepEqual(cleared, [timer]);
   assert.equal(sharedMediaCacheStats.liveJoinReattachedContinuations, 1);
+});
+
+test('cold live joining requires the original video and every audio prefix', async () => {
+  const start = gateway.indexOf('async function inspectMediaCacheLiveJoinGraph(');
+  const end = gateway.indexOf('\nasync function waitForPlaylist(', start);
+  assert.ok(start >= 0 && end > start);
+  const targets = [
+    { kind: 'video', playlistName: 'video.m3u8' },
+    { kind: 'audio', playlistName: 'audio_0.m3u8' },
+    { kind: 'audio', playlistName: 'audio_1.m3u8' },
+  ];
+  let inspections;
+  const inspect = vm.runInNewContext(`(${gateway.slice(start, end).trim()})`, {
+    mediaCacheLiveJoinEnabled: () => true,
+    fsp: { readFile: async () => '#EXTM3U\n' },
+    multiAudioHlsEnabled: () => true,
+    inspectMultiAudioMasterPlaylist: () => ({ ready: true }),
+    rewriteExactHlsMaster: master => master,
+    hlsMediaPlaylistTargetsForSession: () => targets,
+    inspectHlsMediaPlaylistArtifact: async (_session, target) => inspections[target.playlistName],
+    exactSubtitleRenditionsForSession: () => [],
+    audioRenditionsForSession: () => [{}, {}],
+  });
+  const session = { mediaCacheProducer: {}, assetSource: 'session-output', status: 'ready',
+    multiAudioHls: {}, exactSubtitleHls: {}, playlistPath: '/test/playlist.m3u8' };
+  const reset = () => { inspections = Object.fromEntries(targets.map(target => [target.playlistName, {
+    ...target, inspection: { mediaSequence: 0, firstSegment: target.playlistName.replace('.m3u8', '-00000.ts'),
+      segmentCount: 64, durationSeconds: 128 },
+  }])); };
+  reset();
+  assert.equal((await inspect(session)).joinable, true, 'a retained start remains eligible');
+  for (const target of targets) {
+    reset(); inspections[target.playlistName].inspection.mediaSequence = 17;
+    inspections[target.playlistName].inspection.firstSegment = target.playlistName.replace('.m3u8', '-00017.ts');
+    const result = await inspect(session);
+    assert.equal(result.joinable, false, target.playlistName);
+    assert.equal(result.reason, 'vod-prefix-not-retained');
+  }
+  reset(); inspections['video.m3u8'].inspection.firstSegment = 'video-00017.ts';
+  assert.equal((await inspect(session)).joinable, false, 'sequence zero cannot disguise a missing first file');
 });

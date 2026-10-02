@@ -2430,7 +2430,7 @@ const MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS = Math.min(
     MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
     clampInt(process.env.MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS, 8, 1, 32),
 );
-const GATEWAY_VERSION = 173;
+const GATEWAY_VERSION = 174;
 
 // Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
 // 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
@@ -21808,6 +21808,16 @@ async function inspectMediaCacheLiveJoinGraph(session) {
             targets.map((target) => inspectHlsMediaPlaylistArtifact(session, target)),
         );
         if (inspected.some((result) => !result)) return reject('media-continuity-not-ready');
+
+        // Cold coordination joins only starts at zero. A rolling graph may
+        // still be contiguous while its beginning has already been deleted;
+        // hls.js would start on a later timeline and can advance the original
+        // viewer's production credit too. Let Edge fall back to an independent
+        // playback rather than attach a viewer to an incomplete VOD prefix.
+        if (inspected.some(({ inspection }) => inspection.mediaSequence !== 0
+            || !/^(?:segment|video|audio_\d+)-0{5,8}\.ts$/.test(inspection.firstSegment || ''))) {
+            return reject('vod-prefix-not-retained');
+        }
 
         const subtitleRenditions = exactSubtitleRenditionsForSession(session);
         for (const rendition of subtitleRenditions) {
