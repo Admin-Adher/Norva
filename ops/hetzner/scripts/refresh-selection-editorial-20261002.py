@@ -64,6 +64,14 @@ def summary():
 
 def schema():
     assert sql("select to_regprocedure('public.norva_refresh_selection_shared_editorial(uuid,text,text,text[],uuid,uuid,uuid)') is null;") == 't', 'Schema already installed'
+    expected_functions = {'norva_selection_shared_publish_guard': 'e00b176cf69ac50de11773cf5f5ab52f',
+                          'norva_get_visible_catalog_titles_by_ids': '5a9e42e47a3dbf6ed425af32bd034128'}
+    expected_views = {'selection_shared_visible_titles': '28e0a49b49c0db49ed527933ac8ad9f9',
+                      'cloud_catalog_visible_titles': '18fcbc778f282ea62e053481cbfda77e'}
+    for name, digest in expected_functions.items():
+        assert sql("select md5(pg_get_functiondef(oid)) from pg_proc where pronamespace='public'::regnamespace and proname=" + quote(name) + ';') == digest, 'Function contract drift: ' + name
+    for name, digest in expected_views.items():
+        assert sql('select md5(pg_get_viewdef(' + quote('public.' + name) + '::regclass,true));') == digest, 'View contract drift: ' + name
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     backup = ROOT / 'before'
     backup.mkdir(mode=0o700, exist_ok=False)
