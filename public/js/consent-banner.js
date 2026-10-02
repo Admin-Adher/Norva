@@ -68,6 +68,22 @@
   var tv = false;
   var background = [];
   var backgroundObserver = null;
+  var confirmPendingRelease = false;
+
+  function releaseConfirm(event) {
+    if (event.type === 'keyup' && event.key !== 'Enter') return;
+    confirmPendingRelease = false;
+    document.removeEventListener('keydown', swallowHeldConfirm, true);
+    document.removeEventListener('keyup', releaseConfirm, true);
+    window.removeEventListener('blur', releaseConfirm);
+  }
+
+  function swallowHeldConfirm(event) {
+    if (!confirmPendingRelease || event.key !== 'Enter') return false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return true;
+  }
 
   function containBackground() {
     Array.prototype.forEach.call(document.body.children, function (node) {
@@ -88,6 +104,7 @@
 
   // Shared with tvNavigation so capture-listener registration order is irrelevant.
   function handleKey(event) {
+    if (swallowHeldConfirm(event)) return true;
     if (!el || !tv) return false;
     var key = event.key;
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Tab',
@@ -107,7 +124,14 @@
     var index = controls.indexOf(document.activeElement);
     if (index < 0) { focusDefault(); return true; }
     if (key === 'Enter') {
-      if (!event.repeat) controls[index].click();
+      if (!event.repeat) {
+        // A held OK must not activate the restored catalogue/fiche after closing.
+        confirmPendingRelease = true;
+        document.addEventListener('keydown', swallowHeldConfirm, true);
+        document.addEventListener('keyup', releaseConfirm, true);
+        window.addEventListener('blur', releaseConfirm);
+        controls[index].click();
+      }
     } else {
       var rtl = getComputedStyle(el).direction === 'rtl';
       var backwards = key === 'ArrowUp' || (key === 'Tab' && event.shiftKey) ||

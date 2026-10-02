@@ -64,7 +64,17 @@ public class ConsentDpadInstrumentedTest {
             key(KeyEvent.KEYCODE_DPAD_LEFT);
             assertEquals("Decline reachable", "\"denied\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
             capture(activity, view, "tv-consent-decline.png");
-            key(KeyEvent.KEYCODE_DPAD_CENTER);
+            // Give the existing artifact collector (5-second interval) time to copy the capture.
+            Thread.sleep(6000);
+            assertEquals("Card fits TV viewport", "true", eval(view,"(()=>{const r=document.querySelector('.norva-consent__card').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})()"));
+            eval(view,"window.backgroundClicks=0;document.getElementById('detail').onclick=()=>backgroundClicks++");
+            long down = android.os.SystemClock.uptimeMillis();
+            instrumentation.sendKeySync(new KeyEvent(down,down,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_CENTER,0));
+            instrumentation.waitForIdleSync();
+            instrumentation.sendKeySync(new KeyEvent(down,android.os.SystemClock.uptimeMillis(),KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_CENTER,1));
+            instrumentation.sendKeySync(new KeyEvent(down,android.os.SystemClock.uptimeMillis(),KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_CENTER,0));
+            instrumentation.waitForIdleSync();
+            assertEquals("Held OK never plays underlying content", "0", eval(view,"backgroundClicks"));
             assertEquals("Refusal persisted", "\"denied\"", eval(view,"NorvaConsent.get()"));
             assertEquals("Focus restored to fiche", "\"detail\"", eval(view,"document.activeElement.id"));
             assertEquals("Original inert state retained", "true", eval(view,"document.getElementById('already-inert').inert"));
