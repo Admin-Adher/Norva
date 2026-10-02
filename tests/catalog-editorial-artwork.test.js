@@ -26,6 +26,8 @@ test('malformed TMDB URL without known artwork becomes a missing image', () => {
 test('localized HTTPS provider artwork and valid TMDB artwork remain usable', () => {
   assert.equal(preferSecureImage('https://provider.example/pt/poster.jpg', valid), 'https://provider.example/pt/poster.jpg');
   assert.equal(preferSecureImage(valid, null), valid);
+  const cropped = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2/real-poster.jpg';
+  assert.equal(preferSecureImage(cropped, null), cropped);
 });
 test('HTTP provider fallback is preserved when no verified replacement exists', () => {
   assert.equal(preferSecureImage('http://provider.example/poster.jpg', valid), valid);

@@ -4304,7 +4304,7 @@ function preferSecureImage(stored: unknown, tmdbUrl: string | null) {
   // Treat that as missing artwork, so it cannot override a verified image or
   // turn a branded placeholder into a broken request on every device.
   if (value && /^https?:\/\/image\.tmdb\.org(?:\/|$)/i.test(value)
-    && !/^https?:\/\/image\.tmdb\.org\/t\/p\/(?:original|[wh]\d+)\/[a-z0-9._-]+\.(?:jpg|png|webp)(?:[?#].*)?$/i.test(value)) value = null;
+    && !/^https?:\/\/image\.tmdb\.org\/t\/p\/[a-z0-9_-]+\/[a-z0-9._-]+\.(?:jpg|png|webp)(?:[?#].*)?$/i.test(value)) value = null;
   if (value && !/^http:\/\//i.test(value)) return value;
   return tmdbUrl ?? value ?? null;
 }

@@ -38,25 +38,29 @@ def health(name):
 
 
 def main():
-    p = argparse.ArgumentParser(); p.add_argument('--apply', action='store_true'); args = p.parse_args()
+    p = argparse.ArgumentParser(); p.add_argument('--apply', action='store_true')
+    p.add_argument('--expected-sha256', default=EXPECTED)
+    p.add_argument('--revision', type=int, choices=[1, 2], default=1)
+    args = p.parse_args()
     names = ['norva-edge-functions', 'norva-edge-functions-2']
     before = {name: inspect(name) for name in names}
     mounts = [next(m['Source'] for m in before[n]['Mounts'] if m['Destination'] == '/home/deno/functions') for n in names]
     assert mounts[0] == mounts[1], 'Runtime parity drift'
     runtime = Path(mounts[0])
-    assert hashlib.sha256((runtime / FILE).read_text().encode()).hexdigest() == EXPECTED
+    assert hashlib.sha256((runtime / FILE).read_text().encode()).hexdigest() == args.expected_sha256
     for name in names:
         health(name)
     staged = ROOT / 'catalog-artwork-index.ts'
     after = hashlib.sha256(staged.read_text().encode()).hexdigest()
-    print(json.dumps({'apply': args.apply, 'beforeSha256': EXPECTED, 'afterSha256': after}), flush=True)
+    print(json.dumps({'apply': args.apply, 'beforeSha256': args.expected_sha256, 'afterSha256': after}), flush=True)
     if not args.apply:
         return
     env_path = STACK / '.env'; original = env_path.read_text(); lines = original.splitlines()
     assert sum(v.startswith('NORVA_EDGE_FUNCTIONS_ROOT=') for v in lines) == 1
-    backup = ROOT / 'before-artwork-deployment'; backup.mkdir(mode=0o700, exist_ok=False)
+    suffix = '' if args.revision == 1 else '-v2'
+    backup = ROOT / ('before-artwork-deployment' + suffix); backup.mkdir(mode=0o700, exist_ok=False)
     (backup / 'stack.env').write_text(original); (backup / 'stack.env').chmod(0o600)
-    target = ROOT / 'runtime-artwork-functions'; shutil.copytree(runtime, target)
+    target = ROOT / ('runtime-artwork-functions' + suffix); shutil.copytree(runtime, target)
     (target / FILE).write_text(staged.read_text())
     compose = ['docker', 'compose', '--env-file', str(env_path), '-f', str(STACK / 'docker-compose.supabase.yml')]
     env_path.write_text('\n'.join('NORVA_EDGE_FUNCTIONS_ROOT=' + str(target) if l.startswith('NORVA_EDGE_FUNCTIONS_ROOT=') else l for l in lines) + '\n')
