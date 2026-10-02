@@ -106,6 +106,12 @@ public class ConsentDpadInstrumentedTest {
             key(KeyEvent.KEYCODE_BACK);
             assertEquals("Pairing native Back closes consent", "false", eval(view,"!!document.querySelector('.norva-consent')"));
             assertEquals("Pairing dismissal grants nothing", "null", eval(view,"NorvaConsent.get()"));
+            assertEquals("TV hides the direct-login loop", "true", eval(view,"document.getElementById('account-link').hidden && !document.getElementById('account-link').getClientRects().length"));
+            key(KeyEvent.KEYCODE_DPAD_RIGHT);
+            assertEquals("Single TV action stays reachable", "\"restart-button\"", eval(view,"document.activeElement.id"));
+            key(KeyEvent.KEYCODE_DPAD_LEFT);
+            assertEquals("No invisible account focus stop", "\"restart-button\"", eval(view,"document.activeElement.id"));
+
 
         } finally { instrumentation.runOnMainSync(activity::finish); }
     }
