@@ -5023,5 +5023,21 @@
     "ar": "تسوية {{p0}}",
     "id": "Penyelesaian {{p0}}",
     "fil": "{{p0}} settlement"
+  },
+  "ui_tv_consent_summary": {
+    "source": "Allow analytics and advertising cookies? Your choice does not affect playback.",
+    "en": "Allow analytics and advertising cookies? Your choice does not affect playback.",
+    "fr": "Autoriser les cookies de mesure d’audience et de publicité ? Votre choix ne change pas la lecture.",
+    "pt-BR": "Permitir cookies de análise e publicidade? Sua escolha não afeta a reprodução.",
+    "es": "¿Permitir cookies de análisis y publicidad? Tu elección no afecta a la reproducción.",
+    "hi": "क्या विश्लेषण और विज्ञापन कुकीज़ की अनुमति दें? आपके चुनाव से प्लेबैक प्रभावित नहीं होता।",
+    "tr": "Analiz ve reklam çerezlerine izin verilsin mi? Seçiminiz oynatmayı etkilemez.",
+    "bn": "বিশ্লেষণ ও বিজ্ঞাপনের কুকি অনুমোদন করবেন? আপনার পছন্দ প্লেব্যাককে প্রভাবিত করে না।",
+    "ar": "هل تسمح بملفات تعريف الارتباط للتحليلات والإعلانات؟ اختيارك لا يؤثر على التشغيل.",
+    "id": "Izinkan cookie analitik dan iklan? Pilihan Anda tidak memengaruhi pemutaran.",
+    "fil": "Payagan ang cookies para sa analytics at advertising? Hindi maaapektuhan ng iyong pagpili ang pag-play.",
+    "refs": [
+      "public/js/consent-banner.js"
+    ]
   }
 }
