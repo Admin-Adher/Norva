@@ -24,10 +24,9 @@ profile with MPEG-4 video, Portuguese AC-3 and English MP3 audio, 6157.44 second
 | Both players at 10:39:27.961 | Producer position 216.880 s, follower 24.990 s; both unpaused, readyState 4, decoded dimensions 1280×720 |
 | Primary player closed through Films at 10:39:51.438 | Follower continues; at 10:41:43.645 follower 160.670 s, unpaused/readyState 4; primary has no active video |
 
-The follower's approximately three-second start is inferred from click time,
-observation time and played position; it is not an instrumented first-frame
-measurement. Two profiles of one ordinary account prove the real UI path, not
-independent-owner sharing.
+The persisted first-frame event is at 10:39:01.776883, with player-measured
+TTFF **948 ms** (the click preceded this by 1.885 seconds). Two profiles of one
+ordinary account prove the real UI path, not independent-owner sharing.
 
 ## Defect revealed by an additional real mobile launch
 
@@ -55,14 +54,75 @@ Focused tests exercise the real helper with primary/joined/raw viewers,
 successful and failed auxiliary drain, unrelated affinity and full account
 deletion. Initial focused result: 50 passed, one integration fixture skipped.
 
-## Acceptance still pending at this commit
+## Deployed correction and replay
 
-- Deploy the correction and replay simultaneous UI playback, close-primary,
-  additional-account mobile launch and close-last-viewer cleanup.
-- Native playback of this real MPEG-4/AC-3 MKV failed in the initial attempt;
-  do not relabel its `direct` session as successful playback or a shared-cache hit.
+PR [572](https://github.com/Admin-Adher/Norva/pull/572) merged as
+`518cfd9d46a87af7ad2f193887401fd3642d011e`. CI run `36998254897` passed
+cloud contracts and phone, TV and Windows builds. The regression suite reports
+**5,663 passed, 27 skipped, zero failed**; these are automated cases, not real
+streams. Focused operator safety tests: 9 passed.
+
+- Both Gateways run **172**, immutable image
+  `sha256:51af8bd887840377b6c4459150e34d93079cebd6b116afcbbe2c35e6e45cc9bf`,
+  runtime source `990d832b7a39dc5d146616f6bd457690e89caa36` (the later
+  pre-merge commit only corrected test version expectations).
+- All **78 source files** match the staged repository source on both routes.
+- Pilot receipt: `gateway-reference-rollout/20261002T110014662038Z`.
+  Main receipt: `gateway-reference-rollout/20261002T111016531551Z`.
+  Receipts are private under `/home/adrien/.norva/`; environment and mounts
+  were preserved. Main Compose now resolves to the same immutable image.
+- Main deployment handed off one signed, deferred storyboard checkpoint on
+  the unchanged persistent volume. No running extraction was interrupted.
+  Its checkpoint digest was unchanged after replacement. The bounded provider
+  quiesce lease ended with the old process; no cron was disabled.
+- Both Edge replicas run **85**, with identical playback source SHA-256
+  `5d7226bc9aa98211ac2ea4d7ec2efc9e5dd14a289835d2999d2245710346f225`.
+  The prior file was preserved privately for rollback; container configuration
+  and mounts were unchanged.
+
+The post-fix replay again used normal UI buttons and the same real MKV:
+
+| UTC | Result |
+| --- | --- |
+| 11:14:49.986890 | Producer created from the QA partage profile's Restart from beginning button |
+| 11:15:10.694035 | Test client profile joins it, with persisted live-join marker |
+| 11:15:11.338106 | Follower first-frame event, **1,820 ms** TTFF |
+| 11:15:25.915 | Both videos advancing: 29.084 s and 15.112 s, readyState 4, decoded width 1280 |
+| 11:15:49.183 | Original viewer closed through Films; follower kept open |
+| 11:16:03.363318 | Different owner's Android direct session created from its normal Resume button |
+| 11:16 onward | Producer remains alive and follower remains attached: the destructive cross-owner stop does not recur |
+| 11:17:17.237 | Follower waiting at 121.941 s; this run was not stall-free |
+| 11:18:54.912 | Follower resumed automatically, position 171.885 s |
+| 11:20:12.839 | Follower still playing at 215.089 s, readyState 4, decoded width 1280 |
+| Final UI close at 11:20:24.042, then server check | Both Gateways: zero viewer sessions, zero raw pumps, zero joined viewers; all six sessions from this replay expired |
+
+The producer remained in provider-read with bytes advancing during the wait;
+this is different from the pre-fix producer abort. It does not establish why
+delivery was too slow. Cumulative producer attachment/abandon counters are not
+active-viewer counts.
+
+## Remaining limits and failures
+
+- **Android 1.3.29 (43) still fails on this MPEG-4/AC-3 MKV.** After the fix,
+  the native player reported `playback_error / native_terminal` at
+  11:18:06.232603, position zero, with no first frame. The UI showed the
+  reconnect-failed message. The player was closed with Back. A ready direct
+  grant is not successful playback or a shared-cache hit.
+- The native startup-progress watchdog explicitly terminates after its bounded
+  startup limit without entering the usual recovery ladder. That code path is
+  consistent with the observations; this report does not claim a decoder or
+  provider root cause, or that a native fix has been implemented.
+- A nonzero resume on another profile uses the single-provider-slot replacement
+  path and superseded the existing session at 11:12:38.600838. The successful
+  join used zero-offset playback. Concurrent arbitrary-offset resume is not
+  certified by this test.
 - M3U in-progress work is deliberately scoped to owner/source. Completed R2
   objects and in-progress producer attachment are distinct mechanisms.
 - Existing six native complete-cache replays and synthetic/API isolation tests
   remain supporting evidence, not substitutes for this application replay.
 - No claim of 20/100 concurrent real shared conversions is made here.
+
+**Conclusion:** the real ordinary-account web joining path, survival of the
+original viewer's departure and protection against another owner's startup are
+now demonstrated. The phone's actual playback of this title and stall-free
+continuity remain open; the broad commercial objective is not marked complete.
