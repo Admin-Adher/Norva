@@ -92,7 +92,7 @@ test('public delivery never bypasses exact preparation route-generation binding'
 });
 
 test('health advertises the loaded public raw delivery contract without changing existing version', () => {
-  const healthStart = source.indexOf('version: 84,');
+  const healthStart = source.indexOf('version: 85,');
   assert.ok(healthStart >= 0);
-  assert.match(source.slice(healthStart, healthStart + 120), /version:\s*84,\s*publicRawPlaybackProtocol:\s*1,/);
+  assert.match(source.slice(healthStart, healthStart + 120), /version:\s*85,\s*publicRawPlaybackProtocol:\s*1,/);
 });

@@ -370,7 +370,7 @@ async function handleRequest(req: Request): Promise<Response> {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 84,
+        version: 85,
         publicRawPlaybackProtocol: 1,
         livePlaybackPreparationProtocol: 1,
         automaticOwnedEpisodeGatewayProtocol: 1,
@@ -2591,7 +2591,7 @@ async function createPlaybackSessionCore(
 
   // Viewer playback is authoritative. The DB claim removed the background
   // validation lease under the provider advisory lock; now close every real
-  // Gateway transport for that provider affinity and require an explicit drain
+  // auxiliary transport for that provider affinity and require an explicit drain
   // attestation before returning/opening a new provider URL. Calling all
   // configured routes also catches an orphaned broker whose DB lease expired.
   try {
@@ -10839,7 +10839,7 @@ async function preemptProviderLanguageValidationTransports(options: {
   if (!routes.length) throw new Error("media gateway preemption route unavailable");
 
   const outcomes = await Promise.all(routes.map(async (route) => {
-    const response = await fetch(`${route.url}/sessions/stop-provider-affinities`, {
+    const response = await fetch(`${route.url}/sessions/preempt-background-provider-affinities`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${route.token}`,
@@ -10855,7 +10855,8 @@ async function preemptProviderLanguageValidationTransports(options: {
     } catch (_) {
       throw new Error(`media gateway ${route.kind} drain response was invalid`);
     }
-    if (!response.ok || payload.protocol !== 1 || payload.providerDrained !== true) {
+    if (!response.ok || payload.protocol !== 1 || payload.scope !== "auxiliary-only"
+      || payload.backgroundDrained !== true) {
       throw new Error(`media gateway ${route.kind} did not attest provider drain`);
     }
     return {
