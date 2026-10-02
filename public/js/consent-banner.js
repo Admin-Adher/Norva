@@ -181,12 +181,15 @@
     el = document.createElement('div');
     el.className = 'norva-consent' + (tv ? ' norva-consent--tv' : '');
     el.setAttribute('role', tv ? 'dialog' : 'region');
-    if (tv) el.setAttribute('aria-modal', 'true');
+    if (tv) {
+      el.setAttribute('aria-modal', 'true');
+      el.setAttribute('aria-describedby', 'norva-consent-description');
+    }
     el.setAttribute('aria-label', T.aria);
     el.setAttribute('data-i18n-aria-label', 'ui_web_8d5e02d16834');
     el.innerHTML =
       '<div class="norva-consent__card">' +
-        '<p class="norva-consent__text"><span data-i18n="' + (tv ? 'ui_tv_consent_summary' : 'ui_web_f7d909a256a1') + '">' + (tv ? (globalThis.NorvaI18n?.t('ui_tv_consent_summary', { defaultValue: 'Allow analytics and advertising cookies? Your choice does not affect playback.' }) ?? 'Allow analytics and advertising cookies? Your choice does not affect playback.') : T.text) + '</span>' +
+        '<p id="norva-consent-description" class="norva-consent__text"><span data-i18n="' + (tv ? 'ui_tv_consent_summary' : 'ui_web_f7d909a256a1') + '">' + (tv ? (globalThis.NorvaI18n?.t('ui_tv_consent_summary', { defaultValue: 'Allow analytics and advertising cookies? Your choice does not affect playback.' }) ?? 'Allow analytics and advertising cookies? Your choice does not affect playback.') : T.text) + '</span>' +
           ' <a class="norva-consent__link" data-i18n="ui_web_1445799c033a" href="' + privacyHref + '">' + T.more + '</a></p>' +
         '<div class="norva-consent__actions">' +
           '<button type="button" class="norva-consent__btn norva-consent__btn--ghost" data-i18n="ui_web_a2d285b35287" data-consent="denied">' + T.refuse + '</button>' +
