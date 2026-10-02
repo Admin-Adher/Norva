@@ -82,8 +82,9 @@ test('cloud adapter preserves localized editorial data and exact-file language s
     return { items: [{ id: 'current-title', item_type: 'movie', title: 'Titre traduit',
       poster_url: 'https://example.invalid/current.jpg', year: 2022,
       metadata: { tmdb: { title: 'English title', overview: 'English synopsis' } },
-      data: { overview: 'Synopsis actuel', genres: ['Drama'] },
+      data: { title: 'English title', overview: 'Synopsis actuel', genres: ['Drama'] },
       variants: [sourceId, foreignSource].map((id, index) => ({ id: 'variant-' + index, source_id: id,
+        raw_title: 'PT | Provider title',
         external_id: params.externalId, container_extension: 'mkv', audio_languages: [index ? 'fr' : 'en'],
         audio_languages_scope: 'file', audio_language_validation_status: 'verified' }))
     }], count: 1, films: 1, limit: 1, offset: 0, hasMore: false };
@@ -99,6 +100,9 @@ test('cloud adapter preserves localized editorial data and exact-file language s
     for (const item of page.items) {
       assert.equal(item.stream_id, fileId);
       assert.equal(item.title, 'Titre traduit');
+      assert.equal(item.data.title, 'Titre traduit');
+      assert.equal(item.name, 'PT | Provider title');
+      assert.equal(item.raw_title, 'PT | Provider title', 'provider tags remain available for version language evidence');
       assert.equal(item.data.overview, 'Synopsis actuel');
       assert.equal(item.poster_url, 'https://example.invalid/current.jpg');
       assert.equal(item.year, 2022);

@@ -952,8 +952,7 @@ const CloudAdapter = (() => {
         }, options);
         syncVisibilityEpoch(payload);
         const items = externalId && Array.isArray(payload.items)
-            ? payload.items.flatMap(item => normalizeHomeRailItem({ ...item,
-                data: { ...item.data, title: item.title || item.name } }).variants)
+            ? payload.items.flatMap(item => normalizeHomeRailItem(item).variants)
             : (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
             items,
@@ -1381,7 +1380,9 @@ const CloudAdapter = (() => {
             media_item_id: raw.media_item_id || raw.mediaItemId || null,
             mediaItemId: raw.mediaItemId || raw.media_item_id || null,
             name: title,
-            title,
+            // The logical title is localized by the catalogue projection. Keep
+            // the provider label in name/raw_title for version and language tags.
+            title: context.title || title,
             raw_title: raw.raw_title || raw.rawTitle || title,
             rawTitle: raw.rawTitle || raw.raw_title || title,
             stream_icon: poster,
@@ -1447,7 +1448,7 @@ const CloudAdapter = (() => {
                 ...context.metadata,
                 ...context.data,
                 ...(raw.metadata || {}),
-                title,
+                title: context.title || title,
                 poster,
                 sourceId,
                 cloudSourceId,
@@ -1480,14 +1481,14 @@ const CloudAdapter = (() => {
         const data = item.data || {};
         const tmdb = data.tmdb || metadata.tmdb || item.tmdb || {};
         const title = firstUsefulTitle(
+            item.title,
+            item.name,
             data.title,
             metadata.title,
             tmdb.title,
             tmdb.name,
             tmdb.original_title,
             tmdb.original_name,
-            item.title,
-            item.name,
             item.original_title,
             defaultVariant.title,
             defaultVariant.name,
