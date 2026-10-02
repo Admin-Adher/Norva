@@ -11,8 +11,10 @@ test('qualified public MP4 selects a direct route', () => {
 test('the measured public Sandro movie path is direct, private or unrelated routes are not', () => {
     const host='https://sandroflix.sandrostoreps3.workers.dev';
     assert.ok(isPublicDirectRoute(publicVodDirectRoute(host+'/content/filmes/LANCAMENTOS/Downton.Abbey.A.New.Era.2022.mp4')));
+    assert.ok(isPublicDirectRoute(publicVodDirectRoute(host+'/content/filmes/CLASSICOS/Legacy.Xvid.MKV')));
     for (const url of [host+'/movie/user/password/1.mp4',host+'/content/series/1.mp4',
         host+'/content/filmes/../private/1.mp4',host+'/content/filmes/a.mp4?token=x',
+        host+'/content/filmes/a.mkv?token=x',host+'/content/filmes/a.ts',
         host.replace('.dev','.dev.evil.test')+'/content/filmes/a.mp4',
         host.replace('https://','https://user:password@')+'/content/filmes/a.mp4']) {
         assert.equal(publicVodDirectRoute(url),null);
@@ -41,6 +43,8 @@ test('the actual FFmpeg environment removes proxy variables only for the qualifi
     const direct = context.proxyEnvFor('public',publicVodDirectRoute(base+'film.mp4'));
     assert.equal(direct.https_proxy,undefined); assert.equal(direct.ALL_PROXY,undefined); assert.equal(direct.KEEP,'value');
     assert.equal(context.proxyEnvFor('ordinary').https_proxy,'configured-proxy');
+    const mkv = context.proxyEnvFor('public',publicVodDirectRoute('https://sandroflix.sandrostoreps3.workers.dev/content/filmes/a.mkv'));
+    assert.equal(mkv.https_proxy,undefined); assert.equal(mkv.ALL_PROXY,undefined);
 });
 
 test('range broker receives an owned direct agent instead of its default proxy fallback', () => {
@@ -51,7 +55,7 @@ test('range broker receives an owned direct agent instead of its default proxy f
         providerNodeRouteIsAvailable: route => !!route?.slot,
         providerSocksProxyUrls: [], providerHttpProxyUrls: ['proxy'], createProviderProxyAgent: url => ({url}) };
     require('node:vm').runInNewContext(code,context);
-    const factory = context.pinnedProxyAgentFactoryForRoute(publicVodDirectRoute(base+'film.mp4'));
+    const factory = context.pinnedProxyAgentFactoryForRoute(publicVodDirectRoute('https://sandroflix.sandrostoreps3.workers.dev/content/filmes/a.mkv'));
     assert.equal(typeof factory, 'function');
     assert.equal(factory().direct, true); assert.equal(factory().direct, true);
     assert.equal(agents, 2, 'broker refresh owns a fresh direct connection pool');
@@ -69,7 +73,7 @@ test('public probe/capture routing respects an explicit operator route and ordin
         providerNodeRouteIsAvailable:r=>r?.slot===1,providerRouteForKey:()=>({slot:1,nodeTransport:'socks5'}),
         useProviderHttpForward:()=>false,providerHttpForwardAccounts:new Set(),providerHttpForwardPolicy:{}};
     vm.runInNewContext(code,context);
-    const url='https://sandroflix.sandrostoreps3.workers.dev/content/filmes/a.mp4';
+    const url='https://sandroflix.sandrostoreps3.workers.dev/content/filmes/a.mkv';
     assert.ok(isPublicDirectRoute(context.providerNodeRouteForSession({sourceUrl:url})));
     overrides.add(new URL(url).host);
     assert.equal(context.providerNodeRouteForSession({sourceUrl:url}).nodeTransport,'socks5');
