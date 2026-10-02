@@ -1,0 +1,308 @@
+[
+  {
+    "providerTitle": "192021",
+    "itemType": "movie",
+    "tmdbId": "1094599",
+    "previousId": null,
+    "officialTitle": "19.20.21",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "711 Pm",
+    "itemType": "movie",
+    "tmdbId": "1150089",
+    "previousId": null,
+    "officialTitle": "7:11 PM",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Antony",
+    "itemType": "movie",
+    "tmdbId": "1112202",
+    "previousId": "1627554",
+    "officialTitle": "Antony",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "As Aventuras de TimTim",
+    "itemType": "movie",
+    "tmdbId": "17578",
+    "previousId": null,
+    "officialTitle": "The Adventures of Tintin",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Azadi",
+    "itemType": "movie",
+    "tmdbId": "1115022",
+    "previousId": "1449385",
+    "officialTitle": "Azadi",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Bharateeyudu 2",
+    "itemType": "movie",
+    "tmdbId": "552398",
+    "previousId": null,
+    "officialTitle": "Indian 2: Zero Tolerance",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Bookie",
+    "itemType": "movie",
+    "tmdbId": "1539987",
+    "previousId": null,
+    "officialTitle": "Pookie",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Chitta",
+    "itemType": "movie",
+    "tmdbId": "1115253",
+    "previousId": null,
+    "officialTitle": "Chithha",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Crepúsculo Amanhecer 1",
+    "itemType": "movie",
+    "tmdbId": "50619",
+    "previousId": null,
+    "officialTitle": "The Twilight Saga: Breaking Dawn - Part 1",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Crepúsculo Amanhecer 2",
+    "itemType": "movie",
+    "tmdbId": "50620",
+    "previousId": null,
+    "officialTitle": "The Twilight Saga: Breaking Dawn - Part 2",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "D U F F",
+    "itemType": "movie",
+    "tmdbId": "272693",
+    "previousId": null,
+    "officialTitle": "The DUFF",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Dartagnan O 4 Mosqueteiro",
+    "itemType": "movie",
+    "tmdbId": "919348",
+    "previousId": null,
+    "officialTitle": "The Fourth Musketeer",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Doctor Strange en el Multiverso de la Locura (2022",
+    "itemType": "movie",
+    "tmdbId": "453395",
+    "previousId": null,
+    "officialTitle": "Doctor Strange in the Multiverse of Madness",
+    "evidence": "source_alias_file_duration",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Durime",
+    "itemType": "movie",
+    "tmdbId": "1620127",
+    "previousId": null,
+    "officialTitle": "Du.Ri.Me",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Eth Nerathaanavo",
+    "itemType": "movie",
+    "tmdbId": "1527524",
+    "previousId": "1527524",
+    "officialTitle": "Eth Nerathaanavo",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Hindustani 2",
+    "itemType": "movie",
+    "tmdbId": "552398",
+    "previousId": null,
+    "officialTitle": "Indian 2: Zero Tolerance",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Jerry e Marge Tiram a Sorte Grande",
+    "itemType": "movie",
+    "tmdbId": "843847",
+    "previousId": null,
+    "officialTitle": "Jerry & Marge Go Large",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Kamaro 2",
+    "itemType": "movie",
+    "tmdbId": "1586663",
+    "previousId": null,
+    "officialTitle": "Kamaro2",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Kolahalamedu",
+    "itemType": "movie",
+    "tmdbId": "1718698",
+    "previousId": "1718698",
+    "officialTitle": "Kolahalamedu",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "M3Gan 20",
+    "itemType": "movie",
+    "tmdbId": "1071585",
+    "previousId": null,
+    "officialTitle": "M3GAN 2.0",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Marriagecom",
+    "itemType": "movie",
+    "tmdbId": "1195228",
+    "previousId": null,
+    "officialTitle": "Marriage.com",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Os Penguins de Madagascar",
+    "itemType": "movie",
+    "tmdbId": "270946",
+    "previousId": null,
+    "officialTitle": "Penguins of Madagascar",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Premika",
+    "itemType": "movie",
+    "tmdbId": "497090",
+    "previousId": "1094239",
+    "officialTitle": "Killer Karaoke",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Sir Madam",
+    "itemType": "movie",
+    "tmdbId": "1434580",
+    "previousId": null,
+    "officialTitle": "Thalaivan Thalaivii",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "So Muthanna",
+    "itemType": "movie",
+    "tmdbId": "1580593",
+    "previousId": null,
+    "officialTitle": "Son of Muthanna",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Ssaraswathi",
+    "itemType": "movie",
+    "tmdbId": "1552958",
+    "previousId": null,
+    "officialTitle": "S. Saraswathi",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Thudikkum Karangal",
+    "itemType": "movie",
+    "tmdbId": "981768",
+    "previousId": "981768",
+    "officialTitle": "Thudikkum Karangal",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Tom e Jerry no Velho Oeste",
+    "itemType": "movie",
+    "tmdbId": "892153",
+    "previousId": null,
+    "officialTitle": "Tom and Jerry Cowboy Up!",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Vazhakku",
+    "itemType": "movie",
+    "tmdbId": "866437",
+    "previousId": null,
+    "officialTitle": "The Quarrel",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Viva a Vida uma Festa",
+    "itemType": "movie",
+    "tmdbId": "354912",
+    "previousId": null,
+    "officialTitle": "Coco",
+    "evidence": "source_alias_file_duration",
+    "newPoster": true
+  },
+  {
+    "providerTitle": "Wo Anirvesh",
+    "itemType": "movie",
+    "tmdbId": "1620636",
+    "previousId": null,
+    "officialTitle": "W/O Anirvesh",
+    "evidence": "source_media_year_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Chachi No1",
+    "itemType": "series",
+    "tmdbId": "237560",
+    "previousId": null,
+    "officialTitle": "Chachi No.1",
+    "evidence": "source_series_season_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Pi Meena",
+    "itemType": "series",
+    "tmdbId": "201089",
+    "previousId": null,
+    "officialTitle": "P.I. Meena",
+    "evidence": "source_series_season_alias",
+    "newPoster": false
+  },
+  {
+    "providerTitle": "Special Ops",
+    "itemType": "series",
+    "tmdbId": "100612",
+    "previousId": "52001",
+    "officialTitle": "Special Ops",
+    "evidence": "source_series_season_alias",
+    "newPoster": false
+  }
+]
