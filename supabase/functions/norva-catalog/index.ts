@@ -4289,7 +4289,8 @@ function titleTmdb(title: JsonRecord) {
 
 function tmdbImageUrl(path: unknown, size: string) {
   const value = stringOrNull(path);
-  return value ? `https://image.tmdb.org/t/p/${size}${value}` : null;
+  return value && /^\/[a-z0-9._-]+\.(?:jpg|png|webp)$/i.test(value)
+    ? `https://image.tmdb.org/t/p/${size}${value}` : null;
 }
 
 // Serve a secure image. Keep https provider art (often a localized / CDN poster
@@ -4298,7 +4299,12 @@ function tmdbImageUrl(path: unknown, size: string) {
 // image when one exists. http provider images with no TMDB match are kept as-is
 // (the client image proxy still serves them over https).
 function preferSecureImage(stored: unknown, tmdbUrl: string | null) {
-  const value = stringOrNull(stored);
+  let value = stringOrNull(stored);
+  // Some provider records contain only the TMDB size endpoint (no file).
+  // Treat that as missing artwork, so it cannot override a verified image or
+  // turn a branded placeholder into a broken request on every device.
+  if (value && /^https?:\/\/image\.tmdb\.org(?:\/|$)/i.test(value)
+    && !/^https?:\/\/image\.tmdb\.org\/t\/p\/(?:original|[wh]\d+)\/[a-z0-9._-]+\.(?:jpg|png|webp)(?:[?#].*)?$/i.test(value)) value = null;
   if (value && !/^http:\/\//i.test(value)) return value;
   return tmdbUrl ?? value ?? null;
 }

@@ -73,7 +73,11 @@ def main():
         mirror = sql("select pg_get_functiondef('public.cloud_titles_mirror_to_catalog()'::regprocedure);")
         (backup / 'mirror.sql').write_text(mirror)
     before = immutable()
-    (backup / 'immutable.safe.json').write_text(json.dumps(before, indent=2))
+    immutable_receipt = backup / 'immutable.safe.json'
+    if immutable_receipt.exists():
+        assert json.loads(immutable_receipt.read_text()) == before, 'Owner files changed since the interrupted pass'
+    else:
+        immutable_receipt.write_text(json.dumps(before, indent=2))
     if not installed:
         sql(migration)
     else:
@@ -82,19 +86,23 @@ def main():
         functions = re.findall(r'create function public\.norva_refresh_selection_owned_editorial(?:_all)?\(.*?end \$f\$;', migration, re.S)
         assert len(functions) == 2, 'Reviewed RPC source contract changed'
         sql('\n'.join(f.replace('create function ', 'create or replace function ', 1) for f in functions))
-    receipts, zeros = [], 0
-    for iteration in range(40):
+    progress = ROOT / 'owned-refresh-progress.safe.json'
+    receipts = json.loads(progress.read_text()) if args.resume and progress.exists() else []
+    zero_sources = 0
+    for iteration in range(200):
         began = time.monotonic()
-        receipt = json.loads(sql("set request.jwt.claim.role='service_role';select public.norva_refresh_selection_owned_editorial_all(100,100);"))
+        # Ten owners per transaction bounds locks/CPU when another catalogue job
+        # is active. Two zero-write round trips must cover all eligible sources.
+        receipt = json.loads(sql("set request.jwt.claim.role='service_role';select public.norva_refresh_selection_owned_editorial_all(100,10);"))
         assert not receipt.get('busy'), 'A running maintenance pass needs review'
         receipt['seconds'] = round(time.monotonic() - began, 3)
         receipts.append(receipt)
-        (ROOT / 'owned-refresh-progress.safe.json').write_text(json.dumps(receipts, indent=2))
-        print(json.dumps({'pass': iteration + 1, **receipt}), flush=True)
-        zeros = zeros + 1 if receipt['updatedTitles'] == 0 else 0
-        if zeros == 2:
+        progress.write_text(json.dumps(receipts, indent=2))
+        print(json.dumps({'pass': len(receipts), **receipt}), flush=True)
+        zero_sources = zero_sources + receipt['sources'] + receipt['hiddenOrChanged'] if receipt['updatedTitles'] == 0 else 0
+        if zero_sources >= total * 2:
             break
-    assert zeros == 2, 'Still pending; maintenance not enabled'
+    assert zero_sources >= total * 2, 'Still pending; maintenance not enabled'
     after = immutable()
     assert after == before, 'Owner media/variants changed during refresh'
     assert sql("select count(*) from cron.job where jobname='norva-selection-owned-editorial-refresh';") == '0', 'Existing job needs review'
