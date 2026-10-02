@@ -54,8 +54,9 @@ def summary():
     return json.loads(sql("""set statement_timeout='30s'; select jsonb_agg(stats) from (
       select item_type,count(*) titles,
         count(*) filter(where nullif(poster_url,'') is null) missing_posters,
-        count(*) filter(where nullif(coalesce(metadata#>>'{i18n,fr,overview}',metadata#>>'{tmdb,overview}',
-          metadata->>'overview',metadata->>'plot'),'') is null) missing_synopsis,
+        count(*) filter(where coalesce(nullif(btrim(metadata#>>'{i18n,fr,overview}'),''),
+          nullif(btrim(metadata#>>'{i18n,en,overview}'),''),nullif(btrim(metadata#>>'{tmdb,overview}'),''),
+          nullif(btrim(metadata->>'overview'),''),nullif(btrim(metadata->>'plot'),'')) is null) missing_synopsis,
         count(*) filter(where cardinality(genre_buckets)=1 and 'autres'=any(genre_buckets)) only_other_genre,
         count(*) filter(where provider_tmdb_id is not null) tmdb_id
       from public.selection_shared_titles t join public.selection_shared_releases r on r.id=t.release_id
