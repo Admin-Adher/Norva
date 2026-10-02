@@ -497,6 +497,8 @@
             outline-offset: 3px;
         }
         html.tv-pairing-mode body { padding: 0; }
+        /* Direct account login redirects TVs back here. Hide that dead-end before paint. */
+        html.tv-pairing-mode #account-link { display: none; }
         html.tv-pairing-mode .screen {
             width: 100vw;
             height: 100vh;
@@ -672,6 +674,7 @@
         const timerEl = document.getElementById('timer');
         const statusEl = document.getElementById('status');
         const accountLink = document.getElementById('account-link');
+        if (document.documentElement.classList.contains('tv-pairing-mode')) accountLink.hidden = true;
         let currentCode = '';
         let currentPairingSecret = '';
         let expiresAt = 0;
@@ -702,10 +705,9 @@
         initRemoteNav();
 
         // Android TV D-pad: this standalone page carries no spatial-nav engine, so give
-        // the remote explicit movement between the two actions ("New code" / "Pair on this
-        // TV") and Enter to activate. The happy path is scanning the QR with a phone
-        // (no remote needed), but an expired code or the account link must still be
-        // reachable from the couch. No-op off Android TV.
+        // the remote an explicit action list and Enter to activate. On TV only
+        // "New code" remains; hidden account login must never become a focus stop.
+        // The QR/code approval path still happens on the phone. No-op off Android TV.
         function remoteItems() {
             return [restartButton, accountLink].filter((item) => item && !item.disabled && !item.hidden && item.getAttribute('aria-hidden') !== 'true');
         }
