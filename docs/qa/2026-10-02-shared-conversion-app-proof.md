@@ -103,6 +103,12 @@ active-viewer counts.
 
 ## Remaining limits and failures
 
+Follow-up: the native XVID recognition cause has since been confirmed and a
+correction integrated and submitted in phone 1.3.30 / TV 3.8.23. See
+[the native fix and later web replay](2026-10-02-xvid-native-playback-fix.md).
+The physical provider-film replay on that new phone version is still pending.
+The observations below describe the earlier 1.3.29 run.
+
 - **Android 1.3.29 (43) still fails on this MPEG-4/AC-3 MKV.** After the fix,
   the native player reported `playback_error / native_terminal` at
   11:18:06.232603, position zero, with no first frame. The UI showed the
