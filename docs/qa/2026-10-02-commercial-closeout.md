@@ -130,3 +130,32 @@ route decision/proof, unknown-provider ordinary-customer journey, distributed
 phone promotion replay, or corresponding campaign activation evidence is open.
 No assertion of instantaneous starts, universal supplier availability or exact
 WebView FPS certification is made by this audit.
+
+## Publication receipt, 05:43 UTC
+
+- PR 563 merged as `41fcbd3175b547a440420bf65a17a35c3fb96435` after CI
+  `36969455540` passed cloud contracts, Android phone/TV and Windows builds.
+- Cloudflare deployment `36969950833` succeeded. The public billing asset was
+  fetched and matched SHA-256
+  `115ed5b5c4c7fc79d0d3ffb7ab27213b8e76db3d323329e09935deb325c2821a`.
+  The 1.3.29 promotional-purchase guard is therefore globally published.
+- The SQL internal-account predicate confirms `false` for the ordinary QA owner.
+  Source/language filtering returned only the two Spanish Creed variants;
+  filters were then reset and the new-provider form left ready for the user.
+- NodeMaven's authenticated inventory shows exactly one active USA HTTP proxy.
+  A quote for one France HTTP ISP proxy is USD 4.99 per 30 days before tax,
+  recurring. No purchase or terms acceptance was performed. Its checkout's
+  billing-country field must be verified by the user before any payment.
+- The broad objective remains open for the timed rollout gate and the user
+  dependencies recorded above. These receipts do not activate mobile campaigns.
+
+## Mobile gate closed, 06:33 UTC
+
+The phone now runs Google Play 1.3.29 (43). Isolated physical purchases confirmed
+monthly reactivation after expiry and annual replacement before expiry, with
+Google-verified preserved access and immediate in-app confirmation. Mobile
+campaign and communication policy is now enabled in production; the dedicated
+dispatch returned HTTP 200 with zero eligible production recipients. Sandbox
+acceptance remains false. See `2026-10-02-mobile-retention-production.md` for
+receipts, exact scope and the separately observed standard-checkout retry.
+The broader Provider Access, route and unknown-provider gates remain open.
