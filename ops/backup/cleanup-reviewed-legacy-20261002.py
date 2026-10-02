@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 
 BUCKET = 'norva-db-backups'
 RETAIN = 'db/norva-db-20260923-083731.tar.gz.age'
@@ -62,9 +63,41 @@ def run(s3, apply=False):
                 'older_than_3_days_count': sum(now - o['LastModified'] > dt.timedelta(days=3) for o in objects),
                 'older_than_3_days_bytes': sum(o['Size'] for o in objects if now - o['LastModified'] > dt.timedelta(days=3)),
             }
+        wal_objects = [o for o in all_objects if o['Key'].startswith('selfhost/wal/')]
+        wal_days = {}
+        history = []
+        for obj in wal_objects:
+            day = obj['LastModified'].date().isoformat()
+            entry = wal_days.setdefault(day, {'count': 0, 'bytes': 0})
+            entry['count'] += 1
+            entry['bytes'] += obj['Size']
+            if obj['Key'].endswith('.backup') and obj['Size'] <= 65536:
+                content = s3.get_object(Bucket=BUCKET, Key=obj['Key'])['Body'].read().decode('utf-8')
+                fields = {}
+                for line in content.splitlines():
+                    name, sep, value = line.partition(': ')
+                    if sep and name in ('START WAL LOCATION', 'STOP WAL LOCATION', 'START TIME', 'STOP TIME', 'LABEL'):
+                        fields[name] = value
+                history.append({'key': obj['Key'], 'fields': fields})
+        retained_bases = [o['Key'].split('/')[2] for o in all_objects
+                          if o['Key'].startswith('selfhost/base/') and o['Key'].endswith('/base.tar.gz')]
+        oldest_base = min(retained_bases, default='')
+        matched = [h for h in history if h['fields'].get('LABEL') in
+                   ('norva-' + oldest_base, 'norva-weekly-' + oldest_base.removeprefix('base-'))]
+        before_base = None
+        if len(matched) == 1:
+            start = re.search(r'file ([0-9A-F]{24})', matched[0]['fields'].get('START WAL LOCATION', ''))
+            if start:
+                floor = start.group(1)
+                obsolete = [o for o in wal_objects if re.fullmatch(r'[0-9A-F]{24}', o['Key'].split('/')[-1])
+                            and o['Key'].split('/')[-1][:8] == floor[:8] and o['Key'].split('/')[-1] < floor]
+                before_base = {'oldest_retained_base': oldest_base, 'start_segment': floor,
+                               'count': len(obsolete), 'bytes': sum(o['Size'] for o in obsolete)}
         print(json.dumps({'read_only_storage_audit': True, 'time': now.isoformat(),
                           'bucket_bytes': sum(o['Size'] for o in all_objects),
-                          'bucket_count': len(all_objects), 'groups': groups}, default=str))
+                          'bucket_count': len(all_objects), 'groups': groups,
+                          'wal_by_upload_day': wal_days, 'backup_history': history,
+                          'wal_before_oldest_retained_base': before_base}, default=str))
     candidates, proof = plan(s3, now)
     result = {'time': now.isoformat(), 'apply': apply, 'proof': proof,
               'objects': [{'key': o['Key'], 'bytes': o['Size'], 'etag': o['ETag']} for o in candidates],
