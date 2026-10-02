@@ -1,4 +1,8 @@
-# Offsite DB backup → Cloudflare R2
+# Legacy manual DB export → Cloudflare R2
+
+> Updated 2026-10-02: the workflow below now runs manually only, against Hetzner.
+> Daily complete backups are maintained by `../hetzner/backup/BACKUPS.md`.
+> The original migration rationale below is historical, not the current topology.
 
 A scheduled, **read-only** logical backup of the managed Supabase database into a
 private R2 bucket. It runs entirely from GitHub Actions — no server needed — so
@@ -18,7 +22,7 @@ Files:
 - `backup-to-r2.sh` — the dump + compress + encrypt + upload script. Encryption
   remains optional only for explicit legacy/manual invocations; the scheduled
   workflow sets `BACKUP_ENCRYPTION_REQUIRED=true` and fails closed.
-- `../../.github/workflows/backup-db-to-r2.yml` — daily 03:15 UTC + manual run.
+- `../../.github/workflows/backup-db-to-r2.yml` — manual run only; daily schedule retired.
 
 ---
 

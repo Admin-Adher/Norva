@@ -1404,10 +1404,11 @@ test('Partners CI freezes Edge dependencies and replays a blank database', () =>
   assert.match(deploy, /exit 1/);
 });
 
-test('offsite Partners backup is scheduled, least-privilege and secret-backed', () => {
+test('legacy offsite Partners backup is manual, least-privilege and secret-backed', () => {
   const workflow = read('.github/workflows/backup-db-to-r2.yml');
   const hetzner = read('ops/hetzner/scripts/19-backup-db-to-r2.sh');
-  assert.match(workflow, /cron: '15 3 \* \* \*'/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^\s+schedule:/m);
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
   assert.match(workflow, /appleboy\/ssh-action/);
   assert.match(workflow, /19-backup-db-to-r2\.sh/);
