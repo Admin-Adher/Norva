@@ -17,18 +17,22 @@
 >    + **base backup physique quotidien** (04:10 UTC). RPO ≈ 15 min,
 >    restauration à n'importe quel instant. → `RESTORE.md`.
 >
-> ~~Le workflow GitHub `backup-db-to-r2.yml` continue de sauvegarder le **managé
-> dormant** (préfixe `db/`) pendant la fenêtre de rollback — le désactiver quand
-> le managé sera résilié.~~ **Fait** : managé supprimé + workflow retiré (`c0b9b55`).
-> Le préfixe `db/` sur R2 est donc figé (dumps d'avant le cutover du 11/07) — garder
-> le plus récent en archive historique, le reste est supprimable :
-> `rclone lsf r2:$R2_BUCKET/db/ | sort | head -n -1 | rclone delete r2:$R2_BUCKET/db/ --files-from - --dry-run`
-> (retirer `--dry-run` après vérification de la liste).
+> **État corrigé au 2 octobre 2026 :** le workflow GitHub `backup-db-to-r2.yml`
+> avait été réintroduit et sauvegardait lui aussi la base Hetzner dans `db/`.
+> Il est désormais manuel uniquement. Le timer `norva-backup-nightly` reste
+> responsable des sauvegardes quotidiennes complètes (auth/storage/ACL inclus).
+> `db/` contient des exports de septembre, pas seulement des archives de juillet.
+> Le nettoyage borné `backup-reviewed-cleanup.yml` conserve le dernier export
+> du 23 septembre et ne vise que les trois objets explicitement revus des 20–22.
+> Il exige 14 dumps principaux, 3 bases physiques, leur fraîcheur et les dumps
+> de remplacement des mêmes dates. Il ne touche jamais `selfhost/`.
+> Les exports auxiliaires indispensables et la rétention du nightly échouent
+> désormais explicitement en cas d'erreur, sans annoncer un succès trompeur.
 
 ## Layout R2 (bucket unique)
 
 ```
-db/                    ← dumps du managé (workflow GitHub, période rollback)
+db/                    ← exports logiques secondaires, workflow manuel uniquement
 selfhost/dumps/        ← dumps logiques nightly chiffrés .tar.gz.age (rétention 14 j)
 selfhost/base/base-*/  ← base backups quotidiens (rétention KEEP_BASE_COUNT=3)
 selfhost/wal/          ← segments WAL (rétention KEEP_WAL_DAYS=3 ≥ KEEP_BASE_COUNT)

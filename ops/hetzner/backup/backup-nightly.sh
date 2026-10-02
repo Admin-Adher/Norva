@@ -73,7 +73,7 @@ pgtool pg_dump -h $H -U $U -d $D --data-only --no-owner --no-privileges \
   --schema=storage --disable-triggers > "$OUT/04-storage-data.sql"
 
 log "[2/5] reference exports (crons as replayable SQL, extensions)"
-pgtool psql -h $H -U $U -d $D -At \
+pgtool psql -v ON_ERROR_STOP=1 -h $H -U $U -d $D -At \
   -c "with replay as (
         select
           jobid,
@@ -89,13 +89,19 @@ pgtool psql -h $H -U $U -d $D -At \
           'update cron.job set active=false where jobname=''norva-partners-revolut-api'';'
       )
       select statement from replay order by jobid" \
-  > "$OUT/ref-cron-jobs.sql" || true
-pgtool psql -h $H -U $U -d $D -At \
+  > "$OUT/ref-cron-jobs.sql"
+pgtool psql -v ON_ERROR_STOP=1 -h $H -U $U -d $D -At \
   -c "select jobname||' active='||active from cron.job order by jobid" \
-  > "$OUT/ref-cron-active.txt" || true
-pgtool psql -h $H -U $U -d $D -At \
+  > "$OUT/ref-cron-active.txt"
+pgtool psql -v ON_ERROR_STOP=1 -h $H -U $U -d $D -At \
   -c "select extname||' '||extversion from pg_extension order by extname" \
-  > "$OUT/ref-extensions.txt" || true
+  > "$OUT/ref-extensions.txt"
+for reference in ref-cron-jobs.sql ref-cron-active.txt ref-extensions.txt; do
+  if [[ ! -s "$OUT/$reference" ]]; then
+    log "ERROR: required reference export is empty: $reference"
+    exit 1
+  fi
+done
 
 log "[3/5] manifest + checksums"
 AFFILIATE_ACCOUNTS_COUNT="$(
@@ -144,6 +150,6 @@ fi
 log "uploaded and verified $(basename "$UPLOAD") ($SIZE)"
 
 log "[5/5] retention: keep ${KEEP_DUMPS_DAYS:-14} days of nightly dumps"
-rclone delete "r2:${R2_BUCKET}/${R2_PREFIX_DUMPS%/}/" --min-age "${KEEP_DUMPS_DAYS:-14}d" --retries 4 || true
+rclone delete "r2:${R2_BUCKET}/${R2_PREFIX_DUMPS%/}/" --min-age "${KEEP_DUMPS_DAYS:-14}d" --retries 4
 
 log "nightly backup done."
