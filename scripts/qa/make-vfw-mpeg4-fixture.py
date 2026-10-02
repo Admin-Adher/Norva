@@ -1,6 +1,9 @@
 """Convert a generated MPEG-4/AAC MKV fixture to its legacy VFW/XVID layout.
 
 Usage: python make-vfw-mpeg4-fixture.py input.mkv output.mkv
+Pass --without-private to retain only the 40-byte BITMAPINFOHEADER, as in
+the real provider file. Generate that input with -flags -global_header so
+the VOL header remains in the video packets.
 Generate input with FFmpeg testsrc2 + sine, MPEG-4 video/AAC audio, 12 seconds,
 160x96/25 fps, GOP 25, and -write_crc32 0. No third-party media is included.
 Rebuild both SeekHead and Cues because changing CodecPrivate changes offsets.
@@ -57,7 +60,7 @@ for identifier, body, raw in elements(track_body):
     private = next((b for i,b,r in entry if i == 0x63a2), b'')
     bitmap = struct.pack('<IiiHH4sIiiII',40,160,96,1,24,b'XVID',0,0,0,0,0)
     rewritten = [el(0x86,b'V_MS/VFW/FOURCC') if i==0x86 else r for i,b,r in entry if i != 0x63a2]
-    rewritten.append(el(0x63a2,bitmap+private))
+    rewritten.append(el(0x63a2,bitmap+(b'' if '--without-private' in sys.argv[3:] else private)))
     tracks.append(el(0xae,b''.join(rewritten)))
 assert video_number is not None
 tracks = el(0x1654ae6b,b''.join(tracks))

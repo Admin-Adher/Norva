@@ -31,10 +31,16 @@ import org.junit.runner.RunWith;
 @androidx.media3.common.util.UnstableApi
 public final class NativeVfwMpeg4InstrumentedTest {
     @Test public void legacyXvidRendersResumesAndCloses() throws Exception {
+        replay("s_xvid_vfw_aac.mkv");
+    }
+    @Test public void legacyXvidWithoutPrivateInitializationRendersAndResumes() throws Exception {
+        replay("s_xvid_vfw_inband_aac.mkv");
+    }
+    private void replay(String asset) throws Exception {
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();
         Context target=ins.getTargetContext();
         File fixture=new File(target.getCacheDir(),"native-xvid.mkv");
-        try(InputStream input=ins.getContext().getAssets().open("s_xvid_vfw_aac.mkv")) { Files.copy(input,fixture.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+        try(InputStream input=ins.getContext().getAssets().open(asset)) { Files.copy(input,fixture.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
         String activityName=target.getPackageName()+".PlayerActivity";
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(activityName,null,false);
         Activity activity=null;
