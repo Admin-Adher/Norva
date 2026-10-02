@@ -734,7 +734,39 @@ function prepareProviderMediaRow(row: Record<string, any>) {
   return row;
 }
 
+// Restored fiches carry a provider file identity, while their displayed title
+// may be translated. Resolve that identity through the current visible variants
+// and hydrate the same title projection used by the grid, without a name search.
+async function listExactCatalogMediaItems(url: URL, userId: string) {
+  const sourceId = stringOrNull(url.searchParams.get("sourceId"));
+  const externalId = stringOrNull(url.searchParams.get("externalId"));
+  const itemType = url.searchParams.get("type");
+  if (!sourceId || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(sourceId)
+      || !externalId || externalId.length > 256 || (itemType !== "movie" && itemType !== "series")) {
+    throw new HttpError(400, "Invalid catalogue identity");
+  }
+  const empty = { items: [], count: 0, films: 0, limit: 1, offset: 0, hasMore: false };
+  const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+    .select("title_id").eq("user_id", userId).eq("source_id", sourceId)
+    .eq("item_type", itemType).eq("external_id", externalId).limit(2);
+  if (error) throwDb(error, "Unable to resolve catalogue identity");
+  if (!Array.isArray(data) || data.length !== 1) return empty;
+  const titleId = stringOrNull(data[0].title_id);
+  if (!titleId) return empty;
+  const title = await loadTitleById(userId, titleId);
+  if (!title || title.item_type !== itemType) return empty;
+  const variantsByTitle = await listVariantsByTitleIds([titleId], userId);
+  const variants = variantsByTitle.get(titleId) ?? [];
+  // A visibility change during hydration must not substitute another source's
+  // file, even when that source contains the same provider-local identifier.
+  if (!variants.some(v => String(v.source_id) === sourceId && String(v.external_id) === externalId)) return empty;
+  const lang = railLang(url);
+  await applyCatalogOverlay([title], itemType, lang);
+  return { ...empty, count: 1, films: 1, items: [titleRailItem(title, variants, lang)] };
+}
+
 async function listMediaItems(url: URL, userId: string) {
+  if (url.searchParams.has("externalId")) return await listExactCatalogMediaItems(url, userId);
   const sourceId = stringOrNull(url.searchParams.get("sourceId"));
   const itemType = url.searchParams.get("type");
   const search = url.searchParams.get("q");
@@ -1160,7 +1192,11 @@ async function attachOwnedMediaEditorialMetadata(
         row.provider_tmdb_id = title.provider_tmdb_id;
         row.providerTmdbId = title.provider_tmdb_id;
         row.match_status = title.match_status;
-        row.tmdb = { ...recordOrEmpty(editorial.tmdb), overview: editorial.overview, genres: editorial.genres };
+        // Flat-grid clients prefer tmdb.title when no logical title ID is
+        // exposed. Keep that field aligned with the same localized projection
+        // used by rail and restored fiches, rather than the catalogue base title.
+        row.tmdb = { ...recordOrEmpty(editorial.tmdb), title: editorial.title,
+          overview: editorial.overview, genres: editorial.genres };
         row.metadata = { ...recordOrEmpty(row.metadata), providerTmdbId: title.provider_tmdb_id,
           overview: editorial.overview, tmdb: row.tmdb };
         if (editorial.overview) row.plot = editorial.overview;
@@ -4289,7 +4325,8 @@ function titleTmdb(title: JsonRecord) {
 
 function tmdbImageUrl(path: unknown, size: string) {
   const value = stringOrNull(path);
-  return value ? `https://image.tmdb.org/t/p/${size}${value}` : null;
+  return value && /^\/[a-z0-9._-]+\.(?:jpg|png|webp)$/i.test(value)
+    ? `https://image.tmdb.org/t/p/${size}${value}` : null;
 }
 
 // Serve a secure image. Keep https provider art (often a localized / CDN poster
@@ -4298,7 +4335,12 @@ function tmdbImageUrl(path: unknown, size: string) {
 // image when one exists. http provider images with no TMDB match are kept as-is
 // (the client image proxy still serves them over https).
 function preferSecureImage(stored: unknown, tmdbUrl: string | null) {
-  const value = stringOrNull(stored);
+  let value = stringOrNull(stored);
+  // Some provider records contain only the TMDB size endpoint (no file).
+  // Treat that as missing artwork, so it cannot override a verified image or
+  // turn a branded placeholder into a broken request on every device.
+  if (value && /^https?:\/\/image\.tmdb\.org(?:\/|$)/i.test(value)
+    && !/^https?:\/\/image\.tmdb\.org\/t\/p\/[a-z0-9_-]+\/[a-z0-9._-]+\.(?:jpg|png|webp)(?:[?#].*)?$/i.test(value)) value = null;
   if (value && !/^http:\/\//i.test(value)) return value;
   return tmdbUrl ?? value ?? null;
 }

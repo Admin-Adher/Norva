@@ -8,7 +8,7 @@ const { stripTypeScriptTypes } = require('node:module');
 const root = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'supabase/functions/norva-catalog/index.ts'), 'utf8');
 const start = source.indexOf('function prepareProviderMediaRow(');
-const end = source.indexOf('\nasync function listMediaItems(', start);
+const end = source.indexOf('\n}', start) + 2;
 assert.ok(start >= 0 && end > start);
 const prepare = vm.runInNewContext(stripTypeScriptTypes(source.slice(start, end)) + '; prepareProviderMediaRow');
 

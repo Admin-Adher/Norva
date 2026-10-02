@@ -3584,7 +3584,7 @@ class SeriesPage {
         }
     }
 
-    // Open a series' detail directly from a search result: best-effort fetch its
+    // Resolve a series by its source/file identity and fetch its current owned
     // sibling versions, group them like the grid, and open the matching group.
     // Falls back to a single-item group; returns false on failure so the caller
     // can fall back to its own path.
@@ -3592,11 +3592,14 @@ class SeriesPage {
         const token = intentToken ?? this.beginFicheIntent();
         try {
             if (!item || item.series_id == null) return false;
-            const title = item.tmdb?.name || item.tmdb?.title || item.name || '';
             const tapped = { ...item };
             const items = [tapped];
             try {
-                const page = await API.media.page({ type: 'series', q: title, limit: 60 });
+                const page = await API.media.page({ type: 'series', sourceId: item.sourceId,
+                    externalId: item.series_id, limit: 1 });
+                if (!this.isFicheIntentCurrent(token)) return false;
+                if (!(page.items || []).some(s => String(s.sourceId) === String(item.sourceId)
+                    && String(s.series_id) === String(item.series_id))) return false;
                 const seen = new Set([`${item.sourceId}:${item.series_id}`]);
                 for (const s of (page.items || [])) {
                     const k = `${s.sourceId}:${s.series_id}`;

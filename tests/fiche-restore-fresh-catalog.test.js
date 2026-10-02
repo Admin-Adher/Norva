@@ -39,8 +39,13 @@ for (const type of ['movie', 'series']) {
     let calls = 0;
     const f = fixture(type, async params => {
       calls++; assert.equal(params.type, type);
+      assert.equal(params.sourceId, 'selected-source');
+      assert.equal(params.externalId, 'same-provider-id');
+      assert.equal(params.q, undefined, 'a translated saved title must not be used as a provider name query');
       return { items: [
         { sourceId: 'selected-source', [idField]: 'same-provider-id', name: 'Current title',
+          overview: 'Current localized synopsis', poster_url: 'https://example.invalid/current.jpg',
+          year: 2022, metadata: { genres: ['Drama'] },
           audioLanguageValidationStatus: 'verified', audioLanguages: ['en'] },
         { sourceId: 'other-source', [idField]: 'same-provider-id', name: 'Sibling', audioLanguages: ['fr'] },
       ] };
@@ -52,8 +57,19 @@ for (const type of ['movie', 'series']) {
     assert.equal(f.displayed.length, 1);
     assert.equal(f.displayed[0].sourceId, 'selected-source');
     assert.equal(f.displayed[0].name, 'Current title');
+    assert.equal(f.displayed[0].overview, 'Current localized synopsis');
+    assert.equal(f.displayed[0].poster_url, 'https://example.invalid/current.jpg');
+    assert.equal(f.displayed[0].year, 2022);
     assert.equal(f.displayed[0].audioLanguageValidationStatus, 'verified');
     assert.deepEqual(Array.from(f.displayed[0].audioLanguages), ['en']);
+  });
+
+  test(`${type}: a hidden or unowned saved source never opens a same-ID file from another source`, async () => {
+    const f = fixture(type, async () => ({ items: [{ sourceId: 'other-source', [idField]: 'same-provider-id' }] }));
+    f.app.restoreOpenFiche(f.pageName, f.saved);
+    await f.timers.shift()();
+    assert.equal(f.displayed.length, 0);
+    assert.equal(f.forgotten(), 1);
   });
 
   test(`${type}: failed lookup never restores the stale saved audio claims`, async () => {

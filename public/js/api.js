@@ -913,7 +913,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}, options = {}) {
+    async function getMediaPage({ sourceId, type, q, externalId = '', categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}, options = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -921,6 +921,7 @@ const CloudAdapter = (() => {
             cloudSourceId,
             type: type || '',
             q: q || '',
+            externalId: String(externalId || ''),
             categoryId: categoryId || '',
             sort: sort || 'default',
             year: year || '',
@@ -939,6 +940,7 @@ const CloudAdapter = (() => {
             sourceId: cloudSourceId,
             type,
             q,
+            externalId,
             categoryId,
             sort,
             // Server-side year/rating/recently-added filters (denormalized columns).
@@ -949,7 +951,9 @@ const CloudAdapter = (() => {
             offset: normalizedOffset
         }, options);
         syncVisibilityEpoch(payload);
-        const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+        const items = externalId && Array.isArray(payload.items)
+            ? payload.items.flatMap(item => normalizeHomeRailItem(item).variants)
+            : (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
             items,
             // `items` contains every provider variant for the logical titles in
@@ -1376,7 +1380,9 @@ const CloudAdapter = (() => {
             media_item_id: raw.media_item_id || raw.mediaItemId || null,
             mediaItemId: raw.mediaItemId || raw.media_item_id || null,
             name: title,
-            title,
+            // The logical title is localized by the catalogue projection. Keep
+            // the provider label in name/raw_title for version and language tags.
+            title: context.title || title,
             raw_title: raw.raw_title || raw.rawTitle || title,
             rawTitle: raw.rawTitle || raw.raw_title || title,
             stream_icon: poster,
@@ -1442,7 +1448,7 @@ const CloudAdapter = (() => {
                 ...context.metadata,
                 ...context.data,
                 ...(raw.metadata || {}),
-                title,
+                title: context.title || title,
                 poster,
                 sourceId,
                 cloudSourceId,
@@ -1475,14 +1481,14 @@ const CloudAdapter = (() => {
         const data = item.data || {};
         const tmdb = data.tmdb || metadata.tmdb || item.tmdb || {};
         const title = firstUsefulTitle(
+            item.title,
+            item.name,
             data.title,
             metadata.title,
             tmdb.title,
             tmdb.name,
             tmdb.original_title,
             tmdb.original_name,
-            item.title,
-            item.name,
             item.original_title,
             defaultVariant.title,
             defaultVariant.name,
@@ -1927,6 +1933,7 @@ const CloudAdapter = (() => {
                 sourceId: query.get('sourceId') || '',
                 type: query.get('type') || '',
                 q: query.get('q') || '',
+                externalId: query.get('externalId') || '',
                 categoryId: query.get('categoryId') || '',
                 sort: query.get('sort') || 'default',
                 year: query.get('year') || '',

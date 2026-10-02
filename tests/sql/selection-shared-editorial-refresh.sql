@@ -100,6 +100,28 @@ begin
    where user_id=reader and id=rid)<>'Synopsis public QA actualisé' then raise exception 'Later common metadata stayed stale'; end if;
  result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
  if result->>'updatedTitles'<>'0' then raise exception 'Maintenance repeated unchanged writes'; end if;
+ -- A provider size endpoint cannot replace the reviewed image. Both-invalid
+ -- state is cleared once; no invented TMDB path and no repeat write.
+ execute 'reset role';
+ update public.catalog_titles set poster_url='https://image.tmdb.org/t/p/w600_and_h900_bestv2'
+   where item_type='movie' and provider_tmdb_id='49478';
+ execute 'set local role service_role';
+ result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
+ if result->>'updatedTitles'<>'0' or (select poster_url from public.selection_shared_titles
+   where release_id=rel and item_type='movie' and identity_key=key) not like '%qa-warriors.jpg' then
+   raise exception 'Malformed cache artwork replaced reviewed image'; end if;
+ execute 'reset role';
+ update public.selection_shared_titles set poster_url='https://image.tmdb.org/t/p/w500'
+   where release_id=rel and item_type='movie' and identity_key=key;
+ execute 'set local role service_role';
+ result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
+ if result->>'updatedTitles'<>'1' or (select poster_url from public.selection_shared_titles
+   where release_id=rel and item_type='movie' and identity_key=key) is not null then
+   raise exception 'Malformed public artwork not cleared'; end if;
+ result:=public.norva_refresh_selection_shared_editorial_from_cache(1);
+ if result->>'updatedTitles'<>'0' then raise exception 'Malformed artwork cleanup repeated writes'; end if;
+ if public.norva_selection_editorial_image('https://image.tmdb.org/t/p/w600_and_h900_bestv2/real.jpg')
+     <> 'https://image.tmdb.org/t/p/w600_and_h900_bestv2/real.jpg' then raise exception 'Valid cropped image rejected'; end if;
  begin
    perform public.norva_refresh_selection_shared_editorial_from_cache(null);
    raise exception 'Unbounded maintenance accepted';

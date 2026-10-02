@@ -131,7 +131,7 @@ test('cross-account TMDB cache reuse revalidates the current title and year', ()
   assert.match(block, /matchCatalogValidationCandidate\(candidate, r as JsonRecord, md, tv\)/);
   assert.match(block, /if \(!reuseMatch\) continue/);
   assert.match(block, /Math\.abs\(Number\(candidate\.year\) - Number\(cachedYear\)\) > 1/);
-  assert.match(block, /best\.confidence < 0\.58/);
+  assert.match(block, /best\.confidence < 0\.9/);
   assert.match(block, /reason: "reused_from_catalog_title_year_match"/);
 });
 

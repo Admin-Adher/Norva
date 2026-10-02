@@ -2272,7 +2272,7 @@ class MoviesPage {
         return true;
     }
 
-    // Open a movie's detail directly from a search result: best-effort fetch its
+    // Resolve a movie by its source/file identity, fetch its current owned
     // sibling versions, group them exactly like the grid, and open the matching
     // group (so the version picker is complete). Falls back to a single-item group,
     // and returns false on any failure so the caller can fall back to its own path.
@@ -2280,11 +2280,14 @@ class MoviesPage {
         const token = intentToken ?? this.beginFicheIntent();
         try {
             if (!item || item.stream_id == null) return false;
-            const title = item.tmdb?.title || item.name || '';
             const tapped = { ...item, sourceId: item.sourceId, id: `${item.sourceId}:${item.stream_id}` };
             const items = [tapped];
             try {
-                const page = await API.media.page({ type: 'movie', q: title, limit: 60 });
+                const page = await API.media.page({ type: 'movie', sourceId: item.sourceId,
+                    externalId: item.stream_id, limit: 1 });
+                if (!this.isFicheIntentCurrent(token)) return false;
+                if (!(page.items || []).some(m => String(m.sourceId) === String(item.sourceId)
+                    && String(m.stream_id) === String(item.stream_id))) return false;
                 const seen = new Set([`${tapped.sourceId}:${tapped.stream_id}`]);
                 for (const m of (page.items || [])) {
                     const k = `${m.sourceId}:${m.stream_id}`;
@@ -2296,7 +2299,10 @@ class MoviesPage {
                     }
                     if (!seen.has(k)) { seen.add(k); items.push({ ...m, sourceId: m.sourceId, id: k }); }
                 }
-            } catch (_) { /* best-effort: keep just the tapped item */ }
+            } catch (_) {
+                // An unavailable lookup may keep the current card's own data;
+                // never borrow a homonym's metadata through a title search.
+            }
             if (!this.isFicheIntentCurrent(token)) return false;
             const inGroup = (g) => g.items.some(i =>
                 String(i.stream_id) === String(item.stream_id) && String(i.sourceId) === String(item.sourceId));
