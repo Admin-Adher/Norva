@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/main.css"><script src="/js/i18n.js"></script>
+<style>body{padding:48px}main{padding:48px}.qa-cards{display:flex;gap:24px}.qa-cards button{width:160px;height:180px;background:var(--color-bg-tertiary);color:var(--color-text-primary);border:0;border-radius:16px}#modal{position:fixed;inset:100px;display:none;background:var(--color-bg-secondary);padding:32px}#modal.active{display:block}#modal button{padding:24px}.navbar{display:none}</style></head>
+<body><main id="page-movies" class="page active"><h1>Films</h1><p>Bibliothèque de test — navigation à la télécommande</p><div class="qa-cards"><button id="opener">Confidentialité</button><button id="background">Catalogue</button></div></main>
+<div id="modal"><button id="detail">Lire</button></div><div id="already-inert" inert>Fond déjà inactif</div>
+<script>localStorage.removeItem('norva_consent');NorvaI18n.setPreference('fr');window.NORVA_MARKETING_CONFIG={enabled:false};window.consentCalls=[];window.NorvaMarketing={setConsent:s=>consentCalls.push(s)};</script>
+<script src="/js/utils/tvNavigation.js"></script><script src="/js/consent-banner.js"></script>
+<script>window.openConsent=function(detail=false){document.getElementById('modal').classList.toggle('active',detail);document.getElementById(detail?'detail':'opener').focus();NorvaConsent.open();};document.getElementById('opener').onclick=()=>openConsent();addEventListener('load',()=>openConsent(new URLSearchParams(location.search).has('detail')));</script>
+</body></html>

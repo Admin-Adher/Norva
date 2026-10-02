@@ -76,6 +76,12 @@ tasks.configureEach { task ->
     if (task.name.contains("AndroidTest") && (task.name.startsWith("merge") || task.name.contains("Lint") || task.name.startsWith("lint"))) task.dependsOn(copyI18nTestBundle)
 }
 
+def copyConsentFixture = tasks.register("copyConsentFixture", Copy) {
+    from("../../../tests/fixtures/tv-consent.html")
+    into("$buildDir/generated/i18nTestAssets")
+}
+copyI18nTestBundle.configure { dependsOn(copyConsentFixture) }
+
 def norvaPublicDir = file("../../../public")
 def norvaAssetsDir = file("src/main/assets/www")
 

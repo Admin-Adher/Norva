@@ -56,6 +56,7 @@
         `${CATALOG_CARD_SELECTOR}, .continue-card`;
 
     const MODAL_SELECTOR = [
+        '.norva-consent--tv',
         '#modal.active',
         '#edit-user-modal.active',
         '.modal-overlay.active',
@@ -128,6 +129,8 @@
         // shown by presence (no .active) and sits OVER an open fiche, so listing it here
         // traps the D-pad inside it and lets closeTopModal()/Back dismiss the trailer
         // instead of the fiche behind it.
+        const consent = document.querySelector('.norva-consent--tv');
+        if (consent) return consent;
         const modals = document.querySelectorAll(MODAL_SELECTOR);
         return modals[modals.length - 1] || null;
     }
@@ -763,7 +766,7 @@
 
     function scopeEntryTarget(scope) {
         if (!scope) return null;
-        const safeCancel = scope.querySelector('.norva-modal-cancel:not([disabled])');
+        const safeCancel = scope.querySelector('[data-consent="denied"], .norva-modal-cancel:not([disabled])');
         return (safeCancel && isRendered(safeCancel) ? safeCancel : null)
             || [...scope.querySelectorAll(
                 '#movie-primary-action:not([disabled]), #series-primary-action:not([disabled]), ' +
@@ -810,6 +813,11 @@
     function closeTopModal() {
         const modal = openModal();
         if (!modal) return false;
+        if (modal.classList.contains('norva-consent--tv')) {
+            window.NorvaConsent?.close();
+            scheduleModalFocusRestore(modal);
+            return true;
+        }
         // The trailer lightbox dismisses via its own ✕ (removes the node + its key listener).
         if (modal.classList.contains('trailer-lightbox')) {
             const x = modal.querySelector('.trailer-lightbox-close');
@@ -1259,6 +1267,7 @@
     }
 
     document.addEventListener('keydown', (e) => {
+        if (window.NorvaConsent?.handleKey?.(e)) return;
         // Escape (some remotes / keyboards): close an open modal first
         if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') {
             if (closeTopModal() || closeTransient()) {

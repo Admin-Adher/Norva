@@ -64,13 +64,76 @@
   }
 
   var el = null;
+  var origin = null;
+  var tv = false;
+  var background = [];
+  var backgroundObserver = null;
+
+  function containBackground() {
+    Array.prototype.forEach.call(document.body.children, function (node) {
+      if (node === el || background.some(function (entry) { return entry.node === node; })) return;
+      background.push({ node: node, inert: node.inert });
+      node.inert = true;
+    });
+  }
+
+  function focusDefault() {
+    var button = el && el.querySelector('[data-consent="denied"]');
+    if (button) button.focus();
+  }
+
+  function keepFocus(event) {
+    if (el && tv && !el.contains(event.target)) focusDefault();
+  }
+
+  // Shared with tvNavigation so capture-listener registration order is irrelevant.
+  function handleKey(event) {
+    if (!el || !tv) return false;
+    var key = event.key;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Tab',
+         'Escape', 'GoBack', 'BrowserBack'].indexOf(key) < 0) return false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (key === 'Escape' || key === 'GoBack' || key === 'BrowserBack') {
+      hide(); // Dismissal never grants or overwrites an existing decision.
+      return true;
+    }
+    var controls = Array.prototype.slice.call(el.querySelectorAll('[data-consent], .norva-consent__link'));
+    // Keep the remote's primary path deterministic, independent of card geometry.
+    controls.sort(function (a, b) {
+      function rank(node) { return node.getAttribute('data-consent') === 'denied' ? 0 : node.getAttribute('data-consent') === 'granted' ? 1 : 2; }
+      return rank(a) - rank(b);
+    });
+    var index = controls.indexOf(document.activeElement);
+    if (index < 0) { focusDefault(); return true; }
+    if (key === 'Enter') {
+      if (!event.repeat) controls[index].click();
+    } else {
+      var rtl = getComputedStyle(el).direction === 'rtl';
+      var backwards = key === 'ArrowUp' || (key === 'Tab' && event.shiftKey) ||
+        (key === (rtl ? 'ArrowRight' : 'ArrowLeft'));
+      controls[(index + (backwards ? -1 : 1) + controls.length) % controls.length].focus();
+    }
+    return true;
+  }
 
   function hide() {
+    if (backgroundObserver) backgroundObserver.disconnect();
+    backgroundObserver = null;
+    if (tv) {
+      document.removeEventListener('keydown', handleKey, true);
+      document.removeEventListener('focusin', keepFocus, true);
+    }
+    background.forEach(function (entry) { entry.node.inert = entry.inert; });
+    background = [];
     if (el && el.parentNode) el.parentNode.removeChild(el);
     el = null;
+    if (tv && origin && origin.isConnected && !origin.closest('[inert], [hidden], .hidden')) origin.focus();
+    origin = null;
   }
 
   function decide(status) {
+    if (!el) return;
     write(status);
     apply(status);
     hide();
@@ -93,6 +156,15 @@
       '@keyframes norva-consent-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}',
       '.norva-consent__card{animation:norva-consent-in .28s ease both}',
       '@media (max-width:560px){.norva-consent__actions{width:100%;margin-left:0}.norva-consent__btn{flex:1 1 auto}}',
+      '.norva-consent--tv{padding:24px 48px;box-sizing:border-box}',
+      '.norva-consent--tv .norva-consent__card{max-width:960px;padding:24px;gap:16px 24px;border-radius:var(--radius-lg);background:var(--color-bg-secondary);color:var(--color-text-primary);border-color:var(--color-border-light);box-shadow:var(--shadow-lg)}',
+      '.norva-consent--tv .norva-consent__text{flex:1 1 400px;font-size:20px;line-height:1.45;color:var(--color-text-secondary)}',
+      '.norva-consent--tv .norva-consent__actions{gap:16px}',
+      '.norva-consent--tv .norva-consent__btn{min-height:56px;min-width:144px;padding:16px 24px;font-size:20px;border-radius:var(--radius-md);background:var(--color-bg-tertiary);background-image:none;color:var(--color-text-primary);border:2px solid var(--color-border-light)}',
+      '.norva-consent--tv .norva-consent__link{display:inline-flex;align-items:center;min-height:48px;font-size:18px;color:var(--color-text-secondary);border-radius:var(--radius-sm)}',
+      '.norva-consent--tv .norva-consent__btn:focus,.norva-consent--tv .norva-consent__link:focus{outline:4px solid var(--color-accent-hover)!important;outline-offset:4px!important;box-shadow:none!important;transform:none!important}',
+      '.norva-consent--tv .norva-consent__btn:focus{background:var(--color-bg-active);border-color:var(--color-text-primary)}',
+      '.norva-consent--tv .norva-consent__btn:active{background:var(--color-accent-dim)}',
       '@media (prefers-reduced-motion:reduce){.norva-consent__card{animation:none}.norva-consent__btn{transition:none}}'
     ].join('');
     var s = document.createElement('style');
@@ -104,14 +176,17 @@
   function show() {
     if (el) return;
     injectStyle();
+    tv = isTvSurface();
+    origin = document.activeElement;
     el = document.createElement('div');
-    el.className = 'norva-consent';
-    el.setAttribute('role', 'region');
+    el.className = 'norva-consent' + (tv ? ' norva-consent--tv' : '');
+    el.setAttribute('role', tv ? 'dialog' : 'region');
+    if (tv) el.setAttribute('aria-modal', 'true');
     el.setAttribute('aria-label', T.aria);
     el.setAttribute('data-i18n-aria-label', 'ui_web_8d5e02d16834');
     el.innerHTML =
       '<div class="norva-consent__card">' +
-        '<p class="norva-consent__text"><span data-i18n="ui_web_f7d909a256a1">' + T.text + '</span>' +
+        '<p class="norva-consent__text"><span data-i18n="' + (tv ? 'ui_tv_consent_summary' : 'ui_web_f7d909a256a1') + '">' + (tv ? (globalThis.NorvaI18n?.t('ui_tv_consent_summary', { defaultValue: 'Allow analytics and advertising cookies? Your choice does not affect playback.' }) ?? 'Allow analytics and advertising cookies? Your choice does not affect playback.') : T.text) + '</span>' +
           ' <a class="norva-consent__link" data-i18n="ui_web_1445799c033a" href="' + privacyHref + '">' + T.more + '</a></p>' +
         '<div class="norva-consent__actions">' +
           '<button type="button" class="norva-consent__btn norva-consent__btn--ghost" data-i18n="ui_web_a2d285b35287" data-consent="denied">' + T.refuse + '</button>' +
@@ -124,15 +199,19 @@
       decide(btn.getAttribute('data-consent') === 'granted' ? 'granted' : 'denied');
     });
     (document.body || document.documentElement).appendChild(el);
-    if (isTvSurface()) {
+    if (tv) {
+      containBackground();
+      backgroundObserver = new MutationObserver(containBackground);
+      backgroundObserver.observe(document.body, { childList: true });
+      document.addEventListener('keydown', handleKey, true);
+      document.addEventListener('focusin', keepFocus, true);
       var decline = el.querySelector('[data-consent="denied"]');
       if (decline) decline.focus();
     }
   }
 
   /*
-   * TV detection is used only to put initial D-pad focus on the conservative
-   * Decline action. A TV must never imply consent or reuse another device's
+   * TV uses a contained remote-first dialog with initial focus on Decline. A TV must never imply consent or reuse another device's
    * choice: every native installation keeps its own explicit decision.
    */
   function isTvSurface() {
@@ -140,6 +219,7 @@
       var ua = navigator.userAgent || '';
       if (/NorvaTV-AndroidTV/i.test(ua)) return true;
       if (/\b(Android\s?TV|SmartTV|Smart-TV|Tizen|Web0S|WebOS|NetCast|BRAVIA|CrKey|GoogleTV|HbbTV|AFT[A-Z]{2,})\b/i.test(ua)) return true;
+      if (new URLSearchParams(location.search).has('tv')) return true;
       if (/[?&#]device=tv\b/i.test(location.search + location.hash)) return true;
     } catch (e) { /* default to non-TV */ }
     return false;
@@ -155,6 +235,8 @@
   /* Let a "Manage cookies" link re-open the banner: NorvaConsent.reset(). */
   window.NorvaConsent = {
     open: function () { show(); },
+    close: hide,
+    handleKey: handleKey,
     reset: function () { try { localStorage.removeItem(STORAGE_KEY); } catch (e) {} apply('denied'); show(); },
     get: function () { return read(); }
   };
