@@ -12,6 +12,16 @@ select public.norva_sync_catalog_background_owner_title('20000000-0000-0000-0000
 select public.test_assert((select count(*)=2 from public.cloud_catalog_background_owner_snapshot_rows where title='Changed' and catalog_metadata->>'new'='true' and revalidate_attempted_at='2026-10-02Z'),'real payload/attempt change lost');
 select public.test_assert((select r.ctid::text=o.physical_version from public.cloud_catalog_background_owner_snapshot_rows r join original_versions o using(snapshot_id,title_id) where r.user_id='20000000-0000-0000-0000-000000000002'),'other owner was modified');
 
+-- Attempt timestamps drive retry eligibility even when the display is unchanged.
+update public.cloud_titles set search_match_attempted_at='2026-10-02 08:30Z'
+where id='10000000-0000-0000-0000-000000000001';
+select public.norva_sync_catalog_background_owner_title('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001');
+select public.test_assert((select count(*)=2 from public.cloud_catalog_background_owner_snapshot_rows where search_match_attempted_at='2026-10-02 08:30Z'),'timestamp-only change lost');
+update public.cloud_titles set revalidate_attempted_at=null
+where id='10000000-0000-0000-0000-000000000001';
+select public.norva_sync_catalog_background_owner_title('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001');
+select public.test_assert((select count(*)=2 from public.cloud_catalog_background_owner_snapshot_rows where user_id='20000000-0000-0000-0000-000000000001' and revalidate_attempted_at is null),'attempt reset to NULL lost');
+
 insert into public.cloud_source_catalog_generation_candidate_titles
  select id,user_id,'50000000-0000-0000-0000-000000000001',item_type,provider_tmdb_id,
  match_status,'Projected',original_title,release_year,null,backdrop_url,metadata,updated_at,

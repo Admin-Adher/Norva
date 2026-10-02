@@ -45,9 +45,11 @@ def main():
         if subprocess.run(['docker', 'exec', NAME, 'pg_isready', '-h', '/tmp'], capture_output=True).returncode == 0:
             break
         time.sleep(1)
-    old = cmd(['docker', 'exec', 'norva-db', 'psql', '-X', '-qAt', '-U', 'supabase_admin',
-               '-d', 'postgres', '-c', "select pg_get_functiondef('public.norva_sync_catalog_background_owner_title(uuid,uuid)'::regprocedure);"])
-    (ROOT / 'owner-sync-production-before.sql').write_text(old)
+    # Fixed repository baseline makes the proof repeatable after deployment.
+    baseline_source = (ROOT / '20260823182730_catalog_background_owner_snapshot_sync.sql').read_text()
+    start = baseline_source.index('create or replace function public.norva_sync_catalog_background_owner_title(')
+    end = baseline_source.index('$function$;', start) + len('$function$;')
+    old = baseline_source[start:end]
     sql((ROOT / 'catalog-owner-noop-writes.fixture.sql').read_text())
     sql((ROOT / '20260825050000_catalog_background_owner_row_count.sql').read_text())
     sql(old)
