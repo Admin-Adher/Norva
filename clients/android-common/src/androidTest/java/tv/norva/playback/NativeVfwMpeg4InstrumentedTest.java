@@ -32,12 +32,13 @@ import org.junit.runner.RunWith;
 @androidx.media3.common.util.UnstableApi
 public final class NativeVfwMpeg4InstrumentedTest {
     @Test public void legacyXvidRendersResumesAndCloses() throws Exception {
-        replay("s_xvid_vfw_aac.mkv");
+        replay("s_xvid_vfw_aac.mkv",3,7);
     }
     @Test public void legacyXvidWithoutPrivateInitializationRendersAndResumes() throws Exception {
-        replay("s_xvid_vfw_inband_aac.mkv");
+        // Start beyond the initial cluster without first rendering byte zero.
+        replay("s_xvid_vfw_inband_aac.mkv",7,3);
     }
-    private void replay(String asset) throws Exception {
+    private void replay(String asset,int resumeSeconds,int seekSeconds) throws Exception {
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();
         Context target=ins.getTargetContext();
         File fixture=new File(target.getCacheDir(),"native-xvid.mkv");
@@ -50,7 +51,7 @@ public final class NativeVfwMpeg4InstrumentedTest {
         try (FixtureOrigin origin=new FixtureOrigin(Files.readAllBytes(fixture.toPath()))) {
             target.startActivity(new Intent().setClassName(target,activityName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra("url",origin.url()).putExtra("title","Norva legacy XVID QA")
-                    .putExtra("itemType","movie").putExtra("resumeSeconds",3));
+                    .putExtra("itemType","movie").putExtra("resumeSeconds",resumeSeconds));
             activity=ins.waitForMonitorWithTimeout(monitor,10000);
             assertNotNull(activity);final Activity opened=activity;
             java.lang.reflect.Field field=activity.getClass().getDeclaredField("player");field.setAccessible(true);
@@ -66,14 +67,18 @@ public final class NativeVfwMpeg4InstrumentedTest {
                     for(Tracks.Group group:player.getCurrentTracks().getGroups()) if(group.getType()==C.TRACK_TYPE_VIDEO)
                         for(int i=0;i<group.length;i++) if(group.isTrackSelected(i)) selected[0]=MimeTypes.VIDEO_MP4V.equals(group.getTrackFormat(i).sampleMimeType);
                 });
-                if(observed[0]>=4000&&observed[1]>10&&observed[2]>10&&selected[0])break;
+                if(observed[0]>=resumeSeconds*1000L+1000&&observed[1]>10&&observed[2]>10&&selected[0])break;
                 SystemClock.sleep(100);
             }
             assertTrue("No decoded MPEG-4 video",selected[0]&&observed[1]>10);
             assertTrue("No audio progress",observed[2]>10);
-            assertTrue("Resume position lost",observed[0]>=4000&&observed[0]<10000);
-            ins.runOnMainSync(()->player.seekTo(7000));SystemClock.sleep(1200);
-            ins.runOnMainSync(()->{assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=7000);});
+            assertTrue("Resume position lost",observed[0]>=resumeSeconds*1000L+1000&&observed[0]<resumeSeconds*1000L+5000);
+            long videoBefore=observed[1];
+            ins.runOnMainSync(()->player.seekTo(seekSeconds*1000L));SystemClock.sleep(1200);
+            ins.runOnMainSync(()->{
+                assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=seekSeconds*1000L);
+                assertTrue("Seek must render fresh video",player.getVideoDecoderCounters().renderedOutputBufferCount>videoBefore+5);
+            });
             // Exercise the platform Back dispatch, including TV's key handler.
             // Calling deprecated Activity.onBackPressed bypasses that handler.
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
