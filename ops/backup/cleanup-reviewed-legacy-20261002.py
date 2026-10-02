@@ -85,6 +85,7 @@ def run(s3, apply=False):
         matched = [h for h in history if h['fields'].get('LABEL') in
                    ('norva-' + oldest_base, 'norva-weekly-' + oldest_base.removeprefix('base-'))]
         before_base = None
+        chain = None
         if len(matched) == 1:
             start = re.search(r'file ([0-9A-F]{24})', matched[0]['fields'].get('START WAL LOCATION', ''))
             if start:
@@ -93,11 +94,28 @@ def run(s3, apply=False):
                             and o['Key'].split('/')[-1][:8] == floor[:8] and o['Key'].split('/')[-1] < floor]
                 before_base = {'oldest_retained_base': oldest_base, 'start_segment': floor,
                                'count': len(obsolete), 'bytes': sum(o['Size'] for o in obsolete)}
+                retained_segments = [o for o in wal_objects
+                                     if re.fullmatch(r'[0-9A-F]{24}', o['Key'].split('/')[-1])
+                                     and o['Key'].split('/')[-1][:8] == floor[:8]
+                                     and o['Key'].split('/')[-1] >= floor]
+                ordinal = lambda name: int(name[8:16], 16) * 256 + int(name[16:24], 16)
+                positions = {ordinal(o['Key'].split('/')[-1]) for o in retained_segments}
+                if positions:
+                    first = ordinal(floor)
+                    last = max(positions)
+                    missing = [n for n in range(first, last + 1) if n not in positions]
+                    chain = {'segment_bytes': 16777216, 'start_segment': floor,
+                             'newest_segment': max(o['Key'].split('/')[-1] for o in retained_segments),
+                             'expected_count': last - first + 1, 'present_count': len(positions),
+                             'missing_count': len(missing),
+                             'first_missing_ordinals': missing[:5],
+                             'wrong_size_count': sum(o['Size'] != 16777216 for o in retained_segments)}
         print(json.dumps({'read_only_storage_audit': True, 'time': now.isoformat(),
                           'bucket_bytes': sum(o['Size'] for o in all_objects),
                           'bucket_count': len(all_objects), 'groups': groups,
                           'wal_by_upload_day': wal_days, 'backup_history': history,
-                          'wal_before_oldest_retained_base': before_base}, default=str))
+                          'wal_before_oldest_retained_base': before_base,
+                          'retained_wal_chain_metadata_check': chain}, default=str))
     candidates, proof = plan(s3, now)
     result = {'time': now.isoformat(), 'apply': apply, 'proof': proof,
               'objects': [{'key': o['Key'], 'bytes': o['Size'], 'etag': o['ETag']} for o in candidates],
