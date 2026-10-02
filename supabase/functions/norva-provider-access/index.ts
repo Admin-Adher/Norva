@@ -2789,10 +2789,10 @@ async function runActivePostSwitchRefresh(job, workerId, runtime, candidateConfi
         p_expected_checkpoint_revision: run.checkpointRevision,
         p_action_kind: action.categoryKind,
         p_catalog_version: state.catalogVersion,
-        // Live orphan cleanup includes per-channel guards and referential
-        // checks. Use smaller slices so those deletes can checkpoint before
-        // the database statement deadline instead of retrying the same batch.
-        p_limit: action.categoryKind === "live" ? 25 : 200,
+        // The lease proof uses a custom plan (20261001212500). Keep a bounded
+        // batch while amortizing that proof across enough live rows to finish
+        // large source refreshes without thousands of tiny checkpoints.
+        p_limit: 200,
       }));
       visibilityEpoch = activeVisibilityEpoch(
         pruned,

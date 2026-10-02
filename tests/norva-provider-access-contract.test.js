@@ -757,13 +757,13 @@ test('active refresh carries durable category counts and resumes after generatio
   assert.equal(progress.catalogVersion, 9);
 });
 
-test('live prune resumes small slices with the returned epoch before advancing the action', async () => {
+test('live prune resumes bounded slices with the returned epoch before advancing the action', async () => {
   let progress = { version: 1, catalogVersion: 9, action: 'live_streams', actionComplete: true,
     cursor: '', spoolToken: '', contentSha256: 'a'.repeat(64), processedCategories: 357,
     processedItems: 21606, observedItems: 21606, categoryCount: 357 };
   let checkpointRevision = 402;
   let epoch = 3;
-  let remaining = 138;
+  let remaining = 1138;
   let slices = 0;
   const source = section('const ACTIVE_REFRESH_ACTIONS', '\nasync function restoreAfterPostSwitchFailure');
   const run = vm.runInNewContext(`(() => { ${source}; return runActivePostSwitchRefresh; })()`, {
@@ -781,7 +781,7 @@ test('live prune resumes small slices with the returned epoch before advancing t
         assert.equal(params.p_expected_checkpoint_revision, checkpointRevision);
         assert.equal(params.p_user_visibility_epoch, epoch);
         assert.equal(params.p_action_kind, 'live');
-        assert.equal(params.p_limit, 25);
+        assert.equal(params.p_limit, 200);
         remaining = Math.max(0, remaining - params.p_limit);
         slices++;
         return { complete: remaining === 0, visibilityEpoch: ++epoch };
