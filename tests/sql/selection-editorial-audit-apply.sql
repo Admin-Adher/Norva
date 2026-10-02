@@ -7,7 +7,7 @@ declare rel uuid; rev text; manifest text; key text; ext text; person uuid; src 
  readers uuid[]:='{}'; sources uuid[]:='{}'; ids uuid[]:='{}'; ct uuid;
  old_md jsonb:='{"tmdb":{"id":999,"overview":"Wrong overview"},"tmdbValidation":{"valid":true,"confidence":0.783}}';
  patch jsonb; receipt jsonb; after_md jsonb; before_files text; before_shared text; before_variants text;
- before_epoch bigint; counter int;
+ before_epoch bigint; counter int; before_global jsonb;
 begin
  select id,revision,manifest_sha256 into rel,rev,manifest from public.selection_shared_releases where published_at is not null limit 1;
  select identity_key,default_external_id into key,ext from public.selection_shared_titles where release_id=rel and title='Guerreiros da Virtude';
@@ -80,12 +80,48 @@ begin
  if receipt->>'quarantined'<>'1' or receipt->>'ownedBindings'<>'1' then raise exception 'Quarantine did not cover owned binding: %',receipt; end if;
  if exists(select 1 from public.cloud_titles where id=ids[1] and (provider_tmdb_id is not null or metadata?'tmdb' or poster_url is not null)) then
    raise exception 'Rejected content survives in owned fiche'; end if;
+ -- Legacy inventories have no shared enrollment. They still need the same
+ -- verified editorial data, with source/generation/URL and manual guards.
+ execute 'reset role';
+ update public.selection_shared_titles set provider_tmdb_id='49478',match_status='provider_verified',poster_url='https://image.tmdb.org/t/p/w500/correct.jpg',
+   metadata='{"tmdb":{"id":49478,"overview":"Legacy refreshed"},"tmdbValidation":{"valid":true,"confidence":0.923},"tmdbSearchReview":{"reason":"unique_exact_title","rejectedTmdbIds":["999"]}}'
+   where release_id=rel and identity_key=key;
+ update public.cloud_titles set provider_tmdb_id='999',metadata=old_md||'{"privatePreference":"keep","audioTracks":["private"]}' where id=ids[1];
+ delete from public.selection_shared_enrollments where user_id=any(readers);
+ select metadata into before_global from public.catalog_titles where item_type='movie' and provider_tmdb_id='49478';
+ execute 'set local role service_role';
+ snap:=public.norva_get_catalog_write_snapshot(sources[1],readers[1]);
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[1],sources[1],(snap->>'generationId')::uuid,100);
+ if receipt->>'updatedTitles'<>'1' or (select provider_tmdb_id from public.cloud_titles where id=ids[1])<>'49478'
+   or (select metadata->>'privatePreference' from public.cloud_titles where id=ids[1])<>'keep'
+   or not (select metadata#>'{tmdbSearchReview,rejectedTmdbIds}' from public.cloud_titles where id=ids[1]) @> '["999"]' then
+   raise exception 'Legacy exact binding stayed stale: %',receipt; end if;
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[1],sources[1],(snap->>'generationId')::uuid,100);
+ if receipt->>'updatedTitles'<>'0' then raise exception 'Legacy replay rewrites unchanged metadata'; end if;
+ if (select metadata from public.catalog_titles where item_type='movie' and provider_tmdb_id='49478') is distinct from before_global
+   or nullif(current_setting('norva.selection_owned_editorial_context',true),'') is not null then
+   raise exception 'Owner refresh leaked private metadata into global cache or left mirror bypass active'; end if;
+ begin
+   perform public.norva_refresh_selection_owned_editorial(readers[2],sources[1],(snap->>'generationId')::uuid,100);
+   raise exception 'Foreign legacy owner accepted';
+ exception when insufficient_privilege then null; end;
+ begin
+   perform public.norva_refresh_selection_owned_editorial(readers[1],sources[1],gen_random_uuid(),100);
+   raise exception 'Stale legacy generation accepted';
+ exception when sqlstate 'PT409' then null; end;
+ snap:=public.norva_get_catalog_write_snapshot(sources[2],readers[2]);
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[2],sources[2],(snap->>'generationId')::uuid,100);
+ if receipt->>'updatedTitles'<>'0' then raise exception 'Manual legacy title overwritten'; end if;
+ snap:=public.norva_get_catalog_write_snapshot(sources[3],readers[3]);
+ receipt:=public.norva_refresh_selection_owned_editorial(readers[3],sources[3],(snap->>'generationId')::uuid,100);
+ if receipt->>'updatedTitles'<>'0' then raise exception 'Private legacy URL overwritten'; end if;
  if before_files<>(select md5(jsonb_agg(to_jsonb(m) order by id)::text) from public.cloud_media_items m where user_id=any(readers))
    or before_variants<>(select md5(jsonb_agg(to_jsonb(v) order by id)::text) from public.cloud_title_variants v where user_id=any(readers))
    or before_shared<>(select md5(jsonb_agg(to_jsonb(m) order by item_type,external_id)::text) from public.selection_shared_media m where release_id=rel) then
    raise exception 'Files or playback bindings changed'; end if;
  if has_function_privilege('authenticated','public.norva_apply_selection_editorial_audit(uuid,text,jsonb)','execute')
-   or has_function_privilege('anon','public.norva_apply_selection_editorial_audit(uuid,text,jsonb)','execute') then
+   or has_function_privilege('anon','public.norva_apply_selection_editorial_audit(uuid,text,jsonb)','execute')
+   or has_function_privilege('authenticated','public.norva_refresh_selection_owned_editorial_all(int,int)','execute') then
    raise exception 'Public user can apply audit'; end if;
  raise notice 'PASS: audited correction/quarantine, exact bindings, private/manual exclusions, CAS/manifest/duplicates/weak-proof fences, epochs, immutable files and grants';
 end $test$;
