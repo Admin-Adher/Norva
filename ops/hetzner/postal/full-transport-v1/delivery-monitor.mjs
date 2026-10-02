@@ -19,7 +19,9 @@ async function tick(){
   const counters=health??{};
   if(!issue&&Object.values(counters).some(n=>typeof n==='number'&&n>0))issue='mail_delivery_needs_review';
   const file='/data/state.json';let previous={};try{previous=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}
-  const signature=JSON.stringify({issue:issue??null,counters});
+  // Counts fluctuate while an incident drains. Keep its identity stable rather
+  // than sending one message for every decreasing dead-letter count.
+  const signature=JSON.stringify({issue:issue??null,counters:Object.keys(counters).filter(k=>Number(counters[k])>0).sort()});
   if((issue&&(signature!==previous.signature||Date.now()-(previous.at??0)>21600000))||(!issue&&previous.issue)){
    const text=(issue?'Norva — incident de livraison email':'Norva — livraison email rétablie')+'\n'+
     (issue??'healthy')+'\n'+Object.entries(counters).map(([k,v])=>k+': '+v).join('\n');

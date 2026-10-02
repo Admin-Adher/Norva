@@ -4,13 +4,34 @@ import { sendTelegram, telegramConfigured, tgEscape, type TelegramCategory } fro
 
 const COOLDOWN = 6 * 60 * 60 * 1000;
 type Incident = {key:string;detail:string};
-type DeliveryState = {category:TelegramCategory;channel:'telegram'|'email';key:string;details:string;last_alerted_at:string};
+type DeliveryState = {category:TelegramCategory;channel:'telegram'|'email';key:string;details:string;last_alerted_at:string;healthy_since?:string|null};
+
+// Maintenance retries and the safe LID fallback are not new incidents on every
+// sweep. A continuous 30-minute healthy interval is required to close them.
+export function opsRecoveryDelay(key:string):number {
+  return key === 'lid_runtime_degraded' || key.startsWith('cron:') ? 30*60000 : 0;
+}
+export function opsReminderDelay(key:string):number {
+  return key === 'lid_runtime_degraded' || ['sources_error','sources_incomplete'].includes(key)
+    ? 24*3600000 : COOLDOWN;
+}
 
 export async function dispatchOpsNotifications(admin:any, problems:Incident[], opsEmail:string):Promise<Record<string,unknown>> {
   const {data, error} = await admin.from('admin_alert_delivery_state').select('*');
   if(error) throw new Error('ops_notification_state_unavailable');
   const states = (data ?? []) as DeliveryState[];
   const active = new Set(problems.map(p=>p.key));
+  const now=Date.now();
+  for(const state of states) {
+    if(!opsRecoveryDelay(state.key)) continue;
+    const healthySince=active.has(state.key) ? null : state.healthy_since || new Date(now).toISOString();
+    if(healthySince!==state.healthy_since) {
+      const {error:observationError}=await admin.from('admin_alert_delivery_state')
+        .upsert({...state,healthy_since:healthySince},{onConflict:'category,channel,key'});
+      if(observationError) throw new Error('ops_recovery_observation_failed');
+      state.healthy_since=healthySince;
+    }
+  }
   const lidActive = problems.some(p=>p.key.startsWith('lid_cascade_'));
   const resendKey = Deno.env.get('NORVA_POSTAL_WIRE_KEY') ?? '';
   const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <support@norva.tv>";
@@ -39,7 +60,7 @@ export async function dispatchOpsNotifications(admin:any, problems:Incident[], o
     if(accepted) {
       const query=recovery
         ? admin.from('admin_alert_delivery_state').delete().eq('category',category).eq('channel',channel).in('key',items.map(p=>p.key))
-        : admin.from('admin_alert_delivery_state').upsert(items.map(p=>({category,channel,key:p.key,details:p.detail,last_alerted_at:new Date().toISOString()})),{onConflict:'category,channel,key'});
+        : admin.from('admin_alert_delivery_state').upsert(items.map(p=>({category,channel,key:p.key,details:p.detail,last_alerted_at:new Date().toISOString(),healthy_since:null})),{onConflict:'category,channel,key'});
       const {error:writeError}=await query;
       if(writeError) throw new Error('ops_notification_ack_failed');
     }
@@ -49,12 +70,13 @@ export async function dispatchOpsNotifications(admin:any, problems:Incident[], o
     const category=group.category as TelegramCategory;
     for(const channel of ['telegram','email'] as const) {
       if(channel==='telegram' ? !telegramConfigured(category) : !(resendKey && opsEmail)) continue;
-      const due=group.items.filter((p:Incident)=>!states.some(s=>s.category===category && s.channel===channel && s.key===p.key && new Date(s.last_alerted_at).getTime()>Date.now()-COOLDOWN));
+      const due=group.items.filter((p:Incident)=>!states.some(s=>s.category===category && s.channel===channel && s.key===p.key && new Date(s.last_alerted_at).getTime()>Date.now()-opsReminderDelay(p.key)));
       await deliver(category,channel,due,false);
     }
   }
   for(const channel of ['telegram','email'] as const) {
     const healed=states.filter(s=>s.channel===channel && !active.has(s.key)
+      && (!opsRecoveryDelay(s.key) || (s.healthy_since && now-Date.parse(s.healthy_since)>=opsRecoveryDelay(s.key)))
       && !(lidActive && s.key.startsWith('lid_cascade_'))
       && !(['sources_error','sources_incomplete'].includes(s.key) && new Date(s.last_alerted_at).getTime()>Date.now()-COOLDOWN));
     for(const group of groupOpsNotifications(healed,(s:DeliveryState)=>s.category)) {

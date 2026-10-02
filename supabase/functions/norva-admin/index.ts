@@ -441,8 +441,11 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   // 3) Conditions → stable keys. `detail` goes into the email body.
   const problems: { key: string; detail: string }[] = [];
   if (lidRuntime.state !== 'ready') problems.push({
-    key: 'lid_runtime_degraded',
-    detail: `Pipeline LID strict dégradé : ${(lidRuntime.reasons as string[]).join(', ')}. Aucun verdict faible n'est publié; priorité lecteur conservée.`,
+    key: (lidRuntime.reasons as string[]).every(reason=>reason==='vad-degraded-full-whisper-active')
+      ? 'lid_runtime_degraded' : 'lid_runtime_failure',
+    detail: (lidRuntime.reasons as string[]).every(reason=>reason==='vad-degraded-full-whisper-active')
+      ? 'Détection des langues : accélération VAD temporairement suspendue ; traitement Whisper complet actif. Priorité à la lecture et critères de qualité conservés.'
+      : `Pipeline LID strict dégradé : ${(lidRuntime.reasons as string[]).join(', ')}. Aucun verdict faible n'est publié; priorité lecteur conservée.`,
   });
   const {data:trialDeliveryHealth,error:trialDeliveryError} = await admin.rpc('trial_telegram_delivery_health');
   if (trialDeliveryError) problems.push({key:'growth_telegram_health_unavailable',detail:'Supervision des notifications de début d’essai indisponible'});
