@@ -14,6 +14,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -30,10 +38,12 @@ public final class NativeVfwMpeg4InstrumentedTest {
         String activityName=target.getPackageName()+".PlayerActivity";
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(activityName,null,false);
         Activity activity=null;
-        try {
+        // Both real players use HTTP for online media. Phone's local lane is
+        // encrypted downloads; TV does not support file:// sources.
+        try (FixtureOrigin origin=new FixtureOrigin(Files.readAllBytes(fixture.toPath()))) {
             target.startActivity(new Intent().setClassName(target,activityName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .putExtra("url",fixture.toURI().toString()).putExtra("title","Norva legacy XVID QA")
-                    .putExtra("local",true).putExtra("itemType","movie").putExtra("resumeSeconds",3));
+                    .putExtra("url",origin.url()).putExtra("title","Norva legacy XVID QA")
+                    .putExtra("itemType","movie").putExtra("resumeSeconds",3));
             activity=ins.waitForMonitorWithTimeout(monitor,10000);
             assertNotNull(activity);final Activity opened=activity;
             java.lang.reflect.Field field=activity.getClass().getDeclaredField("player");field.setAccessible(true);
@@ -42,7 +52,7 @@ public final class NativeVfwMpeg4InstrumentedTest {
             long[] observed={0,0,0};boolean[] selected={false};long start=SystemClock.elapsedRealtime();
             while(SystemClock.elapsedRealtime()-start<20000) {
                 ins.runOnMainSync(()->{
-                    assertNull(player.getPlayerError());
+                    assertNull("Playback failed: "+safeError(player.getPlayerError()),player.getPlayerError());
                     observed[0]=player.getCurrentPosition();
                     observed[1]=player.getVideoDecoderCounters()==null?0:player.getVideoDecoderCounters().renderedOutputBufferCount;
                     observed[2]=player.getAudioDecoderCounters()==null?0:player.getAudioDecoderCounters().renderedOutputBufferCount;
@@ -62,5 +72,44 @@ public final class NativeVfwMpeg4InstrumentedTest {
             if(activity!=null&&!activity.isDestroyed()){final Activity opened=activity;ins.runOnMainSync(opened::finish);}
             ins.removeMonitor(monitor);fixture.delete();
         }
+    }
+    private static String safeError(Throwable error) {
+        StringBuilder result=new StringBuilder();
+        for(int depth=0;error!=null&&depth<8;depth++,error=error.getCause())
+            result.append(error.getClass().getSimpleName()).append(": ").append(error.getMessage()).append("; ");
+        return result.toString();
+    }
+    private static final class FixtureOrigin implements AutoCloseable {
+        final ServerSocket server;
+        final byte[] bytes;
+        FixtureOrigin(byte[] bytes) throws IOException {
+            this.bytes=bytes;server=new ServerSocket(0,8,InetAddress.getByName("127.0.0.1"));
+            Thread accept=new Thread(()->{
+                while(!server.isClosed())try{
+                    Socket socket=server.accept();Thread serve=new Thread(()->serve(socket),"vfw-response");
+                    serve.setDaemon(true);serve.start();
+                }catch(IOException ignored){}
+            },"vfw-origin");accept.setDaemon(true);accept.start();
+        }
+        String url(){return "http://127.0.0.1:"+server.getLocalPort()+"/fixture.mkv";}
+        void serve(Socket socket){
+            try(Socket current=socket){
+                current.setSoTimeout(5000);
+                BufferedReader reader=new BufferedReader(new InputStreamReader(current.getInputStream(),StandardCharsets.US_ASCII));
+                String line;int start=0,end=bytes.length-1;boolean range=false;
+                while((line=reader.readLine())!=null&&!line.isEmpty()){
+                    if(line.toLowerCase(java.util.Locale.ROOT).startsWith("range: bytes=")){
+                        range=true;String[] bounds=line.substring(line.indexOf('=')+1).split("-",-1);
+                        start=Integer.parseInt(bounds[0]);if(!bounds[1].isEmpty())end=Math.min(end,Integer.parseInt(bounds[1]));
+                    }
+                }
+                OutputStream out=current.getOutputStream();
+                if(start> end){out.write(("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */"+bytes.length+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));return;}
+                out.write(("HTTP/1.1 "+(range?"206 Partial Content":"200 OK")+"\r\nContent-Type: video/x-matroska\r\nAccept-Ranges: bytes\r\nContent-Length: "+(end-start+1)+"\r\n"
+                        +(range?"Content-Range: bytes "+start+"-"+end+"/"+bytes.length+"\r\n":"")+"Connection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                out.write(bytes,start,end-start+1);out.flush();
+            }catch(Exception ignored){}
+        }
+        @Override public void close()throws IOException{server.close();}
     }
 }
