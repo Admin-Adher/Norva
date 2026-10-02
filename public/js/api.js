@@ -913,7 +913,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}, options = {}) {
+    async function getMediaPage({ sourceId, type, q, externalId = '', categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}, options = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -921,6 +921,7 @@ const CloudAdapter = (() => {
             cloudSourceId,
             type: type || '',
             q: q || '',
+            externalId: String(externalId || ''),
             categoryId: categoryId || '',
             sort: sort || 'default',
             year: year || '',
@@ -939,6 +940,7 @@ const CloudAdapter = (() => {
             sourceId: cloudSourceId,
             type,
             q,
+            externalId,
             categoryId,
             sort,
             // Server-side year/rating/recently-added filters (denormalized columns).
@@ -949,7 +951,10 @@ const CloudAdapter = (() => {
             offset: normalizedOffset
         }, options);
         syncVisibilityEpoch(payload);
-        const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+        const items = externalId && Array.isArray(payload.catalogTitleItems)
+            ? payload.catalogTitleItems.flatMap(item => normalizeHomeRailItem({ ...item,
+                data: { ...item.data, title: item.title || item.name } }).variants)
+            : (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
         const page = {
             items,
             // `items` contains every provider variant for the logical titles in
@@ -1927,6 +1932,7 @@ const CloudAdapter = (() => {
                 sourceId: query.get('sourceId') || '',
                 type: query.get('type') || '',
                 q: query.get('q') || '',
+                externalId: query.get('externalId') || '',
                 categoryId: query.get('categoryId') || '',
                 sort: query.get('sort') || 'default',
                 year: query.get('year') || '',
