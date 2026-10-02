@@ -159,3 +159,22 @@ dispatch returned HTTP 200 with zero eligible production recipients. Sandbox
 acceptance remains false. See `2026-10-02-mobile-retention-production.md` for
 receipts, exact scope and the separately observed standard-checkout retry.
 The broader Provider Access, route and unknown-provider gates remain open.
+
+## Real application conversion-sharing replay, 11:20 UTC
+
+See [the detailed replay](2026-10-02-shared-conversion-app-proof.md).
+Two profiles of an ordinary QA owner played a real Norva Selection MKV through
+the normal web UI and shared one in-progress conversion. The joined viewer's
+post-fix first frame was measured at 1.820 seconds. Closing the original viewer
+did not terminate the follower. A separate internal owner's physical Android
+launch exposed a destructive auxiliary-drain call; PR572 corrected it and is
+merged. Gateway172 and Edge85 are deployed on both production routes, with
+78 Gateway source files matched and main Compose pinned to the immutable image.
+
+This closes the **synthetic-only proof gap for that web joining scenario**.
+It does not close every playback gate: the follower encountered buffering and
+resumed automatically; the same MKV still failed before its first frame on
+phone1.3.29. Nonzero concurrent resume used the existing single-slot replacement
+path. Neither native in-progress joining nor arbitrary-offset concurrent resume
+is certified. All test players were closed and server viewer/pump counts returned
+to zero. The broader objective remains open with these limits recorded explicitly.
