@@ -136,6 +136,32 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         const providerContext = category || item.sourceId || item.source_id;
         let raw = String(item.raw_title || item.rawTitle || (providerContext ? item.name || item.title : '') || '')
             .replace(BAR_SEPARATORS, ' | ').slice(0, 2000);
+        // A second, delimited language is not the IN market code. Preserve that
+        // declaration on a matching language shelf or the broad South India shelf.
+        // Other named shelves still conflict, and IN alone declares no language.
+        const namedIndianPrefix = raw.match(/^\s*INI?(?:\s*[|:]\s*|\s+)(HINDI|TAMIL|TELUGU|MALAYALAM|KANNADA|GUJARATI|BENGALI|PUNJABI|MARATHI)\s*[|:]\s*/);
+        const indianShelf = category.trim().replace(/\s+/g, ' ');
+        if (namedIndianPrefix && (indianShelf === '[IN] SOUTH INDIA'
+            || indianShelf === `[IN] ${namedIndianPrefix[1]}`)) {
+            raw = `${namedIndianPrefix[1]} | ${raw.slice(namedIndianPrefix[0].length)}`;
+            category = namedIndianPrefix[1];
+            // These suffixes qualify an independently named language. They do
+            // not specify the other tracks; no track map is created here.
+            raw = raw.replace(/\s*\[MULTI(?:[ -](?:AUDIO|SUBS?))?\]\s*((?:(?:19|20)\d{2})?)\s*$/i, ' $1');
+        }
+        // English-market releases can explicitly separate audio and subtitles:
+        // "(JAPANESE ENG-SUB)" or "[HINDI-AUDIO] [EN-SUB]". Only a complete
+        // annotation with known language names is accepted, never title prose.
+        const englishMarket = /^\s*EN(?=\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:])/.test(raw)
+            && /^(?:\[EN\](?:\s|$)|EN\s*[-|:]|VOD - [^\[\]]+\[EN\]$)/.test(category.trim());
+        const audioSubRole = raw.match(/\(([A-Z][A-Za-z]{3,29})\s+(?:-\s*)?(?:ENG|EN|ENGLISH)[ -]SUBS?\)\s*$/i)
+            || raw.match(/\[([A-Z][A-Za-z]{3,29})[ -]AUDIO\]\s*\[(?:ENG|EN|ENGLISH)[ -]SUBS?\]\s*$/i);
+        if (englishMarket && audioSubRole && VERSION_PROVIDER_LANGUAGE_TAGS[audioSubRole[1].toLowerCase()]
+            && VERSION_PROVIDER_LANGUAGE_TAGS[audioSubRole[1].toLowerCase()] !== 'nordic') {
+            const audioName = audioSubRole[1].toUpperCase();
+            raw = raw.slice(0, audioSubRole.index).replace(/^\s*EN/, audioName);
+            category = audioName;
+        }
         // Role-aware supplier grammars from the residual audit. These do not
         // weaken generic subtitle/conflict guards: only the complete category
         // and its matching bare prefix may assign the destination of a dub.
@@ -274,7 +300,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
                 .replace(/^([\p{L}\p{M}]{2,30})\s+blu-ray$/iu, '$1');
             const originalTokens = stripDiacritics(value).normalize('NFC').split(/[^\p{L}\p{M}\d]+/u).filter(Boolean);
             const tokens = originalTokens.map(t => t.toLowerCase());
-            const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
+            const subOnly = (tokens.some(t => SUB_MARKERS.has(t) || /^(?:subtitled|vost(?:fr|en|eng|es|ar|de|it|pt|nl|ru|hi)?|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi))$/.test(t))
                 || /sous[\s-]+titres/i.test(value) || RTL_SUB_RE.test(value))
                 && !tokens.some(t => DUB_MARKERS.has(t));
             // Brackets alone are not proof of an annotation. For example, the
@@ -282,7 +308,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             const annotationOnly = tokens.every(t => t === 'exyu' || Object.prototype.hasOwnProperty.call(VERSION_PROVIDER_LANGUAGE_TAGS, t)
                 || SUB_MARKERS.has(t) || DUB_MARKERS.has(t)
                 || (supplierPrefix && /^(?:af|vp|eg|ye|s|shr|as|sbus|sham|ma|alg|kh|doc|d|tn|xmas|pod|sh|anm|hara|li|ly|dz|ptv|do|ch|chr|irq|isl|bdy|kid|kids|hdr|dv|jo|jor|cam|dsc|pse|sus|geo|kd)$/.test(t))
-                || /^(?:subtitled|vost\w*|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi)|multi|dual|bilingual|multiaudio|audio|in|4k|8k|sd|hd|fhd|uhd|\d{3,4}p)$/.test(t));
+                || /^(?:subtitled|vost(?:fr|en|eng|es|ar|de|it|pt|nl|ru|hi)?|sub(?:fr|en|es|ar|de|it|pt|nl|ru|hi)|multi|dual|bilingual|multiaudio|audio|in|4k|8k|sd|hd|fhd|uhd|\d{3,4}p)$/.test(t));
             if (annotated && !annotationOnly) return { subOnly, tags: [], multi: false, region: false };
             const codeIsBounded = token => new RegExp(`(?:^|[|:/\\[(])\\s*${token}(?:\\s*[-–—|:/\\])]|\\s*$)`, 'i').test(value);
             // EXYU is a regional catalogue marker, deliberately not a language
@@ -307,7 +333,7 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         // An explicit subtitle marker must not be bypassed by the other field.
         const audioBlocked = leading.subOnly || categorized.subOnly || trailing.subOnly
             || (!declaredFrenchMulti && !declaredIndianMulti && (leading.multi || categorized.multi || trailing.multi))
-            || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw)
+            || /\b(?:vost(?:fr|en|eng|es|ar|de|it|pt|nl|ru|hi)?|subtitles?|subbed)\b/i.test(raw)
             // Standalone supplier markers only: المترجم can be the actual
             // movie title (The Translator), not a subtitle declaration.
             || /(?:^|[^\p{L}\p{M}])(?:مترجم|ترجمة|زیرنویس|زیرنویس‌دار)(?=$|[^\p{L}\p{M}])/u.test(raw);
