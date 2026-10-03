@@ -148,3 +148,35 @@ Ces compteurs d'analyse sont distincts des langues identifiées par les métadon
 Deux Gateways HTTP 200 / `ok=true`, aucune lecture active lors du relevé, capacité limitée à deux travaux. Le dispatcher est sain, sans redémarrage et sans marqueur STOP ; enrichissement et cron strict actifs. **Zéro erreur HTTP du dispatcher depuis 18:01:46**, 258 lots de métadonnées non vides terminés ; zéro diagnostic d'expiration SQL depuis la recréation des Edge à 19:23. Les codes SQL historiques figurant encore dans l'état d'admission ne prouvent pas une nouvelle expiration.
 
 Le correctif précédent est intégré dans `be86445f99e7ae16be9bb107622bbf478fe545a4` (PR 609). Ce contrôle n'a modifié ni le dispatcher, ni la base, ni les seuils ou limites de production. Seul l'audit en lecture seule a été précisé. La campagne et sa supervision restent **ACTIVES**, sans clôture. Preuve : `2026-10-03-language-campaign-heartbeat-2112.json`.
+
+## Contrôle du 4 octobre à 00:12 Paris (3 octobre 22:12 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 2 271 | 25 | 30 169 |
+| Norva Selection | 44 | 5 | 178 |
+| Dino | 2 209 | 1 176 | 7 693 |
+| MAX OTT | 1 624 | 979 | 16 526 |
+| **Total** | **6 148** | **2 185** | **54 566** |
+
+Il reste **41 884 fiches distinctes** sans langue dans le périmètre contrôlé. Les 56 751 variantes initiales sont toujours visibles. La projection compte **428 identifications supplémentaires** depuis le relevé précédent ; aucune suppression ne produit cette baisse. Les requêtes restent successives, pendant que les traitements avancent.
+
+Le gain de contrôles distincts est **1 009 en 60 min 16 s**, soit **1 004 contrôles techniques/h**. Ce rythme est inférieur aux 1 263/h de la fenêtre précédente et ne constitue pas un débit d'analyse vocale ni un délai de clôture.
+
+### Analyses strictes réellement terminées
+
+**11 validations réussies avec preuve pour toutes les pistes** depuis le lancement (Strng 2, Selection 3, Dino 3, MAX OTT 3), contre neuf précédemment. Les deux nouvelles validations sont Selection à 21:17:10 UTC et Strng à 21:59:33 UTC.
+
+**22 analyses complètes mais indéterminées**, contre 14 précédemment : Strng 4, Selection 13, Dino 4, MAX OTT 1. Chacune possède ses quatre ou six fenêtres et leurs reçus, une progression fournisseur postérieure au lancement et le même profil observé courant. Les autres échecs, anciennes analyses ou travaux reportés ne gonflent pas ce compteur. Ces 22 résultats ne reçoivent pas de langue arbitraire et ne sont pas relancés manuellement. Les contrôles techniques, identifications et résultats stricts se recoupent : ils ne doivent pas être additionnés.
+
+### Incident SQL récupéré automatiquement
+
+Une requête de métadonnées MAX OTT a reçu **HTTP 500 à 21:20:10 UTC**. Les deux Edge enregistrent à cet instant le code SQL `57014` (délai de requête dépassé). Il s'agit d'un échec HTTP du dispatcher avec un diagnostic sur chaque réplique, et non de deux fichiers sondés. Le premier lot de métadonnées terminé ensuite sur cette source est daté de **21:42:01 UTC**, avec deux contrôles et deux identifications. La temporisation conservatrice de 21 minutes a donc été respectée avant la reprise automatique. Aucun autre échec HTTP du dispatcher n'apparaît dans le contrôle allant jusqu'à 22:18:57 UTC.
+
+L'opération SQL exacte reste **non établie** : le diagnostic la classe comme indéterminée et les journaux PostgreSQL consultés ne fournissent pas le contexte de la requête fautive. Les statistiques cumulées des appels réussis à l'admission des métadonnées donnent 563 ms en moyenne et 7 968 ms au maximum sur 7 594 appels ; elles incluent les anciennes versions et ne permettent pas d'attribuer cet incident à une requête précise. Aucun changement de production spéculatif n'a été appliqué.
+
+### Santé, continuité et limites
+
+À 22:12:52 UTC, les deux Gateways répondent HTTP 200 / `ok=true`, sans lecture active au moment du relevé. La capacité observée passe d'un à deux travaux entre 22:12 et 22:19 selon l'admission adaptative, sans modification de sa limite. Le dispatcher est sain, sans redémarrage ni marqueur STOP ; enrichissement ouvert et cron strict actif. Les dernières exécutions de cron à 22:16–22:19 réussissent, et les candidats dus contrôlés ne présentent pas le profil obsolète responsable de l'ancien blocage.
+
+Le correctif de la file est intégré par la PR 609 ; la précision de l'audit strict est intégrée par la PR 610 (`3e4bd37bcef74c2fe368ded05fe8ae886b9d5ead`). Ce suivi a uniquement lu les états et conservé des reçus agrégés. Aucun bail, compteur, seuil, quarantaine ni résultat indéterminé n'a été réinitialisé. La campagne et son suivi restent **ACTIFS**, sans clôture. Preuve : `2026-10-04-language-campaign-heartbeat-0012.json`.

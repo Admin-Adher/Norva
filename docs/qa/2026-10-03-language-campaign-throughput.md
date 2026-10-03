@@ -78,3 +78,13 @@ Un blocage distinct de la file stricte a été corrigé à 20:28 : clôture des 
 
 La projection affiche **1 757 variantes identifiées / 54 994 inconnues**. À 21:15, l'audit strict trouve **neuf validations réussies** depuis le lancement et **14 résultats de consensus indéterminés avec toutes les fenêtres enregistrées**, toujours rattachés au même profil observé. Les derniers ne reçoivent pas une langue arbitraire. Un nouveau travail Dino a été vérifié à 21:05:51, après le correctif de la file. La campagne continue ; aucun délai de clôture de toutes les analyses vocales n'est certifié.
 
+## Mesure à 22:12 UTC — 4 octobre 00:12 Paris
+
+**6 148 variantes distinctes contrôlées**, soit +1 009 en 60 min 16 s : **1 004 contrôles techniques/h**, contre 1 263/h à la fenêtre précédente. **2 185 variantes identifiées**, soit +428 ; **54 566 variantes / 41 884 fiches encore inconnues**. La cohorte initiale est intégralement conservée.
+
+Un nouvel échec HTTP 500 du dispatcher apparaît sur les métadonnées MAX OTT à 21:20:10 UTC, accompagné du diagnostic SQL `57014` sur les deux Edge. Le premier lot terminé après cet incident est observé à 21:42:01 UTC : deux contrôles et deux identifications. La protection de 21 minutes a donc de nouveau réduit la fenêtre utile. Aucun nouvel échec HTTP n'est observé jusqu'à 22:18:57. La cause SQL précise n'est pas prouvée par les journaux conservés ; les 563 ms de durée moyenne cumulée des appels d'admission réussis ne caractérisent pas l'appel ayant expiré. La réduction de page a amélioré le rythme, mais n'a pas supprimé toutes les expirations.
+
+L'audit strict relève **11 validations réussies avec preuve complète** (+2) et **22 analyses complètes mais indéterminées, rattachées au profil courant** (+8). Ce débit strict reste très inférieur au débit de simples contrôles de métadonnées. Les ensembles se recoupent et ne sont pas additionnés. Il n'est toujours pas possible de garantir une date de clôture exhaustive.
+
+Deux Gateways sains, dispatcher actif sans redémarrage, admission ouverte et cron strict actif. La capacité adaptative observée varie entre un et deux travaux sans changement de configuration. Aucun bail ni résultat n'a été effacé ; aucune nouvelle modification du traitement n'a été déployée pendant ce contrôle. Reçu : `2026-10-04-language-campaign-heartbeat-0012.json`.
+
