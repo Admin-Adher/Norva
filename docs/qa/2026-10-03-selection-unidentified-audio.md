@@ -76,7 +76,10 @@ les configurations ont été vérifiées identiques avant/après et le worker a 
 
 ## Vérifications
 
-- **61 tests ciblés réussis** : 20 préemption/sonde et 41 worker/client audio.
+- **66 tests ciblés réussis** : 20 préemption/sonde, 41 worker/client audio et
+  5 d'isolation de l'admission héritée. Le premier contrôle CI a signalé deux
+  dépendances manquantes dans la fixture d'admission ; elle a été adaptée au
+  protocole d'attestation, en conservant ses assertions de priorité et de capacité.
   Le nouveau test vérifie les deux refus, aucune création de processus fournisseur,
   l'attestation spécifique à la requête et le maintien de l'autre réservation.
 - Rejeu PostgreSQL isolé avec **233 résultats finis réels**, puis annulation des
