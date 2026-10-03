@@ -69,6 +69,26 @@ test('Watch follows the displayed TF1 identity when a later render changes the p
   assert.equal(played[0].streamId, tf1.streamId);
 });
 
+test('guide uses the actual provider variant, never the stripped logical TF1 title', () => {
+  const { guide, tf1 } = fixture();
+  const requests = [];
+  guide.app.epgGuide = { channels: [{}], getEpgChannel: (...args) => { requests.push(args); return null; } };
+  guide.getEpgChannel({ ...tf1, name: 'TF1', tvgId: 'previous-feed', currentVariant: {
+    raw: 'UEFA-FR| TF1 HD', channel: { name:'UEFA-FR| TF1 HD', epg_id:'event-feed' }
+  }});
+  assert.deepEqual(requests, [['event-feed', 'UEFA-FR| TF1 HD', tf1.sourceId]]);
+});
+
+test('mobile family navigation keeps French, African and event TF1 schedules separate', () => {
+  const { list, tf1 } = fixture();
+  list.channels = ['FR| TF1 HD', 'FR| TF1 FHD', 'AF| TF1 HD', 'UEFA-FR| TF1 HD',
+    'FR-REU| TF1 HD'].map((name, n) => ({...tf1, id:String(n), name}));
+  assert.deepEqual(Array.from(list.getChannelFamilyMembers(list.channels[0]), c => c.name),
+    ['FR| TF1 HD', 'FR| TF1 FHD']);
+  assert.equal(list.getChannelFamilyMembers(list.channels[2]).length, 1);
+  assert.equal(list.getChannelFamilyLabel(list.channels[2]), 'Tf1');
+});
+
 test('a stale TF1 button cannot silently play the first row when its channel left the loaded page', () => {
   const { guide, list, tf1, arabic, played, watch, click } = fixture();
   const displayedWatch = watch(guide.renderPreview(tf1));

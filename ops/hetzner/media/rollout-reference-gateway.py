@@ -113,7 +113,33 @@ def preparation_generation(name, original):
     return value
 
 
-def idle(name, original, *, expected_version):
+def deferred_storyboards_are_restartable(h, original):
+    work = h.get('languageForegroundWork', {})
+    count = h.get('transcribeQueueDepth')
+    durability = h.get('storyboardDurability', {})
+    if (type(count) is not int or count <= 0 or work.get('protocol') != 1
+            or work.get('busy') is not False
+            or any(type(work.get(k)) is not int or work[k] != 0
+                   for k in ('activeOperations', 'admissionChecks', 'pendingPriorityJobs'))
+            or work.get('deferredBackgroundJobs') != count
+            or durability.get('enabled') is not True or durability.get('pending') != count):
+        return False
+    settings = env(original)
+    root = settings.get('STORYBOARD_PRIVATE_DIR', '')
+    mounts = [m for m in original['Mounts'] if root == m['Destination']
+              or root.startswith(m['Destination'].rstrip('/') + '/')]
+    if not root.startswith('/') or not mounts or not max(mounts, key=lambda m: len(m['Destination'])).get('RW'):
+        return False
+    # Positive proof: every deferred queue entry has a signed checkpoint on the
+    # persistent volume. A busy drain loop alone does not mean work is running.
+    probe = ("const {StoryboardStore}=require('./src/storyboard-store');"
+             "new StoryboardStore(process.env.STORYBOARD_PRIVATE_DIR,"
+             "process.env.GATEWAY_TOKEN).load().then(j=>console.log(j.length)).catch(()=>process.exit(1));")
+    saved = subprocess.check_output(['docker', 'exec', original['Id'], 'node', '-e', probe], text=True).strip()
+    return saved == str(count)
+
+
+def idle(name, original, *, expected_version, allow_deferred_storyboards=False):
     current = inspect(name)
     assert current['Id'] == original['Id'], 'container_identity_changed'
     assert contract(clone(current)) == contract(clone(original)), 'configuration_changed'
@@ -129,7 +155,11 @@ def idle(name, original, *, expected_version):
                 'backgroundCpuProcessCount', 'whisperInferenceActive',
                 'argosInferenceActive', 'activeStrictLidBrokers'):
         assert type(h.get(key)) is int and h[key] == 0, 'gateway_busy_or_unknown_' + key
-    for key in ('transcribeBusy', 'ocrBusy', 'translateBusy', 'lidBenchmarkBusy'):
+    if h.get('transcribeBusy') is True:
+        assert allow_deferred_storyboards and deferred_storyboards_are_restartable(h, original), 'gateway_busy_or_unknown_transcribeBusy'
+    else:
+        assert h.get('transcribeBusy') is False, 'gateway_busy_or_unknown_transcribeBusy'
+    for key in ('ocrBusy', 'translateBusy', 'lidBenchmarkBusy'):
         assert h.get(key) is False, 'gateway_busy_or_unknown_' + key
     assert h.get('videoEncoderCapacity', {}).get('active') == 0, 'encoder_active_or_unknown'
     # Native/direct clients may still hold usable grants between media requests.
@@ -196,6 +226,7 @@ def main():
     parser.add_argument('--current-version', type=int, default=CURRENT_VERSION)
     parser.add_argument('--target-version', type=int, default=TARGET_VERSION)
     parser.add_argument('--pilot-output-already-persistent', action='store_true')
+    parser.add_argument('--allow-idle-durable-storyboards', action='store_true')
     args = parser.parse_args()
     validate_rollout_parameters(args.base_image, args.image, args.revision,
                                 args.current_version, args.target_version)
@@ -219,7 +250,7 @@ def main():
         assert not DATA.exists(), 'persistent_destination_already_exists'
         prepared['HostConfig']['Binds'] = list(prepared['HostConfig'].get('Binds') or [])
         prepared['HostConfig']['Binds'].append(str(DATA) + ':/tmp/resume-pilot:rw')
-    idle(args.node, original, expected_version=CURRENT_VERSION)
+    idle(args.node, original, expected_version=CURRENT_VERSION, allow_deferred_storyboards=args.allow_idle_durable_storyboards)
     summary = {'node': args.node, 'image': IMAGE, 'sourceRevision': REVISION,
                'currentVersion': CURRENT_VERSION, 'targetVersion': TARGET_VERSION,
                'environmentChanges': False, 'persistentOutputAdded': persist,
@@ -271,7 +302,7 @@ def main():
     try:
         # Gate immediately before stopping. Existing runtime has no atomic
         # viewer drain mode: a residual admission race is recorded, not hidden.
-        idle(args.node, original, expected_version=CURRENT_VERSION)
+        idle(args.node, original, expected_version=CURRENT_VERSION, allow_deferred_storyboards=args.allow_idle_durable_storyboards)
         action('stop-original', 'POST', '/containers/' + original['Id'] + '/stop?t=25',
                lambda: not inspect(original['Id'])['State']['Running'])
         stopped = True

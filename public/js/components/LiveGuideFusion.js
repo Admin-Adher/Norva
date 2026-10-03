@@ -686,7 +686,11 @@ class LiveGuideFusion {
     getEpgChannel(channel) {
         const guide = this.app.epgGuide;
         if (!guide?.channels?.length) return null;
-        if (guide.getEpgChannel) return guide.getEpgChannel(channel.tvgId || channel.epg_id, channel.name, channel.sourceId);
+        const variant = channel.currentVariant;
+        const broadcast = variant?.channel || channel;
+        const broadcastName = variant?.raw || broadcast.name || channel.name;
+        const broadcastId = broadcast.tvgId || broadcast.epg_id;
+        if (guide.getEpgChannel) return guide.getEpgChannel(broadcastId, broadcastName, channel.sourceId);
         if (channel.tvgId && guide.channelMap?.has(channel.tvgId)) {
             return guide.channelMap.get(channel.tvgId);
         }

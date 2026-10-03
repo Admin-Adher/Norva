@@ -117,7 +117,7 @@ function isProviderMetadataRequest(req) {
     if (req.method !== 'POST') return false;
     const path = req.path.replace(/\/$/, '');
     return ['/probe-audio', '/detect-language', '/detect-language/capture/capture',
-        '/extract-language-wav', '/provider-route/benchmark', '/xtream/epg',
+        '/extract-language-wav', '/provider-route/benchmark', '/xtream/epg', '/xtream/xmltv',
         '/xtream/series-info', '/xtream/metadata-page', '/xtream/metadata'].includes(path)
         || /^\/benchmark-language\/[^/]+$/.test(path);
 }

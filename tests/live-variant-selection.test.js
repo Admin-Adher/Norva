@@ -121,6 +121,18 @@ test('same-label provider variants remain separate fallback candidates', () => {
   );
 });
 
+test('French TF1 quality fallback cannot select African, regional or UEFA broadcasts', () => {
+  const grouping = loadGrouping();
+  const channels = ['FR| TF1 HD', 'FR| TF1 FHD', '4K| TF1', 'AF| TF1 HD',
+    'UEFA-FR| TF1 HD', 'FR-CAR| TF1', 'FR-REU| Tf1 HD', 'DSTV| TF1 HD',
+    'FR| TF1 SERIES FILMS HD'].map((name, index) => ({name, sourceId:'same', streamId:String(index)}));
+  const group = grouping.variantsForChannel(channels[0], channels, 'FR');
+  assert.deepEqual(Array.from(group.variants, v => v.raw).sort(),
+    ['4K| TF1', 'FR| TF1 FHD', 'FR| TF1 HD'].sort());
+  assert.deepEqual(Array.from(grouping.variantsForChannel(channels[3], channels, 'FR').variants, v => v.raw),
+    ['AF| TF1 HD']);
+});
+
 test('known-broken catalogue variants are never automatic fallbacks', () => {
   const grouping = loadGrouping();
   const current = { label: 'HD', rank: 2, healthRank: 1, sourceId: 'source-a', streamId: '301' };

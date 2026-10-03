@@ -78,7 +78,7 @@ class ChannelList {
     getChannelFamilyKey(channelOrName) {
         const rawName = typeof channelOrName === 'string'
             ? channelOrName
-            : (channelOrName?.name || '');
+            : (channelOrName?.currentVariant?.raw || channelOrName?.name || '');
         if (!rawName) return '';
 
         const pipeParts = String(rawName).split('|').map(part => part.trim()).filter(Boolean);
@@ -97,7 +97,13 @@ class ChannelList {
             .filter(Boolean)
             .filter(token => !CHANNEL_FAMILY_NOISE_WORDS.has(token));
 
-        return tokens.join(' ');
+        const prefix = pipeParts.length > 1 ? pipeParts[0].toLowerCase()
+            .replace(/\b(4k|uhd|fhd|hd|sd|hdr|h265|h264|hevc|kids)\b/g, ' ')
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : '';
+        // Keep regional/event families separate; a quality-only prefix remains
+        // compatible with the ordinary French national name.
+        const scope = prefix === 'fr' ? '' : prefix;
+        return `${scope ? scope + '::' : ''}${tokens.join(' ')}`;
     }
 
     getChannelFamilyMembers(channel, options = {}) {
@@ -125,7 +131,7 @@ class ChannelList {
 
     getChannelFamilyLabel(channel) {
         const familyKey = this.getChannelFamilyKey(channel);
-        return familyKey
+        return familyKey.split('::').pop()
             .split(' ')
             .filter(Boolean)
             .map(token => /^\d+$/.test(token) ? token : token.charAt(0).toUpperCase() + token.slice(1))
