@@ -1,11 +1,15 @@
 """Bounded provider-tag release using the existing sequential Edge supervisor."""
 import importlib.util,json,os,sys,time,hashlib
 from pathlib import Path
-ROOT=Path('/home/adrien/.norva/provider-language-tags-20261003')
+SPELLING=len(sys.argv)>2 and sys.argv[2]=='--spelling'
+ROOT=Path('/home/adrien/.norva/'+('provider-language-spelling-20261003' if SPELLING else 'provider-language-tags-20261003'))
 spec=importlib.util.spec_from_file_location('tag_release_base',ROOT.parent/'provider-audio-catchup-20261003/deploy-provider-audio-catchup-20261003.py')
 base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
-base.ROOT=ROOT;base.CANARY='norva-language-tags-canary-20261003'
-MIGRATION='20261003133000_provider_indian_language_tags.sql'
+base.ROOT=ROOT;base.CANARY='norva-language-spelling-canary-20261003' if SPELLING else 'norva-language-tags-canary-20261003'
+MIGRATION='20261003151500_provider_language_shelf_spelling.sql' if SPELLING else '20261003133000_provider_indian_language_tags.sql'
+FILTER=("btrim(regexp_replace(coalesce(v.metadata->>'categoryName',v.metadata->>'category_name',''),'\\s+',' ','g')) in ('[IN] KANADA','[IN] GUJARTI')" if SPELLING else
+ "btrim(regexp_replace(coalesce(v.metadata->>'categoryName',v.metadata->>'category_name',''),'\\s+',' ','g'))='VOD - INDIA' and v.raw_title ~ '^\\s*(TG|TM)(\\s*[-–—|:])'")
+LANGUAGES="'kn','gu'" if SPELLING else "'te','ta'"
 
 def migrate():
     base.assert_reference()
@@ -27,15 +31,14 @@ def backfill():
 with batch as materialized(
  select v.* from cloud_title_variants v
  where (CURSOR is null or v.id>CURSOR) and v.item_type in ('movie','series')
- and btrim(regexp_replace(coalesce(v.metadata->>'categoryName',v.metadata->>'category_name',''),'\\s+',' ','g'))='VOD - INDIA'
- and v.raw_title ~ '^\\s*(TG|TM)(\\s*[-–—|:])'
+ and FILTER
  and not exists(select 1 from cloud_catalog_provider_language_hints h where h.variant_id=v.id)
  order by v.id limit 500 for share of v
 ), parsed as materialized(select *,catalog_provider_language(metadata,external_id,raw_title) as resolved_language from batch),
 inserted as (insert into cloud_catalog_provider_language_hints(variant_id,user_id,title_id,source_id,item_type,language)
- select id,user_id,title_id,source_id,item_type,resolved_language from parsed where resolved_language in ('te','ta')
+ select id,user_id,title_id,source_id,item_type,resolved_language from parsed where resolved_language in (LANGUAGES)
  on conflict(variant_id) do nothing returning user_id)
-select jsonb_build_object('after',(select max(id::text) from batch),'scanned',(select count(*) from batch),'inserted',(select count(*) from inserted));commit;""".replace('CURSOR',cursor)
+select jsonb_build_object('after',(select max(id::text) from batch),'scanned',(select count(*) from batch),'inserted',(select count(*) from inserted));commit;""".replace('CURSOR',cursor).replace('FILTER',FILTER).replace('LANGUAGES',LANGUAGES)
         result=json.loads(base.sql(statement))
         state={'after':result['after'] or state['after'],'scanned':state['scanned']+result['scanned'],'inserted':state['inserted']+result['inserted'],'done':result['scanned']==0}
         statefile.write_text(json.dumps(state))
@@ -45,9 +48,9 @@ select jsonb_build_object('after',(select max(id::text) from batch),'scanned',(s
     cache_sql="""begin;set local statement_timeout='25s';
 do $$declare owner uuid;begin
  for owner in select distinct v.user_id from cloud_title_variants v join cloud_catalog_provider_language_hints h on h.variant_id=v.id
- where h.language in ('te','ta') and v.metadata->>'categoryName'='VOD - INDIA' and v.raw_title ~ '^\\s*(TG|TM)(\\s*[-–—|:])'
+ where h.language in (LANGUAGES) and FILTER
  loop perform norva_bump_user_catalog_visibility_epoch(owner);delete from cloud_catalog_facet_summary where user_id=owner;end loop;
-end$$;commit;"""
+end$$;commit;""".replace('FILTER',FILTER).replace('LANGUAGES',LANGUAGES)
     base.run(['docker','exec','-i','norva-db','psql','-X','-qAt','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1'],cache_sql.encode())
     print(json.dumps({'catalogueCachesInvalidated':True}))
 

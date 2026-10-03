@@ -121,6 +121,11 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
         // weaken generic subtitle/conflict guards: only the complete category
         // and its matching bare prefix may assign the destination of a dub.
         const categoryKey = category.trim().replace(/\s+/g, ' ');
+        // Misspelled language names on complete Indian supplier shelves.
+        // Keep IN country-only elsewhere and preserve all independent prefix,
+        // subtitle and MULTI guards. These remain unverified declarations.
+        if (categoryKey === '[IN] KANADA') category = 'KANNADA';
+        else if (categoryKey === '[IN] GUJARTI') category = 'GUJARATI';
         // On these exact English shelves, a final Arabic "subtitled" marker
         // does not erase the separately declared English audio. Strip it only
         // in this local parsing copy, before suffix inspection so conflicting
