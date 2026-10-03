@@ -387,8 +387,9 @@ function openStrictLidWindowReceipt({
     }
 }
 
-function validateStrictLidWindowReceiptsInput(receipts, expectedCount) {
-    if (![4, 6].includes(expectedCount) || !Array.isArray(receipts) || receipts.length !== expectedCount) {
+function validateStrictLidWindowReceiptsInput(receipts, expectedCount, { allowPartial = false } = {}) {
+    if (![4, 6].includes(expectedCount) || !Array.isArray(receipts)
+        || (allowPartial ? receipts.length < 1 || receipts.length > expectedCount : receipts.length !== expectedCount)) {
         fail('STRICT_LID_WINDOW_RECEIPTS_INVALID', 'complete ordered window receipts are required');
     }
     let totalChars = 0;

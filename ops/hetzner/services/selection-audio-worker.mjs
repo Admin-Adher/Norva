@@ -112,6 +112,17 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
       } else {
         const args = { file, profile, jobId: job.id, subjectId: 'norva-selection-audio', trackIndex: track.index, signal: controller.signal };
         let windows = profile.durationSeconds >= 120 ? 6 : 4;
+        if (progress.receipts.length) {
+          try { await gateway.validateReceipts({ ...args, receipts:progress.receipts }); }
+          catch (error) {
+            if (error.resetRequired !== true || error.providerDrained !== true) throw error;
+            // Expired/incompatible receipts are authenticated by the Gateway,
+            // before any new capture. Keep the exact probed profile and prior
+            // certified tracks; replace only this track's expired prefix once.
+            progress.receipts = [];
+            await checkpoint();
+          }
+        }
         for (let ordinal = progress.receipts.length; ordinal < windows; ordinal++) {
           const windowArgs = { ...args, windowOrdinal: ordinal + 1 };
           let response;
@@ -184,10 +195,6 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     clearInterval(heartbeat);
     await checkpointChain;
     if (lostLease) return { state: 'lease_lost' };
-    if (localCapturePhase && captureEnabled) {
-      if (!await repository.deferCapture(job)) return { state:'lease_lost' };
-      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY', diagnostic:selectionAudioFailureDiagnostic(error) };
-    }
     if (['SELECTION_AUDIO_CAPACITY_BUSY', 'SELECTION_AUDIO_VIEWER_BUSY'].includes(error.code)
       && error.providerDrained === true) {
       // Capacity refusal or yielding to a viewer is not a failed analysis.
@@ -195,6 +202,10 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
       // Preserve receipts/profile and return only this claim's retry debit by CAS.
       if (!await repository.deferAdmission(job)) return { state: 'lease_lost' };
       return { state: 'retry_wait', error: error.code, diagnostic:selectionAudioFailureDiagnostic(error) };
+    }
+    if (localCapturePhase && captureEnabled) {
+      if (!await repository.deferCapture(job)) return { state:'lease_lost' };
+      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY', diagnostic:selectionAudioFailureDiagnostic(error) };
     }
     if (error.resetRequired) {
       profile = null;

@@ -24,6 +24,7 @@ const diagnosticCodes = new Set(['codec_probe_timeout', 'strict_lid_extraction_t
   'LID_CAPTURE_COMPUTE_BUSY', 'account_busy', 'background_busy', 'viewer_preempted',
   'LANGUAGE_VALIDATION_VIEWER_PREEMPTED', 'strict_lid_preempted']);
 const diagnosticStages = new Map([['/probe-audio', 'probe'], ['/detect-language', 'analyze'],
+  ['/detect-language/checkpoints', 'checkpoints'],
   ['/detect-language/finalize', 'finalize'], ['/detect-language/capture/status', 'capture_status'],
   ['/detect-language/capture/capture', 'capture'], ['/detect-language/capture/infer', 'infer'],
   ['/detect-language/capture/ack', 'ack']]);
@@ -286,6 +287,17 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     captureWindow: args => captureRequest(args, 'capture'),
     computeCapture: args => captureRequest(args, 'infer'),
     acknowledgeCapture: args => captureRequest(args, 'ack'),
+    async validateReceipts(args) {
+      const { profile, capability } = await context(args, true);
+      if (!Array.isArray(args.receipts) || args.receipts.length < 1 || args.receipts.length > profile.windowCount
+        || args.receipts.some(receipt => typeof receipt !== 'string' || receipt.length < 32 || receipt.length > 64 * 1024
+          || !/^[a-zA-Z0-9._-]+$/.test(receipt))) fail('SELECTION_AUDIO_RECEIPTS_INVALID');
+      const payload = await request(`/detect-language/checkpoints?index=${args.trackIndex}`, {
+        capability, body:{ receipts:args.receipts }, signal:args.signal, budgetMs:Math.min(budget, 10_000) });
+      if (payload.checkpointProtocol !== 1 || payload.valid !== true || payload.receiptCount !== args.receipts.length
+        || payload.windowCount !== profile.windowCount) fail('SELECTION_AUDIO_EVIDENCE_INVALID', { retryable:true, providerDrained:true });
+      return { valid:true, providerDrained:true };
+    },
     async finalizeTrack(args) {
       const { profile, capability } = await context(args, true);
       if (!Array.isArray(args.receipts) || args.receipts.length !== profile.windowCount

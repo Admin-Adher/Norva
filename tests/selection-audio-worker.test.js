@@ -31,6 +31,7 @@ async function harness({ job = baseJob(), givenProfile = profile(), analyze, fin
   const windows = [], finals = [];
   const gateway = {
     async probe() { events.push('probe'); return clone(givenProfile); },
+    async validateReceipts() { events.push('checkpoints'); return { valid:true, providerDrained:true }; },
     async analyzeTrackWindow(args) {
       events.push('window'); windows.push({ ...args, receipts:undefined });
       return analyze ? analyze(args) : { providerDrained:true, receipt:receipt(args.windowOrdinal), windowCount:6 };
@@ -218,6 +219,36 @@ test('unattested viewer refusal cannot refund the bounded retry budget', async (
   run.repository.deferAdmission = async () => { throw Error('unproved drain must not defer admission'); };
   assert.equal((await run.run()).state,'failed');
   assert.equal(run.finishes.length,1);
+});
+
+test('local compute saturation refunds admission with drain proof and preserves the captured excerpt', async () => {
+  for (const drained of [true,false]) {
+    const job={...baseJob(),attempt_count:8,profile:profile(),progress:{trackPosition:0,receipts:[receipt(1)],tracks:[],evidence:[]}};
+    const run=await harness({job});let refunds=0,localDefers=0,downloads=0;
+    run.gateway.getCaptureStatus=async()=>({captured:true,providerDrained:true,sha256:'d'.repeat(64),expiresAt:Date.now()+10000});
+    run.repository.checkpointCapture=async()=> '23456789-1234-4234-8234-123456789012';
+    run.gateway.computeCapture=async()=>{throw Object.assign(Error('busy'),{code:'SELECTION_AUDIO_CAPACITY_BUSY',providerDrained:drained,retryable:true});};
+    run.gateway.captureWindow=async()=>{downloads++;throw Error('must reuse');};
+    run.repository.deferAdmission=async()=>{refunds++;return true;};
+    run.repository.deferCapture=async()=>{localDefers++;return true;};
+    const result=await run.run({captureEnabled:true});
+    assert.equal(result.state,drained?'retry_wait':'failed');
+    assert.equal(refunds,drained?1:0);assert.equal(localDefers,drained?0:1);assert.equal(downloads,0);
+    assert.deepEqual(job.progress.receipts,[receipt(1)]);assert.equal(run.finishes.length,0);
+  }
+});
+
+test('expired partial receipts are replaced before provider I/O without losing prior certified tracks',async()=>{
+  const p=profile();p.audioTracks.unshift({index:0,lang:'pt',codec:'aac'});
+  const job={...baseJob(),profile:p,progress:{trackPosition:1,receipts:[receipt(1),receipt(2)],tracks:[{index:0,lang:'pt',codec:'aac'}],evidence:[]}};
+  const run=await harness({job});let checked=0;
+  run.gateway.validateReceipts=async()=>{checked++;assert.equal(run.windows.length,0);throw Object.assign(Error('expired'),{code:'SELECTION_AUDIO_CHECKPOINT_RESET_REQUIRED',resetRequired:true,providerDrained:true});};
+  const result=await run.run();
+  assert.equal(result.state,'completed');assert.equal(checked,1);
+  assert.deepEqual(run.windows.map(w=>w.windowOrdinal),[1,2,3,4,5,6]);
+  assert.equal(run.events.includes('probe'),false);
+  assert.deepEqual(run.checkpoints[0].progress.tracks,[{index:0,lang:'pt',codec:'aac'}]);
+  assert.deepEqual(run.finishes[0].result.audioTracks.map(t=>t.lang),['pt','es']);
 });
 
 test('ambiguous audio completes durably as unidentified and never promotes a candidate', async () => {

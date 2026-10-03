@@ -41,6 +41,18 @@ test('only immutable audited file + URL digest may reach the gateway', async () 
   assert.equal(calls.length, 0);
 });
 
+test('preflight signs an exact finalize capability, checks prefix acknowledgement and exposes no language',async()=>{
+  const {gateway,file,calls}=await setup(url=>url.endsWith('/probe-audio')?json(probePayload()):json({...drain,checkpointProtocol:1,valid:true,receiptCount:2,windowCount:6}));
+  const profile=await gateway.probe(file);
+  const result=await gateway.validateReceipts({file,profile,jobId,subjectId,trackIndex:1,receipts:[receipt(1),receipt(2)]});
+  assert.deepEqual(result,{valid:true,providerDrained:true});
+  const call=calls.at(-1);assert.ok(call.url.includes('/checkpoints?index=1'));
+  const token=call.options.headers['X-Norva-Byte-Pipe-Token'];const claims=JSON.parse(Buffer.from(token.split('.')[0],'base64url'));
+  assert.equal(claims.windowFinalize,true);assert.equal(claims.profileFingerprint,profile.fingerprint);assert.equal(claims.jobId,jobId);
+  assert.equal(claims.url,file.url);assert.equal(claims.windowOrdinal,undefined);
+  await assert.rejects(gateway.validateReceipts({file,profile,jobId,subjectId,trackIndex:1,receipts:[]}),{code:'SELECTION_AUDIO_RECEIPTS_INVALID'});
+});
+
 test('confirmed incomplete media is terminal while its fixed diagnostic is preserved', async () => {
   const { gateway, file, calls } = await setup(() => json({ ...drain,
     code:'MP4_DECLARED_MEDIA_EXCEEDS_FILE' }, 422));
