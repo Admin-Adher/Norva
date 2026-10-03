@@ -49,14 +49,55 @@ export async function refreshHistoryEditorial(rows, { db, userId, epoch, lang })
         titles.set(title.id, title);
       }
     }
+    // A title can be present in several providers. Its default display
+    // generation may belong to another source, so fetch the exact visible
+    // variant's projection instead of borrowing that other generation.
+    const exactProjections = new Map();
+    const projectionGroups = new Map();
+    for (const variants of variantsByKey.values()) {
+      if (variants.length !== 1) continue;
+      const variant = variants[0], title = titles.get(variant.title_id);
+      if (!title?.visible_source_ids?.includes(variant.source_id) || !variant.generation_id
+          || !title.overlay_generation_id || title.overlay_generation_id === variant.generation_id) continue;
+      const groupKey = key(variant.source_id, variant.item_type, variant.generation_id);
+      if (!projectionGroups.has(groupKey)) projectionGroups.set(groupKey, { variant, ids: new Set() });
+      projectionGroups.get(groupKey).ids.add(variant.title_id);
+    }
+    for (const { variant, ids: projectedIds } of projectionGroups.values()) {
+      const all = [...projectedIds];
+      for (let offset = 0; offset < all.length; offset += 100) {
+        const chunk = all.slice(offset, offset + 100);
+        const { data, error } = await db.from('cloud_source_catalog_generation_candidate_titles')
+          .select('user_id,source_id,item_type,title_id,generation_id,match_status,title,poster_url,backdrop_url,release_year,rating_num,metadata,catalog_metadata')
+          .eq('user_id', userId).eq('source_id', variant.source_id).eq('item_type', variant.item_type)
+          .eq('generation_id', variant.generation_id).in('title_id', chunk);
+        if (error) throw error;
+        for (const projection of data ?? []) {
+          if (projection.user_id !== userId || projection.source_id !== variant.source_id
+              || projection.item_type !== variant.item_type || projection.generation_id !== variant.generation_id
+              || !chunk.includes(projection.title_id)
+              || record(record(projection.catalog_metadata).tmdbValidation).valid !== true) continue;
+          const k = key(projection.source_id, projection.generation_id, projection.title_id);
+          if (exactProjections.has(k)) throw Error('Ambiguous history editorial projection');
+          exactProjections.set(k, projection);
+        }
+      }
+    }
     return rows.map(row => {
       const variants = variantsByKey.get(targets.get(row));
       if (variants?.length !== 1) return row;
-      const variant = variants[0], title = titles.get(variant.title_id);
+      const variant = variants[0];
+      let title = titles.get(variant.title_id);
       if (!title || !title.visible_source_ids?.includes(row.source_id)
           || !['matched', 'manual', 'provider_verified'].includes(title.match_status)) return row;
       if (title.overlay_generation_id && title.overlay_generation_id === title.display_generation_id
-          && title.display_generation_id !== variant.generation_id) return row;
+          && title.display_generation_id !== variant.generation_id) {
+        const exact = exactProjections.get(key(row.source_id, variant.generation_id, variant.title_id));
+        if (!exact || !['matched', 'manual', 'provider_verified'].includes(exact.match_status)) return row;
+        title = { ...title, ...exact, id: title.id, visible_source_ids: title.visible_source_ids,
+          overlay_generation_id: variant.generation_id, display_generation_id: variant.generation_id,
+          overlay_catalog_metadata: exact.catalog_metadata };
+      }
       const generation = record(title.overlay_catalog_metadata);
       const useGeneration = title.overlay_generation_id && title.overlay_generation_id === variant.generation_id
         && title.overlay_generation_id === title.display_generation_id

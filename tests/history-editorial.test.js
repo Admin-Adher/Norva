@@ -20,7 +20,22 @@ async function fixture(options = {}) {
     ...(options.progressive ? { overlay_generation_id: 'other', display_generation_id: 'other' } : {}) };
   const query = { select() { return this; }, eq(k, v) { if (k === 'user_id') assert.equal(v, 'owner'); return this; },
     async in() { return { data: options.ambiguous ? [variant, variant] : [variant] }; } };
-  const db = { from(table) { assert.equal(table, 'cloud_catalog_visible_title_variants'); return query; },
+  const db = { from(table) {
+      if (table === 'cloud_source_catalog_generation_candidate_titles') {
+        const filters = {};
+        return { select() { return this; }, eq(k, v) { filters[k] = v; return this; },
+          async in(k, ids) {
+            assert.deepEqual(filters, {user_id:'owner',source_id:'source',item_type:'movie',generation_id:'generation'});
+            assert.equal(k,'title_id'); assert.deepEqual(ids,['title']);
+            return {data: options.exactProjection ? [{user_id:options.foreignProjection?'other':'owner',
+              source_id:options.wrongProjectionSource?'other-source':'source',item_type:'movie',title_id:'title',
+              generation_id:options.wrongProjectionGeneration?'other-generation':'generation',
+              match_status:'matched',title:'Exact source title',release_year:2001,
+              catalog_metadata:{tmdbValidation:{valid:!options.untrustedProjection},i18n:{fr:{overview:'Synopsis de la source exacte'}}}}] : []};
+          } };
+      }
+      assert.equal(table, 'cloud_catalog_visible_title_variants'); return query;
+    },
     async rpc(name, args) {
       assert.equal(args.p_expected_visibility_epoch, '42');
       if (options.failure) throw Error('unavailable');
@@ -65,6 +80,17 @@ test('public history exposes only bounded editorial fields and keeps private nes
 test('history prefers only the trusted exact generation synopsis', async () => {
   assert.equal((await fixture({generation:true})).result[0].data.description, 'Synopsis de la génération active');
   assert.equal((await fixture({generation:true,untrustedGeneration:true})).result[0].data.description, 'Synopsis actuel en français');
+});
+test('history uses the exact owned source projection when another provider owns the default display generation', async () => {
+  const {original,result}=await fixture({progressive:true,exactProjection:true});
+  assert.equal(result[0].data.description,'Synopsis de la source exacte');
+  assert.equal(result[0].data.year,2001);
+  assert.equal(result[0].source_id,original[0].source_id);
+  assert.equal(result[0].progress_seconds,original[0].progress_seconds);
+  for (const flag of ['foreignProjection','wrongProjectionSource','wrongProjectionGeneration','untrustedProjection']) {
+    const invalid=await fixture({progressive:true,exactProjection:true,[flag]:true});
+    assert.deepEqual(invalid.result,invalid.original);
+  }
 });
 for (const option of ['foreign', 'hidden', 'ambiguous', 'stale', 'progressive', 'failure']) {
   test(`history preserves its snapshot for ${option} metadata`, async () => {
