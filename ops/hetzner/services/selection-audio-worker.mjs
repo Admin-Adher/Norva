@@ -189,6 +189,10 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
         const identified = detection.verified === true && knownLanguage(detection.lang);
         progress.tracks.push({ index: track.index, lang: identified ? detection.lang : null, codec: track.codec || null });
         if (identified) progress.evidence.push({ index: track.index, evidence: detection.evidence });
+        else if (detection.diagnostics) {
+          progress.unidentifiedTracks ||= [];
+          progress.unidentifiedTracks.push({ index:track.index,diagnostics:detection.diagnostics });
+        }
       }
       progress.receipts = [];
       // Save the next track, so a crash never repeats an already certified track.
@@ -199,6 +203,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     const result = { audioTracks: progress.tracks, subtitleTracks: profile.subtitleTracks || [], profile, verified,
       verification: { method: 'selection-strict-lid-v1', status: verified ? 'verified' : 'probed',
         urlSha256: file.urlSha256, profileFingerprint: profile.fingerprint,
+        ...(progress.unidentifiedTracks?.length ? { unidentifiedTracks:progress.unidentifiedTracks } : {}),
         profileProbedAt: profile.probedAt, fileSizeBytes: profile.fileSizeBytes, tracks: progress.evidence } };
     clearInterval(heartbeat);
     await checkpointChain;

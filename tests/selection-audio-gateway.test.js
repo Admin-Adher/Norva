@@ -212,6 +212,22 @@ test('shutdown abort and upstream failures expose only bounded local error codes
   assert.equal(calls.length, 1);
 });
 
+test('unidentified results retain bounded counts without promoting candidates or exposing speech',async()=>{
+ const payload={...drain,verified:false,language:null,candidate:'pt',sample:'private speech',
+   evaluatedWindowCount:6,sampleCount:3,consensus:3,rejectedSpeechSampleCount:1,
+   ignoredWeakSpeechSampleCount:1,repeatedSpeechSampleCount:0,missingDiversitySampleCount:0};
+ for(const bad of [null,{consensus:7},{sampleCount:'3'},{evaluatedWindowCount:5}]){
+  const {gateway,file}=await setup(url=>url.endsWith('/probe-audio')?json(probePayload()):json({...payload,...bad}));
+  const profile=await gateway.probe(file);
+  const result=await gateway.finalizeTrack({file,profile,jobId,subjectId,trackIndex:1,receipts:[1,2,3,4,5,6].map(receipt)});
+  assert.equal(result.verified,false);assert.equal(result.lang,null);
+  assert.doesNotMatch(JSON.stringify(result),/private speech|candidate|"pt"/);
+  if(bad)assert.equal(result.diagnostics,null);
+  else assert.deepEqual(result.diagnostics,{protocol:1,evaluatedWindows:6,acceptedWindows:3,largestAgreement:3,
+    conflictingWindows:1,weakWindows:1,repeatedWindows:0,missingDiversityWindows:0});
+ }
+});
+
 test('Selection capture actions are signed and bound; compute has no network capture fallback', async () => {
   const captured = { ...drain, captureProtocol:1, captured:true, sha256:'e'.repeat(64),
     expiresAt:Date.parse('2026-09-09T12:30:00Z') };

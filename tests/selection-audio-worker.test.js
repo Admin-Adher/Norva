@@ -71,6 +71,17 @@ test('retry resumes persisted receipts without probing or repeating completed wi
   assert.deepEqual(run.finals[0].receipts, [1,2,3,4,5,6].map(receipt));
 });
 
+test('unidentified track counts survive checkpoint and final persistence without inventing a language',async()=>{
+ const diagnostics={protocol:1,evaluatedWindows:6,acceptedWindows:2,largestAgreement:2,
+   conflictingWindows:0,weakWindows:2,repeatedWindows:0,missingDiversityWindows:0};
+ const run=await harness({finalize:async()=>({verified:false,lang:null,providerDrained:true,diagnostics})});
+ assert.equal((await run.run()).state,'completed');
+ assert.equal(run.finishes[0].result.verified,false);
+ assert.equal(run.finishes[0].result.audioTracks[0].lang,null);
+ assert.deepEqual(run.finishes[0].result.verification.unidentifiedTracks,[{index:1,diagnostics}]);
+ assert.deepEqual(run.checkpoints.at(-1).progress.unidentifiedTracks,[{index:1,diagnostics}]);
+});
+
 test('gateway failure retains safe diagnostics and reports exhausted retries as terminal', async () => {
   for (const attempts of [1,8]) {
     const run = await harness({ job:{ ...baseJob(), attempt_count:attempts } });

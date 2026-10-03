@@ -247,6 +247,18 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     return { receipt:payload.receipt, windowOrdinal:args.windowOrdinal, windowCount:profile.windowCount, providerDrained:true };
   }
 
+  function unidentifiedDiagnostics(payload, profile) {
+    const fields = { evaluatedWindows:'evaluatedWindowCount', acceptedWindows:'sampleCount',
+      largestAgreement:'consensus', conflictingWindows:'rejectedSpeechSampleCount',
+      weakWindows:'ignoredWeakSpeechSampleCount', repeatedWindows:'repeatedSpeechSampleCount',
+      missingDiversityWindows:'missingDiversitySampleCount' };
+    if (payload.evaluatedWindowCount !== profile.windowCount || Object.values(fields)
+      .some(key => !Number.isInteger(payload[key]) || payload[key] < 0 || payload[key] > profile.windowCount)) return null;
+    // Counts explain an unresolved result. Candidate languages, excerpts and
+    // arbitrary upstream fields cannot enter either the durable result or UI.
+    return { protocol:1,...Object.fromEntries(Object.entries(fields).map(([key,source])=>[key,payload[source]])) };
+  }
+
   async function captureRequest(args, action) {
     const { profile, capability } = await context(args, false, action);
     const payload = await request(`/detect-language/capture/${action}?index=${args.trackIndex}`, {
@@ -327,6 +339,7 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       if (!valid) {
         if (payload.verified === true) fail('SELECTION_AUDIO_EVIDENCE_INVALID', { retryable:true, providerDrained:true });
         return { verified:false, lang:null, status:'unidentified', providerDrained:true,
+          diagnostics:unidentifiedDiagnostics(payload, profile),
           evidence:{ protocol:1, method:METHOD, profileFingerprint:profile.fingerprint, windowCount:profile.windowCount } };
       }
       return { verified:true, lang, status:'verified', providerDrained:true,
