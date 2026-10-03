@@ -475,6 +475,9 @@ class LiveGuideFusion {
         if (channel) {
             this.currentChannel = channel;
             this.refreshPreview(channel);
+            // Sidebar selection and playback fallback update the preview without
+            // a full render. Load this broadcast's guide on those paths as well.
+            this.ensureChannelGuide([channel]);
         }
         this.updateHighlights();
     }
@@ -700,8 +703,30 @@ class LiveGuideFusion {
         return guide.channels.find(epg => epg.id === channel.tvgId || epg.name === channel.name) || null;
     }
 
+    getGuideBroadcast(channel) {
+        const variant = channel?.currentVariant;
+        const broadcast = variant?.channel || channel;
+        return {
+            ...channel,
+            name: variant?.raw || broadcast?.name || channel?.name,
+            tvgId: broadcast?.tvgId || broadcast?.epg_id || '',
+            epg_id: broadcast?.epg_id || broadcast?.tvgId || '',
+            sourceId: variant?.sourceId ?? broadcast?.sourceId ?? channel?.sourceId,
+            sourceType: broadcast?.sourceType || broadcast?.source_type || channel?.sourceType || channel?.source_type,
+            streamId: variant?.streamId ?? broadcast?.streamId ?? broadcast?.stream_id ?? channel?.streamId ?? channel?.id,
+            currentVariant: null
+        };
+    }
+
+    ensureChannelGuide(channels) {
+        const broadcasts = channels.filter(Boolean).map(channel => this.getGuideBroadcast(channel));
+        this.app.epgGuide?.ensureChannels?.(broadcasts);
+        this.ensureShortEpgForChannels(broadcasts);
+    }
+
     shortEpgKey(channel) {
-        const streamId = channel?.streamId || channel?.id || '';
+        channel = this.getGuideBroadcast(channel);
+        const streamId = channel?.streamId ?? channel?.id ?? '';
         const sourceType = channel?.sourceType
             || channel?.source_type
             || channel?.playback_hint?.sourceType
@@ -758,7 +783,9 @@ class LiveGuideFusion {
             const loadedAt = this.shortEpgLoadedAt.get(key) || 0;
             if (now - loadedAt < 10 * 60 * 1000) continue; // still fresh
             this._shortEpgQueuedKeys.add(key);
-            this._shortEpgQueue.push(channel);
+            // Snapshot the request identity: playback may select a different
+            // variant while this deferred queue is waiting for the provider.
+            this._shortEpgQueue.push(this.getGuideBroadcast(channel));
         }
         this._drainShortEpg();
     }
@@ -797,7 +824,11 @@ class LiveGuideFusion {
                         // Rate-limited: cool the source down and drop its remaining
                         // queue — hammering a 429'd provider only makes it worse.
                         this.shortEpgSourceCooldown.set(sourceKey, Date.now() + 10 * 60 * 1000);
-                        this._shortEpgQueue = this._shortEpgQueue.filter(c => String(c.sourceId || '') !== sourceKey);
+                        this._shortEpgQueue = this._shortEpgQueue.filter(c => {
+                            if (String(c.sourceId || '') !== sourceKey) return true;
+                            this._shortEpgQueuedKeys.delete(this.shortEpgKey(c));
+                            return false;
+                        });
                     }
                     if (err?.status !== 429) console.debug('[LiveGuide] Short EPG unavailable for', channel.name, err);
                     // Playback preemption is temporary, not a valid empty guide.
@@ -1516,17 +1547,17 @@ class LiveGuideFusion {
         // makes resuming the last channel a single tap on "Watch".
         const candidates = [this.currentChannel, this.app.channelList.currentChannel,
             this.app.channelList.findLastLiveChannel?.()];
-        const selectedChannel = candidates.map(candidate => candidate && channels.find(channel =>
+        const selectedChannel = candidates.find(candidate => candidate && channels.some(channel =>
             String(channel.sourceId) === String(candidate.sourceId)
             && channel.sourceType === candidate.sourceType
-            && String(channel.id) === String(candidate.id))).find(Boolean)
+            && (String(channel.id) === String(candidate.id)
+                || String(channel.id) === String(candidate._norvaSelection?.logicalChannelId))))
             || groupChannels[0] || channels[0] || null;
         const currentOnly = this.usesSidebarNavigation();
         const shortEpgCandidates = currentOnly ? (selectedChannel ? [selectedChannel] : []) : selectedChannel
             ? [selectedChannel, ...groupChannels.slice(0, 60)]
             : groupChannels.slice(0, 60);
-        this.app.epgGuide?.ensureChannels?.(shortEpgCandidates);
-        this.ensureShortEpgForChannels(shortEpgCandidates);
+        this.ensureChannelGuide(shortEpgCandidates);
 
         // Preserve the channel list's scroll position across re-renders (EPG
         // arrivals re-render the guide; without this the list jumps to the top).
