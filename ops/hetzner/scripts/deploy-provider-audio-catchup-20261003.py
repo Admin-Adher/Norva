@@ -76,7 +76,10 @@ def migrate():
  assert_reference()
  assert sql("select to_regclass('public.catalog_provider_audio_metadata_sweeps') is null").strip()=='t','migration_already_present'
  migration=ROOT/'20261003121000_provider_audio_metadata_catchup.sql'
- sql(migration.read_text());print(json.dumps({'migrationApplied':migration.name}))
+ # Existing protected language RPCs are owned by supabase_admin. PostgreSQL
+ # correctly rejects replacing them as the ordinary postgres runtime role.
+ run(['docker','exec','-i','norva-db','psql','-X','-qAt','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1'],migration.read_bytes())
+ print(json.dumps({'migrationApplied':migration.name}))
 def observe(name,source):
  assert source in ['Dino','MAX OTT','Strng IPTV 8K']
  statement="""set default_transaction_read_only=on;set statement_timeout='15s';

@@ -18,8 +18,14 @@ Le correctif ajoute un curseur durable dédié aux métadonnées audio Xtream, p
 
 Tests JS ciblés : 118 réussis lors du contrôle des modules et intégrations concernés ; 65 réussis lors du contrôle suivant du répartiteur et de son maintien de la cadence M3U.
 
-Base isolée : copie du schéma de production sans aucune ligne utilisateur, PostgreSQL sans réseau, données synthétiques et transaction annulée. Les 24 premiers contrôles valident les droits, l'isolation, les écritures de déclaration réelles, les délais de réessai, la priorité de lecture et le changement d'accès. Des contrôles complémentaires couvrent la rotation du planificateur et la conservation du curseur de synopsis.
+Base isolée : copie du schéma de production sans aucune ligne utilisateur, PostgreSQL sans réseau, données synthétiques et transaction annulée. Les 28 contrôles valident les droits, l'isolation, les écritures de déclaration réelles, les délais de réessai, la priorité de lecture et le changement d'accès. Ils couvrent également la rotation du planificateur et la conservation du curseur de synopsis.
 
 ## État
 
 Déploiement et mesures réelles à compléter. L'existence de ce correctif ne signifie pas que chaque fichier fournit une langue exploitable. La complétude du catalogue et le gain de débit doivent être mesurés séparément.
+
+## Préproduction sur données réelles
+
+Révision e3b78ba6da43ea6d3e6b34366e620617487d0d5d : vérification des contrats et compilations Windows, Android téléphone et TV réussies (GitHub Actions 37120116011). La migration a été appliquée par le propriétaire des RPC protégées, supabase_admin.
+
+Le candidat isolé du routage public a traité 28 fichiers Strng en 36,18 s, sans erreur ; les 28 réponses ne contenaient aucune déclaration exploitable et restent inconnues. Dino et MAX OTT ont respecté les reports liés aux activités fournisseur ; aucune protection de lecture n'a été contournée.
