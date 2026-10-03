@@ -172,6 +172,18 @@ test('the worker routes through Selection capture admission independently of the
   assert.deepEqual(calls, ['selection_audio_parallel_capture_enabled','selection_audio_capture_pipeline_enabled']);
 });
 
+test('replica choice is stable, preserves legacy captures and rejects removal of a persisted route',async()=>{
+  const {selectionAudioGatewayIndex}=await workerModule;
+  const fresh=baseJob();fresh.id=fresh.id.slice(0,-1)+'3';
+  assert.equal(selectionAudioGatewayIndex(fresh,2),1);
+  assert.equal(selectionAudioGatewayIndex({...fresh,profile:profile()},2),0);
+  assert.equal(selectionAudioGatewayIndex({...fresh,progress:{receipts:[receipt(1)]}},2),0);
+  assert.equal(selectionAudioGatewayIndex({...fresh,progress:{gatewayRoute:1}},2),1);
+  assert.throws(()=>selectionAudioGatewayIndex({...fresh,progress:{gatewayRoute:1}},1),/ROUTE_CHANGED/);
+  const run=await harness();await run.run({gatewayRoute:1});
+  assert.ok(run.checkpoints.every(p=>p.progress.gatewayRoute===1));
+});
+
 test('Selection local failures preserve audio and retry locally; lease loss and capture refusals never infer', async () => {
   for (const stage of ['status','handoff','compute','evidence','capture']) {
     const job = { ...baseJob(), attempt_count:3, profile:profile(), progress:{ trackPosition:0, receipts:[], tracks:[], evidence:[] } };

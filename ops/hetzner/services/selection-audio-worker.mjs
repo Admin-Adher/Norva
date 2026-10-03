@@ -7,6 +7,20 @@ import { createSelectionAudioTaskPool } from './selection-audio-task-pool.mjs';
 const priorityTitles = /^(Calabozos y Dragones|Raya y el |Avatar 2|Riverdance|Ponyo|X-Men 2$|Uma Aventura Lego$)/i;
 const knownLanguage = value => typeof value === 'string' && /^[a-z]{2}$/.test(value) && value !== 'un';
 
+// One job stays on one replica: encrypted local captures must not roam. Old
+// partially analyzed jobs retain the original route; only fresh jobs distribute.
+export function selectionAudioGatewayIndex(job, count) {
+  if (![1,2].includes(count)) throw new Error('SELECTION_AUDIO_GATEWAY_CONFIGURATION_INVALID');
+  const saved=job.progress?.gatewayRoute;
+  if (saved !== undefined) {
+    if (!Number.isInteger(saved) || saved < 0 || saved >= count) throw new Error('SELECTION_AUDIO_GATEWAY_ROUTE_CHANGED');
+    return saved;
+  }
+  if (job.profile?.fingerprint || (job.progress?.receipts || []).length || job.progress?.trackPosition > 0) return 0;
+  if (!/^[a-f0-9-]{36}$/i.test(job.id || '')) throw new Error('SELECTION_AUDIO_GATEWAY_JOB_INVALID');
+  return Number.parseInt(job.id.slice(-1),16)%count;
+}
+
 export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl = fetch }) {
   if (!baseUrl || !serviceKey) throw new Error('SELECTION_AUDIO_CONFIGURATION_REQUIRED');
   async function rpc(name, body = {}) {
@@ -63,13 +77,15 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
   };
 }
 
-export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, onProgress = async () => {} }) {
+export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, gatewayRoute, onProgress = async () => {} }) {
   if (!file || file.externalId !== job.external_id || file.urlSha256 !== job.url_sha256) {
     await repository.finish(job, null, 'SELECTION_AUDIO_FILE_CHANGED', false);
     return { state: 'failed' };
   }
   let profile = job.profile?.fingerprint ? job.profile : null;
-  let progress = job.progress?.trackPosition >= 0 ? job.progress : { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
+  const emptyProgress=()=>({ trackPosition:0,receipts:[],tracks:[],evidence:[],...(gatewayRoute!==undefined?{gatewayRoute}:{}) });
+  let progress = job.progress?.trackPosition >= 0 ? { ...job.progress } : emptyProgress();
+  if (gatewayRoute!==undefined) progress.gatewayRoute=gatewayRoute;
   let lostLease = false;
   let localCapturePhase = false;
   const controller = new AbortController();
@@ -100,7 +116,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
   try {
     if (!profile) {
       profile = await gateway.probe(file, { signal: controller.signal });
-      progress = { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
+      progress = emptyProgress();
       await checkpoint();
     }
     const sourceTracks = profile.audioTracks;
@@ -209,7 +225,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     }
     if (error.resetRequired) {
       profile = null;
-      progress = { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
+      progress = emptyProgress();
       if (!await repository.checkpoint(job, {}, progress)) return { state: 'lease_lost' };
     }
     const code = typeof error.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(error.code)
@@ -227,7 +243,10 @@ export async function runSelectionAudioWorker(env = process.env) {
     throw new Error('SELECTION_AUDIO_CONCURRENCY_INVALID');
   }
   const repository = createSelectionAudioRepository({ baseUrl: env.SUPABASE_URL, serviceKey: env.SUPABASE_SERVICE_ROLE_KEY });
-  const gateway = createSelectionAudioGateway({ gatewayUrl: env.MEDIA_GATEWAY_URL, gatewayToken: env.MEDIA_GATEWAY_TOKEN });
+  const urls=env.SELECTION_AUDIO_GATEWAY_URLS ? JSON.parse(env.SELECTION_AUDIO_GATEWAY_URLS) : [env.MEDIA_GATEWAY_URL];
+  if (!Array.isArray(urls) || ![1,2].includes(urls.length) || urls[0]!==env.MEDIA_GATEWAY_URL || new Set(urls).size!==urls.length)
+    throw new Error('SELECTION_AUDIO_GATEWAY_CONFIGURATION_INVALID');
+  const gateways=urls.map(gatewayUrl=>createSelectionAudioGateway({ gatewayUrl, gatewayToken:env.MEDIA_GATEWAY_TOKEN }));
   const manifest = await getSelectionAudioManifest();
   const files = new Map(manifest.map(f => [f.externalId, f]));
   const controller = new AbortController();
@@ -261,8 +280,9 @@ export async function runSelectionAudioWorker(env = process.env) {
       const captureEnabled = env.SELECTION_CAPTURE_PIPELINE_ENABLED === '1' && await repository.captureEnabled();
       const limit = concurrency > 1 && captureEnabled && await repository.parallelEnabled() ? 2 : 1;
       await pool.fill({ limit, signal:controller.signal, claim:() => repository.claim(), process:async job => {
-        const result = await processSelectionAudioJob({ repository, gateway, file: files.get(job.external_id), job,
-          signal: controller.signal, captureEnabled, onProgress: health });
+        const gatewayRoute=selectionAudioGatewayIndex(job,gateways.length);
+        const result = await processSelectionAudioJob({ repository, gateway:gateways[gatewayRoute], file: files.get(job.external_id), job,
+          signal: controller.signal, captureEnabled, gatewayRoute, onProgress: health });
         console.log(JSON.stringify({ event: 'selection_audio_job', state: result.state,
           error: result.error || null, diagnostic:selectionAudioFailureDiagnostic(result.diagnostic),
           languages: result.languages || [], hydrated: result.hydrated || 0 }));

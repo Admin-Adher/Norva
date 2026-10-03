@@ -26,7 +26,10 @@ def main():
     time.sleep(1);continue
    raise
   if sum(out.values())%25==0:print(json.dumps({'recovered':sum(out.values())}),flush=True)
+  # Keep a small gap for the worker's distributed admission arbiter.
+  time.sleep(0.25)
  (ROOT/'recovered-progress.private.json').write_text(json.dumps(private));(ROOT/'recovered-progress.private.json').chmod(0o600)
- receipt={'atEpoch':time.time(),'repairRevision':REV,'recovered':sum(out.values()),'byPriorReason':dict(out)}
+ archive=json.loads(sql("select coalesce(jsonb_agg(jsonb_build_object('reason',original_job->>'error_code','count',n)),'[]') from(select original_job,count(*) over(partition by original_job->>'error_code') n from public.catalog_selection_audio_recoveries where repair_revision='%s')x;"%REV))
+ receipt={'atEpoch':time.time(),'repairRevision':REV,'recoveredThisRun':sum(out.values()),'byPriorReason':dict(out),'archive':archive}
  (ROOT/'recovered-progress.safe.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt))
 if __name__=='__main__':main()
