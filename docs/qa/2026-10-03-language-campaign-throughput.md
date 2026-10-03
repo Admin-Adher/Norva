@@ -54,10 +54,13 @@ La première fenêtre de 2,55 minutes a donné 55 nouveaux contrôles uniques, s
 
 Les statistiques cumulées de l'appel `claim_catalog_provider_audio_metadata` indiquaient 1,57 seconde en moyenne et 7,97 secondes au maximum sur 1 071 appels réussis. Le contrôle en lecture seule d'une page réelle de 256 candidats a pris 2 798 ms, contre 513 ms pour ses 32 premiers candidats. Cette mesure porte sur les vérifications d'éligibilité, pas sur le débit réseau global, et ne reproduit pas à elle seule toutes les expirations.
 
-La migration `20261003180000` réduit à 32 la page de candidats par transaction, sans changer les conditions d'éligibilité, l'avancement du curseur, les baux ni les droits. Une page entièrement connue rend la main puis le prochain appel continue après son dernier identifiant. **31 contrôles SQL réussis** dans une copie de schéma sans réseau ni données de production, dont trois contrôles de continuation entre pages ; les **34 tests JavaScript** passent également.
+La migration `20261003181000` réduit à 32 la page de candidats par transaction, sans changer les conditions d'éligibilité, l'avancement du curseur, les baux ni les droits. Une page entièrement connue rend la main puis le prochain appel continue après son dernier identifiant. **31 contrôles SQL réussis** dans une copie de schéma sans réseau ni données de production, dont trois contrôles de continuation entre pages ; les **34 tests JavaScript** passent également.
 
 Déploiement SQL confirmé à **18:01:46 UTC**, sans redémarrage : empreinte de la fonction `061190b4256e965731375d5d9e6083824a11afd00b259fe50565e3c5e2e8a693`. La comparaison exacte avant/après confirme que seule la taille 256 → 32 diffère. L'installation autonome n'a pas de registre de migrations Supabase CLI ; le script SQL, l'ancienne définition privée et le reçu de déploiement sont conservés. Une première tentative incluant un registre absent a été entièrement annulée par transaction avant application correcte.
 
 À 18:02 UTC : **493 versions distinctes contrôlées depuis le lancement**, et le rapprochement du filtre effectué à 18:00 UTC donne **266 versions initialement inconnues désormais identifiées**, 56 485 encore inconnues. Ces deux nombres ne sont pas interchangeables : une déclaration récupérée peut rester inconclusive, et une correction de projection peut rendre visible une langue déjà enregistrée.
 
 La cible d'une ou deux heures demeure non atteinte. Le débit durable après la réduction de page reste à mesurer ; aucun nouveau délai de fin complète n'est certifié. La campagne est active, les admissions d'enrichissement sont ouvertes et le cron d'analyse stricte est actif.
+
+Le contrôle CI a détecté un identifiant de migration déjà utilisé. Le fichier est référencé définitivement sous `20261003181000` ; le contenu SQL et la fonction déployée sont identiques à ceux testés. Le reçu initial conserve le nom utilisé lors de l’application.
+
