@@ -18,6 +18,16 @@ const { planStrictSpeechWindow } = require('../services/media-gateway/src/strict
 const SECRET = 'gateway-test-secret-with-at-least-sixteen-bytes';
 const NOW = Date.UTC(2026, 7, 17, 0, 0, 0);
 
+test('partial validation remains bounded and cannot authorize incomplete final consensus',()=>{
+  for(let count=1;count<=6;count++){
+    const receipts=Array(count).fill('a'.repeat(40));
+    assert.equal(validateStrictLidWindowReceiptsInput(receipts,6,{allowPartial:true}).length,count);
+    if(count!==6)assert.throws(()=>validateStrictLidWindowReceiptsInput(receipts,6),{code:'STRICT_LID_WINDOW_RECEIPTS_INVALID'});
+  }
+  for(const input of [[],Array(7).fill('a'),[null],['a'.repeat(STRICT_LID_WINDOW_RECEIPT_MAX_CHARS+1)]])
+    assert.throws(()=>validateStrictLidWindowReceiptsInput(input,6,{allowPartial:true}),{code:'STRICT_LID_WINDOW_RECEIPTS_INVALID'});
+});
+
 function hex(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }

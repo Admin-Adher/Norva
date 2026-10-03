@@ -41,6 +41,18 @@ test('only immutable audited file + URL digest may reach the gateway', async () 
   assert.equal(calls.length, 0);
 });
 
+test('preflight signs an exact finalize capability, checks prefix acknowledgement and exposes no language',async()=>{
+  const {gateway,file,calls}=await setup(url=>url.endsWith('/probe-audio')?json(probePayload()):json({...drain,checkpointProtocol:1,valid:true,receiptCount:2,windowCount:6}));
+  const profile=await gateway.probe(file);
+  const result=await gateway.validateReceipts({file,profile,jobId,subjectId,trackIndex:1,receipts:[receipt(1),receipt(2)]});
+  assert.deepEqual(result,{valid:true,providerDrained:true});
+  const call=calls.at(-1);assert.ok(call.url.includes('/checkpoints?index=1'));
+  const token=call.options.headers['X-Norva-Byte-Pipe-Token'];const claims=JSON.parse(Buffer.from(token.split('.')[0],'base64url'));
+  assert.equal(claims.windowFinalize,true);assert.equal(claims.profileFingerprint,profile.fingerprint);assert.equal(claims.jobId,jobId);
+  assert.equal(claims.url,file.url);assert.equal(claims.windowOrdinal,undefined);
+  await assert.rejects(gateway.validateReceipts({file,profile,jobId,subjectId,trackIndex:1,receipts:[]}),{code:'SELECTION_AUDIO_RECEIPTS_INVALID'});
+});
+
 test('confirmed incomplete media is terminal while its fixed diagnostic is preserved', async () => {
   const { gateway, file, calls } = await setup(() => json({ ...drain,
     code:'MP4_DECLARED_MEDIA_EXCEEDS_FILE' }, 422));
@@ -200,6 +212,22 @@ test('shutdown abort and upstream failures expose only bounded local error codes
   assert.equal(calls.length, 1);
 });
 
+test('unidentified results retain bounded counts without promoting candidates or exposing speech',async()=>{
+ const payload={...drain,verified:false,language:null,candidate:'pt',sample:'private speech',
+   evaluatedWindowCount:6,sampleCount:3,consensus:3,rejectedSpeechSampleCount:1,
+   ignoredWeakSpeechSampleCount:1,repeatedSpeechSampleCount:0,missingDiversitySampleCount:0};
+ for(const bad of [null,{consensus:7},{sampleCount:'3'},{evaluatedWindowCount:5}]){
+  const {gateway,file}=await setup(url=>url.endsWith('/probe-audio')?json(probePayload()):json({...payload,...bad}));
+  const profile=await gateway.probe(file);
+  const result=await gateway.finalizeTrack({file,profile,jobId,subjectId,trackIndex:1,receipts:[1,2,3,4,5,6].map(receipt)});
+  assert.equal(result.verified,false);assert.equal(result.lang,null);
+  assert.doesNotMatch(JSON.stringify(result),/private speech|candidate|"pt"/);
+  if(bad)assert.equal(result.diagnostics,null);
+  else assert.deepEqual(result.diagnostics,{protocol:1,evaluatedWindows:6,acceptedWindows:3,largestAgreement:3,
+    conflictingWindows:1,weakWindows:1,repeatedWindows:0,missingDiversityWindows:0});
+ }
+});
+
 test('Selection capture actions are signed and bound; compute has no network capture fallback', async () => {
   const captured = { ...drain, captureProtocol:1, captured:true, sha256:'e'.repeat(64),
     expiresAt:Date.parse('2026-09-09T12:30:00Z') };
@@ -248,6 +276,23 @@ test('missing, expired, overlong or unbound private captures cannot reach comput
   await assert.rejects(gateway.computeCapture({ file, profile, jobId, subjectId, trackIndex:1, windowOrdinal:1,
     captureRelease:'23456789-1234-4234-8234-123456789012' }), { code:'SELECTION_AUDIO_GATEWAY_REJECTED' });
   assert.equal(calls.length, 2); assert.ok(calls[1].url.includes('/capture/infer'));
+});
+
+test('local inference outlives the Gateway quality fallback while explicit caller cancellation remains immediate', async t => {
+  const budgets=[];
+  t.mock.method(AbortSignal,'timeout',ms=>{budgets.push(ms);return new AbortController().signal;});
+  const { gateway,file,calls }=await setup(url=>url.endsWith('/probe-audio')?json(probePayload())
+    :json({...drain,windowCheckpointProtocol:1,windowOrdinal:1,windowCount:6,receipt:receipt(1)}));
+  const profile=await gateway.probe(file);
+  const args={file,profile,jobId,subjectId,trackIndex:1,windowOrdinal:1,
+    captureRelease:'23456789-1234-4234-8234-123456789012'};
+  await gateway.computeCapture(args);
+  assert.equal(budgets.at(-1),110000);
+  const stopped=new AbortController();stopped.abort();
+  await assert.rejects(gateway.computeCapture({...args,signal:stopped.signal}),{code:'SELECTION_AUDIO_ABORTED'});
+  assert.equal(calls.length,2);
+  assert.ok(calls.at(-1).url.includes('/capture/infer?'));
+  assert.equal(calls.some(c=>c.url.includes('/capture/capture?')),false);
 });
 
 test('local capacity is distinct from provider rejection and requires a drain attestation', async () => {

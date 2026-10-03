@@ -179,7 +179,7 @@ test('finalize has a dedicated signed capability, validates all ordered receipts
   assert.ok(finalizeStart >= 0 && capabilityHeaderStart > finalizeStart);
   assert.match(finalizeHandler, /strictLidWindowClaimContext\(validation\.claims, trackIndex, \{ finalize: true \}\)/);
   assert.match(finalizeHandler, /Object\.keys\(body\)\.length !== 1/);
-  assert.match(finalizeHandler, /validateStrictLidWindowReceiptsInput\(body\.receipts, context\.windowCount\)/);
+  assert.match(finalizeHandler, /validateStrictLidWindowReceiptsInput\(body\.receipts, context\.windowCount, \{ allowPartial: checkpointOnly \}\)/);
   assert.match(finalizeHandler, /receipts\.map\(\(receipt, index\) => openStrictLidWindowReceipt/);
   assert.match(finalizeHandler, /strictLidWindowReceiptBinding\(context, index \+ 1\)/);
   assert.match(finalizeHandler, /resolveStrictLidConsensus\(evaluated, WHISPER_STRICT_CONSENSUS\)/);
@@ -427,6 +427,29 @@ test('checkpoint code never logs or returns sensitive evidence outside the opaqu
   assert.doesNotMatch(checkpointModule, /\bsample\s*:/);
   assert.equal((finalizeHandler.match(/console\.info/g) || []).length, 1);
   assert.doesNotMatch(finalizeHandler, /JSON\.stringify\(.*(?:receipt|token|id|offset|probability|transcript)/);
+});
+
+test('partial checkpoint route authenticates every prefix and never evaluates consensus or opens provider I/O',async()=>{
+  const real=require('../services/media-gateway/src/strict-lid-window-checkpoint');
+  const {strictLidTimelineOffsets}=require('../services/media-gateway/src/strict-lid-batch');
+  const secret='gateway-receipt-test-secret-at-least-32', now=Date.now();
+  const b=ordinal=>({jobId:'12345678-1234-4234-8234-123456789012',profileFingerprint:'a'.repeat(64),userId:'norva-selection-audio',trackIndex:2,
+    fileSizeBytes:123456,durationSeconds:600,windowOrdinal:ordinal,windowCount:6,
+    offsetMilliseconds:Math.round(strictLidTimelineOffsets(600)[ordinal-1]*1000),
+    method:real.STRICT_LID_WINDOW_METHOD,configDigest:'b'.repeat(64),modelDigest:'c'.repeat(64)});
+  const receipt=real.createStrictLidWindowReceipt({secret,binding:b(1),nowMs:now,evidence:{disposition:'insufficient',diversity:{fingerprint:'d'.repeat(64),shingles:[]},
+    result:{language:null,candidate:null,confidence:0,confident:false,verified:false,validationStatus:'pending',method:real.STRICT_LID_WINDOW_METHOD,
+      consensus:0,whisperLang:null,transcriptLang:null,transcriptAgrees:null,minProbability:.95,wordCount:0,uniqueWordCount:0,
+      transcriptEvidenceBasis:'insufficient',scriptCharacterCount:0,uniqueScriptCharacterCount:0,uniqueScriptBigramCount:0,scriptDensity:0,offset:b(1).offsetMilliseconds/1000}}});
+  const handler=vm.runInNewContext(`(${finalizeHandler.trim()})`,{...real,GATEWAY_TOKEN:secret,LID_LEGACY_FULL_SCOPE:'lid-legacy-full',
+    validateDetectLanguageCapability:()=>({claims:{}}),strictLidWindowClaimContext:()=>({windowCount:6}),
+    strictLidWindowReceiptBinding:(_ctx,ordinal)=>b(ordinal),resolveStrictLidConsensus:()=>{throw Error('prefix is not consensus');}});
+  const ok=responseHarness();await handler({query:{index:'2'},body:{receipts:[receipt]}},ok,'capability',{checkpointOnly:true});
+  assert.equal(ok.statusCode,200);assert.equal(ok.payload.receiptCount,1);assert.equal(ok.payload.verified,undefined);
+  const tampered=responseHarness();await handler({query:{index:'2'},body:{receipts:[receipt.replace(/.$/,'!')]}},tampered,'capability',{checkpointOnly:true});
+  assert.equal(tampered.statusCode,409);assert.equal(tampered.payload.resetRequired,true);
+  const final=responseHarness();await handler({query:{index:'2'},body:{receipts:[receipt]}},final,'capability');
+  assert.equal(final.statusCode,409,'normal finalization still needs all six windows');
 });
 
 test('legacy monolithic route remains the default when checkpoint claims are absent', () => {

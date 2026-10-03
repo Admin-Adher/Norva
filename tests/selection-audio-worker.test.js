@@ -31,6 +31,7 @@ async function harness({ job = baseJob(), givenProfile = profile(), analyze, fin
   const windows = [], finals = [];
   const gateway = {
     async probe() { events.push('probe'); return clone(givenProfile); },
+    async validateReceipts() { events.push('checkpoints'); return { valid:true, providerDrained:true }; },
     async analyzeTrackWindow(args) {
       events.push('window'); windows.push({ ...args, receipts:undefined });
       return analyze ? analyze(args) : { providerDrained:true, receipt:receipt(args.windowOrdinal), windowCount:6 };
@@ -70,6 +71,17 @@ test('retry resumes persisted receipts without probing or repeating completed wi
   assert.deepEqual(run.finals[0].receipts, [1,2,3,4,5,6].map(receipt));
 });
 
+test('unidentified track counts survive checkpoint and final persistence without inventing a language',async()=>{
+ const diagnostics={protocol:1,evaluatedWindows:6,acceptedWindows:2,largestAgreement:2,
+   conflictingWindows:0,weakWindows:2,repeatedWindows:0,missingDiversityWindows:0};
+ const run=await harness({finalize:async()=>({verified:false,lang:null,providerDrained:true,diagnostics})});
+ assert.equal((await run.run()).state,'completed');
+ assert.equal(run.finishes[0].result.verified,false);
+ assert.equal(run.finishes[0].result.audioTracks[0].lang,null);
+ assert.deepEqual(run.finishes[0].result.verification.unidentifiedTracks,[{index:1,diagnostics}]);
+ assert.deepEqual(run.checkpoints.at(-1).progress.unidentifiedTracks,[{index:1,diagnostics}]);
+});
+
 test('gateway failure retains safe diagnostics and reports exhausted retries as terminal', async () => {
   for (const attempts of [1,8]) {
     const run = await harness({ job:{ ...baseJob(), attempt_count:attempts } });
@@ -96,6 +108,29 @@ test('failure reporting honors a lost lease and the persisted interruption retry
     assert.equal(run.finishes[0].retryable, true);
     assert.equal(run.events.includes('hydrate'), false);
   }
+});
+
+test('safe service stop before I/O returns only this claim debit, including at attempt eight',async()=>{
+ const run=await harness({job:{...baseJob(),attempt_count:8}});let refunds=0;
+ run.repository.deferAdmission=async()=>{refunds++;return true;};
+ const result=await run.run({shouldStop:()=>true});assert.equal(result.state,'retry_wait');assert.equal(result.error,'SELECTION_AUDIO_SAFE_SHUTDOWN');assert.equal(refunds,1);assert.equal(run.events.includes('probe'),false);assert.equal(run.finishes.length,0);
+});
+
+test('service stop waits for captured audio drain and durable handoff before refunding',async()=>{
+ const run=await harness();let stop=false,refunded=false;
+ run.gateway.getCaptureStatus=async()=>({captured:false});
+ run.gateway.captureWindow=async args=>{assert.equal(args.signal.aborted,false);stop=true;return {captured:true,providerDrained:true};};
+ run.repository.checkpointCapture=async()=>{run.events.push('durable-drain');return '23456789-1234-4234-8234-123456789012';};
+ run.gateway.computeCapture=async()=>{throw Error('must stop before compute');};
+ run.repository.deferAdmission=async()=>{assert.equal(run.events.at(-1),'durable-drain');refunded=true;return true;};
+ const result=await run.run({captureEnabled:true,shouldStop:()=>stop});assert.equal(result.error,'SELECTION_AUDIO_SAFE_SHUTDOWN');assert.equal(refunded,true);assert.equal(run.finishes.length,0);
+});
+
+test('stop request cannot refund an unconfirmed capture drain',async()=>{
+ const run=await harness();let stop=false;
+ run.gateway.getCaptureStatus=async()=>({captured:false});run.gateway.captureWindow=async()=>{stop=true;return {captured:true,providerDrained:false};};
+ run.repository.deferAdmission=async()=>{throw Error('unconfirmed drain cannot be refunded');};run.repository.deferCapture=async()=>true;
+ const result=await run.run({captureEnabled:true,shouldStop:()=>stop});assert.notEqual(result.error,'SELECTION_AUDIO_SAFE_SHUTDOWN');
 });
 
 test('confirmed truncated capture persists its terminal reason without resetting receipts or hydrating a language', async () => {
@@ -171,6 +206,18 @@ test('the worker routes through Selection capture admission independently of the
   assert.deepEqual(calls, ['selection_audio_parallel_capture_enabled','selection_audio_capture_pipeline_enabled']);
 });
 
+test('replica choice is stable, preserves legacy captures and rejects removal of a persisted route',async()=>{
+  const {selectionAudioGatewayIndex}=await workerModule;
+  const fresh=baseJob();fresh.id=fresh.id.slice(0,-1)+'3';
+  assert.equal(selectionAudioGatewayIndex(fresh,2),1);
+  assert.equal(selectionAudioGatewayIndex({...fresh,profile:profile()},2),0);
+  assert.equal(selectionAudioGatewayIndex({...fresh,progress:{receipts:[receipt(1)]}},2),0);
+  assert.equal(selectionAudioGatewayIndex({...fresh,progress:{gatewayRoute:1}},2),1);
+  assert.throws(()=>selectionAudioGatewayIndex({...fresh,progress:{gatewayRoute:1}},1),/ROUTE_CHANGED/);
+  const run=await harness();await run.run({gatewayRoute:1});
+  assert.ok(run.checkpoints.every(p=>p.progress.gatewayRoute===1));
+});
+
 test('Selection local failures preserve audio and retry locally; lease loss and capture refusals never infer', async () => {
   for (const stage of ['status','handoff','compute','evidence','capture']) {
     const job = { ...baseJob(), attempt_count:3, profile:profile(), progress:{ trackPosition:0, receipts:[], tracks:[], evidence:[] } };
@@ -218,6 +265,36 @@ test('unattested viewer refusal cannot refund the bounded retry budget', async (
   run.repository.deferAdmission = async () => { throw Error('unproved drain must not defer admission'); };
   assert.equal((await run.run()).state,'failed');
   assert.equal(run.finishes.length,1);
+});
+
+test('local compute saturation refunds admission with drain proof and preserves the captured excerpt', async () => {
+  for (const drained of [true,false]) {
+    const job={...baseJob(),attempt_count:8,profile:profile(),progress:{trackPosition:0,receipts:[receipt(1)],tracks:[],evidence:[]}};
+    const run=await harness({job});let refunds=0,localDefers=0,downloads=0;
+    run.gateway.getCaptureStatus=async()=>({captured:true,providerDrained:true,sha256:'d'.repeat(64),expiresAt:Date.now()+10000});
+    run.repository.checkpointCapture=async()=> '23456789-1234-4234-8234-123456789012';
+    run.gateway.computeCapture=async()=>{throw Object.assign(Error('busy'),{code:'SELECTION_AUDIO_CAPACITY_BUSY',providerDrained:drained,retryable:true});};
+    run.gateway.captureWindow=async()=>{downloads++;throw Error('must reuse');};
+    run.repository.deferAdmission=async()=>{refunds++;return true;};
+    run.repository.deferCapture=async()=>{localDefers++;return true;};
+    const result=await run.run({captureEnabled:true});
+    assert.equal(result.state,drained?'retry_wait':'failed');
+    assert.equal(refunds,drained?1:0);assert.equal(localDefers,drained?0:1);assert.equal(downloads,0);
+    assert.deepEqual(job.progress.receipts,[receipt(1)]);assert.equal(run.finishes.length,0);
+  }
+});
+
+test('expired partial receipts are replaced before provider I/O without losing prior certified tracks',async()=>{
+  const p=profile();p.audioTracks.unshift({index:0,lang:'pt',codec:'aac'});
+  const job={...baseJob(),profile:p,progress:{trackPosition:1,receipts:[receipt(1),receipt(2)],tracks:[{index:0,lang:'pt',codec:'aac'}],evidence:[]}};
+  const run=await harness({job});let checked=0;
+  run.gateway.validateReceipts=async()=>{checked++;assert.equal(run.windows.length,0);throw Object.assign(Error('expired'),{code:'SELECTION_AUDIO_CHECKPOINT_RESET_REQUIRED',resetRequired:true,providerDrained:true});};
+  const result=await run.run();
+  assert.equal(result.state,'completed');assert.equal(checked,1);
+  assert.deepEqual(run.windows.map(w=>w.windowOrdinal),[1,2,3,4,5,6]);
+  assert.equal(run.events.includes('probe'),false);
+  assert.deepEqual(run.checkpoints[0].progress.tracks,[{index:0,lang:'pt',codec:'aac'}]);
+  assert.deepEqual(run.finishes[0].result.audioTracks.map(t=>t.lang),['pt','es']);
 });
 
 test('ambiguous audio completes durably as unidentified and never promotes a candidate', async () => {

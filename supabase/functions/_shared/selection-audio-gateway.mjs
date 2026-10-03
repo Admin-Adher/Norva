@@ -24,6 +24,7 @@ const diagnosticCodes = new Set(['codec_probe_timeout', 'strict_lid_extraction_t
   'LID_CAPTURE_COMPUTE_BUSY', 'account_busy', 'background_busy', 'viewer_preempted',
   'LANGUAGE_VALIDATION_VIEWER_PREEMPTED', 'strict_lid_preempted']);
 const diagnosticStages = new Map([['/probe-audio', 'probe'], ['/detect-language', 'analyze'],
+  ['/detect-language/checkpoints', 'checkpoints'],
   ['/detect-language/finalize', 'finalize'], ['/detect-language/capture/status', 'capture_status'],
   ['/detect-language/capture/capture', 'capture'], ['/detect-language/capture/infer', 'infer'],
   ['/detect-language/capture/ack', 'ack']]);
@@ -246,10 +247,25 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     return { receipt:payload.receipt, windowOrdinal:args.windowOrdinal, windowCount:profile.windowCount, providerDrained:true };
   }
 
+  function unidentifiedDiagnostics(payload, profile) {
+    const fields = { evaluatedWindows:'evaluatedWindowCount', acceptedWindows:'sampleCount',
+      largestAgreement:'consensus', conflictingWindows:'rejectedSpeechSampleCount',
+      weakWindows:'ignoredWeakSpeechSampleCount', repeatedWindows:'repeatedSpeechSampleCount',
+      missingDiversityWindows:'missingDiversitySampleCount' };
+    if (payload.evaluatedWindowCount !== profile.windowCount || Object.values(fields)
+      .some(key => !Number.isInteger(payload[key]) || payload[key] < 0 || payload[key] > profile.windowCount)) return null;
+    // Counts explain an unresolved result. Candidate languages, excerpts and
+    // arbitrary upstream fields cannot enter either the durable result or UI.
+    return { protocol:1,...Object.fromEntries(Object.entries(fields).map(([key,source])=>[key,payload[source]])) };
+  }
+
   async function captureRequest(args, action) {
     const { profile, capability } = await context(args, false, action);
     const payload = await request(`/detect-language/capture/${action}?index=${args.trackIndex}`, {
-      capability, signal:args.signal, budgetMs:Math.min(budget, action === 'capture' ? 215_000 : action === 'infer' ? 60_000 : 10_000) });
+      // The Gateway allows 100 s of provider-free speech sampling/inference,
+      // with a 105 s handler deadline. A shorter client deadline aborted a
+      // valid local quality fallback and needlessly spent another retry.
+      capability, signal:args.signal, budgetMs:Math.min(budget, action === 'capture' ? 215_000 : action === 'infer' ? 110_000 : 10_000) });
     if (action === 'infer') return windowReceipt(payload, args, profile);
     if (action === 'ack') {
       if (payload.acknowledged !== true) fail('SELECTION_AUDIO_CAPTURE_ACK_INVALID', { retryable:true, providerDrained:true });
@@ -286,6 +302,17 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
     captureWindow: args => captureRequest(args, 'capture'),
     computeCapture: args => captureRequest(args, 'infer'),
     acknowledgeCapture: args => captureRequest(args, 'ack'),
+    async validateReceipts(args) {
+      const { profile, capability } = await context(args, true);
+      if (!Array.isArray(args.receipts) || args.receipts.length < 1 || args.receipts.length > profile.windowCount
+        || args.receipts.some(receipt => typeof receipt !== 'string' || receipt.length < 32 || receipt.length > 64 * 1024
+          || !/^[a-zA-Z0-9._-]+$/.test(receipt))) fail('SELECTION_AUDIO_RECEIPTS_INVALID');
+      const payload = await request(`/detect-language/checkpoints?index=${args.trackIndex}`, {
+        capability, body:{ receipts:args.receipts }, signal:args.signal, budgetMs:Math.min(budget, 10_000) });
+      if (payload.checkpointProtocol !== 1 || payload.valid !== true || payload.receiptCount !== args.receipts.length
+        || payload.windowCount !== profile.windowCount) fail('SELECTION_AUDIO_EVIDENCE_INVALID', { retryable:true, providerDrained:true });
+      return { valid:true, providerDrained:true };
+    },
     async finalizeTrack(args) {
       const { profile, capability } = await context(args, true);
       if (!Array.isArray(args.receipts) || args.receipts.length !== profile.windowCount
@@ -312,6 +339,7 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
       if (!valid) {
         if (payload.verified === true) fail('SELECTION_AUDIO_EVIDENCE_INVALID', { retryable:true, providerDrained:true });
         return { verified:false, lang:null, status:'unidentified', providerDrained:true,
+          diagnostics:unidentifiedDiagnostics(payload, profile),
           evidence:{ protocol:1, method:METHOD, profileFingerprint:profile.fingerprint, windowCount:profile.windowCount } };
       }
       return { verified:true, lang, status:'verified', providerDrained:true,

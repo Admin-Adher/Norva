@@ -7,6 +7,20 @@ import { createSelectionAudioTaskPool } from './selection-audio-task-pool.mjs';
 const priorityTitles = /^(Calabozos y Dragones|Raya y el |Avatar 2|Riverdance|Ponyo|X-Men 2$|Uma Aventura Lego$)/i;
 const knownLanguage = value => typeof value === 'string' && /^[a-z]{2}$/.test(value) && value !== 'un';
 
+// One job stays on one replica: encrypted local captures must not roam. Old
+// partially analyzed jobs retain the original route; only fresh jobs distribute.
+export function selectionAudioGatewayIndex(job, count) {
+  if (![1,2].includes(count)) throw new Error('SELECTION_AUDIO_GATEWAY_CONFIGURATION_INVALID');
+  const saved=job.progress?.gatewayRoute;
+  if (saved !== undefined) {
+    if (!Number.isInteger(saved) || saved < 0 || saved >= count) throw new Error('SELECTION_AUDIO_GATEWAY_ROUTE_CHANGED');
+    return saved;
+  }
+  if (job.profile?.fingerprint || (job.progress?.receipts || []).length || job.progress?.trackPosition > 0) return 0;
+  if (!/^[a-f0-9-]{36}$/i.test(job.id || '')) throw new Error('SELECTION_AUDIO_GATEWAY_JOB_INVALID');
+  return Number.parseInt(job.id.slice(-1),16)%count;
+}
+
 export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl = fetch }) {
   if (!baseUrl || !serviceKey) throw new Error('SELECTION_AUDIO_CONFIGURATION_REQUIRED');
   async function rpc(name, body = {}) {
@@ -63,15 +77,23 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
   };
 }
 
-export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, onProgress = async () => {} }) {
+export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, gatewayRoute, shouldStop = () => false, onProgress = async () => {} }) {
   if (!file || file.externalId !== job.external_id || file.urlSha256 !== job.url_sha256) {
     await repository.finish(job, null, 'SELECTION_AUDIO_FILE_CHANGED', false);
     return { state: 'failed' };
   }
   let profile = job.profile?.fingerprint ? job.profile : null;
-  let progress = job.progress?.trackPosition >= 0 ? job.progress : { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
+  const emptyProgress=()=>({ trackPosition:0,receipts:[],tracks:[],evidence:[],...(gatewayRoute!==undefined?{gatewayRoute}:{}) });
+  let progress = job.progress?.trackPosition >= 0 ? { ...job.progress } : emptyProgress();
+  if (gatewayRoute!==undefined) progress.gatewayRoute=gatewayRoute;
   let lostLease = false;
   let localCapturePhase = false;
+  // Only call at a boundary with no provider I/O in this claim, or after the
+  // Gateway has positively attested drain. SIGTERM never aborts a live capture.
+  const stopAtDrainedBoundary = () => {
+    if (shouldStop()) throw Object.assign(new Error('SELECTION_AUDIO_SAFE_SHUTDOWN'), {
+      code:'SELECTION_AUDIO_SAFE_SHUTDOWN', providerDrained:true });
+  };
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
@@ -98,13 +120,15 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     finally { heartbeatPending = false; }
   }, 30_000);
   try {
+    stopAtDrainedBoundary();
     if (!profile) {
       profile = await gateway.probe(file, { signal: controller.signal });
-      progress = { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
+      progress = emptyProgress();
       await checkpoint();
     }
     const sourceTracks = profile.audioTracks;
     while (progress.trackPosition < sourceTracks.length) {
+      stopAtDrainedBoundary();
       const track = sourceTracks[progress.trackPosition];
       const language = track.lang || track.language;
       if (knownLanguage(language)) {
@@ -112,6 +136,17 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
       } else {
         const args = { file, profile, jobId: job.id, subjectId: 'norva-selection-audio', trackIndex: track.index, signal: controller.signal };
         let windows = profile.durationSeconds >= 120 ? 6 : 4;
+        if (progress.receipts.length) {
+          try { await gateway.validateReceipts({ ...args, receipts:progress.receipts }); }
+          catch (error) {
+            if (error.resetRequired !== true || error.providerDrained !== true) throw error;
+            // Expired/incompatible receipts are authenticated by the Gateway,
+            // before any new capture. Keep the exact probed profile and prior
+            // certified tracks; replace only this track's expired prefix once.
+            progress.receipts = [];
+            await checkpoint();
+          }
+        }
         for (let ordinal = progress.receipts.length; ordinal < windows; ordinal++) {
           const windowArgs = { ...args, windowOrdinal: ordinal + 1 };
           let response;
@@ -135,6 +170,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
               lostLease = true; controller.abort();
               throw Object.assign(new Error('SELECTION_AUDIO_LEASE_LOST'), { code:'SELECTION_AUDIO_LEASE_LOST' });
             }
+            stopAtDrainedBoundary();
             response = await gateway.computeCapture({ ...windowArgs, captureRelease });
           } else response = await gateway.analyzeTrackWindow(windowArgs);
           if (!response.providerDrained || !response.receipt) throw Object.assign(new Error('SELECTION_AUDIO_DRAIN_UNPROVEN'), { code: 'SELECTION_AUDIO_DRAIN_UNPROVEN', retryable: true });
@@ -147,11 +183,16 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
             try { await gateway.acknowledgeCapture(windowArgs); } catch { /* private TTL */ }
           }
           localCapturePhase = false;
+          stopAtDrainedBoundary();
         }
         const detection = await gateway.finalizeTrack({ ...args, receipts: progress.receipts });
         const identified = detection.verified === true && knownLanguage(detection.lang);
         progress.tracks.push({ index: track.index, lang: identified ? detection.lang : null, codec: track.codec || null });
         if (identified) progress.evidence.push({ index: track.index, evidence: detection.evidence });
+        else if (detection.diagnostics) {
+          progress.unidentifiedTracks ||= [];
+          progress.unidentifiedTracks.push({ index:track.index,diagnostics:detection.diagnostics });
+        }
       }
       progress.receipts = [];
       // Save the next track, so a crash never repeats an already certified track.
@@ -162,6 +203,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     const result = { audioTracks: progress.tracks, subtitleTracks: profile.subtitleTracks || [], profile, verified,
       verification: { method: 'selection-strict-lid-v1', status: verified ? 'verified' : 'probed',
         urlSha256: file.urlSha256, profileFingerprint: profile.fingerprint,
+        ...(progress.unidentifiedTracks?.length ? { unidentifiedTracks:progress.unidentifiedTracks } : {}),
         profileProbedAt: profile.probedAt, fileSizeBytes: profile.fileSizeBytes, tracks: progress.evidence } };
     clearInterval(heartbeat);
     await checkpointChain;
@@ -184,11 +226,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     clearInterval(heartbeat);
     await checkpointChain;
     if (lostLease) return { state: 'lease_lost' };
-    if (localCapturePhase && captureEnabled) {
-      if (!await repository.deferCapture(job)) return { state:'lease_lost' };
-      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY', diagnostic:selectionAudioFailureDiagnostic(error) };
-    }
-    if (['SELECTION_AUDIO_CAPACITY_BUSY', 'SELECTION_AUDIO_VIEWER_BUSY'].includes(error.code)
+    if (['SELECTION_AUDIO_CAPACITY_BUSY', 'SELECTION_AUDIO_VIEWER_BUSY', 'SELECTION_AUDIO_SAFE_SHUTDOWN'].includes(error.code)
       && error.providerDrained === true) {
       // Capacity refusal or yielding to a viewer is not a failed analysis.
       // Require the Gateway's drain attestation before returning the retry debit.
@@ -196,9 +234,13 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
       if (!await repository.deferAdmission(job)) return { state: 'lease_lost' };
       return { state: 'retry_wait', error: error.code, diagnostic:selectionAudioFailureDiagnostic(error) };
     }
+    if (localCapturePhase && captureEnabled) {
+      if (!await repository.deferCapture(job)) return { state:'lease_lost' };
+      return { state:Number(job.attempt_count || 0) >= 8 ? 'failed' : 'retry_wait', error:'SELECTION_AUDIO_CAPTURE_LOCAL_RETRY', diagnostic:selectionAudioFailureDiagnostic(error) };
+    }
     if (error.resetRequired) {
       profile = null;
-      progress = { trackPosition: 0, receipts: [], tracks: [], evidence: [] };
+      progress = emptyProgress();
       if (!await repository.checkpoint(job, {}, progress)) return { state: 'lease_lost' };
     }
     const code = typeof error.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(error.code)
@@ -216,11 +258,15 @@ export async function runSelectionAudioWorker(env = process.env) {
     throw new Error('SELECTION_AUDIO_CONCURRENCY_INVALID');
   }
   const repository = createSelectionAudioRepository({ baseUrl: env.SUPABASE_URL, serviceKey: env.SUPABASE_SERVICE_ROLE_KEY });
-  const gateway = createSelectionAudioGateway({ gatewayUrl: env.MEDIA_GATEWAY_URL, gatewayToken: env.MEDIA_GATEWAY_TOKEN });
+  const urls=env.SELECTION_AUDIO_GATEWAY_URLS ? JSON.parse(env.SELECTION_AUDIO_GATEWAY_URLS) : [env.MEDIA_GATEWAY_URL];
+  if (!Array.isArray(urls) || ![1,2].includes(urls.length) || urls[0]!==env.MEDIA_GATEWAY_URL || new Set(urls).size!==urls.length)
+    throw new Error('SELECTION_AUDIO_GATEWAY_CONFIGURATION_INVALID');
+  const gateways=urls.map(gatewayUrl=>createSelectionAudioGateway({ gatewayUrl, gatewayToken:env.MEDIA_GATEWAY_TOKEN }));
   const manifest = await getSelectionAudioManifest();
   const files = new Map(manifest.map(f => [f.externalId, f]));
   const controller = new AbortController();
-  for (const event of ['SIGTERM', 'SIGINT']) process.once(event, () => controller.abort());
+  let stopRequested=false;
+  for (const event of ['SIGTERM', 'SIGINT']) process.once(event, () => { stopRequested=true; });
   const health = async (status = 'ready') => {
     if (env.SELECTION_AUDIO_HEALTH_FILE) await writeFile(env.SELECTION_AUDIO_HEALTH_FILE, JSON.stringify({ status, at: Date.now() }));
   };
@@ -228,7 +274,7 @@ export async function runSelectionAudioWorker(env = process.env) {
   const pool = createSelectionAudioTaskPool({ maximum:concurrency, onError:() => {
     console.error(JSON.stringify({ event:'selection_audio_worker', error:'SELECTION_AUDIO_OWNED_TASK_FAILED' }));
   } });
-  while (!controller.signal.aborted) {
+  while (!stopRequested && !controller.signal.aborted) {
     try {
       await health();
       if (Date.now() - seededAt > 300_000) {
@@ -249,9 +295,10 @@ export async function runSelectionAudioWorker(env = process.env) {
       // fallback. The database still caps live jobs across worker replicas.
       const captureEnabled = env.SELECTION_CAPTURE_PIPELINE_ENABLED === '1' && await repository.captureEnabled();
       const limit = concurrency > 1 && captureEnabled && await repository.parallelEnabled() ? 2 : 1;
-      await pool.fill({ limit, signal:controller.signal, claim:() => repository.claim(), process:async job => {
-        const result = await processSelectionAudioJob({ repository, gateway, file: files.get(job.external_id), job,
-          signal: controller.signal, captureEnabled, onProgress: health });
+      await pool.fill({ limit, signal:controller.signal, claim:() => stopRequested ? null : repository.claim(), process:async job => {
+        const gatewayRoute=selectionAudioGatewayIndex(job,gateways.length);
+        const result = await processSelectionAudioJob({ repository, gateway:gateways[gatewayRoute], file: files.get(job.external_id), job,
+          signal: controller.signal, captureEnabled, gatewayRoute, shouldStop:()=>stopRequested, onProgress: health });
         console.log(JSON.stringify({ event: 'selection_audio_job', state: result.state,
           error: result.error || null, diagnostic:selectionAudioFailureDiagnostic(result.diagnostic),
           languages: result.languages || [], hydrated: result.hydrated || 0 }));
@@ -261,7 +308,7 @@ export async function runSelectionAudioWorker(env = process.env) {
       if (pool.size()) await Promise.race([pool.progress(),delay(15_000,undefined,{signal:controller.signal})]);
       else await delay(15_000, undefined, { signal:controller.signal });
     } catch (error) {
-      if (controller.signal.aborted) break;
+      if (stopRequested || controller.signal.aborted) break;
       console.error(JSON.stringify({ event: 'selection_audio_worker', error: 'SELECTION_AUDIO_WORKER_RETRY' }));
       await health('retrying');
       await delay(30_000, undefined, { signal: controller.signal }).catch(() => {});

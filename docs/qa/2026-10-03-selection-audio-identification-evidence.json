@@ -1,0 +1,224 @@
+{
+  "at": "2026-10-03T05:25:50.398311+00:00",
+  "cohortSummary": {
+    "at": "2026-10-03T05:25:50.018798+00:00",
+    "baselineAt": "2026-10-03T04:45:53.280367+02:00",
+    "baselineTitles": 530,
+    "baselineFiles": 533,
+    "currentUnidentifiedTitles": 468,
+    "currentUnidentifiedFiles": 470,
+    "cohortTitlesNowIdentified": 62,
+    "cohortFilesNowIdentified": 63,
+    "classifications": {
+      "analysis_inconclusive": 78,
+      "retry_wait:SELECTION_AUDIO_CHECKPOINT_RESET_REQUIRED": 79,
+      "queued:processing": 184,
+      "retry_wait:SELECTION_AUDIO_CAPACITY_BUSY": 102,
+      "identified": 63,
+      "native_hls_audit_inconclusive": 3,
+      "retry_wait:SELECTION_AUDIO_VIEWER_BUSY": 18,
+      "failed:SELECTION_AUDIO_GATEWAY_REJECTED": 1,
+      "running:processing": 2,
+      "retry_wait:SELECTION_AUDIO_ABORTED": 2,
+      "failed:SELECTION_AUDIO_PROBE_INCOMPLETE": 1
+    },
+    "identifiedLanguages": {
+      "pt": 60,
+      "ja": 1,
+      "ko": 1,
+      "es": 1,
+      "en": 2
+    }
+  },
+  "runtime": {
+    "at": "2026-10-03T05:25:50.398311+00:00",
+    "images": {
+      "norva-media-gateway": "sha256:eece83dc932b3506d72aa62f9e350faf3b50057c5712f9293036e148122acd0e",
+      "norva-resume-cache-pilot-20260916": "sha256:eece83dc932b3506d72aa62f9e350faf3b50057c5712f9293036e148122acd0e"
+    },
+    "gatewaySourceHashes": {
+      "norva-media-gateway": "f311bfe8677b1dc338d4e31ee385159a4baa6dcd3ca1cd45d1bb11a6b42512be",
+      "norva-resume-cache-pilot-20260916": "f311bfe8677b1dc338d4e31ee385159a4baa6dcd3ca1cd45d1bb11a6b42512be"
+    },
+    "gatewaySourceEqual": true,
+    "workerSourceHash": "c2bb7199e0353d3acf0dcb332815ac178cd0718cf6a74246d957e3aa6e7a6540",
+    "clientSourceHash": "5136268efb67b82b42c40af5a303c772c9025fca27a7bc16e6256fc9ef6609d5",
+    "workerRunning": true,
+    "workerStartedAt": "2026-10-03T05:14:50.956119784Z",
+    "workerRestartCount": 0,
+    "receiptSecretEqual": true,
+    "whisperEnvironmentDifferentKeys": [
+      "WHISPER_VAD_BIN"
+    ],
+    "whisperInferenceSettingsEqual": true,
+    "workerConcurrency": "2",
+    "captureEnabled": "1",
+    "effectiveInferenceRuntimeEqual": true,
+    "effectiveInferenceRuntime": {
+      "modelSha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "binarySha256": "27d89fad6c61ac9f8719eaeee7ed26b9a179dd246bf10f0fcacd884f6ac24ba9",
+      "commit": "080bbbe85230f624f0b52127f1ae1218247989f9",
+      "vadModelSha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+      "speechSamplerBinarySha256": "0b12f515952eef67d7e4361d051e3311fdd4d13761168de80a4a2f03459215d3",
+      "speechSamplerRuntimeVerified": true
+    }
+  },
+  "databaseEvidence": {
+    "routes": [
+      {
+        "count": 53,
+        "route": "0",
+        "state": "completed"
+      },
+      {
+        "count": 1,
+        "route": "0",
+        "state": "failed"
+      },
+      {
+        "count": 7,
+        "route": "0",
+        "state": "retry_wait"
+      },
+      {
+        "count": 1,
+        "route": "0",
+        "state": "running"
+      },
+      {
+        "count": 17,
+        "route": "1",
+        "state": "completed"
+      },
+      {
+        "count": 3,
+        "route": "1",
+        "state": "retry_wait"
+      }
+    ],
+    "functions": {
+      "claim_selection_audio_job": "79a022b1d8cab42d54702bf1ff2e820b",
+      "seed_selection_audio_jobs": "0271752b75a399641c97caea3d143568",
+      "selection_audio_job_owners": "1dcf146a97f51b7ddaa868f84c7e2398",
+      "recover_selection_audio_job": "034489cc1fbdb1b2bf826d084d0cd253",
+      "defer_selection_audio_admission": "b2ee5f13fa21ad117ff7ba2929158dc9"
+    },
+    "diagnosticJobs": 4
+  },
+  "nativeHlsAudits": [
+    {
+      "externalId": "norva-selection:movie:51f4fb44658341a40c3cb0fe433004871992a5c5e1aaa9eee3fcd0e056d57073",
+      "title": "Get Lucky",
+      "audit": "six-disjoint-20-second-windows",
+      "seconds": 215.85,
+      "inferenceSucceeded": true,
+      "verified": false,
+      "evaluatedWindows": 6,
+      "dispositions": {
+        "insufficient": 5,
+        "conflict": 1
+      }
+    },
+    {
+      "externalId": "norva-selection:movie:67a61a45d6994f6c8dc7f9e68cd349a8d5fc0e68a71e77c8e1f4d3d1c6cf08a3",
+      "title": "Sawadikap Pei",
+      "audit": "six-disjoint-20-second-windows",
+      "seconds": 96.22,
+      "inferenceSucceeded": true,
+      "verified": false,
+      "evaluatedWindows": 6,
+      "dispositions": {
+        "accepted": 2,
+        "insufficient": 2,
+        "weak": 2
+      }
+    },
+    {
+      "externalId": "norva-selection:movie:688b1c21526228e24c3b1132b243a4c525dfb07b07a0dc056799073482ff2a65",
+      "title": "Godzilla Minus One",
+      "audit": "six-disjoint-20-second-windows",
+      "seconds": 73.69,
+      "inferenceSucceeded": true,
+      "verified": false,
+      "evaluatedWindows": 6,
+      "dispositions": {
+        "insufficient": 2,
+        "accepted": 3,
+        "weak": 1
+      }
+    },
+    {
+      "externalId": "norva-selection:movie:51f4fb44658341a40c3cb0fe433004871992a5c5e1aaa9eee3fcd0e056d57073",
+      "title": "Get Lucky",
+      "audit": "six-60-second-regions-with-20-second-VAD-selection",
+      "seconds": 92.18,
+      "inferenceSucceeded": true,
+      "verified": false,
+      "evaluatedWindows": 6,
+      "dispositions": {
+        "insufficient": 1,
+        "accepted": 2,
+        "conflict": 2,
+        "weak": 1
+      }
+    },
+    {
+      "externalId": "norva-selection:movie:67a61a45d6994f6c8dc7f9e68cd349a8d5fc0e68a71e77c8e1f4d3d1c6cf08a3",
+      "title": "Sawadikap Pei",
+      "audit": "six-60-second-regions-with-20-second-VAD-selection",
+      "seconds": 85.34,
+      "inferenceSucceeded": true,
+      "verified": false,
+      "evaluatedWindows": 6,
+      "dispositions": {
+        "insufficient": 1,
+        "accepted": 5
+      }
+    },
+    {
+      "externalId": "norva-selection:movie:688b1c21526228e24c3b1132b243a4c525dfb07b07a0dc056799073482ff2a65",
+      "title": "Godzilla Minus One",
+      "audit": "six-60-second-regions-with-20-second-VAD-selection",
+      "seconds": 36.62,
+      "inferenceSucceeded": true,
+      "verified": false,
+      "evaluatedWindows": 6,
+      "dispositions": {
+        "insufficient": 2,
+        "accepted": 3,
+        "weak": 1
+      }
+    }
+  ],
+  "incompleteFreshProbe": [
+    {
+      "externalId": "norva-selection:movie:2be1add5ba27f63991d84e9300b12e8816f93b448a20298fda6e46eee13211c1",
+      "title": "Cha Cha Real Smooth O Próximo Passo",
+      "state": "failed",
+      "attempts": 8,
+      "keys": [
+        "audioLanguages",
+        "audioTracks",
+        "audioDefaultLanguage",
+        "subtitles",
+        "probeSource",
+        "probeComplete",
+        "audioProbeComplete",
+        "subtitleProbeComplete",
+        "codecProfileRefreshProtocol",
+        "codecProfileRefreshed",
+        "codecProfile",
+        "providerDrained",
+        "providerDrainProtocol"
+      ],
+      "probeComplete": true,
+      "audioProbeComplete": false,
+      "format": null,
+      "duration": 6506.214,
+      "size": 1065751762,
+      "audioTracks": [],
+      "seconds": 4.04
+    }
+  ],
+  "scope": "All 533 exact file identities reconciled; queued/retry/inconclusive are not identified audio."
+}

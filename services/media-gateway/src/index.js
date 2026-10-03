@@ -8239,7 +8239,7 @@ function buildStrictLidWindowFinalizePendingObservability(summary, extractedWind
     });
 }
 
-async function handleFinalizeStrictLidWindows(req, res, capabilityToken) {
+async function handleFinalizeStrictLidWindows(req, res, capabilityToken, { checkpointOnly = false } = {}) {
     const validation = validateDetectLanguageCapability(capabilityToken, LID_LEGACY_FULL_SCOPE);
     if (!validation.claims) {
         return res.status(validation.status).json({
@@ -8283,7 +8283,7 @@ async function handleFinalizeStrictLidWindows(req, res, capabilityToken) {
     let receipts;
     let evaluated;
     try {
-        receipts = validateStrictLidWindowReceiptsInput(body.receipts, context.windowCount);
+        receipts = validateStrictLidWindowReceiptsInput(body.receipts, context.windowCount, { allowPartial: checkpointOnly });
         evaluated = receipts.map((receipt, index) => openStrictLidWindowReceipt({
             secret: GATEWAY_TOKEN,
             receipt,
@@ -8296,10 +8296,17 @@ async function handleFinalizeStrictLidWindows(req, res, capabilityToken) {
             code: 'strict_lid_checkpoint_reset_required',
             retryable: true,
             resetRequired: true,
+            checkpointReason: error.code,
             providerDrained: true,
             providerDrainProtocol: 1,
         });
     }
+    // Authenticate and check the TTL before the worker acquires another provider
+    // connection. A valid prefix is never a language certificate or consensus.
+    if (checkpointOnly) return res.status(200).json({
+        checkpointProtocol: 1, valid: true, receiptCount: evaluated.length,
+        windowCount: context.windowCount, providerDrained: true, providerDrainProtocol: 1,
+    });
     const summary = resolveStrictLidConsensus(evaluated, WHISPER_STRICT_CONSENSUS);
     const payload = strictLidWindowConsensusPayload(
         summary,
@@ -8637,6 +8644,14 @@ app.post('/detect-language/finalize', setDetectLanguageSecurityHeaders, requireG
         });
     }
     return handleFinalizeStrictLidWindows(req, res, capabilityToken);
+});
+
+app.post('/detect-language/checkpoints', setDetectLanguageSecurityHeaders, requireGatewayAuth, async (req, res) => {
+    const capabilityToken = detectLanguageCapabilityFromHeader(req);
+    if (!capabilityToken) return res.status(401).json({
+        error: 'Invalid byte-pipe token', providerDrained: true, providerDrainProtocol: 1,
+    });
+    return handleFinalizeStrictLidWindows(req, res, capabilityToken, { checkpointOnly: true });
 });
 
 // Temporary compatibility route for already-issued clients. New callers must
@@ -9592,6 +9607,7 @@ function extractAudioWav(
                 : 'Accept: */*\r\nConnection: keep-alive\r\n',
             '-user_agent', ua,
             '-probesize', '2000000', '-analyzeduration', '3000000',
+            ...(!strictLoopback ? codecProbeInputOptions(url) : []),
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
             '-i', url,
             '-map', `0:${trackIndex}`,
