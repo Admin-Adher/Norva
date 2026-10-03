@@ -546,7 +546,12 @@
             else if (CODEC_TOKENS.has(t)) codec = (t === 'h265' || t === 'hevc') || codec;
             else core.push(t);
         });
-        return { coreStr: core.join(' '), quals, codec, foreign };
+        // Regional and event prefixes describe a different broadcast schedule.
+        // They must survive quality grouping: FR, AF, FR-CAR and UEFA-FR are
+        // not interchangeable TF1 feeds, even when their core names match.
+        const scope = prefix.split(/[^a-z0-9]+/).filter(Boolean)
+            .filter(t => !QUALITY_TOKENS[t] && !CODEC_TOKENS.has(t) && t !== 'kids').join('-');
+        return { coreStr: core.join(' '), quals, codec, foreign, scope };
     }
 
     function qualityLabel(p) {
@@ -780,7 +785,7 @@
     // A "XX |" prefix only marks a foreign feed when it differs from the user's
     // own country (for a US user, "US | ESPN" is a national channel, not foreign).
     function isForeignTo(p, country) {
-        return !!p.foreign && !nativePrefixesFor(country).includes(p.foreign);
+        return Boolean(p.scope && !nativePrefixesFor(country).includes(p.scope));
     }
 
     function group(channels, country) {
@@ -849,7 +854,7 @@
             variants = (allChannels || []).filter(c => {
                 if (!sameSource(c)) return false;
                 const pp = parseName(c.name || c.title || '');
-                return !isForeignTo(pp, country) && pp.coreStr === p.coreStr;
+                return pp.scope === p.scope && pp.coreStr === p.coreStr;
             }).map(c => variantFrom(c, parseName(c.name || c.title || '')));
         }
 

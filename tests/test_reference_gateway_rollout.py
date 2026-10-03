@@ -17,6 +17,26 @@ spec.loader.exec_module(r)
 
 
 class ReferenceRolloutIdleTests(unittest.TestCase):
+    def test_only_fully_persisted_deferred_storyboards_can_survive_idle_restart(self):
+        original = {'Id': 'gateway', 'Config': {'Env': ['STORYBOARD_PRIVATE_DIR=/private']},
+                    'Mounts': [{'Destination': '/private', 'RW': True}]}
+        h = {'transcribeQueueDepth': 6, 'storyboardDurability': {'enabled': True, 'pending': 6},
+             'languageForegroundWork': {'protocol': 1, 'busy': False, 'activeOperations': 0,
+                 'admissionChecks': 0, 'pendingPriorityJobs': 0, 'deferredBackgroundJobs': 6}}
+        with patch.object(r.subprocess, 'check_output', return_value='6\n'):
+            self.assertTrue(r.deferred_storyboards_are_restartable(h, original))
+            changed = copy.deepcopy(original); changed['Config']['Env'] = ['STORYBOARD_PRIVATE_DIR=/private/durable']
+            self.assertTrue(r.deferred_storyboards_are_restartable(h, changed))
+            for field in ('activeOperations', 'admissionChecks', 'pendingPriorityJobs'):
+                changed = copy.deepcopy(h); changed['languageForegroundWork'][field] = 1
+                self.assertFalse(r.deferred_storyboards_are_restartable(changed, original))
+            changed = copy.deepcopy(h); del changed['languageForegroundWork']['activeOperations']
+            self.assertFalse(r.deferred_storyboards_are_restartable(changed, original))
+            changed = copy.deepcopy(original); changed['Mounts'] = []
+            self.assertFalse(r.deferred_storyboards_are_restartable(h, changed))
+        with patch.object(r.subprocess, 'check_output', return_value='5\n'):
+            self.assertFalse(r.deferred_storyboards_are_restartable(h, original))
+
     def setUp(self):
         self.original = {
             'Id': 'unchanged-container',
