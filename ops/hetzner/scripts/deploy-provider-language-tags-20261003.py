@@ -31,9 +31,9 @@ with batch as materialized(
  and v.raw_title ~ '^\\s*(TG|TM)(\\s*[-–—|:])'
  and not exists(select 1 from cloud_catalog_provider_language_hints h where h.variant_id=v.id)
  order by v.id limit 500 for share of v
-), parsed as materialized(select *,catalog_provider_language(metadata,external_id,raw_title) as language from batch),
+), parsed as materialized(select *,catalog_provider_language(metadata,external_id,raw_title) as resolved_language from batch),
 inserted as (insert into cloud_catalog_provider_language_hints(variant_id,user_id,title_id,source_id,item_type,language)
- select id,user_id,title_id,source_id,item_type,language from parsed where language in ('te','ta')
+ select id,user_id,title_id,source_id,item_type,resolved_language from parsed where resolved_language in ('te','ta')
  on conflict(variant_id) do nothing returning user_id)
 select jsonb_build_object('after',(select max(id::text) from batch),'scanned',(select count(*) from batch),'inserted',(select count(*) from inserted));commit;""".replace('CURSOR',cursor)
         result=json.loads(base.sql(statement))
