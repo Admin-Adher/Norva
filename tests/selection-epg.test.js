@@ -97,3 +97,25 @@ test('cloud guide authenticates the exact Selection source and rechecks visibili
   const exposeAt = handler.indexOf('return data;', fetchAt);
   assert.match(handler.slice(fetchAt, exposeAt), /await assertVisibleSourceSnapshotCurrent\(sourceId, userId, visibleSource, db\)/);
 });
+
+test('the current LiveGuideFusion page fetches and refreshes EPG without retired grid markup', async () => {
+  let calls = 0, renders = 0, refresh;
+  const API = { sources: { getAll: async () => [{ id: 12, type: 'm3u', enabled: true }] },
+    proxy: { epg: { get: async () => { calls++; return { channels: [{ id: 'norva-selection:dw-news', name: 'DW News' }],
+      programmes: [{ channelId: 'norva-selection:dw-news', title: 'DW News', start: news.startDate, stop: news.endDate }] }; } } },
+    favorites: { getAll: async () => [] } };
+  const context = vm.createContext({ window: { app: { liveGuideFusion: { render: () => renders++ } } },
+    document: { getElementById: () => null }, API, console, Map, Set, Date,
+    setInterval: fn => { refresh = fn; return 1; }, clearInterval() {} });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/js/components/EpgGuide.js'), 'utf8'), context);
+  const guide = new context.window.EpgGuide();
+  assert.equal(guide.isMounted, false);
+  await guide.loadEpg();
+  assert.equal(calls, 1);
+  assert.equal(renders, 1);
+  assert.equal(guide.programmes.length, 1);
+  assert.equal(typeof refresh, 'function');
+  await refresh();
+  assert.equal(calls, 2);
+  assert.equal(renders, 2);
+});
