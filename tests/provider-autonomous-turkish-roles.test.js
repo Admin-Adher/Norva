@@ -23,7 +23,7 @@ test('autonomous exact-shelf rules agree across frontend declarations and catalo
         assert.equal(catalogVariantMatchesAudio(value,'catalog-tr'),expected==='tr',raw);
         assert.equal(catalogVariantMatchesAudio(value,'catalog-ar'),false,raw);
         const descriptor=M.versionDescriptor(value,{providerLanguageHints:true});
-        assert.equal(descriptor.headline,expected?M.languageDisplayFull('tr'):'Language unidentified',raw);
+        assert.equal(descriptor.headline,expected?M.languageDisplayFull(expected):'Language unidentified',raw);
         assert.doesNotMatch(descriptor.headline,/verify|vérifier/i);
         assert.equal(JSON.stringify(value),saved,raw);
     }

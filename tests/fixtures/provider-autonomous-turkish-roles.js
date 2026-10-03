@@ -33,7 +33,9 @@ for (const [raw, category] of [
     ['Example [Sub]', 'Séries TURQUES SUB-AR DUB'],
     ['Example [SUBS]', 'Séries TURQUES SUB-AR'],
     ['IN - Example', 'IN - NEW RELEASE'],
-    ['PH - Example', 'PH - PHILIPPINES FILM'],
+    ['PH - Example', 'PHILIPPINES'],
     ['IR - Example', 'IRAN'],
 ]) cases.push([raw, category, null]);
+// Scoped market fallback added 3 October; it still does not assert file audio.
+cases.push(['PH - Example', 'PH - PHILIPPINES FILM', 'fil']);
 module.exports = cases;
