@@ -250,7 +250,10 @@ export function createSelectionAudioGateway({ gatewayUrl, gatewayToken, fetchImp
   async function captureRequest(args, action) {
     const { profile, capability } = await context(args, false, action);
     const payload = await request(`/detect-language/capture/${action}?index=${args.trackIndex}`, {
-      capability, signal:args.signal, budgetMs:Math.min(budget, action === 'capture' ? 215_000 : action === 'infer' ? 60_000 : 10_000) });
+      // The Gateway allows 100 s of provider-free speech sampling/inference,
+      // with a 105 s handler deadline. A shorter client deadline aborted a
+      // valid local quality fallback and needlessly spent another retry.
+      capability, signal:args.signal, budgetMs:Math.min(budget, action === 'capture' ? 215_000 : action === 'infer' ? 110_000 : 10_000) });
     if (action === 'infer') return windowReceipt(payload, args, profile);
     if (action === 'ack') {
       if (payload.acknowledged !== true) fail('SELECTION_AUDIO_CAPTURE_ACK_INVALID', { retryable:true, providerDrained:true });

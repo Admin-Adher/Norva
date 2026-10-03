@@ -262,6 +262,23 @@ test('missing, expired, overlong or unbound private captures cannot reach comput
   assert.equal(calls.length, 2); assert.ok(calls[1].url.includes('/capture/infer'));
 });
 
+test('local inference outlives the Gateway quality fallback while explicit caller cancellation remains immediate', async t => {
+  const budgets=[];
+  t.mock.method(AbortSignal,'timeout',ms=>{budgets.push(ms);return new AbortController().signal;});
+  const { gateway,file,calls }=await setup(url=>url.endsWith('/probe-audio')?json(probePayload())
+    :json({...drain,windowCheckpointProtocol:1,windowOrdinal:1,windowCount:6,receipt:receipt(1)}));
+  const profile=await gateway.probe(file);
+  const args={file,profile,jobId,subjectId,trackIndex:1,windowOrdinal:1,
+    captureRelease:'23456789-1234-4234-8234-123456789012'};
+  await gateway.computeCapture(args);
+  assert.equal(budgets.at(-1),110000);
+  const stopped=new AbortController();stopped.abort();
+  await assert.rejects(gateway.computeCapture({...args,signal:stopped.signal}),{code:'SELECTION_AUDIO_ABORTED'});
+  assert.equal(calls.length,2);
+  assert.ok(calls.at(-1).url.includes('/capture/infer?'));
+  assert.equal(calls.some(c=>c.url.includes('/capture/capture?')),false);
+});
+
 test('local capacity is distinct from provider rejection and requires a drain attestation', async () => {
   for (const attested of [false,true]) {
     const { gateway, file } = await setup(() => json({ code:'LANGUAGE_ENRICHMENT_CAPACITY_BUSY', ...(attested ? drain : {}) }, 429));
