@@ -180,3 +180,29 @@ L'opération SQL exacte reste **non établie** : le diagnostic la classe comme i
 À 22:12:52 UTC, les deux Gateways répondent HTTP 200 / `ok=true`, sans lecture active au moment du relevé. La capacité observée passe d'un à deux travaux entre 22:12 et 22:19 selon l'admission adaptative, sans modification de sa limite. Le dispatcher est sain, sans redémarrage ni marqueur STOP ; enrichissement ouvert et cron strict actif. Les dernières exécutions de cron à 22:16–22:19 réussissent, et les candidats dus contrôlés ne présentent pas le profil obsolète responsable de l'ancien blocage.
 
 Le correctif de la file est intégré par la PR 609 ; la précision de l'audit strict est intégrée par la PR 610 (`3e4bd37bcef74c2fe368ded05fe8ae886b9d5ead`). Ce suivi a uniquement lu les états et conservé des reçus agrégés. Aucun bail, compteur, seuil, quarantaine ni résultat indéterminé n'a été réinitialisé. La campagne et son suivi restent **ACTIFS**, sans clôture. Preuve : `2026-10-04-language-campaign-heartbeat-0012.json`.
+
+## Contrôle du 4 octobre à 01:12 Paris (3 octobre 23:12 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 2 653 | 38 | 30 156 |
+| Norva Selection | 49 | 5 | 178 |
+| Dino | 2 288 | 1 221 | 7 648 |
+| MAX OTT | 2 286 | 1 371 | 16 134 |
+| **Total** | **7 276** | **2 635** | **54 116** |
+
+**1 128 contrôles distincts supplémentaires en 60 min 17 s**, soit environ **1 123 contrôles techniques/h**. La projection compte **450 identifications supplémentaires** et **41 490 fiches distinctes** encore inconnues. Toutes les variantes initiales restent visibles. Les mesures par source sont successives, sans photographie atomique. Le contrôle des métadonnées demeure beaucoup plus rapide que les captures vocales complètes ; ce rythme ne prédit pas la clôture de ces dernières.
+
+### Analyses strictes et attentes
+
+**15 validations strictes réussies avec preuve complète** depuis le lancement : Strng 3, Selection 3, Dino 3, MAX OTT 6. Le gain depuis le relevé précédent est quatre. **28 analyses complètes restent indéterminées** avec leurs fenêtres et reçus complets et un profil observé correspondant : Strng 4, Selection 17, Dino 6, MAX OTT 1, soit six supplémentaires. Aucun résultat indéterminé n'a reçu une langue par défaut. Ces compteurs recoupent les contrôles et identifications ; ils ne s'y additionnent pas.
+
+À 23:14:44 UTC, **29 variantes** ont enregistré une progression fournisseur après le correctif de file de 20:28, dont **sept validations réussies**. Les deux anciens travaux retirés pour changement de profil restent exclus des sondes. Un travail Strng présente encore un bail expiré à 22:56 et attend son prochain passage : rang global quatre parmi cinq voies fournisseur éligibles à 23:15, puis rang trois parmi six à 23:17. Il est premier sur sa propre voie fournisseur, sans autre bail actif de ce fournisseur ; son profil observé correspond toujours. La liste globale ne lance que le nombre de travaux autorisé par la capacité. Cette attente n'est ni une analyse terminée ni une nouvelle tentative effectuée ; sa reprise reste à vérifier au suivi suivant. Aucun bail n'a été forcé ou effacé.
+
+### Santé et incident SQL précédent
+
+Les deux Gateways répondent HTTP 200 / `ok=true`, sans lecture active au moment du contrôle. Le dispatcher est sain sans redémarrage ni marqueur STOP. L'admission est ouverte, le cron strict actif ; les quatre passages de cron de 23:09 à 23:12 réussissent. La capacité observée autorise deux travaux. Les protections de capacité et d'occupation fournisseur continuent à reporter des appels, notamment Dino ; ces reports ne comptent pas comme des fichiers sondés.
+
+**Aucun nouvel échec HTTP du dispatcher ni diagnostic d'expiration SQL** depuis l'incident de 21:20. Les compteurs restent à un échec HTTP et un diagnostic sur chacun des deux Edge. Les lots de métadonnées non vides terminés passent de 332 à **409** depuis le correctif de pagination. La cause précise de l'incident antérieur demeure non établie ; aucun correctif spéculatif n'a été appliqué pendant ce contrôle.
+
+La campagne et sa supervision restent **ACTIVES**, sans clôture. Aucune modification du traitement de production, des seuils, des limites ou des quarantaines. Les contrôles et reçus agrégés sont conservés dans `2026-10-04-language-campaign-heartbeat-0112.json`.
