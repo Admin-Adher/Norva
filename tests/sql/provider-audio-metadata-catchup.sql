@@ -89,6 +89,22 @@ begin
  q:=public.claim_catalog_provider_audio_metadata(pg_temp.uid(1),pg_temp.uid(2));
  perform pg_temp.ok(q->>'skipped'='metadata-not-eligible','global_pause_preserved');
 end $test$;
+-- A page containing only known files must yield and persist its cursor, then
+-- claim the first unknown file on the next page without gaps or a false EOF.
+update public.admin_feature_flags set enabled=false where key='enrichment_paused';
+insert into public.cloud_catalog_provider_language_hints(variant_id,user_id,title_id,source_id,item_type,language)
+ select pg_temp.uid(n),pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(2),'movie','fr' from generate_series(102,132) n;
+update public.catalog_provider_audio_metadata_sweeps set after_variant_id=null,next_scan_at=now() where source_id=pg_temp.uid(2);
+do $test$
+declare q jsonb;
+begin
+ q:=public.claim_catalog_provider_audio_metadata(pg_temp.uid(1),pg_temp.uid(2));
+ perform pg_temp.ok(q->>'scanned'='32' and q->>'hasMore'='true' and not(q ? 'variantId'),'bounded_known_page_yields');
+ perform pg_temp.ok((select after_variant_id=pg_temp.uid(132) from public.catalog_provider_audio_metadata_sweeps where source_id=pg_temp.uid(2)),'known_page_cursor_persisted');
+ q:=public.claim_catalog_provider_audio_metadata(pg_temp.uid(1),pg_temp.uid(2));
+ perform pg_temp.ok(q->>'itemId'='133','next_page_unknown_not_skipped');
+ perform public.finish_catalog_provider_audio_metadata(pg_temp.uid(1),pg_temp.uid(2),(q->>'variantId')::uuid,(q->>'leaseToken')::uuid,'deferred','live-session');
+end $test$;
 insert into public.catalog_enrichment_source_schedule(source_id,user_id,dispatch_count,claim_token,lease_until,cycle_had_work,provider_overview_cursor)
  values(pg_temp.uid(2),pg_temp.uid(1),22,pg_temp.uid(301),now()+interval '10 minutes',true,'keep-me');
 select pg_temp.ok(public.finish_catalog_enrichment_source(pg_temp.uid(2),pg_temp.uid(301),true,30,true,
