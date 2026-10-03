@@ -108,8 +108,8 @@ test('all six screenshot families preserve browser/server audio boundaries', asy
     const { providerCatalogLanguage } = await import(pathToFileURL(path.join(root, 'supabase/functions/_shared/provider-catalog-language.mjs')));
     for (const [raw_title, categoryName, expected] of [
         ['NF - Love in Slow Motion (2026)', 'NETFLIX MOVIES', null],
-        ['PH - Young Blood (2026)', 'PH - PHILIPPINES FILM', null],
-        ['PH - Past Is Past (2026)', 'PH - EVENTS', null],
+        ['PH - Young Blood (2026)', 'PH - PHILIPPINES FILM', 'fil'],
+        ['PH - Past Is Past (2026)', 'PH - EVENTS', 'fil'],
         ['PH - The Roast of Kevin Hart (2026)', 'PH - TAGALOG SUB MOVIES', null],
         ['IR ▎ House of Paper', 'IRAN', null],
         ['IN-KD - Demon Hunters (2026)', 'IN - KOREAN HINDI DABBLING', 'hi'],
