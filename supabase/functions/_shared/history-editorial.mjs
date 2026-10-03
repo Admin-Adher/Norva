@@ -57,7 +57,12 @@ export async function refreshHistoryEditorial(rows, { db, userId, epoch, lang })
           || !['matched', 'manual', 'provider_verified'].includes(title.match_status)) return row;
       if (title.overlay_generation_id && title.overlay_generation_id === title.display_generation_id
           && title.display_generation_id !== variant.generation_id) return row;
-      const metadata = record(title.metadata), loc = record(record(metadata.i18n)[lang]);
+      const generation = record(title.overlay_catalog_metadata);
+      const useGeneration = title.overlay_generation_id && title.overlay_generation_id === variant.generation_id
+        && title.overlay_generation_id === title.display_generation_id
+        && record(generation.tmdbValidation).valid === true;
+      const metadata = useGeneration ? { ...record(title.metadata), ...generation } : record(title.metadata);
+      const loc = record(record(metadata.i18n)[lang]);
       const name = text(loc.title) ?? text(title.title);
       const poster = text(title.poster_url), backdrop = text(title.backdrop_url);
       const data = { ...record(row.data) };

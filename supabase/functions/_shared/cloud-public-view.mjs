@@ -1033,6 +1033,24 @@ export function sanitizeWatchHistory(value) {
   const source = isRecord(value) ? value : {};
   const history = pick(source, WATCH_HISTORY_FIELDS);
   history.data = sanitizeHistoryData(source.data);
+  // Read-time editorial hydration is public display information. Keep it out
+  // of sanitizeHistoryData, which also gates writes, so playback never stores
+  // a synopsis snapshot on every progress update.
+  const editorial = isRecord(source.data) ? source.data : {};
+  if (typeof editorial.description === 'string' && editorial.description.trim()
+      && editorial.description.length <= 20000 && !isSelectionSourceAttribution(editorial.description))
+    history.data.description = editorial.description;
+  const year = Number(editorial.year);
+  if (Number.isInteger(year) && year >= 1800 && year <= 2200) history.data.year = year;
+  if (editorial.rating != null && Number.isFinite(Number(editorial.rating))
+      && Number(editorial.rating) >= 0 && Number(editorial.rating) <= 10)
+    history.data.rating = Number(editorial.rating);
+  if (Array.isArray(editorial.genres)) {
+    const genres = editorial.genres.slice(0, 32).map(genre =>
+      typeof genre === 'string' ? genre : isRecord(genre) ? genre.name : null)
+      .filter(name => typeof name === 'string' && name.trim() && name.length <= 200);
+    if (genres.length) history.data.genres = genres;
+  }
   return history;
 }
 
