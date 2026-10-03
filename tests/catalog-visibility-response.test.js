@@ -55,6 +55,17 @@ async function jsonBody(response) {
   return JSON.parse(await response.text());
 }
 
+test('temporary guide deferral survives the final authenticated error boundary', async () => {
+  const api = await helper(), db = sequencedDb(7);
+  const req = new Request('https://edge.test/sources/fixture/short-epg');
+  await api.bindCatalogVisibilityEpoch(req, 'guide-owner', db);
+  const result = await api.finalizeCatalogVisibilityResponse(req,
+    new Response(JSON.stringify({ error: 'Guide temporarily deferred', details: {
+      code: 'GUIDE_DEFERRED', credentials: 'never public' } }), { status: 409 }), db);
+  assert.equal(result.status, 409);
+  assert.deepEqual(await result.json(), { error: 'Guide temporarily deferred', details: { code: 'GUIDE_DEFERRED' } });
+});
+
 test('deep cache scopes track the latest bound epoch without moving backwards', async () => {
   const api = await helper();
   const userId = 'user-cache-monotone';

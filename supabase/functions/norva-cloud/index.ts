@@ -4037,6 +4037,7 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
     }
     epgUrl = xtreamXmltvUrl({ serverUrl, username, password });
     gatewayXmltvRequest = { serverUrl, username, password, windowStartMs, windowEndMs,
+      cacheScope: await sha256Hex(`${userId}:${sourceId}:config:${configRevision}`),
       ...(hasSelection ? { channelIds, channelNames } : {}) };
     xtreamDirectEpg = true;
     xtreamDirectFallback = {
