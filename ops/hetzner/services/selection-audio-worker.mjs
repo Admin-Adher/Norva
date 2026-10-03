@@ -77,7 +77,7 @@ export function createSelectionAudioRepository({ baseUrl, serviceKey, fetchImpl 
   };
 }
 
-export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, gatewayRoute, onProgress = async () => {} }) {
+export async function processSelectionAudioJob({ repository, gateway, file, job, signal, captureEnabled = false, gatewayRoute, shouldStop = () => false, onProgress = async () => {} }) {
   if (!file || file.externalId !== job.external_id || file.urlSha256 !== job.url_sha256) {
     await repository.finish(job, null, 'SELECTION_AUDIO_FILE_CHANGED', false);
     return { state: 'failed' };
@@ -88,6 +88,12 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
   if (gatewayRoute!==undefined) progress.gatewayRoute=gatewayRoute;
   let lostLease = false;
   let localCapturePhase = false;
+  // Only call at a boundary with no provider I/O in this claim, or after the
+  // Gateway has positively attested drain. SIGTERM never aborts a live capture.
+  const stopAtDrainedBoundary = () => {
+    if (shouldStop()) throw Object.assign(new Error('SELECTION_AUDIO_SAFE_SHUTDOWN'), {
+      code:'SELECTION_AUDIO_SAFE_SHUTDOWN', providerDrained:true });
+  };
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
@@ -114,6 +120,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     finally { heartbeatPending = false; }
   }, 30_000);
   try {
+    stopAtDrainedBoundary();
     if (!profile) {
       profile = await gateway.probe(file, { signal: controller.signal });
       progress = emptyProgress();
@@ -121,6 +128,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     }
     const sourceTracks = profile.audioTracks;
     while (progress.trackPosition < sourceTracks.length) {
+      stopAtDrainedBoundary();
       const track = sourceTracks[progress.trackPosition];
       const language = track.lang || track.language;
       if (knownLanguage(language)) {
@@ -162,6 +170,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
               lostLease = true; controller.abort();
               throw Object.assign(new Error('SELECTION_AUDIO_LEASE_LOST'), { code:'SELECTION_AUDIO_LEASE_LOST' });
             }
+            stopAtDrainedBoundary();
             response = await gateway.computeCapture({ ...windowArgs, captureRelease });
           } else response = await gateway.analyzeTrackWindow(windowArgs);
           if (!response.providerDrained || !response.receipt) throw Object.assign(new Error('SELECTION_AUDIO_DRAIN_UNPROVEN'), { code: 'SELECTION_AUDIO_DRAIN_UNPROVEN', retryable: true });
@@ -174,6 +183,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
             try { await gateway.acknowledgeCapture(windowArgs); } catch { /* private TTL */ }
           }
           localCapturePhase = false;
+          stopAtDrainedBoundary();
         }
         const detection = await gateway.finalizeTrack({ ...args, receipts: progress.receipts });
         const identified = detection.verified === true && knownLanguage(detection.lang);
@@ -211,7 +221,7 @@ export async function processSelectionAudioJob({ repository, gateway, file, job,
     clearInterval(heartbeat);
     await checkpointChain;
     if (lostLease) return { state: 'lease_lost' };
-    if (['SELECTION_AUDIO_CAPACITY_BUSY', 'SELECTION_AUDIO_VIEWER_BUSY'].includes(error.code)
+    if (['SELECTION_AUDIO_CAPACITY_BUSY', 'SELECTION_AUDIO_VIEWER_BUSY', 'SELECTION_AUDIO_SAFE_SHUTDOWN'].includes(error.code)
       && error.providerDrained === true) {
       // Capacity refusal or yielding to a viewer is not a failed analysis.
       // Require the Gateway's drain attestation before returning the retry debit.
@@ -250,7 +260,8 @@ export async function runSelectionAudioWorker(env = process.env) {
   const manifest = await getSelectionAudioManifest();
   const files = new Map(manifest.map(f => [f.externalId, f]));
   const controller = new AbortController();
-  for (const event of ['SIGTERM', 'SIGINT']) process.once(event, () => controller.abort());
+  let stopRequested=false;
+  for (const event of ['SIGTERM', 'SIGINT']) process.once(event, () => { stopRequested=true; });
   const health = async (status = 'ready') => {
     if (env.SELECTION_AUDIO_HEALTH_FILE) await writeFile(env.SELECTION_AUDIO_HEALTH_FILE, JSON.stringify({ status, at: Date.now() }));
   };
@@ -258,7 +269,7 @@ export async function runSelectionAudioWorker(env = process.env) {
   const pool = createSelectionAudioTaskPool({ maximum:concurrency, onError:() => {
     console.error(JSON.stringify({ event:'selection_audio_worker', error:'SELECTION_AUDIO_OWNED_TASK_FAILED' }));
   } });
-  while (!controller.signal.aborted) {
+  while (!stopRequested && !controller.signal.aborted) {
     try {
       await health();
       if (Date.now() - seededAt > 300_000) {
@@ -279,10 +290,10 @@ export async function runSelectionAudioWorker(env = process.env) {
       // fallback. The database still caps live jobs across worker replicas.
       const captureEnabled = env.SELECTION_CAPTURE_PIPELINE_ENABLED === '1' && await repository.captureEnabled();
       const limit = concurrency > 1 && captureEnabled && await repository.parallelEnabled() ? 2 : 1;
-      await pool.fill({ limit, signal:controller.signal, claim:() => repository.claim(), process:async job => {
+      await pool.fill({ limit, signal:controller.signal, claim:() => stopRequested ? null : repository.claim(), process:async job => {
         const gatewayRoute=selectionAudioGatewayIndex(job,gateways.length);
         const result = await processSelectionAudioJob({ repository, gateway:gateways[gatewayRoute], file: files.get(job.external_id), job,
-          signal: controller.signal, captureEnabled, gatewayRoute, onProgress: health });
+          signal: controller.signal, captureEnabled, gatewayRoute, shouldStop:()=>stopRequested, onProgress: health });
         console.log(JSON.stringify({ event: 'selection_audio_job', state: result.state,
           error: result.error || null, diagnostic:selectionAudioFailureDiagnostic(result.diagnostic),
           languages: result.languages || [], hydrated: result.hydrated || 0 }));
@@ -292,7 +303,7 @@ export async function runSelectionAudioWorker(env = process.env) {
       if (pool.size()) await Promise.race([pool.progress(),delay(15_000,undefined,{signal:controller.signal})]);
       else await delay(15_000, undefined, { signal:controller.signal });
     } catch (error) {
-      if (controller.signal.aborted) break;
+      if (stopRequested || controller.signal.aborted) break;
       console.error(JSON.stringify({ event: 'selection_audio_worker', error: 'SELECTION_AUDIO_WORKER_RETRY' }));
       await health('retrying');
       await delay(30_000, undefined, { signal: controller.signal }).catch(() => {});

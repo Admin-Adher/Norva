@@ -99,6 +99,29 @@ test('failure reporting honors a lost lease and the persisted interruption retry
   }
 });
 
+test('safe service stop before I/O returns only this claim debit, including at attempt eight',async()=>{
+ const run=await harness({job:{...baseJob(),attempt_count:8}});let refunds=0;
+ run.repository.deferAdmission=async()=>{refunds++;return true;};
+ const result=await run.run({shouldStop:()=>true});assert.equal(result.state,'retry_wait');assert.equal(result.error,'SELECTION_AUDIO_SAFE_SHUTDOWN');assert.equal(refunds,1);assert.equal(run.events.includes('probe'),false);assert.equal(run.finishes.length,0);
+});
+
+test('service stop waits for captured audio drain and durable handoff before refunding',async()=>{
+ const run=await harness();let stop=false,refunded=false;
+ run.gateway.getCaptureStatus=async()=>({captured:false});
+ run.gateway.captureWindow=async args=>{assert.equal(args.signal.aborted,false);stop=true;return {captured:true,providerDrained:true};};
+ run.repository.checkpointCapture=async()=>{run.events.push('durable-drain');return '23456789-1234-4234-8234-123456789012';};
+ run.gateway.computeCapture=async()=>{throw Error('must stop before compute');};
+ run.repository.deferAdmission=async()=>{assert.equal(run.events.at(-1),'durable-drain');refunded=true;return true;};
+ const result=await run.run({captureEnabled:true,shouldStop:()=>stop});assert.equal(result.error,'SELECTION_AUDIO_SAFE_SHUTDOWN');assert.equal(refunded,true);assert.equal(run.finishes.length,0);
+});
+
+test('stop request cannot refund an unconfirmed capture drain',async()=>{
+ const run=await harness();let stop=false;
+ run.gateway.getCaptureStatus=async()=>({captured:false});run.gateway.captureWindow=async()=>{stop=true;return {captured:true,providerDrained:false};};
+ run.repository.deferAdmission=async()=>{throw Error('unconfirmed drain cannot be refunded');};run.repository.deferCapture=async()=>true;
+ const result=await run.run({captureEnabled:true,shouldStop:()=>stop});assert.notEqual(result.error,'SELECTION_AUDIO_SAFE_SHUTDOWN');
+});
+
 test('confirmed truncated capture persists its terminal reason without resetting receipts or hydrating a language', async () => {
   const { SelectionAudioGatewayError } = await gatewayModule;
   const job = { ...baseJob(), attempt_count:5, profile:profile(),
