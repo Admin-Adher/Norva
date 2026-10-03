@@ -281,7 +281,10 @@ class EpgGuide {
             sourceData.set(String(source.id), previous.get(String(source.id)));
         this._epgSourceData = sourceData;
         this._mergeSourceGuides(sourceData);
+        this._epgPendingSources ||= new Set();
         const fetchPromises = sources.map(async (source) => {
+            const id = String(source.id);
+            this._epgPendingSources.add(id);
             try {
                 const loaded = window.app?.channelList?.channels;
                 const channels = Array.isArray(loaded) ? loaded.filter(c => String(c.sourceId) === String(source.id)).slice(0, 64) : null;
@@ -296,6 +299,11 @@ class EpgGuide {
             } catch (e) {
                 console.warn(`Failed to load EPG for source ${source.name}:`, e);
                 return null;
+            } finally {
+                if (fetchVersion === this._epgFetchVersion) {
+                    this._epgPendingSources.delete(id);
+                    window.app?.liveGuideFusion?.scheduleRender?.();
+                }
             }
         });
 
@@ -359,7 +367,8 @@ class EpgGuide {
                     this._storeSourceGuide(source, data); this._markGuideRequests(source.id, wanted);
                     this._mergeSourceGuides(this._epgSourceData);
                     window.app?.channelList?.clearProgramInfoCache?.();
-                }).catch(() => {
+                }).catch(error => {
+                    console.debug('[EPG] Visible channel guide unavailable', { status: error?.status || null, code: error?.code || null });
                     this._epgRequestedAt ||= new Map();
                     for (const c of wanted) this._epgRequestedAt.set(this._guideRequestKey(c), Date.now() - 570000);
                 }).finally(() => {

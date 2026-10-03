@@ -115,3 +115,17 @@ test('fast provider becomes visible while a slow provider is still pending; fail
   fail = true; await guide.fetchEpgData();
   assert.equal(guide.getEpgChannel('c', '', 'slow')?.name, 'Channel');
 });
+
+test('channel navigation cannot start a duplicate provider guide while its initial guide is pending', async () => {
+  let release, calls = 0;
+  const guide = guideClass({ sources: { getAll: async () => [{ id: 'new', type: 'xtream', enabled: true }] },
+    proxy: { epg: { get: async () => { calls++; return new Promise(resolve => { release = resolve; }); } } },
+    favorites: { getAll: async () => [] } });
+  const pending = guide.fetchEpgData();
+  await new Promise(resolve => setImmediate(resolve));
+  guide.ensureChannels([{ sourceId: 'new', name: 'TF1' }]);
+  assert.equal(calls, 1);
+  release({ channels: [], programmes: [] });
+  await pending;
+  assert.equal(guide._epgPendingSources.size, 0);
+});

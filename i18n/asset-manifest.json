@@ -1,6 +1,6 @@
 {
   "public/css/i18n.css": "9d49bdc112",
-  "public/css/main.css": "6b7cc84832",
+  "public/css/main.css": "b0232e9bca",
   "public/js/api.js": "d85d1b8598",
   "public/js/app.js": "da1a9443ac",
   "public/js/authApi.js": "c736215973",
@@ -8,8 +8,8 @@
   "public/js/cloudApi.js": "2cd92eead3",
   "public/js/components/ChannelList.js": "c9a68594f0",
   "public/js/components/DevicesScreensModule.js": "f865c42fcb",
-  "public/js/components/EpgGuide.js": "3db8b4a726",
-  "public/js/components/LiveGuideFusion.js": "b7996be785",
+  "public/js/components/EpgGuide.js": "fddd296f87",
+  "public/js/components/LiveGuideFusion.js": "e75e64f17a",
   "public/js/components/MultiSelect.js": "dcf4b45081",
   "public/js/components/NorvaModal.js": "0a46686142",
   "public/js/components/PairTvSheet.js": "76b90a06de",

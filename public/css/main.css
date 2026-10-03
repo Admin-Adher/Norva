@@ -1131,6 +1131,29 @@ h4 {
   min-height: 0;
 }
 
+/* Web uses the channel sidebar for browsing and the centre for the selected
+   channel. Keep the programme card content-sized so the video gets the space. */
+.live-guide-fusion.live-guide-current-only {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+.live-guide-current-only .live-guide-shell {
+  height: auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.live-guide-current-only .live-guide-main {
+  grid-template-rows: auto;
+}
+
+.live-guide-current-only .live-guide-preview {
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 0;
+}
+
 .live-guide-preview {
   display: grid;
   grid-template-columns: 80px minmax(0, 1fr) auto;
