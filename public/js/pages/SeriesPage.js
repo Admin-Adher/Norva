@@ -2261,6 +2261,9 @@ class SeriesPage {
                 episode: h.data?.currentEpisode
             }),
             poster: MediaUtils.safeImageUrl(h.data?.poster),
+            description: h.data?.description || h.data?.overview || h.data?.plot || '',
+            year: h.data?.year,
+            rating: h.data?.rating,
             sourceId,
             seriesId,
             ...(this.historyTitleId(h) ? { titleId: this.historyTitleId(h) } : {}),
@@ -4479,7 +4482,7 @@ class SeriesPage {
                 episode: episodeNum
             }),
             poster: MediaUtils.safeImageUrl(this.currentSeries?.cover || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)),
-            description: this.currentSeries?.plot || this.currentSeries?.tmdb?.overview || '',
+            description: this.currentSeries?.overview || this.currentSeries?.description || this.currentSeries?.plot || this.currentSeries?.tmdb?.overview || '',
             year: this.currentSeries?.year,
             rating: this.currentSeries?.rating,
             sourceId: sourceId,

@@ -2238,6 +2238,10 @@ class MoviesPage {
                 providerAudioLanguages: h.data?.providerAudioLanguages || null,
                 providerAudioLanguageStatus: h.data?.providerAudioLanguageStatus || null,
                 stream_icon: h.data?.poster,
+                plot: h.data?.description || h.data?.overview || h.data?.plot || '',
+                year: h.data?.year,
+                rating: h.data?.rating,
+                genres: h.data?.genres,
                 container_extension: h.data?.containerExtension || 'mp4',
                 ...(historyTitleId ? { titleId: historyTitleId, title_id: historyTitleId } : {})
             };
@@ -3531,7 +3535,7 @@ class MoviesPage {
             providerAudioLanguages: movie.providerAudioLanguages || movie.provider_audio_languages || null,
             providerAudioLanguageStatus: movie.providerAudioLanguageStatus || movie.provider_audio_language_status || null,
             poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
-            description: movie.plot || movie.tmdb?.overview || '',
+            description: movie.overview || movie.description || movie.plot || movie.tmdb?.overview || '',
             year: this.getItemYear(movie),
             rating: movie.rating || movie.tmdb?.vote_average,
             sourceId: movie.sourceId,
