@@ -21,6 +21,7 @@ export const CLOUD_PUBLIC_ERROR_CODES = Object.freeze([
   "SOURCE_CATALOG_NOT_VISIBLE",
   "SOURCE_CATALOG_CHANGED",
   "SOURCE_CATALOG_BUSY",
+  "GUIDE_DEFERRED",
   "ambiguous_title_identity",
   "rating_identity_invalid",
   "rating_request_invalid",
@@ -44,6 +45,7 @@ const CLOUD_PUBLIC_ERROR_CODE_SET = new Set(CLOUD_PUBLIC_ERROR_CODES);
 const CLOUD_PUBLIC_RETRYABLE_ERROR_CODE_SET = new Set([
   "PROVIDER_DIRECT_FALLBACK_RETRYABLE",
   "SOURCE_CATALOG_CHANGED",
+  "GUIDE_DEFERRED",
 ]);
 
 export const PROFILE_PUBLIC_SELECT = PROFILE_FIELDS.join(",");

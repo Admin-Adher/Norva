@@ -5927,6 +5927,13 @@ async function requestGatewayXtreamEpg(
   });
   const payload = await response.json().catch(() => ({}));
   if (!response || !response.ok) {
+    // Local metadata admission is a temporary deferral, not the provider's
+    // anti-sharing/rate limit. Expose only a bounded public signal so clients
+    // can retry the guide without opening a direct provider path.
+    if ([409, 429].includes(response.status)
+      && ["account_busy", "background_busy", "viewer_preempted"].includes(stringOr(recordOrEmpty(payload).code, ""))) {
+      throw new HttpError(409, "Guide temporarily deferred", { code: "GUIDE_DEFERRED" });
+    }
     throw new HttpError(response.status, "Media gateway refused the EPG request", payload);
   }
   return recordOrEmpty(payload);

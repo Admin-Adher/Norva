@@ -229,6 +229,34 @@ test('a selected broadcast gets its short guide and never shows another variant 
   assert.doesNotMatch(guide.renderPreview(event), /French TF1 programme/);
 });
 
+test('a deferred guide retries the selected channel at most three times and stops after navigation', () => {
+  const { guide, tf1, arabic, context } = fixture();
+  let callback, requests = 0, active = true;
+  context.setTimeout = (fn, delay) => { assert.equal(delay, 30000); callback = fn; return 1; };
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => id === 'page-live' ? { classList: { contains: () => active } } : lookup(id);
+  guide.ensureShortEpgForChannels = channels => { assert.equal(channels[0], tf1); requests++; };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    guide.retrySelectedShortEpg(tf1);
+    guide.retrySelectedShortEpg(tf1); // One timer, even if several completions arrive.
+    callback();
+  }
+  callback = null;
+  guide.retrySelectedShortEpg(tf1);
+  assert.equal(callback, null);
+  assert.equal(requests, 3);
+  guide._shortEpgRetries.clear();
+  guide.retrySelectedShortEpg(tf1);
+  active = false;
+  callback();
+  assert.equal(requests, 3);
+  active = true;
+  guide.retrySelectedShortEpg(tf1);
+  guide.currentChannel = arabic;
+  callback();
+  assert.equal(requests, 3);
+});
+
 test('phone and TV retain their channel navigation even when the shared document contains the web sidebar', () => {
   for (const options of [{ phone: true, sidebar: true }, { phone: false, tv: true, sidebar: true }]) {
     const { guide } = fixture(options);

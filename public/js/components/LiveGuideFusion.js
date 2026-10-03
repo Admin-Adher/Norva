@@ -814,6 +814,7 @@ class LiveGuideFusion {
                     const programmes = listings.map(l => this.normalizeShortEpgListing(l)).filter(Boolean);
                     this.shortEpgCache.set(key, programmes);
                     this.shortEpgLoadedAt.set(key, Date.now());
+                    this._shortEpgRetries?.delete(key);
                     if (programmes.length) this.shortEpgSourceFailures.set(sourceKey, 0);
                 } catch (err) {
                     const deferred = err?.status === 409 || err?.status === 503;
@@ -834,6 +835,7 @@ class LiveGuideFusion {
                     // Playback preemption is temporary, not a valid empty guide.
                     // Retain prior programmes and allow a later browse to retry.
                     this.shortEpgLoadedAt.set(key, Date.now() - (deferred ? 570000 : 0));
+                    if (deferred) this.retrySelectedShortEpg(channel);
                 } finally {
                     this.shortEpgInflight.delete(key);
                     this.scheduleRender();
@@ -844,6 +846,22 @@ class LiveGuideFusion {
         } finally {
             this._shortEpgDraining = false;
         }
+    }
+
+    retrySelectedShortEpg(channel) {
+        const key = this.shortEpgKey(channel);
+        if (!key || key !== this.shortEpgKey(this.currentChannel)) return;
+        this._shortEpgRetries ||= new Map();
+        this._shortEpgRetryTimers ||= new Map();
+        const attempts = this._shortEpgRetries.get(key) || 0;
+        if (attempts >= 3 || this._shortEpgRetryTimers.has(key)) return;
+        this._shortEpgRetries.set(key, attempts + 1);
+        this._shortEpgRetryTimers.set(key, setTimeout(() => {
+            this._shortEpgRetryTimers.delete(key);
+            if (!document.getElementById('page-live')?.classList.contains('active')) return;
+            if (key !== this.shortEpgKey(this.currentChannel)) return;
+            this.ensureShortEpgForChannels([this.currentChannel]);
+        }, 30000));
     }
 
     getProgramAt(channel, date) {
