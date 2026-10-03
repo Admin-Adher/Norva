@@ -29,3 +29,38 @@ Le script en lecture seule `ops/hetzner/scripts/language-campaign-progress-20261
 La cible d'une à deux heures n'est pas validée. Le parcours actuel limite les métadonnées à une requête par seconde et par compte fournisseur, avec deux opérations réseau au maximum ; la campagne garde une place pour les captures strictes. Les médias sans déclaration demandent encore leurs extraits et leur consensus. La capacité théorique des simples requêtes n'est donc pas une promesse de délai d'identification complète.
 
 La campagne et sa supervision horaire continuent. La clôture reste conditionnée à la classification de chaque version, avec distinction entre langue identifiée, résultat inconclusif et erreur de transport.
+
+## Deuxième cause : résultat terminé remplacé par un conflit de cache
+
+Le contrôle réel a ensuite reproduit un HTTP 409 `CATALOG_VISIBILITY_MUTATION_OUTCOME_UNKNOWN` après environ 38 secondes. Il ne provenait pas de l'accusé SQL individuel : la finalisation HTTP rejetait le résultat agrégé parce que l'époque de cache du catalogue avait changé pendant le lot. Les écritures individuelles étaient pourtant déjà enregistrées. Le dispatcher traitait alors l'issue comme incertaine et attendait 21 minutes.
+
+Les deux parcours bornés (`providerMetadataOnly`, `automaticUnknowns`, films avec propriétaire et source explicites) enregistrent maintenant un reçu de traitement terminé. Ils réutilisent la finalisation existante sans rejouer les appels fournisseur. L'accès à l'enrichissement et la visibilité sont revérifiés ; la génération, la révision de tête, la configuration et la visibilité de source doivent rester identiques. Seule l'avancée monotone de l'époque de cache utilisateur est adoptée par l'utilitaire partagé existant.
+
+Le premier candidat a correctement échoué lors du contrôle d'une époque utilisateur modifiée ; ce cas a été intégré au test, qui exécute désormais la véritable fonction d'adoption de génération. **34 tests ciblés passent**, incluant changement réel de source, révocation d'accès, jeton invalide, publication concurrente et absence de second appel fournisseur. Les contrôles CI cloud et les constructions Android téléphone, TV et Windows ont réussi.
+
+Essai corrigé sur le candidat isolé, avec le vrai MAX OTT : **HTTP 200, 9 métadonnées vérifiées en 36,75 secondes, 6 identifications, 3 résultats inconclusifs, aucun échec ni report dans ce lot**. Cela valide le reçu ; un lot de 9 ne certifie pas le débit soutenu de toute la campagne.
+
+Code intégré par la PR 606, commit de fusion `99cf6f714b401172744f5f46c95de0f5988a5355`. Le déploiement des deux réplicas utilise la vérification des empreintes, un candidat isolé, une attente des travaux actifs et une restauration automatique de la configuration d'admission après cette attente.
+
+Les deux réplicas ont été publiés à **17:42:17 UTC**. Empreinte de `norva-playback/index.ts` : `1cd3a5911fa2ab159a3578230b5fe8d8ded4e400e5ca795112ab08d261496331`. Santé des deux réplicas confirmée. Le candidat isolé a ensuite été arrêté.
+
+La fenêtre naturelle sans travail actif ne se présentant pas, les nouvelles admissions d'enrichissement et le cron strict 159 ont été suspendus le temps de laisser finir les tâches en cours. L'état initial (`enrichment_paused=false`, cron strict actif) a été restauré dans le bloc `finally`, et le marqueur temporaire STOP du dispatcher retiré. Aucun bail SQL n'a été effacé et aucune analyse active n'a été annulée.
+
+Premiers lots autonomes après déploiement : MAX OTT, **21 contrôles / 10 identifications** ; Strng, **16 contrôles / 16 résultats inconclusifs**. Les réponses ne présentent plus le conflit de finalisation observé avant correction. Dino respecte toujours son report d'occupation fournisseur. Ces compteurs de lots sont distincts du rapprochement des versions uniques.
+
+## Débit prolongé et coût SQL
+
+La première fenêtre de 2,55 minutes a donné 55 nouveaux contrôles uniques, soit environ 1 293/h. Cette pointe **ne s'est pas maintenue** : deux requêtes ont ensuite échoué sur un délai SQL, et le dispatcher a conservé son délai de sécurité de 21 minutes. À 18:02:04 UTC, la fenêtre de 19,42 minutes ne comptait que 79 nouveaux contrôles, soit 244/h. L'extrapolation initiale de deux jours n'est donc pas un délai confirmé.
+
+Les statistiques cumulées de l'appel `claim_catalog_provider_audio_metadata` indiquaient 1,57 seconde en moyenne et 7,97 secondes au maximum sur 1 071 appels réussis. Le contrôle en lecture seule d'une page réelle de 256 candidats a pris 2 798 ms, contre 513 ms pour ses 32 premiers candidats. Cette mesure porte sur les vérifications d'éligibilité, pas sur le débit réseau global, et ne reproduit pas à elle seule toutes les expirations.
+
+La migration `20261003181000` réduit à 32 la page de candidats par transaction, sans changer les conditions d'éligibilité, l'avancement du curseur, les baux ni les droits. Une page entièrement connue rend la main puis le prochain appel continue après son dernier identifiant. **31 contrôles SQL réussis** dans une copie de schéma sans réseau ni données de production, dont trois contrôles de continuation entre pages ; les **34 tests JavaScript** passent également.
+
+Déploiement SQL confirmé à **18:01:46 UTC**, sans redémarrage : empreinte de la fonction `061190b4256e965731375d5d9e6083824a11afd00b259fe50565e3c5e2e8a693`. La comparaison exacte avant/après confirme que seule la taille 256 → 32 diffère. L'installation autonome n'a pas de registre de migrations Supabase CLI ; le script SQL, l'ancienne définition privée et le reçu de déploiement sont conservés. Une première tentative incluant un registre absent a été entièrement annulée par transaction avant application correcte.
+
+À 18:02 UTC : **493 versions distinctes contrôlées depuis le lancement**, et le rapprochement du filtre effectué à 18:00 UTC donne **266 versions initialement inconnues désormais identifiées**, 56 485 encore inconnues. Ces deux nombres ne sont pas interchangeables : une déclaration récupérée peut rester inconclusive, et une correction de projection peut rendre visible une langue déjà enregistrée.
+
+La cible d'une ou deux heures demeure non atteinte. Le débit durable après la réduction de page reste à mesurer ; aucun nouveau délai de fin complète n'est certifié. La campagne est active, les admissions d'enrichissement sont ouvertes et le cron d'analyse stricte est actif.
+
+Le contrôle CI a détecté un identifiant de migration déjà utilisé. Le fichier est référencé définitivement sous `20261003181000` ; le contenu SQL et la fonction déployée sont identiques à ceux testés. Le reçu initial conserve le nom utilisé lors de l’application.
+
