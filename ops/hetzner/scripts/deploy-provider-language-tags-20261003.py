@@ -41,12 +41,14 @@ select jsonb_build_object('after',(select max(id::text) from batch),'scanned',(s
         statefile.write_text(json.dumps(state))
         print(json.dumps({k:v for k,v in state.items() if k!='after'}),flush=True)
         time.sleep(.25)
-    base.sql("""begin;set local role service_role;set local statement_timeout='25s';
+    # Cache epoch mutation is intentionally private to the migration owner.
+    cache_sql="""begin;set local statement_timeout='25s';
 do $$declare owner uuid;begin
  for owner in select distinct v.user_id from cloud_title_variants v join cloud_catalog_provider_language_hints h on h.variant_id=v.id
  where h.language in ('te','ta') and v.metadata->>'categoryName'='VOD - INDIA' and v.raw_title ~ '^\\s*(TG|TM)(\\s*[-–—|:])'
  loop perform norva_bump_user_catalog_visibility_epoch(owner);delete from cloud_catalog_facet_summary where user_id=owner;end loop;
-end$$;commit;""")
+end$$;commit;"""
+    base.run(['docker','exec','-i','norva-db','psql','-X','-qAt','-U','supabase_admin','-d','postgres','-v','ON_ERROR_STOP=1'],cache_sql.encode())
     print(json.dumps({'catalogueCachesInvalidated':True}))
 
 if __name__=='__main__':
