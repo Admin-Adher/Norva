@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
 const { fetchGatewayXmltv } = require('../services/media-gateway/src/provider-xmltv');
+const { createGuideSnapshotCache, guideSnapshotKey } = require('../services/media-gateway/src/provider-guide-snapshots');
 const now = Date.now();
 const options = { serverUrl: 'https://new.example', username: 'user', password: 'secret',
     windowStartMs: now - 7200000, windowEndMs: now + 28800000, channelNames: ['FR| TF1 UHD'], channelIds: [] };
@@ -60,4 +61,51 @@ test('invalid selection, date ranges and private redirects cannot trigger unboun
         body: Readable.from([]), close: async () => { evidence.closed = true; } }; };
     await assert.rejects(fetchGatewayXmltv(options, hooks), e => e.kind === 'invalid_epg_url');
     assert.equal(evidence.opens, 1); assert.equal(evidence.released, true);
+});
+
+test('a complete provider snapshot serves a different channel during playback without opening a connection', async () => {
+    const other = xml.replaceAll('tf1.fr', 'tf1series.fr').replace('TF1 HD', 'TF1 SERIES FILMS HD')
+        .replace('Programme actuel', 'Autre programme');
+    const { evidence, hooks } = fixture(xml.replace('</tv>', other.replace('<tv>', '')));
+    hooks.snapshots = createGuideSnapshotCache();
+    const scoped = { ...options, cacheScope: 'a'.repeat(64) };
+    assert.equal((await fetchGatewayXmltv(scoped, hooks)).programmes[0].title, 'Programme actuel');
+    hooks.assertAdmission = () => { throw Object.assign(new Error('viewer active'), { status: 409 }); };
+    const guide = await fetchGatewayXmltv({ ...scoped, channelNames: ['FR| TF1 SERIES FILMS FHD'] }, hooks);
+    assert.equal(guide.programmes[0].title, 'Autre programme');
+    assert.equal(guide.programmes.length, 1);
+    assert.equal(evidence.opens, 1);
+    assert.equal(evidence.transport.providerDrained, true);
+    for (const changes of [{ cacheScope: 'b'.repeat(64) }, { password: 'replaced' }, { serverUrl: 'https://another.example' }])
+        await assert.rejects(fetchGatewayXmltv({ ...scoped, ...changes }, hooks), e => e.status === 409);
+    assert.equal(evidence.opens, 1);
+});
+
+test('retained snapshots obey programme dates, expire and stay within the byte budget', async () => {
+    let instant = now;
+    const cache = createGuideSnapshotCache({ maxBytes: 10000, freshMs: 10, retainMs: 100, now: () => instant });
+    const { evidence, hooks } = fixture(); hooks.snapshots = cache;
+    const scoped = { ...options, cacheScope: 'c'.repeat(64) };
+    await fetchGatewayXmltv(scoped, hooks);
+    instant += 20;
+    hooks.assertAdmission = () => { throw Object.assign(new Error('busy'), { status: 429 }); };
+    assert.equal((await fetchGatewayXmltv(scoped, hooks)).programmes.length, 1);
+    assert.equal((await fetchGatewayXmltv({ ...scoped, windowStartMs: now + 120000 }, hooks)).programmes.length, 0);
+    instant += 100;
+    await assert.rejects(fetchGatewayXmltv(scoped, hooks), e => e.status === 429);
+    assert.equal(evidence.opens, 1);
+    assert.equal(cache.bytes, 0);
+    cache.set('first', Buffer.alloc(6000)); cache.set('second', Buffer.alloc(6000));
+    assert.equal(cache.get('first'), null); assert.equal(cache.bytes, 6000);
+    cache.set('oversized', Buffer.alloc(11000)); assert.equal(cache.bytes, 6000);
+});
+
+test('invalid or interrupted XMLTV never becomes a cached guide', async () => {
+    const { evidence, hooks } = fixture('<tv><channel id="partial">');
+    hooks.snapshots = createGuideSnapshotCache();
+    const scoped = { ...options, cacheScope: 'd'.repeat(64) };
+    await assert.rejects(fetchGatewayXmltv(scoped, hooks));
+    assert.equal(hooks.snapshots.get(guideSnapshotKey(scoped)), null);
+    assert.equal(evidence.transport.providerDrained, true);
+    assert.equal(guideSnapshotKey(options), '');
 });
