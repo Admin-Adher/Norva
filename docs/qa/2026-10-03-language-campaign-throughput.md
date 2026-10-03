@@ -88,3 +88,11 @@ L'audit strict relève **11 validations réussies avec preuve complète** (+2) e
 
 Deux Gateways sains, dispatcher actif sans redémarrage, admission ouverte et cron strict actif. La capacité adaptative observée varie entre un et deux travaux sans changement de configuration. Aucun bail ni résultat n'a été effacé ; aucune nouvelle modification du traitement n'a été déployée pendant ce contrôle. Reçu : `2026-10-04-language-campaign-heartbeat-0012.json`.
 
+## Mesure à 23:12 UTC — 4 octobre 01:12 Paris
+
+**7 276 contrôles techniques distincts**, soit +1 128 en 60 min 17 s : environ **1 123/h**. **2 635 variantes identifiées** (+450), **54 116 variantes / 41 490 fiches inconnues**. La cohorte initiale reste intégralement visible.
+
+Les analyses strictes comptent **15 validations réussies** (+4) et **28 analyses complètes indéterminées rattachées au profil courant** (+6). Ces mesures se recoupent avec les contrôles techniques ; elles ne permettent toujours pas de prévoir la date de clôture exhaustive. L'attente d'un travail Strng au bail expiré est documentée : sa position dans la file globale passe de quatre à trois, sans profil obsolète, mais sa reprise n'est pas encore établie à 23:17.
+
+Aucun nouvel échec HTTP du dispatcher ni délai SQL dépassé dans les deux Edge depuis l'incident antérieur. Services sains, admission et cron actifs, priorité de lecture et limites fournisseur conservées. Aucune nouvelle modification de production pendant ce contrôle. Reçu : `2026-10-04-language-campaign-heartbeat-0112.json`.
+
