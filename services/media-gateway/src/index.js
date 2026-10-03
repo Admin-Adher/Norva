@@ -4978,10 +4978,12 @@ async function handleProbeAudioRequest(req, res, options = {}) {
         // that got the account banned. Match on the account key (host + username in the stream path).
         const probeKey = proxyKeyFromUrl(url);
         if (accountSlotBusyLocally(url)) {
-            return res.status(409).json({ error: 'Account busy (active playback)', code: 'account_busy' });
+            return res.status(409).json({ error: 'Account busy (active playback)', code: 'account_busy',
+                ...await providerProbeDrainAttestation(providerDrainState) });
         }
         if (probeKey && accountExtractions.get(probeKey)?.size) {
-            return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy' });
+            return res.status(429).json({ error: 'Account busy (background extraction)', code: 'background_busy',
+                ...await providerProbeDrainAttestation(providerDrainState) });
         }
         // This endpoint requires the service credential. A viewer recovery has
         // already acquired the Edge playback coordinator and exact-file lease;

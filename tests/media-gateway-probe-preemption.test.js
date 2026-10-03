@@ -142,7 +142,7 @@ function makeHarness({ globalViewerBusyChecks = null } = {}) {
   };
 }
 
-function makeProbeRouteHarness() {
+function makeProbeRouteHarness({ viewerBusy = false } = {}) {
   const children = [];
   const events = [];
   let releaseDelay = null;
@@ -179,7 +179,7 @@ function makeProbeRouteHarness() {
       return String(value || '');
     },
     accountSlotBusyLocally() {
-      return false;
+      return viewerBusy;
     },
     viewerPlaybackActiveLocally() {
       return false;
@@ -287,6 +287,22 @@ function makeProbeRouteHarness() {
 
 const providerUrl = 'https://provider.test/movie/alice/secret/42.mkv';
 const providerKey = 'provider.test/alice';
+
+test('/probe-audio admission refusals attest that this request never opened a provider connection', async () => {
+  for (const viewerBusy of [true, false]) {
+    const harness = makeProbeRouteHarness({ viewerBusy });
+    if (!viewerBusy) harness.accountExtractions.set(providerKey, new Set([{}]));
+    await harness.handleProbeAudioRequest({ body: { url: providerUrl } }, harness.response);
+    assert.equal(harness.children.length, 0);
+    assert.equal(harness.response.statusCode, viewerBusy ? 409 : 429);
+    assert.equal(harness.response.payload.code, viewerBusy ? 'account_busy' : 'background_busy');
+    assert.equal(harness.response.payload.providerDrained, true);
+    assert.equal(harness.response.payload.providerDrainProtocol, 1);
+    assert.equal(JSON.stringify(harness.response.payload).includes(providerUrl), false);
+    if (!viewerBusy) assert.equal(harness.accountExtractions.get(providerKey).size, 1,
+      'another holder must remain reserved; the attestation is specific to the refused request');
+  }
+});
 
 test('background ffprobe is registered and released after a successful exit', async () => {
   const harness = makeHarness();
