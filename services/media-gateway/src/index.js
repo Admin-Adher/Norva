@@ -3493,30 +3493,6 @@ app.post('/jobs/revoke-source-storyboards', requireGatewayAuth, async (req, res)
     });
 });
 
-app.post('/xtream/xmltv', requireGatewayAuth, async (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    try {
-        const guide = await fetchGatewayXmltv(req.body || {}, {
-            accountKey: providerAccountKeyFromCredentials,
-            userAgent: FFMPEG_USER_AGENT,
-            assertAdmission: key => {
-                if (viewerPlaybackActiveLocally() || providerMetadataPriorityFence.has(providerAffinityHashForGatewayKey(key)))
-                    throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
-                if (accountExtractions.get(key)?.size)
-                    throw backgroundProbeError(429, 'background_busy', 'Account busy (background request)');
-            },
-            register: (key, transport) => registerAccountExtraction(key, transport, true),
-            open: openXtreamProviderResponse,
-        });
-        res.json(guide);
-    } catch (error) {
-        res.status(Number.isInteger(error.status) ? error.status : 502).json({
-            error: 'IPTV provider guide unavailable',
-            code: error.code || (error.kind === 'timeout' ? 'guide_timeout' : 'guide_unavailable'),
-        });
-    }
-});
-
 app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
     try {
         const {
@@ -3555,6 +3531,30 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
             error: err.publicMessage || 'IPTV provider request failed',
             details: err.details || undefined,
             code: err.code || undefined
+        });
+    }
+});
+
+app.post('/xtream/xmltv', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+        const guide = await fetchGatewayXmltv(req.body || {}, {
+            accountKey: providerAccountKeyFromCredentials,
+            userAgent: FFMPEG_USER_AGENT,
+            assertAdmission: key => {
+                if (viewerPlaybackActiveLocally() || providerMetadataPriorityFence.has(providerAffinityHashForGatewayKey(key)))
+                    throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
+                if (accountExtractions.get(key)?.size)
+                    throw backgroundProbeError(429, 'background_busy', 'Account busy (background request)');
+            },
+            register: (key, transport) => registerAccountExtraction(key, transport, true),
+            open: openXtreamProviderResponse,
+        });
+        res.json(guide);
+    } catch (error) {
+        res.status(Number.isInteger(error.status) ? error.status : 502).json({
+            error: 'IPTV provider guide unavailable',
+            code: error.code || (error.kind === 'timeout' ? 'guide_timeout' : 'guide_unavailable'),
         });
     }
 });

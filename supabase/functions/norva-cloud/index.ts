@@ -5947,7 +5947,10 @@ async function requestGatewayXmltv(runtimeConfig: RuntimeConfig, body: JsonRecor
         || payload.channels.length > 20_000 || payload.programmes.length > EPG_MAX_PROGRAMMES)
       throw new HttpError(502, "Invalid media gateway guide");
     return payload;
-  } catch (error) { throw boundedProviderHttpError(error, "XMLTV Gateway"); }
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "XMLTV Gateway");
+  }
 }
 
 async function requestGatewaySeriesInfo(
