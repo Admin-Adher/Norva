@@ -123,14 +123,14 @@ async function metadataFixture(options={}) {
       response:{ok:!options.httpError,status:options.httpError||200},value:{info:{audio:{tags:{language:options.empty?'und':'spa'}}}}
     }},
   });
-  const start=playback.indexOf('async function runOwnedMovieLanguageMetadata(');
+  const start=playback.indexOf('async function ownedMetadataProviderBlockReason(');
   const end=playback.indexOf('async function exactFileProbeAdmissionEnabled(',start);
   vm.runInContext(stripTypeScriptTypes(playback.slice(start,end)),context);
   let result,error;try{result=await context.runOwnedMovieLanguageMetadata(db,'u','s','v','12','identity')}catch(e){error=e}
   return {result,error,events};
 }
 test('cheap provider metadata is fresh, bounded and only writes the fenced declaration RPC',async()=>{
-  const h=await metadataFixture();assert.equal(h.result.persisted,1);
+  const h=await metadataFixture();assert.equal(h.error,undefined);assert.equal(h.result.persisted,1);
   assert.equal(h.events[0].name,'catalog_owned_language_metadata_enabled_for_source');
   assert.equal(h.events[0].args.p_user,'u');assert.equal(h.events[0].args.p_source,'s');
   const fetch=h.events.find(e=>e.fetch);assert.match(fetch.fetch,/\/xtream\/metadata$/);

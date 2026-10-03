@@ -12400,6 +12400,21 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
 // One cheap metadata operation BEFORE downloading media. It has the same
 // source/account/circuit/idle guards as exact probes. The next tick may perform
 // a full probe if metadata was inconclusive; never open both in one claim.
+async function ownedMetadataProviderBlockReason(db: SupabaseClient, accountHash: string, identityKey: string): Promise<string | null> {
+  try {
+    await assertProviderCircuitClosed(accountHash, db);
+    await assertProviderProbeCircuitClosedStrict(db, identityKey);
+    return null;
+  } catch (error) {
+    // These two explicit local guards run before provider I/O. A closed
+    // admission is a deferral, not a failed file or uncertain transport.
+    const code = (error as { details?: { code?: string } })?.details?.code;
+    if (code === "PROVIDER_ACCOUNT_BUSY") return "provider_account_busy";
+    if (code === "PROVIDER_PROBE_CIRCUIT_OPEN") return "provider_probe_circuit_open";
+    throw error; // Database/unknown failures retain conservative lease handling.
+  }
+}
+
 async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string, sourceId: string,
   variantId: string, itemId: string, identityKey: string): Promise<JsonRecord | null> {
   const { data: enabled, error: flagError } = await db.rpc("catalog_owned_language_metadata_enabled_for_source", { p_user: userId, p_source: sourceId });
@@ -12425,8 +12440,8 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
   const accountHash = await providerAccountHashFromUrl(targetUrl);
   const blocked = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
   if (blocked) return { stopped: blocked, attempted: 0 };
-  await assertProviderCircuitClosed(accountHash, db);
-  await assertProviderProbeCircuitClosedStrict(db, identityKey);
+  const providerBlock = await ownedMetadataProviderBlockReason(db, accountHash, identityKey);
+  if (providerBlock) return { stopped: providerBlock, attempted: 0 };
   const owner = `owned-metadata:${crypto.randomUUID()}`;
   if (!await claimProviderFileProbeStrict(db, identityKey, owner, 180)) return { stopped: "provider-lease-busy", attempted: 0 };
   let transportStarted = false;
@@ -12437,8 +12452,8 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
     if (await loadLanguageValidationIdentity(db, userId, sourceId, true) !== identityKey) return { stopped: "source-changed", attempted: 0 };
     const race = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
     if (race) return { stopped: race, attempted: 0 };
-    await assertProviderCircuitClosed(accountHash, db);
-    await assertProviderProbeCircuitClosedStrict(db, identityKey);
+    const providerRace = await ownedMetadataProviderBlockReason(db, accountHash, identityKey);
+    if (providerRace) return { stopped: providerRace, attempted: 0 };
     transportStarted = true;
     const { response, value } = await fetchBoundedProviderJson(`${runtime.mediaGatewayUrl}/xtream/metadata`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.mediaGatewayToken}` },
@@ -12456,7 +12471,7 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
     // A complete 200 from this uncached route follows fetchProviderJson's
     // complete-body read/cleanup. Errors/timeouts do NOT release exclusion.
     transportCompleted = true;
-    if (!isRecord(payload.info) && !isRecord(payload.movie_data)) return { stopped: "provider-metadata-invalid", attempted: 1 };
+    if (!isRecord(payload.info) && !isRecord(payload.movie_data)) return { stopped: "provider-metadata-invalid", attempted: 1, transportCompleted: true };
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, snapshot);
     await requireAutomaticLanguageEnrichmentAccess(userId, db);
     const { data: count, error } = await db.rpc("record_owned_movie_language_declaration", {
