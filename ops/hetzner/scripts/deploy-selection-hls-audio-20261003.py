@@ -20,6 +20,15 @@ def main():
  stopped=False
  try:
   prior.run('docker','stop','--time','45',WORKER);stopped=True;assert prior.inspect(WORKER)['State']['ExitCode']==0,'Worker drain failed'
+  # A successful worker stop can precede the Gateway's socket-release grace.
+  # Wait for confirmed idle; do not terminate a broker or a viewer to deploy.
+  for name,port in NAMES:
+   deadline=time.monotonic()+180
+   while True:
+    try:prior.idle(port);break
+    except AssertionError:
+     if time.monotonic()>=deadline:raise
+     time.sleep(3)
   for name,port in NAMES:prior.replace_gateway(name,port,image)
  finally:
   if stopped:prior.run('docker','start',WORKER)
