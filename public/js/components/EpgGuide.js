@@ -177,8 +177,6 @@ class EpgGuide {
      * The actual sync runs on the server independently.
      */
     startBackgroundRefresh() {
-        if (!this.isMounted) return;
-
         // Clear any existing timer
         this.stopBackgroundRefresh();
 
@@ -192,11 +190,7 @@ class EpgGuide {
             try {
                 await this.fetchEpgData(false); // Fetch cached data (no force refresh)
 
-                // Update channel list program info if visible
-                if (window.app?.channelList) {
-                    window.app.channelList.clearProgramInfoCache();
-                    window.app.channelList.updateVisibleEpgInfo?.();
-                }
+                this.refreshGuideSurfaces();
             } catch (err) {
                 console.error('[EPG] Display refresh failed:', err);
             }
@@ -225,13 +219,14 @@ class EpgGuide {
      * Load EPG data (server-side caching)
      */
     async loadEpg(forceRefresh = false) {
-        if (!this.isMounted) return;
-
         try {
-            this.container.innerHTML = '<div class="loading"></div>';
+            // LiveGuideFusion uses this data service without the retired
+            // #epg-grid view. Missing legacy markup must not disable fetching.
+            if (this.container) this.container.innerHTML = '<div class="loading"></div>';
             await this.fetchEpgData(forceRefresh);
             this.lastRefreshTime = new Date();
             this.render();
+            this.refreshGuideSurfaces();
 
             // Start background refresh timer after initial load
             // This ensures EPG data stays fresh while the app is open
@@ -247,13 +242,22 @@ class EpgGuide {
         }
     }
 
+    refreshGuideSurfaces() {
+        window.app?.channelList?.clearProgramInfoCache?.();
+        window.app?.channelList?.updateVisibleEpgInfo?.();
+        window.app?.liveGuideFusion?.render?.();
+    }
+
     /**
      * Fetch EPG data from sources
      */
     async fetchEpgData(forceRefresh = false) {
         // Get ALL sources and filter for EPG-capable types
         const allSources = await API.sources.getAll();
-        const sources = allSources.filter(s => (s.type === 'epg' || s.type === 'xtream') && s.enabled);
+        // Managed M3U sources can supply a broadcaster guide (Norva Selection).
+        // The server checks the exact source identity; unsupported M3U sources
+        // return an empty guide and never trigger guessed XMLTV downloads.
+        const sources = allSources.filter(s => ['epg', 'xtream', 'm3u'].includes(s.type) && s.enabled);
 
         if (sources.length === 0) {
             throw new Error('No EPG sources or Xtream accounts configured');
