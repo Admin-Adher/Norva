@@ -25,6 +25,7 @@ function fixture(mode = 'pilot') {
         LANGUAGE_HOST_ADAPTIVE_ADMISSION_ENABLED: false,
         selectionEnrichmentPolicy: { configured: false },
         createProviderProbeDrainState: () => ({}), isHttpUrl: () => true,
+        providerProbeDrainAttestation: async () => ({ providerDrained: true, providerDrainProtocol: 1 }),
         sanitizeUserAgent: value => value,
         accountSlotBusyLocally: () => activity.viewer, accountExtractions: extractions,
         probeCodecProfile: () => { activity.probeCalls++; throw new Error('unexpected provider read'); },
@@ -76,6 +77,8 @@ for (const guard of ['viewer', 'extraction']) test(`an unrelated legacy probe st
         { claimNetwork: f.context.claimOptionalLanguageEnrichmentNetwork });
     assert.equal(status, guard === 'viewer' ? 409 : 429);
     assert.equal(response.code, guard === 'viewer' ? 'account_busy' : 'background_busy');
+    assert.equal(response.providerDrained, true);
+    assert.equal(response.providerDrainProtocol, 1);
     assert.equal(f.activity.probeCalls, 0);
     assert.equal(f.admission.snapshot().active, 0);
 });
