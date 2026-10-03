@@ -64,3 +64,11 @@ La cible d'une ou deux heures demeure non atteinte. Le débit durable après la 
 
 Le contrôle CI a détecté un identifiant de migration déjà utilisé. Le fichier est référencé définitivement sous `20261003181000` ; le contenu SQL et la fonction déployée sont identiques à ceux testés. Le reçu initial conserve le nom utilisé lors de l’application.
 
+## Mesure soutenue à 20:12 UTC
+
+Le rapprochement du manifeste donne 657 versions contrôlées à 18:11:21, 2 213 à 19:11:47 et **3 880 à 20:12:27**. Les deux fenêtres valent respectivement environ **1 545 et 1 649 contrôles uniques/h**, soit 1 597/h sur 121 min 6 s. Les expirations SQL responsables des reports de 21 minutes n'ont pas réapparu dans ces relevés : aucun échec HTTP du dispatcher depuis 18:01:46. Les journaux Edge actuels commencent à leur recréation de 19:23 ; les relevés antérieurs conservent la preuve de la période précédente.
+
+Ces deux heures établissent un débit observé de **contrôles techniques** ; elles ne permettent pas d'annoncer le même débit de reconnaissance vocale ni une échéance certaine de fin. À 20:12, 1 247 variantes de la cohorte ont une langue identifiée, 55 504 restent inconnues. À 20:32, seules huit versions ont un travail strict passé à `verified` depuis le lancement, avec progression fournisseur et preuve pour toutes les pistes attendues. Ces ensembles se recoupent et ne doivent pas être additionnés.
+
+Un blocage distinct de la file stricte a été corrigé à 20:28 : clôture des travaux devenus obsolètes par changement de profil observé, sans effacer leurs preuves ni toucher aux travaux actifs. Deux reprises de progression fournisseur sont observées après déploiement ; le débit vocal prolongé reste à mesurer. Voir `2026-10-03-language-worker-stale-profile.md` et le relevé `2026-10-03-language-campaign-heartbeat-2012.json`. La campagne continue, avec les limites de production et sans promesse de clôture en une ou deux heures.
+

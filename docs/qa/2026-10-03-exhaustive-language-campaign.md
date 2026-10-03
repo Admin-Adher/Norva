@@ -94,3 +94,27 @@ Le rapprochement de la projection donne **813 variantes initialement inconnues d
 Une autre cause de perte de débit a été identifiée : un garde-fou local « fournisseur occupé / circuit de sondes ouvert » peut être enregistré comme un échec de fichier incertain, sans qu'aucune requête soit partie. Il dépense alors une tentative et prolonge inutilement l'exclusion réseau. MAX OTT possède huit lignes de ce type en nouvelle tentative et un circuit réellement ouvert jusqu'à 19:33 UTC ; cette pause fournisseur doit être respectée. La correction et son déploiement sont documentés dans `2026-10-03-language-metadata-provider-deferrals.md`.
 
 La campagne reste **EN COURS**. La cible d'une à deux heures n'est pas atteinte. Les fichiers seulement contrôlés, les langues identifiées et les résultats d'analyse vocale ne sont pas additionnés comme s'il s'agissait de la même mesure. Preuve de cette heure : `2026-10-03-language-campaign-heartbeat-1911.json`.
+
+## Contrôle automatique à 20:12 UTC
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 1 665 | 19 | 30 175 |
+| Norva Selection | 36 | 4 | 179 |
+| Dino | 1 403 | 728 | 8 141 |
+| MAX OTT | 776 | 496 | 17 009 |
+| **Total** | **3 880** | **1 247** | **55 504** |
+
+Le total de fiches distinctes encore inconnues est **42 459**. Aucune variante de la cohorte n'a disparu. Entre 19:11:47 et 20:12:27, **1 667 versions supplémentaires** ont reçu un contrôle distinct : environ **1 649/h sur 60 min 40 s**. Sur les deux fenêtres horaires cumulées depuis 18:11:21, le gain est 3 223 en 121 min 6 s, soit environ 1 597/h. Ce débit observé de contrôles techniques ne représente ni la vitesse d'analyse vocale complète ni une garantie de délai pour les fichiers restants.
+
+La projection comporte **434 identifications supplémentaires** par rapport à 19:11. MAX OTT a repris automatiquement après expiration de son circuit de protection ; les huit nouvelles tentatives historiques de métadonnées ne sont plus présentes. Aucun compteur ni bail n'a été supprimé manuellement. Le dernier lot observé à 20:11:38 a contrôlé 25 métadonnées, dont dix identifications et quinze résultats inconclusifs.
+
+À 20:12:51, zéro erreur HTTP du dispatcher depuis 18:01:46 ; zéro diagnostic d'expiration SQL dans les Edge depuis leur recréation à 19:23. Les deux Gateways répondent HTTP 200 ; les admissions sont ouvertes, le cron strict actif et STOP absent. Le conteneur de campagne est sain, sans redémarrage.
+
+L'audit strict complémentaire recense **sept versions dont le travail est passé à `verified` depuis le lancement**, avec progression fournisseur et preuve enregistrée pour toutes les pistes attendues (Strng 1, Selection 2, Dino 1, MAX OTT 3). Ce compteur de travaux terminés est distinct des 1 247 langues identifiées via les différents mécanismes. Il ne certifie pas à lui seul qu'un fichier fournisseur n'a pas changé depuis sa vérification.
+
+L'audit a également identifié une attente anormale : un travail obsolète se présentait en tête du répartiteur mais échouait au garde-fou du profil observé. D'autres travaux dus depuis plus d'une heure attendaient derrière lui, dont un finaliseur Dino. La correction et la preuve de reprise sont consignées dans `2026-10-03-language-worker-stale-profile.md`. La campagne reste **EN COURS**.
+
+Correctif SQL publié à **20:28:46 UTC**, après 23 contrôles dédiés : deux travaux obsolètes ont été retirés naturellement de la file globale, sans sonde ni attribution de langue. À 20:34, deux variantes de la cohorte ont une nouvelle progression de capture après publication. Le total des vérifications strictes terminées depuis le lancement est passé à **huit** ; la huitième (Dino à 20:22) précède ce correctif et n'en est pas une preuve de résultat. Aucun nouveau travail terminé n'est revendiqué dans les cinq premières minutes après déploiement.
+
+Les douze contrôles CI du code ont réussi. La base de preuve isolée a été arrêtée ; le dispatcher de production et la supervision restent actifs. Aucun compteur, bail, échec inconclusif ni quarantaine n'a été réinitialisé.
