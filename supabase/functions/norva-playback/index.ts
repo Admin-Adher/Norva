@@ -17515,6 +17515,31 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     return withAuditMeta(await runLidBenchmark(db, body));
   }
 
+  // These bounded maintenance lanes persist each file behind its own source
+  // fence. Their writes can themselves advance the catalog cache epoch. Return
+  // the completed aggregate receipt without replaying those provider requests;
+  // a real source/configuration cutover must still reject the response.
+  if (auditMeta.userId && auditMeta.sourceId && body.type === "movie"
+      && body.fallthrough !== true
+      && (body.providerMetadataOnly === true || body.automaticUnknowns === true)) {
+    const userId = auditMeta.userId;
+    const sourceId = auditMeta.sourceId;
+    const sourceSnapshot = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+    const result = await runOneDimension(db, body) as JsonRecord;
+    await bindCompletedPlaybackReceipt(req, {
+      refreshEpoch: async () => {
+        await requireAutomaticLanguageEnrichmentAccess(userId, db);
+        await bindCatalogVisibilityEpochShared(req, userId, db);
+      },
+      assertSourceCurrent: async () => {
+        await assertSourceCatalogVisible(sourceId, userId, db);
+        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, sourceSnapshot);
+      },
+      cleanup: async () => {}, // Completed per-file writes are already durable.
+    });
+    return withAuditMeta(result);
+  }
+
   // One dimension per call by default. With fallthrough:true (set on the DAYTIME audio-films
   // crons), once the primary dimension runs out of candidates we DRAIN the next unfinished
   // dimension for the same provider — so a finished daytime window accelerates the night-only
