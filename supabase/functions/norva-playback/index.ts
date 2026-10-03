@@ -16659,14 +16659,14 @@ const EXHAUSTED_TTL_MS = 30 * 60 * 1000;
 // Only candidate-driven sweeps participate — targeted/on-demand modes (titleIds, orderedTitleIds,
 // catalog fill, transcribe/ocr paths) must never be short-circuited. null = not a sweep.
 function sweepDimKey(body: JsonRecord): string | null {
+  // This queue owns a generation/config-aware resting cursor. A legacy VOD
+  // dimension cache must not suppress a newly imported metadata backlog.
+  if (body.providerMetadataOnly === true) return null;
   if (Array.isArray(body.orderedTitleIds) || Array.isArray(body.titleIds) || Array.isArray(body.verifyTitleIds)) return null;
   const mode = stringOr(body.mode, "");
   const subtitleTarget = stringOr(body.target, "") === "subtitle";
   if (!subtitleTarget && !["", "vod", "probe", "whisper"].includes(mode)) return null;
   const requestedType = stringOr(body.type, "movie");
-  if (body.providerMetadataOnly === true && requestedType === "movie" && sourceId) {
-    return await runOwnedProviderMetadataCatchup(db, userId, sourceId);
-  }
   const itemType = requestedType === "series" || requestedType === "episode"
     ? requestedType
     : "movie";
@@ -18358,6 +18358,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const requestedType = stringOr(body.type, "movie");
   if (body.automaticUnknowns === true && requestedType === "movie" && sourceId) {
     return await runAutomaticVodLanguageMetadataBatch(db, userId, sourceId);
+  }
+  if (body.providerMetadataOnly === true && requestedType === "movie" && sourceId) {
+    return await runOwnedProviderMetadataCatchup(db, userId, sourceId);
   }
   const itemType = requestedType === "series" || requestedType === "episode"
     ? requestedType

@@ -55,3 +55,21 @@ test('all legacy lanes receive a turn; cheap metadata cannot starve speech or se
   assert.equal(turns.filter(x=>x.metadata).length,24);
   assert.deepEqual(turns.filter(x=>!x.metadata).map(x=>x.lane),Array.from({length:24},(_,i)=>i%12));
 });
+test('real playback entry routes metadata without a legacy exhaustion key',async()=>{
+  const fs=require('node:fs'),vm=require('node:vm'),{stripTypeScriptTypes}=require('node:module');
+  const source=fs.readFileSync(require('node:path').join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
+  const start=source.indexOf('async function runOneDimension(');
+  const end=source.indexOf('\nasync function ',start+10);
+  const keyStart=source.indexOf('function sweepDimKey(');
+  const keyEnd=source.indexOf('\nasync function exhaustedMap(',keyStart);
+  const calls=[];const context=vm.createContext({
+    stringOr:(v,f)=>typeof v==='string'?v:f,
+    sourceCatalogVisible:async()=>true,
+    runOwnedProviderMetadataCatchup:async(db,user,scope)=>{calls.push([user,scope]);return {mode:'metadata-proof'}},
+  });
+  vm.runInContext(stripTypeScriptTypes(source.slice(start,end)+'\n'+source.slice(keyStart,keyEnd)),context);
+  const body={userId:'owner',sourceId:'source',type:'movie',providerMetadataOnly:true};
+  assert.equal((await context.runOneDimension({},body)).mode,'metadata-proof');
+  assert.deepEqual(calls,[['owner','source']]);
+  assert.equal(context.sweepDimKey(body),null);
+});
