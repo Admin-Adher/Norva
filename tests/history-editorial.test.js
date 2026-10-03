@@ -20,25 +20,20 @@ async function fixture(options = {}) {
     ...(options.progressive ? { overlay_generation_id: 'other', display_generation_id: 'other' } : {}) };
   const query = { select() { return this; }, eq(k, v) { if (k === 'user_id') assert.equal(v, 'owner'); return this; },
     async in() { return { data: options.ambiguous ? [variant, variant] : [variant] }; } };
-  const db = { from(table) {
-      if (table === 'cloud_source_catalog_generation_candidate_titles') {
-        const filters = {};
-        return { select() { return this; }, eq(k, v) { filters[k] = v; return this; },
-          async in(k, ids) {
-            assert.deepEqual(filters, {user_id:'owner',source_id:'source',item_type:'movie',generation_id:'generation'});
-            assert.equal(k,'title_id'); assert.deepEqual(ids,['title']);
-            return {data: options.exactProjection ? [{user_id:options.foreignProjection?'other':'owner',
-              source_id:options.wrongProjectionSource?'other-source':'source',item_type:'movie',title_id:'title',
-              generation_id:options.wrongProjectionGeneration?'other-generation':'generation',
-              match_status:'matched',title:'Exact source title',release_year:2001,
-              catalog_metadata:{tmdbValidation:{valid:!options.untrustedProjection},i18n:{fr:{overview:'Synopsis de la source exacte'}}}}] : []};
-          } };
-      }
-      assert.equal(table, 'cloud_catalog_visible_title_variants'); return query;
-    },
+  const db = { from(table) { assert.equal(table, 'cloud_catalog_visible_title_variants'); return query; },
     async rpc(name, args) {
       assert.equal(args.p_expected_visibility_epoch, '42');
       if (options.failure) throw Error('unavailable');
+      if (name==='norva_get_history_source_editorial') {
+        assert.deepEqual(args,{p_user_id:'owner',p_source_id:'source',p_item_type:'movie',
+          p_generation_id:'generation',p_title_ids:['title'],p_expected_visibility_epoch:'42'});
+        return {data:{contract:'history-source-editorial-v1',visibilityEpoch:options.staleProjection?'43':'42',
+          items: options.exactProjection ? [{user_id:options.foreignProjection?'other':'owner',
+            source_id:options.wrongProjectionSource?'other-source':'source',item_type:'movie',title_id:'title',
+            generation_id:options.wrongProjectionGeneration?'other-generation':'generation',
+            match_status:'matched',title:'Exact source title',release_year:2001,
+            catalog_metadata:{tmdbValidation:{valid:!options.untrustedProjection},i18n:{fr:{overview:'Synopsis de la source exacte'}}}}] : []}};
+      }
       return { data: { contract: 'catalog-title-hydration-v3', visibilityEpoch: options.stale ? '43' : '42', items: [title] } };
     } };
   const result = await refreshHistoryEditorial(rows, { db, userId: 'owner', epoch: '42', lang: 'fr' });
@@ -87,7 +82,7 @@ test('history uses the exact owned source projection when another provider owns 
   assert.equal(result[0].data.year,2001);
   assert.equal(result[0].source_id,original[0].source_id);
   assert.equal(result[0].progress_seconds,original[0].progress_seconds);
-  for (const flag of ['foreignProjection','wrongProjectionSource','wrongProjectionGeneration','untrustedProjection']) {
+  for (const flag of ['foreignProjection','wrongProjectionSource','wrongProjectionGeneration','untrustedProjection','staleProjection']) {
     const invalid=await fixture({progressive:true,exactProjection:true,[flag]:true});
     assert.deepEqual(invalid.result,invalid.original);
   }
