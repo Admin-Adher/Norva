@@ -11,6 +11,7 @@ async function fixture({ epochs = [1, 2, 2], revokeAt = 0, accessRevoked = false
   const start = source.indexOf('async function runAudioBackfill(');
   const end = source.indexOf('\nasync function claimProviderFileProbeStrict(', start);
   const counts = { batches: 0, fences: 0, epochs: 0 };
+  let snapshotReads = 0;
   const db = { async rpc(name) {
     if (name === 'feature_flag') return { data: false };
     assert.equal(name, 'norva_catalog_cache_epoch_v2');
@@ -26,15 +27,21 @@ async function fixture({ epochs = [1, 2, 2], revokeAt = 0, accessRevoked = false
     sourceCatalogVisible: async () => true,
     bindCatalogVisibilityEpochShared: visibility.bindCatalogVisibilityEpoch,
     bindCompletedPlaybackReceipt: receipts.bindCompletedPlaybackReceipt,
-    readActiveCatalogGenerationSnapshot: async () => ({ generation: 'original' }),
-    assertSourceCatalogVisible: async () => {},
-    assertActiveCatalogGenerationCurrent: async (_db, sourceId, userId, snapshot) => {
-      assert.equal(sourceId, 'source'); assert.equal(userId, 'owner'); assert.equal(snapshot.generation, 'original');
-      if (++counts.fences === revokeAt) throw new Error('source changed');
+    readActiveCatalogGenerationSnapshot: async (_db, sourceId, userId) => {
+      assert.equal(sourceId, 'source'); assert.equal(userId, 'owner');
+      if (++snapshotReads > 1) counts.fences++;
+      return { generationId: 'original', headRevision: '1', configRevision: counts.fences === revokeAt && revokeAt ? '2' : '1',
+        sourceVisibilityEpoch: '1', userVisibilityEpoch: String(100 + counts.epochs) };
     },
+    CatalogGenerationSupersededError: class extends Error { constructor() { super('source changed'); } },
+    assertSourceCatalogVisible: async () => {},
     requireAutomaticLanguageEnrichmentAccess: async () => { if (accessRevoked) throw new Error('access revoked'); },
     runOneDimension: async () => { counts.batches++; if (failBatch) throw new Error('batch failed'); return { processed: 32, identified: 10 }; },
   });
+  const generations = fs.readFileSync(require('node:path').join(__dirname, '../supabase/functions/_shared/catalog-generation.ts'), 'utf8');
+  const adoptStart = generations.indexOf('export async function adoptActiveCatalogUserVisibilityEpoch(');
+  const adoptEnd = generations.indexOf('\n// Retry only', adoptStart);
+  vm.runInContext(stripTypeScriptTypes(generations.slice(adoptStart, adoptEnd).replace('export ', '')), context);
   vm.runInContext(stripTypeScriptTypes(source.slice(start, end)), context);
   const req = new Request('https://edge.test/audio-backfill', { method: 'POST', headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ userId: 'owner', sourceId: 'source', type: 'movie', [lane]: true }) });

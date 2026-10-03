@@ -17533,7 +17533,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       },
       assertSourceCurrent: async () => {
         await assertSourceCatalogVisible(sourceId, userId, db);
-        await assertActiveCatalogGenerationCurrent(db, sourceId, userId, sourceSnapshot);
+        await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, sourceSnapshot);
       },
       cleanup: async () => {}, // Completed per-file writes are already durable.
     });
