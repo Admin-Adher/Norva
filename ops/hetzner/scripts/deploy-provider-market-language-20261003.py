@@ -25,12 +25,14 @@ def backfill():
     assert_sql()
     queuefile=ROOT/'candidates.private.json';statefile=ROOT/'backfill.private.json'
     if not queuefile.exists():
-        # Read visible versions only, once. Do not enrich superseded generations.
-        rows=base.sql("""set default_transaction_read_only=on;set statement_timeout='60s';set jit=off;
+        # Snapshot visible candidates without evaluating the full parser across
+        # the fleet in one statement. Each bounded write batch parses them below.
+        # Do not enrich superseded generations.
+        rows=base.sql("""set default_transaction_read_only=on;set statement_timeout='60s';set jit=off;set enable_nestloop=off;
 select json_build_object('id',v.id,'owner',v.user_id,'source',v.source_id) from cloud_catalog_visible_title_variants v
 where FILTER and v.item_type in ('movie','series')
 and not exists(select 1 from cloud_catalog_provider_language_hints h where h.variant_id=v.id)
-and catalog_provider_language(v.metadata,v.external_id,v.raw_title) is not null order by v.id;""".replace('FILTER',FILTER))
+order by v.id;""".replace('FILTER',FILTER))
         queue=[json.loads(x) for x in rows.splitlines() if x.startswith('{')]
         queuefile.write_text(json.dumps(queue));queuefile.chmod(0o600)
     queue=json.loads(queuefile.read_text())
