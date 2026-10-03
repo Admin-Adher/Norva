@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=56264c2d2d"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>D-Pad Navigation: Focus, Rows, Cards, Back | Norva Blog</title>
+  <meta name="description" content="Understand how focus moves through TV rows and cards, why directional paths fail, and how predictable Back behaviour protects context.">
+  <link rel="canonical" href="https://norva.tv/blog/dpad-navigation-explained/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="D-Pad Navigation: Focus, Rows, Cards, Back | Norva Blog">
+  <meta property="og:description" content="Understand how focus moves through TV rows and cards, why directional paths fail, and how predictable Back behaviour protects context.">
+  <meta property="og:url" content="https://norva.tv/blog/dpad-navigation-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="D-Pad Navigation: Focus, Rows, Cards, Back | Norva Blog">
+  <meta name="twitter:description" content="Understand how focus moves through TV rows and cards, why directional paths fail, and how predictable Back behaviour protects context.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "D-Pad Navigation Explained: Focus, Rows, Cards, and Back Behavior",
+  "description": "Understand how focus moves through TV rows and cards, why directional paths fail, and how predictable Back behaviour protects context.",
+  "inLanguage": "en",
+  "datePublished": "2026-10-03T06:00:00+02:00",
+  "dateModified": "2026-10-03T06:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/dpad-navigation-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "D-Pad Navigation Explained: Focus, Rows, Cards, and Back Behavior",
+      "item": "https://norva.tv/blog/dpad-navigation-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=d4e720e971"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">D-Pad Navigation Explained: Focus, Rows, Cards, and Back Behavior</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="dpad-navigation-explained" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">Cross-Device &amp; TV Experience</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-10-03T06:00:00+02:00">3 October 2026</time>
+        <span class="dot">·</span>
+        <span>6 min read</span>
+      </div>
+      <h1>D-Pad Navigation Explained: Focus, Rows, Cards, and Back Behavior</h1>
+      <p class="lede">D-pad navigation is a graph of focusable destinations; predictable geometry and Back history make that graph understandable.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#focus-is-the-users-cursor">Focus is the user's cursor</a></li><li><a href="#rows-define-horizontal-relationships">Rows define horizontal relationships</a></li><li><a href="#vertical-movement-crosses-regions">Vertical movement crosses regions</a></li><li><a href="#cards-can-contain-more-than-one-action">Cards can contain more than one action</a></li><li><a href="#details-panels-need-a-two-way-path">Details panels need a two-way path</a></li><li><a href="#back-is-history-not-spatial-movement">Back is history, not spatial movement</a></li><li><a href="#build-a-focus-graph-worksheet">Build a focus graph worksheet</a></li><li><a href="#common-failure-patterns">Common failure patterns</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> A D-pad moves focus between controls arranged as a spatial graph. Rows create horizontal neighbours, stacked regions create vertical neighbours, Select activates the current node, and Back follows view history. Navigation feels broken when focus is invisible, a directional edge leads somewhere surprising, or returning from details loses the previous context.</blockquote>
+<p>Thinking in terms of a focus graph explains more than thinking in terms of pages. Every visible interactive element is a destination, and every directional press asks the interface for the next valid destination.</p>
+<h2 id="focus-is-the-users-cursor">Focus is the user's cursor</h2>
+<p>On TV there is no finger resting on the target. Focus must therefore communicate:</p>
+<ul><li>which element is active;</li><li>whether Select will open or toggle it;</li><li>how far the page has scrolled;</li><li>which direction remains available.</li></ul>
+<p>The indicator must remain visible over varied backgrounds. WCAG's focus-appearance guidance explains why sufficient area and contrast matter for people who need to locate the current target.</p>
+<p>If you are learning the controls as a viewer, start with <a href="/blog/navigate-media-app-tv-remote/">the practical TV remote guide</a>.</p>
+<h2 id="rows-define-horizontal-relationships">Rows define horizontal relationships</h2>
+<p>In a poster row, Left and Right usually connect adjacent cards. The route should remain predictable when:</p>
+<ul><li>the row scrolls;</li><li>cards have different widths;</li><li>one card is unavailable;</li><li>a favourite button sits inside the card;</li><li>focus reaches the first or last item.</li></ul>
+<p>An unavailable card can remain focusable if it offers useful details, but the interface must not imply that Select will start playback. If it is skipped, the next destination should still be understandable.</p>
+<h2 id="vertical-movement-crosses-regions">Vertical movement crosses regions</h2>
+<p>Up and Down may move between:</p>
+<ul><li>search and filters;</li><li>one content row and another;</li><li>a list and a details panel;</li><li>tabs and their content;</li><li>action buttons and recommendations.</li></ul>
+<p>Geometry alone can produce poor results when regions do not align. Android's TV navigation guidance notes that default directional navigation should be tested and explicit routes used when the generated order is not satisfactory.</p>
+<p>The correct destination is not always the mathematically nearest control. It is the control that preserves the user's mental context.</p>
+<h2 id="cards-can-contain-more-than-one-action">Cards can contain more than one action</h2>
+<p>A card may open details, toggle a favourite, display versions, or offer playback. Too many nested targets make directional navigation ambiguous.</p>
+<p>Use one clear primary action. Secondary controls should:</p>
+<ul><li>have a visible focus state;</li><li>be reachable without trapping focus;</li><li>return to the parent card predictably;</li><li>expose a readable label;</li><li>not change position unexpectedly after activation.</li></ul>
+<p>For readability at distance, see why sofa readability matters.</p>
+<h2 id="details-panels-need-a-two-way-path">Details panels need a two-way path</h2>
+<p>Moving from a list to a details panel creates a relationship that should work in both directions:</p>
+<ul><li>entering details identifies a sensible initial action;</li><li>moving Left or Back returns to the originating list when appropriate;</li><li>the original card or row remains locatable;</li><li>recommendations below the details do not collapse into unreachable strips.</li></ul>
+<p>When a filter panel sits left of a title detail panel, a deliberate Right route can reduce the feeling of a dead end. That route must still respect visible geometry and should be tested at each row.</p>
+<h2 id="back-is-history-not-spatial-movement">Back is history, not spatial movement</h2>
+<p>Back differs from Left. Left asks for a neighbouring focus target; Back asks to reverse the navigation history.</p>
+<p>Official Android TV guidance recommends breadcrumb-style Back behaviour and says the button should not be used as a toggle. Repeated Back presses should eventually reach the app root and then the system home.</p>
+<p>A predictable path could be:</p>
+<p>variant list → title details → originating library row → library root.</p>
+<p>Skipping directly from a variant list to an unrelated home screen discards context and surprises the viewer.</p>
+<h2 id="build-a-focus-graph-worksheet">Build a focus graph worksheet</h2>
+<p>Choose six representative nodes and record their neighbours:</p>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Node</th><th scope="col">Up</th><th scope="col">Right</th><th scope="col">Down</th><th scope="col">Left</th><th scope="col">Back</th></tr></thead>
+<tbody><tr><td>Search</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>First filter</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>First card</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>Last visible card</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>Primary detail action</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>Recommendation card</td><td></td><td></td><td></td><td></td><td></td></tr></tbody>
+</table></div>
+<p>Run each direction once and record actual behaviour. A blank, loop, invisible target, or unrelated jump identifies a specific edge to fix. This worksheet is a design and QA tool, not a claim about any current product state.</p>
+<h2 id="common-failure-patterns">Common failure patterns</h2>
+<ul><li>Focus moves behind an overlay.</li><li>A row scrolls but focus indication stays visually weak.</li><li>Left and Back perform the same destructive exit.</li><li>A secondary card action traps focus.</li><li>Recommendations are visible but not reachable.</li><li>A filter has no directional route to the results it changes.</li><li>Initial focus lands on a destructive or low-priority action.</li></ul>
+<p>The device-pairing article shows a separate way to reduce text-entry burden; it does not replace good focus navigation.</p>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="why-does-focus-get-stuck-at-the-end-of-a-row">Why does focus get stuck at the end of a row?</h3>
+<p>There may be no valid destination in the pressed direction, or the intended neighbouring region may lack an explicit relationship. Record the exact card and direction for testing.</p>
+<h3 id="should-left-always-open-the-side-menu">Should Left always open the side menu?</h3>
+<p>Not necessarily. Left normally represents spatial movement. Opening a menu should not steal the action when a legitimate left-hand neighbour exists.</p>
+<h3 id="is-back-the-same-as-left">Is Back the same as Left?</h3>
+<p>No. Left moves focus spatially, while Back reverses the view history. Treating them as identical can cause unexpected exits.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="dpad-navigation-explained">Review Norva's product preview</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://developer.android.com/training/tv/get-started/navigation" target="_blank" rel="noopener">Android Developers: TV navigation</a></li><li><a href="https://developer.android.com/training/tv/get-started/controllers" target="_blank" rel="noopener">Android Developers: Manage TV controllers</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-appearance" target="_blank" rel="noopener">W3C: Understanding Focus Appearance</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/navigate-media-app-tv-remote/">
+          <span class="tag">Cross-Device &amp; TV Experience</span>
+          <div class="card-title">How to Navigate a Media App Efficiently With a TV Remote</div>
+
+          <p>Efficient TV navigation begins with visible focus, deliberate row movement, a predictable Select action, and breadcrumb-style Back behaviour.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
