@@ -21,7 +21,7 @@ begin
  end if;
  v_epoch:=public.norva_user_catalog_visibility_epoch(p_user_id);
  if v_epoch<>p_expected_visibility_epoch then
-  raise exception 'catalog visibility changed' using errcode='40001';
+  raise exception 'catalog visibility changed' using errcode='PT409';
  end if;
  select jsonb_build_object('contract','history-source-editorial-v1','visibilityEpoch',v_epoch,
   'items',coalesce(jsonb_agg(jsonb_build_object(
@@ -52,7 +52,7 @@ begin
   raise exception 'history editorial response exceeds bound' using errcode='54000';
  end if;
  if public.norva_user_catalog_visibility_epoch(p_user_id)<>v_epoch then
-  raise exception 'catalog visibility changed' using errcode='40001';
+  raise exception 'catalog visibility changed' using errcode='PT409';
  end if;
  return v_result;
 end $f$;
