@@ -8,6 +8,8 @@ Après le premier correctif, le navigateur de production affichait **60 477**. L
 
 Après le second rattrapage, la requête de référence retourne **59 849 fiches / 75 749 versions inconnues**. Parmi ces fiches, 17 722 ont également une version identifiée. Le gain comparé aux 62 040 signalées est de 2 191 fiches, environ 3,5 %, et comprend les petites évolutions des traitements concurrents. Ce gain est concret mais n'est pas la baisse drastique demandée.
 
+Le contrôle final dans le navigateur, recherche vide et toutes les sources sélectionnées, confirme également **« Langue non identifiée · 59 849 »** ; les options kannada et goudjarati affichent respectivement 1 370 et 311 fiches.
+
 Au contrôle SQL du 3 octobre à 13:02:30 UTC, le compte contrôlé possède 245 582 fiches films et 452 539 versions visibles. **374 288 versions ont déjà un libellé de langue fournisseur interprété.** Les tags sont donc déjà exploités ; le solde inconnu ne correspond pas à un import où leur extraction serait entièrement absente.
 
 ## Audit exhaustif des listes rapides
