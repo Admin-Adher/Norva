@@ -33,21 +33,64 @@ export function intakeWindowOpen(now = Date.now()) {
   return phase >= 20_000 && phase < 50_000;
 }
 export function recoverState(state, sources, now = Date.now()) {
-  if (!state) state = { schema: 1, startedAt: new Date(now).toISOString(), sources: {} };
-  if (state.schema !== 1) throw new Error('Unsupported campaign state');
+  if (!state) state = { schema: 2, startedAt: new Date(now).toISOString(), sources: {} };
+  if (![1, 2].includes(state.schema)) throw new Error('Unsupported campaign state');
   for (const source of sources) {
     const entry = state.sources[source.id] ||= { turn: 0, calls: 0, totals: {}, nextAt: now, failures: 0 };
+    entry.lanes ||= {};
+    for (const lane of source.xtream ? ['metadata', 'exact'] : ['exact']) {
+      entry.lanes[lane] ||= { calls: 0, totals: {}, failures: 0, nextAt: entry.nextAt ?? now };
+    }
     if (entry.inFlight) {
       // The Edge request may still own a 20-minute intake lease. Never reset it.
-      entry.nextAt = Math.max(entry.nextAt, entry.inFlight + 21 * 60_000);
-      delete entry.inFlight;
+      entry.blockedUntil = Math.max(entry.blockedUntil || 0, entry.inFlight + 21 * 60_000);
+      for (const lane of Object.values(entry.lanes)) lane.nextAt = Math.max(lane.nextAt, entry.blockedUntil);
+      delete entry.inFlight; delete entry.inFlightLane;
     }
   }
+  state.schema = 2;
   return state;
 }
-export function chooseSource(state, sources, busy, now = Date.now()) {
-  return sources.filter(s => !busy.has(s.id) && state.sources[s.id].nextAt <= now)
-    .sort((a, b) => state.sources[a.id].nextAt - state.sources[b.id].nextAt || state.sources[a.id].calls - state.sources[b.id].calls)[0];
+export function chooseWork(state, sources, busy, now = Date.now()) {
+  const candidates = [];
+  for (const source of sources) {
+    const entry = state.sources[source.id];
+    if (busy.has(source.id) || (entry.blockedUntil || 0) > now) continue;
+    for (const lane of source.xtream ? ['metadata', 'exact'] : ['exact']) {
+      const pending = entry.lanes[lane];
+      if (pending.nextAt > now || (lane === 'exact' && !intakeWindowOpen(now))) continue;
+      candidates.push({ source, lane, pending });
+    }
+  }
+  // Give the narrow exact-probe window priority. Outside it metadata can use
+  // the campaign's ONE slot; strict capture still has the other network slot.
+  // FIFO by nextAt makes finite metadata batches rotate between providers.
+  return candidates.sort((a, b) => Number(b.lane === 'exact') - Number(a.lane === 'exact')
+    || a.pending.nextAt - b.pending.nextAt || a.pending.calls - b.pending.calls)[0];
+}
+export function recordResult(entry, lane, result, now = Date.now()) {
+  const pending = entry.lanes[lane];
+  for (const target of [entry, pending]) {
+    target.calls++;
+    target.failures = result.httpError ? target.failures + 1 : 0;
+    for (const key of counters) target.totals[key] = (target.totals[key] || 0) + (result[key] || 0);
+    target.lastResult = result;
+    target.lastAt = new Date(now).toISOString();
+  }
+  entry.turn++;
+  pending.nextAt = now + delayFor(result, pending.failures);
+  const code = result.skipped || result.code || '';
+  // Audio queue congestion blocks only exact work. Actual provider/viewer
+  // occupancy, permission changes and uncertain transport block BOTH lanes.
+  if (/viewer|playback|provider|circuit|footprint|account|live-session|revoked|disabled|not-visible|not-ready|paused/.test(code)
+      && code !== 'metadata-no-language') {
+    entry.blockedUntil = Math.max(entry.blockedUntil || 0, pending.nextAt);
+  }
+  if (result.httpError) {
+    entry.blockedUntil = Math.max(entry.blockedUntil || 0, pending.nextAt, (entry.inFlight ?? now) + 21 * 60_000);
+  }
+  delete entry.inFlight; delete entry.inFlightLane;
+  entry.nextAt = Math.max(entry.blockedUntil || 0, Math.min(...Object.values(entry.lanes).map(l => l.nextAt)));
 }
 function atomic(file, value) {
   fs.writeFileSync(file + '.tmp', JSON.stringify(value), { mode: 0o600 });
@@ -68,10 +111,10 @@ export async function main() {
   const save = () => atomic(file, state);
   const heartbeat = setInterval(() => atomic(path.join(root, 'health.json'), { at: Date.now(), inFlight: busy.size, stopping }), 10_000);
   save();
-  async function dispatch(source) {
+  async function dispatch(source, lane) {
     const entry = state.sources[source.id];
-    const metadata = source.xtream && entry.turn % 3 === 0;
-    entry.inFlight = Date.now(); busy.add(source.id); save();
+    const metadata = lane === 'metadata';
+    entry.inFlight = Date.now(); entry.inFlightLane = lane; busy.add(source.id); save();
     let result;
     try {
       const response = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${process.env.NORVA_BACKFILL_TOKEN}`, 'Content-Type': 'application/json' },
@@ -80,15 +123,8 @@ export async function main() {
       if (!response.ok) { await response.body?.cancel(); result = { httpError: response.status }; }
       else { const body = await response.text(); if (body.length > 65536) throw new Error('Oversize response'); result = safeResult(JSON.parse(body)); }
     } catch (_) { result = { httpError: 'transport' }; }
-    entry.calls++; entry.turn++;
-    entry.failures = result.httpError ? entry.failures + 1 : 0;
-    for (const key of counters) entry.totals[key] = (entry.totals[key] || 0) + (result[key] || 0);
-    entry.lastResult = result;
-    entry.lastAt = new Date().toISOString();
-    entry.nextAt = Date.now() + delayFor(result, entry.failures);
-    // Unknown HTTP outcome: respect the longest intake lease, even after a restart.
-    if (result.httpError) entry.nextAt = Math.max(entry.nextAt, entry.inFlight + 21 * 60_000);
-    delete entry.inFlight; busy.delete(source.id); save();
+    recordResult(entry, lane, result);
+    busy.delete(source.id); save();
     console.log(JSON.stringify({ at: entry.lastAt, source: source.label, lane: metadata ? 'provider-metadata' : 'exact-profile', ...result }));
   }
   try {
@@ -98,9 +134,9 @@ export async function main() {
       if (fs.existsSync(path.join(root, 'STOP'))) { await new Promise(r => setTimeout(r, 2000)); continue; }
       // Leave a second global slot available to the minute-based strict audio
       // worker. Filling both slots with intake can starve its queued jobs.
-      if (busy.size < 1 && intakeWindowOpen()) {
-        const source = chooseSource(state, config.sources, busy);
-        if (source) { dispatch(source).catch(() => { stopping = true; process.exitCode = 1; }); continue; }
+      if (busy.size < 1) {
+        const work = chooseWork(state, config.sources, busy);
+        if (work) { dispatch(work.source, work.lane).catch(() => { stopping = true; process.exitCode = 1; }); continue; }
       }
       await new Promise(r => setTimeout(r, 1000));
     }
