@@ -4024,6 +4024,7 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
   }
   let epgUrl = "";
   let xtreamDirectEpg = false;
+  let gatewayXmltvRequest: JsonRecord | null = null;
   let xtreamDirectFallback: DirectFallbackLeaseContext | null = null;
   if (sourceType === "xtream") {
     const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
@@ -4035,6 +4036,8 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
       throw new HttpError(400, "Xtream EPG requires server URL, username and password");
     }
     epgUrl = xtreamXmltvUrl({ serverUrl, username, password });
+    gatewayXmltvRequest = { serverUrl, username, password, windowStartMs, windowEndMs,
+      ...(hasSelection ? { channelIds, channelNames } : {}) };
     xtreamDirectEpg = true;
     xtreamDirectFallback = {
       db,
@@ -4079,8 +4082,7 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
       return result.value;
     } catch (error) { throw boundedProviderHttpError(error, "XMLTV"); }
   };
-  const xml = xtreamDirectEpg
-    ? await withExistingXtreamDirectFallback(
+  const directXmltv = () => withExistingXtreamDirectFallback(
       xtreamDirectFallback!,
       "cloud-xmltv-epg",
       45_000,
@@ -4089,8 +4091,20 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
         await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
         return payload;
       },
-    )
-    : await fetchEpgXml();
+    );
+  let xml;
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (xtreamDirectEpg && runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    // The primary route owns the provider metadata cancellation ledger and uses
+    // playback's pinned egress. A credential transition may legitimately block
+    // the direct fallback without making the primary provider guide disappear.
+    xml = await requestGatewayXmltv(runtimeConfig, gatewayXmltvRequest!).catch(async error => {
+      // Compatibility for a Gateway still rolling out this endpoint. Busy,
+      // preempted or rate-limited metadata must never open a second direct path.
+      if (error instanceof HttpError && (error.status === 404 || error.status === 405)) return await directXmltv();
+      throw error;
+    });
+  } else xml = xtreamDirectEpg ? await directXmltv() : await fetchEpgXml();
   const data = {
     ...xml,
     sourceId,
@@ -5916,6 +5930,27 @@ async function requestGatewayXtreamEpg(
     throw new HttpError(response.status, "Media gateway refused the EPG request", payload);
   }
   return recordOrEmpty(payload);
+}
+
+async function requestGatewayXmltv(runtimeConfig: RuntimeConfig, body: JsonRecord) {
+  try {
+    const { response, value: payload } = await fetchBoundedProviderJson(`${runtimeConfig.mediaGatewayUrl}/xtream/xmltv`, {
+      method: "POST", timeoutMs: 50_000, maxBytes: 8 * 1024 * 1024, redirect: "error",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new HttpError(response.status, "Media gateway guide unavailable");
+    }
+    if (!isRecord(payload) || !Array.isArray(payload.channels) || !Array.isArray(payload.programmes)
+        || payload.channels.length > 20_000 || payload.programmes.length > EPG_MAX_PROGRAMMES)
+      throw new HttpError(502, "Invalid media gateway guide");
+    return payload;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw boundedProviderHttpError(error, "XMLTV Gateway");
+  }
 }
 
 async function requestGatewaySeriesInfo(

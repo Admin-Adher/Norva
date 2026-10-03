@@ -1833,6 +1833,9 @@ class ChannelList {
         this._setTvResultNav(false);
         this.updateSelectedResult(false);
         this.attachSearchResultListeners();
+        // Fetch the bounded visible result set while the viewer is browsing,
+        // before a channel click claims the provider's playback connection.
+        window.app?.epgGuide?.ensureChannels?.(this.renderedChannels.slice(0, 64));
     }
 
     showZeroState() {

@@ -22,6 +22,7 @@ const { createWeakValidatorAttestationSpool } = require('./weakValidatorAttestat
 const { acquireAuthoritativeVodSpool, createAuthoritativePlaybackSpool, verifySpoolAttestation } = require('./authoritative-vod-spool');
 const { parseHttpForwardAccounts, useProviderHttpForward } = require('./provider-http-forward-policy');
 const { createProviderMetadataTransport, finishProviderMetadataTransport, createProviderMetadataPriorityFence, isUndrainedProviderMetadata } = require('./provider-metadata-transport');
+const { fetchGatewayXmltv } = require('./provider-xmltv');
 const { allowsNativeMp4Capability } = require('./native-mp4-access-policy');
 const { createNativeMp4Sessions, pipeNativeMp4 } = require('./native-mp4-sessions');
 const { finiteTsProfileEligible, finiteTsDemuxArgs, finiteTsHttpArgs, FINITE_TS_PROBE_BYTES,
@@ -3530,6 +3531,30 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
             error: err.publicMessage || 'IPTV provider request failed',
             details: err.details || undefined,
             code: err.code || undefined
+        });
+    }
+});
+
+app.post('/xtream/xmltv', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+        const guide = await fetchGatewayXmltv(req.body || {}, {
+            accountKey: providerAccountKeyFromCredentials,
+            userAgent: FFMPEG_USER_AGENT,
+            assertAdmission: key => {
+                if (viewerPlaybackActiveLocally() || providerMetadataPriorityFence.has(providerAffinityHashForGatewayKey(key)))
+                    throw backgroundProbeError(409, 'account_busy', 'Account busy (active playback)');
+                if (accountExtractions.get(key)?.size)
+                    throw backgroundProbeError(429, 'background_busy', 'Account busy (background request)');
+            },
+            register: (key, transport) => registerAccountExtraction(key, transport, true),
+            open: openXtreamProviderResponse,
+        });
+        res.json(guide);
+    } catch (error) {
+        res.status(Number.isInteger(error.status) ? error.status : 502).json({
+            error: 'IPTV provider guide unavailable',
+            code: error.code || (error.kind === 'timeout' ? 'guide_timeout' : 'guide_unavailable'),
         });
     }
 });
