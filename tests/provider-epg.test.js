@@ -11,6 +11,27 @@ const xml = `<?xml version="1.0"?><tv><channel id="unknown.fr"><display-name>FR 
 <programme start="20261003114500 +0200" stop="20261003130000 +0200" channel="unknown.fr"><title>Le journal</title></programme>
 <programme start="20261001120000 +0200" stop="20261001130000 +0200" channel="unknown.fr"><title>Old</title></programme></tv>`;
 
+test('Gateway packaged XMLTV parser stays identical to the Edge canonical parser', () => {
+  for (const name of ['provider-epg.mjs', 'bounded-provider-response.mjs'])
+    assert.equal(fs.readFileSync(`services/media-gateway/src/provider-epg-shared/${name}`, 'utf8'),
+      fs.readFileSync(`supabase/functions/_shared/${name}`, 'utf8'), `Run node scripts/sync-provider-epg.js for ${name}`);
+});
+
+test('all declared quality variants resolve the same programme without mixing TF1 Series Films or providers', () => {
+  const guide = guideClass({});
+  guide._mergeSourceGuides(new Map([['max', { source: { type: 'xtream' }, data: {
+    channels: [{ id: 'tf1.fr', name: 'TF1', aliases: ['FR| TF1 FHD', 'FR| TF1 HD'] },
+      { id: 'tf1series.fr', name: 'TF1 SERIES FILMS' }],
+    programmes: [{ channelId: 'tf1.fr', title: 'Tfou', start: '2026-10-03T03:50:00Z', stop: '2026-10-03T09:45:00Z' }],
+  } }]]));
+  for (const quality of ['UHD', 'FHD', 'HD', 'HEVC', 'SD']) {
+    const channel = guide.getEpgChannel('', `FR| TF1 ${quality}`, 'max');
+    assert.equal(guide.getChannelProgrammes(channel.id)[0].title, 'Tfou');
+  }
+  assert.notEqual(guide.getEpgChannel('', 'FR| TF1 SERIES FILMS', 'max')?.id, 'max::tf1.fr');
+  assert.equal(guide.getEpgChannel('', 'FR| TF1 HD', 'dino'), null);
+});
+
 test('unknown XMLTV provider retains all channel aliases, deduplicates broadcasts and respects timezone/window', async () => {
   const { parseProviderXmltv } = await mod();
   const guide = parseProviderXmltv(xml, windowOptions);
@@ -81,8 +102,8 @@ test('a public guide redirect cannot make Norva fetch a private endpoint', async
   assert.equal(requests, 1);
 });
 
-function guideClass(API) {
-  const context = vm.createContext({ window: {}, API, console, Map, Set, Date });
+function guideClass(API, channels) {
+  const context = vm.createContext({ window: { app: { channelList: { channels } } }, API, console, Map, Set, Date });
   vm.runInContext(fs.readFileSync('public/js/components/EpgGuide.js', 'utf8'), context);
   return Object.create(context.window.EpgGuide.prototype);
 }
@@ -120,7 +141,7 @@ test('channel navigation cannot start a duplicate provider guide while its initi
   let release, calls = 0;
   const guide = guideClass({ sources: { getAll: async () => [{ id: 'new', type: 'xtream', enabled: true }] },
     proxy: { epg: { get: async () => { calls++; return new Promise(resolve => { release = resolve; }); } } },
-    favorites: { getAll: async () => [] } });
+    favorites: { getAll: async () => [] } }, [{ sourceId: 'new', name: 'TF1' }]);
   const pending = guide.fetchEpgData();
   await new Promise(resolve => setImmediate(resolve));
   guide.ensureChannels([{ sourceId: 'new', name: 'TF1' }]);
@@ -128,4 +149,22 @@ test('channel navigation cannot start a duplicate provider guide while its initi
   release({ channels: [], programmes: [] });
   await pending;
   assert.equal(guide._epgPendingSources.size, 0);
+});
+
+test('a new visible variant requested during the initial guide is fetched after it completes', async () => {
+  let release, calls = 0;
+  const guide = guideClass({ sources: { getAll: async () => [{ id: 'new', type: 'xtream', enabled: true }] },
+    proxy: { epg: { get: async (_, options) => {
+      calls++;
+      if (calls === 1) return new Promise(resolve => { release = resolve; });
+      return { channels: [{ id: 'tf1.fr', name: options.channelNames[0] }], programmes: [] };
+    } } }, favorites: { getAll: async () => [] } }, [{ sourceId: 'new', name: 'Other' }]);
+  const pending = guide.fetchEpgData();
+  await new Promise(resolve => setImmediate(resolve));
+  guide.ensureChannels([{ sourceId: 'new', name: 'TF1 HD' }]);
+  assert.equal(calls, 1);
+  release({ channels: [], programmes: [] }); await pending;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 2);
+  assert.equal(guide.getEpgChannel('', 'TF1 UHD', 'new')?.id, 'new::tf1.fr');
 });

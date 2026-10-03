@@ -302,6 +302,9 @@ class EpgGuide {
             } finally {
                 if (fetchVersion === this._epgFetchVersion) {
                     this._epgPendingSources.delete(id);
+                    const wanted = this._epgDeferredChannels?.get(id);
+                    this._epgDeferredChannels?.delete(id);
+                    if (wanted) this.ensureChannels(wanted);
                     window.app?.liveGuideFusion?.scheduleRender?.();
                 }
             }
@@ -355,7 +358,14 @@ class EpgGuide {
         for (const c of channels.slice(0, 64)) {
             if (now - (this._epgRequestedAt?.get(this._guideRequestKey(c)) || 0) < 600000) continue;
             const source = this._epgSources.find(s => String(s.id) === String(c.sourceId));
-            if (!source || this._epgPendingSources.has(String(source.id))) continue;
+            if (!source) continue;
+            if (this._epgPendingSources.has(String(source.id))) {
+                this._epgDeferredChannels ||= new Map();
+                const id = String(source.id), wanted = this._epgDeferredChannels.get(id) || [];
+                if (!wanted.some(previous => this._guideRequestKey(previous) === this._guideRequestKey(c))) wanted.push(c);
+                this._epgDeferredChannels.set(id, wanted.slice(-64));
+                continue;
+            }
             const group = groups.get(source) || []; group.push(c); groups.set(source, group);
         }
         for (const [source, wanted] of groups) {
@@ -373,6 +383,9 @@ class EpgGuide {
                     for (const c of wanted) this._epgRequestedAt.set(this._guideRequestKey(c), Date.now() - 570000);
                 }).finally(() => {
                     this._epgPendingSources.delete(id);
+                    const deferred = this._epgDeferredChannels?.get(id);
+                    this._epgDeferredChannels?.delete(id);
+                    if (deferred) this.ensureChannels(deferred);
                     window.app?.liveGuideFusion?.scheduleRender?.();
                 });
         }

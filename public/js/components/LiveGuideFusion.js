@@ -785,7 +785,9 @@ class LiveGuideFusion {
                     this.shortEpgLoadedAt.set(key, Date.now());
                     if (programmes.length) this.shortEpgSourceFailures.set(sourceKey, 0);
                 } catch (err) {
-                    const failures = (this.shortEpgSourceFailures.get(sourceKey) || 0) + 1;
+                    const deferred = err?.status === 409 || err?.status === 503;
+                    const failures = deferred ? (this.shortEpgSourceFailures.get(sourceKey) || 0)
+                        : (this.shortEpgSourceFailures.get(sourceKey) || 0) + 1;
                     this.shortEpgSourceFailures.set(sourceKey, failures);
                     if (err?.status === 429 || failures >= 3) {
                         // Rate-limited: cool the source down and drop its remaining
@@ -794,8 +796,9 @@ class LiveGuideFusion {
                         this._shortEpgQueue = this._shortEpgQueue.filter(c => String(c.sourceId || '') !== sourceKey);
                     }
                     if (err?.status !== 429) console.debug('[LiveGuide] Short EPG unavailable for', channel.name, err);
-                    this.shortEpgCache.set(key, []);
-                    this.shortEpgLoadedAt.set(key, Date.now());
+                    // Playback preemption is temporary, not a valid empty guide.
+                    // Retain prior programmes and allow a later browse to retry.
+                    this.shortEpgLoadedAt.set(key, Date.now() - (deferred ? 570000 : 0));
                 } finally {
                     this.shortEpgInflight.delete(key);
                     this.scheduleRender();
