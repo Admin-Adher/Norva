@@ -205,7 +205,7 @@ test('twelve-lane cycle doubles every exact-file series stage without raising pr
       .map((enabled, lane) => enabled ? lane : null).filter((lane) => lane !== null),
     [6, 10],
   );
-  assert.match(dispatcher, /dispatch_count\) \|\| 0\) % 12/);
+  assert.match(dispatcher, /providerMetadataFleetTurn\(Number\(claim\.dispatch_count\)\)/);
   assert.match(
     dispatcher,
     /const speechLane = lane === 1 \|\| lane === 4 \|\| lane === 8/,
@@ -248,7 +248,7 @@ test('two speech lanes lend bounded capacity only to a durable exact-audio repai
   assert.match(dispatcher, /repairCohort = true/);
   assert.match(dispatcher, /repairCohort,/);
   assert.ok(
-    dispatcher.indexOf('speechVerification = false') < dispatcher.indexOf('timeout = setTimeout('),
+    dispatcher.indexOf('speechVerification = false') < dispatcher.indexOf('timeout = setTimeout(', dispatcher.indexOf('speechVerification = false')),
     'a borrowed probe lane must receive the ordinary probe timeout',
   );
   assert.ok(
