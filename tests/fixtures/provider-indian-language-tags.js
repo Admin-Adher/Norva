@@ -28,7 +28,7 @@ module.exports = [
     ['IN| Example', '  [IN]  KANADA  ', 'kn'],
     ['IN| Example', '[IN] KANADA SUB', null],
     ['IN| Example [SUB]', '[IN] KANADA', null],
-    ['IN| Example [MULTI-AUDIO]', '[IN] GUJARTI', null],
+    ['IN| Example [MULTI-AUDIO]', '[IN] GUJARTI', 'gu'],
     ['EN| Example', '[IN] KANADA', null],
     ['IN| Example [English]', '[IN] GUJARTI', null],
     ['IN| Example', 'KANADA', null],

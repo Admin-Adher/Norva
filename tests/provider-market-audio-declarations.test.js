@@ -60,11 +60,11 @@ test('PH Tagalog SUB is a subtitle declaration, not Filipino audio or a global P
  const known=M.versionDescriptor(observed,{providerLanguageHints:true});
  assert.equal(known.headline,'Anglais');assert.match(known.meta,/ST ES/);assert.doesNotMatch(known.meta,/fournisseur/);
 });
-test('new screenshots retain only independently supported audio declarations',()=>{
+test('matching market shelves supply a fallback while subtitles stay separate',()=>{
  for(const [raw,category,expected] of [
   ['NF - Love in Slow Motion (2026)','NETFLIX MOVIES',null],
-  ['PH - Young Blood (2026)','PH - PHILIPPINES FILM',null],
-  ['PH - Past Is Past (2026)','PH - EVENTS',null],
+  ['PH - Young Blood (2026)','PH - PHILIPPINES FILM','fil'],
+  ['PH - Past Is Past (2026)','PH - EVENTS','fil'],
   ['PH - The Roast of Kevin Hart (2026)','PH - TAGALOG SUB MOVIES',null],
   ['IR ▎ House of Paper','IRAN',null],
   ['IN-KD - Demon Hunters (2026)','IN - KOREAN HINDI DABBLING','hi'],

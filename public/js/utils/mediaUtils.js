@@ -2015,6 +2015,25 @@ const MediaUtils = (() => {
         return value.replace(/^\s*EX-YU(?=\s*[|:]|\s*$)/i, 'EXYU');
     }
 
+    // Catalogue-language conventions require both a delimited supplier code and
+    // its matching shelf. These are fallbacks, never observed file languages.
+    // Do not add continent/India or overloaded MA/KD aliases to this table.
+    const VERSION_PROVIDER_SCOPED_MARKET_TAGS = {
+        BR: { language: 'PORTUGUESE', category: '^(?:\\[BR\\]|BR\\s*[-|:])' },
+        HU: { language: 'HUNGARIAN', category: '^(?:VOD - HUNGARIA \\[HU\\]|\\[HU\\]|HU\\s*[-|:])' },
+        IS: { language: 'ICELANDIC', category: '^(?:VOD - (?:ICELAND|KRAKKABÍÓ) \\[IS\\]|ÍSLANDS |VIAPLAY ÍSLANDS |\\[IS\\]|IS\\s*[-|:])' },
+        QC: { language: 'FRENCH', category: '^(?:\\[QC\\]|QC\\s*[-|:])' },
+        IR: { language: 'PERSIAN', category: '^(?:\\[IR\\]|IR\\s*[-|:]|VOD - IRAN \\[IR\\])' },
+        IL: { language: 'HEBREW', category: '^(?:\\[IL\\]|IL\\s*[-|:])' },
+        MY: { language: 'MALAY', category: '^(?:\\[MY\\]|MY\\s*[-|:])' },
+        PH: { language: 'TAGALOG', category: '^(?:\\[PH\\]|PH\\s*[-|:])' },
+        CH: { language: 'CHINESE', category: '^(?:\\[CH\\] CHINA|CN - CHINA FILM)' },
+        CN: { language: 'CHINESE', category: '^(?:\\[CH\\] CHINA|CN - CHINA FILM)' },
+        SW: { language: 'SWEDISH', category: '^(?:\\[SW\\]|SW\\s*[-|:])' },
+        PB: { language: 'PUNJABI', category: '^VOD - INDIA$' },
+        SC: { language: 'NORDIC', category: '^(?:NORDIC |\\[SC\\] NORDIC)' }
+    };
+
     function versionProviderLanguageHint(item = {}) {
         let category = normalizeProviderAuditedCategory(String(item.category_name || item.categoryName || item.metadata?.categoryName || item.metadata?.category_name || '').replace(BAR_SEPARATORS, ' | ').slice(0, 1000)
             // A complete category label can delimit a leading tag with a space.
@@ -2032,6 +2051,11 @@ const MediaUtils = (() => {
         // weaken generic subtitle/conflict guards: only the complete category
         // and its matching bare prefix may assign the destination of a dub.
         const categoryKey = category.trim().replace(/\s+/g, ' ');
+        const marketPrefix = raw.match(/^\s*((?:4K-)?)((?:BR|HU|IS|QC|IR|IL|MY|PH|CH|CN|SW|PB|SC))(?=\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:])/);
+        const marketRule = marketPrefix && VERSION_PROVIDER_SCOPED_MARKET_TAGS[marketPrefix[2]];
+        if (marketRule && new RegExp(marketRule.category, 'iu').test(categoryKey)) {
+            raw = raw.replace(marketPrefix[0], `${marketPrefix[1]}${marketRule.language}`);
+        }
         // Misspelled language names on complete Indian supplier shelves.
         // Keep IN country-only elsewhere and preserve all independent prefix,
         // subtitle and MULTI guards. These remain unverified declarations.
@@ -2112,6 +2136,16 @@ const MediaUtils = (() => {
         // French MULTI shelves; it does not assert a second language or count.
         const declaredFrenchMulti = /^FR:\s*(?:FILMS\s*-\s*[^|:]+|Documentaires)\s*$/i.test(categoryKey)
             || categoryKey === 'FRANÇAIS';
+        // An explicitly named Indian language remains useful when MULTI-AUDIO
+        // declares additional, unnamed tracks. Never infer the other tracks.
+        const indianQualifier = raw.match(/^\s*INI?\s*[|:]\s*([A-Z]+)\s*[|:]/)?.[1];
+        const indianName = value => value.replace(/^\[IN\] /, '').replace(/^KANADA$/, 'KANNADA')
+            .replace(/^GUJARTI$/, 'GUJARATI').replace(/^TELUG$/, 'TELUGU');
+        const declaredIndianMulti = /^\[IN\] (?:HINDI|TAMIL|TELUGU|MALAYALAM|KANADA|GUJARTI)$/.test(categoryKey)
+            && /^\s*INI?(?=\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:])/.test(raw)
+            && /\[MULTI[ -]AUDIO\]\s*(?:(?:19|20)\d{2})?\s*$/i.test(raw)
+            && !/[\[\]()]/.test(raw.replace(/\[MULTI[ -]AUDIO\]/i, '').replace(/\((?:19|20)\d{2}\)/g, ''))
+            && (!indianQualifier || indianName(indianQualifier) === indianName(categoryKey));
         const providerPrefixMatch = raw.match(/^\s*([A-Z0-9]+(?:[._/+-][A-Z0-9]+){0,4})(?:\s*[-–—]\s+|\s+[-–—]\s*|\s*[|:]\s*)/)
             // Some suppliers separate a composite tag from its title with two
             // spaces. A plain title word followed by spaces is never a prefix.
@@ -2183,7 +2217,7 @@ const MediaUtils = (() => {
         const trailing = inspect(suffix, true);
         // An explicit subtitle marker must not be bypassed by the other field.
         const audioBlocked = leading.subOnly || categorized.subOnly || trailing.subOnly
-            || (!declaredFrenchMulti && (leading.multi || categorized.multi || trailing.multi))
+            || (!declaredFrenchMulti && !declaredIndianMulti && (leading.multi || categorized.multi || trailing.multi))
             || /\b(?:vost\w*|subtitles?|subbed)\b/i.test(raw)
             // Standalone supplier markers only: المترجم can be the actual
             // movie title (The Translator), not a subtitle declaration.
