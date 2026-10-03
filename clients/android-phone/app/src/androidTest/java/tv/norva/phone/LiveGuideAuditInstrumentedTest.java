@@ -118,6 +118,13 @@ public class LiveGuideAuditInstrumentedTest {
             System.out.println("LIVE_GUIDE_AUDIT "+measurement);
             System.out.println("LIVE_SOURCE_WATCH_REQUEST "+sourcePlay);
             assertEquals("Watch must follow the selected source", "\"2\"", sourcePlay);
+            org.json.JSONObject epgProof = new org.json.JSONObject(js(i, ref.get(), "liveAudit.verifyProviderEpg()"));
+            assertEquals("Programme 1", epgProof.getString("first"));
+            assertEquals("Programme 2", epgProof.getString("second"));
+            assertTrue("Unrelated source cannot reuse the guide", epgProof.isNull("unrelated"));
+            assertEquals("Programme visible in production guide markup", "true", js(i,ref.get(),
+                "document.querySelector('#live-guide-fusion').textContent.includes('Programme 1')"));
+            screenshot(i, ref.get(), "live-guide-provider-epg");
         } finally {i.runOnMainSync(()->{ref.get().destroy();a.finish();});}
     }
 }

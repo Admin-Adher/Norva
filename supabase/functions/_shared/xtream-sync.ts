@@ -1595,6 +1595,7 @@ function xtreamRows(
       metadata: compactRecord({
         categoryId,
         categoryName,
+          tvgId: itemType === "live" ? stringOrNull(item.epg_channel_id ?? item.tvg_id ?? item.tvgId) : null,
         rating: item.rating,
         added: item.added,
         overview: providerOverview,

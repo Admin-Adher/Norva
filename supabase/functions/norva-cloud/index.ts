@@ -12,6 +12,7 @@ import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch
 import { preparedSelectionCatalog, selectionPreparedRevision } from "../_shared/selection-prepared-catalog.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
 import { fetchSelectionEpg, SELECTION_EPG_TTL_MS } from "../_shared/selection-epg.mjs";
+import { fetchProviderXmltv, parseProviderXmltv, declaredM3uEpgUrl } from "../_shared/provider-epg.mjs";
 import { isM3uSeriesId, isM3uEpisodeId, loadM3uSeriesInfo, resolveOwnedM3uEpisode } from "../_shared/m3u-series-info.mjs";
 import { buildM3uCatalogRows, m3uCatalogCounts } from "../_shared/m3u-media-classification.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch, withActiveCatalogEpochRetry } from "../_shared/catalog-generation.ts";
@@ -220,7 +221,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 const EPG_CACHE_TTL_MS = 10 * 60 * 1000;
 const EPG_WINDOW_BUCKET_MS = 30 * 60 * 1000;
-const EPG_MAX_XML_BYTES = 80_000_000;
 const EPG_MAX_PROGRAMMES = 80_000;
 const epgCache = new Map<string, { expiresAt: number; data: unknown }>();
 
@@ -527,8 +527,8 @@ async function route(
     if (req.method === "GET" && id === "sources" && action && segments[3] === "short-epg") {
       return { body: await getXtreamShortEpg(url, action, device.user_id, db) };
     }
-    if (req.method === "GET" && id === "sources" && action && segments[3] === "epg") {
-      return { body: await getSourceEpg(url, action, device.user_id, db) };
+    if ((req.method === "GET" || req.method === "POST") && id === "sources" && action && segments[3] === "epg") {
+      return { body: await getSourceEpg(url, action, device.user_id, db, req.method === "POST" ? await readJson(req) : {}) };
     }
     if (req.method === "POST" && id === "sources" && action && segments[3] === "test") {
       await assertVisibleSource(action, device.user_id, db);
@@ -814,8 +814,8 @@ async function route(
     if (req.method === "GET" && id && action === "short-epg") {
       return { body: await getXtreamShortEpg(url, id, user.id, db) };
     }
-    if (req.method === "GET" && id && action === "epg") {
-      return { body: await getSourceEpg(url, id, user.id, db) };
+    if ((req.method === "GET" || req.method === "POST") && id && action === "epg") {
+      return { body: await getSourceEpg(url, id, user.id, db, req.method === "POST" ? await readJson(req) : {}) };
     }
     if (req.method === "POST" && id && action === "sync") {
       await requireCloudAccess(user.id, db, "source_sync");
@@ -2176,7 +2176,8 @@ function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
 
   if (sourceType === "m3u") {
     const playlistUrl = stringOr(body.playlistUrl ?? body.playlist_url ?? body.url, "");
-    return playlistUrl ? { playlistUrl } : {};
+    const epgUrl = stringOr(body.epgUrl ?? body.epg_url, "");
+    return playlistUrl ? compactRecord({ playlistUrl, epgUrl: epgUrl || undefined }) : {};
   }
 
   if (sourceType === "epg") {
@@ -2281,6 +2282,9 @@ async function validateCloudSource(
     if (!hasExtendedM3uHeader(preview.text)) {
       throw new HttpError(400, "This URL does not look like a valid M3U playlist");
     }
+    // The guide URL may include provider credentials: retain it only in the
+    // encrypted configuration, never in the public source hint/validation.
+    if (!config.epgUrl) config.epgUrl = declaredM3uEpgUrl(preview.text, playlistUrl) || undefined;
     const previewItems = countExtendedM3uEntries(preview.text);
     return {
       playlistUrl,
@@ -3964,13 +3968,21 @@ function epgPayloadHasCurrentOrFuture(payload: JsonRecord) {
   });
 }
 
-async function getSourceEpg(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
+async function getSourceEpg(url: URL, sourceId: string, userId: string, db: SupabaseClient, selection: JsonRecord = {}) {
   // Check before consulting the in-memory EPG cache: a source hidden after the
   // cache was filled must stop returning listings immediately.
   const visibleSource = await visibleSourceSnapshot(sourceId, userId, db);
   const beforeHours = boundedInt(url.searchParams.get("beforeHours") ?? url.searchParams.get("windowBeforeHours"), 2, 0, 24);
   const afterHours = boundedInt(url.searchParams.get("afterHours") ?? url.searchParams.get("windowAfterHours"), 8, 1, 48);
   const refresh = url.searchParams.get("refresh") === "1";
+  const hasSelection = Array.isArray(selection.channelIds) || Array.isArray(selection.channelNames);
+  const boundedKeys = (value: unknown) => Array.isArray(value)
+    ? [...new Set(value.filter((v) => typeof v === "string" && v.length <= 256).map((v) => v.trim()).filter(Boolean))].slice(0, 64).sort() : [];
+  const channelIds = boundedKeys(selection.channelIds), channelNames = boundedKeys(selection.channelNames);
+  if (hasSelection && !channelIds.length && !channelNames.length) {
+    await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+    return { sourceId, channels: [], programmes: [], cloud: true };
+  }
   const now = Date.now();
   const windowStartMs = now - beforeHours * 60 * 60 * 1000;
   const windowEndMs = now + afterHours * 60 * 60 * 1000;
@@ -3980,7 +3992,7 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
   // in the key prevents the new login from inheriting XMLTV cached under the
   // previous provider configuration.
   const configRevision = sourceSnapshotConfigRevision(visibleSource);
-  const cacheKey = `${userId}:${sourceId}:config:${configRevision}:${bucketStart}:${bucketEnd}`;
+  const cacheKey = `${userId}:${sourceId}:config:${configRevision}:${bucketStart}:${bucketEnd}:${hasSelection ? JSON.stringify([channelIds, channelNames]) : "all"}`;
   const cached = epgCache.get(cacheKey);
   if (!refresh && cached && cached.expiresAt > now) {
     await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
@@ -4038,17 +4050,35 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
   } else if (sourceType === "epg") {
     epgUrl = stringOr(sourceConfig.epgUrl, "");
     assertHttpUrl(epgUrl);
+  } else if (sourceType === "m3u") {
+    epgUrl = stringOr(sourceConfig.epgUrl ?? sourceConfig.epg_url, "");
+    if (!epgUrl) {
+      const playlistUrl = stringOr(sourceConfig.playlistUrl, "");
+      assertHttpUrl(playlistUrl);
+      const preview = await fetchTextPrefix(playlistUrl, 12000, 64 * 1024);
+      epgUrl = declaredM3uEpgUrl(preview.text, playlistUrl);
+    }
+    if (!epgUrl) {
+      await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+      return { channels: [], programmes: [], guideStatus: "not_provided", sourceId, cloud: true };
+    }
+    assertHttpUrl(epgUrl);
   } else {
     await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
     return { channels: [], programmes: [], sourceId, generatedAt: new Date().toISOString(), cloud: true };
   }
 
-  const fetchEpgXml = () => fetchText(
-    epgUrl,
-    45_000,
-    EPG_MAX_XML_BYTES,
-    providerHeaders("VLC/3.0.20 LibVLC/3.0.20"),
-  );
+  const fetchEpgXml = async () => {
+    try {
+      const result = await fetchProviderXmltv(epgUrl, {
+        timeoutMs: 45_000, windowStartMs, windowEndMs, maxProgrammes: EPG_MAX_PROGRAMMES,
+        ...(hasSelection ? { channelIds, channelNames } : {}),
+        headers: providerHeaders("VLC/3.0.20 LibVLC/3.0.20"),
+      });
+      if (!result.response.ok) throw new HttpError(result.response.status, "IPTV provider guide unavailable");
+      return result.value;
+    } catch (error) { throw boundedProviderHttpError(error, "XMLTV"); }
+  };
   const xml = xtreamDirectEpg
     ? await withExistingXtreamDirectFallback(
       xtreamDirectFallback!,
@@ -4062,7 +4092,7 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
     )
     : await fetchEpgXml();
   const data = {
-    ...parseXmltvWindow(xml, { windowStartMs, windowEndMs, maxProgrammes: EPG_MAX_PROGRAMMES }),
+    ...xml,
     sourceId,
     generatedAt: new Date().toISOString(),
     windowStart: new Date(windowStartMs).toISOString(),
@@ -4070,123 +4100,15 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
     cloud: true,
   };
   await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+  // Limit retained guides across owners, while preserving owner/revision keys.
+  if (epgCache.size >= 8) epgCache.delete(epgCache.keys().next().value!);
   epgCache.set(cacheKey, { expiresAt: Date.now() + EPG_CACHE_TTL_MS, data });
   return data;
 }
 
 function parseXmltvWindow(xml: string, options: { windowStartMs: number; windowEndMs: number; maxProgrammes: number }) {
-  const channels: JsonRecord[] = [];
-  const channelIds = new Set<string>();
-  const channelPattern = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/gi;
-  let channelMatch: RegExpExecArray | null;
-
-  while ((channelMatch = channelPattern.exec(xml)) !== null) {
-    const id = xmlAttr(channelMatch[1], "id");
-    if (!id || channelIds.has(id)) continue;
-    const body = channelMatch[2] ?? "";
-    const iconTag = body.match(/<icon\b([^>]*)\/?>/i);
-    channels.push({
-      id,
-      name: xmlChildText(body, "display-name") || id,
-      icon: iconTag ? xmlAttr(iconTag[1], "src") : null,
-      url: xmlChildText(body, "url") || null,
-    });
-    channelIds.add(id);
-  }
-
-  const programmes: JsonRecord[] = [];
-  const programmePattern = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/gi;
-  let programmeMatch: RegExpExecArray | null;
-
-  while ((programmeMatch = programmePattern.exec(xml)) !== null) {
-    const attrs = programmeMatch[1] ?? "";
-    const channelId = xmlAttr(attrs, "channel");
-    const startMs = parseXmltvDateMs(xmlAttr(attrs, "start"));
-    const stopMs = parseXmltvDateMs(xmlAttr(attrs, "stop"));
-    if (!channelId || !Number.isFinite(startMs) || !Number.isFinite(stopMs) || stopMs <= startMs) continue;
-    if (stopMs <= options.windowStartMs || startMs >= options.windowEndMs) continue;
-
-    const body = programmeMatch[2] ?? "";
-    programmes.push({
-      channelId,
-      start: new Date(startMs).toISOString(),
-      stop: new Date(stopMs).toISOString(),
-      title: xmlChildText(body, "title") || "Programme",
-      subtitle: xmlChildText(body, "sub-title") || null,
-      description: xmlChildText(body, "desc") || "",
-      category: xmlChildrenText(body, "category"),
-      icon: xmlIcon(body),
-    });
-
-    if (programmes.length >= options.maxProgrammes) break;
-  }
-
-  if (!channels.length && programmes.length) {
-    for (const channelId of new Set(programmes.map((program) => String(program.channelId)))) {
-      channels.push({ id: channelId, name: channelId, icon: null, url: null });
-    }
-  }
-
-  return { channels, programmes };
+  return parseProviderXmltv(xml, options);
 }
-
-function xmlIcon(body: string) {
-  const iconTag = body.match(/<icon\b([^>]*)\/?>/i);
-  return iconTag ? xmlAttr(iconTag[1], "src") : null;
-}
-
-function xmlAttr(attrs: string, name: string) {
-  const pattern = new RegExp(`${escapeRegExp(name)}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
-  const match = attrs.match(pattern);
-  return decodeXmlText(match?.[1] ?? match?.[2] ?? "");
-}
-
-function xmlChildText(body: string, tagName: string) {
-  const pattern = new RegExp(`<${escapeRegExp(tagName)}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escapeRegExp(tagName)}>`, "i");
-  const match = body.match(pattern);
-  return decodeXmlText(match?.[1] ?? "");
-}
-
-function xmlChildrenText(body: string, tagName: string) {
-  const pattern = new RegExp(`<${escapeRegExp(tagName)}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escapeRegExp(tagName)}>`, "gi");
-  const values: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(body)) !== null) {
-    const value = decodeXmlText(match[1] ?? "");
-    if (value) values.push(value);
-  }
-  return values;
-}
-
-function parseXmltvDateMs(value: string) {
-  if (!value) return NaN;
-  const match = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?$/);
-  if (!match) return Date.parse(value);
-  const [, year, month, day, hour, minute, second, tz] = match;
-  const offset = tz ? `${tz.slice(0, 3)}:${tz.slice(3)}` : "Z";
-  return Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`);
-}
-
-function decodeXmlText(value: string) {
-  if (!value) return "";
-  const stripped = value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]+>/g, "")
-    .trim();
-  return stripped
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
   const sourceId = stringOr(body.sourceId ?? body.source_id, "");

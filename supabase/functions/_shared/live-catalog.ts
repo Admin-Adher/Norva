@@ -394,6 +394,7 @@ function makeLogicalChannel(bucket: LiveBucket, includeVariants: boolean): JsonR
     playbackHint: defaultVariant.playbackHint,
     metadata: {
       logical: true,
+        tvgId: defaultVariant.metadata.tvgId || defaultVariant.metadata.tvg_id || null,
       sourceCategoryId: defaultVariant.category_id,
       sourceCategoryName: defaultVariant.category_name,
       section: bucket.section,

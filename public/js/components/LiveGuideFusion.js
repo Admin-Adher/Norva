@@ -684,7 +684,7 @@ class LiveGuideFusion {
     getEpgChannel(channel) {
         const guide = this.app.epgGuide;
         if (!guide?.channels?.length) return null;
-        if (guide.getEpgChannel) return guide.getEpgChannel(channel.tvgId || channel.epg_id, channel.name);
+        if (guide.getEpgChannel) return guide.getEpgChannel(channel.tvgId || channel.epg_id, channel.name, channel.sourceId);
         if (channel.tvgId && guide.channelMap?.has(channel.tvgId)) {
             return guide.channelMap.get(channel.tvgId);
         }
@@ -1510,6 +1510,7 @@ class LiveGuideFusion {
         const shortEpgCandidates = selectedChannel
             ? [selectedChannel, ...groupChannels.slice(0, 60)]
             : groupChannels.slice(0, 60);
+        this.app.epgGuide?.ensureChannels?.(shortEpgCandidates);
         this.ensureShortEpgForChannels(shortEpgCandidates);
 
         // Preserve the channel list's scroll position across re-renders (EPG
