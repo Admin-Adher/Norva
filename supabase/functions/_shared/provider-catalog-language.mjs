@@ -133,6 +133,14 @@ const stripDiacritics = str => String(str).normalize("NFD").replace(/[\u0300-\u0
             raw = raw.replace(/\s+مترجم\s*$/u, '');
         }
         const barePrefix = code => new RegExp(`^\\s*${code}(?=\\s*[-–—]\\s+|\\s+[-–—]\\s*|\\s*[|:])`);
+        // Supplier language tags are context-bound declarations. TG/TM are
+        // confirmed by the supplier's audio metadata on this Indian shelf;
+        // they are not global ISO/country aliases. Keep all subtitle, MULTI
+        // and conflicting-suffix guards below, and never upgrade observations.
+        if (categoryKey === 'VOD - INDIA' && barePrefix('(?:TG|TM)').test(raw)) {
+            raw = raw.replace(/^\s*TG(?=\s*[-–—|:])/, 'TE')
+                .replace(/^\s*TM(?=\s*[-–—|:])/, 'TA');
+        }
         // Full, audited supplier shelves disambiguate market prefixes. LA is
         // not a global Spanish/Latin alias, and IN is never a Hindi alias.
         // Hindi is explicitly declared by these shelves; no second soundtrack
