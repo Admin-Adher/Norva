@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function fixture() {
+function fixture({ phone = true, tv = false, sidebar = false } = {}) {
   const source = { value: 'xtream:2' };
   const listeners = new Map();
   const container = { innerHTML: '', classList: { toggle() {} },
@@ -14,10 +14,10 @@ function fixture() {
     addEventListener: (type, listener) => listeners.set(type, listener) };
   const window = { addEventListener() {} };
   const document = { activeElement: null,
-    getElementById: id => id === 'source-select' ? source : null,
+    getElementById: id => id === 'source-select' ? source : id === 'channel-sidebar' && sidebar ? {} : null,
     querySelector: () => null,
-    body: { classList: { contains: name => name === 'norva-phone-apk' } },
-    documentElement: { classList: { contains: () => false } } };
+    body: { classList: { contains: name => phone && name === 'norva-phone-apk' } },
+    documentElement: { classList: { contains: name => tv && name === 'tv-mode' } } };
   const context = vm.createContext({ window, document, console, setTimeout, clearTimeout,
     localStorage: { getItem: () => null, setItem() {} } });
   for (const component of ['ChannelList', 'LiveGuideFusion']) {
@@ -37,7 +37,7 @@ function fixture() {
     ensureShortEpgForChannels() {}, getProgramAt: () => null, getProgress: () => 0,
     getUpcoming: () => [], getRowsChannels: () => list.channels,
     renderRows: channels => channels.map(channel => channel.name).join(','),
-    renderToolbar: () => '', _isTvMode: () => false, isPhoneApk: () => true,
+    renderToolbar: () => '',
     _applyCinema() {}, refreshFamilyIfNeeded() {} });
   guide.init();
   // The identity comes from the real rendered Watch button, not a hand-built
@@ -115,5 +115,26 @@ test('an ordinary current Watch action still chooses a healthy variant of the di
     assert.equal(played.length, 1);
     assert.equal(played[0].channelId, hd.id);
     assert.equal(played[0].sourceId, String(tf1.sourceId));
+  }
+});
+
+test('web with a sidebar shows only the selected channel and requests its programme, without a second browse list', () => {
+  const { guide, container, tf1, played, watch, click } = fixture({ phone: false, sidebar: true });
+  let wanted;
+  guide.app.epgGuide = { ensureChannels: channels => { wanted = channels; } };
+  guide.renderRows = () => { throw new Error('Web must use the sidebar for navigation'); };
+  guide.render();
+  assert.equal(wanted.length, 1);
+  assert.equal(wanted[0], tf1);
+  assert.match(container.innerHTML, /BE: TF1 HD/);
+  assert.doesNotMatch(container.innerHTML, /live-guide-rows|live-guide-groups|ARABIC/);
+  click(watch(container.innerHTML));
+  assert.equal(played[0].channelId, tf1.id);
+});
+
+test('phone and TV retain their channel navigation even when the shared document contains the web sidebar', () => {
+  for (const options of [{ phone: true, sidebar: true }, { phone: false, tv: true, sidebar: true }]) {
+    const { guide } = fixture(options);
+    assert.equal(guide.usesSidebarNavigation(), false);
   }
 });

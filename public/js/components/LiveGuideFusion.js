@@ -159,6 +159,7 @@ class LiveGuideFusion {
     }
 
     shouldShowGroupRail() {
+        if (this.usesSidebarNavigation()) return false;
         const layout = document.querySelector('.home-layout');
         if (!layout) return true;
         return !layout.classList.contains('sidebar-open');
@@ -166,6 +167,7 @@ class LiveGuideFusion {
 
     syncNavigationState() {
         if (!this.container) return;
+        this.container.classList.toggle('live-guide-current-only', this.usesSidebarNavigation());
         const hideGroups = !this.shouldShowGroupRail();
         this.container.classList.toggle('live-guide-groups-hidden', hideGroups);
         this.container.querySelector('.live-guide-shell')?.classList.toggle('groups-hidden', hideGroups);
@@ -895,6 +897,11 @@ class LiveGuideFusion {
         return document.body.classList.contains('norva-phone-apk');
     }
 
+    usesSidebarNavigation() {
+        return !this.isPhoneApk() && !this._isTvMode()
+            && Boolean(document.getElementById('channel-sidebar'));
+    }
+
     /** Filter a channel list by the inline search query (family label / name). */
     filterBySearch(channels) {
         const q = (this.searchQuery || '').trim().toLowerCase();
@@ -1507,7 +1514,8 @@ class LiveGuideFusion {
             && channel.sourceType === candidate.sourceType
             && String(channel.id) === String(candidate.id))).find(Boolean)
             || groupChannels[0] || channels[0] || null;
-        const shortEpgCandidates = selectedChannel
+        const currentOnly = this.usesSidebarNavigation();
+        const shortEpgCandidates = currentOnly ? (selectedChannel ? [selectedChannel] : []) : selectedChannel
             ? [selectedChannel, ...groupChannels.slice(0, 60)]
             : groupChannels.slice(0, 60);
         this.app.epgGuide?.ensureChannels?.(shortEpgCandidates);
@@ -1552,11 +1560,11 @@ class LiveGuideFusion {
         this.container.innerHTML = `
             ${this.isPhoneApk() ? this.renderToolbar() : ''}
             <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'} ${tv ? 'lg-tv-shell' : ''}">
-                ${tv ? '' : this.renderGroups(groups)}
+                ${tv || currentOnly ? '' : this.renderGroups(groups)}
                 <div class="live-guide-main">
                     ${this.renderPreview(selectedChannel)}
                     ${tv ? `<div class="lg-tv-listhead"><span class="lg-tv-listtitle" data-i18n="ui_web_4b33d5e03e53">All channels</span><span class="lg-tv-count">${rowsChannels.length}</span></div>` : ''}
-                    ${this.renderRows(rowsChannels)}
+                    ${currentOnly ? '' : this.renderRows(rowsChannels)}
                 </div>
             </div>
         `;
