@@ -3655,6 +3655,9 @@ class HomePage {
                 })
                 : (data.subtitle || this.typeLabel(type)),
             poster: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl,
+            description: this.descriptionFromItem(item) || item.overview || data.overview || '',
+            year: data.year || item.year || item.release_year,
+            rating: data.rating ?? item.rating ?? item.rating_num,
             sourceId,
             cloudSourceId: item.cloudSourceId || data.cloudSourceId || null,
             resumeTime: resumeOffset,

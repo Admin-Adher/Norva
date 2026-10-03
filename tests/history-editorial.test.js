@@ -11,7 +11,9 @@ async function fixture(options = {}) {
   const title = { id: 'title', user_id: options.foreign ? 'other-owner' : 'owner',
     visible_source_ids: options.hidden ? [] : ['source'], match_status: 'matched',
     title: 'Current title', poster_url: 'https://norva.tv/new.jpg',
-    metadata: { i18n: { fr: { title: 'Titre corrigé' } } },
+    release_year: 1997, rating_num: 4.75,
+    metadata: { i18n: { fr: { title: 'Titre corrigé', overview: 'Synopsis actuel en français' } },
+      tmdb: { overview: 'English fallback', genres: [{ id: 28, name: 'Action' }] } },
     ...(options.progressive ? { overlay_generation_id: 'other', display_generation_id: 'other' } : {}) };
   const query = { select() { return this; }, eq(k, v) { if (k === 'user_id') assert.equal(v, 'owner'); return this; },
     async in() { return { data: options.ambiguous ? [variant, variant] : [variant] }; } };
@@ -30,6 +32,11 @@ test('history refreshes current owned artwork and localized title without rewrit
   assert.deepEqual(rows, original);
   assert.equal(result[0].data.title, 'Titre corrigé');
   assert.equal(result[0].data.poster, 'https://norva.tv/new.jpg');
+  assert.equal(result[0].data.description, 'Synopsis actuel en français');
+  assert.equal(result[0].data.year, 1997);
+  assert.equal(result[0].data.rating, 4.75);
+  assert.deepEqual(result[0].data.genres, [{ id: 28, name: 'Action' }]);
+  assert.equal(result[0].data.audioLanguages, undefined);
   for (const key of ['id', 'source_id', 'item_type', 'item_id', 'progress_seconds', 'duration_seconds', 'updated_at'])
     assert.equal(result[0][key], original[0][key]);
   assert.equal(result[0].data.containerExtension, 'mp4');

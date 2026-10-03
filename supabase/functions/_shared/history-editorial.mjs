@@ -64,6 +64,19 @@ export async function refreshHistoryEditorial(rows, { db, userId, epoch, lang })
       if (name) data.title = name;
       if (poster) Object.assign(data, { poster, posterUrl: poster, poster_url: poster });
       if (backdrop) Object.assign(data, { backdrop, backdropUrl: backdrop, backdrop_url: backdrop });
+      // Only presentation fields are refreshed. The owned variant above remains
+      // the proof for this exact source; editorial metadata is never audio proof.
+      const tmdb = record(metadata.tmdb);
+      const description = text(loc.overview) ?? text(tmdb.overview)
+        ?? text(metadata.overview) ?? text(metadata.plot);
+      if (description) Object.assign(data, { description, overview: description, plot: description });
+      const year = Number(title.release_year);
+      if (Number.isInteger(year) && year >= 1800 && year <= 2200) data.year = year;
+      const rating = title.rating_num ?? tmdb.vote_average;
+      if (rating != null && Number.isFinite(Number(rating)) && Number(rating) >= 0 && Number(rating) <= 10)
+        data.rating = Number(rating);
+      const genres = metadata.genres ?? tmdb.genres;
+      if (Array.isArray(genres) && genres.length) data.genres = genres;
       return { ...row, ...(name ? { item_name: name } : {}), data };
     });
   } catch { return rows; } // Transient metadata failures must never erase resume state.
