@@ -68,3 +68,29 @@ Répertoire privé : `/home/adrien/.norva/all-unknown-language-20261003`. `manif
 Restent à traiter les fichiers de la cohorte, les erreurs de fournisseur ou de profil et les langues indéterminées. Un report de capacité n’est pas une sonde. Un échec de transport n’établit pas la langue. Une déclaration technique n’est pas une reconnaissance vocale certifiée. **100 % examinés ne promet pas 100 % identifiables.** Ne fermer la campagne qu’après classification de chaque entrée et maintien explicite de ses limites.
 
 Les nouvelles importations conservent le planificateur global habituel. Ce manifeste initial concerne les quatre catalogues du compte contrôlé ; il ne prouve pas à lui seul une couverture exhaustive de tous les comptes Norva. Les résultats canoniques partageables continuent d’être réutilisés selon les règles d’isolation existantes.
+
+## Contrôle automatique à 18:11–18:13 UTC
+
+Le rapprochement unique à 18:11:21 UTC compte **657 versions contrôlées** depuis le lancement : Strng 216, Selection 29, Dino 142, MAX OTT 270. Il s'agit d'au moins un contrôle de métadonnées, de profil ou d'une progression de capture ; ce n'est pas le nombre d'analyses vocales terminées ni celui de langues identifiées.
+
+Les quatre mesures de projection, prises successivement pendant que les traitements avancent, donnent **302 versions de la cohorte désormais identifiées** (5, 1, 79, 217 respectivement). La requête globale, exécutée ensuite, trouve **56 446 variantes / 42 904 fiches inconnues**. Ce relevé n'est pas une transaction unique : la petite différence entre la somme des sources et le total global est conservée, sans prétendre à une photographie atomique.
+
+Le passage de 493 à 657 versions contrôlées entre 18:02:04 et 18:11:21 représente 164 nouveaux contrôles uniques en 9 min 17 s, environ 1 060/h sur cette courte fenêtre. Ce n'est pas un débit soutenu certifié ni une prévision de fin complète. La cible d'une ou deux heures demeure non atteinte.
+
+À 18:13:06 UTC, depuis le correctif SQL de 18:01:46 : **zéro erreur HTTP du dispatcher, zéro diagnostic d'expiration SQL dans les deux réplicas Edge**, et dix lots de métadonnées non vides terminés. Des erreurs de profil/transport et reports fournisseur restent présents ; ils ne sont pas assimilés à une langue identifiée. Le dernier progrès de capture stricte observé pour Selection date de 18:11:16 ; des travaux de Strng, Dino et MAX OTT restent en traitement ou en attente selon leurs baux et quarantaines.
+
+Les deux Gateways répondent HTTP 200 avec `ok=true`, aucune lecture active au moment du relevé, capacité réseau toujours limitée à deux travaux. Le dispatcher est sain, sans redémarrage ni marqueur STOP ; l'enrichissement reste ouvert et le cron strict actif. Aucun bail ni échec n'a été effacé. Les correctifs sont intégrés jusqu'au commit `32940a3dae65583302fdbbcda0642a9a8ecb9fe4` (PR 607).
+
+Preuve agrégée : `2026-10-03-language-campaign-heartbeat.json`. La campagne et son suivi horaire restent actifs. Pas de nouvelle modification de production lors de ce contrôle.
+
+## Contrôle automatique à 19:11–19:13 UTC
+
+Le relevé unique compte **2 213 versions contrôlées** : Strng 784, Selection 33, Dino 899, MAX OTT 497. L'écart avec 18:11:21 est **1 556 nouvelles versions en 60 min 26 s**, soit environ **1 545 contrôles uniques/h** sur l'heure écoulée. Ce débit comprend des métadonnées et des profils, pas uniquement des analyses vocales complètes. Il ne garantit pas la même vitesse lorsque les fichiers restants nécessiteront des captures longues.
+
+Le rapprochement de la projection donne **813 variantes initialement inconnues désormais identifiées** : Strng 11, Selection 1, Dino 453, MAX OTT 348. Il reste **55 938 variantes / 42 685 fiches inconnues**. Les 56 751 variantes de départ sont toujours visibles. La baisse n'est pas produite par une suppression de fichiers ou de catalogue.
+
+À 19:12:01, depuis le correctif SQL de 18:01:46 : **zéro erreur HTTP du dispatcher, zéro diagnostic d'expiration SQL dans les deux Edge**, et 91 lots de métadonnées non vides terminés. Les deux Gateways sont sains ; l'enrichissement et le cron strict restent actifs. La capture stricte Dino a encore progressé à 19:11:21. Les états terminaux agrégés restent distincts d'une preuve de nouvelle analyse vocale complète sur chaque version.
+
+Une autre cause de perte de débit a été identifiée : un garde-fou local « fournisseur occupé / circuit de sondes ouvert » peut être enregistré comme un échec de fichier incertain, sans qu'aucune requête soit partie. Il dépense alors une tentative et prolonge inutilement l'exclusion réseau. MAX OTT possède huit lignes de ce type en nouvelle tentative et un circuit réellement ouvert jusqu'à 19:33 UTC ; cette pause fournisseur doit être respectée. La correction et son déploiement sont documentés dans `2026-10-03-language-metadata-provider-deferrals.md`.
+
+La campagne reste **EN COURS**. La cible d'une à deux heures n'est pas atteinte. Les fichiers seulement contrôlés, les langues identifiées et les résultats d'analyse vocale ne sont pas additionnés comme s'il s'agissait de la même mesure. Preuve de cette heure : `2026-10-03-language-campaign-heartbeat-1911.json`.
