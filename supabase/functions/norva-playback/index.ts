@@ -1,5 +1,6 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { processAutomaticVodLanguageFile, processAutomaticVodLanguageBatch } from "../_shared/automatic-vod-language-fleet.mjs";
+import { runProviderAudioMetadataBatch } from "../_shared/provider-audio-metadata-batch.mjs";
 import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { bindSharedSelectionFile } from "../_shared/selection-shared-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
@@ -12463,8 +12464,8 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
       p_variant_id: variantId, p_external_id: itemId, p_identity_id: identityKey, p_payload: payload,
     });
     if (error) throw new HttpError(409, "Metadata ownership changed", { code: "metadata-persistence-retry" });
-    return Number(count) > 0 ? { persisted: 1, attempted: 1 }
-      : { stopped: "metadata-no-language", attempted: 1 };
+    return Number(count) > 0 ? { persisted: 1, attempted: 1, transportCompleted: true }
+      : { stopped: "metadata-no-language", attempted: 1, transportCompleted: true };
   } finally {
     if (!transportStarted || transportCompleted) await releaseProviderFileProbe(db, identityKey, owner);
     // Uncertain transport: keep this owner's 180s lease until expiry.
@@ -12521,6 +12522,49 @@ async function runAutomaticVodLanguageMetadataBatch(db: SupabaseClient, userId: 
   if (error || data !== true) return await runAutomaticVodLanguageIntake(db, userId, sourceId);
   return await processAutomaticVodLanguageBatch({
     runOne: () => runAutomaticVodLanguageIntake(db, userId, sourceId, "metadata"),
+  });
+}
+
+async function runOwnedProviderMetadataCatchup(db: SupabaseClient, userId: string, sourceId: string) {
+  await requireAutomaticLanguageEnrichmentAccess(userId, db);
+  return await runProviderAudioMetadataBatch({
+    claim: async () => {
+      await requireAutomaticLanguageEnrichmentAccess(userId, db);
+      await assertSourceCatalogVisible(sourceId, userId, db);
+      if (!await refreshLanguageBackgroundCapacity(db, "metadata")) {
+        return { skipped: "server-capacity", hasMore: true };
+      }
+      const result = await db.rpc("claim_catalog_provider_audio_metadata", { p_user: userId, p_source: sourceId });
+      if (result.error) throwDb(result.error, "Unable to claim provider audio metadata");
+      return recordOrEmpty(result.data);
+    },
+    read: async (item: JsonRecord) => {
+      const budget = await db.rpc("provider_footprint_budget", { p_identity_key: item.identityKey });
+      if (budget.error) throw new HttpError(503, "Provider budget unavailable", { code: "metadata-budget-retry" });
+      const footprint = recordOrEmpty(Array.isArray(budget.data) ? budget.data[0] : budget.data);
+      const lowFootprint = footprint.mode === "low_footprint";
+      if (lowFootprint && footprint.allowed !== true) return { stopped: "provider-footprint-capped", attempted: 0 };
+      let started = false;
+      try {
+        started = true;
+        return await runOwnedMovieLanguageMetadata(db, userId, sourceId,
+          stringOr(item.variantId, ""), stringOr(item.itemId, ""), stringOr(item.identityKey, ""));
+      } finally {
+        // Conservatively charge an admitted low-footprint attempt even when a
+        // later race prevents network I/O. Never bypass its hourly budget.
+        if (started && lowFootprint) {
+          const recorded = await db.rpc("provider_footprint_record_hit", { p_identity_key: item.identityKey });
+          if (recorded.error) throw new HttpError(503, "Provider budget write unavailable", { code: "metadata-budget-retry" });
+        }
+      }
+    },
+    finish: async (item: JsonRecord, outcome: { state: string; code: string; uncertain?: boolean }) => {
+      const result = await db.rpc("finish_catalog_provider_audio_metadata", {
+        p_user: userId, p_source: sourceId, p_variant: item.variantId, p_token: item.leaseToken,
+        p_outcome: outcome.state, p_code: outcome.code, p_transport_uncertain: outcome.uncertain === true,
+      });
+      if (result.error || result.data !== true) throw new HttpError(409, "Provider metadata lease changed");
+    },
   });
 }
 
@@ -16615,6 +16659,9 @@ const EXHAUSTED_TTL_MS = 30 * 60 * 1000;
 // Only candidate-driven sweeps participate — targeted/on-demand modes (titleIds, orderedTitleIds,
 // catalog fill, transcribe/ocr paths) must never be short-circuited. null = not a sweep.
 function sweepDimKey(body: JsonRecord): string | null {
+  // This queue owns a generation/config-aware resting cursor. A legacy VOD
+  // dimension cache must not suppress a newly imported metadata backlog.
+  if (body.providerMetadataOnly === true) return null;
   if (Array.isArray(body.orderedTitleIds) || Array.isArray(body.titleIds) || Array.isArray(body.verifyTitleIds)) return null;
   const mode = stringOr(body.mode, "");
   const subtitleTarget = stringOr(body.target, "") === "subtitle";
@@ -18311,6 +18358,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const requestedType = stringOr(body.type, "movie");
   if (body.automaticUnknowns === true && requestedType === "movie" && sourceId) {
     return await runAutomaticVodLanguageMetadataBatch(db, userId, sourceId);
+  }
+  if (body.providerMetadataOnly === true && requestedType === "movie" && sourceId) {
+    return await runOwnedProviderMetadataCatchup(db, userId, sourceId);
   }
   const itemType = requestedType === "series" || requestedType === "episode"
     ? requestedType

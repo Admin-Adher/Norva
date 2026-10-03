@@ -1,4 +1,5 @@
 import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
+import { providerMetadataFleetTurn } from "../_shared/provider-audio-metadata-batch.mjs";
 import { activateSharedSelection } from "../_shared/selection-shared-catalog.mjs";
 import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
 import { fetchDiscoverySelection, discoveryCatalogFields } from "../_shared/discovery-sources.mjs";
@@ -1947,6 +1948,7 @@ type EnrichmentFleetClaim = {
   claim_token: string;
   failure_count?: number;
   dispatch_count?: number;
+  metadata_rotation?: boolean;
 };
 
 function enrichmentFleetSummary(payload: unknown): JsonRecord {
@@ -2070,7 +2072,7 @@ async function finishEnrichmentFleetClaim(
     p_success: success,
     p_next_delay_seconds: delaySeconds,
     p_release_leases: releaseLeases,
-    p_result: result,
+    p_result: { ...result, fleetRotationProtocol: claim.metadata_rotation ? 2 : 1 },
   });
   if (error) {
     console.error("[enrichment-fleet] unable to finish claim", claim.source_id, error.message);
@@ -2643,7 +2645,18 @@ async function runEnrichmentFleetClaim(
   // structural ceiling of inventory, episode probes and episode LID. It does
   // not enlarge an individual provider batch, so viewer pre-emption continues
   // to be checked between every file/series rather than only between claims.
-  const lane = Math.max(0, Number(claim.dispatch_count) || 0) % 12;
+  const classification = await db.from("cloud_sources").select("source_type")
+    .eq("id", claim.source_id).eq("user_id", claim.user_id).maybeSingle();
+  if (classification.error || !classification.data) {
+    await finishEnrichmentFleetClaim(db, claim, false, 300, { skipped: "source-type-unavailable" });
+    return;
+  }
+  // M3U has no get_vod_info endpoint. Preserve its existing cadence, including
+  // the separate Selection recognition worker, without empty metadata turns.
+  claim.metadata_rotation = classification.data.source_type === "xtream";
+  const { lane, metadata: metadataTurn } = claim.metadata_rotation
+    ? providerMetadataFleetTurn(Number(claim.dispatch_count))
+    : { lane: Math.max(0, Number(claim.dispatch_count) || 0) % 12, metadata: false };
   const subtitleProbe = lane === 3;
   const seriesInventory = lane === 5 || lane === 9;
   const episodeProbe = lane === 2 || lane === 7;
@@ -2684,6 +2697,28 @@ async function runEnrichmentFleetClaim(
       return;
     }
     accessSnapshot = await readCatalogAccessSnapshot(claim.source_id, claim.user_id, db, false);
+
+    // Metadata never falls through into a media download. Keep the existing
+    // owner/provider dispatcher leases; all twelve original lanes retain a
+    // turn between metadata batches. Empty sources rotate without a long wait.
+    if (metadataTurn) {
+      timeout = setTimeout(() => controller.abort(), 105_000);
+      const response = await fetch(`${trimTrailingSlash(SUPABASE_URL)}/functions/v1/norva-playback/audio-backfill`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${backfillToken}`,
+          apikey: SUPABASE_SERVICE_KEY, "X-Norva-Enrichment-Dispatcher": "dynamic-v1" },
+        body: JSON.stringify({ userId: claim.user_id, sourceId: claim.source_id,
+          type: "movie", providerMetadataOnly: true, concurrency: 1, fallthrough: false }),
+        signal: controller.signal,
+      });
+      responseReceived = true;
+      const payload = recordOrEmpty(await response.json().catch(() => ({})));
+      await assertCatalogSnapshotCurrent(claim.source_id, claim.user_id, accessSnapshot, db);
+      if (!response.ok) throw new Error(`Provider metadata batch failed: ${response.status}`);
+      const summary = enrichmentFleetSummary(payload);
+      await finishEnrichmentFleetClaim(db, claim, true,
+        summary.paused === true ? 30 * 60 : 30, summary);
+      return;
+    }
 
     // A repaired false-negative cohort has no exact track map yet, so speech
     // verification cannot make progress on it. Temporarily lend two of the
