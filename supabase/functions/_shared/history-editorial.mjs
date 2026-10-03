@@ -67,12 +67,14 @@ export async function refreshHistoryEditorial(rows, { db, userId, epoch, lang })
       const all = [...projectedIds];
       for (let offset = 0; offset < all.length; offset += 100) {
         const chunk = all.slice(offset, offset + 100);
-        const { data, error } = await db.from('cloud_source_catalog_generation_candidate_titles')
-          .select('user_id,source_id,item_type,title_id,generation_id,match_status,title,poster_url,backdrop_url,release_year,rating_num,metadata,catalog_metadata')
-          .eq('user_id', userId).eq('source_id', variant.source_id).eq('item_type', variant.item_type)
-          .eq('generation_id', variant.generation_id).in('title_id', chunk);
-        if (error) throw error;
-        for (const projection of data ?? []) {
+        const { data, error } = await db.rpc('norva_get_history_source_editorial', {
+          p_user_id: userId, p_source_id: variant.source_id, p_item_type: variant.item_type,
+          p_generation_id: variant.generation_id, p_title_ids: chunk, p_expected_visibility_epoch: epoch,
+        });
+        if (error || data?.contract !== 'history-source-editorial-v1'
+            || String(data.visibilityEpoch) !== String(epoch) || !Array.isArray(data.items))
+          throw Error('Exact history editorial snapshot unavailable');
+        for (const projection of data.items) {
           if (projection.user_id !== userId || projection.source_id !== variant.source_id
               || projection.item_type !== variant.item_type || projection.generation_id !== variant.generation_id
               || !chunk.includes(projection.title_id)
