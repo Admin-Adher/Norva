@@ -253,7 +253,10 @@ class EpgGuide {
     async fetchEpgData(forceRefresh = false) {
         // Get ALL sources and filter for EPG-capable types
         const allSources = await API.sources.getAll();
-        const sources = allSources.filter(s => (s.type === 'epg' || s.type === 'xtream') && s.enabled);
+        // Managed M3U sources can supply a broadcaster guide (Norva Selection).
+        // The server checks the exact source identity; unsupported M3U sources
+        // return an empty guide and never trigger guessed XMLTV downloads.
+        const sources = allSources.filter(s => ['epg', 'xtream', 'm3u'].includes(s.type) && s.enabled);
 
         if (sources.length === 0) {
             throw new Error('No EPG sources or Xtream accounts configured');

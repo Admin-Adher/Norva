@@ -11,6 +11,7 @@ import { selectionEnrollment } from "../_shared/selection-enrollment.mjs";
 import { handoffSelectionFinalization, selectionStarterRows, writeSelectionBatch } from "../_shared/selection-initial-import.mjs";
 import { preparedSelectionCatalog, selectionPreparedRevision } from "../_shared/selection-prepared-catalog.mjs";
 import { loadSelectionSeriesInfo } from "../_shared/selection-series-info.mjs";
+import { fetchSelectionEpg, SELECTION_EPG_TTL_MS } from "../_shared/selection-epg.mjs";
 import { isM3uSeriesId, isM3uEpisodeId, loadM3uSeriesInfo, resolveOwnedM3uEpisode } from "../_shared/m3u-series-info.mjs";
 import { buildM3uCatalogRows, m3uCatalogCounts } from "../_shared/m3u-media-classification.mjs";
 import { adoptActiveCatalogUserVisibilityEpoch, withActiveCatalogEpochRetry } from "../_shared/catalog-generation.ts";
@@ -3998,6 +3999,17 @@ async function getSourceEpg(url: URL, sourceId: string, userId: string, db: Supa
 
   const sourceType = stringOr(source.source_type, "");
   const sourceConfig = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  if (sourceType === "m3u" && sourceConfig.playlistUrl === DISCOVERY_PLAYLIST_URL &&
+      await isDiscoverySourceId(sourceId, userId)) {
+    const guide = await fetchSelectionEpg({ windowStartMs, windowEndMs, refresh });
+    // Recheck after the network requests, before exposing public listings in an
+    // owner-scoped response. Hidden/removed sources cannot use a warm cache.
+    await assertVisibleSourceSnapshotCurrent(sourceId, userId, visibleSource, db);
+    const data = { ...guide, sourceId, generatedAt: new Date().toISOString(),
+      windowStart: new Date(windowStartMs).toISOString(), windowEnd: new Date(windowEndMs).toISOString(), cloud: true };
+    epgCache.set(cacheKey, { expiresAt: Date.now() + SELECTION_EPG_TTL_MS, data });
+    return data;
+  }
   let epgUrl = "";
   let xtreamDirectEpg = false;
   let xtreamDirectFallback: DirectFallbackLeaseContext | null = null;
