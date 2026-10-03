@@ -14,6 +14,9 @@ async function fixture(options = {}) {
     release_year: 1997, rating_num: 4.75,
     metadata: { i18n: { fr: { title: 'Titre corrigé', overview: 'Synopsis actuel en français' } },
       tmdb: { overview: 'English fallback', genres: [{ id: 28, name: 'Action' }] } },
+    ...(options.generation ? { overlay_generation_id: 'generation', display_generation_id: 'generation',
+      overlay_catalog_metadata: { tmdbValidation:{valid:!options.untrustedGeneration},
+        i18n:{fr:{overview:'Synopsis de la génération active'}} } } : {}),
     ...(options.progressive ? { overlay_generation_id: 'other', display_generation_id: 'other' } : {}) };
   const query = { select() { return this; }, eq(k, v) { if (k === 'user_id') assert.equal(v, 'owner'); return this; },
     async in() { return { data: options.ambiguous ? [variant, variant] : [variant] }; } };
@@ -37,10 +40,31 @@ test('history refreshes current owned artwork and localized title without rewrit
   assert.equal(result[0].data.rating, 4.75);
   assert.deepEqual(result[0].data.genres, [{ id: 28, name: 'Action' }]);
   assert.equal(result[0].data.audioLanguages, undefined);
+  const { sanitizeWatchHistory, sanitizeHistoryData } = await import('../supabase/functions/_shared/cloud-public-view.mjs');
+  const publicHistory = sanitizeWatchHistory(result[0]);
+  assert.equal(publicHistory.data.description, 'Synopsis actuel en français');
+  assert.equal(publicHistory.data.year, 1997);
+  assert.equal(publicHistory.data.rating, 4.75);
+  assert.deepEqual(publicHistory.data.genres, ['Action']);
+  assert.equal(sanitizeHistoryData(result[0].data).description, undefined, 'progress writes remain lean');
   for (const key of ['id', 'source_id', 'item_type', 'item_id', 'progress_seconds', 'duration_seconds', 'updated_at'])
     assert.equal(result[0][key], original[0][key]);
   assert.equal(result[0].data.containerExtension, 'mp4');
   assert.equal(result[0].data.titleId, 'obsolete-title');
+});
+
+test('public history exposes only bounded editorial fields and keeps private nested genre values out', async () => {
+  const { sanitizeWatchHistory } = await import('../supabase/functions/_shared/cloud-public-view.mjs');
+  const result = sanitizeWatchHistory({ data: { title:'Film', description:'x'.repeat(20001),year:-1,rating:99,
+    genres:[{name:'Action',credentials:'must not escape'},null,'Drama'],token:'secret' } });
+  assert.equal(result.data.description,undefined); assert.equal(result.data.year,undefined);
+  assert.equal(result.data.rating,undefined); assert.equal(result.data.token,undefined);
+  assert.deepEqual(result.data.genres,['Action','Drama']);
+});
+
+test('history prefers only the trusted exact generation synopsis', async () => {
+  assert.equal((await fixture({generation:true})).result[0].data.description, 'Synopsis de la génération active');
+  assert.equal((await fixture({generation:true,untrustedGeneration:true})).result[0].data.description, 'Synopsis actuel en français');
 });
 for (const option of ['foreign', 'hidden', 'ambiguous', 'stale', 'progressive', 'failure']) {
   test(`history preserves its snapshot for ${option} metadata`, async () => {
