@@ -80,24 +80,22 @@ class EpgGuide {
             .replace(/\b(fhd|full\s*hd|hd|uhd|4k|sd|hevc|h265|h264|fr)\b/g, ' ')
             .replace(/[^a-z0-9]+/g, ' ')
             .trim()
+            .replace(/\b([a-z]{2,})\s+(\d+)\b/g, '$1$2')
             .replace(/\s+/g, ' ');
     }
 
-    getEpgChannel(tvgId, channelName) {
+    getEpgChannel(tvgId, channelName, sourceId) {
         if (!this.channelMap) return null;
-        const directId = tvgId ? this.channelMap.get(String(tvgId)) : null;
-        if (directId) return directId;
-        const directName = channelName ? this.channelMap.get(String(channelName).toLowerCase()) : null;
-        if (directName) return directName;
-        const normalizedId = tvgId ? this.channelMap.get(this.normalizeChannelKey(tvgId)) : null;
-        if (normalizedId) return normalizedId;
-        const normalizedName = channelName ? this.channelMap.get(this.normalizeChannelKey(channelName)) : null;
-        if (normalizedName) return normalizedName;
-        return this.channels.find(epg =>
-            (tvgId && epg.id === tvgId) ||
-            (channelName && epg.name === channelName) ||
-            (channelName && this.normalizeChannelKey(epg.name || epg.id) === this.normalizeChannelKey(channelName))
-        ) || null;
+        const keys = [tvgId && String(tvgId), channelName && String(channelName).toLowerCase(),
+            tvgId && this.normalizeChannelKey(tvgId), channelName && this.normalizeChannelKey(channelName)].filter(Boolean);
+        // A provider's channel IDs/names are local to that provider. Only an
+        // explicitly added standalone EPG is allowed as a cross-source fallback.
+        const scopes = sourceId != null ? [String(sourceId), '*'] : [''];
+        for (const scope of scopes) for (const key of keys) {
+            const result = this.channelMap.get(scope ? `${scope}::${key}` : key);
+            if (result) return result;
+        }
+        return null;
     }
 
     init() {
@@ -254,10 +252,10 @@ class EpgGuide {
     async fetchEpgData(forceRefresh = false) {
         // Get ALL sources and filter for EPG-capable types
         const allSources = await API.sources.getAll();
-        // Managed M3U sources can supply a broadcaster guide (Norva Selection).
-        // The server checks the exact source identity; unsupported M3U sources
-        // return an empty guide and never trigger guessed XMLTV downloads.
+        // M3U guides are discovered from their declared XMLTV URL; Xtream uses
+        // its standard guide endpoint, including previously unknown providers.
         const sources = allSources.filter(s => ['epg', 'xtream', 'm3u'].includes(s.type) && s.enabled);
+        this._epgSources = sources;
 
         if (sources.length === 0) {
             throw new Error('No EPG sources or Xtream accounts configured');
@@ -274,10 +272,27 @@ class EpgGuide {
             ...(forceRefresh ? { refresh: 1 } : {})
         };
 
-        // Load EPG from ALL sources in parallel
+        const fetchVersion = this._epgFetchVersion = (this._epgFetchVersion || 0) + 1;
+        const sourceData = new Map();
+        // Publish each guide as soon as it arrives. A slow provider must not
+        // delay all other programmes, nor erase the previous guide on failure.
+        const previous = this._epgSourceData || new Map();
+        for (const source of sources) if (previous.has(String(source.id)))
+            sourceData.set(String(source.id), previous.get(String(source.id)));
+        this._epgSourceData = sourceData;
+        this._mergeSourceGuides(sourceData);
         const fetchPromises = sources.map(async (source) => {
             try {
-                return await API.proxy.epg.get(source.id, epgOptions);
+                const loaded = window.app?.channelList?.channels;
+                const channels = Array.isArray(loaded) ? loaded.filter(c => String(c.sourceId) === String(source.id)).slice(0, 64) : null;
+                const data = await API.proxy.epg.get(source.id, { ...epgOptions, ...(channels ? this._guideSelection(channels) : {}) });
+                if (fetchVersion !== this._epgFetchVersion) return data;
+                this._storeSourceGuide(source, data);
+                if (channels) this._markGuideRequests(source.id, channels);
+                this._mergeSourceGuides(sourceData);
+                window.app?.channelList?.clearProgramInfoCache?.();
+                window.app?.liveGuideFusion?.scheduleRender?.();
+                return data;
             } catch (e) {
                 console.warn(`Failed to load EPG for source ${source.name}:`, e);
                 return null;
@@ -286,52 +301,98 @@ class EpgGuide {
 
         const results = await Promise.all(fetchPromises);
 
-        // Merge results
-        this.channels = [];
-        this.programmes = [];
-
-        let hasData = false;
-        results.forEach(data => {
-            if (data) {
-                if (data.channels && data.channels.length > 0) {
-                    this.channels = this.channels.concat(data.channels);
-                }
-                if (data.programmes && data.programmes.length > 0) {
-                    this.programmes = this.programmes.concat(data.programmes);
-                }
-                if (data.channels || data.programmes) {
-                    hasData = true;
-                }
-            }
-        });
-
-        if (!hasData) {
+        if (fetchVersion !== this._epgFetchVersion) return;
+        if (!results.some(data => data && (data.channels || data.programmes)) && !sourceData.size) {
             throw new Error('Failed to load EPG data from any source');
         }
-
-        // Build secondary indexes for faster lookup
-        this.channelMap = new Map();
-        // Index by ID
-        this.channels.forEach(ch => {
-            if (ch.id) this.channelMap.set(String(ch.id), ch);
-            // Also index by name (normalized) for fallback matching
-            if (ch.name) {
-                this.channelMap.set(ch.name.toLowerCase(), ch);
-            }
-            const normalizedId = this.normalizeChannelKey(ch.id);
-            const normalizedName = this.normalizeChannelKey(ch.name);
-            if (normalizedId) this.channelMap.set(normalizedId, ch);
-            if (normalizedName) this.channelMap.set(normalizedName, ch);
-        });
-
-        // Build per-channel programme index with cached numeric timestamps so
-        // hot-path lookups (preview) read a small sorted array instead of
-        // linear-scanning the whole flat programmes list.
-        this._rebuildProgrammeIndex();
-
-        // Load favorites
+        this._mergeSourceGuides(sourceData);
         const favs = await API.favorites.getAll();
         this.favorites = new Set(favs.map(f => `${f.source_id}:${f.item_id}`));
+    }
+
+    _guideSelection(channels) {
+        return { channelIds: [...new Set(channels.map(c => c.tvgId || c.epg_id || '').filter(Boolean))].slice(0, 64),
+            channelNames: [...new Set(channels.map(c => c.name || '').filter(Boolean))].slice(0, 64) };
+    }
+
+    _guideRequestKey(channel) {
+        return `${channel.sourceId}:${channel.tvgId || channel.epg_id || ''}:${channel.name || ''}`;
+    }
+
+    _markGuideRequests(sourceId, channels) {
+        this._epgRequestedAt ||= new Map();
+        for (const c of channels) this._epgRequestedAt.set(this._guideRequestKey({ ...c, sourceId }), Date.now());
+        while (this._epgRequestedAt.size > 2048) this._epgRequestedAt.delete(this._epgRequestedAt.keys().next().value);
+    }
+
+    _storeSourceGuide(source, data) {
+        const sourceId = String(source.id), previous = this._epgSourceData.get(sourceId)?.data;
+        const byId = new Map((previous?.channels || []).map(c => [c.id, c]));
+        for (const c of data.channels || []) { byId.delete(c.id); byId.set(c.id, c); }
+        while (byId.size > 256) byId.delete(byId.keys().next().value);
+        const byProgramme = new Map();
+        for (const p of [...(previous?.programmes || []).filter(p => Date.parse(p.stop) > Date.now() - 7200000), ...(data.programmes || [])]) {
+            if (byId.has(p.channelId))
+                byProgramme.set(`${p.channelId}:${p.start}:${p.stop}`, p);
+        }
+        this._epgSourceData.set(sourceId, { source, data: { ...data, channels: [...byId.values()], programmes: [...byProgramme.values()] } });
+    }
+
+    // Guide follows source/group/search navigation. Batch the visible channels
+    // into one bounded request, rather than downloading the worldwide feed.
+    ensureChannels(channels) {
+        if (!this._epgSources || !this._epgSourceData) return;
+        this._epgPendingSources ||= new Set();
+        const groups = new Map(), now = Date.now();
+        for (const c of channels.slice(0, 64)) {
+            if (now - (this._epgRequestedAt?.get(this._guideRequestKey(c)) || 0) < 600000) continue;
+            const source = this._epgSources.find(s => String(s.id) === String(c.sourceId));
+            if (!source || this._epgPendingSources.has(String(source.id))) continue;
+            const group = groups.get(source) || []; group.push(c); groups.set(source, group);
+        }
+        for (const [source, wanted] of groups) {
+            const version = this._epgFetchVersion, id = String(source.id);
+            this._epgPendingSources.add(id);
+            API.proxy.epg.get(source.id, { beforeHours: 2, afterHours: 8, ...this._guideSelection(wanted) })
+                .then(data => {
+                    if (version !== this._epgFetchVersion) return;
+                    this._storeSourceGuide(source, data); this._markGuideRequests(source.id, wanted);
+                    this._mergeSourceGuides(this._epgSourceData);
+                    window.app?.channelList?.clearProgramInfoCache?.();
+                }).catch(() => {
+                    this._epgRequestedAt ||= new Map();
+                    for (const c of wanted) this._epgRequestedAt.set(this._guideRequestKey(c), Date.now() - 570000);
+                }).finally(() => {
+                    this._epgPendingSources.delete(id);
+                    window.app?.liveGuideFusion?.scheduleRender?.();
+                });
+        }
+    }
+
+    _mergeSourceGuides(sourceData) {
+        this.channels = []; this.programmes = [];
+        this.channelMap = new Map();
+        const add = (key, channel) => {
+            if (!key) return;
+            const old = this.channelMap.get(key);
+            if (!this.channelMap.has(key) || old?.id === channel.id) this.channelMap.set(key, channel);
+            else this.channelMap.set(key, null); // ambiguous: never guess a programme
+        };
+        for (const [sourceId, { source, data }] of sourceData) {
+            const scope = source.type === 'epg' ? '*' : sourceId;
+            for (const original of data.channels || []) {
+                const channel = { ...original, sourceId, id: `${sourceId}::${original.id}` };
+                this.channels.push(channel);
+                const aliases = [original.id, original.name, ...(original.aliases || [])];
+                for (const alias of aliases.filter(Boolean)) {
+                    for (const key of [String(alias), String(alias).toLowerCase(), this.normalizeChannelKey(alias)]) {
+                        add(`${scope}::${key}`, channel); add(key, channel);
+                    }
+                }
+            }
+            this.programmes = this.programmes.concat((data.programmes || []).map(p => ({ ...p, sourceId, channelId: `${sourceId}::${p.channelId}` })));
+        }
+        this._rebuildProgrammeIndex();
     }
 
     /**
@@ -381,10 +442,10 @@ class EpgGuide {
      * @param {string} channelName - The channel name (for fallback)
      * @returns {object|null} Program object with title, start, stop
      */
-    getCurrentProgram(tvgId, channelName) {
+    getCurrentProgram(tvgId, channelName, sourceId) {
         if (!this.programmes || this.programmes.length === 0) return null;
 
-        const epgChannel = this.getEpgChannel(tvgId, channelName);
+        const epgChannel = this.getEpgChannel(tvgId, channelName, sourceId);
 
         if (!epgChannel) return null;
 
@@ -471,7 +532,7 @@ class EpgGuide {
 
         // Match ALL playable channels with optional EPG data
         const allChannels = playableChannels.map(sourceChannel => {
-            const epgChannel = this.getEpgChannel(sourceChannel.tvgId || sourceChannel.epg_id, sourceChannel.name);
+            const epgChannel = this.getEpgChannel(sourceChannel.tvgId || sourceChannel.epg_id, sourceChannel.name, sourceChannel.sourceId);
             return { epgChannel, sourceChannel };
         });
 

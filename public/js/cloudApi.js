@@ -4936,8 +4936,9 @@
                 `/sources/${encodeURIComponent(id)}/short-epg?stream_id=${encodeURIComponent(streamId)}&limit=${encodeURIComponent(limit)}`
             ),
             epg: (id, params = {}) => request(
-                'GET',
-                `/sources/${encodeURIComponent(id)}/epg${query(params)}`
+                Array.isArray(params.channelIds) || Array.isArray(params.channelNames) ? 'POST' : 'GET',
+                `/sources/${encodeURIComponent(id)}/epg${query(Object.fromEntries(Object.entries(params).filter(([key]) => !['channelIds', 'channelNames'].includes(key))))}`,
+                Array.isArray(params.channelIds) || Array.isArray(params.channelNames) ? { channelIds: params.channelIds, channelNames: params.channelNames } : null
             ),
             // A stale visibility response can reject after the server committed
             // the mutation. Clear the cached source view on both resolution and
@@ -5177,9 +5178,9 @@
                     { token: getDeviceToken() }
                 ),
                 epg: (id, params = {}) => request(
-                    'GET',
-                    `/device/sources/${encodeURIComponent(id)}/epg${query(params)}`,
-                    null,
+                    Array.isArray(params.channelIds) || Array.isArray(params.channelNames) ? 'POST' : 'GET',
+                    `/device/sources/${encodeURIComponent(id)}/epg${query(Object.fromEntries(Object.entries(params).filter(([key]) => !['channelIds', 'channelNames'].includes(key))))}`,
+                    Array.isArray(params.channelIds) || Array.isArray(params.channelNames) ? { channelIds: params.channelIds, channelNames: params.channelNames } : null,
                     { token: getDeviceToken() }
                 )
             },

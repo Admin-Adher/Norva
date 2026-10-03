@@ -1204,7 +1204,7 @@ const CloudAdapter = (() => {
             name: channel.name || channel.title || defaultVariant.raw || 'Norva',
             title: channel.title || channel.name || defaultVariant.raw || 'Norva',
             num: channel.num ?? channel.lcn ?? null,
-            epg_channel_id: channel.epg_channel_id || channel.tvgId || '',
+            epg_channel_id: channel.epg_channel_id || channel.tvgId || channel.metadata?.tvgId || defaultVariantRaw.metadata?.tvgId || '',
             stream_icon: poster,
             tvgLogo: poster,
             category_id: categoryId,
@@ -2420,7 +2420,9 @@ const CloudAdapter = (() => {
                     refresh: query.get('refresh') === '1' ? '1' : '',
                     maxAge: query.get('maxAge') || '',
                     beforeHours: query.get('beforeHours') || query.get('windowBeforeHours') || '2',
-                    afterHours: query.get('afterHours') || query.get('windowAfterHours') || '8'
+                    afterHours: query.get('afterHours') || query.get('windowAfterHours') || '8',
+                    ...(Array.isArray(data?.channelIds) ? { channelIds: data.channelIds } : {}),
+                    ...(Array.isArray(data?.channelNames) ? { channelNames: data.channelNames } : {})
                 });
             }
             return { channels: [], programmes: [] };
@@ -3337,10 +3339,13 @@ const API = {
         epg: {
             get: (sourceId, options = {}) => {
                 const params = new URLSearchParams();
-                Object.entries(options).forEach(([key, value]) => {
+                const { channelIds, channelNames, ...windowOptions } = options;
+                Object.entries(windowOptions).forEach(([key, value]) => {
                     if (value !== undefined && value !== null && value !== '') params.set(key, value);
                 });
-                return API.request('GET', `/proxy/epg/${sourceId}${params.toString() ? `?${params.toString()}` : ''}`);
+                const targeted = Array.isArray(channelIds) || Array.isArray(channelNames);
+                return API.request(targeted ? 'POST' : 'GET', `/proxy/epg/${sourceId}${params.toString() ? `?${params.toString()}` : ''}`,
+                    targeted ? { channelIds, channelNames } : null);
             },
             getForChannels: (sourceId, channelIds, options = {}) => {
                 const params = new URLSearchParams();

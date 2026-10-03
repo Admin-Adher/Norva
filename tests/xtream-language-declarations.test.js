@@ -203,6 +203,13 @@ test('no-language items stay unchanged and live ingestion does not acquire VOD d
   }
 });
 
+test('both import paths retain the declared channel guide identity from an unknown provider', async () => {
+  const { xtreamRows, activeMediaRows } = await loadIngestMappers();
+  const item = { stream_id: '1', name: 'Unknown Channel HD', epg_channel_id: 'provider.channel@region' };
+  assert.equal(xtreamRows('source', 'user', [item], 'live', new Map())[0].metadata.tvgId, item.epg_channel_id);
+  assert.equal(activeMediaRows({}, [item], 'live')[0].metadata.tvgId, item.epg_channel_id);
+});
+
 test('both ingestion paths use the helper; projections preserve opaque metadata without new language resolution', () => {
   const sync = read('supabase/functions/_shared/xtream-sync.ts');
   const access = read('supabase/functions/norva-provider-access/index.ts');

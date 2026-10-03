@@ -577,7 +577,7 @@ class ChannelList {
 
             // Cache key: channel_id + current_minute (invalidate every minute)
             const currentMinute = Math.floor(Date.now() / 60000);
-            const cacheKey = `${channel.tvgId || channel.name}:${currentMinute}`;
+            const cacheKey = `${channel.sourceId}:${channel.tvgId || channel.name}:${currentMinute}`;
 
             if (this._programInfoCache && this._programInfoCache.has(cacheKey)) {
                 return this._programInfoCache.get(cacheKey);
@@ -589,7 +589,7 @@ class ChannelList {
                 this._lastCacheMinute = currentMinute;
             }
 
-            const program = window.app.epgGuide.getCurrentProgram(channel.tvgId, channel.name);
+            const program = window.app.epgGuide.getCurrentProgram(channel.tvgId, channel.name, channel.sourceId);
             const result = program ? program.title : null;
 
             this._programInfoCache.set(cacheKey, result);
@@ -1677,7 +1677,9 @@ class ChannelList {
         for (const ch of this.channels) {
             let epgCh = null;
             if (!this.matchesSelectedLiveSource(ch)) continue;
-            if (ch.tvgId && guide.channelMap?.has(ch.tvgId)) {
+            if (guide.getEpgChannel) {
+                epgCh = guide.getEpgChannel(ch.tvgId, ch.name, ch.sourceId);
+            } else if (ch.tvgId && guide.channelMap?.has(ch.tvgId)) {
                 epgCh = guide.channelMap.get(ch.tvgId);
             } else if (ch.name && guide.channelMap?.has(String(ch.name).toLowerCase())) {
                 epgCh = guide.channelMap.get(String(ch.name).toLowerCase());
@@ -4186,7 +4188,7 @@ class ChannelList {
 
         if (window.app?.epgGuide) {
             const tvgKey = channel.tvgId || channel.name;
-            const currentProgram = window.app.epgGuide.getCurrentProgram(channel.tvgId, channel.name);
+            const currentProgram = window.app.epgGuide.getCurrentProgram(channel.tvgId, channel.name, channel.sourceId);
             const programs = window.app.epgGuide.getChannelPrograms?.(tvgKey) || [];
 
             if (currentProgram || programs.length > 0) {

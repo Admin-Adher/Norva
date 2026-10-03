@@ -3085,6 +3085,7 @@ function activeMediaRows(job, items, itemType) {
       item_type: itemType, external_id: externalId, parent_external_id: categoryId,
       title, subtitle: categoryName, poster_url: nullableString(item.stream_icon ?? item.cover), backdrop_url: null,
       metadata: compactActiveRecord({ categoryId, categoryName, rating: item.rating, added: item.added,
+        tvgId: itemType === "live" ? nullableString(item.epg_channel_id ?? item.tvg_id ?? item.tvgId) : null,
         overview: nullableString(item.plot ?? item.description ?? item.overview ?? item.desc), providerTmdbId, providerImdbId,
         providerLanguageDeclarations: itemType === "live" ? null : xtreamLanguageDeclarations(item) }),
       playback_hint: compactActiveRecord({ sourceType: "xtream", streamId: externalId, streamType: itemType,

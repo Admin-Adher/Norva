@@ -45,5 +45,18 @@
       const r=b.getBoundingClientRect();return {kind:b.className,label:b.getAttribute('aria-label')||b.textContent.trim(),width:r.width,height:r.height};
     }).filter(r=>r.width&&r.height),
     firstRow:document.querySelector('.live-guide-row')?.getBoundingClientRect().toJSON()});
+  window.liveAudit.verifyProviderEpg = () => {
+    const epg = new EpgGuide(), now = Date.now();
+    epg._mergeSourceGuides(new Map(['1', '2'].map(id => [id, { source: { type: 'xtream' }, data: {
+      channels: [{ id: 'same.channel', name: 'Same HD' }],
+      programmes: [{ channelId: 'same.channel', title: `Programme ${id}`, start: new Date(now - 60000).toISOString(), stop: new Date(now + 60000).toISOString() }]
+    } }])));
+    guide.app.epgGuide = epg;
+    const a = { ...channels[0], tvgId: 'same.channel' }, b = { ...channels[48], tvgId: 'same.channel' };
+    const proof = { first: guide.getProgramAt(a, new Date()).title, second: guide.getProgramAt(b, new Date()).title,
+      unrelated: guide.getProgramAt({ ...a, sourceId: 'absent' }, new Date()) };
+    list.channels = [a, b]; guide.render();
+    return proof;
+  };
   window.fixtureReady = true;
 })().catch(e => { window.fixtureError = String(e); });

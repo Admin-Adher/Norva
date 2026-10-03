@@ -85,7 +85,7 @@ test('WebView loads enabled M3U guides and indexes programme IDs for live previe
   await guide.fetchEpgData();
   assert.deepEqual(calls, [12, 14]);
   assert.equal(guide.channelMap.get('norva-selection:dw-news').name, 'DW News');
-  assert.equal(guide.programmesByChannel.get('norva-selection:dw-news')[0].title, 'DW News');
+  assert.equal(guide.getChannelProgrammes(guide.getEpgChannel('norva-selection:dw-news', '', 12).id)[0].title, 'DW News');
 });
 
 test('cloud guide authenticates the exact Selection source and rechecks visibility after fetching', () => {

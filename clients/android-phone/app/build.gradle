@@ -87,6 +87,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
         include "css/main.css", "js/utils/mediaUtils.js", "js/pages/WatchPage.js"
         include "js/pages/Settings.js"
         include "js/components/LiveGuideFusion.js", "js/components/ChannelList.js", "js/pages/LivePage.js"
+        include "js/components/EpgGuide.js"
         include "js/components/SourceManager.js", "js/components/NorvaModal.js"
         include "js/components/RetentionOffer.js"
         include "js/components/PlayRetentionCard.js"

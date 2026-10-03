@@ -75,7 +75,7 @@ test('EPG and series metadata check visibility before provider or cache access',
   assert.match(shortEpg, /const result =[\s\S]*await assertVisibleSourceSnapshotCurrent[\s\S]*return result/);
   assert.match(epg, /epgCache\.get\(cacheKey\)[\s\S]*await assertVisibleSourceSnapshotCurrent[\s\S]*return cached\.data/);
   assert.match(epg, /cloud-xmltv-epg[\s\S]*fetchEpgXml\(\)[\s\S]*await assertVisibleSourceSnapshotCurrent/);
-  assert.match(epg, /parseXmltvWindow[\s\S]*await assertVisibleSourceSnapshotCurrent[\s\S]*epgCache\.set\(cacheKey/);
+  assert.match(epg, /fetchProviderXmltv[\s\S]*await assertVisibleSourceSnapshotCurrent[\s\S]*epgCache\.set\(cacheKey/);
 });
 
 test('delayed gateway and direct series reads reject A after an interleaved transition', async () => {
