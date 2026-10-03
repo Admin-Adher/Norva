@@ -28,6 +28,26 @@ for source in manifest['sources']:
         where state='verified' and verified_at>='{start}'::timestamptz
         and next_track_position=cardinality(expected_audio_indices)
         and jsonb_array_length(evidence)=cardinality(expected_audio_indices)),
+      'inconclusiveCompletedSinceStart',(select count(distinct variant_id) from jobs
+        where state='failed' and error_code='LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE'
+        and last_provider_progress_at>='{start}'::timestamptz
+        and strict_lid_window_count in (4,6)
+        and strict_lid_window_position=strict_lid_window_count
+        and jsonb_array_length(strict_lid_window_tokens)=strict_lid_window_count),
+      'inconclusiveCompletedMatchingCurrentProfile',(select count(distinct j.variant_id)
+        from jobs j join public.catalog_file_tracks cache
+          on cache.server_host=j.identity_key and cache.item_type=j.item_type
+          and cache.external_id=j.external_id
+        where j.state='failed' and j.error_code='LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE'
+        and j.last_provider_progress_at>='{start}'::timestamptz
+        and j.strict_lid_window_count in (4,6)
+        and j.strict_lid_window_position=j.strict_lid_window_count
+        and jsonb_array_length(j.strict_lid_window_tokens)=j.strict_lid_window_count
+        and cache.observed_profile_fingerprint is not null
+        and j.profile_fingerprint is not distinct from cache.observed_profile_fingerprint
+        and j.profile_probed_at is not distinct from cache.observed_profile_probed_at
+        and j.profile_snapshot is not distinct from cache.observed_profile_snapshot
+        and j.file_size_bytes is not distinct from public.vod_language_profile_file_size_bytes(cache.observed_profile_snapshot)),
       'dueUnleased',(select count(*) from jobs where quarantined_at is null and
         ((state='retry_wait' and coalesce(retry_at,'-infinity'::timestamptz)<=now())
         or (state in ('running','finalizing') and lease_expires_at<=now()) or state='queued')),

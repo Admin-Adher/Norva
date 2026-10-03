@@ -72,3 +72,9 @@ Ces deux heures établissent un débit observé de **contrôles techniques** ; e
 
 Un blocage distinct de la file stricte a été corrigé à 20:28 : clôture des travaux devenus obsolètes par changement de profil observé, sans effacer leurs preuves ni toucher aux travaux actifs. Deux reprises de progression fournisseur sont observées après déploiement ; le débit vocal prolongé reste à mesurer. Voir `2026-10-03-language-worker-stale-profile.md` et le relevé `2026-10-03-language-campaign-heartbeat-2012.json`. La campagne continue, avec les limites de production et sans promesse de clôture en une ou deux heures.
 
+## Mesure à 21:12 UTC
+
+**5 139 variantes distinctes contrôlées**, soit +1 259 en 59 min 47 s depuis le relevé précédent : **1 263 contrôles/h**. Le rythme varie, et la moyenne de 1 597/h observée sur les deux heures précédentes n'est pas une garantie pour les suivantes. Aucune nouvelle erreur HTTP du dispatcher ni expiration SQL n'est détectée ; les gardes de capacité et d'occupation fournisseur reportent encore certains appels.
+
+La projection affiche **1 757 variantes identifiées / 54 994 inconnues**. À 21:15, l'audit strict trouve **neuf validations réussies** depuis le lancement et **14 résultats de consensus indéterminés avec toutes les fenêtres enregistrées**, toujours rattachés au même profil observé. Les derniers ne reçoivent pas une langue arbitraire. Un nouveau travail Dino a été vérifié à 21:05:51, après le correctif de la file. La campagne continue ; aucun délai de clôture de toutes les analyses vocales n'est certifié.
+

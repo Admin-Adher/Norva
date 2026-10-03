@@ -34,3 +34,9 @@ Santé à 20:33 : deux Gateways HTTP 200, zéro erreur HTTP du dispatcher depuis
 Les douze contrôles GitHub du commit `a80a469ad` ont réussi, dont contrats cloud, types Edge, base jetable et compilations/tests Android. La suite « base jetable » ne rejoue pas cette nouvelle migration ; les **23 contrôles sur copie fraîche du schéma** constituent sa preuve SQL spécifique.
 
 La reprise est donc observée, mais ce correctif ne certifie ni un débit vocal soutenu ni la clôture de toute la campagne. Il ne justifie pas une nouvelle tentative aveugle des analyses déjà inconclusives ou mises en quarantaine. Preuves agrégées avant/après : `2026-10-03-language-campaign-heartbeat-2012.json`.
+
+## Confirmation à 21:12 UTC
+
+La PR 609 est intégrée dans `be86445f99e7ae16be9bb107622bbf478fe545a4`. Le contrôle suivant compte dix variantes ayant progressé auprès du fournisseur après déploiement, dont **une nouvelle validation réussie Dino à 21:05:51**. Le total de travaux stricts vérifiés de la cohorte passe à neuf. Quatre travaux ont également atteint un consensus indéterminé après publication ; ces résultats ne sont pas présentés comme des identifications réussies.
+
+La liste des candidats progresse et ne contient plus l'ancien travail obsolète de 10:50. Les reports normaux de capacité et d'occupation fournisseur restent présents. Le dispatcher et les deux Gateways sont sains, sans nouvelle expiration SQL détectée. Aucune nouvelle modification du fonctionnement de production lors de ce contrôle. Preuve : `2026-10-03-language-campaign-heartbeat-2112.json`.

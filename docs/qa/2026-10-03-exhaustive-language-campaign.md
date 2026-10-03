@@ -118,3 +118,33 @@ L'audit a également identifié une attente anormale : un travail obsolète se p
 Correctif SQL publié à **20:28:46 UTC**, après 23 contrôles dédiés : deux travaux obsolètes ont été retirés naturellement de la file globale, sans sonde ni attribution de langue. À 20:34, deux variantes de la cohorte ont une nouvelle progression de capture après publication. Le total des vérifications strictes terminées depuis le lancement est passé à **huit** ; la huitième (Dino à 20:22) précède ce correctif et n'en est pas une preuve de résultat. Aucun nouveau travail terminé n'est revendiqué dans les cinq premières minutes après déploiement.
 
 Les douze contrôles CI du code ont réussi. La base de preuve isolée a été arrêtée ; le dispatcher de production et la supervision restent actifs. Aucun compteur, bail, échec inconclusif ni quarantaine n'a été réinitialisé.
+
+## Contrôle automatique à 21:12–21:15 UTC
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 2 042 | 22 | 30 172 |
+| Norva Selection | 40 | 4 | 179 |
+| Dino | 1 712 | 918 | 7 951 |
+| MAX OTT | 1 345 | 813 | 16 692 |
+| **Total** | **5 139** | **1 757** | **54 994** |
+
+Il reste **42 111 fiches distinctes** inconnues. Toutes les variantes initiales sont encore visibles. La projection donne **510 identifications supplémentaires** depuis le relevé précédent. Les requêtes par source sont successives et les traitements continuent : le relevé n'est pas une photographie atomique.
+
+Entre 20:12:27 et 21:12:15, **1 259 variantes supplémentaires** ont reçu un contrôle distinct, soit **1 263 contrôles techniques/h** sur 59 min 47 s. Le débit a donc baissé par rapport à l'heure précédente (1 649/h), sans nouvelle erreur HTTP ni expiration SQL détectée. Les reports de capacité et d'occupation fournisseur persistent ; leur absence d'appel média ne compte pas comme une sonde. Ce débit ne constitue pas une prévision du temps de reconnaissance vocale complète.
+
+### Résultats stricts et reprise après correction
+
+Le travail Dino terminé à **21:05:51 UTC** apporte la première validation `verified` de la cohorte observée après le correctif de 20:28. Le total est désormais **neuf validations strictes réussies depuis le début** (Strng 1, Selection 2, Dino 3, MAX OTT 3), avec progression fournisseur et preuve pour toutes les pistes attendues.
+
+L'audit en lecture seule distingue maintenant les analyses strictes réellement achevées mais indéterminées : état terminal de consensus insuffisant, progression fournisseur après le début de campagne, quatre ou six fenêtres complètes et autant de reçus de fenêtre. À 21:15, **14 variantes** remplissent ces critères (Strng 2, Selection 9, Dino 3, MAX OTT 0). Le profil exact observé en cache correspond encore dans les 14 cas : signature, date, description et taille. Les anciens résultats inconclusifs antérieurs à la campagne ne gonflent pas ce compteur. Aucun de ces travaux n'est relancé manuellement.
+
+Ces compteurs d'analyse sont distincts des langues identifiées par les métadonnées et ne doivent pas être additionnés à celles-ci. Un simple profil sans langue ou une réponse de métadonnées inconclusive ne constitue pas une analyse vocale terminée. Les erreurs de transport encore en nouvelle tentative restent **à traiter** ; elles ne deviennent pas automatiquement une indisponibilité définitive prouvée.
+
+À 21:12:39, **dix variantes** ont enregistré une nouvelle progression fournisseur après le correctif de 20:28. Les deux travaux obsolètes retirés de la file globale ne sont pas comptés comme des sondes. MAX OTT a reçu un nouvel essai à 21:14, reporté pour occupation fournisseur : son ancien état `LANGUAGE_VALIDATION_GATEWAY_ERROR` n'est plus immobile. La file continue, avec des contraintes de capacité toujours actives.
+
+### Santé et continuité
+
+Deux Gateways HTTP 200 / `ok=true`, aucune lecture active lors du relevé, capacité limitée à deux travaux. Le dispatcher est sain, sans redémarrage et sans marqueur STOP ; enrichissement et cron strict actifs. **Zéro erreur HTTP du dispatcher depuis 18:01:46**, 258 lots de métadonnées non vides terminés ; zéro diagnostic d'expiration SQL depuis la recréation des Edge à 19:23. Les codes SQL historiques figurant encore dans l'état d'admission ne prouvent pas une nouvelle expiration.
+
+Le correctif précédent est intégré dans `be86445f99e7ae16be9bb107622bbf478fe545a4` (PR 609). Ce contrôle n'a modifié ni le dispatcher, ni la base, ni les seuils ou limites de production. Seul l'audit en lecture seule a été précisé. La campagne et sa supervision restent **ACTIVES**, sans clôture. Preuve : `2026-10-03-language-campaign-heartbeat-2112.json`.
