@@ -46,13 +46,13 @@ Le candidat isolé du routage public a traité 28 fichiers Strng en 36,18 s, san
 
 Le filtre web affichait encore **62 042** fiches avec au moins une version sans langue à 11:50 UTC. Ce nombre n'est pas le nombre de fichiers et comprend des fiches ayant également une version identifiée. Il n'est ni masqué ni artificiellement diminué par ce correctif.
 
-La seule mesure réelle de débit du nouveau lot ayant effectivement atteint le fournisseur pendant cette fenêtre est **28 réponses en 36,18 s** sur Strng. Elles sont toutes inconclusives, sans erreur, et ne prouvent pas un gain de langues identifiées. Les essais Dino/MAX OTT et plusieurs passages automatiques ont été différés par les activités fournisseur et la capacité serveur. Les traces d'activité et fenêtres de priorité existaient bien ; elles n'ont pas été supprimées pour forcer un résultat.
+La première mesure réelle de débit du nouveau lot ayant effectivement atteint le fournisseur pendant cette fenêtre est **28 réponses en 36,18 s** sur Strng. Elles sont toutes inconclusives, sans erreur, et ne prouvent pas un gain de langues identifiées. Les essais Dino/MAX OTT et plusieurs passages automatiques ont été différés par les activités fournisseur et la capacité serveur. Les traces d'activité et fenêtres de priorité existaient bien ; elles n'ont pas été supprimées pour forcer un résultat.
 
 Le garde de capacité du Gateway principal a notamment indiqué une opération de transcription et plusieurs travaux prioritaires, même avec zéro session vidéo locale. Un créneau de métadonnées disponible a ensuite confirmé le report par compte fournisseur. Les reports restent récupérables et le traitement continue via le planificateur. Aucune échéance de traitement des 62 000 fiches n'est certifiée par cet essai.
 
 **Ce qui est validé** : nouveau parcours réel, progression après métadonnées vides, déploiement identique, activation automatique, limites de charge, priorité de lecture, tests d'écriture et de projection isolés avec les fonctions réelles.
 
-**Ce qui ne l'est pas encore** : fin du rattrapage global, débit représentatif en exploitation prolongée et attribution positive d'une langue visible dans l'interface par ce nouveau lot pendant cette fenêtre. L'absence de langue explicite nécessite toujours une sonde ou une reconnaissance concluante ; les fournisseurs inaccessibles ou fichiers inconclusifs ne peuvent pas être déclarés identifiés.
+**Ce qui ne l'est pas encore** : fin du rattrapage global, débit représentatif en exploitation prolongée et contrôle visuel sur le compte propriétaire AtlasPro des six langues nouvellement projetées. L'absence de langue explicite nécessite toujours une sonde ou une reconnaissance concluante ; les fournisseurs inaccessibles ou fichiers inconclusifs ne peuvent pas être déclarés identifiés.
 
 ## Résultats de validation complets
 
@@ -60,3 +60,19 @@ Le garde de capacité du Gateway principal a notamment indiqué une opération d
 - Régression ciblée JS réussie ; les 11 contrôles GitHub sur `e0a557a9ca39a7f34e3aa32a0348b42ed579238b` sont réussis, dont contrats, typage Edge, base jetable, parcours simulé web/mobile et compilations.
 - La suite générale Windows locale a obtenu 5 729 réussites, 4 échecs, 1 annulation, 55 ignorés : trois appels à un chemin Git absent, un contrôle bash absent et un test Gateway dépassant son délai. Elle n'est pas déclarée verte. La CI Linux de la même modification, incluant les contrats cloud, est verte ; aucun de ces échecs locaux ne porte sur le nouveau lot.
 - Les deux prévisualisations Vercel ont été limitées par le quota journalier de builds. Elles ne constituent pas une preuve de déploiement ; le déploiement concerné ici est celui des fonctions Edge sur Hetzner, contrôlé séparément. Aucun bundle d'interface n'est changé dans cette PR.
+### Résultat positif automatique constaté à 12:05 UTC
+
+Le cron a traité 11 fichiers **AtlasPro** vers 12:01 UTC : **6 langues identifiées et 5 réponses inconclusives**. Les six écritures du nouveau parcours sont présentes dans `catalog_owned_language_declarations`, avec génération et configuration courantes ; `catalog_movie_audio_identified` renvoie `true` pour chacune. Ce n'est pas un lancement manuel limité à la source de test.
+
+| Fichier | Déclaration audio fournisseur intégrée |
+| --- | --- |
+| Kung Fu Games (2024) SUBT AR | anglais |
+| Under Fire (2025) VOSTFR | anglais |
+| The Love Scam (2025) SUBT AR | anglais |
+| Breaking In (2018) 4K MULTI | anglais |
+| Magma (2023) 4K | français |
+| Pyaar Prema Kalyanam (2026) SUBT AR | anglais |
+
+Ces langues viennent des objets de pistes audio, pas des marqueurs de sous-titres, de la catégorie ou de la langue originale TMDB. Elles constituent des déclarations du fournisseur ; elles ne sont pas présentées comme une écoute certifiée.
+
+Le catalogue du navigateur a été rechargé : navigation et filtres disponibles ; compteur global affiché **62 041**. Ce compte n'a pas la source AtlasPro, donc ce contrôle visuel ne prétend pas montrer les six nouvelles langues. Les conteneurs temporaires de test et de preuve SQL ont été arrêtés et supprimés ; les répliques de production restent actives.
