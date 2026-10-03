@@ -29,7 +29,7 @@ def main():
   # Keep a small gap for the worker's distributed admission arbiter.
   time.sleep(0.25)
  (ROOT/'recovered-progress.private.json').write_text(json.dumps(private));(ROOT/'recovered-progress.private.json').chmod(0o600)
- archive=json.loads(sql("select coalesce(jsonb_agg(jsonb_build_object('reason',original_job->>'error_code','count',n)),'[]') from(select original_job,count(*) over(partition by original_job->>'error_code') n from public.catalog_selection_audio_recoveries where repair_revision='%s')x;"%REV))
+ archive=json.loads(sql("select coalesce(jsonb_agg(x),'[]') from(select original_job->>'error_code' reason,count(*) count from public.catalog_selection_audio_recoveries where repair_revision='%s' group by 1)x;"%REV))
  receipt={'atEpoch':time.time(),'repairRevision':REV,'recoveredThisRun':sum(out.values()),'byPriorReason':dict(out),'archive':archive}
  (ROOT/'recovered-progress.safe.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt))
 if __name__=='__main__':main()

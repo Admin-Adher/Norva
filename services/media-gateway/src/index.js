@@ -9607,6 +9607,7 @@ function extractAudioWav(
                 : 'Accept: */*\r\nConnection: keep-alive\r\n',
             '-user_agent', ua,
             '-probesize', '2000000', '-analyzeduration', '3000000',
+            ...(!strictLoopback ? codecProbeInputOptions(url) : []),
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
             '-i', url,
             '-map', `0:${trackIndex}`,
