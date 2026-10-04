@@ -10209,40 +10209,14 @@ class WatchPage {
         return ep?.rawTitle || ep?.raw_title || ep?.title || ep?.name || null;
     }
 
-    // Player-menu fallback when no real per-track language is known: infer the audio VERSION
-    // from the provider's episode/title name (e.g. a "VOSTFR"/"VO" tag => the ORIGINAL audio,
-    // a "VF" tag => French) so the menu reads something meaningful instead of "Default".
-    // CRITICAL: "original" is NOT a language — VOSTFR can be any source language. It resolves to
-    // the title's real TMDB original_language ("Japanese", "English", "Korean"…) when known, and
-    // otherwise to a plain "VO". We never assume a specific language from the VOSTFR tag.
+    // Use the same curated, file-scoped provider declaration as catalogue badges.
+    // A filename prefix, subtitle tag or TMDB original language cannot name an
+    // untagged audio track (e.g. EN| Innocent Voices [SUB] has English subtitles).
     playingAudioVersionLabel() {
         try {
-            // Display-only fallback from the selected file's curated declaration.
-            // Never create a track/index, a verified language or a saved audio
-            // preference from it. Multiple declared languages cannot name one track.
             const item = this.currentEpisodeMetadata() || this.content || {};
             const languages = window.MediaUtils?.providerAudioLanguages?.(item) || [];
-            if (languages.length === 1) return this.getLanguageDisplayName(languages[0]);
-            if (languages.length > 1) return null;
-            // Provider filename tags are display hints only. Their provenance and
-            // validation stay in the record, not in the public track label.
-            const name = this.currentEpisodeRawTitle() || this.content?.rawTitle
-                || this.content?.raw_title || this.content?.title || '';
-            const info = window.MediaUtils?.parseVersionInfo?.(name);
-            const audioSig = (info?.audioSignals || [])[0];
-            if (!audioSig) return null;
-            if (audioSig.language === 'original') {
-                const orig = this.normalizeTrackLanguage(
-                    this.content?.originalLanguage || this.content?.original_language,
-                );
-                if (orig && orig !== 'und') {
-                    const display = this.getLanguageDisplayName(orig);
-                    if (display) return display;
-                }
-                return (globalThis.NorvaI18n?.t("ui_web_8a0d7658de66", { defaultValue: "Original audio" }) ?? 'Original audio');
-            }
-            const display = this.getLanguageDisplayName(audioSig.language);
-            return display || null;
+            return languages.length === 1 ? this.getLanguageDisplayName(languages[0]) : null;
         } catch (_) {
             return null;
         }

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const Hls = require('../public/js/vendor/hls-1.5.7.min.js');
+const Hls = require('../public/js/vendor/hls-1.7.3.min.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../public/js/pages/WatchPage.js'), 'utf8');
 
@@ -65,22 +65,23 @@ test('WatchPage bounds HLS rewind retention while preserving each forward-buffer
     }
 });
 
-test('delivered Hls 1.5.7 trims audio and video at a simulated two-hour position, growing and completed VOD', () => {
-    assert.equal(Hls.version, '1.5.7');
+test('delivered Hls 1.7.3 trims audio and video at a simulated two-hour position, growing and completed VOD', () => {
+    assert.equal(Hls.version, '1.7.3');
     assert.equal(Hls.DefaultConfig.backBufferLength, Infinity);
     for (const live of [true, false]) {
         const events = [];
         const controller = new Hls.DefaultConfig.bufferController({
             config: { ...Hls.DefaultConfig, ...watchHlsConfig('/gateway/session/master.m3u8') },
+            logger: { debug() {}, log() {}, info() {}, warn() {}, error() {} },
             on() {}, off() {}, trigger: (event, data) => events.push({ event, data }),
         });
         controller.media = { currentTime: 7203 };
         controller.details = { live, levelTargetDuration: 4 };
-        controller.sourceBuffer = {
-            audio: { buffered: ranges([[0, 7323]]), ended: false },
-            video: { buffered: ranges([[0, 7323]]), ended: false },
-        };
-        controller.onFragChanged();
+        controller.sourceBuffers = [
+            ['audio', { buffered: ranges([[0, 7323]]) }],
+            ['video', { buffered: ranges([[0, 7323]]) }],
+        ];
+        controller.onFragChanged(null, { frag: { elementaryStreams: {} } });
         const flushes = events.filter(item => item.event === Hls.Events.BUFFER_FLUSHING);
         assert.equal(flushes.length, 2);
         assert.deepEqual(flushes.map(item => item.data.type).sort(), ['audio', 'video']);
@@ -95,14 +96,15 @@ test('delivered Hls retains at least a target duration for long segments', () =>
     const flushes = [];
     const controller = new Hls.DefaultConfig.bufferController({
         config: { ...Hls.DefaultConfig, ...watchHlsConfig('/gateway/session/master.m3u8') },
+        logger: { debug() {}, log() {}, info() {}, warn() {}, error() {} },
         on() {}, off() {}, trigger: (event, data) => {
             if (event === Hls.Events.BUFFER_FLUSHING) flushes.push(data);
         },
     });
     controller.media = { currentTime: 7203 };
     controller.details = { live: true, levelTargetDuration: 60 };
-    controller.sourceBuffer = { video: { buffered: ranges([[0, 7323]]), ended: false } };
-    controller.onFragChanged();
+    controller.sourceBuffers = [['video', { buffered: ranges([[0, 7323]]) }]];
+    controller.onFragChanged(null, { frag: { elementaryStreams: {} } });
     assert.equal(flushes[0].endOffset, 7140);
 });
 
