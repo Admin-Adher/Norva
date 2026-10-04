@@ -59,3 +59,15 @@ A demonstrated queue-admission defect prevented explicit resampling while the au
 Innocent Voices pass three reached three authenticated receipts, with the last new capture at 16:13:14. The first three dispositions are conflict/weak/weak, not accepted language evidence. The next capture was deferred with `LANGUAGE_VALIDATION_PLAYBACK_ACTIVE`; the existing receipts and three provider attempts are retained. Ochi remains deferred for provider occupancy, zero captures. This proves real capture resumption after the admission fix, not a language identification. Both Gateways returned HTTP 200 / ok at 16:12:46; automatic admission remains enabled with 32 automatic and two manual jobs. The proof container is stopped; the permanent dispatcher was not restarted.
 
 Code commit `1599a43ad628e675bf4845be0db82ee7b9c9626f` passed the cloud contracts, Edge contracts/types, disposable database, customer journey, notice policy, GoTrue acceptance, Android phone/TV tests and both Android package builds. The Windows package was still running at 16:15. PR 632 records the change; Codex attachment hit the existing 100-item limit, with no other attachment removed.
+
+
+## Human listening confirmation after the AAC decoder correction
+
+On 4 October, the user explicitly confirmed that the sound was normal and that
+the current Innocent Voices [SUB] copy was spoken in Spanish. See the
+[AAC decoder acceptance](2026-10-04-aac-decoder-regression.md). This is a
+human identification of the exact selected file and track. The prior
+inconclusive automated runs, source audio tag `und`, and independently known
+English subtitles retain their original provenance. This documentary update
+does not publish a fabricated provider declaration or strict worker result.
+The other five requested film identifications remain open.
