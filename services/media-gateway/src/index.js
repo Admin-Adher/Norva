@@ -112,6 +112,7 @@ const {
     classifyProviderFetchFailure,
     classifyProviderResponseFailure,
     isProxyAuthenticationFailure,
+    providerFileRefusalResponse,
     shouldRetryProviderStatus,
 } = require('./providerFailure');
 const {
@@ -12440,6 +12441,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                     ? err.upstreamStatus : null,
                 retryable: err?.retryable === true,
             });
+            const fileRefusal = providerFileRefusalResponse(err);
+            if (fileRefusal) return res.status(502).json(fileRefusal);
             if (err?.upstreamStatus === 404 && err?.code === 'PROVIDER_REQUEST_FAILED') {
                 return res.status(404).json({
                     error: 'Media file not found on the provider (404).',

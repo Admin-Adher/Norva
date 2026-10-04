@@ -4242,7 +4242,7 @@ class WatchPage {
     }
 
     isTerminalPlaybackError(message) {
-        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|PROVIDER_(ACCOUNT_)?BUSY|PLAYBACK_SUPERSEDED|401|403|404|416|429|458|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|PROVIDER_FILE_REFUSED|PROVIDER_(ACCOUNT_)?BUSY|PLAYBACK_SUPERSEDED|401|403|404|416|429|458|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
     }
 
     isPlaybackSupersededError(error) {
@@ -4346,6 +4346,11 @@ class WatchPage {
         if (this.isProviderBusyError(text)) {
             return this.providerAccountConflictCopy().message;
         }
+        if (/\bPROVIDER_FILE_REFUSED\b/i.test(text)) {
+            // This response identifies the selected file's refusal. It proves
+            // neither a general cloud block nor that another device can play it.
+            return (globalThis.NorvaI18n?.t("ui_web_542c160150e3", { defaultValue: "The provider is temporarily unavailable for this stream. Try another version or retry in a moment." }) ?? 'The provider is temporarily unavailable for this stream. Try another version or retry in a moment.');
+        }
         if (/MEDIA_CACHE_(PRODUCER_ACTIVE|BACKGROUND_DRAINING)/i.test(text)) {
             return (globalThis.NorvaI18n?.t("ui_web_800cec00079f", { defaultValue: "This film is still being prepared. Please retry in a moment." }) ?? 'This film is still being prepared. Please retry in a moment.');
         }
@@ -4373,9 +4378,7 @@ class WatchPage {
                 : (globalThis.NorvaI18n?.t("ui_web_4700ef1bdf32", { defaultValue: "The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again." }) ?? 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.');
         }
         if (/401|Unauthorized|403|Forbidden/i.test(text)) {
-            return cloud
-                ? (globalThis.NorvaI18n?.t("ui_web_0d831becc649", { defaultValue: "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off." }) ?? "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off.")
-                : (globalThis.NorvaI18n?.t("ui_web_ec9a00a6e6b1", { defaultValue: "The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed." }) ?? 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.');
+            return (globalThis.NorvaI18n?.t("ui_web_ec9a00a6e6b1", { defaultValue: "The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed." }) ?? 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.');
         }
         if (/404|not found/i.test(text)) {
             return (globalThis.NorvaI18n?.t("ui_web_e95a86ac0092", { defaultValue: "Stream not found on the provider (404). This title may have been removed." }) ?? 'Stream not found on the provider (404). This title may have been removed.');
@@ -8274,15 +8277,16 @@ class WatchPage {
         this.trackProduct('journey_error', {
             state: 'error', outcome: 'error', failureFamily: this.playbackFailureFamily(safeMessage)
         });
-        // A provider auth / rate-limit block (401/403/429) does not clear on a
-        // reload — auto-refreshing just spins on the same blocked path. Skip it
-        // and point the user to a residential path (native app / local hub).
+        // File refusal and account/rate-limit responses stay user-driven. A
+        // failed route does not prove that another device or network will work.
         const playbackSuperseded = this.isPlaybackSupersededError(safeMessage);
         const providerBusy = !playbackSuperseded && this.isProviderBusyError(safeMessage);
+        const providerFileRefused = /\bPROVIDER_FILE_REFUSED\b/i.test(safeMessage);
         const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
         const serverRecovery = !playbackSuperseded
             && !providerBusy
             && !providerBlocked
+            && !providerFileRefused
             && this.isCloudPlaybackMode()
             && this._preferredExplicitCloudMode === 'transcode';
         const conflictCopy = playbackSuperseded
@@ -8292,7 +8296,7 @@ class WatchPage {
         // A 458 opens a server-side circuit. Automatic retries would extend the
         // provider conflict; only an explicit user retry may probe after cooldown.
         const allowAutomaticRetry = options.allowAutomaticRetry !== false;
-        const refreshScheduled = playbackSuperseded || providerBusy || serverRecovery
+        const refreshScheduled = playbackSuperseded || providerBusy || providerFileRefused || serverRecovery
             ? false
             : providerBlocked || !allowAutomaticRetry
                 ? false
@@ -8301,8 +8305,8 @@ class WatchPage {
             ? conflictCopy.hint
             : serverRecovery
                 ? recoveryCopy.hint
-            : providerBlocked
-                ? (globalThis.NorvaI18n?.t("ui_web_eea77d940feb", { defaultValue: "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later." }) ?? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later.")
+            : providerBlocked || providerFileRefused
+                ? (globalThis.NorvaI18n?.t("ui_web_5e719a93f85f", { defaultValue: "If the problem persists, use Retry below." }) ?? 'If the problem persists, use Retry below.')
                 : refreshScheduled
                     ? (globalThis.NorvaI18n?.t("ui_web_61abd551a4ec", { defaultValue: "Retrying automatically in 2 seconds…" }) ?? 'Retrying automatically in 2 seconds…')
                     : (globalThis.NorvaI18n?.t("ui_web_5e719a93f85f", { defaultValue: "If the problem persists, use Retry below." }) ?? 'If the problem persists, use Retry below.');

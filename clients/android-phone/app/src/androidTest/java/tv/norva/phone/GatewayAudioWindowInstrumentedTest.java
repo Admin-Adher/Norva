@@ -71,6 +71,10 @@ public class GatewayAudioWindowInstrumentedTest {
                 + "audio.content=film;audio.audioLanguageValidationStatus='pending';audio.audioTracks=[{index:1,language:'und',codec:'aac'},{index:2,language:'und',codec:'aac'}];"
                 + "const rows=audio.getProbeAudioTracks();if(!rows[0].label.startsWith(audio.getLanguageDisplayName('es'))||rows[1].label.includes(audio.getLanguageDisplayName('es')))throw Error('track scope lost');"
                 + "if(audio.isAudioLanguageVerified()||audio.content.audioLanguages)throw Error('human report promoted to machine evidence');"
+                + "audio.isCloudPlaybackMode=()=>true;const refused={status:502,payload:{details:{code:'PROVIDER_FILE_REFUSED'}}};"
+                + "const refusal=audio.getErrorText(refused),copy=audio.getFriendlyPlaybackError(refusal);"
+                + "if(!copy.includes('temporarily unavailable for this stream')||/datacenter|blocking cloud|Norva app/.test(copy))throw Error('file refusal copy untruthful');"
+                + "if(!audio.isTerminalPlaybackError(refusal)||audio.playbackCoordinationRetryDelayMs(refused,0,0)!==null)throw Error('file refusal auto retry');"
                 + "return 'ok';}catch(e){return String(e);}})()",
                 value -> { result.set(value); done.countDown(); }));
             assertTrue("WebView completed recovery contract", done.await(20, TimeUnit.SECONDS));

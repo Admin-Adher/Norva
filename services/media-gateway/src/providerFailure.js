@@ -89,6 +89,20 @@ function shouldRetryProviderStatus(status) {
     return value === 502 || value === 503 || value === 504;
 }
 
+// A file-open refusal is terminal for this attempt, but says nothing about its
+// cause (account, relay, or file availability). Keep raw status in server logs:
+// legacy clients interpret a public 401/403 as an account-concurrency signal.
+// This narrowly typed response is used only by finite VOD startup, after its
+// busy, proxy-authentication and container-mismatch handling.
+function providerFileRefusalResponse(error) {
+    if (error?.code !== 'PROVIDER_REQUEST_FAILED'
+        || ![401, 403].includes(error?.upstreamStatus)) return null;
+    return {
+        error: 'This media file is currently unavailable.',
+        code: 'PROVIDER_FILE_REFUSED',
+    };
+}
+
 function classifyProviderResponseFailure(status, payload, options = {}) {
     const value = Number(status);
     const text = JSON.stringify(payload || {}).toLowerCase();
@@ -131,5 +145,6 @@ module.exports = {
     classifyProviderFetchFailure,
     classifyProviderResponseFailure,
     isProxyAuthenticationFailure,
+    providerFileRefusalResponse,
     shouldRetryProviderStatus,
 };
