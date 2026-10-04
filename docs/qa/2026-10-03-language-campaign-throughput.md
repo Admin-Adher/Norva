@@ -128,3 +128,13 @@ Pas de nouvelle erreur HTTP du dispatcher ni diagnostic SQL avant le déploiemen
 
 La campagne reprend automatiquement. Gateways sains, 681 lots de métadonnées terminés à 03:29 ; les logs des nouveaux Edge ne remplacent pas l'historique conservé. La cause de l'erreur de finalisation n'est pas encore établie et aucun délai de clôture exhaustive n'est certifié. Reçu : `2026-10-04-language-campaign-heartbeat-0518.json`.
 
+## Mesure du 4 octobre à 04:19 UTC — 06:19 Paris
+
+**11 893 contrôles distincts**, soit +955 en 61 min 4 s : **938 contrôles techniques/h**. **4 248 variantes identifiées** (+318), **52 503 variantes / 40 808 fiches encore inconnues**. Toute la cohorte initiale reste visible. Les 2 min 28 s du drainage précédent sont comprises dans la durée murale, sans correction favorable du débit.
+
+**24 validations strictes réussies** (+2) et **49 analyses complètes indéterminées** (+1), avec profil courant correspondant. Ces compteurs se recoupent avec les contrôles techniques ; aucune prévision certaine de fin exhaustive n'en est déduite.
+
+Un retard distinct du consensus des fenêtres est reproduit puis corrigé : une piste MAX OTT avec six reçus attendait depuis 03:41. Migration déployée à **04:31:27 UTC** après **34 contrôles SQL isolés**. Le cron clôt son consensus à **04:32:00**, indéterminé, sans nouvelle capture ni langue attribuée. À 04:33, les compteurs stricts passent à 24 réussites / 51 analyses indéterminées ; le second résultat supplémentaire est Selection, terminé avant correction à 04:22. Ces clôtures ne sont pas des contrôles techniques uniques supplémentaires.
+
+Gateways sains, dispatcher, admission et cron actifs. Aucun nouvel échec HTTP du dispatcher ni diagnostic SQL depuis le dernier redémarrage Edge ; l'incident historique est conservé. La finalisation SQL Strng reste en report jusqu'au 5 octobre, avec diagnostic précis encore manquant. Reçu : `2026-10-04-language-campaign-heartbeat-0619.json`.
+
