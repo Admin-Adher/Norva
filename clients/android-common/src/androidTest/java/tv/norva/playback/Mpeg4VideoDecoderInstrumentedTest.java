@@ -55,7 +55,7 @@ public final class Mpeg4VideoDecoderInstrumentedTest {
         assertNotNull(demux.format);
         Mpeg4VideoDecoder decoder = new Mpeg4VideoDecoder(demux.format);
         try (PixelReference pixels=new PixelReference(InstrumentationRegistry.getInstrumentation().getContext()
-                .getAssets().open("asp-qpel-reference.yuv.gz"),reference)) {
+                .getAssets().open("asp-qpel-reference.yuvref"),reference)) {
             List<String> decoded=decode(decoder, demux.packets, 0,pixels);
             assertEquals(reference.size(),decoded.size());
             // A decoder flushed after EOF must discard its old references and
@@ -177,3 +177,4 @@ public final class Mpeg4VideoDecoderInstrumentedTest {
         }
     }
 }
+
