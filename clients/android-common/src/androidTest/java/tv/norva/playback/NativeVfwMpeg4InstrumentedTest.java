@@ -111,6 +111,23 @@ public final class NativeVfwMpeg4InstrumentedTest {
                 assertTrue("Seek must render fresh video; before="+videoBefore+" after="+seekObserved[1]
                         +" position="+seekObserved[0],seekObserved[1]>videoBefore+5);
             });
+            if("s_xvid_vfw_asp_qpel.mkv".equals(asset)) {
+                // Exercise actual Activity background/foreground transitions and
+                // Surface recreation, not just a decoder flush on the same view.
+                ins.runOnMainSync(()->assertTrue(opened.moveTaskToBack(true)));
+                SystemClock.sleep(500);
+                ins.runOnMainSync(()->assertFalse("Background player must pause",player.getPlayWhenReady()));
+                target.startActivity(new Intent().setClassName(target,activityName)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+                long foregroundDeadline=SystemClock.elapsedRealtime()+5000;
+                long[] resumed={0};
+                while(SystemClock.elapsedRealtime()<foregroundDeadline){
+                    ins.runOnMainSync(()->{assertNull(player.getPlayerError());resumed[0]=player.getVideoDecoderCounters().renderedOutputBufferCount;});
+                    if(resumed[0]>seekObserved[1]+5)break;
+                    SystemClock.sleep(50);
+                }
+                assertTrue("Returning must render new MPEG-4 pictures",resumed[0]>seekObserved[1]+5);
+            }
             // Exercise the platform Back dispatch, including TV's key handler.
             // Calling deprecated Activity.onBackPressed bypasses that handler.
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
