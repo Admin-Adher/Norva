@@ -354,3 +354,33 @@ Les deux Gateways sont sains, sans lecture active aux relevés ; capacité adapt
 Le travail Strng ayant échoué à la finalisation SQL reste inchangé et reporté au **5 octobre à 02:22:08 UTC**, sans tentative forcée. Trois reprises de métadonnées Strng et trois MAX OTT conservent `metadata-request-failed` avec un seul essai et leurs délais ; aucune reprise Dino de ce type n'est présente au contrôle de 04:24. Ces erreurs par entrée sont distinctes d'un échec HTTP du dispatcher et ne démontrent pas une panne SQL. Un travail Dino sans première capture garde un bail expiré à 04:17 ; sa reprise reste à surveiller avec le sélecteur réel, sans forcer le bail.
 
 La campagne et la supervision restent **ACTIVES**. Aucun seuil de confiance, compteur de tentative, bail, délai ni quarantaine n'est réinitialisé. Reçu : `2026-10-04-language-campaign-heartbeat-0619.json`.
+
+## Contrôle du 4 octobre à 07:20 Paris (05:20 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 4 653 | 88 | 30 106 |
+| Norva Selection | 78 | 7 | 176 |
+| Dino | 4 597 | 2 465 | 6 404 |
+| MAX OTT | 3 629 | 2 185 | 15 320 |
+| **Total de la cohorte** | **12 957** | **4 745** | **52 006** |
+
+**1 064 contrôles supplémentaires en 61 min 29 s**, soit **1 038 contrôles techniques/h**, et **497 identifications supplémentaires**. Les 56 751 variantes de départ restent visibles. Le total global interrogé ensuite trouve 52 004 variantes / 40 395 fiches inconnues ; le gain utilise les sommes par source, puisque les requêtes sont successives.
+
+**27 validations strictes réussies avec preuve complète** (Strng 5, Selection 5, Dino 5, MAX OTT 12), soit trois supplémentaires. **53 analyses complètes indéterminées avec profil courant correspondant** (6, 31, 11, 5), soit quatre supplémentaires depuis le relevé horaire de 04:19. Ces ensembles se recoupent avec les contrôles et identifications ; le débit technique n'est pas celui de la reconnaissance vocale.
+
+### Deux expirations de finalisation et optimisation mesurée
+
+Deux occurrences naturelles à 05:11 sur le premier Edge apportent enfin un code précis : **57014**, après **8 002 et 8 003 ms**. Le compteur générique de délais SQL reste à zéro car il ne couvre pas ce diagnostic ; il ne faut pas l'utiliser pour nier ces erreurs. La lecture des logs a été corrigée pour les couleurs ANSI et les clés entre guillemets, sans publier de message brut ni identifiant. L'étape SQL exacte interrompue reste inconnue ; l'échantillonnage ultérieur ne prouve aucune absence de verrou lors des échecs.
+
+Une composante coûteuse est néanmoins mesurée : la sélection des destinataires d'un résultat film parcourt les variantes de 53 sources. Sa réécriture utilise le périmètre fournisseur et l'index des générations tout en conservant la vue visible canonique. Sur une coordonnée suivie : **1 918 ms → 4,542 ms**, et **1 328 081 → 427 accès aux blocs en mémoire**, avec le même destinataire. Ce chiffre concerne la requête, pas le RPC complet.
+
+**23 assertions SQL isolées réussies**, dont huit comparaisons sur 35 combinaisons identité/fichier ; quatre comparaisons en lecture seule sur les catalogues réels confirment aussi les mêmes destinataires. Migration **`20261004054500_scope_audio_verification_recipients`** déployée à **05:45:39 UTC**, sans pause ni redémarrage. SHA-256 de la fonction : **`83bc052b380c5db8b4e7e188999491fd913f81619a8aa74f191ae666bd5fbc8d`**. Validation, ACL, admission, seuils, délais et baux restent inchangés. Conteneur de preuve arrêté. Détails : `2026-10-04-language-finalization-recipient-scope.md`.
+
+### Santé et limites
+
+À 05:21, deux Gateways sains, dispatcher sain, STOP absent, cron et admission actifs ; **812 lots métadonnées terminés**, contre 739 à 04:19. À 05:46 après déploiement : services toujours sains, capacité deux/deux, **850 lots terminés**. Aucun nouvel échec HTTP du dispatcher ; l'incident historique demeure compté.
+
+Le travail Strng ayant échoué à 02:22 garde son report au **5 octobre à 02:22:08 UTC**, ses huit tentatives fournisseur et sa dernière capture à 01:31. Un autre travail Strng a terminé sa validation à 05:18. Le travail Dino sans capture a repassé l'admission à 05:02 ; son bail a expiré à 05:07 sans nouvelle preuve de capture. Une autre analyse Dino progresse à quatre fenêtres à 05:20. Les erreurs de métadonnées par entrée conservent leurs délais ; aucune reprise n'est forcée.
+
+La diminution du coût SQL est prouvée ; **la disparition complète des expirations RPC ne l'est pas encore**. La campagne et la supervision restent **ACTIVES**, sans déclaration de clôture ni promesse de terminer les analyses vocales en une ou deux heures. Reçu : `2026-10-04-language-campaign-heartbeat-0720.json`.
