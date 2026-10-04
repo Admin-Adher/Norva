@@ -32,6 +32,7 @@ test('Edge display and identity handle the same compact provider labels', () => 
     ['EN|Lost on a Mountain in Maine', 'Lost on a Mountain in Maine'],
     ['AR| Lost in Mobius', 'Lost in Mobius'], ['AR| Long Lost', 'Long Lost'],
     ['FR｜Long Lost', 'Long Lost'], ['THOR | Love and Thunder', 'THOR | Love and Thunder'],
+    ['IN| TAMIL| Gandhi Kannadi', 'Gandhi Kannadi'],
   ]) {
     assert.equal(output.exports.cleanDisplayTitle(raw), clean);
     assert.equal(output.exports.normalizeTitle(raw), output.exports.normalizeTitle(clean));

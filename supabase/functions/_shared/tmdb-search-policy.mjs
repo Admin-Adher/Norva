@@ -4,7 +4,7 @@
 
 // A bar is an explicit provider delimiter, including compact labels such as
 // "EN| Title". Dashes still require spaces to preserve real hyphenated titles.
-const BOX_BAR_PREFIX = /^([A-Z0-9+_-]{2,12})\s*[▎▏▍▌│┃┆┊｜|]\s*/;
+const BOX_BAR_PREFIX = /^((?:[A-Z]{2}|FRQ|ALB|EXYU|SRB|SCAN|MULTI|TAMIL|TELUGU|HINDI|MALAYALAM|KANNADA|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*)\s*[▎▏▍▌│┃┆┊｜|]\s*/;
 const DASH_PREFIX = /^((?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*)(?: [-–—] | -[A-Z0-9+]{1,6}- )/;
 
 // These are provider market labels, not always ISO language codes. Map only
@@ -43,7 +43,7 @@ const PREFIX_LOCALES = Object.freeze({
   SO: "so-SO",
 });
 
-export const TMDB_SEARCH_POLICY_VERSION = "catalog-compact-prefix-v7";
+export const TMDB_SEARCH_POLICY_VERSION = "catalog-compact-prefix-v8";
 
 export function providerTitlePrefix(value) {
   const raw = String(value || "");
@@ -59,9 +59,15 @@ export function providerTitlePrefix(value) {
 }
 
 export function stripProviderSearchPrefix(value) {
-  const raw = String(value || "");
-  const withoutBox = raw.replace(BOX_BAR_PREFIX, "");
-  return withoutBox === raw ? raw.replace(DASH_PREFIX, "") : withoutBox;
+  let text = String(value || "");
+  // Some catalogues nest a market and a named language: IN| TAMIL| Title.
+  // Only the bounded provider vocabulary is removed, never arbitrary title words.
+  for (let index = 0; index < 8; index += 1) {
+    const next = text.replace(BOX_BAR_PREFIX, "").replace(DASH_PREFIX, "");
+    if (next === text || next.trim().length < 2) break;
+    text = next;
+  }
+  return text;
 }
 
 export function cleanTmdbSearchQuery(value) {

@@ -73,6 +73,7 @@ public class CatalogLanguageAliasesInstrumentedTest {
                 + "if(MediaUtils.cleanReleaseName(raw)!=='Lost on a Mountain in Maine')throw Error('compact title prefix '+prefix);"
                 + "if(MediaUtils.normalizeTitle(raw)!==MediaUtils.normalizeTitle('Lost on a Mountain in Maine'))throw Error('compact title grouping '+prefix);"
                 + "if(MediaUtils.versionDescriptor({...unprobed,raw_title:raw}).headline!=='Language unidentified')throw Error('compact title guessed as audio');}"
+                + "if(MediaUtils.cleanReleaseName('IN| TAMIL| Gandhi Kannadi')!=='Gandhi Kannadi')throw Error('nested title prefix');"
                 + "return 'ok';}catch(e){return String(e);}})()", value -> {result.set(value); evaluated.countDown();}));
             assertTrue("WebView utility responded", evaluated.await(20, TimeUnit.SECONDS));
             assertEquals("textZoom="+zoom, "\"ok\"", result.get());
