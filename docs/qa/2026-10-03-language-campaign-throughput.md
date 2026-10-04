@@ -138,3 +138,13 @@ Un retard distinct du consensus des fenêtres est reproduit puis corrigé : une 
 
 Gateways sains, dispatcher, admission et cron actifs. Aucun nouvel échec HTTP du dispatcher ni diagnostic SQL depuis le dernier redémarrage Edge ; l'incident historique est conservé. La finalisation SQL Strng reste en report jusqu'au 5 octobre, avec diagnostic précis encore manquant. Reçu : `2026-10-04-language-campaign-heartbeat-0619.json`.
 
+## Mesure du 4 octobre à 05:20 UTC — 07:20 Paris
+
+**12 957 contrôles distincts**, soit +1 064 en 61 min 29 s : **1 038 contrôles techniques/h**. **4 745 variantes identifiées** (+497) et **52 006 encore inconnues** dans la cohorte intégralement visible. Le contrôle global suivant compte 52 004 variantes / 40 395 fiches inconnues ; le gain est calculé à partir des sommes par source.
+
+**27 validations strictes réussies** (+3) et **53 analyses complètes indéterminées** (+4), avec profil courant correspondant. Les ensembles se recoupent. Le débit technique ne permet toujours pas d'annoncer une fin exhaustive des analyses vocales.
+
+Deux erreurs naturelles de finalisation à 05:11 retournent **57014**, après environ huit secondes. Une requête de sélection des destinataires est effectivement trop large : **1 917,982 ms** et 1 328 081 accès aux blocs en mémoire. Une réécriture ciblée mesure **4,542 ms** / 427 blocs sur la même coordonnée. **Ce gain local ne représente pas le gain de la campagne entière et n'établit pas à lui seul la cause exacte des expirations.**
+
+Après 23 assertions SQL isolées et quatre comparaisons d'ensembles en production, la migration est déployée à **05:45:39 UTC**, sans pause, appel fournisseur ni mutation directe de travaux. Les services sont sains, la campagne continue et le report Strng jusqu'au 5 octobre est conservé. Aucun nouveau seuil ou parallélisme n'est appliqué. Reçu : `2026-10-04-language-campaign-heartbeat-0720.json`.
+
