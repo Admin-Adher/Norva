@@ -42,12 +42,21 @@ public final class NativeVfwMpeg4InstrumentedTest {
         assertTrue(Mpeg4VideoDecoder.isAvailable());
         replay("s_xvid_vfw_asp_qpel.mkv",3,7);
     }
+    @Test public void privateRealClipRendersResumesAndCloses() throws Exception {
+        File clip=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null),"mpeg4-real.mkv");
+        if("true".equals(InstrumentationRegistry.getArguments().getString("norvaRequireRealMpeg4")))assertTrue("Private clip missing",clip.isFile());
+        else org.junit.Assume.assumeTrue("Private real clip not supplied",clip.isFile());
+        replay("private-real",3,7);
+    }
     private void replay(String asset,int resumeSeconds,int seekSeconds) throws Exception {
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();
         Context target=ins.getTargetContext();
         File fixture=new File(target.getCacheDir(),"native-xvid.mkv");
-        try(InputStream input=ins.getContext().getAssets().open(asset)) { Files.copy(input,fixture.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-        String activityName=target.getPackageName()+".PlayerActivity";
+        try(InputStream input="private-real".equals(asset)
+                ?new java.io.FileInputStream(new File(target.getExternalFilesDir(null),"mpeg4-real.mkv"))
+                :ins.getContext().getAssets().open(asset)) { Files.copy(input,fixture.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+        String activityName=target.getPackageManager().getLaunchIntentForPackage(target.getPackageName())
+                .getComponent().getClassName().replace("MainActivity","PlayerActivity");
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(activityName,null,false);
         Activity activity=null;
         // Both real players use HTTP for online media. Phone's local lane is
@@ -83,6 +92,15 @@ public final class NativeVfwMpeg4InstrumentedTest {
                 assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=seekSeconds*1000L);
                 assertTrue("Seek must render fresh video",player.getVideoDecoderCounters().renderedOutputBufferCount>videoBefore+5);
             });
+            if("private-real".equals(asset)) {
+                ins.runOnMainSync(player::pause);
+                android.graphics.Bitmap screenshot=ins.getUiAutomation().takeScreenshot();
+                assertNotNull(screenshot);
+                try(OutputStream out=new java.io.FileOutputStream(new File(target.getExternalFilesDir(null),"mpeg4-real-render.png"))) {
+                    assertTrue(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));
+                }
+                screenshot.recycle();
+            }
             // Exercise the platform Back dispatch, including TV's key handler.
             // Calling deprecated Activity.onBackPressed bypasses that handler.
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);

@@ -20,6 +20,8 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.IOException;
+import java.io.File;
+import java.nio.file.Files;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -61,6 +63,20 @@ public final class Mpeg4VideoDecoderInstrumentedTest {
             assertEquals(reference.subList(reference.size() - afterSeek.size(), reference.size()), afterSeek);
             assertTrue(afterSeek.size() >= 220 && afterSeek.size() <= 226);
         } finally { decoder.release(); decoder.release(); }
+    }
+    @Test public void privateRealClipMatchesEveryReferenceFrame() throws Exception {
+        File root=InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
+        File clip=new File(root,"mpeg4-real.mkv"), referenceFile=new File(root,"mpeg4-real.framemd5");
+        if ("true".equals(InstrumentationRegistry.getArguments().getString("norvaRequireRealMpeg4"))) {
+            assertTrue("Private real clip missing",clip.isFile()&&referenceFile.isFile());
+        } else org.junit.Assume.assumeTrue("Private real clip not supplied",clip.isFile()&&referenceFile.isFile());
+        List<String> reference=new ArrayList<>();
+        for(String line:Files.readAllLines(referenceFile.toPath(),StandardCharsets.US_ASCII))
+            if(!line.isEmpty()&&!line.startsWith("#"))reference.add(line.substring(line.lastIndexOf(',')+1).trim());
+        assertTrue(reference.size()>100);
+        Demux demux=new Demux(Files.readAllBytes(clip.toPath()));
+        Mpeg4VideoDecoder decoder=new Mpeg4VideoDecoder(demux.format);
+        try {assertEquals(reference,decode(decoder,demux.packets,0));} finally {decoder.release();}
     }
     private static List<String> decode(Mpeg4VideoDecoder decoder, List<Packet> packets, long startUs) throws Exception {
         decoder.setOutputStartTimeUs(startUs); decoder.setOutputMode(C.VIDEO_OUTPUT_MODE_SURFACE_YUV);

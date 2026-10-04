@@ -8,6 +8,11 @@ on:
         required: false
         default: ''
         type: string
+      tv-test-class:
+        description: 'Optional comma-separated TV instrumentation classes; empty runs the full suite'
+        required: false
+        default: ''
+        type: string
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -93,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      NORVA_ANDROID_TEST_CLASS: ${{ inputs['phone-test-class'] && 'tv.norva.playback.Mpeg4VideoDecoderInstrumentedTest,tv.norva.playback.NativeVfwMpeg4InstrumentedTest' || '' }}
+      NORVA_ANDROID_TEST_CLASS: ${{ inputs['tv-test-class'] || '' }}
     strategy:
       fail-fast: false
       matrix:

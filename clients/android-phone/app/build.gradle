@@ -67,6 +67,14 @@ namespace "tv.norva.phone"
     }
 
     buildTypes {
+        debug {
+            if (project.findProperty('norvaPlayerDeviceQa') == 'true') {
+                // Isolated USB validation; never replace the Play installation
+                // or reuse its accounts/downloads. Absent in release builds.
+                applicationIdSuffix ".playbackqa"
+                resValue "string", "app_name", "Norva · Test lecture"
+            }
+        }
         release {
             // R8 left off for the first release so media3 reflection paths are
             // never stripped; enable later with tested keep rules.
