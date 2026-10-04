@@ -60,7 +60,7 @@ public class GatewayAudioWindowInstrumentedTest {
                 + "if(!audio.getProbeAudioTracks()[0].label.startsWith('Audio track'))throw Error('unknown track mislabeled');"
                 + "audio.content={providerAudioLanguages:['es'],providerAudioLanguageStatus:'provider_declared'};"
                 + "if(audio.playingAudioVersionLabel()!==audio.getLanguageDisplayName('es'))throw Error('explicit declaration lost');"
-                + "audio.audioTracks[0].language='fr';"
+                + "audio.audioTracks[0].language='fr';audio.audioLanguageValidationStatus='probed';"
                 + "if(!audio.getProbeAudioTracks()[0].label.startsWith(audio.getLanguageDisplayName('fr')))throw Error('embedded track lost');"
                 + "return 'ok';}catch(e){return String(e);}})()",
                 value -> { result.set(value); done.countDown(); }));
