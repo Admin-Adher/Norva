@@ -18,11 +18,11 @@ test('owned metadata projects declared languages without tracks, certification o
   const calls=[];const query={select(){return this},eq(k,v){calls.push([k,v]);return this},in(k,v){calls.push([k,v]);return Promise.resolve({data:rows})}};
   const v={id:'v',user_id:'u',source_id:'s',item_type:'movie',raw_title:'EN | Example'};
   const foreign={id:'foreign',user_id:'other',source_id:'s',item_type:'movie'};
-  await attach({rpc(t,args){assert.equal(t,'cloud_catalog_owned_audio_declarations_scoped');calls.push(['scope',args]);return query}},[v,foreign],'u');
+  await attach({rpc(t,args){assert.equal(t,'cloud_catalog_owned_movie_audio_declarations_batch');calls.push(['scope',args]);return Promise.resolve({data:rows})}},[v,foreign],'u');
   assert.deepEqual(languages(v),['es']); assert.deepEqual(publicLanguages(v),['es']);
   assert.equal(v.audio_languages,undefined);assert.equal(v.audio_verified_at,undefined);assert.equal(v.audio_tracks,undefined);
   assert.equal(foreign.provider_audio_languages,undefined);
-  assert.deepEqual(calls,[['scope',{p_user_id:'u',p_source_id:'s',p_item_type:'movie'}],['variant_id',['v']]]);
+  assert.deepEqual(calls,[['scope',{p_user_id:'u',p_source_id:'s',p_variant_ids:['v']}]]);
   const {sanitizeCatalogVariant}=await load('catalog-public-view.mjs');
   const published=sanitizeCatalogVariant(v);assert.deepEqual(published.provider_audio_languages,['es']);
   assert.doesNotMatch(JSON.stringify(published),/__owned|fingerprint|observed_at|Audio à vérifier/);
@@ -43,7 +43,8 @@ test('declaration batches keep source and media type boundaries',async()=>{
   ];
   const scopes=[];
   await attach({rpc(name,args){
-    scopes.push([args.p_user_id,args.p_source_id,args.p_item_type]);
+    scopes.push([args.p_user_id,args.p_source_id,args.p_item_type || 'movie']);
+    if(name==='cloud_catalog_owned_movie_audio_declarations_batch') return Promise.resolve({data:args.p_variant_ids.map(id=>({variant_id:id,source_id:args.p_source_id,item_type:'movie',language:'fr'}))});
     return {in:async(_,ids)=>({data:ids.map(id=>({variant_id:id,source_id:args.p_source_id,item_type:args.p_item_type,language:'fr'}))})};
   }},variants,'owner');
   assert.deepEqual(scopes,[['owner','first','movie'],['owner','first','series'],['owner','second','series']]);
@@ -79,7 +80,7 @@ test('flat movie and series paths copy only the matching owned declaration',asyn
     const variants=[{id:'v',media_item_id:'m',source_id:'s',user_id:'u',external_id:'file',item_type:itemType}];
     const context=vm.createContext({attachOwnedProviderLanguageDeclarations,
       flatMediaVariantKey:v=>JSON.stringify([v.media_item_id||v.id,v.source_id,v.external_id]),
-      db:{rpc(name,args){assert.equal(name,'cloud_catalog_owned_audio_declarations_scoped');assert.equal(args.p_user_id,'u');return {in:async()=>({data:[{variant_id:'v',source_id:'s',item_type:itemType,language:'es'}]})}},from(table){const q={select(){return q},eq(){return q},in(){return Promise.resolve({data:
+      db:{rpc(name,args){assert.equal(name,itemType==='movie'?'cloud_catalog_owned_movie_audio_declarations_batch':'cloud_catalog_owned_audio_declarations_scoped');assert.equal(args.p_user_id,'u');const response={data:[{variant_id:'v',source_id:'s',item_type:itemType,language:'es'}]};return itemType==='movie'?Promise.resolve(response):{in:async()=>response}},from(table){const q={select(){return q},eq(){return q},in(){return Promise.resolve({data:
         table==='cloud_catalog_visible_title_variants'?variants:[{variant_id:'v',source_id:'s',item_type:itemType,language:'es'}]})}};return q;}}
     });
     vm.runInContext(stripTypeScriptTypes(catalog.slice(start,end)),context);
@@ -89,6 +90,19 @@ test('flat movie and series paths copy only the matching owned declaration',asyn
     assert.equal(items[0].audio_languages,undefined);
     assert.doesNotMatch(JSON.stringify(items),/__owned|verified|tracks|fingerprint/);
   }
+});
+
+test('large movie rails bound the projection inside each RPC, not with an outer filter',async()=>{
+  const {attachOwnedProviderLanguageDeclarations:attach}=await load('owned-provider-language-declarations.mjs');
+  const variants=Array.from({length:201},(_,n)=>({id:`v${n}`,user_id:'u',source_id:'s',item_type:'movie'}));
+  const batches=[];
+  await attach({rpc(name,args){
+    assert.equal(name,'cloud_catalog_owned_movie_audio_declarations_batch');
+    batches.push(args.p_variant_ids.length);
+    return Promise.resolve({data:args.p_variant_ids.map(variant_id=>({variant_id,source_id:'s',item_type:'movie',language:'en'}))});
+  }},variants,'u');
+  assert.deepEqual(batches,[200,1]);
+  assert.ok(variants.every(v=>v.provider_audio_languages.join(',')==='en'));
 });
 
 test('upper-case technical tags retain their audio/subtitle role',async()=>{

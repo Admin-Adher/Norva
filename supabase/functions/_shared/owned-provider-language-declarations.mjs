@@ -18,10 +18,15 @@ export async function attachOwnedProviderLanguageDeclarations(db, variants, user
   const collected = new Map();
   for (const { source, type, ids } of scopes.values()) {
     for (let offset = 0; offset < ids.length; offset += 200) {
-      const { data, error } = await db.rpc('cloud_catalog_owned_audio_declarations_scoped', {
+      const batchIds = ids.slice(offset, offset + 200);
+      const { data, error } = await (type === 'movie'
+        ? db.rpc('cloud_catalog_owned_movie_audio_declarations_batch', {
+          p_user_id: userId, p_source_id: source, p_variant_ids: batchIds,
+        })
+        : db.rpc('cloud_catalog_owned_audio_declarations_scoped', {
         p_user_id: userId, p_source_id: source, p_item_type: type,
       })
-        .in('variant_id', ids.slice(offset, offset + 200));
+        .in('variant_id', batchIds));
       if (error) throw new Error('Owned language declarations unavailable');
       for (const row of data || []) {
         const v = byId.get(String(row.variant_id));
