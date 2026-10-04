@@ -96,7 +96,48 @@
       ],
       "firstFrameMs": 20988
     },
-    "note": "First frame was rendered while paused; not successful sustained playback."
+    "note": "First frame was rendered while paused; not successful sustained playback.",
+    "afterFix": {
+      "events": [
+        {
+          "at": "2026-10-04T15:31:35.087838+00:00",
+          "ttff": null,
+          "event": "play_started",
+          "phases": null,
+          "position": 66,
+          "errorCode": null
+        },
+        {
+          "at": "2026-10-04T15:31:35.432672+00:00",
+          "ttff": 21556,
+          "event": "first_frame",
+          "phases": {
+            "firstFrame": 21556,
+            "mediaAttach": 18662,
+            "manifestParsed": 19123,
+            "resumeResolved": 823,
+            "sessionResolved": 18633,
+            "teardownComplete": 18652,
+            "startupBufferReady": 21140
+          },
+          "position": 67,
+          "errorCode": null
+        }
+      ],
+      "firstObservedPlayingTime": 29.83898,
+      "laterObservedPlayingTime": 114.286586,
+      "paused": false,
+      "readyState": 4,
+      "error": null,
+      "bufferedRangesLater": [
+        [
+          82.921333,
+          192.906333
+        ]
+      ],
+      "userStillReportsStutter": true,
+      "testClosedNormally": true
+    }
   },
   "cleanup": {
     "mediaSamplesRemaining": 0,
@@ -115,5 +156,540 @@
   "dispatcher": {
     "running": true,
     "health": "healthy"
-  }
+  },
+  "productionFix": {
+    "pullRequest": 630,
+    "mergeCommit": "51e42e0601828bbbe62d701e4ae40550e88932b5",
+    "headCommit": "86d08c7ba32ea687fe5130189746a545bf2c6ac4",
+    "cloudflareRun": 37213129857,
+    "deployedAt": "2026-10-04T15:30:17Z",
+    "browserAssetVersion": "7ae15195bc",
+    "emulatorRun": 37212828932,
+    "emulatorJobsPassed": 6,
+    "tvScope": "consent D-pad smoke only; not a video-decoder test",
+    "targetedLocalTestsPassed": 57
+  },
+  "followup": {
+    "codecComparison": {
+      "at": "2026-10-04T15:41:02.906485+00:00",
+      "scope": "same 40-second Bolt input, offline production image, fixed 2 CPU / 2 GiB diagnostic limit",
+      "input": {
+        "frames": 513,
+        "first": 0.043,
+        "last": 39.916,
+        "duplicateOrBackwards": 4,
+        "gapsOver65ms": 10,
+        "largestIntervals": [
+          8.008,
+          8.008,
+          2.795,
+          2.711,
+          2.67,
+          2.669,
+          2.669,
+          2.669,
+          2.669,
+          0.083
+        ],
+        "medianInterval": 0.042,
+        "intervalHistogram": [
+          [
+            0.042,
+            353
+          ],
+          [
+            0.041,
+            145
+          ],
+          [
+            2.669,
+            4
+          ],
+          [
+            8.008,
+            2
+          ],
+          [
+            -2.628,
+            2
+          ],
+          [
+            2.67,
+            1
+          ],
+          [
+            -2.627,
+            1
+          ],
+          [
+            0.083,
+            1
+          ]
+        ],
+        "probeExit": 0,
+        "probeSeconds": 2.979,
+        "corruptFrameDiagnostics": 0
+      },
+      "pipelines": {
+        "software": {
+          "exit": 0,
+          "encodeSecondsUnderDiagnosticCap": 4.64,
+          "corruptFrameDiagnostics": 4,
+          "audioDiagnostics": 7,
+          "nonmonotonicDiagnostics": 1,
+          "output": {
+            "scope": "entire locally generated 40-second HLS output",
+            "frames": 515,
+            "first": 1.464333,
+            "last": 41.420333,
+            "duplicateOrBackwards": 0,
+            "gapsOver65ms": 9,
+            "largestIntervals": [
+              7.924,
+              2.795,
+              2.67,
+              2.586,
+              2.586,
+              0.125,
+              0.084,
+              0.083,
+              0.083,
+              0.042
+            ],
+            "medianInterval": 0.042,
+            "intervalHistogram": [
+              [
+                0.042,
+                355
+              ],
+              [
+                0.041,
+                148
+              ],
+              [
+                0.083,
+                2
+              ],
+              [
+                2.586,
+                2
+              ],
+              [
+                2.67,
+                1
+              ],
+              [
+                1.1e-05,
+                1
+              ],
+              [
+                0.041989,
+                1
+              ],
+              [
+                2.795,
+                1
+              ]
+            ],
+            "probeExit": 0
+          }
+        },
+        "software-vaapi": {
+          "exit": 0,
+          "encodeSecondsUnderDiagnosticCap": 3.275,
+          "corruptFrameDiagnostics": 4,
+          "audioDiagnostics": 7,
+          "nonmonotonicDiagnostics": 1,
+          "output": {
+            "scope": "entire locally generated 40-second HLS output",
+            "frames": 515,
+            "first": 1.464333,
+            "last": 41.420333,
+            "duplicateOrBackwards": 0,
+            "gapsOver65ms": 9,
+            "largestIntervals": [
+              7.924,
+              2.795,
+              2.67,
+              2.586,
+              2.586,
+              0.125,
+              0.084,
+              0.083,
+              0.083,
+              0.042
+            ],
+            "medianInterval": 0.042,
+            "intervalHistogram": [
+              [
+                0.042,
+                355
+              ],
+              [
+                0.041,
+                148
+              ],
+              [
+                0.083,
+                2
+              ],
+              [
+                2.586,
+                2
+              ],
+              [
+                2.67,
+                1
+              ],
+              [
+                1.1e-05,
+                1
+              ],
+              [
+                0.041989,
+                1
+              ],
+              [
+                2.795,
+                1
+              ]
+            ],
+            "probeExit": 0
+          }
+        },
+        "vaapi": {
+          "exit": 0,
+          "encodeSecondsUnderDiagnosticCap": 1.738,
+          "corruptFrameDiagnostics": 0,
+          "audioDiagnostics": 7,
+          "nonmonotonicDiagnostics": 1,
+          "output": {
+            "scope": "entire locally generated 40-second HLS output",
+            "frames": 515,
+            "first": 1.464333,
+            "last": 41.420333,
+            "duplicateOrBackwards": 0,
+            "gapsOver65ms": 9,
+            "largestIntervals": [
+              7.924,
+              2.795,
+              2.67,
+              2.586,
+              2.586,
+              0.125,
+              0.084,
+              0.083,
+              0.083,
+              0.042
+            ],
+            "medianInterval": 0.042,
+            "intervalHistogram": [
+              [
+                0.042,
+                355
+              ],
+              [
+                0.041,
+                148
+              ],
+              [
+                0.083,
+                2
+              ],
+              [
+                2.586,
+                2
+              ],
+              [
+                2.67,
+                1
+              ],
+              [
+                1.1e-05,
+                1
+              ],
+              [
+                0.041989,
+                1
+              ],
+              [
+                2.795,
+                1
+              ]
+            ],
+            "probeExit": 0
+          }
+        }
+      }
+    },
+    "independentEbml": {
+      "parser": "independent EBML element/block timestamps; no FFmpeg",
+      "clusters": [
+        {
+          "offset": 11375,
+          "time": 43,
+          "blocks": 230
+        },
+        {
+          "offset": 2095178,
+          "time": 2943,
+          "blocks": 112
+        },
+        {
+          "offset": 3486704,
+          "time": 6997,
+          "blocks": 41
+        },
+        {
+          "offset": 3670491,
+          "time": 10368,
+          "blocks": 157
+        },
+        {
+          "offset": 4194557,
+          "time": 12586,
+          "blocks": 3
+        },
+        {
+          "offset": 4198013,
+          "time": 12629,
+          "blocks": 11
+        },
+        {
+          "offset": 4208480,
+          "time": 12841,
+          "blocks": 2
+        },
+        {
+          "offset": 4209692,
+          "time": 20521,
+          "blocks": 23
+        },
+        {
+          "offset": 4227139,
+          "time": 20799,
+          "blocks": 88
+        },
+        {
+          "offset": 4285586,
+          "time": 21760,
+          "blocks": 369
+        },
+        {
+          "offset": 5439645,
+          "time": 26687,
+          "blocks": 167
+        },
+        {
+          "offset": 6184275,
+          "time": 31615,
+          "blocks": 41
+        },
+        {
+          "offset": 6367654,
+          "time": 32191,
+          "blocks": 204
+        },
+        {
+          "offset": 7241446,
+          "time": 35071,
+          "blocks": 199
+        },
+        {
+          "offset": 8022097,
+          "time": 39978,
+          "blocks": 187
+        },
+        {
+          "offset": 8853106,
+          "time": 42623,
+          "blocks": 58
+        },
+        {
+          "offset": 9153546,
+          "time": 47402,
+          "blocks": 268
+        },
+        {
+          "offset": 10572408,
+          "time": 52245,
+          "blocks": 56
+        },
+        {
+          "offset": 10914476,
+          "time": 53034,
+          "blocks": 239
+        },
+        {
+          "offset": 12080745,
+          "time": 57962,
+          "blocks": 363
+        },
+        {
+          "offset": 13416419,
+          "time": 62804,
+          "blocks": 44
+        },
+        {
+          "offset": 13568051,
+          "time": 63424,
+          "blocks": 124
+        },
+        {
+          "offset": 13947312,
+          "time": 64896,
+          "blocks": 108
+        },
+        {
+          "offset": 14332662,
+          "time": 68138,
+          "blocks": 189
+        },
+        {
+          "offset": 15135038,
+          "time": 70527,
+          "blocks": 111
+        }
+      ],
+      "errors": [
+        {
+          "offset": 15797533,
+          "kind": "partial-tail"
+        }
+      ],
+      "tracks": [
+        {
+          "track": 1,
+          "blocksUnder40s": 533,
+          "largeIntervals": [
+            {
+              "fromMs": 3046,
+              "toMs": 5506,
+              "deltaMs": 2460,
+              "fromByte": 2073299,
+              "toByte": 2096231
+            },
+            {
+              "fromMs": 7091,
+              "toMs": 10011,
+              "deltaMs": 2920,
+              "fromByte": 3407560,
+              "toByte": 3487804
+            },
+            {
+              "fromMs": 12597,
+              "toMs": 20563,
+              "deltaMs": 7966,
+              "fromByte": 4192907,
+              "toByte": 4195610
+            },
+            {
+              "fromMs": 28321,
+              "toMs": 30990,
+              "deltaMs": 2669,
+              "fromByte": 5892983,
+              "toByte": 5920114
+            },
+            {
+              "fromMs": 35078,
+              "toMs": 37372,
+              "deltaMs": 2294,
+              "fromByte": 7237611,
+              "toByte": 7242509
+            }
+          ]
+        },
+        {
+          "track": 2,
+          "blocksUnder40s": 1055,
+          "largeIntervals": [
+            {
+              "fromMs": 3135,
+              "toMs": 5611,
+              "deltaMs": 2476,
+              "fromByte": 2141131,
+              "toByte": 2195591
+            },
+            {
+              "fromMs": 7124,
+              "toMs": 9941,
+              "deltaMs": 2817,
+              "fromByte": 3526470,
+              "toByte": 3542297
+            },
+            {
+              "fromMs": 12841,
+              "toMs": 20480,
+              "deltaMs": 7639,
+              "fromByte": 4208502,
+              "toByte": 4209833
+            },
+            {
+              "fromMs": 28372,
+              "toMs": 30955,
+              "deltaMs": 2583,
+              "fromByte": 5967150,
+              "toByte": 6006809
+            },
+            {
+              "fromMs": 35177,
+              "toMs": 37291,
+              "deltaMs": 2114,
+              "fromByte": 7269542,
+              "toByte": 7274201
+            }
+          ]
+        }
+      ]
+    },
+    "independentReader": {
+      "at": "2026-10-04T15:48:04.024624+00:00",
+      "reader": "system libcurl, independent of Norva media code",
+      "scope": "first 8 MiB of exact Bolt MULTI-SUB",
+      "proxyTransport": "same HTTP CONNECT slot",
+      "nativeHeartbeatIntervalSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "attempts": 1,
+      "curlExit": 0,
+      "seconds": 17.88,
+      "bytes": 8388608,
+      "sha256": "2c2b713f1efafaafa24389152ebd4d684331ecb371993c63521e539519c39ed7",
+      "identicalToNorvaRaw": true,
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        206
+      ],
+      "contentRanges": [
+        "bytes 0-8388607/1256381975"
+      ],
+      "expired": true
+    },
+    "cleanup": {
+      "at": "2026-10-04T15:50:37.443438+00:00",
+      "removedFiles": 66,
+      "temporaryMediaRemaining": 0,
+      "gateways": [
+        {
+          "ok": true,
+          "sessions": 0
+        },
+        {
+          "ok": true,
+          "sessions": 0
+        }
+      ],
+      "dispatcher": {
+        "running": true,
+        "health": "healthy"
+      }
+    }
+  },
+  "limitations": [
+    "Only bounded exact-file prefixes tested.",
+    "Identical independent reader and Gateway bytes still share the same upstream proxy.",
+    "Startup/resume fixed; remaining input gaps and user-reported stutter not repaired.",
+    "Source and output frame-window counts are not directly comparable dropped-frame counts."
+  ]
 }
