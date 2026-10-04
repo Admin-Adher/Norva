@@ -166,7 +166,15 @@ window.ProviderVersionCardsQA = (() => {
         }
     }
     let recoveryFixture;
-    const turn = () => new Promise(resolve => setTimeout(resolve, 35));
+    // Production focus transitions run on animation frames. A fixed 35ms
+    // delay neither proves a visible renderer nor waits for a slow WebView.
+    const turn = () => new Promise((resolve, reject) => {
+        const deadline = setTimeout(() => reject(Error('recovery renderer did not produce animation frames')), 2500);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            clearTimeout(deadline);
+            resolve();
+        }));
+    });
     function mountPlaybackRecovery({ single = false, holdClose = false, lookupFails = false, closeFails = false } = {}) {
         const host = document.getElementById('qa-host');
         host.innerHTML = `<section id="qa-recovery-watch" class="watch-video-section" style="position:relative;min-height:360px">

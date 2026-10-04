@@ -53,10 +53,14 @@ public class ProviderVersionCardsInstrumentedTest {
     private void verify(int width, int height, boolean catalogue, boolean restoration, boolean recovery) throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         android.content.Context context = instrumentation.getTargetContext();
+        android.app.Activity activity = recovery ? instrumentation.startActivitySync(
+                new android.content.Intent(context, RecoveryWebViewFixtureActivity.class)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        .putExtra("landscape", width > height)) : null;
         AtomicReference<WebView> holder = new AtomicReference<>();
         CountDownLatch loaded = new CountDownLatch(1);
         instrumentation.runOnMainSync(() -> {
-            WebView view = new WebView(context); holder.set(view);
+            WebView view = new WebView(activity != null ? activity : context); holder.set(view);
             view.getSettings().setJavaScriptEnabled(true);
             view.getSettings().setDomStorageEnabled(true);
             view.getSettings().setUseWideViewPort(true);
@@ -74,12 +78,29 @@ public class ProviderVersionCardsInstrumentedTest {
             });
             float density = context.getResources().getDisplayMetrics().density;
             int w = Math.round(width * density), h = Math.round(height * density);
-            view.measure(android.view.View.MeasureSpec.makeMeasureSpec(w, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(h, android.view.View.MeasureSpec.EXACTLY));
-            view.layout(0, 0, w, h);
+            if (activity != null) {
+                android.widget.FrameLayout host = new android.widget.FrameLayout(activity);
+                host.addView(view, new android.widget.FrameLayout.LayoutParams(w, h));
+                activity.setContentView(host);
+                view.requestFocus();
+            } else {
+                view.measure(android.view.View.MeasureSpec.makeMeasureSpec(w, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(h, android.view.View.MeasureSpec.EXACTLY));
+                view.layout(0, 0, w, h);
+            }
             view.loadDataWithBaseURL("https://norva-versions.test/", HTML, "text/html", "UTF-8", null);
         });
         try {
             assertTrue("Version renderer assets loaded", loaded.await(45, TimeUnit.SECONDS));
+            if (recovery) {
+                AtomicReference<Boolean> visible = new AtomicReference<>(false);
+                for (int i = 0; i < 50 && !visible.get(); i++) {
+                    instrumentation.runOnMainSync(() -> visible.set(holder.get().isAttachedToWindow()
+                            && holder.get().isShown() && holder.get().hasWindowFocus()));
+                    if (!visible.get()) Thread.sleep(100);
+                }
+                assertTrue("Recovery WebView is attached to the visible focused window", visible.get());
+                assertEquals("Recovery document is visible", "\"visible\"", evaluate(instrumentation, holder.get(), "document.visibilityState"));
+            }
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
                 for (String locale : restoration ? new String[] {"fr"} : recovery ? new String[] {"fr", "en"} : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
@@ -101,7 +122,7 @@ public class ProviderVersionCardsInstrumentedTest {
                             + "if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);"
                             + "window.versionResult='ok';}catch(e){window.versionResult=String(e);}})();");
                         String result = "\"pending\"";
-                        for (int i=0; i<40 && "\"pending\"".equals(result); i++) {
+                        for (int i=0; i<(recovery ? 120 : 40) && "\"pending\"".equals(result); i++) {
                             Thread.sleep(100); result = evaluate(instrumentation, holder.get(), "window.versionResult");
                         }
                         assertEquals("width="+width+" textZoom="+zoom+" locale="+locale+" kind="+kind, "\"ok\"", result);
@@ -109,6 +130,10 @@ public class ProviderVersionCardsInstrumentedTest {
                 }
             }
             System.out.println("LANGUAGE_PRESENTATION_WEBVIEW_OK width="+width+" textZooms=100,130 locales=6 catalogue="+catalogue);
-        } finally { instrumentation.runOnMainSync(() -> holder.get().destroy()); }
+        } finally { instrumentation.runOnMainSync(() -> {
+            if (activity != null) activity.setContentView(new android.widget.FrameLayout(activity));
+            holder.get().destroy();
+            if (activity != null) activity.finish();
+        }); }
     }
 }
