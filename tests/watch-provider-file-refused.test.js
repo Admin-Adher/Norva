@@ -70,3 +70,55 @@ test('legacy authorization refusal no longer claims cloud blocking or promises a
         assert.equal(calls.scheduled,0);
     }
 });
+
+test('real Edge envelope and cloud client preserve file refusal through to the visible manual-retry error', async()=>{
+    const {publicEdgeErrorPayload,bindCatalogVisibilityEpoch,finalizeCatalogVisibilityResponse}=await import('../supabase/functions/_shared/catalog-visibility-response.mjs');
+    const gatewayBody={code:'PROVIDER_FILE_REFUSED',error:'This media file is currently unavailable.',
+        upstreamStatus:403,url:'https://private.invalid/movie/SECRET/SECRET/file.mkv',diagnostic:'PRIVATE_DIAGNOSTIC'};
+    // This is the same wrapping used by createGatewaySession before the handler catch.
+    const wrapped=Object.assign(new Error('Media gateway refused the session'),{details:gatewayBody});
+    let envelope=publicEdgeErrorPayload(wrapped,502,{unavailableMessage:'Norva Playback is temporarily unavailable'});
+    assert.deepEqual(envelope,{error:'Norva Playback is temporarily unavailable',details:{code:'PROVIDER_FILE_REFUSED'}});
+    // Authenticated dispatch sanitizes the error a second time after the catch.
+    // Exercise that real boundary, with the exact epoch recheck still enforced.
+    let epochReads=0;
+    const db={async rpc(name){assert.equal(name,'norva_catalog_cache_epoch_v2');epochReads++;
+        return {data:{contract:'catalog-cache-epoch-v2',globalEpoch:'1',userEpoch:'4',cacheEpoch:'v2.1.4'},error:null};}};
+    const request=new Request('https://edge.test/norva-playback/session',{method:'POST'});
+    await bindCatalogVisibilityEpoch(request,'fixture-owner-refusal',db);
+    const finalized=await finalizeCatalogVisibilityResponse(request,new Response(JSON.stringify(envelope),{status:502}),db);
+    assert.equal(finalized.status,502);assert.equal(epochReads,2);
+    assert.equal(finalized.headers.get('cache-control'),'no-store');
+    assert.equal(finalized.headers.get('x-norva-visibility-epoch'),'v2.1.4');
+    envelope=await finalized.json();
+    assert.deepEqual(envelope,{error:'Service temporarily unavailable',details:{code:'PROVIDER_FILE_REFUSED'}});
+    const values=new Map([['norva-cloud-token','test-owner-token']]);
+    const window={location:{origin:'https://norva.tv',search:''},NORVA_PLAYBACK_URL:'https://playback.test/functions/v1/norva-playback'};
+    const requests=[];
+    const context={window,localStorage:{getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)},
+        navigator:{userAgent:'NorvaWeb',language:'fr-FR',languages:['fr-FR']},
+        document:{readyState:'loading',addEventListener(){}},URL,URLSearchParams,AbortController,Intl,Date,Map,Set,WeakMap,Promise,
+        console:{log(){},warn(){},debug(){},error(){}},performance:{now:()=>0},setTimeout,clearTimeout,
+        fetch:async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});return {status:502,ok:false,
+            headers:{get:name=>name.toLowerCase()==='content-type'?'application/json':null},json:async()=>envelope,text:async()=>''};}};
+    vm.runInNewContext(fs.readFileSync('public/js/cloudApi.js','utf8'),context);
+    let error;
+    try {await window.NorvaCloud.playback.createSession({sourceId:'owned-source',itemType:'movie',itemId:'selected-file',mode:'transcode'});}
+    catch(value){error=value;}
+    assert.ok(error);assert.equal(error.status,502);assert.equal(error.payload.details.code,'PROVIDER_FILE_REFUSED');
+    assert.equal(requests.length,1,'the failed selected file creates no fallback or hidden retry');
+    assert.equal(requests[0].body.itemId,'selected-file');
+    const {page,errorEl,calls}=fixture('fr');
+    page.showPlaybackError(page.getErrorText(error),{immediate:true,allowAutomaticRetry:false});
+    assert.ok(errorEl.innerHTML.includes(translations.ui_web_542c160150e3.fr));
+    assert.doesNotMatch(errorEl.innerHTML,/SECRET|PRIVATE_DIAGNOSTIC|403|502|PROVIDER_FILE_REFUSED/);
+    assert.equal(calls.scheduled,0);assert.equal(calls.switched,0);assert.equal(calls.retried,0);
+});
+
+test('public envelope still rejects neighbouring unapproved codes and provider details', async()=>{
+    const {publicEdgeErrorPayload}=await import('../supabase/functions/_shared/catalog-visibility-response.mjs');
+    for(const code of ['PROVIDER_FILE_REFUSED_PRIVATE','PRIVATE_PROVIDER_CODE']){
+        const payload=publicEdgeErrorPayload(Object.assign(new Error('private'),{details:{code,upstreamStatus:403,password:'secret'}}),502);
+        assert.deepEqual(payload,{error:'Service temporarily unavailable'});
+    }
+});
