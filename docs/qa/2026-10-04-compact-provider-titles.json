@@ -1,0 +1,163 @@
+{
+  "at": "2026-10-04T14:29:50.465935+00:00",
+  "editorialApply": {
+    "at": "2026-10-04T14:23:38.220053+00:00",
+    "mode": "apply",
+    "matchedProjections": 6,
+    "fileCoordinatesUnchanged": true,
+    "inputSha256": "6947a9d4edb9468248cb1ce9fbc7d893abacf14679c9fa6ebd8ee24e4ccb76b5",
+    "rawTitlesAndAudioUnchanged": true
+  },
+  "deployment": {
+    "at": 1791123923.5363371,
+    "revision": "3db74fcc8ec1880761607173429f334e6f2847ba",
+    "files": {
+      "_shared/tmdb-search-policy.mjs": "9150daa0a5674311337383af43182eb5ffa547231a279b04d1bd6e86d799976f",
+      "_shared/vod-title-projection.ts": "0305cbb30dd31adb3b0c4876433f8edca8ab2aaeb2a6d229f785f7287b5f395c"
+    },
+    "replicas": 2
+  },
+  "admission": {
+    "pause": "2026-10-04T14:25:15.321779+00:00",
+    "restoredAt": "2026-10-04T14:25:23.621069+00:00",
+    "forcedLeases": false
+  },
+  "titles": [
+    {
+      "providerTitle": "EN| Lost on a Mountain in Maine",
+      "matchedTitle": "Lost on a Mountain in Maine",
+      "tmdbId": "1197619",
+      "year": "2024",
+      "reason": "poster_path_confirmed",
+      "confidence": 0.923,
+      "synopsisLanguages": {
+        "en": 456,
+        "fr": 475,
+        "zh": 242,
+        "pl": 199,
+        "it": 512,
+        "pt": 244,
+        "ru": 265,
+        "fa": 398,
+        "el": 287,
+        "de": 301,
+        "es": 277,
+        "bg": 438,
+        "he": 136,
+        "uk": 198,
+        "nl": 500,
+        "hr": 355,
+        "ro": 460,
+        "hu": 262,
+        "cs": 371
+      }
+    },
+    {
+      "providerTitle": "AR| Lost in Mobius",
+      "matchedTitle": "Lost in Mobius",
+      "tmdbId": "565551",
+      "year": "2018",
+      "reason": "poster_path_confirmed",
+      "confidence": 0.923,
+      "synopsisLanguages": {
+        "en": 520,
+        "zh": 155
+      }
+    },
+    {
+      "providerTitle": "AR| Long Lost",
+      "matchedTitle": "Long Lost",
+      "tmdbId": "552709",
+      "year": "2019",
+      "reason": "poster_path_confirmed",
+      "confidence": 0.923,
+      "synopsisLanguages": {
+        "en": 198,
+        "ru": 879,
+        "es": 203,
+        "el": 332,
+        "fr": 207,
+        "tr": 212
+      }
+    },
+    {
+      "providerTitle": "FR| Lost on a Mountain in Maine",
+      "matchedTitle": "Lost on a Mountain in Maine",
+      "tmdbId": "1197619",
+      "year": "2024",
+      "reason": "poster_path_confirmed",
+      "confidence": 0.923,
+      "synopsisLanguages": {
+        "en": 456,
+        "fr": 475,
+        "zh": 242,
+        "pl": 199,
+        "it": 512,
+        "pt": 244,
+        "ru": 265,
+        "fa": 398,
+        "el": 287,
+        "de": 301,
+        "es": 277,
+        "bg": 438,
+        "he": 136,
+        "uk": 198,
+        "nl": 500,
+        "hr": 355,
+        "ro": 460,
+        "hu": 262,
+        "cs": 371
+      }
+    },
+    {
+      "providerTitle": "CH| Lost in Mobius",
+      "matchedTitle": "Lost in Mobius",
+      "tmdbId": "565551",
+      "year": "2018",
+      "reason": "poster_path_confirmed",
+      "confidence": 0.923,
+      "synopsisLanguages": {
+        "en": 520,
+        "zh": 155
+      }
+    },
+    {
+      "providerTitle": "IR| Lost on a Mountain in Maine",
+      "matchedTitle": "Lost on a Mountain in Maine",
+      "tmdbId": "1197619",
+      "year": "2024",
+      "reason": "poster_path_confirmed",
+      "confidence": 0.923,
+      "synopsisLanguages": {
+        "en": 456,
+        "fr": 475,
+        "zh": 242,
+        "pl": 199,
+        "it": 512,
+        "pt": 244,
+        "ru": 265,
+        "fa": 398,
+        "el": 287,
+        "de": 301,
+        "es": 277,
+        "bg": 438,
+        "he": 136,
+        "uk": 198,
+        "nl": 500,
+        "hr": 355,
+        "ro": 460,
+        "hu": 262,
+        "cs": 371
+      }
+    }
+  ],
+  "gateways": [
+    {
+      "ok": true
+    },
+    {
+      "ok": true
+    }
+  ],
+  "dispatcher": true
+}

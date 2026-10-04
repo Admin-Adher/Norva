@@ -14,6 +14,8 @@ test('compact MAX OTT bars do not enter the TMDB query', async () => {
   }
   assert.deepEqual(policy.tmdbSearchLocalesForTitle('IR| Lost on a Mountain in Maine'), ['fa-IR', 'fr-FR', 'en-US']);
   assert.equal(policy.cleanTmdbSearchQuery('EN| Innocent Voices [SUB]'), 'Innocent Voices');
+  assert.equal(policy.cleanTmdbSearchQuery('IN| TAMIL| Gandhi Kannadi'), 'Gandhi Kannadi');
+  assert.equal(policy.stripProviderSearchPrefix('THOR | Love and Thunder'), 'THOR | Love and Thunder');
 });
 
 test('Promax market prefixes are removed without damaging real titles', async () => {
