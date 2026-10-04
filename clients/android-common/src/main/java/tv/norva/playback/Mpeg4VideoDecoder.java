@@ -19,12 +19,14 @@ final class Mpeg4VideoDecoder implements Decoder<DecoderInputBuffer, VideoDecode
     private static final boolean AVAILABLE = load();
     private final DecoderInputBuffer input = new DecoderInputBuffer(DecoderInputBuffer.BUFFER_REPLACEMENT_MODE_DIRECT);
     private final ArrayDeque<VideoDecoderOutputBuffer> free = new ArrayDeque<>();
+    private final ArrayDeque<VideoDecoderOutputBuffer> ready = new ArrayDeque<>();
     private final long[] frame = new long[5];
     private final Format format;
     private long context;
     private long outputStartTimeUs;
     private int outputMode;
     private int skipped;
+    private int packetsSinceDrain;
     private boolean inputOwned, pending, draining, ended;
 
     private static boolean load() {
@@ -45,18 +47,29 @@ final class Mpeg4VideoDecoder implements Decoder<DecoderInputBuffer, VideoDecode
     @Override public void setOutputStartTimeUs(long timeUs) { outputStartTimeUs = timeUs; }
     void setOutputMode(int mode) { outputMode = mode; }
     @Override public DecoderInputBuffer dequeueInputBuffer() {
-        if (context == 0 || inputOwned || pending || draining || ended) return null;
+        if (context == 0 || inputOwned || pending || draining || ended || free.isEmpty()
+                || packetsSinceDrain >= 32) return null;
         input.clear(); inputOwned = true; return input;
     }
     @Override public void queueInputBuffer(DecoderInputBuffer buffer) throws DecoderException {
         if (buffer != input || !inputOwned || context == 0) throw new DecoderException("Invalid MPEG-4 input ownership");
         inputOwned = false; pending = true;
+        packetsSinceDrain++;
+        // DecoderVideoRenderer drains, then feeds. Decode while feeding too:
+        // otherwise every discarded preroll packet costs another render tick.
+        // Four output buffers provide backpressure; 32 packets bound catch-up.
+        pump();
     }
     @Override public VideoDecoderOutputBuffer dequeueOutputBuffer() throws DecoderException {
-        if (context == 0 || ended || free.isEmpty()) return null;
+        packetsSinceDrain = 0;
+        pump();
+        return ready.pollFirst();
+    }
+    private void pump() throws DecoderException {
+        if (context == 0 || ended || free.isEmpty()) return;
         // Receive before send, preserving packets rejected with EAGAIN and all
         // delayed B frames. Never treat an input timestamp as an output timestamp.
-        for (int steps = 0; steps < 32; steps++) {
+        for (int steps = 0; steps < 32 && !free.isEmpty(); steps++) {
             int result = nativeReceive(context, frame);
             if (result == 1) {
                 if (frame[2] < outputStartTimeUs) { skipped++; continue; }
@@ -69,25 +82,26 @@ final class Mpeg4VideoDecoder implements Decoder<DecoderInputBuffer, VideoDecode
                 }
                 output.format = format;
                 output.skippedOutputBufferCount = skipped; skipped = 0;
-                return output;
+                ready.addLast(output);
+                continue;
             }
             if (result == 2) {
                 ended = true;
                 VideoDecoderOutputBuffer output = free.removeFirst();
                 output.addFlag(C.BUFFER_FLAG_END_OF_STREAM);
-                return output;
+                ready.addLast(output);
+                return;
             }
             if (result < 0) throw new DecoderException("MPEG-4 decode failed (" + result + ")");
-            if (!pending) return null;
+            if (!pending) return;
             boolean eos = input.isEndOfStream();
             ByteBuffer data = eos ? null : input.data;
             int sent = nativeSend(context, data, data == null ? 0 : data.position(),
                     data == null ? 0 : data.remaining(), input.timeUs, eos);
             if (sent < 0) throw new DecoderException("MPEG-4 packet rejected (" + sent + ")");
-            if (sent == 0) return null; // EAGAIN: retain the exact packet.
+            if (sent == 0) return; // EAGAIN: retain the exact packet.
             pending = false; draining = eos;
         }
-        return null; // Bound catch-up work on the playback thread after seeking.
     }
     private void recycle(VideoDecoderOutputBuffer output) {
         output.clear();
@@ -98,13 +112,15 @@ final class Mpeg4VideoDecoder implements Decoder<DecoderInputBuffer, VideoDecode
             throw new DecoderException("MPEG-4 video surface unavailable");
     }
     @Override public void flush() {
+        while (!ready.isEmpty()) recycle(ready.removeFirst());
         if (context != 0) nativeFlush(context);
         input.clear(); inputOwned = pending = draining = ended = false; skipped = 0;
+        packetsSinceDrain = 0;
         outputStartTimeUs = 0;
     }
     @Override public void release() {
         if (context != 0) { nativeRelease(context); context = 0; }
-        free.clear(); pending = inputOwned = false;
+        free.clear(); ready.clear(); pending = inputOwned = false;
     }
     private static native int nativeVersion();
     private static native long nativeCreate(byte[] extra, int width, int height);
