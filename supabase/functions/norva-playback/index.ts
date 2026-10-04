@@ -1,4 +1,5 @@
 import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
+import { attachOwnedHumanPlaybackLanguages } from "../_shared/owned-human-language-confirmations.mjs";
 import { processAutomaticVodLanguageFile, processAutomaticVodLanguageBatch } from "../_shared/automatic-vod-language-fleet.mjs";
 import { runProviderAudioMetadataBatch } from "../_shared/provider-audio-metadata-batch.mjs";
 import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
@@ -3615,6 +3616,7 @@ async function createPlaybackSession(
       mediaCacheLifecycle,
       preparation,
     );
+    await attachOwnedHumanPlaybackLanguages(db, result, userId);
     await preparation?.assertCurrent();
     return result;
   } catch (error) {

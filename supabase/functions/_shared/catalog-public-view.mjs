@@ -5,6 +5,7 @@ import {
   sanitizePlaybackHint,
 } from "./cloud-public-view.mjs";
 import { publicProviderAudioLanguages } from "./selection-provider-languages.mjs";
+import { humanAudioFields } from "./owned-human-language-confirmations.mjs";
 
 // Catalog reads combine rows from RPCs, materialized views, and provider-global
 // overlays. Keep their public representation here so a newly-added database or
@@ -412,6 +413,7 @@ function sanitizeVerification(value) {
 export function sanitizeCatalogVariant(value) {
   const source = isRecord(value) ? value : {};
   const result = pick(source, MEDIA_SCALAR_FIELDS);
+  Object.assign(result, humanAudioFields(source));
   const integrity = source.source_integrity;
   if (isRecord(integrity) && integrity.status === 'incomplete'
     && typeof integrity.checkedAt === 'string' && Number.isFinite(Date.parse(integrity.checkedAt))) {

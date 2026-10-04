@@ -12,6 +12,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { DISCOVERY_SELECTION_ENABLED, discoverySourceIds, isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { providerAudioFacet, selectionProviderAudioLanguages, catalogProviderAudioLanguages, catalogVariantMatchesAudio } from "../_shared/selection-provider-languages.mjs";
 import { attachOwnedProviderLanguageDeclarations, useCachedAudioLanguageEvidence } from "../_shared/owned-provider-language-declarations.mjs";
+import { attachOwnedHumanLanguageConfirmations, humanAudioFields } from "../_shared/owned-human-language-confirmations.mjs";
 import { attachSelectionSeriesLanguages, selectionSeriesLanguageFields, selectionSeriesTitleLanguageFields } from "../_shared/selection-series-languages.mjs";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
@@ -3595,6 +3596,9 @@ function attachFileLanguageObservation(variant: JsonRecord, observation: JsonRec
 // (provider identity, item type, external id) granularity.
 async function attachExactFileTracks(variantsByTitle: Map<string, JsonRecord[]>, userId: string) {
   try {
+    await attachOwnedHumanLanguageConfirmations(db, [...variantsByTitle.values()].flat(), userId);
+  } catch (_) { /* Owner testimony is optional during rolling schema deployment. */ }
+  try {
     await attachOwnedProviderLanguageDeclarations(db, [...variantsByTitle.values()].flat(), userId);
   } catch (_) { /* DB-first/Edge-first rolling deployment: declarations are optional. */ }
   try {
@@ -3803,6 +3807,8 @@ async function attachFlatMediaFileLanguages(
       [...variantByExactFile.values()].map((variant) => String(variant.id ?? "")),
       userId,
     );
+    try { await attachOwnedHumanLanguageConfirmations(db, [...variantByExactFile.values()], userId); }
+    catch (_) { /* No testimony is inferred when the owned projection is unavailable. */ }
     await attachSelectionAudioFileIdentity([...variantByExactFile.values()], userId);
     try { await attachSharedSelectionFileFacts(db, [...variantByExactFile.values()], userId); }
     catch (_) { /* A missing shared proof keeps the existing owned path. */ }
@@ -3815,6 +3821,7 @@ async function attachFlatMediaFileLanguages(
       const variant = exactFileKey ? variantByExactFile.get(exactFileKey) : null;
       if (!variant) continue;
 
+      Object.assign(item, humanAudioFields(variant));
       Object.assign(item, audioJobFields(variant.__audio_job_status));
       item.source_integrity = variant.__source_integrity;
 
@@ -4307,6 +4314,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     providerAudioLanguages: Array.isArray(defaultVariant.__owned_provider_audio_languages)
       ? catalogProviderAudioLanguages(defaultVariant) : selectionProviderAudioLanguages(defaultVariant),
     providerAudioLanguageStatus: 'provider_declared',
+    ...humanAudioFields(defaultVariant),
     audio_verified_languages: verifiedAudioLanguages,
     audioVerifiedLanguages: verifiedAudioLanguages,
     audio_language_validation_status: titleAudioValidationStatus,
@@ -4465,6 +4473,7 @@ function titleVariantItem(variant: JsonRecord) {
     rawTitle: variant.raw_title,
     provider_audio_languages: variant.__owned_provider_audio_languages,
     provider_audio_language_status: 'provider_declared',
+    ...humanAudioFields(variant),
     label: variant.label,
     language: variant.language,
     quality: variant.quality,

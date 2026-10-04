@@ -2235,6 +2235,7 @@ class MoviesPage {
                 stream_id: h.item_id,
                 sourceId: parseInt(sourceId),
                 name: h.data?.title,
+                ...window.MediaUtils?.humanAudioMetadata?.(h.data || {}),
                 providerAudioLanguages: h.data?.providerAudioLanguages || null,
                 providerAudioLanguageStatus: h.data?.providerAudioLanguageStatus || null,
                 stream_icon: h.data?.poster,
@@ -3510,6 +3511,7 @@ class MoviesPage {
             type: 'movie',
             label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId)),
             rawTitle: v.raw_title || v.rawTitle || v.name || v.title || null,
+            ...window.MediaUtils?.humanAudioMetadata?.(v),
             providerAudioLanguages: v.providerAudioLanguages || v.provider_audio_languages || null,
             providerAudioLanguageStatus: v.providerAudioLanguageStatus || v.provider_audio_language_status || null,
             codecProfile: v.codecProfile || v.codec_profile
@@ -3532,6 +3534,7 @@ class MoviesPage {
             id: movie.stream_id,
             title: this.getMovieDisplayTitle(movie),
             rawTitle: movie.raw_title || movie.rawTitle || movie.name || movie.title || null,
+            ...window.MediaUtils?.humanAudioMetadata?.(movie),
             providerAudioLanguages: movie.providerAudioLanguages || movie.provider_audio_languages || null,
             providerAudioLanguageStatus: movie.providerAudioLanguageStatus || movie.provider_audio_language_status || null,
             poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),

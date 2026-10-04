@@ -1,6 +1,7 @@
 import { playRetention } from "../_shared/play-retention.ts";
 import { playQaContext } from "../_shared/play-retention-qa.mjs";
 import { refreshHistoryEditorial } from "../_shared/history-editorial.mjs";
+import { attachOwnedHumanHistoryLanguages } from "../_shared/owned-human-language-confirmations.mjs";
 import { bindCommittedSourceCreationReceipt, finalizeSourceCreationReceiptResponse } from "../_shared/source-creation-receipt.mjs";
 import { writeM3uEpochBatch } from "../_shared/selection-initial-import.mjs";
 import { m3uFinalizeProof, resolveM3uFinalizeCursor, joinM3uFinalizer, assertM3uFinalizeRunCurrent, claimM3uProjectionLease, renewM3uProjectionLease, releaseM3uProjectionLease } from "../_shared/selection-initial-import.mjs";
@@ -4951,6 +4952,8 @@ async function listHistory(req: Request, url: URL, userId: string, db: SupabaseC
     db, userId, epoch: boundCatalogVisibilityEpoch(req),
     lang: (url.searchParams.get("lang") ?? "").toLowerCase().split(/[-_]/)[0],
   });
+  try { await attachOwnedHumanHistoryLanguages(db, editorialHistory, userId); }
+  catch (_) { /* A failed optional exact-file lookup never hides resume cards. */ }
   return { history: editorialHistory.map(sanitizeWatchHistory) };
 }
 
