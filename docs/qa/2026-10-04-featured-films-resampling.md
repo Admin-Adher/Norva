@@ -99,3 +99,8 @@ documentary record; this update does not resolve their exact database file
 coordinates. It does not propagate a language to other versions, certify
 audio quality for either film, modify catalogue badges, or count these
 confirmations as automated recognition successes.
+
+The next user message also confirms English for `Broke [MULTI-SUB]`. This
+brings the listening register to five confirmed copies, with the same
+provenance and publication limits. Broke is outside the original six-film
+request; the four outstanding films in that request remain unchanged.
