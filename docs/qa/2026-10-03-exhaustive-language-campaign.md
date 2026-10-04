@@ -322,3 +322,35 @@ Version intégrée : PR **616**, commit de code `77574436cd88be2b184e418212a8434
 À 03:29, les deux Gateways sont sains, STOP absent, admission et cron restaurés ; **681 lots** sont terminés. La capacité adaptative indique une voie réseau occupée sur le Gateway principal et deux places sur l'autre, sans lecture active. Les nouvelles fenêtres de logs Edge commencent à 03:27:05 et 03:27:19 : zéro nouveau diagnostic SQL/finalisation dans ces courtes fenêtres. **Le zéro après recréation ne supprime pas les incidents historiques**, conservés dans le reçu antérieur et le relevé de 03:18.
 
 Ce diagnostic ne résout pas à lui seul la finalisation Strng. Aucun échec n'est provoqué et aucun délai n'est contourné pour le tester en production ; la prochaine occurrence naturelle fournira un code exploitable. La campagne et sa supervision restent **ACTIVES**. Reçu : `2026-10-04-language-campaign-heartbeat-0518.json`.
+
+## Contrôle du 4 octobre à 06:19 Paris (04:19 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 4 385 | 71 | 30 123 |
+| Norva Selection | 76 | 7 | 176 |
+| Dino | 4 478 | 2 406 | 6 463 |
+| MAX OTT | 2 954 | 1 764 | 15 741 |
+| **Total de la cohorte** | **11 893** | **4 248** | **52 503** |
+
+**955 contrôles supplémentaires en 61 min 4 s**, soit **938 contrôles techniques/h**, et **318 identifications supplémentaires**. La fenêtre conserve les 2 min 28 s de drainage du déploiement précédent ; aucun temps n'est retranché. Les 56 751 variantes initiales sont toujours visibles ; le contrôle global trouve 40 808 fiches inconnues. Les requêtes restent successives.
+
+À 04:19, **24 validations strictes réussies avec preuve complète** (Strng 4, Selection 5, Dino 5, MAX OTT 10), soit deux supplémentaires ; **49 analyses complètes indéterminées avec profil courant correspondant** (6, 28, 11, 4), soit une supplémentaire. Les ensembles se recoupent avec les contrôles et identifications. Le débit technique ne prédit toujours pas la clôture des analyses vocales.
+
+### Retard de consensus identifié et corrigé
+
+À 04:25:20, une analyse MAX OTT dispose de six reçus pour six fenêtres depuis 03:41:30. Son bail a expiré à 03:46:01 ; le sélecteur réel la place dans les quatre candidats mais pas dans les deux exécutés. Le correctif précédent ne donnait priorité qu'aux travaux dont toutes les pistes étaient déjà finalisées, pas au consensus des fenêtres d'une piste. Une analyse Selection en attente au relevé initial s'est terminée naturellement à 04:22, avant la nouvelle correction, avec un résultat indéterminé.
+
+La migration **`20261004043500_prioritize_completed_language_windows`** étend la priorité aux pistes dont les quatre ou six reçus sont présents et dont les curseurs concordent. **34 contrôles SQL réussis** dans une copie du schéma sans lignes clients ni réseau (13 nouveaux, 21 de régression) ; retard reproduit avant correction. Les fonctions de claim, validation, checkpoints, capacité et admission par source restent identiques. Les demandes manuelles, délais futurs, quarantaines, baux actifs et exclusions par source restent appliqués.
+
+Déploiement transactionnel à **04:31:27 UTC**, sans redémarrage, pause du dispatcher, mutation directe de travaux ou appel fournisseur. SHA-256 du sélecteur : **`bee4c49c2932883178091cecb193f4e944980a569b02783be2bc00df8f7312ed`**. Le planificateur reprend naturellement le travail MAX OTT à 04:32 ; son consensus se termine à **04:32:00**, **indéterminé**. Les sept tentatives fournisseur et la dernière capture de 03:41:30 restent inchangées. Il s'agit d'une analyse complète sans langue attribuée, pas d'une nouvelle sonde ni d'une identification. Voir `2026-10-04-language-finalizer-priority.md`.
+
+À 04:33, le relevé strict distinct compte **24 validations réussies et 51 analyses complètes indéterminées correspondant au profil courant** : deux clôtures supplémentaires depuis 04:19, dont Selection avant la correction et MAX OTT après. Le conteneur de preuve est arrêté.
+
+### Santé et limites
+
+Les deux Gateways sont sains, sans lecture active aux relevés ; capacité adaptative de zéro/deux à 04:19 puis deux/deux à 04:33. Dispatcher sain, STOP absent, admission ouverte et cron actif. Les lots de métadonnées terminés passent de 671 à **739** au relevé, puis **757** à 04:33. Aucun nouvel échec HTTP du dispatcher ni diagnostic SQL ou de finalisation dans les Edge depuis leur recréation à 03:27. L'ancien incident HTTP 500 / SQL 57014 du 3 octobre reste conservé, sans cause SQL exacte établie.
+
+Le travail Strng ayant échoué à la finalisation SQL reste inchangé et reporté au **5 octobre à 02:22:08 UTC**, sans tentative forcée. Trois reprises de métadonnées Strng et trois MAX OTT conservent `metadata-request-failed` avec un seul essai et leurs délais ; aucune reprise Dino de ce type n'est présente au contrôle de 04:24. Ces erreurs par entrée sont distinctes d'un échec HTTP du dispatcher et ne démontrent pas une panne SQL. Un travail Dino sans première capture garde un bail expiré à 04:17 ; sa reprise reste à surveiller avec le sélecteur réel, sans forcer le bail.
+
+La campagne et la supervision restent **ACTIVES**. Aucun seuil de confiance, compteur de tentative, bail, délai ni quarantaine n'est réinitialisé. Reçu : `2026-10-04-language-campaign-heartbeat-0619.json`.
