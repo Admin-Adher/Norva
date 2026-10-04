@@ -262,3 +262,35 @@ Le contrôle ne trouve **aucun travail de la cohorte avec un bail de capture/fin
 Les deux Gateways répondent HTTP 200 / `ok=true`, sans lecture active au relevé ; capacité observée de deux travaux. Le dispatcher est sain sans redémarrage ni marqueur STOP, admission ouverte et cron strict actif. **Aucun nouvel échec HTTP du dispatcher ni diagnostic SQL** depuis l'incident du 3 octobre à 21:20. Les lots de métadonnées non vides terminés passent de 472 à **511**.
 
 Aucune modification du traitement de production, des limites, seuils, baux ou quarantaines. Les reports ne sont pas comptés comme sondes ; le délai de fin n'est toujours pas certifié. La campagne et sa supervision restent **ACTIVES**. Reçu : `2026-10-04-language-campaign-heartbeat-0314.json`.
+
+## Contrôle du 4 octobre à 04:15 Paris (02:15 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 3 485 | 53 | 30 141 |
+| Norva Selection | 65 | 6 | 177 |
+| Dino | 3 481 | 1 861 | 7 008 |
+| MAX OTT | 2 646 | 1 583 | 15 922 |
+| **Total** | **9 677** | **3 503** | **53 248** |
+
+**1 212 variantes distinctes supplémentaires en 60 min 46 s**, soit environ **1 197 contrôles techniques/h**. **582 identifications supplémentaires** ; **41 122 fiches distinctes** restent inconnues et toute la cohorte initiale reste visible. Les relevés par source sont successifs. Ce rythme n'est ni un débit de reconnaissance vocale ni une prévision de clôture exhaustive.
+
+L'audit strict compte **20 validations réussies avec preuve complète** : Strng 3, Selection 4, Dino 4, MAX OTT 9, soit deux supplémentaires. **43 analyses complètes indéterminées** correspondent toujours au profil observé courant : Strng 6, Selection 25, Dino 11, MAX OTT 1, soit cinq supplémentaires. Ces ensembles recoupent les contrôles et identifications ; ils ne s'additionnent pas.
+
+### Reprise automatique MAX OTT et santé
+
+MAX OTT reprend ses métadonnées à **01:57:02 UTC**, après l'échéance de protection de 01:56:05 : cinq contrôles et trois identifications dans le premier lot. Neuf lots avec tentatives sont observés jusqu'à 02:15:03. Dino continue aussi, avec 49 lots après son échéance précédente et un dernier lot de 24 contrôles / 11 identifications à 02:14:45. Aucun circuit n'a été réinitialisé.
+
+Les Gateways restent sains, HTTP 200 / `ok=true`, sans lecture active aux contrôles de 02:15 et 02:25. Dispatcher sain, aucun redémarrage au relevé, STOP absent, admission ouverte et cron strict actif ; capacité observée de deux travaux. Les lots de métadonnées terminés passent de 511 à **586**, puis **601** à 02:25. Aucun nouvel échec HTTP du dispatcher ni diagnostic d'expiration SQL : les anciens compteurs restent à un échec HTTP et un diagnostic par Edge. Cela ne couvre pas l'erreur distincte de finalisation décrite ci-dessous.
+
+### Finalisation prioritaire : correctif déployé, erreur distincte encore ouverte
+
+Un travail Strng a terminé sa piste à **01:31:35 UTC**, avec une preuve pour une piste attendue. Son bail expire à 01:36:01 ; à 02:18:55, il n'est toujours pas choisi par le sélecteur réel. La file faisait passer des captures répétées avant ce reçu prêt à finaliser.
+
+La migration `20261004022500_prioritize_completed_language_finalizers` est déployée à **02:21:45 UTC**. Elle donne priorité aux finaliseurs complets à l'intérieur d'une même priorité de demande, dans chaque voie et dans l'ordre global. Les demandes manuelles restent premières ; l'isolation des voies, les baux actifs, les quarantaines, l'admission et la capacité ne sont pas modifiés. **21 contrôles SQL réussis** sur une copie du schéma sans données clients ni réseau ; attente reproduite avant correction. Les définitions des fonctions de validation et d'admission sont inchangées. Le conteneur de preuve est arrêté après le test.
+
+Le cron reprend ce travail automatiquement à **02:22:00**, soit environ 15 secondes après déploiement. **Il échoue ensuite à la finalisation**, à 02:22:08, avec `LANGUAGE_VALIDATION_FINALIZE_FAILED`, et respecte son report jusqu'au 5 octobre à 02:22:08 UTC. Son compteur de tentatives fournisseur reste à huit et sa dernière capture reste 01:31:35 : aucune nouvelle sonde ni validation réussie n'est comptée.
+
+Les contrôles en lecture seule concordent pour le profil, les indices audio, la taille, les dates, la génération active, le cache et l'appartenance de la source. **La cause exacte de cet échec RPC n'est pas encore établie.** Le niveau PostgreSQL `log_min_messages=fatal` n'a pas conservé son erreur ; aucune modification générale de journalisation ni nouvelle tentative forcée n'est faite. Voir `2026-10-04-language-finalizer-priority.md`. Cette analyse reste à terminer ; le correctif d'ordre ne suffit pas à la déclarer validée.
+
+La campagne et la supervision restent **ACTIVES**, sans baisse des seuils ni modification des délais, limites ou quarantaines. Reçu agrégé : `2026-10-04-language-campaign-heartbeat-0415.json`.
