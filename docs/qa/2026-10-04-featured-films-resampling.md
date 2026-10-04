@@ -84,3 +84,18 @@ user listening confirmations; the other four remain unconfirmed in this
 six-film request. These documentary confirmations have not changed the
 catalogue badges; a separate human-provenance publication path is absent
 from the code audited at this point.
+
+### Additional user listening confirmations: Sinners and California King
+
+The user subsequently confirmed English for the copy shown in the screenshot
+of Pécheurs / Sinners (2025), with category `[MULTI-LANG] TOP 2025 MOVIES`, and
+explicitly for `California King [MULTI-SUB]`. These two titles are outside the
+original six-film request. Four copies in total now have human language
+confirmations in the accompanying listening register, while four of the
+original six films still lack a human confirmation.
+
+The screenshot and named title identify the user's intended copies for this
+documentary record; this update does not resolve their exact database file
+coordinates. It does not propagate a language to other versions, certify
+audio quality for either film, modify catalogue badges, or count these
+confirmations as automated recognition successes.
