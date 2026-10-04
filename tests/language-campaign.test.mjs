@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { safeResult, delayFor, recoverState, chooseWork, recordResult, intakeWindowOpen } from '../ops/hetzner/services/language-campaign.mjs';
+import { safeResult, delayFor, recoverState, chooseWork, recordResult, intakeWindowOpen, discoverSources, reconcileSources } from '../ops/hetzner/services/language-campaign.mjs';
 const sources = [{ id: 'a', xtream: true }, { id: 'b', xtream: true }, { id: 'c' }];
 test('logs discard arbitrary bodies, URLs, identities and negative counters', () => {
   assert.deepEqual(safeResult({ processed: 3, failed: -1, sourceId: 'secret', code: 'https://secret', skipped: 'provider-account-busy', details: 'secret' }), {
@@ -95,4 +95,52 @@ test('v1 migration preserves counters, existing delays and unfinished leases for
   assert.equal(state.sources.a.lanes.exact.nextAt, 1261000);
   assert.equal(state.sources.b.lanes.metadata.nextAt, 90000);
   assert.equal(chooseWork(state, [sources[1]], new Set(), 60000), undefined);
+});
+
+const sourceUuid = n => `10000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
+const ownerUuid = n => `20000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
+
+test('restart protects uncertain requests of sources outside the original cohort', () => {
+  const initial = { id: sourceUuid(1), userId: ownerUuid(1), xtream: false };
+  const added = { id: sourceUuid(2), userId: ownerUuid(2), xtream: true };
+  const state = recoverState(null, [initial, added], 0);
+  state.sources[added.id].inFlight = 1000;
+  state.sources[added.id].calls = 23;
+  recoverState(state, [initial], 30000);
+  assert.equal(state.sources[added.id].blockedUntil, 1261000);
+  assert.equal(state.sources[added.id].calls, 23);
+  assert.equal(chooseWork(state, [added], new Set(), 60000), undefined);
+});
+test('discovery paginates every eligible owner without a pilot list and sends no media request', async () => {
+  const rows = Array.from({ length: 131 }, (_, n) => ({ id: sourceUuid(n + 1), userId: ownerUuid(n + 1), xtream: n % 2 === 0 }));
+  const calls = [];
+  const found = await discoverSources('http://internal/rpc/discovery', 'fixture', async (url, options) => {
+    calls.push(JSON.parse(options.body)); assert.equal(options.redirect, 'error');
+    return new Response(JSON.stringify(calls.length === 1 ? rows.slice(0, 128) : rows.slice(128)));
+  });
+  assert.deepEqual(found, rows); assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1], { p_after: sourceUuid(128), p_limit: 128 });
+});
+test('failed or malformed discovery never returns a partial fleet', async () => {
+  for (const value of [{}, [{ id: sourceUuid(1), userId: 'invalid', xtream: true }],
+    [{ id: sourceUuid(2), userId: ownerUuid(1), xtream: true }, { id: sourceUuid(1), userId: ownerUuid(1), xtream: true }]]) {
+    await assert.rejects(discoverSources('http://internal/rpc/discovery', 'fixture', async () => new Response(JSON.stringify(value))));
+  }
+  await assert.rejects(discoverSources('http://internal/rpc/discovery', 'fixture', async () => new Response('', { status: 503 })));
+  await assert.rejects(discoverSources('http://internal/rpc/discovery', '', async () => { throw new Error('must not fetch'); }));
+});
+test('new owners join, removed sources stop scheduling, old attempts and uncertain leases remain', () => {
+  const first = { id: sourceUuid(1), userId: ownerUuid(1), xtream: true, label: 'Pilot' };
+  const next = { id: sourceUuid(2), userId: ownerUuid(2), xtream: false };
+  const state = recoverState(null, [first], 1000);
+  const original = state.sources[first.id]; original.calls = 57; original.blockedUntil = 900000;
+  original.inFlight = 5000; original.inFlightLane = 'metadata';
+  let selected = reconcileSources(state, [first, next], [first], 10000);
+  assert.equal(selected.length, 2); assert.equal(state.sources[first.id], original);
+  assert.equal(original.inFlight, 5000); assert.equal(original.blockedUntil, 900000);
+  assert.equal(original.calls, 57); assert.equal(selected[0].label, 'Pilot');
+  selected = reconcileSources(state, [next], [first], 20000);
+  assert.equal(chooseWork(state, selected, new Set(), 30000).source.id, next.id);
+  assert.equal(state.sources[first.id].calls, 57);
+  assert.throws(() => reconcileSources(state, [{ ...first, userId: ownerUuid(3) }], [first]));
 });

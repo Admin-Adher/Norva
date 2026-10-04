@@ -22,7 +22,7 @@ function sourceBetween(startMarker, endMarker) {
 test('home rails pass the request through and place liked recommendations before watched', () => {
   assert.match(
     CATALOG,
-    /jsonCached\(req,\s*sanitizeCatalogMediaPayload\(await listHomeRails\(req,\s*url,\s*userId\)\),\s*60\)/,
+    /const payload = sanitizeCatalogMediaPayload\(await listHomeRails\(req,\s*url,\s*userId\)\);\s*scheduleFeaturedLanguagePriority\(db, userId, payload\);\s*return jsonCached\(req, payload, 60\)/,
   );
 
   const home = sourceBetween(

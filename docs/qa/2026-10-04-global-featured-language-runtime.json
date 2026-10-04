@@ -1,0 +1,652 @@
+{
+  "runtime": {
+    "at": "2026-10-04T09:55:08.627926+00:00",
+    "paused": false,
+    "priority": {
+      "owners": 1,
+      "titles": 364,
+      "virtualTitles": 0,
+      "physicalMovies": 168,
+      "physicalSeries": 196
+    },
+    "strictCron": true,
+    "activeLeases": {
+      "intake": 0,
+      "strict": 0,
+      "metadata": 1,
+      "sourceSchedule": 0,
+      "lastIntakeExpiry": null,
+      "lastStrictExpiry": null
+    },
+    "discovered": {
+      "sources": 53,
+      "owners": 47
+    },
+    "dispatcher": {
+      "at": 1791107703327,
+      "inFlight": 1,
+      "stopping": false,
+      "discoveryOk": true,
+      "sourceCount": 53,
+      "ownerCount": 47
+    },
+    "outsideOriginal": {
+      "sourcesInState": 49,
+      "sourcesCalled": 49,
+      "ownersCalled": 46,
+      "attempted": 582,
+      "identifiedReceipts": 241,
+      "deferredReceipts": 89
+    },
+    "countersPreserved": true,
+    "norva-edge-functions": {
+      "running": true,
+      "startedAt": "2026-10-04T09:14:57.30376061Z",
+      "health": "healthy"
+    },
+    "norva-edge-functions-2": {
+      "running": true,
+      "startedAt": "2026-10-04T09:15:01.261904431Z",
+      "health": "healthy"
+    },
+    "norva-media-gateway": {
+      "running": true,
+      "startedAt": "2026-10-03T10:42:59.227350903Z",
+      "health": "healthy",
+      "healthHttp": 200,
+      "healthOk": true
+    },
+    "norva-resume-cache-pilot-20260916": {
+      "running": true,
+      "startedAt": "2026-10-03T10:42:18.909407433Z",
+      "health": null,
+      "healthHttp": 200,
+      "healthOk": true
+    }
+  },
+  "featured-progress": {
+    "at": "2026-10-04T09:53:33.988379+00:00",
+    "intakeCodes": {
+      "strict-analysis-queued": 3,
+      "strict-analysis-deferred": 1
+    },
+    "metadataCodes": null,
+    "featuredVariants": 6785,
+    "intakeSincePriority": 4,
+    "strictSincePriority": 3,
+    "metadataSincePriority": 0,
+    "visibleMovieIdentified": 131,
+    "strictSelectorSeconds": 0.085,
+    "dispatcherEvents": {
+      "count": 273,
+      "httpErrors": 3,
+      "discoveryFailures": 0,
+      "codes": {
+        "none": 46,
+        "incomplete_codec_profile": 7,
+        "provider_request_failed": 5,
+        "provider_probe_circuit_open": 15,
+        "metadata-sweep-resting": 2,
+        "provider-account-busy": 76,
+        "server-capacity": 107,
+        "declared-track-languages": 3,
+        "strict-analysis-deferred": 3,
+        "intake-request-failed": 2,
+        "codec_probe_failed": 1,
+        "sweep-resting": 6
+      }
+    }
+  },
+  "eligibility": {
+    "at": "2026-10-04T09:55:35.558901+00:00",
+    "strictJobs": [
+      {
+        "n": 1,
+        "code": "none",
+        "state": "queued",
+        "delayed": 0,
+        "quarantined": 0,
+        "progressed_since_priority": 1
+      },
+      {
+        "n": 2,
+        "code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+        "state": "failed",
+        "delayed": 2,
+        "quarantined": 0,
+        "progressed_since_priority": 2
+      }
+    ],
+    "intakeStates": [
+      {
+        "n": 1,
+        "code": "strict-analysis-deferred",
+        "state": "deferred",
+        "delayed": 0
+      },
+      {
+        "n": 3,
+        "code": "strict-analysis-queued",
+        "state": "queued",
+        "delayed": 0
+      },
+      {
+        "n": 45,
+        "code": "none",
+        "state": "unclaimed",
+        "delayed": 0
+      }
+    ],
+    "metadataStates": [
+      {
+        "n": 48,
+        "code": "none",
+        "delayed": 0
+      },
+      {
+        "n": 1,
+        "code": "provider-account-busy",
+        "delayed": 1
+      }
+    ],
+    "featuredUnknownMovies": 49,
+    "seriesInventorySincePriority": 0,
+    "originalSourceLanes": [
+      {
+        "source": "Strng IPTV 8K",
+        "blockedForSeconds": 0,
+        "lanes": {
+          "metadata": {
+            "nextInSeconds": 0,
+            "lastAt": "2026-10-04T09:34:22.842Z",
+            "result": {
+              "httpError": 500
+            }
+          },
+          "exact": {
+            "nextInSeconds": 0,
+            "lastAt": "2026-10-04T09:20:22.325Z",
+            "result": {
+              "processed": 1,
+              "attempted": 0,
+              "queued": 0,
+              "identified": 0,
+              "verified": 0,
+              "inconclusive": 0,
+              "deferred": 1,
+              "failed": 0,
+              "scanned": 6,
+              "code": "provider-account-busy",
+              "outcome": "deferred",
+              "hasMore": true
+            }
+          }
+        }
+      },
+      {
+        "source": "Norva Selection",
+        "blockedForSeconds": 0,
+        "lanes": {
+          "exact": {
+            "nextInSeconds": 0,
+            "lastAt": "2026-10-04T09:54:32.324Z",
+            "result": {
+              "processed": 1,
+              "attempted": 1,
+              "queued": 0,
+              "identified": 0,
+              "verified": 0,
+              "inconclusive": 0,
+              "deferred": 0,
+              "failed": 1,
+              "scanned": 3,
+              "code": "incomplete_codec_profile",
+              "outcome": "failed",
+              "hasMore": true
+            }
+          }
+        }
+      },
+      {
+        "source": "Dino",
+        "blockedForSeconds": 0,
+        "lanes": {
+          "metadata": {
+            "nextInSeconds": 0,
+            "lastAt": "2026-10-04T09:54:08.376Z",
+            "result": {
+              "processed": 0,
+              "attempted": 0,
+              "queued": 0,
+              "identified": 0,
+              "verified": 0,
+              "inconclusive": 0,
+              "deferred": 0,
+              "failed": 0,
+              "scanned": 0,
+              "skipped": "server-capacity",
+              "hasMore": true
+            }
+          },
+          "exact": {
+            "nextInSeconds": 0,
+            "lastAt": "2026-10-04T09:42:21.458Z",
+            "result": {
+              "processed": 1,
+              "attempted": 0,
+              "queued": 0,
+              "identified": 0,
+              "verified": 0,
+              "inconclusive": 0,
+              "deferred": 1,
+              "failed": 0,
+              "scanned": 16,
+              "code": "provider_probe_circuit_open",
+              "outcome": "deferred",
+              "hasMore": true
+            }
+          }
+        }
+      },
+      {
+        "source": "MAX OTT",
+        "blockedForSeconds": 102,
+        "lanes": {
+          "metadata": {
+            "nextInSeconds": 102,
+            "lastAt": "2026-10-04T09:54:20.464Z",
+            "result": {
+              "processed": 1,
+              "attempted": 0,
+              "queued": 0,
+              "identified": 0,
+              "verified": 0,
+              "inconclusive": 0,
+              "deferred": 1,
+              "failed": 0,
+              "scanned": 1,
+              "skipped": "provider-account-busy",
+              "hasMore": true
+            }
+          },
+          "exact": {
+            "nextInSeconds": 0,
+            "lastAt": "2026-10-04T09:33:16.178Z",
+            "result": {
+              "processed": 4,
+              "attempted": 4,
+              "queued": 3,
+              "identified": 0,
+              "verified": 0,
+              "inconclusive": 0,
+              "deferred": 1,
+              "failed": 0,
+              "scanned": 4,
+              "code": "strict-analysis-deferred",
+              "outcome": "deferred",
+              "hasMore": true
+            }
+          }
+        }
+      }
+    ]
+  },
+  "candidate-plans-generic": {
+    "at": "2026-10-04T09:42:35.900812+00:00",
+    "results": [
+      {
+        "sourceOrdinal": 1,
+        "kind": "xtream",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "before",
+        "seconds": 8.073,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 1,
+        "kind": "xtream",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "after",
+        "seconds": 1.609,
+        "outcome": "ok",
+        "executionMs": 1545.539,
+        "planningMs": 4.168,
+        "rows": 1,
+        "hitBlocks": 105802
+      },
+      {
+        "sourceOrdinal": 1,
+        "kind": "xtream",
+        "claim": "claim_catalog_provider_audio_metadata",
+        "version": "before",
+        "seconds": 8.084,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 1,
+        "kind": "xtream",
+        "claim": "claim_catalog_provider_audio_metadata",
+        "version": "after",
+        "seconds": 1.867,
+        "outcome": "ok",
+        "executionMs": 1798.147,
+        "planningMs": 2.831,
+        "rows": 1,
+        "hitBlocks": 359547
+      },
+      {
+        "sourceOrdinal": 2,
+        "kind": "xtream",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "before",
+        "seconds": 8.078,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 2,
+        "kind": "xtream",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "after",
+        "seconds": 1.091,
+        "outcome": "ok",
+        "executionMs": 1006.835,
+        "planningMs": 6.295,
+        "rows": 0,
+        "hitBlocks": 109765
+      },
+      {
+        "sourceOrdinal": 2,
+        "kind": "xtream",
+        "claim": "claim_catalog_provider_audio_metadata",
+        "version": "before",
+        "seconds": 8.09,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 2,
+        "kind": "xtream",
+        "claim": "claim_catalog_provider_audio_metadata",
+        "version": "after",
+        "seconds": 0.949,
+        "outcome": "ok",
+        "executionMs": 868.318,
+        "planningMs": 4.423,
+        "rows": 0,
+        "hitBlocks": 196077
+      },
+      {
+        "sourceOrdinal": 3,
+        "kind": "xtream",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "before",
+        "seconds": 8.086,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 3,
+        "kind": "xtream",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "after",
+        "seconds": 0.284,
+        "outcome": "ok",
+        "executionMs": 208.435,
+        "planningMs": 4.594,
+        "rows": 0,
+        "hitBlocks": 47595
+      },
+      {
+        "sourceOrdinal": 3,
+        "kind": "xtream",
+        "claim": "claim_catalog_provider_audio_metadata",
+        "version": "before",
+        "seconds": 8.072,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 3,
+        "kind": "xtream",
+        "claim": "claim_catalog_provider_audio_metadata",
+        "version": "after",
+        "seconds": 0.297,
+        "outcome": "ok",
+        "executionMs": 228.008,
+        "planningMs": 2.857,
+        "rows": 0,
+        "hitBlocks": 111665
+      },
+      {
+        "sourceOrdinal": 4,
+        "kind": "m3u",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "before",
+        "seconds": 8.068,
+        "outcome": "timeout"
+      },
+      {
+        "sourceOrdinal": 4,
+        "kind": "m3u",
+        "claim": "claim_catalog_vod_language_file",
+        "version": "after",
+        "seconds": 0.155,
+        "outcome": "ok",
+        "executionMs": 87.877,
+        "planningMs": 3.917,
+        "rows": 0,
+        "hitBlocks": 13040
+      }
+    ]
+  },
+  "candidate-bounds-production": {
+    "at": "2026-10-04T09:44:46.374865+00:00",
+    "migrationSha256": "eb88b719af7736169c85d0390998bbb79f9c61b469677ab88deb289b69d3eff1",
+    "mode": "production",
+    "functionHashes": {
+      "claim_catalog_vod_language_file": "3a9121908e1f5bb603c12940a2a373637f350b0b25567bdffa5eeae1af2d0772",
+      "claim_catalog_provider_audio_metadata": "f72fd554e37d6de33e8d4c8d857f10792cc5f42f7f9098eb5600aca595ba5acc",
+      "record_catalog_featured_language_titles": "7dae40b84106108b0cbf1492aabefabfaa4e7403b511d0640da7f04425ba5467"
+    }
+  },
+  "series-fastpath-production": {
+    "at": "2026-10-04T09:51:20.997374+00:00",
+    "migrationSha256": "4a9af5c19ce09f2426b0b82893329ecebe9d86f1ee0c65e8d49291e67c7068c2",
+    "mode": "production",
+    "functionHashes": {
+      "catalog_episode_probe_candidates": "56c9a4c960f97eb4064656ea9d4f08b2f25c1728c71ec48651d5734fd2e84d59",
+      "catalog_series_inventory_candidates": "5414154ef7c3a55d408c4f904d3b2c39ab06ee03949b90819739b25952d18725",
+      "record_catalog_featured_language_titles": "7dae40b84106108b0cbf1492aabefabfaa4e7403b511d0640da7f04425ba5467"
+    }
+  },
+  "series-selectors": {
+    "at": "2026-10-04T09:52:40.113321+00:00",
+    "results": [
+      {
+        "source": "Strng IPTV 8K",
+        "selector": "catalog_series_inventory_candidates",
+        "featured": 1,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.791
+      },
+      {
+        "source": "Strng IPTV 8K",
+        "selector": "catalog_episode_probe_candidates",
+        "featured": 1,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.514
+      },
+      {
+        "source": "Strng IPTV 8K",
+        "selector": "catalog_episode_lid_candidates",
+        "featured": 1,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.209
+      },
+      {
+        "source": "Dino",
+        "selector": "catalog_series_inventory_candidates",
+        "featured": 1,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.303
+      },
+      {
+        "source": "Dino",
+        "selector": "catalog_episode_probe_candidates",
+        "featured": 0,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.097
+      },
+      {
+        "source": "Dino",
+        "selector": "catalog_episode_lid_candidates",
+        "featured": 0,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.092
+      },
+      {
+        "source": "MAX OTT",
+        "selector": "catalog_series_inventory_candidates",
+        "featured": 1,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.104
+      },
+      {
+        "source": "MAX OTT",
+        "selector": "catalog_episode_probe_candidates",
+        "featured": 0,
+        "candidates": 1,
+        "outcome": "ok",
+        "seconds": 0.101
+      },
+      {
+        "source": "MAX OTT",
+        "selector": "catalog_episode_lid_candidates",
+        "featured": 0,
+        "candidates": 0,
+        "outcome": "ok",
+        "seconds": 0.095
+      }
+    ]
+  },
+  "sql-deployment": {
+    "at": "2026-10-04T09:12:51.567745+00:00",
+    "migrations": [
+      {
+        "migration": "20261004100000_language_campaign_all_accounts.sql",
+        "sha256": "31a560c7ae3ee1181231536ef66a5fc89ee878b57d761b80023610f6a1a0ca87"
+      },
+      {
+        "migration": "20261004100500_featured_language_priority.sql",
+        "sha256": "8143e9a63e98ba946e80d79251d5a4d9862ce6fa5d9a4c336bd46d15d91aaedc"
+      }
+    ]
+  },
+  "deployment": {
+    "at": 1791105303.5234203,
+    "revision": "c2f946e0ec89c7adb3a13017cd8e223ca88a4a92",
+    "files": {
+      "norva-catalog/index.ts": "5083a1a021ee991463a47d16771c31b00774fd3255cbdf2fc4af674f5d2b6d48",
+      "_shared/featured-language-priority.mjs": "ea05597a5cc2a0ebff55a13f83f192edef483dfbffcc209a86ad253904773d75"
+    },
+    "replicas": 2
+  },
+  "dispatcher-deployment": {
+    "at": "2026-10-04T09:16:03.246501+00:00",
+    "workerSha256": "87120a630a7434f0dd93dfeffc91d6dae06c7b7fb2c70311be5ca8933252380b",
+    "originalCohortPreserved": true,
+    "originalSourceCounters": 4,
+    "globalConcurrency": 1,
+    "discoverySeconds": 300
+  },
+  "priority-rpc-audit": {
+    "status": 200,
+    "written": 168,
+    "at": "2026-10-04T09:26:58.141733+00:00",
+    "seconds": 0.095,
+    "titles": 168
+  },
+  "naturalRecovery": {
+    "at": "2026-10-04T09:58:16.149108+00:00",
+    "allRetainedLogErrors": [
+      {
+        "event": {
+          "at": "2026-10-04T09:32:32.749Z",
+          "source": "Norva Selection",
+          "lane": "exact-profile",
+          "httpError": 500
+        },
+        "firstResponseAfter": {
+          "at": "2026-10-04T09:54:32.324Z",
+          "source": "Norva Selection",
+          "lane": "exact-profile",
+          "attempted": 1,
+          "processed": 1,
+          "identified": 0,
+          "inconclusive": 0,
+          "code": "incomplete_codec_profile"
+        },
+        "firstBatchWithAttemptsAfter": {
+          "at": "2026-10-04T09:54:32.324Z",
+          "source": "Norva Selection",
+          "lane": "exact-profile",
+          "attempted": 1,
+          "processed": 1,
+          "identified": 0,
+          "inconclusive": 0,
+          "code": "incomplete_codec_profile"
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-04T09:33:34.343Z",
+          "source": "MAX OTT",
+          "lane": "provider-metadata",
+          "httpError": 500
+        },
+        "firstResponseAfter": {
+          "at": "2026-10-04T09:54:20.464Z",
+          "source": "MAX OTT",
+          "lane": "provider-metadata",
+          "attempted": 0,
+          "processed": 1,
+          "identified": 0,
+          "inconclusive": 0,
+          "skipped": "provider-account-busy"
+        },
+        "firstBatchWithAttemptsAfter": null
+      },
+      {
+        "event": {
+          "at": "2026-10-04T09:34:22.842Z",
+          "source": "Strng IPTV 8K",
+          "lane": "provider-metadata",
+          "httpError": 500
+        },
+        "firstResponseAfter": {
+          "at": "2026-10-04T09:56:21.483Z",
+          "source": "Strng IPTV 8K",
+          "lane": "provider-metadata",
+          "attempted": 20,
+          "processed": 20,
+          "identified": 0,
+          "inconclusive": 20
+        },
+        "firstBatchWithAttemptsAfter": {
+          "at": "2026-10-04T09:56:21.483Z",
+          "source": "Strng IPTV 8K",
+          "lane": "provider-metadata",
+          "attempted": 20,
+          "processed": 20,
+          "identified": 0,
+          "inconclusive": 20
+        }
+      }
+    ],
+    "postDeploymentHttpErrors": 3
+  }
+}
