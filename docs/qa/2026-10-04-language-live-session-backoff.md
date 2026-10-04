@@ -77,3 +77,8 @@ que l'absence de reports après fermeture du lecteur soit un effet du correctif.
 Un bail expiré de capture Strng et celui de MAX OTT restent en attente du
 sélecteur normal ; aucun n'est forcé. Le finaliseur Strng ancien conserve son
 délai jusqu'au 5 octobre.
+
+
+## Contrôle prolongé — 4 octobre 08:31 UTC
+
+302 événements depuis le déploiement, dont 174 lots avec au moins une tentative, sans nouvel échec HTTP. Aucun report naturel `live-session` dans cette fenêtre : la temporisation reste prouvée par les tests, mais non observée sur une nouvelle lecture réelle. Aucune lecture artificielle n'a été créée pour provoquer le cas. Le nombre de lots ne représente pas celui des fichiers distincts. Les deux travaux au bail expiré ont repris naturellement et terminé leur validation ; le Strng concerné est hors manifeste. Reçu : `2026-10-04-language-campaign-heartbeat-1027.json`.

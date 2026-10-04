@@ -156,3 +156,34 @@ Après 23 assertions SQL isolées et quatre comparaisons d'ensembles en producti
 L'audit strict compte **27 validations réussies**, inchangé, et **60 analyses complètes indéterminées** avec profil courant correspondant (+7 depuis 05:20). Les captures reprennent sur les quatre sources, mais aucune nouvelle validation réussie ne démontre encore le RPC complet après l'optimisation SQL de 05:45. Les deux anciennes erreurs 57014 restent conservées, sans nouveau diagnostic à 06:35.
 
 Un défaut de temporisation est reproduit puis corrigé : **472 reports de lecture active**, sans tentative fournisseur, revenaient avec un délai de 1,5 seconde. Ils attendent désormais trois minutes. **21 tests réussis**, déploiement du seul dispatcher à **06:38:47 UTC**, arrêt gracieux et compteurs conservés. Aucune limite, quarantaine ou reprise forcée. Le gain de cette réduction des appels inutiles reste à mesurer ; il n'est pas présenté comme une accélération prouvée des analyses vocales. Voir `2026-10-04-language-live-session-backoff.md` et le reçu `2026-10-04-language-campaign-heartbeat-0834.json`.
+
+
+## Contrôle du 4 octobre à 08:27 UTC — 10:27 Paris
+
+| Catalogue | Versions distinctes contrôlées | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 6 212 | 119 | 30 075 |
+| Norva Selection | 84 | 9 | 174 |
+| Dino | 5 568 | 2 995 | 5 874 |
+| MAX OTT | 4 773 | 2 864 | 14 641 |
+| **Total de la cohorte** | **16 637** | **5 987** | **50 764** |
+
+**+2 164 contrôles techniques distincts en 113 min 12 s**, environ **1147/h**, et **+822 identifications** depuis le relevé de 06:34 UTC. Les 56 751 variantes initiales restent visibles. Le contrôle global suivant trouve 50 762 variantes / 39 574 fiches inconnues : les requêtes sont successives. Le gain est calculé à partir des sommes par source, sans utiliser le total global ultérieur.
+
+**32 validations strictes réussies avec preuve complète** (+5 : Selection 1, Dino 1, MAX OTT 3), et **69 analyses complètes indéterminées correspondant au profil courant** (+9). Ces ensembles se recoupent avec les contrôles techniques et identifications. Le débit technique ne permet pas d'estimer la fin de toutes les analyses vocales.
+
+### Finalisations naturelles après correction SQL
+
+Les cinq nouveaux succès sont postérieurs à la correction de sélection des destinataires de 05:45:39 UTC. Le contrôle ciblé de 08:33 confirme, pour chacun, toutes les pistes terminées, les preuves complètes, ainsi que l'empreinte et le profil courant correspondants. Horaires UTC : Selection 06:42:26 ; Dino 07:23:21 ; MAX OTT 07:09:28, 07:18:22 et 08:20:21. **La réussite de finalisations complètes après publication est désormais prouvée** ; elle n'établit ni la cause exacte des expirations historiques ni leur disparition définitive.
+
+Les deux anciens travaux au bail expiré ont été repris naturellement : MAX OTT est vérifié à 07:18:22 ; Strng à 07:50:38. Le second appartient à la source contrôlée mais **pas au manifeste initial** : il ne s'ajoute pas aux 32 validations de la campagne. L'autre finaliseur Strng, celui de l'erreur SQL à 02:22, reste distinct et reporté au **5 octobre à 02:22:08 UTC**, avec huit tentatives fournisseur et dernière capture à 01:31 inchangées.
+
+### Quarantaines, temporisation et santé
+
+Deux travaux Dino sont automatiquement mis en quarantaine pour absence de progression à 07:26:48 et 08:26:15 UTC. Ils possèdent seulement deux et une fenêtres sur six, après six et cinq tentatives fournisseur. Ils restent **incomplets**, sans langue attribuée ni indisponibilité définitive affirmée. Aucun bail, délai, compteur ou quarantaine n'est modifié.
+
+À 08:28, les deux Gateways répondent sainement, capacité deux/deux, admission et cron strict actifs, dispatcher sain et STOP absent. Les logs conservés du dispatcher incluent toujours l'ancien HTTP 500 du 3 octobre à 21:20 ; **aucun nouvel échec HTTP après la correction du dispatcher**, jusqu'à 08:31:52. Depuis cette correction : 302 événements, dont 174 lots avec au moins une tentative, qui ne sont pas des comptes de fichiers distincts. Aucun nouveau diagnostic de finalisation : les deux 57014 de 05:11 sont toujours conservés ; le compteur générique SQL ne les couvre pas.
+
+Aucun report naturel `live-session` depuis le déploiement de 06:38 jusqu'à ce contrôle. La temporisation de trois minutes reste couverte par les tests de régression, **mais son application en situation réelle n'a pas encore été observée**. L'absence de lecture active ne démontre pas le gain du correctif. Les reports fournisseur et de capacité continuent d'être respectés.
+
+Aucune modification de production pendant ce contrôle. Campagne et supervision **ACTIVES**, clôture non atteinte. Reçu agrégé : `2026-10-04-language-campaign-heartbeat-1027.json`.
