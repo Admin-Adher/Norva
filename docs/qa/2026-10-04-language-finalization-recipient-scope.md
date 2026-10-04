@@ -53,3 +53,12 @@ Preuves agrégées : `2026-10-04-language-campaign-heartbeat-0720.json`. Aucun i
 À **05:50 UTC**, aucune nouvelle erreur de finalisation n'est journalisée ; les deux erreurs de 05:11 restent conservées. L'audit strict compte 27 validations réussies et 57 analyses complètes indéterminées avec profil courant correspondant. Les quatre clôtures indéterminées supplémentaires depuis 05:20 ont eu lieu **avant** le déploiement (au plus tard 05:35), elles ne lui sont donc pas attribuées.
 
 À **05:51:54**, le dispatcher a produit 17 événements et dix lots avec tentatives depuis le déploiement. **Aucune nouvelle capture stricte n'est prouvée dans cette fenêtre de six minutes**, marquée par des reports de capacité et d'occupation fournisseur. La reprise des métadonnées est confirmée ; la validation complète du prochain finaliseur naturel reste attendue.
+
+
+## Vérification des premières réussites après publication — 4 octobre 08:33 UTC
+
+Cinq variantes du manifeste ont terminé naturellement leur validation après la correction : Selection à 06:42:26, Dino à 07:23:21 et MAX OTT à 07:09:28, 07:18:22 et 08:20:21 UTC. Le contrôle ciblé confirme des preuves complètes sur toutes les pistes ainsi que l'empreinte et le profil courant correspondants pour les cinq résultats. Le compteur strict passe de 27 à **32 validations réussies**.
+
+Une autre réussite Strng à 07:50:38 concerne un travail au bail précédemment expiré, mais hors manifeste : elle est exclue des compteurs de campagne. Le finaliseur Strng de l'erreur SQL à 02:22 reste reporté au 5 octobre, sans reprise forcée.
+
+Aucun nouveau diagnostic de finalisation depuis les deux erreurs 57014 de 05:11, au relevé de 08:28. La réussite complète après correction est prouvée ; l'origine exacte des échecs passés et l'absence définitive d'expirations ne le sont pas. Reçu : `2026-10-04-language-campaign-heartbeat-1027.json`.
