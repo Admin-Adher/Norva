@@ -1618,7 +1618,8 @@ function strictLidWindowClaimContext(claims, trackIndex, { finalize = false } = 
     ) {
         return null;
     }
-    const offsets = strictLidTimelineOffsets(durationSeconds, STRICT_LID_SAMPLE_DURATION_CAP_SECONDS);
+    const samplingPass = claims.samplingPass === undefined ? 0 : claims.samplingPass;
+    const offsets = strictLidTimelineOffsets(durationSeconds, STRICT_LID_SAMPLE_DURATION_CAP_SECONDS, samplingPass);
     const runtime = strictLidWindowRuntimeBinding();
     if (!offsets || offsets.length !== windowCount || !runtime) return null;
     return Object.freeze({
@@ -1631,6 +1632,7 @@ function strictLidWindowClaimContext(claims, trackIndex, { finalize = false } = 
         windowOrdinal,
         windowCount,
         offsets,
+        ...(samplingPass > 0 ? { samplingPass } : {}),
         modelDigest: runtime.modelDigest,
         configDigest: runtime.configDigest,
     });
@@ -1651,6 +1653,7 @@ function strictLidWindowReceiptBinding(context, windowOrdinal) {
         method: STRICT_LID_WINDOW_METHOD,
         configDigest: context.configDigest,
         modelDigest: context.modelDigest,
+        ...(context.samplingPass > 0 ? { samplingPass: context.samplingPass } : {}),
         selectionProtocol: 1,
     };
 }
@@ -7614,7 +7617,7 @@ async function handleDetectLanguageRequest(req, res, capabilityToken, options = 
         for (const [offsetIndex, off] of offsets.entries()) {
             const observedWindowOrdinal = strictWindowContext?.windowOrdinal || offsetIndex + 1;
             const speechPlan = strictWindowContext
-                ? planStrictSpeechWindow(strictWindowContext.durationSeconds, observedWindowOrdinal)
+                ? planStrictSpeechWindow(strictWindowContext.durationSeconds, observedWindowOrdinal, strictWindowContext.samplingPass)
                 : null;
             if (strictWindowContext && !speechPlan) throw new Error('invalid strict speech window plan');
             let wavPath = null;
@@ -8521,7 +8524,7 @@ function initializeStrictLidCapturePipeline(store) {
             const key = selectionEnrichmentPolicy.describe(context.selectionCapability)
                 ? `selection-exact-file:${sha256Hex(context.url)}` : accountJobKey(context.userId, context.url);
             if (isAccountJobBusy(key)) throw capturePipelineError('LANGUAGE_ENRICHMENT_CAPACITY_BUSY');
-            const plan = planStrictSpeechWindow(bindings[0].durationSeconds, bindings[0].windowOrdinal);
+            const plan = planStrictSpeechWindow(bindings[0].durationSeconds, bindings[0].windowOrdinal, bindings[0].samplingPass);
             let registration;
             const result = await withAccountJobLock(key, () => runStrictLidMultiExtract({
                 bin: FFMPEG_PATH, inputUrl: broker.inputUrl, outputs,
@@ -8555,7 +8558,7 @@ function initializeStrictLidCapturePipeline(store) {
             const deadline = Date.now() + 100000;
             const options = { backgroundKey: context.accountKey, preemptibleBackground: true, abortSignal: signal };
             const prepared = await runStrictSpeechSampler(wavPath,
-                planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal),
+                planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal, binding.samplingPass),
                 { ...options, selectedWavPath: `${wavPath}.selected.wav`, timeoutMs: 8000 });
             if (!prepared.ok) throw capturePipelineError(prepared.preempted
                 ? 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED' : 'LID_CAPTURE_PREPARATION_FAILED');

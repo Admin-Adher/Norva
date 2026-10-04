@@ -72,12 +72,15 @@ function normalizeStrictLidWindowBinding(input = {}) {
     const windowCount = safeInteger(input.windowCount, 'window count', 4, 6);
     if (![4, 6].includes(windowCount)) fail('STRICT_LID_WINDOW_BINDING_INVALID', 'invalid window count');
     const windowOrdinal = safeInteger(input.windowOrdinal, 'window ordinal', 1, windowCount);
+    const samplingPass = input.samplingPass === undefined ? 0
+        : safeInteger(input.samplingPass, 'sampling pass', 0, 6);
     const hasSelectionProtocol = Object.prototype.hasOwnProperty.call(input, 'selectionProtocol');
+    if (samplingPass > 0 && !hasSelectionProtocol) fail('STRICT_LID_WINDOW_BINDING_INVALID', 'sampling requires speech selection');
     if (hasSelectionProtocol && input.selectionProtocol !== 1) {
         fail('STRICT_LID_WINDOW_BINDING_INVALID', 'invalid speech selection protocol');
     }
     if (hasSelectionProtocol) {
-        const plan = planStrictSpeechWindow(input.durationSeconds, windowOrdinal);
+        const plan = planStrictSpeechWindow(input.durationSeconds, windowOrdinal, samplingPass);
         if (!plan || plan.windowCount !== windowCount
             || plan.anchorOffsetMilliseconds !== input.offsetMilliseconds) {
             fail('STRICT_LID_WINDOW_BINDING_INVALID', 'invalid speech selection anchor');
@@ -99,6 +102,7 @@ function normalizeStrictLidWindowBinding(input = {}) {
         configDigest,
         modelDigest,
         ...(hasSelectionProtocol ? { selectionProtocol: 1 } : {}),
+        ...(samplingPass > 0 ? { samplingPass } : {}),
     });
 }
 
@@ -131,7 +135,7 @@ function normalizeStrictLidSpeechSelection(input, binding) {
     if (!input || typeof input !== 'object' || Array.isArray(input) || input.protocol !== 1) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'speech selection evidence is required');
     }
-    const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal);
+    const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal, binding.samplingPass);
     if (!plan || plan.windowCount !== binding.windowCount
         || plan.anchorOffsetMilliseconds !== binding.offsetMilliseconds) {
         fail('STRICT_LID_WINDOW_EVIDENCE_INVALID', 'invalid speech selection plan');

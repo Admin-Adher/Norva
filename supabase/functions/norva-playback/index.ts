@@ -4263,9 +4263,11 @@ type StrictLidWindowState = {
   count: 4 | 6;
   protocol: 1;
   tokens: string[];
+  samplingPass?: number;
 };
 
 type StrictLidWindowCapabilityClaims = {
+  samplingPass?: number;
   windowCheckpointProtocol: 1;
   jobId: string;
   profileFingerprint: string;
@@ -4317,9 +4319,12 @@ function strictLidWindowStateFromClaim(
   const position = Number(claim.windowPosition);
   const count = Number(claim.windowCount);
   const protocol = Number(claim.windowProtocol);
+  const samplingPass = claim.samplingPass === undefined ? 0 : claim.samplingPass;
   const rawTokens = Array.isArray(claim.windowTokens) ? claim.windowTokens : [];
   const tokens = rawTokens.map(strictLidWindowToken);
   if (
+    !Number.isInteger(samplingPass) || Number(samplingPass) < 0 || Number(samplingPass) > 6 ||
+    (Number(samplingPass) > 0 && exactDurationSeconds / Number(expectedCount) < 480) ||
     !expectedCount || count !== expectedCount || protocol !== LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL ||
     !Number.isInteger(position) || position < 0 || position > count ||
     rawTokens.length !== position || tokens.some((token) => token === null)
@@ -4328,7 +4333,8 @@ function strictLidWindowStateFromClaim(
   }
   const exactTokens = tokens as string[];
   if (new Set(exactTokens).size !== exactTokens.length) return null;
-  return { position, count: expectedCount, protocol: 1, tokens: exactTokens };
+  return { position, count: expectedCount, protocol: 1, tokens: exactTokens,
+    ...(Number(samplingPass) > 0 ? { samplingPass: Number(samplingPass) } : {}) };
 }
 
 function strictLidWindowCheckpointFromGateway(
@@ -4353,6 +4359,7 @@ function sameStrictLidWindowState(left: StrictLidWindowState, right: StrictLidWi
   return left.position === right.position &&
     left.count === right.count &&
     left.protocol === right.protocol &&
+    (left.samplingPass ?? 0) === (right.samplingPass ?? 0) &&
     left.tokens.length === right.tokens.length &&
     left.tokens.every((token, index) => token === right.tokens[index]);
 }
@@ -4751,6 +4758,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         jobId,
         profileFingerprint: exactAfterLease.fingerprint,
         windowOrdinal,
+        ...(windowState.samplingPass ? { samplingPass: windowState.samplingPass } : {}),
         windowCount: windowState.count,
         enrichmentFileKey: await sha256Hex(JSON.stringify(["provider",current.identityKey,current.itemType,current.itemId])),
         ...(useCapturePipeline ? { captureProtocol: 1 as const, captureAction: "capture" as const, captureTrackIndex: trackIndex,
@@ -4969,6 +4977,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
           position: windowState.count,
           count: windowState.count,
           protocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
+          ...(windowState.samplingPass ? { samplingPass: windowState.samplingPass } : {}),
           tokens: [...windowState.tokens, receipt],
         },
         taskDeadlineAt,
@@ -5031,6 +5040,7 @@ async function requestLanguageCaptureWindow(options: LanguageCaptureWindowOption
     current.exactProfile.fileSizeBytes, Number(current.exactProfile.profile.durationSeconds), {
       windowCheckpointProtocol: 1, jobId, profileFingerprint: current.fingerprint,
       windowCount: windowState.count, windowOrdinal: windowState.position + 1,
+      ...(windowState.samplingPass ? { samplingPass: windowState.samplingPass } : {}),
       enrichmentFileKey: await sha256Hex(JSON.stringify(["provider",current.identityKey,current.itemType,current.itemId])),
       captureProtocol: 1, captureAction: action, captureTrackIndex: trackIndex,
       ...(action === "infer" ? { captureRelease: release } : {}),
@@ -5155,6 +5165,7 @@ async function finalizeLanguageValidationTrackWindows(options: {
     {
       windowCheckpointProtocol: LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL,
       windowFinalize: true,
+      ...(windowState.samplingPass ? { samplingPass: windowState.samplingPass } : {}),
       jobId,
       profileFingerprint: current.fingerprint,
       windowCount: windowState.count,
@@ -8421,6 +8432,10 @@ async function createBytePipeCapability(
       || (strictLidWindowClaims.captureAction !== "capture" && captureIndices.length !== 1)
       || (strictLidWindowClaims.captureAction === "infer" && !PLAYBACK_SESSION_UUID_PATTERN.test(strictLidWindowClaims.captureRelease || ""))
     )) throw new HttpError(409, "Private audio capture claims invalid", { code: "LANGUAGE_CAPTURE_CLAIMS_INVALID" });
+    const samplingPass = strictLidWindowClaims.samplingPass ?? 0;
+    if (!Number.isInteger(samplingPass) || samplingPass < 0 || samplingPass > 6) {
+      throw new HttpError(409, "Invalid signed sampling pass");
+    }
     const finalizing = strictLidWindowClaims.windowFinalize === true;
     if (
       strictLidWindowClaims.windowCheckpointProtocol !== LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL ||
@@ -8469,6 +8484,7 @@ async function createBytePipeCapability(
         jobId: strictLidWindowClaims.jobId,
         profileFingerprint: strictLidWindowClaims.profileFingerprint,
         windowCount: strictLidWindowClaims.windowCount,
+        ...(strictLidWindowClaims.samplingPass ? { samplingPass: strictLidWindowClaims.samplingPass } : {}),
         ...(strictLidWindowClaims.enrichmentFileKey ? { enrichmentFileKey:strictLidWindowClaims.enrichmentFileKey } : {}),
         ...(strictLidWindowClaims.captureProtocol === 1 ? {
           captureProtocol: 1, captureAction: strictLidWindowClaims.captureAction,
