@@ -5286,6 +5286,7 @@ async function finalizeLanguageValidationJob(
   claim: JsonRecord,
   current: Awaited<ReturnType<typeof revalidateLanguageValidationClaim>>,
 ) {
+  const startedAt = Date.now();
   const { data, error } = await db.rpc("finalize_catalog_file_audio_validation_job", {
     p_job_id: jobId,
     p_lease_owner: leaseOwner,
@@ -5295,6 +5296,9 @@ async function finalizeLanguageValidationJob(
     p_expected_audio_indices: current.expectedAudioIndices,
   });
   if (error || !data) {
+    // Only aggregate timing and allowlisted database codes. Never log the RPC
+    // arguments, raw message/detail, provider URL, evidence or owner identifiers.
+    console.warn("[norva-playback:language-finalization]", languageFinalizationDiagnostic(error, Date.now() - startedAt));
     throw new HttpError(409, "Strict language validation could not be finalized", {
       code: "LANGUAGE_VALIDATION_FINALIZE_FAILED",
     });
@@ -5304,6 +5308,20 @@ async function finalizeLanguageValidationJob(
       code: "LANGUAGE_VALIDATION_PROFILE_CHANGED",
     });
   }
+}
+
+function languageFinalizationDiagnostic(error: unknown, elapsedMs: number) {
+  const code = recordOrEmpty(error).code;
+  const knownCodes = new Set([
+    "PT409", "22023", "23502", "23503", "23505", "23514", "57014",
+    "55P03", "40P01", "40001", "42501", "42883", "42703", "42P01",
+    "PGRST002", "PGRST003", "PGRST202", "PGRST203",
+  ]);
+  return {
+    outcome: error ? "rpc_error" : "empty_result",
+    code: typeof code === "string" && knownCodes.has(code) ? code : null,
+    elapsedMs: Number.isFinite(elapsedMs) ? Math.max(0, Math.round(elapsedMs)) : null,
+  };
 }
 
 async function failLanguageValidationJob(
