@@ -1,5 +1,19 @@
 # Norva — état de la publication Play Store (snapshot)
 
+## Mise à jour du 5 octobre 2026 — parcours de récupération
+
+Mobile **1.3.32 (46)** et TV **3.8.25-hybrid (38)** ont été construits et signés
+par le workflow `37240315836`, puis importés et envoyés pour examen en production.
+Au relevé du 5 octobre à 00:53 Paris, les vérifications rapides étaient terminées
+et les deux versions étaient en cours d'examen. Elles ne sont **pas encore annoncées disponibles**.
+Le déploiement complet est demandé ; la publication gérée reste désactivée.
+
+Ces versions incluent le choix explicite d'une autre copie après un refus et
+conservent les correctifs de lecture précédents. Les preuves et le suivi actuel
+sont dans [le rapport de publication](../docs/qa/2026-10-05-android-recovery-play-release.md).
+Les paragraphes ci-dessous sont le snapshot historique du 28 août, pas l'état
+actuel des versions ou de leur examen.
+
 > Snapshot opérationnel daté. Le référentiel exhaustif est `clients/PLAY_STORE.md`.
 > Ce fichier dit **où on en est** et **quoi faire ensuite**, pas à pas.
 >

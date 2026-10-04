@@ -1,0 +1,178 @@
+{
+  "observedAt": "2026-10-04T22:42:19Z",
+  "releaseCommit": "8589944dca85e11f2600d71b680701a338d1a37b",
+  "pullRequest": 647,
+  "signedWorkflow": 37240315836,
+  "signedBuildConclusion": "success",
+  "phone": {
+    "manifest": {
+      "package": "tv.norva.phone",
+      "versionCode": 46,
+      "versionName": "1.3.32",
+      "debuggable": false,
+      "fixtureActivityAbsent": true
+    },
+    "sha256": "f9c3c33e09fe6d80a4c9dc0665da031353affbf5cd57fdba49f4566e4255b18c",
+    "signature": {
+      "signatureVerified": true,
+      "signers": 1,
+      "certificateSha256": "0082f31a9f05d6e6ce07fc9d4d8b30e81ffdc1cceba6a985c2dafee021409621",
+      "digestAlgorithmOid": "2.16.840.1.101.3.4.2.1",
+      "validationScope": "Cryptographic signature only; Android upload certificates are not required to chain to a public CA.",
+      "signedPayloadEntries": 1711,
+      "allPayloadDigestsMatch": true,
+      "fullManifestDigestMatches": true,
+      "samePriorCertificate": true
+    },
+    "libraries": [
+      {
+        "abi": "arm64-v8a",
+        "sha256": "8c0b0323b7211fd2257c1f5e21f824e7160a99352ef38e8bba9aa0b0a617e620",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "armeabi-v7a",
+        "sha256": "9b41ce2bebc82ec4939f6960492b8a0b59083bbe46782b743cf4c5f49e00590d",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "x86",
+        "sha256": "036e9f35a9f406e702457edde7de5316ccf5843782f04373484a3c2f874d442f",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "x86_64",
+        "sha256": "5b867e14efc6dc15016b3dea36ef8ff4324726b2745b7099bba7767e63ad2564",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      }
+    ],
+    "nativeRecoveryPolicyDefined": true,
+    "configurationComparison": {
+      "manifestUnchangedExceptVersion": true,
+      "permissionsUnchanged": true,
+      "featuresUnchanged": true,
+      "revenueCatValueUnchanged": true,
+      "revenueCatConfiguredBeforeAndAfter": true,
+      "firebaseResourceValuesUnchanged": true,
+      "firebaseAppIdConfiguredBeforeAndAfter": true,
+      "firebaseApiKeyConfiguredBeforeAndAfter": true
+    },
+    "playRelease": 31,
+    "playSubmissionRequested": true,
+    "playReviewRestarted": true,
+    "fullRolloutRequested": true,
+    "quickChecks": "finished",
+    "published": false,
+    "reviewObservedAt": "2026-10-04T22:53:20Z"
+  },
+  "tv": {
+    "manifest": {
+      "package": "tv.norva.tv",
+      "versionCode": 38,
+      "versionName": "3.8.25-hybrid",
+      "debuggable": false,
+      "fixtureActivityAbsent": true
+    },
+    "sha256": "d84148c7278a7f1638a66e3740ab589909c296644bf3952ae967359827f8230e",
+    "signature": {
+      "signatureVerified": true,
+      "signers": 1,
+      "certificateSha256": "0082f31a9f05d6e6ce07fc9d4d8b30e81ffdc1cceba6a985c2dafee021409621",
+      "digestAlgorithmOid": "2.16.840.1.101.3.4.2.1",
+      "validationScope": "Cryptographic signature only; Android upload certificates are not required to chain to a public CA.",
+      "signedPayloadEntries": 995,
+      "allPayloadDigestsMatch": true,
+      "fullManifestDigestMatches": true,
+      "samePriorCertificate": true
+    },
+    "libraries": [
+      {
+        "abi": "arm64-v8a",
+        "sha256": "8c0b0323b7211fd2257c1f5e21f824e7160a99352ef38e8bba9aa0b0a617e620",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "armeabi-v7a",
+        "sha256": "9b41ce2bebc82ec4939f6960492b8a0b59083bbe46782b743cf4c5f49e00590d",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "x86",
+        "sha256": "036e9f35a9f406e702457edde7de5316ccf5843782f04373484a3c2f874d442f",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "x86_64",
+        "sha256": "5b867e14efc6dc15016b3dea36ef8ff4324726b2745b7099bba7767e63ad2564",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      }
+    ],
+    "nativeRecoveryPolicyDefined": true,
+    "manifestUnchangedExceptVersion": true,
+    "playRelease": 22,
+    "playSubmissionRequested": true,
+    "playReviewRestarted": true,
+    "fullRolloutRequested": true,
+    "quickChecks": "finished",
+    "published": false,
+    "reviewObservedAt": "2026-10-04T22:51:38Z"
+  },
+  "managedPublishingEnabled": false,
+  "providerMediaRequests": 0,
+  "runtimeDeployments": 0,
+  "limits": [
+    "Signed build and submission are not Google approval or store availability.",
+    "Targeted local binary verification does not replace full bundletool validation.",
+    "Play displayed nonblocking missing mapping/native debug symbol warnings.",
+    "Recovery does not repair the original remote media refusal."
+  ],
+  "mergeCommit": "20699884da5b28be949da64ae473da31a15cf155",
+  "latestSuccessfulChecks": 19,
+  "emulatorVerification": {
+    "runId": 37240316615,
+    "head": "8589944dca85e11f2600d71b680701a338d1a37b",
+    "originalAttempt": 1,
+    "originalJobId": 111547554743,
+    "originalConclusion": "failure",
+    "completedAt": "2026-10-04T22:44:12Z",
+    "configuration": "phone-three-button-font-1.0",
+    "failingTest": "FirstFrameFixtureInstrumentedTest.ownedHttp460RecoversWithoutRepeatingTheRefusedRequest",
+    "actualElapsedMs": 1719,
+    "requiredElapsedMsExclusive": 1500,
+    "junit": {
+      "tests": 76,
+      "passed": 70,
+      "skipped": 5,
+      "failed": 1
+    },
+    "recoverySpecificTests": {
+      "classes": [
+        "ProviderVersionCardsInstrumentedTest",
+        "ResumeRecoveryInstrumentedTest"
+      ],
+      "total": 9,
+      "failed": 0
+    },
+    "timingScope": "First loopback request received to main-thread recovery broadcast callback",
+    "mediaAssertionsAfterFailedTimingWereNotReached": true,
+    "observation": "Logcat shows concurrent app and SystemUI frame delays; exact root cause remains unestablished",
+    "rerun": {
+      "scope": "only failed job",
+      "authorized": true,
+      "requestedAt": "2026-10-04T22:46:17Z",
+      "jobId": 111550323318,
+      "conclusion": "success",
+      "completedAt": "2026-10-04T22:58:17Z"
+    },
+    "thresholdsModified": false,
+    "productionCodeModified": false
+  }
+}
