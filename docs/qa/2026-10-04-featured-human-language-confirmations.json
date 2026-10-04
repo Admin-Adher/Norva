@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-04",
+  "provenance": "explicit user listening confirmations in this conversation",
+  "automaticLidSuccessesAdded": 0,
+  "catalogueBadgesChanged": false,
+  "confirmations": [
+    {
+      "title": "Innocent Voices [SUB]",
+      "language": "es",
+      "scope": "selected copy in the current playback investigation",
+      "audioQualityAccepted": true
+    },
+    {
+      "title": "Prey",
+      "language": "en",
+      "scope": "copy discussed in the current playback investigation",
+      "audioQualityAccepted": null
+    },
+    {
+      "title": "Pécheurs / Sinners (2025)",
+      "language": "en",
+      "scope": "copy identified by the user screenshot, category [MULTI-LANG] TOP 2025 MOVIES; exact file coordinate not resolved by this documentary update",
+      "audioQualityAccepted": null
+    },
+    {
+      "title": "California King [MULTI-SUB]",
+      "language": "en",
+      "scope": "copy explicitly named by the user; exact file coordinate not resolved by this documentary update",
+      "audioQualityAccepted": null
+    },
+    {
+      "title": "Broke [MULTI-SUB]",
+      "language": "en",
+      "scope": "copy explicitly named by the user; exact file coordinate not resolved by this documentary update",
+      "audioQualityAccepted": null
+    }
+  ],
+  "remainingRequestedFilms": [
+    "Lost on a Mountain in Maine",
+    "The Legend of Ochi",
+    "Bolt from the Blue",
+    "I Want to Live on Mars"
+  ]
+}

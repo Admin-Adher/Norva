@@ -71,3 +71,36 @@ inconclusive automated runs, source audio tag `und`, and independently known
 English subtitles retain their original provenance. This documentary update
 does not publish a fabricated provider declaration or strict worker result.
 The other five requested film identifications remain open.
+
+
+### Second user listening confirmation: Prey
+
+The user then explicitly confirmed: "Prey l'audio est anglais je confirme".
+English (`en`) is recorded as human-confirmed for the Prey copy discussed in
+this playback investigation. This does not apply to every Prey variant or
+turn its expired/inconclusive automated jobs into completed validations.
+Together with Innocent Voices (`es`), two requested films now have direct
+user listening confirmations; the other four remain unconfirmed in this
+six-film request. These documentary confirmations have not changed the
+catalogue badges; a separate human-provenance publication path is absent
+from the code audited at this point.
+
+### Additional user listening confirmations: Sinners and California King
+
+The user subsequently confirmed English for the copy shown in the screenshot
+of Pécheurs / Sinners (2025), with category `[MULTI-LANG] TOP 2025 MOVIES`, and
+explicitly for `California King [MULTI-SUB]`. These two titles are outside the
+original six-film request. Four copies in total now have human language
+confirmations in the accompanying listening register, while four of the
+original six films still lack a human confirmation.
+
+The screenshot and named title identify the user's intended copies for this
+documentary record; this update does not resolve their exact database file
+coordinates. It does not propagate a language to other versions, certify
+audio quality for either film, modify catalogue badges, or count these
+confirmations as automated recognition successes.
+
+The next user message also confirms English for `Broke [MULTI-SUB]`. This
+brings the listening register to five confirmed copies, with the same
+provenance and publication limits. Broke is outside the original six-film
+request; the four outstanding films in that request remain unchanged.
