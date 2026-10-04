@@ -38,3 +38,11 @@ Authenticated receipt diagnostics on the first four new Innocent Voices windows 
 Lost on a Mountain in Maine has an exact AAC profile but no strict job yet. Ochi, Bolt from the Blue and I Want to Live on Mars still need their first complete track profile. Explicit guarded profile requests at 12:50 and 13:06 returned provider-account-busy without provider I/O. They are not counted as probes. All six variants share the MAX OTT provider account; requests stay sequential.
 
 This report must be updated with final exact-file verification and the visible application cards. No completion is claimed at this stage.
+
+## Follow-up at 14:00 UTC
+
+The preceding 13:12 section is historical, not the current result. Innocent Voices completed passes one and two, both inconclusive; prior receipts and retry dates remain preserved. Pass one includes an accepted Spanish sample, but not four accepted independent windows. Pass two also produces mostly weak Spanish candidates. A separately pinned medium-model diagnostic on one existing, unexpired Spanish musical sample did not improve confidence (0.609 versus 0.693 from the production model). No model, probability threshold or language was changed. Diagnostic speech files expired and were removed.
+
+Prey pass one has five receipts, including one accepted English sample, and is deferred for active playback. Lost's manual job captured one window, then expired in the queue during the subsequent playback investigation; this is not a completed analysis. Ochi and Bolt now have exact profiles from real playback. Bolt has a pending job, zero completed windows at the observation. Mars still lacks an exact profile. No additional language identification is claimed for these six files.
+
+The user's live stutter report took immediate priority. See [the multi-file comparison](2026-10-04-featured-multisub-stutter.md): both Bolt and Lost MULTI-SUB samples reproduce input corruption before HLS conversion, while another Lost MKV copy on the same provider route played without those errors and was confirmed fluid by the user. The six-film language request remains incomplete. Reading the alternative version does not establish the language of the original exact file.
