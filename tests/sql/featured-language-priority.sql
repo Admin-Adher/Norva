@@ -135,5 +135,23 @@ update catalog_file_audio_validation_jobs set retry_at=now()+interval '1 hour' w
 select pg_temp.ok(not exists(select 1 from list_due_catalog_file_audio_validation_jobs(4) where job_id=pg_temp.uid(8002)),'featured_strict_future_retry_preserved');
 update catalog_file_audio_validation_jobs set state='failed',retry_at=null,quarantined_at=now() where id=pg_temp.uid(8002);
 select pg_temp.ok(not exists(select 1 from list_due_catalog_file_audio_validation_jobs(4) where job_id=pg_temp.uid(8002)),'featured_strict_quarantine_preserved');
+
+-- Shared Selection cards have virtual ids and reuse the public exact-file job.
+set local session_replication_role=replica;
+insert into selection_shared_releases(id,revision,manifest_sha256,published_at) values(pg_temp.uid(51),repeat('a',64),repeat('b',64),now());
+insert into selection_shared_enrollments(source_id,user_id,generation_id,config_revision,release_id) values(pg_temp.uid(13),pg_temp.uid(3),pg_temp.uid(23),1,pg_temp.uid(51));
+insert into selection_shared_titles(release_id,item_type,identity_key,title) values(pg_temp.uid(51),'movie','public-fixture','Public fixture');
+insert into selection_shared_variants(release_id,item_type,external_id,identity_key,playback_hint)
+ values(pg_temp.uid(51),'movie','norva-selection:movie:'||repeat('c',64),'public-fixture','{"targetUrl":"https://example.invalid/public-fixture.mp4"}');
+insert into selection_shared_media(release_id,item_type,external_id,available,playback_hint)
+ values(pg_temp.uid(51),'movie','norva-selection:movie:'||repeat('c',64),true,'{"targetUrl":"https://example.invalid/public-fixture.mp4"}');
+insert into catalog_selection_audio_jobs(external_id,url_sha256,priority,state,next_attempt_at,attempt_count)
+ values('norva-selection:movie:'||repeat('c',64),encode(sha256(convert_to('https://example.invalid/public-fixture.mp4','UTF8')),'hex'),1,'retry_wait',now()+interval '1 day',4);
+set local session_replication_role=origin;
+select pg_temp.ok(record_catalog_featured_language_titles(pg_temp.uid(3),array[norva_selection_shared_uuid('title:'||pg_temp.uid(3)::text||':movie:public-fixture')])=1,'shared_virtual_title_accepted');
+select pg_temp.ok((select priority=1000 and state='retry_wait' and next_attempt_at=now()+interval '1 day' and attempt_count=4 from catalog_selection_audio_jobs where external_id='norva-selection:movie:'||repeat('c',64)),'shared_public_file_priority_preserves_delays_and_attempts');
+select pg_temp.ok(record_catalog_featured_language_titles(pg_temp.uid(1),array[norva_selection_shared_uuid('title:'||pg_temp.uid(3)::text||':movie:public-fixture')])=0,'foreign_shared_title_rejected');
+update cloud_sources set enabled=false where id=pg_temp.uid(13);
+select pg_temp.ok(record_catalog_featured_language_titles(pg_temp.uid(3),array[norva_selection_shared_uuid('title:'||pg_temp.uid(3)::text||':movie:public-fixture')])=0,'hidden_shared_source_cannot_refresh_priority');
 select jsonb_build_object('assertions',count(*),'labels',jsonb_agg(label order by label)) from checks;
 rollback;
