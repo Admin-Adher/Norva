@@ -27,3 +27,10 @@ An exact definition guard prevents patching an unexpected function. SQL ACLs and
 All six requested exact files remain without a confirmed audio language at this observation. Innocent Voices passes zero through two retain their inconclusive evidence and retry dates. Prey's pass one expired after the playback investigation; it is not a completed consensus. Lost retains one receipt in an expired job. Bolt's old job ended on profile change, while its current exact profile is available. Mars still needs its exact profile. No old job or circuit was forcibly reset to fill these gaps.
 
 The earlier MULTI-SUB stutter investigation remains separate and unresolved for the defective copies; this admission correction changes no playback codec, route or selected version.
+
+
+### Natural capture follow-up at 16:15 UTC
+
+Innocent Voices pass three reached three authenticated receipts, with the last new capture at 16:13:14. The first three dispositions are conflict/weak/weak, not accepted language evidence. The next capture was deferred with `LANGUAGE_VALIDATION_PLAYBACK_ACTIVE`; the existing receipts and three provider attempts are retained. Ochi remains deferred for provider occupancy, zero captures. This proves real capture resumption after the admission fix, not a language identification. Both Gateways returned HTTP 200 / ok at 16:12:46; automatic admission remains enabled with 32 automatic and two manual jobs. The proof container is stopped; the permanent dispatcher was not restarted.
+
+Code commit `1599a43ad628e675bf4845be0db82ee7b9c9626f` passed the cloud contracts, Edge contracts/types, disposable database, customer journey, notice policy, GoTrue acceptance, Android phone/TV tests and both Android package builds. The Windows package was still running at 16:15. PR 632 records the change; Codex attachment hit the existing 100-item limit, with no other attachment removed.

@@ -1241,5 +1241,86 @@
     "operation": "metadata",
     "http": 500,
     "exactCause": "not established; preceded Edge recreation at 14:46"
+  },
+  "postDeploymentHealth": {
+    "at": "2026-10-04T16:12:46.228069+00:00",
+    "gateways": [
+      {
+        "http": 200,
+        "ok": true
+      },
+      {
+        "http": 200,
+        "ok": true
+      }
+    ],
+    "queue": [
+      {
+        "manualActive": 2,
+        "automaticActive": 32,
+        "admissionEnabled": true
+      }
+    ]
+  },
+  "postDeploymentCaptures": {
+    "at": "2026-10-04T16:15:32.440463+00:00",
+    "items": [
+      {
+        "title": "EN| Innocent Voices [SUB]",
+        "identified": false,
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE",
+            "pass": 3,
+            "retry": "2026-10-04T16:15:19.318+00:00",
+            "state": "retry_wait",
+            "windows": 3,
+            "receipts": 3,
+            "selected": true,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T16:13:14.704392+00:00",
+            "providerAttempts": 3
+          }
+        ]
+      },
+      {
+        "title": "Prey",
+        "identified": false,
+        "jobs": []
+      },
+      {
+        "title": "Lost on a Mountain in Maine",
+        "identified": false,
+        "jobs": []
+      },
+      {
+        "title": "The Legend of Ochi",
+        "identified": false,
+        "jobs": [
+          {
+            "code": "PROVIDER_ACCOUNT_BUSY",
+            "pass": 0,
+            "retry": "2026-10-04T16:08:15.723+00:00",
+            "state": "retry_wait",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 0
+          }
+        ]
+      },
+      {
+        "title": "Bolt from the Blue",
+        "identified": false,
+        "jobs": []
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "identified": false,
+        "jobs": []
+      }
+    ]
   }
 }
