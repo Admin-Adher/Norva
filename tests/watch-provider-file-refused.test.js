@@ -42,7 +42,7 @@ test('structured file refusal stays specific, localized and manual without repla
         assert.equal(calls.scheduled,0,code);
         assert.equal(calls.retried,0);assert.equal(calls.switched,0);
         assert.equal(JSON.stringify({content:page.content,versionIndex:page.versionIndex,resumeTime:page.resumeTime}),selected);
-        assert.ok(errorEl.innerHTML.includes(translations.ui_web_542c160150e3[code]));
+        assert.ok(errorEl.innerHTML.includes(translations.ui_playback_version_unavailable_title[code]));
         assert.doesNotMatch(errorEl.innerHTML,/PROVIDER_FILE_REFUSED|502|datacenter|blocking cloud playback|Convert and play/);
         clickRetry();
         assert.equal(calls.retried,1);assert.equal(calls.switched,0);
@@ -55,7 +55,7 @@ test('file refusal takes precedence over numeric diagnostics and never exposes p
     const error={code:'PROVIDER_FILE_REFUSED',message:'request 403 https://private.test/movie/USER/PASS/movie.mkv',
         payload:{details:{upstreamStatus:403}}};
     page.showPlaybackError(page.getErrorText(error),{immediate:true});
-    assert.match(errorEl.innerHTML,/temporarily unavailable for this stream/);
+    assert.match(errorEl.innerHTML,/Access to this copy was refused/);
     assert.doesNotMatch(errorEl.innerHTML,/private\.test|USER|PASS|403|datacenter|TV\/mobile app|local hub/);
 });
 
@@ -110,7 +110,7 @@ test('real Edge envelope and cloud client preserve file refusal through to the v
     assert.equal(requests[0].body.itemId,'selected-file');
     const {page,errorEl,calls}=fixture('fr');
     page.showPlaybackError(page.getErrorText(error),{immediate:true,allowAutomaticRetry:false});
-    assert.ok(errorEl.innerHTML.includes(translations.ui_web_542c160150e3.fr));
+    assert.ok(errorEl.innerHTML.includes(translations.ui_playback_version_unavailable_title.fr));
     assert.doesNotMatch(errorEl.innerHTML,/SECRET|PRIVATE_DIAGNOSTIC|403|502|PROVIDER_FILE_REFUSED/);
     assert.equal(calls.scheduled,0);assert.equal(calls.switched,0);assert.equal(calls.retried,0);
 });

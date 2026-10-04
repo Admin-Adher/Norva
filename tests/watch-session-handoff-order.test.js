@@ -209,6 +209,60 @@ function episodeContent(id) {
     };
 }
 
+test('an explicit recovery start or resume outranks server and local history for one invocation only', async () => {
+    for (const position of [0, 123]) {
+        const WatchPage = loadWatchPage();
+        const page = dynamicPageHarness(WatchPage, { events: [] });
+        let serverReads = 0, localReads = 0;
+        page._fetchServerResumeInfo = async () => { serverReads++; return { answered: true, position: 800 }; };
+        page._loadResumePosition = () => { localReads++; return 900; };
+        const content = { ...episodeContent('recovery-file'), type: 'movie', resumeTime: position, explicitRecoveryResume: true };
+        await page.play(content, async () => ({}));
+        assert.equal(page.resumeTime, position);
+        assert.equal(serverReads, 0); assert.equal(localReads, 0);
+        assert.equal(content.explicitRecoveryResume, undefined, 'the one-shot override cannot leak into resume snapshots');
+        await page.play({ ...content }, async () => ({}));
+        assert.equal(serverReads, 1); assert.equal(page.resumeTime, 800);
+    }
+});
+
+test('retrying a refused recovered copy preserves explicit zero instead of reading old history', async () => {
+    const requests = [];
+    const WatchPage = loadWatchPage({ api: { proxy: { xtream: {
+        async getStreamUrl(sourceId, itemId, type, container, hint) {
+            requests.push({ sourceId, itemId, type, container, hint });
+            return { url: 'fixture-stream', sessionId: 'retry-session' };
+        }
+    } } } });
+    const page = dynamicPageHarness(WatchPage, { events: [] });
+    let serverReads = 0, localReads = 0;
+    Object.assign(page, {
+        _fetchServerResumeInfo: async () => { serverReads++; return { answered: true, position: 800 }; },
+        _loadResumePosition: () => { localReads++; return 900; },
+        releasePlaybackPipelineForRetry: async () => {},
+        isCloudPlaybackMode: () => true,
+        getCurrentAudioPlaybackOptions: () => ({}),
+        getMergedPlaybackPreferences: () => null,
+        savePlaybackPreferences: value => value,
+        applyPlaybackPreferencesToHint: hint => hint,
+        getPlaybackPosition: () => 0,
+        loadVideo: async () => {},
+    });
+    page.video.currentTime = 0;
+    await page.play({ ...episodeContent('refused-copy'), type: 'movie', resumeTime: 0, explicitRecoveryResume: true }, async () => {
+        throw Object.assign(new Error('This media file is currently unavailable.'), { code: 'PROVIDER_FILE_REFUSED' });
+    });
+    assert.equal(page.resumeTime, 0);
+    await page.retryPlaybackInPlace();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].sourceId, 'source-a');
+    assert.equal(requests[0].itemId, 'refused-copy');
+    assert.equal(requests[0].container, 'mkv');
+    assert.equal(requests[0].hint.resumeTime, 0);
+    assert.equal(requests[0].hint.seekOffset, 0);
+    assert.equal(serverReads, 0); assert.equal(localReads, 0);
+});
+
 test('relaunching the active episode expires and cools the old slot before resolving', async () => {
     const WatchPage = loadWatchPage();
     const events = [];

@@ -117,4 +117,5 @@
     <string name="native_standalone_hint">Standalone: run Norva entirely on this TV. Use this when you do not want an account on this device. Playback uses the TV native decoder.</string>
     <string name="native_connection_tip">Advanced connection options: press MENU, or press BACK from Home and pick \"Connection settings\".</string>
     <string name="native_setup_failed">Norva could not start on this TV. Try again.</string>
+    <string name="player_other_versions">Other versions</string>
 </resources>

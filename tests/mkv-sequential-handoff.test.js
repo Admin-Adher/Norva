@@ -150,7 +150,7 @@ test('sequential 10-title contract: replacement always expires the previous sess
   // overlap two provider slots on the same mono-compte account.
   const play = section(watchSrc, 'async play(content, streamUrl, playback = {}) {', '\n    async ');
   const stopFn = section(watchSrc, 'stop({ enqueueStoryboard = true, preservePlaybackResolutionAttempt = false } = {}) {', '\n    // === Playback Controls ===');
-  const expire = section(watchSrc, 'async stopCloudPlaybackSessions(options = {}) {', 'async releasePlaybackPipelineForRetry() {');
+  const expire = section(watchSrc, 'async stopCloudPlaybackSessions(options = {}) {', 'async releasePlaybackPipelineForRetry(');
   const create = section(edgeSrc, 'async function createPlaybackSessionCore(', 'async function createPlaybackSession(');
   const loadVideo = section(watchSrc, 'async loadVideo(url, options = {}) {', '\n    setVolumeFromStorage() {');
 

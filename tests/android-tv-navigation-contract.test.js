@@ -880,6 +880,35 @@ test('Android TV Back dispatches addEventListener modal close before any class f
   assert.equal(deactivated.restores, 1);
 });
 
+test('Android TV Back dismisses native recovery without a playback action or orphaned overlay', () => {
+  const closeTopModalSource = jsFunction(read('public/js/utils/tvNavigation.js'), 'closeTopModal');
+  let dismissals = 0;
+  let restored = null;
+  const modal = {
+    isConnected: true,
+    classList: {
+      contains: name => name === 'norva-modal-overlay',
+      remove: () => assert.fail('Back must use the owned dismissal, not class fallback')
+    },
+    querySelector: () => assert.fail('Back must not select a playback action'),
+    __norvaCloseNativeRecovery() {
+      dismissals += 1;
+      this.isConnected = false;
+    }
+  };
+  const context = {
+    openModal: () => modal.isConnected ? modal : null,
+    scheduleModalFocusRestore: closed => { restored = closed; }
+  };
+  vm.runInNewContext(`${closeTopModalSource}\nthis.closeTopModal = closeTopModal;`, context);
+  assert.equal(context.closeTopModal(), true);
+  assert.equal(dismissals, 1);
+  assert.equal(modal.isConnected, false);
+  assert.equal(restored, modal);
+  assert.equal(context.closeTopModal(), false);
+  assert.equal(dismissals, 1);
+});
+
 test('Android TV remembers a content stop per page before opening the rail', () => {
   const source = read('public/js/utils/tvNavigation.js');
   assert.match(source, /const pageFocusMemory = new Map\(\);/);

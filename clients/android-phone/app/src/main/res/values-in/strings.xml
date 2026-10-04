@@ -25,6 +25,7 @@
     <string name="player_state_format_message">Versi ini menggunakan format yang tidak dapat didekode oleh perangkat Anda. Coba versi lain jika tersedia.</string>
     <string name="player_state_generic_terminal_message">Pemutaran berhenti tiba-tiba. Coba lagi atau kembali ke judul.</string>
     <string name="player_change_version">Ubah versi</string>
+    <string name="player_other_versions">Versi lain</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">Audio dan subtitle</string>
     <string name="player_tracks_title">Audio dan subtitle</string>

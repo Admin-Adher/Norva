@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">स्टैंडअलोन: Norva को पूरी तरह से इस टीवी पर चलाएं। जब आप इस डिवाइस पर खाता नहीं चाहते तो इसका उपयोग करें। प्लेबैक टीवी देशी डिकोडर का उपयोग करता है।</string>
     <string name="native_connection_tip">उन्नत कनेक्शन विकल्प: मेनू दबाएँ, या होम से वापस दबाएँ और \"कनेक्शन सेटिंग्स\" चुनें।</string>
     <string name="native_setup_failed">इस टीवी पर Norva प्रारंभ नहीं हो सका। पुनः प्रयास करें।</string>
+    <string name="player_other_versions">अन्य संस्करण</string>
 </resources>

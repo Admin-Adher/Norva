@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">Independiente: ejecuta Norva por completo en este televisor. Úselo cuando no desee una cuenta en este dispositivo. La reproducción utiliza el decodificador nativo de TV.</string>
     <string name="native_connection_tip">Opciones de conexión avanzadas: presione MENÚ o presione ATRÁS desde Inicio y seleccione \"Configuración de conexión\".</string>
     <string name="native_setup_failed">Norva no pudo iniciarse en este televisor. Intentar otra vez.</string>
+    <string name="player_other_versions">Otras versiones</string>
 </resources>

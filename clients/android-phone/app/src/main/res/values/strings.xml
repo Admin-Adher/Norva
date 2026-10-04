@@ -33,6 +33,7 @@
     <string name="player_state_format_message">This version uses a format your device can’t decode. Try another version if one is available.</string>
     <string name="player_state_generic_terminal_message">Playback stopped unexpectedly. Try again or return to the title.</string>
     <string name="player_change_version">Change version</string>
+    <string name="player_other_versions">Other versions</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
 
     <!-- Unified native track selector. These labels stay deliberately neutral

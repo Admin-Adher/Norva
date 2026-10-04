@@ -1395,7 +1395,8 @@ public class MainActivity extends Activity {
                         emptyToNull(o.optString("previousTitle")),
                         emptyToNull(o.optString("nextTitle")),
                         emptyToNull(o.optString("sessionId")),
-                    o.optJSONObject("mediaCache") == null ? null : o.getJSONObject("mediaCache").toString());
+                        o.optJSONObject("mediaCache") == null ? null : o.getJSONObject("mediaCache").toString(),
+                        o.optBoolean("movieVersionRecovery", false));
             } catch (Exception ignored) {
                 // Malformed payload → the web falls back to the fixed-signature methods.
             }
@@ -2475,7 +2476,8 @@ public class MainActivity extends Activity {
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson, final String posterUrl,
                             final String previousTitle, final String nextTitle,
-                            final String playbackSessionId, final String mediaCacheJson) {
+                            final String playbackSessionId, final String mediaCacheJson,
+                            final boolean movieVersionRecovery) {
         // Variant picks and explicit Play actions are new intents. Retire the
         // previous retry token before the new Activity is launched.
         clearPendingPlayerRecovery(null);
@@ -2490,6 +2492,7 @@ public class MainActivity extends Activity {
             if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
             if (variantsJson != null && !variantsJson.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_VARIANTS, variantsJson);
             if (activeStreamId != null && !activeStreamId.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_ACTIVE_VARIANT, activeStreamId);
+            intent.putExtra(PlayerActivity.EXTRA_MOVIE_VERSION_RECOVERY, movieVersionRecovery);
             if (trackMetadataJson != null && !trackMetadataJson.isEmpty()) {
                 intent.putExtra(PlayerActivity.EXTRA_TRACK_METADATA, trackMetadataJson);
             }
@@ -2636,6 +2639,17 @@ public class MainActivity extends Activity {
         final String sourceId = data.getStringExtra("sourceId");
         final String itemType = data.getStringExtra("itemType");
         final String itemId = data.getStringExtra("itemId");
+        if (data.getBooleanExtra(PlayerActivity.EXTRA_OPEN_MOVIE_VERSION_RECOVERY, false)
+                && MovieVersionRecoveryPolicy.canOffer(true, false, itemType, sourceId, itemId, true, false)) {
+            final long position = Math.max(0L, data.getLongExtra("positionSeconds", 0L));
+            final String script = "window.__norvaNative&&window.__norvaNative.onMovieVersionRecovery&&"
+                    + "window.__norvaNative.onMovieVersionRecovery("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + position + ")";
+            runOnUiThread(() -> {
+                if (webView != null) webView.evaluateJavascript(script, null);
+            });
+            return;
+        }
         // Viewer picked a different quality variant in the native player: ask the web to
         // re-select it (resolves a fresh stream + relaunches native playback).
         final String pickedVariant = data.getStringExtra("selectedVariantStreamId");

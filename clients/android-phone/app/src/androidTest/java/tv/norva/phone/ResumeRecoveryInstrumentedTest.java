@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.*;
 import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.View;
 import androidx.core.content.ContextCompat;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -16,19 +18,29 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Real Media3 startup refusal, with a resume point originally saved by another device. */
 @RunWith(AndroidJUnit4.class)
 public final class ResumeRecoveryInstrumentedTest {
     @Test public void refusalKeepsFiveMinutesAndRejectedResolutionEndsTheWait() throws Exception {
+        verifyRecovery(false);
+    }
+
+    @Test public void retryKeepsExactFileThenOtherVersionsClosesNativePlayer() throws Exception {
+        verifyRecovery(true);
+    }
+
+    private void verifyRecovery(boolean otherVersions) throws Exception {
         Instrumentation ins = InstrumentationRegistry.getInstrumentation();
         Context target = ins.getTargetContext();
         CountDownLatch requested = new CountDownLatch(1);
         AtomicReference<Intent> request = new AtomicReference<>();
+        AtomicInteger requestCount = new AtomicInteger();
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context context, Intent intent) {
                 if (!"resume-recovery-fixture".equals(intent.getStringExtra(PlayerActivity.EXTRA_ITEM_ID))) return;
-                request.set(new Intent(intent)); requested.countDown();
+                request.set(new Intent(intent)); requestCount.incrementAndGet(); requested.countDown();
             }
         };
         ContextCompat.registerReceiver(target, receiver,
@@ -56,6 +68,7 @@ public final class ResumeRecoveryInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_SOURCE_ID, "resume-fixture-source")
                     .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
                     .putExtra(PlayerActivity.EXTRA_ITEM_ID, "resume-recovery-fixture")
+                    .putExtra(PlayerActivity.EXTRA_MOVIE_VERSION_RECOVERY, otherVersions)
                     .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, 300));
             activity = ins.waitForMonitorWithTimeout(monitor, 15000);
             assertNotNull(activity);
@@ -73,15 +86,73 @@ public final class ResumeRecoveryInstrumentedTest {
             long deadline = SystemClock.elapsedRealtime()+3000;
             AtomicReference<Boolean> visible = new AtomicReference<>(false);
             while (!visible.get() && SystemClock.elapsedRealtime()<deadline) {
-                ins.runOnMainSync(() -> visible.set(shown.findViewById(R.id.norva_player_error_message).getVisibility()==View.VISIBLE));
+                ins.runOnMainSync(() -> visible.set(shown.findViewById(R.id.norva_player_error_message).isShown()));
                 SystemClock.sleep(50);
             }
             assertTrue("Explicit rejection displays a terminal state without the 60-second timeout", visible.get());
-            ins.runOnMainSync(shown::onBackPressed);
-            assertTrue(shown.isFinishing());
+            if (otherVersions) {
+                ins.runOnMainSync(() -> {
+                    View action = shown.findViewById(R.id.norva_player_change_version_button);
+                    assertEquals(View.VISIBLE, action.getVisibility());
+                    assertTrue("Other versions receives keyboard/accessibility focus", action.isFocused());
+                    assertTrue("Native action remains at least 48dp", action.getHeight()
+                            >= Math.round(48 * target.getResources().getDisplayMetrics().density));
+                });
+                tapOnce(ins, shown, R.id.norva_player_retry_button);
+                long retryDeadline = SystemClock.elapsedRealtime() + 3000;
+                while (requestCount.get() < 2 && SystemClock.elapsedRealtime() < retryDeadline) SystemClock.sleep(50);
+                assertEquals("One physical tap on Retry requests one fresh resolution", 2, requestCount.get());
+                assertEquals("resume-fixture-source", request.get().getStringExtra(PlayerActivity.EXTRA_SOURCE_ID));
+                assertEquals("resume-recovery-fixture", request.get().getStringExtra(PlayerActivity.EXTRA_ITEM_ID));
+                assertEquals(300L, request.get().getLongExtra("positionSeconds", -1L));
+                target.sendBroadcast(new Intent(PlayerActivity.ACTION_APPLY_FRESH_STREAM).setPackage(target.getPackageName())
+                        .putExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN, request.get().getStringExtra(PlayerActivity.EXTRA_RECOVERY_TOKEN))
+                        .putExtra(PlayerActivity.EXTRA_RECOVERY_PAYLOAD, payload));
+                visible.set(false);
+                deadline = SystemClock.elapsedRealtime() + 3000;
+                while (!visible.get() && SystemClock.elapsedRealtime() < deadline) {
+                    ins.runOnMainSync(() -> visible.set(shown.findViewById(R.id.norva_player_error_message).isShown()));
+                    SystemClock.sleep(50);
+                }
+                assertTrue("Repeated failure stays in explicit recovery", visible.get());
+                tapOnce(ins, shown, R.id.norva_player_change_version_button);
+                assertEquals("Opening the catalogue does not request another stream", 2, requestCount.get());
+            } else {
+                ins.runOnMainSync(() -> {
+                    assertEquals(View.GONE, shown.findViewById(R.id.norva_player_change_version_button).getVisibility());
+                    shown.onBackPressed();
+                });
+            }
+            assertTrue("One action closes the native player without a second tap", shown.isFinishing());
         } finally {
             if (activity!=null && !activity.isFinishing()) { Activity shown=activity; ins.runOnMainSync(shown::finish); }
             target.unregisterReceiver(receiver); ins.removeMonitor(monitor);
+        }
+    }
+
+    private void tapOnce(Instrumentation ins, Activity activity, int viewId) {
+        final float[] center = new float[2];
+        ins.runOnMainSync(() -> {
+            View action = activity.findViewById(viewId);
+            assertTrue("Touch action must be visible and enabled", action.isShown() && action.isEnabled());
+            int[] location = new int[2];
+            action.getLocationOnScreen(location);
+            center[0] = location[0] + action.getWidth() / 2f;
+            center[1] = location[1] + action.getHeight() / 2f;
+        });
+        long downTime = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, center[0], center[1], 0);
+        MotionEvent up = MotionEvent.obtain(downTime, downTime + 60, MotionEvent.ACTION_UP, center[0], center[1], 0);
+        down.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        up.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        try {
+            ins.sendPointerSync(down);
+            SystemClock.sleep(60);
+            ins.sendPointerSync(up);
+            ins.waitForIdleSync();
+        } finally {
+            down.recycle();
+            up.recycle();
         }
     }
 }

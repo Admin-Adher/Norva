@@ -126,6 +126,8 @@ public class PlayerActivity extends Activity {
     // MainActivity, which asks the web to re-resolve + relaunch (one gateway slot → no
     // in-place source swap).
     public static final String EXTRA_VARIANTS = "variants";
+    public static final String EXTRA_MOVIE_VERSION_RECOVERY = "movieVersionRecovery";
+    public static final String EXTRA_OPEN_MOVIE_VERSION_RECOVERY = "openMovieVersionRecovery";
     public static final String EXTRA_ACTIVE_VARIANT = "activeStreamId";
     // Exact-file, fail-closed track metadata from the already-loaded Norva
     // catalogue. This never opens a second provider connection.
@@ -318,6 +320,10 @@ public class PlayerActivity extends Activity {
     private String activeStreamId;            // currently-playing variant's streamId
     private String pendingVariantStreamId;    // set when the viewer picks a variant → attached to the result in finish()
     private String pendingVariantSourceId;
+    private boolean movieVersionRecoverySupported;
+    private boolean offerMovieVersionRecovery;
+    private boolean pendingMovieVersionRecovery;
+    private long movieVersionRecoveryPositionSeconds;
     private String mediaTitle;
     private String posterUrl;
     private String previousTitle;
@@ -532,6 +538,7 @@ public class PlayerActivity extends Activity {
         streamHost = hostOf(url);
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
         isLocal = getIntent().getBooleanExtra(EXTRA_LOCAL, false);
+        movieVersionRecoverySupported = getIntent().getBooleanExtra(EXTRA_MOVIE_VERSION_RECOVERY, false);
         activeStreamId = getIntent().getStringExtra(EXTRA_ACTIVE_VARIANT);
         readTrackMetadata(getIntent().getStringExtra(EXTRA_TRACK_METADATA));
         initializePlaybackPreferences();
@@ -1054,7 +1061,10 @@ public class PlayerActivity extends Activity {
                 R.id.norva_player_change_version_button,
                 R.string.player_change_version,
                 true,
-                v -> showVariantDialog());
+                v -> {
+                    if (offerMovieVersionRecovery) openMovieVersionRecovery();
+                    else showVariantDialog();
+                });
         changeVersionButton.setVisibility(View.GONE);
         LinearLayout.LayoutParams changeLp = playbackActionLayoutParams();
         changeLp.bottomMargin = dp(12);
@@ -1392,11 +1402,18 @@ public class PlayerActivity extends Activity {
             errorView.setText(message);
             errorView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
         }
-        boolean canChangeVersion = recommendVersion && variants != null && variants.length() > 1;
+        offerMovieVersionRecovery = MovieVersionRecoveryPolicy.canOffer(
+                movieVersionRecoverySupported, isLocal, itemType, sourceId, itemId,
+                state == PlaybackUiState.TERMINAL,
+                titleRes == R.string.player_error_provider_in_use_title);
+        boolean canChangeVersion = offerMovieVersionRecovery
+                || (recommendVersion && variants != null && variants.length() > 1);
         if (retryButton != null) {
             retryButton.setVisibility(retryAllowed ? View.VISIBLE : View.GONE);
         }
         if (changeVersionButton != null) {
+            changeVersionButton.setText(offerMovieVersionRecovery
+                    ? R.string.player_other_versions : R.string.player_change_version);
             changeVersionButton.setVisibility(canChangeVersion ? View.VISIBLE : View.GONE);
         }
         transitionTo(state, true);
@@ -1404,7 +1421,9 @@ public class PlayerActivity extends Activity {
                 ? changeVersionButton
                 : (retryAllowed ? retryButton : errorBackButton);
         if (focusTarget != null) {
-            focusTarget.requestFocus();
+            // Move keyboard focus after a touch-driven failure without making
+            // sibling buttons consume their first tap solely to take focus.
+            if (!focusTarget.requestFocus()) focusTarget.requestFocusFromTouch();
             focusTarget.announceForAccessibility(
                     getString(R.string.player_state_accessibility,
                             getString(titleRes), message));
@@ -3322,6 +3341,18 @@ public class PlayerActivity extends Activity {
         finish();
     }
 
+    private void openMovieVersionRecovery() {
+        if (!offerMovieVersionRecovery || pendingMovieVersionRecovery || isFinishing()) return;
+        pendingMovieVersionRecovery = true;
+        movieVersionRecoveryPositionSeconds = Math.max(0L, recoverPositionMs() / 1000L);
+        if (changeVersionButton != null) changeVersionButton.setEnabled(false);
+        if (retryButton != null) retryButton.setEnabled(false);
+        NativePlayerUiTelemetry.log(this, "player_error_action", "other_versions", "error", "manual");
+        // MainActivity waits for the existing exact-session close ACK before
+        // opening the owned film's version list. No URL is returned or resolved.
+        finishWithoutRecovery();
+    }
+
     private static boolean hasSelectedTrack(List<TrackOption> options) {
         for (TrackOption option : options) if (option.selected) return true;
         return false;
@@ -4361,6 +4392,14 @@ public class PlayerActivity extends Activity {
                 if (data == null) data = new Intent();
                 data.putExtra("selectedVariantStreamId", pendingVariantStreamId);
                 data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
+            }
+            if (pendingMovieVersionRecovery) {
+                if (data == null) data = new Intent();
+                data.putExtra(EXTRA_OPEN_MOVIE_VERSION_RECOVERY, true);
+                data.putExtra(EXTRA_SOURCE_ID, sourceId);
+                data.putExtra(EXTRA_ITEM_TYPE, itemType);
+                data.putExtra(EXTRA_ITEM_ID, itemId);
+                data.putExtra("positionSeconds", movieVersionRecoveryPositionSeconds);
             }
             if (currentTrackPreferencesJson != null
                     && !currentTrackPreferencesJson.isEmpty()) {

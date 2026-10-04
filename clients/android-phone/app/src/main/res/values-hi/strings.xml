@@ -25,6 +25,7 @@
     <string name="player_state_format_message">यह संस्करण एक ऐसे प्रारूप का उपयोग करता है जिसे आपका डिवाइस डिकोड नहीं कर सकता। यदि कोई उपलब्ध हो तो दूसरा संस्करण आज़माएँ।</string>
     <string name="player_state_generic_terminal_message">प्लेबैक अप्रत्याशित रूप से बंद हो गया. पुनः प्रयास करें या शीर्षक पर वापस लौटें।</string>
     <string name="player_change_version">संस्करण बदलें</string>
+    <string name="player_other_versions">अन्य संस्करण</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">ऑडियो और उपशीर्षक</string>
     <string name="player_tracks_title">ऑडियो और उपशीर्षक</string>

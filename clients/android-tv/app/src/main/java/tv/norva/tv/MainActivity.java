@@ -1421,6 +1421,18 @@ public class MainActivity extends Activity {
                             final String trackMetadataJson, final String preferenceScopeJson,
                             final String playbackPreferencesJson,
                             final String playbackSessionId, final String mediaCacheJson) {
+        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl,
+                poster, nextTitle, variantsJson, activeStreamId, trackMetadataJson,
+                preferenceScopeJson, playbackPreferencesJson, playbackSessionId, mediaCacheJson, false);
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds,
+                            final String fallbackUrl, final String poster, final String nextTitle,
+                            final String variantsJson, final String activeStreamId,
+                            final String trackMetadataJson, final String preferenceScopeJson,
+                            final String playbackPreferencesJson, final String playbackSessionId,
+                            final String mediaCacheJson, final boolean movieVersionRecovery) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -1451,6 +1463,9 @@ public class MainActivity extends Activity {
                     intent.putExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID, playbackSessionId);
                 intent.putExtra(PlayerActivity.EXTRA_MEDIA_CACHE, mediaCacheJson);
                 }
+                intent.putExtra(PlayerActivity.EXTRA_MOVIE_VERSION_RECOVERY,
+                        cloudBridgeAdded && MovieVersionRecoveryPolicy.canOffer(movieVersionRecovery,
+                                itemType, sourceId, itemId, playbackSessionId, true, false));
                 launchPlayerWithEphemeralAuth(intent);
             }
         });
@@ -1516,7 +1531,8 @@ public class MainActivity extends Activity {
                     preferenceScope == null ? null : preferenceScope.toString(),
                     playbackPreferences == null ? null : playbackPreferences.toString(),
                     emptyToNull(o.optString("sessionId")),
-                    o.optJSONObject("mediaCache") == null ? null : o.getJSONObject("mediaCache").toString());
+                    o.optJSONObject("mediaCache") == null ? null : o.getJSONObject("mediaCache").toString(),
+                    o.optBoolean("movieVersionRecovery", false));
         } catch (Exception ignored) {
             // A malformed payload simply doesn't start playback; the web side
             // falls back to the legacy fixed-signature bridge methods.
@@ -1626,6 +1642,16 @@ public class MainActivity extends Activity {
         final boolean retryPlayback = data.getBooleanExtra("retryPlayback", false);
         final String retryReason = data.getStringExtra("retryReason");
         if (sourceId == null || itemId == null) return;
+        if (MovieVersionRecoveryPolicy.canOffer(
+                data.getBooleanExtra(PlayerActivity.EXTRA_OPEN_MOVIE_VERSION_RECOVERY, false),
+                itemType, sourceId, itemId,
+                data.getStringExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID), true, false)) {
+            final String recoveryJs = "window.__norvaNative && window.__norvaNative.onMovieVersionRecovery && "
+                    + "window.__norvaNative.onMovieVersionRecovery("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + Math.max(0L, pos) + ")";
+            webView.evaluateJavascript(recoveryJs, null);
+            return;
+        }
         // Direct + signed fallback were exhausted. Keep the current catalogue/detail
         // route open and ask it to mint a fresh provider session, then relaunch the
         // native player at the same VOD timestamp. This prevents a transient Atlas

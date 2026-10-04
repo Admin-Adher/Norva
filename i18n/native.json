@@ -3865,5 +3865,17 @@
     "fil": "Hindi makapagsimula si Norva sa TV na ito. Subukan muli.",
     "hi": "इस टीवी पर Norva प्रारंभ नहीं हो सका। पुनः प्रयास करें।",
     "bn": "Norva এই টিভিতে শুরু করা যায়নি। আবার চেষ্টা করুন"
+  },
+  "Other versions": {
+    "en": "Other versions",
+    "fr": "Autres versions",
+    "pt-BR": "Outras versões",
+    "es": "Otras versiones",
+    "hi": "अन्य संस्करण",
+    "tr": "Diğer sürümler",
+    "bn": "অন্যান্য সংস্করণ",
+    "ar": "إصدارات أخرى",
+    "id": "Versi lain",
+    "fil": "Iba pang bersyon"
   }
 }
