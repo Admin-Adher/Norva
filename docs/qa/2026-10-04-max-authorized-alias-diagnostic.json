@@ -2,7 +2,7 @@
   "reportVersion": 1,
   "reportDate": "2026-10-04",
   "status": "bounded-comparison-complete-media-fault-unresolved",
-  "scope": "Three user-authorized provider bases; only indices published. Exact original HIT file.",
+  "scope": "Three user-authorized provider bases; only indices published. Exact original HIT file and exact original MMA Cop control.",
   "persistentConfigurationChanged": false,
   "providerMediaRequestsInMetadataPhase": 0,
   "credentialsOrSourceIdentifiersPublished": false,
@@ -608,7 +608,9 @@
       },
       "expired": true,
       "temporaryBodyHeadersErrorsRemoved": true,
-      "finishedAt": "2026-10-04T19:58:47.715972+00:00"
+      "finishedAt": "2026-10-04T19:58:47.715972+00:00",
+      "filmTitle": "MMA Cop",
+      "filmKey": "mma"
     }
   ],
   "metadataTechnicalProjection": {
@@ -1287,7 +1289,9 @@
       },
       "expired": true,
       "temporaryBodyHeadersErrorsRemoved": true,
-      "finishedAt": "2026-10-04T19:59:01.867200+00:00"
+      "finishedAt": "2026-10-04T19:59:01.867200+00:00",
+      "filmTitle": "MMA Cop",
+      "filmKey": "mma"
     }
   ],
   "limitations": [
@@ -1458,5 +1462,6 @@
     "expectedNaturalExpiryAt": "2026-10-04T20:00:59.709308+00:00",
     "expiryAlreadyObservedAtFinalHealth": false,
     "forciblyCleared": false
-  }
+  },
+  "initialAccountControlIncludedInRequestCounts": false
 }
