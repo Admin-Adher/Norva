@@ -157,8 +157,7 @@ Earlier checks were not all successful:
 
 The debug Activity is excluded from release APKs. Previous failed or pending
 emulator attempts are not counted as passes simply because later code passed.
-The earlier local `evidence.safe.json` snapshot predates the final matrix and
-must not be used as its completion receipt.
+The final sanitized receipt is `2026-10-04-refused-version-recovery.json`.
 
 ### Final Android emulator matrix
 
@@ -200,19 +199,16 @@ interaction. Lookup and closure failures are announced through a status region.
 The static review and browser fixture are separate from the Android matrix
 above; no general WCAG certification is claimed.
 
-## Deployment and publication — to complete
+## Deployment and publication
 
-Production Web publication and its post-deployment checks have not been recorded
-in this report yet. Do not interpret successful CI or emulator jobs as production
-deployment. The native changes have **not been published to Google Play**; the
-currently installed Play version must not be presented as containing this work.
+Web publication and the server follow-up are verified below. The shared WebView
+initial-refusal dialog is delivered with the Web assets. The new native terminal
+action has **not been published to Google Play**; the installed Play version must
+not be presented as containing that native button. No version code was bumped.
 
-The merge commit is recorded above. Record the Web publication/run, served asset verification and
-post-deployment interaction result here when they are available. Record a native
-release/version and Play status only after that distinct publication occurs.
-
-No production server code, media routes, language proofs or background campaign
-configuration is changed by this feature.
+The initial client implementation left the server unchanged. The follow-up below
+changes exact catalogue lookup and ten editorial projections. Media routes,
+language evidence, provider limits and the permanent campaign remain unchanged.
 
 ### First production verification — 21:17–21:19 UTC
 
@@ -224,6 +220,28 @@ One ordinary UI launch of the exact HIT MULTI-SUB original produced the new refu
 
 The first real test showed two independent catalogue gaps. Exact lookup stopped at one internal title identifier even when another current owned title had the same verified movie identity. Ten MAX OTT copies also lacked an accepted editorial match. A bounded server RPC now discovers only current owned projections of the same validated movie identity, hydrates through the existing visibility-epoch contract, and returns each projection with its own variants and evidence. A failed or over-limit lookup remains an error. Series lookups, client grouping and playback routing are unchanged.
 
-The endpoint regression set passed 45 tests, including the real CloudAdapter normalization, MediaUtils grouping and MoviesPage exact opening. It preserves source aliases, selected file, container and per-file audio, with no media resolver invoked. The isolated PostgreSQL 17 fixture passed 30 assertions on modeled hydration and scope; no customer rows or network were used, and its container was removed. A real read-only production benchmark and canary remain required before deployment.
+The endpoint regression set passed 45 tests, including the real CloudAdapter normalization, MediaUtils grouping and MoviesPage exact opening. It preserves source aliases, selected file, container and per-file audio, with no media resolver invoked. The isolated PostgreSQL 17 fixture passed 30 assertions on modeled hydration and scope; no customer rows or network were used, and its container was removed. The real read-only production benchmark and canary are recorded below.
 
 The ten MAX OTT associations passed the existing editorial matcher using exact poster evidence, confidence 0.923, movie identity 1060046 and year 2025. They are separate editorial corrections, not language identifications or proof of media availability. The differing-poster KU item was excluded.
+
+The first editorial transaction encountered PostgreSQL `40P01` before any CAS receipt and rolled back. A second, deterministically ordered proof completed ten CAS operations, verified unchanged file/audio/configuration/generation fingerprints, rolled back and re-read the unchanged baseline. The authorized application then committed the same ten CAS operations at 21:29:55 UTC. Its first post-commit assertion incorrectly expected `matched`; the existing RPC writes `provider_verified`. Independent readback confirmed all ten persisted associations, and no second application was made.
+
+The real read-only SQL benchmark used temporary definitions within BEGIN/ROLLBACK: 186 ms with a generic plan and 224 ms with a custom plan, twelve distinct logical titles, anchor first and matching visibility epoch. This is a single-account lookup measurement, not a service-wide performance guarantee. No speculative Selection index was added.
+
+### Verified server rollout — 21:35–21:39 UTC
+
+PR644, code `36eb52999e8fbb15ac0e6085456111aeb2a36ac9`, is integrated in `bd125d69a51d5456803ad2ece4089ec998baffbc`. All twelve GitHub check-runs on that code passed, including Android and Windows packages. No new frontend/native code was added by this follow-up, so the six successful emulator configurations of PR643 remain the corresponding client evidence.
+
+Migration `20261004233000_owned_movie_recovery_versions` was applied at 21:35:11 UTC. Only two new functions were added; existing function definitions and ACLs were compared unchanged. RPC SHA-256: `d2b68549220bba54723e5daed24ddee7280ba2fa12d0fc9b7adff77de117cca7`. Its execution is restricted to the service role. The stack has no application migration registry; its effective-state receipt is retained.
+
+A canary exact lookup returned twelve title projections and twenty-one visible variants in 918 ms, including the exact original and no duplicate file coordinates. The canary was stopped. The two Edge replicas were recreated sequentially at 21:38:12 and 21:38:16, changing only `norva-catalog/index.ts` (SHA-256 `cca50e09d484dd1c75d35f978ed0621439b56f3f9414825d841a424ad108dde6`) and preserving the other 192 files and their permissions. The controlled admission pause lasted 21:37:55.068–21:38:20.288 UTC (25.22 seconds), with natural worker drainage, no forced lease, unchanged Gateways and preserved dispatcher. Cron, admissions and worker were restored.
+
+Post-deployment exact reads returned the same twelve titles/twenty-one variants in 864/762 ms on the two replicas. The existing limit of ten variants per internal title remains unchanged; twenty-one is the returned visible choice count, not a claim that the film has only twenty-one catalogue files. Both Gateways returned healthy; the permanent language maintenance remained active. These catalogue probes opened no provider media.
+
+A fresh production browser replay then showed the three refusal actions for the same HIT original. Other versions closed that session and displayed twenty-one choices with per-file language/source/container and a recent-refusal label on the original. Selecting the existing English-labelled MAX OTT MP4 copy displayed Start from the beginning/Cancel without launching media. The failed original had no playback position to resume, so the recovery panel correctly offered only a start from zero; nonzero recovery remains covered by fixture/emulator tests.
+
+Selecting Start from the beginning then launched that chosen MP4 copy. Read-only DOM observations showed currentTime 2.050 then 41.421 seconds, paused=false, readyState=4 and no media error. This is a short successful replay, not certification of the whole film or repair of the original. The ordinary Back action closed the test and returned to the version list. At 21:41:45, the tested owner/source had zero unexpired pending/ready playback sessions; no claim about other global accounts is made.
+
+There were three ordinary UI launch attempts in this task: the original before the catalogue correction, the original after it, and one explicitly selected alternative. No diagnostic media downloader or parallel-copy probe was used. Both attempts of the original still displayed refusal; no language was newly certified. A screenshot of the real choice panel is retained locally as `.codex-artifacts/refused-version-recovery/production-version-choice.jpg`.
+
+The second main Web publication, run `37236922286`, succeeded at 21:40:20 UTC on merge `bd125d69a51d5456803ad2ece4089ec998baffbc`; it contains the same client assets already inspected in the browser. The original refusal and input-corruption investigations remain open. The recovery UX is verified; native-store publication remains a separate release.
