@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Build the androidx.media3 FFmpeg AUDIO decoder extension as a self-built .aar,
-# with an LGPL-clean FFmpeg (audio decoders only, NO --enable-gpl). This lets the
+# Build Media3 FFmpeg audio plus Norva MPEG-4 video decoding as a self-built .aar,
+# with a pinned FFmpeg configuration (NO --enable-gpl). This lets the
 # Norva phone app play OFFLINE downloads whose audio track is AC-3 / E-AC-3 / DTS /
 # TrueHD on devices whose hardware MediaCodec lacks those decoders (the #1 cause
-# of "downloaded but won't play" today).
+# of "downloaded but won't play" today), and decode legacy XVID locally.
 #
 # WHY self-build (not the prebuilt Jellyfin/NextLib AARs): those artifacts are
 # packaged GPL-3.0. The founder intends to close the source at commercialization,
@@ -29,7 +29,7 @@ FFMPEG_REF="${FFMPEG_REF:-b4a62c32549b8295691a8e0ff2c9b82188923159}" # exact rel
 API_LEVEL="${API_LEVEL:-23}"              # matches the apps' minSdk 23
 HOST_PLATFORM="${HOST_PLATFORM:-linux-x86_64}"   # darwin-x86_64 on macOS
 
-# LGPL-clean audio decoders (identical to Jellyfin's set; none needs --enable-gpl).
+# Audio decoders and MPEG-4 Part 2 video; none needs --enable-gpl.
 # Covers the offline gaps: Dolby AC-3 / E-AC-3, DTS + DTS-HD core (dca), Dolby
 # TrueHD (mlp/truehd), plus common lossless/lossy audio so nothing regresses.
 ENABLED_DECODERS=(flac alac pcm_mulaw pcm_alaw mp3 aac ac3 eac3 dca mlp truehd mpeg4)

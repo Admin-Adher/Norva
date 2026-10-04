@@ -55,7 +55,7 @@ public final class Mpeg4VideoDecoderInstrumentedTest {
         assertNotNull(demux.format);
         Mpeg4VideoDecoder decoder = new Mpeg4VideoDecoder(demux.format);
         try {
-            assertEquals(reference, decode(decoder, demux.packets, 0));
+            assertFrames(reference, decode(decoder, demux.packets, 0));
             // A decoder flushed after EOF must discard its old references and
             // preroll without exposing pictures before the requested seek.
             decoder.flush();
@@ -76,7 +76,13 @@ public final class Mpeg4VideoDecoderInstrumentedTest {
         assertTrue(reference.size()>100);
         Demux demux=new Demux(Files.readAllBytes(clip.toPath()));
         Mpeg4VideoDecoder decoder=new Mpeg4VideoDecoder(demux.format);
-        try {assertEquals(reference,decode(decoder,demux.packets,0));} finally {decoder.release();}
+        try {assertFrames(reference,decode(decoder,demux.packets,0));} finally {decoder.release();}
+    }
+    private static void assertFrames(List<String> reference,List<String> actual) {
+        assertEquals("Decoded frame count",reference.size(),actual.size());
+        int mismatches=0,first=-1;
+        for(int i=0;i<reference.size();i++)if(!reference.get(i).equals(actual.get(i))){mismatches++;if(first<0)first=i;}
+        assertEquals("Pixel hash mismatches; first="+first,0,mismatches);
     }
     private static List<String> decode(Mpeg4VideoDecoder decoder, List<Packet> packets, long startUs) throws Exception {
         decoder.setOutputStartTimeUs(startUs); decoder.setOutputMode(C.VIDEO_OUTPUT_MODE_SURFACE_YUV);
@@ -89,6 +95,12 @@ public final class Mpeg4VideoDecoderInstrumentedTest {
                 assertTrue(out.timeUs >= startUs); previous = out.timeUs;
                 int length = out.width*out.height + 2*((out.width+1)/2)*((out.height+1)/2);
                 ByteBuffer bytes = out.data.duplicate(); bytes.position(0); bytes.limit(length);
+                if("true".equals(InstrumentationRegistry.getArguments().getString("norvaMpeg4Diagnostic"))
+                        && (hashes.size()%40==0 || hashes.size()==18 || hashes.size()==19)) {
+                    File root=InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
+                    byte[] raw=new byte[length];bytes.duplicate().get(raw);
+                    Files.write(new File(root,"frame-"+out.width+"x"+out.height+"-"+hashes.size()+".yuv").toPath(),raw);
+                }
                 MessageDigest md5 = MessageDigest.getInstance("MD5"); md5.update(bytes);
                 StringBuilder hash = new StringBuilder(); for (byte value : md5.digest()) hash.append(String.format(java.util.Locale.ROOT,"%02x", value & 255));
                 hashes.add(hash.toString()); out.release();

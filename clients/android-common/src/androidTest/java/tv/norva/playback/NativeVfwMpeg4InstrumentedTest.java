@@ -87,11 +87,12 @@ public final class NativeVfwMpeg4InstrumentedTest {
             assertTrue("No audio progress",observed[2]>10);
             assertTrue("Resume position lost",observed[0]>=resumeSeconds*1000L+1000&&observed[0]<resumeSeconds*1000L+5000);
             long videoBefore=observed[1];
+            long seekStarted=SystemClock.elapsedRealtime();
             ins.runOnMainSync(()->player.seekTo(seekSeconds*1000L));SystemClock.sleep(1200);
-            ins.runOnMainSync(()->{
-                assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=seekSeconds*1000L);
-                assertTrue("Seek must render fresh video",player.getVideoDecoderCounters().renderedOutputBufferCount>videoBefore+5);
-            });
+            long[] seekObserved={0,0};
+            ins.runOnMainSync(()->{seekObserved[0]=player.getCurrentPosition();seekObserved[1]=player.getVideoDecoderCounters().renderedOutputBufferCount;});
+            android.util.Log.i("NorvaMpeg4QA","seek initial ms="+(SystemClock.elapsedRealtime()-seekStarted)
+                    +" position="+seekObserved[0]+" before="+videoBefore+" after="+seekObserved[1]);
             if("private-real".equals(asset)) {
                 ins.runOnMainSync(player::pause);
                 android.graphics.Bitmap screenshot=ins.getUiAutomation().takeScreenshot();
@@ -101,6 +102,11 @@ public final class NativeVfwMpeg4InstrumentedTest {
                 }
                 screenshot.recycle();
             }
+            ins.runOnMainSync(()->{
+                assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=seekSeconds*1000L);
+                assertTrue("Seek must render fresh video; before="+videoBefore+" after="+seekObserved[1]
+                        +" position="+seekObserved[0],seekObserved[1]>videoBefore+5);
+            });
             // Exercise the platform Back dispatch, including TV's key handler.
             // Calling deprecated Activity.onBackPressed bypasses that handler.
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
