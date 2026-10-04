@@ -1335,7 +1335,98 @@
         },
         "hasPlaybackEvents": true
       }
-    ]
+    ],
+    "observedByParent": {
+      "refusalClickAt": "2026-10-04T18:22:03.357Z",
+      "refusalMessageCorrect": true,
+      "resumeClickAt": "2026-10-04T18:23:01.441Z",
+      "lastVideoObservationAt": "2026-10-04T18:25:45.324Z",
+      "currentTime": 76.036894,
+      "readyState": 4,
+      "paused": false,
+      "videoError": null,
+      "bufferedRanges": [
+        [
+          43.312,
+          196.117333
+        ]
+      ],
+      "returnedToFilmsApproximately": "2026-10-04T18:26:10Z"
+    },
+    "resumeTiming": {
+      "firstFrameAt": "2026-10-04T18:23:34.884136Z",
+      "reportedTtffMs": 32050,
+      "playStartedAt": "2026-10-04T18:24:34.906260Z",
+      "firstFrameToPlayStartedMs": 60022,
+      "clickToPlayStartedMs": 93465,
+      "classification": "Delayed automatic initial playback after resume, not proven post-start rebuffering.",
+      "startupPolicy": {
+        "captured": false,
+        "reason": "Session removed from Gateway debug after closure; no policy retained in playback_hint, Gateway row or the two playback event metadata records."
+      },
+      "requestedSeekOffsetSeconds": 96,
+      "requestGatewayMode": "remux",
+      "requestVideoCodec": "h264",
+      "requestAudioMode": "copy",
+      "gatewayStartup": {
+        "readyAt": "2026-10-04T18:23:33.404Z",
+        "totalMs": 29999,
+        "ffmpegReadyMs": 29862,
+        "playlistBufferSeconds": 17.5,
+        "playlistSegmentCount": 3,
+        "firstSegmentReadyMs": 26206.614501953125,
+        "sustainedMediaProductionRateX": 2.069,
+        "inputProbeMode": "known-fast",
+        "codecProfileSource": "request",
+        "seek": true
+      }
+    },
+    "logLimitations": [
+      "Gateway logs begin at 18:05:56/18:05:59 after deployment; earlier replay cleanliness cannot be inferred from these windows.",
+      "Shutdown-adjacent truncated-input/loopback/output errors appeared at 18:26:18, after the reported return to Films. Their relationship to teardown is plausible, not established; do not label them proof of an in-playback corruption or certify a clean decoder.",
+      "The exact startup policy was not retained; do not claim the suspected client-policy mismatch as proven for this session."
+    ],
+    "health": {
+      "at": "2026-10-04T18:29:43.044359+00:00",
+      "windowStartedAt": "2026-10-04T18:08:00Z",
+      "gateways": [
+        {
+          "route": "norva-media-gateway",
+          "activeViewerSessions": 1,
+          "http": 200,
+          "ok": true,
+          "running": true,
+          "logWindowStartedAt": "2026-10-04T18:05:56.370293012Z",
+          "windowLogLines": 44,
+          "taggedPlaybackFfmpegDiagnosticLines": 4
+        },
+        {
+          "route": "norva-resume-cache-pilot-20260916",
+          "activeViewerSessions": 0,
+          "http": 200,
+          "ok": true,
+          "running": true,
+          "logWindowStartedAt": "2026-10-04T18:05:59.164930376Z",
+          "windowLogLines": 16,
+          "taggedPlaybackFfmpegDiagnosticLines": 1
+        }
+      ],
+      "sessionLogs": [
+        {
+          "title": "EN| HIT: The Third Case",
+          "created": "2026-10-04T18:23:33.408822+00:00",
+          "lastUpdated": "2026-10-04T18:26:21.300836+00:00",
+          "exactSessionAssociatedLines": 2,
+          "diagnosticCounts": {
+            "corruptPicture": 0,
+            "aacDecode": 0,
+            "processError": 0,
+            "providerRefusal": 0
+          }
+        }
+      ],
+      "logScope": "Only lines carrying exact Gateway session IDs are attributed. Untagged continuation lines and other background jobs cannot certify full decoder cleanliness."
+    }
   },
   "finalBrowser": {
     "scope": "Production browser, exact original HIT MULTI-SUB then explicitly selected MAX OTT EN MP4 alternative",
