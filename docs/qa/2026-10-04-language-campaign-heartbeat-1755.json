@@ -1,0 +1,1326 @@
+{
+  "initialCohort": {
+    "at": "2026-10-04T15:55:49.583721+00:00",
+    "startedAt": "2026-10-03T16:24:04.734234+00:00",
+    "initialVariants": 56751,
+    "sources": [
+      {
+        "intakeCodes": {
+          "live-session": 27,
+          "server-capacity": 12,
+          "codec_probe_timeout": 7,
+          "provider-account-busy": 12,
+          "strict-analysis-queued": 16,
+          "declared-track-languages": 121,
+          "incomplete_codec_profile": 14,
+          "strict-analysis-deferred": 9,
+          "codec_probe_invalid_media": 1
+        },
+        "intakeStates": {
+          "failed": 3,
+          "queued": 16,
+          "deferred": 79,
+          "identified": 121
+        },
+        "recentIntake": 218,
+        "strictStates": {
+          "failed": 9,
+          "verified": 5,
+          "retry_wait": 2
+        },
+        "cohortVisible": 30194,
+        "cohortWithProfile": 154,
+        "cohortStillUnknown": 30063,
+        "currentUnknownCards": 22053,
+        "cohortWithAudioTracks": 154,
+        "currentUnknownVariants": 30063,
+        "strictCompletedWindows": 54,
+        "lastStrictProviderProgress": "2026-10-04T15:44:43.946733+00:00",
+        "source": "Strng IPTV 8K",
+        "initialUnknownVariants": 30194,
+        "cohortNowIdentified": 131,
+        "cohortChangedOrRemoved": 0
+      },
+      {
+        "intakeCodes": {
+          "live-session": 8,
+          "server-capacity": 8,
+          "provider-account-busy": 74,
+          "strict-analysis-queued": 50,
+          "declared-track-languages": 2,
+          "incomplete_codec_profile": 3,
+          "strict-analysis-deferred": 37
+        },
+        "intakeStates": {
+          "queued": 50,
+          "deferred": 130,
+          "identified": 2
+        },
+        "recentIntake": 178,
+        "strictStates": {
+          "failed": 45,
+          "verified": 6
+        },
+        "cohortVisible": 183,
+        "cohortWithProfile": 176,
+        "cohortStillUnknown": 174,
+        "currentUnknownCards": 170,
+        "cohortWithAudioTracks": 175,
+        "currentUnknownVariants": 174,
+        "strictCompletedWindows": 270,
+        "lastStrictProviderProgress": "2026-10-04T08:48:11.904003+00:00",
+        "source": "Norva Selection",
+        "initialUnknownVariants": 183,
+        "cohortNowIdentified": 9,
+        "cohortChangedOrRemoved": 0
+      },
+      {
+        "intakeCodes": {
+          "account_busy": 1,
+          "live-session": 9,
+          "server-capacity": 5,
+          "codec_probe_failed": 1,
+          "codec_probe_timeout": 1,
+          "provider-account-busy": 27,
+          "strict-analysis-queued": 29,
+          "declared-track-languages": 26,
+          "incomplete_codec_profile": 1,
+          "strict-analysis-deferred": 36,
+          "provider_probe_circuit_open": 3
+        },
+        "intakeStates": {
+          "queued": 29,
+          "deferred": 84,
+          "identified": 26
+        },
+        "recentIntake": 139,
+        "strictStates": {
+          "failed": 18,
+          "verified": 7,
+          "retry_wait": 4
+        },
+        "cohortVisible": 8869,
+        "cohortWithProfile": 95,
+        "cohortStillUnknown": 5224,
+        "currentUnknownCards": 4685,
+        "cohortWithAudioTracks": 95,
+        "currentUnknownVariants": 5224,
+        "strictCompletedWindows": 102,
+        "lastStrictProviderProgress": "2026-10-04T15:22:05.170913+00:00",
+        "source": "Dino",
+        "initialUnknownVariants": 8869,
+        "cohortNowIdentified": 3645,
+        "cohortChangedOrRemoved": 0
+      },
+      {
+        "intakeCodes": {
+          "live-session": 16,
+          "server-capacity": 14,
+          "codec_probe_failed": 1,
+          "codec_probe_timeout": 1,
+          "intake-request-failed": 1,
+          "provider-account-busy": 26,
+          "strict-analysis-queued": 33,
+          "declared-track-languages": 3,
+          "incomplete_codec_profile": 2,
+          "strict-analysis-deferred": 26,
+          "codec_probe_access_denied": 9,
+          "provider_probe_circuit_open": 7,
+          "strict-profile-insufficient": 2
+        },
+        "intakeStates": {
+          "failed": 1,
+          "queued": 33,
+          "deferred": 102,
+          "identified": 3,
+          "unsupported": 2
+        },
+        "recentIntake": 139,
+        "strictStates": {
+          "failed": 20,
+          "expired": 2,
+          "verified": 18,
+          "retry_wait": 2
+        },
+        "cohortVisible": 17505,
+        "cohortWithProfile": 75,
+        "cohortStillUnknown": 14063,
+        "currentUnknownCards": 13844,
+        "cohortWithAudioTracks": 74,
+        "currentUnknownVariants": 14063,
+        "strictCompletedWindows": 115,
+        "lastStrictProviderProgress": "2026-10-04T13:31:33.093039+00:00",
+        "source": "MAX OTT",
+        "initialUnknownVariants": 17505,
+        "cohortNowIdentified": 3442,
+        "cohortChangedOrRemoved": 0
+      }
+    ],
+    "currentGlobal": {
+      "unknownCards": 38825,
+      "unknownVariants": 49524
+    },
+    "dispatcher": [
+      {
+        "source": "Strng IPTV 8K",
+        "calls": 1221,
+        "totals": {
+          "processed": 7712,
+          "attempted": 7293,
+          "queued": 18,
+          "identified": 129,
+          "verified": 0,
+          "inconclusive": 6994,
+          "deferred": 432,
+          "failed": 139,
+          "scanned": 43700
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 0,
+          "attempted": 0,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 0,
+          "failed": 0,
+          "scanned": 0,
+          "skipped": "server-capacity",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T15:56:04.526Z"
+      },
+      {
+        "source": "Norva Selection",
+        "calls": 368,
+        "totals": {
+          "processed": 350,
+          "attempted": 175,
+          "queued": 46,
+          "identified": 2,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 211,
+          "failed": 91,
+          "scanned": 7361
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 1,
+          "attempted": 0,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 82,
+          "code": "strict-analysis-deferred",
+          "outcome": "deferred",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T15:38:27.990Z"
+      },
+      {
+        "source": "Dino",
+        "calls": 1149,
+        "totals": {
+          "processed": 7095,
+          "attempted": 6692,
+          "queued": 29,
+          "identified": 3517,
+          "verified": 0,
+          "inconclusive": 3042,
+          "deferred": 446,
+          "failed": 61,
+          "scanned": 80573
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 1,
+          "attempted": 1,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 11,
+          "skipped": "provider_fetch_failed",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T15:54:54.864Z"
+      },
+      {
+        "source": "MAX OTT",
+        "calls": 1169,
+        "totals": {
+          "processed": 6114,
+          "attempted": 5641,
+          "queued": 35,
+          "identified": 3248,
+          "verified": 0,
+          "inconclusive": 2297,
+          "deferred": 495,
+          "failed": 39,
+          "scanned": 52480
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 1,
+          "attempted": 0,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 1,
+          "skipped": "provider-account-busy",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T15:53:40.248Z"
+      }
+    ],
+    "container": {
+      "running": true,
+      "health": "healthy",
+      "restartCount": 0
+    }
+  },
+  "uniqueTechnicalCoverage": {
+    "startedAt": "2026-10-03T16:24:04.734234+00:00",
+    "at": "2026-10-04T15:56:32.790135+00:00",
+    "initial": 56751,
+    "uniqueChecked": 19979,
+    "elapsedMinutes": 1412.46759835,
+    "sources": [
+      {
+        "at": "2026-10-04T15:56:31.08135+00:00",
+        "uniqueChecked": 7347,
+        "profilesProbed": 145,
+        "metadataChecked": 7270,
+        "uniqueLast15Min": 136,
+        "strictWithProgress": 16,
+        "strictRecentTerminal": {
+          "verified": 5,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 9
+        },
+        "source": "Strng IPTV 8K"
+      },
+      {
+        "at": "2026-10-04T15:56:31.655349+00:00",
+        "uniqueChecked": 85,
+        "profilesProbed": 85,
+        "metadataChecked": 0,
+        "uniqueLast15Min": 0,
+        "strictWithProgress": 46,
+        "strictRecentTerminal": {
+          "verified": 6,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 40
+        },
+        "source": "Norva Selection"
+      },
+      {
+        "at": "2026-10-04T15:56:31.775808+00:00",
+        "uniqueChecked": 6768,
+        "profilesProbed": 90,
+        "metadataChecked": 6757,
+        "uniqueLast15Min": 0,
+        "strictWithProgress": 27,
+        "strictRecentTerminal": {
+          "verified": 7,
+          "LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED": 2,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 16
+        },
+        "source": "Dino"
+      },
+      {
+        "at": "2026-10-04T15:56:32.170486+00:00",
+        "uniqueChecked": 5779,
+        "profilesProbed": 68,
+        "metadataChecked": 5747,
+        "uniqueLast15Min": 0,
+        "strictWithProgress": 33,
+        "strictRecentTerminal": {
+          "verified": 18,
+          "PROFILE_CHANGED": 1,
+          "LANGUAGE_VALIDATION_QUEUE_EXPIRED": 2,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 14
+        },
+        "source": "MAX OTT"
+      }
+    ]
+  },
+  "strictAudit": [
+    {
+      "at": "2026-10-04T15:56:57.958391+00:00",
+      "groups": [
+        {
+          "jobs": 9,
+          "state": "failed",
+          "variants": 9,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T15:44:44.025+00:00",
+          "first_retry": "2026-10-04T17:35:24.945+00:00",
+          "last_update": "2026-10-04T15:44:44.026983+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 35,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T15:44:43.946733+00:00",
+          "stored_window_positions": 54
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "LANGUAGE_VALIDATION_CHECKPOINT_RESET_REQUIRED",
+          "last_retry": "2026-10-04T13:58:17.366+00:00",
+          "first_retry": "2026-10-04T13:58:17.366+00:00",
+          "last_update": "2026-10-04T13:57:47.368856+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 10,
+          "min_provider_attempts": 10,
+          "last_provider_progress": "2026-10-04T13:57:47.266965+00:00",
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "LANGUAGE_VALIDATION_FINALIZE_FAILED",
+          "last_retry": "2026-10-05T02:22:08.47+00:00",
+          "first_retry": "2026-10-05T02:22:08.47+00:00",
+          "last_update": "2026-10-04T02:22:08.472329+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 8,
+          "min_provider_attempts": 8,
+          "last_provider_progress": "2026-10-04T01:31:35.341418+00:00",
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 5,
+          "state": "verified",
+          "variants": 5,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T05:18:00.79425+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-04T05:18:00.79425+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T05:11:29.601612+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 1,
+      "verifiedVariantsSinceStart": 5,
+      "verifiedCompleteTrackEvidence": 5,
+      "inconclusiveCompletedSinceStart": 9,
+      "verifiedWithProviderProgressSinceStart": 5,
+      "inconclusiveCompletedMatchingCurrentProfile": 9,
+      "source": "Strng IPTV 8K"
+    },
+    {
+      "at": "2026-10-04T15:56:58.069117+00:00",
+      "groups": [
+        {
+          "jobs": 45,
+          "state": "failed",
+          "variants": 45,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T08:48:11.978+00:00",
+          "first_retry": "2026-09-25T03:53:12.272+00:00",
+          "last_update": "2026-10-04T08:48:11.980187+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T08:48:11.904003+00:00",
+          "stored_window_positions": 270
+        },
+        {
+          "jobs": 6,
+          "state": "verified",
+          "variants": 6,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T06:42:26.605667+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-04T06:42:26.605667+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 7,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T06:42:26.566324+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 0,
+      "verifiedVariantsSinceStart": 6,
+      "verifiedCompleteTrackEvidence": 6,
+      "inconclusiveCompletedSinceStart": 40,
+      "verifiedWithProviderProgressSinceStart": 6,
+      "inconclusiveCompletedMatchingCurrentProfile": 40,
+      "source": "Norva Selection"
+    },
+    {
+      "at": "2026-10-04T15:56:58.182628+00:00",
+      "groups": [
+        {
+          "jobs": 2,
+          "state": "failed",
+          "variants": 2,
+          "error_code": "LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED",
+          "last_retry": "2026-10-05T08:26:15.285909+00:00",
+          "first_retry": "2026-10-05T07:26:48.066023+00:00",
+          "last_update": "2026-10-04T08:26:15.285909+00:00",
+          "quarantined": 2,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 6,
+          "min_provider_attempts": 5,
+          "last_provider_progress": "2026-10-04T05:23:21.068569+00:00",
+          "stored_window_positions": 3
+        },
+        {
+          "jobs": 16,
+          "state": "failed",
+          "variants": 16,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T09:14:53.052+00:00",
+          "first_retry": "2026-10-04T16:46:18.151+00:00",
+          "last_update": "2026-10-04T09:14:53.054671+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 17,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T09:14:52.977703+00:00",
+          "stored_window_positions": 96
+        },
+        {
+          "jobs": 2,
+          "state": "retry_wait",
+          "variants": 2,
+          "error_code": "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE",
+          "last_retry": "2026-10-04T15:18:15.403+00:00",
+          "first_retry": "2026-10-04T14:00:15.634+00:00",
+          "last_update": "2026-10-04T15:18:00.404902+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 1,
+          "min_provider_attempts": 0,
+          "last_provider_progress": "2026-10-04T13:59:19.594083+00:00",
+          "stored_window_positions": 1
+        },
+        {
+          "jobs": 2,
+          "state": "retry_wait",
+          "variants": 2,
+          "error_code": "PROVIDER_ACCOUNT_BUSY",
+          "last_retry": "2026-10-04T15:28:15.827+00:00",
+          "first_retry": "2026-10-04T14:14:15.629+00:00",
+          "last_update": "2026-10-04T15:28:00.829053+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 2,
+          "min_provider_attempts": 0,
+          "last_provider_progress": "2026-10-04T15:22:05.170913+00:00",
+          "stored_window_positions": 2
+        },
+        {
+          "jobs": 7,
+          "state": "verified",
+          "variants": 7,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T09:03:24.218009+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-04T09:03:24.218009+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 15,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T09:03:24.147658+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 4,
+      "verifiedVariantsSinceStart": 7,
+      "verifiedCompleteTrackEvidence": 7,
+      "inconclusiveCompletedSinceStart": 16,
+      "verifiedWithProviderProgressSinceStart": 7,
+      "inconclusiveCompletedMatchingCurrentProfile": 16,
+      "source": "Dino"
+    },
+    {
+      "at": "2026-10-04T15:56:58.332907+00:00",
+      "groups": [
+        {
+          "jobs": 2,
+          "state": "expired",
+          "variants": 2,
+          "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+          "last_retry": "2026-10-04T15:49:00.837435+00:00",
+          "first_retry": "2026-10-04T13:43:46.330484+00:00",
+          "last_update": "2026-10-04T15:49:00.837435+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 9,
+          "min_provider_attempts": 1,
+          "last_provider_progress": "2026-10-04T13:31:33.093039+00:00",
+          "stored_window_positions": 1
+        },
+        {
+          "jobs": 19,
+          "state": "failed",
+          "variants": 17,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T13:22:13.174+00:00",
+          "first_retry": "2026-10-04T03:32:22.642+00:00",
+          "last_update": "2026-10-04T13:22:13.177704+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T13:22:13.106819+00:00",
+          "stored_window_positions": 114
+        },
+        {
+          "jobs": 1,
+          "state": "failed",
+          "variants": 1,
+          "error_code": "PROFILE_CHANGED",
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T14:04:24.642313+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 0,
+          "min_provider_attempts": 0,
+          "last_provider_progress": null,
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "LANGUAGE_VALIDATION_GATEWAY_ERROR",
+          "last_retry": "2026-10-04T13:05:48.86+00:00",
+          "first_retry": "2026-10-04T13:05:48.86+00:00",
+          "last_update": "2026-10-04T13:00:48.861519+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 2,
+          "min_provider_attempts": 2,
+          "last_provider_progress": null,
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "PROVIDER_ACCOUNT_BUSY",
+          "last_retry": "2026-10-04T15:53:16.287+00:00",
+          "first_retry": "2026-10-04T15:53:16.287+00:00",
+          "last_update": "2026-10-04T15:53:01.288133+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 2,
+          "min_provider_attempts": 2,
+          "last_provider_progress": null,
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 18,
+          "state": "verified",
+          "variants": 18,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T10:13:33.225642+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-04T10:13:33.225642+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 14,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T10:13:33.168324+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 2,
+      "verifiedVariantsSinceStart": 18,
+      "verifiedCompleteTrackEvidence": 18,
+      "inconclusiveCompletedSinceStart": 14,
+      "verifiedWithProviderProgressSinceStart": 18,
+      "inconclusiveCompletedMatchingCurrentProfile": 14,
+      "source": "MAX OTT"
+    }
+  ],
+  "finalizationLogs": {
+    "at": "2026-10-04T15:55:49.610949+00:00",
+    "replicas": [
+      {
+        "replica": "norva-edge-functions",
+        "startedAt": "2026-10-04T14:46:06.997107974Z",
+        "running": true,
+        "sha256": "ffe66d313222d7dea0d815d9dd13abcf2621e8ca0bf3e2acf33c2abb54129446",
+        "diagnosticPresent": true,
+        "finalizationErrors": [],
+        "databaseTimeoutDiagnostics": 0
+      },
+      {
+        "replica": "norva-edge-functions-2",
+        "startedAt": "2026-10-04T14:46:10.939690214Z",
+        "running": true,
+        "sha256": "ffe66d313222d7dea0d815d9dd13abcf2621e8ca0bf3e2acf33c2abb54129446",
+        "diagnosticPresent": true,
+        "finalizationErrors": [],
+        "databaseTimeoutDiagnostics": 0
+      }
+    ]
+  },
+  "global": {
+    "at": "2026-10-04T15:55:25.068892+00:00",
+    "paused": false,
+    "priority": {
+      "owners": 1,
+      "titles": 384,
+      "virtualTitles": 0,
+      "physicalMovies": 188,
+      "physicalSeries": 196
+    },
+    "strictCron": true,
+    "activeLeases": {
+      "intake": 0,
+      "strict": 0,
+      "metadata": 1,
+      "sourceSchedule": 0,
+      "lastIntakeExpiry": null,
+      "lastStrictExpiry": null
+    },
+    "discovered": {
+      "sources": 53,
+      "owners": 47
+    },
+    "dispatcher": {
+      "at": 1791129324004,
+      "inFlight": 0,
+      "stopping": false,
+      "discoveryOk": true,
+      "sourceCount": 53,
+      "ownerCount": 47
+    },
+    "outsideOriginal": {
+      "sourcesInState": 49,
+      "sourcesCalled": 49,
+      "ownersCalled": 46,
+      "attempted": 2981,
+      "identifiedReceipts": 1570,
+      "deferredReceipts": 866
+    },
+    "countersPreserved": true,
+    "norva-edge-functions": {
+      "running": true,
+      "startedAt": "2026-10-04T14:46:06.997107974Z",
+      "health": "healthy"
+    },
+    "norva-edge-functions-2": {
+      "running": true,
+      "startedAt": "2026-10-04T14:46:10.939690214Z",
+      "health": "healthy"
+    },
+    "norva-media-gateway": {
+      "running": true,
+      "startedAt": "2026-10-04T13:06:00.163037849Z",
+      "health": "healthy",
+      "healthHttp": 200,
+      "healthOk": true
+    },
+    "norva-resume-cache-pilot-20260916": {
+      "running": true,
+      "startedAt": "2026-10-04T13:06:03.671217934Z",
+      "health": null,
+      "healthHttp": 200,
+      "healthOk": true
+    }
+  },
+  "featured": {
+    "at": "2026-10-04T15:56:57.814637+00:00",
+    "intakeCodes": {
+      "provider-account-busy": 2,
+      "strict-analysis-queued": 2,
+      "codec_probe_access_denied": 1
+    },
+    "metadataCodes": {
+      "live-session": 1,
+      "provider-account-busy": 2
+    },
+    "featuredVariants": 6805,
+    "intakeSincePriority": 5,
+    "strictSincePriority": 1,
+    "metadataSincePriority": 3,
+    "visibleMovieIdentified": 145,
+    "strictSelectorSeconds": 0.085,
+    "dispatcherEvents": {
+      "count": 3562,
+      "httpErrors": 4,
+      "discoveryFailures": 0,
+      "codes": {
+        "none": 327,
+        "incomplete_codec_profile": 50,
+        "provider_request_failed": 5,
+        "provider_probe_circuit_open": 271,
+        "metadata-sweep-resting": 28,
+        "provider-account-busy": 525,
+        "server-capacity": 1960,
+        "declared-track-languages": 5,
+        "strict-analysis-deferred": 115,
+        "intake-request-failed": 12,
+        "codec_probe_failed": 9,
+        "sweep-resting": 127,
+        "metadata-capacity": 34,
+        "metadata-busy": 7,
+        "background_busy": 5,
+        "codec_probe_timeout": 3,
+        "strict-analysis-queued": 4,
+        "provider-lease-busy": 1,
+        "codec_probe_invalid_media": 1,
+        "codec_probe_access_denied": 1,
+        "metadata-not-eligible": 2,
+        "live-session": 61,
+        "viewer_preempted": 1,
+        "strict-profile-insufficient": 2,
+        "account_busy": 1,
+        "provider_fetch_failed": 5
+      }
+    }
+  },
+  "sqlProof": {
+    "checks": [
+      "active_lease_not_stolen",
+      "anonymous_cannot_resample",
+      "authenticated_cannot_resample",
+      "automatic_global_bound_unchanged",
+      "automatic_global_queue_full",
+      "bounded_pass_count",
+      "cannot_skip_pass",
+      "claim_carries_persisted_sampling_pass",
+      "duplicate_request_cannot_create_second_job",
+      "foreign_owner_rejected",
+      "incomplete_analysis_not_restarted",
+      "new_attempt_has_separate_journal",
+      "new_pass_queued",
+      "old_receipts_counters_and_retry_dates_intact",
+      "operator_pause_retained",
+      "quarantine_preserved",
+      "second_manual_request_allowed",
+      "shared_provider_four_job_bound",
+      "transport_error_preserved",
+      "twenty_manual_starts_per_day",
+      "two_manual_jobs_per_owner",
+      "zero_execution_capacity_blocks_capture",
+      "zero_pass_rejected"
+    ],
+    "passed": 23,
+    "at": "2026-10-04T16:06:26.489599+00:00",
+    "migrationSha256": "740284ba1fbaa2d9ce689f2679f2176700e50313d407c1c9713c53702138c890",
+    "network": "none",
+    "customerRowsCopied": 0,
+    "baselineRegressionReproduced": true
+  },
+  "deployment": {
+    "at": "2026-10-04T16:07:55.864718+00:00",
+    "migration": "20261004160000_manual_language_resampling_admission",
+    "beforeMd5": "2ce3215e0b6983199aa16935481f0537",
+    "functionSha256": "18c266ce14f1369d80c47ecf9f62bed307be9a9e8f29db36b7f09538f99251a0",
+    "proofFunctionIdentical": true,
+    "aclUnchanged": true,
+    "automaticQueueExecutionClaimValidationGuardsUnchanged": true,
+    "serviceRestarts": 0,
+    "providerCalls": 0,
+    "directJobMutations": 0
+  },
+  "sixFilms": {
+    "at": "2026-10-04T16:08:10.684529+00:00",
+    "items": [
+      {
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+            "pass": 0,
+            "retry": "2026-10-05T09:45:16.222+00:00",
+            "state": "failed",
+            "windows": 6,
+            "receipts": 6,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T09:45:16.110401+00:00",
+            "providerAttempts": 7
+          },
+          {
+            "code": null,
+            "pass": 3,
+            "retry": "2026-10-04T16:08:09.815188+00:00",
+            "state": "retry_wait",
+            "windows": 0,
+            "receipts": 0,
+            "selected": true,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 0
+          },
+          {
+            "code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+            "pass": 1,
+            "retry": "2026-10-05T13:14:13.743+00:00",
+            "state": "failed",
+            "windows": 6,
+            "receipts": 6,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T13:14:13.613579+00:00",
+            "providerAttempts": 8
+          },
+          {
+            "code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+            "pass": 2,
+            "retry": "2026-10-05T13:22:13.174+00:00",
+            "state": "failed",
+            "windows": 6,
+            "receipts": 6,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T13:22:13.106819+00:00",
+            "providerAttempts": 6
+          }
+        ],
+        "audio": [
+          {
+            "codec": "aac",
+            "index": 1,
+            "order": 0,
+            "title": "SoundHandler",
+            "default": true,
+            "profile": "LC",
+            "channels": 6,
+            "language": "und",
+            "sampleRate": 48000,
+            "channelLayout": "5.1"
+          }
+        ],
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "activity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T16:03:30.963559+00:00",
+          "inFiveMinutes": true
+        },
+        "identified": false,
+        "profileComplete": true,
+        "title": "EN| Innocent Voices [SUB]"
+      },
+      {
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+            "pass": 0,
+            "retry": "2026-10-05T10:12:24.826+00:00",
+            "state": "failed",
+            "windows": 6,
+            "receipts": 6,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T10:12:24.758578+00:00",
+            "providerAttempts": 9
+          },
+          {
+            "code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "pass": 1,
+            "retry": "2026-10-04T15:49:00.837435+00:00",
+            "state": "expired",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T13:31:33.093039+00:00",
+            "providerAttempts": 9
+          }
+        ],
+        "audio": [
+          {
+            "codec": "aac",
+            "index": 1,
+            "order": 0,
+            "title": "Audio 1",
+            "default": true,
+            "profile": "LC",
+            "channels": 6,
+            "sampleRate": 48000,
+            "channelLayout": "5.1"
+          }
+        ],
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "activity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T16:03:30.963559+00:00",
+          "inFiveMinutes": true
+        },
+        "identified": false,
+        "profileComplete": true,
+        "title": "Prey"
+      },
+      {
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "pass": 0,
+            "retry": "2026-10-04T13:43:46.330484+00:00",
+            "state": "expired",
+            "windows": 1,
+            "receipts": 1,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T13:28:41.183804+00:00",
+            "providerAttempts": 1
+          }
+        ],
+        "audio": [
+          {
+            "codec": "aac",
+            "index": 1,
+            "order": 0,
+            "title": "Audio 1",
+            "default": true,
+            "profile": "LC",
+            "channels": 6,
+            "sampleRate": 48000,
+            "channelLayout": "5.1"
+          }
+        ],
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "activity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T16:03:30.963559+00:00",
+          "inFiveMinutes": true
+        },
+        "identified": false,
+        "profileComplete": true,
+        "title": "Lost on a Mountain in Maine"
+      },
+      {
+        "jobs": [
+          {
+            "code": "PROVIDER_ACCOUNT_BUSY",
+            "pass": 0,
+            "retry": "2026-10-04T16:08:15.723+00:00",
+            "state": "retry_wait",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 0
+          }
+        ],
+        "audio": [
+          {
+            "codec": "aac",
+            "index": 1,
+            "order": 0,
+            "title": "Audio 1",
+            "default": true,
+            "profile": "LC",
+            "channels": 6,
+            "sampleRate": 48000,
+            "channelLayout": "5.1"
+          }
+        ],
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "activity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T16:03:30.963559+00:00",
+          "inFiveMinutes": true
+        },
+        "identified": false,
+        "profileComplete": true,
+        "title": "The Legend of Ochi"
+      },
+      {
+        "jobs": [
+          {
+            "code": "PROFILE_CHANGED",
+            "pass": 0,
+            "retry": null,
+            "state": "failed",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 0
+          }
+        ],
+        "audio": [
+          {
+            "codec": "aac",
+            "index": 1,
+            "order": 0,
+            "title": "Audio 1",
+            "default": true,
+            "profile": "LC",
+            "channels": 6,
+            "sampleRate": 48000,
+            "channelLayout": "5.1"
+          }
+        ],
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "activity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T16:03:30.963559+00:00",
+          "inFiveMinutes": true
+        },
+        "identified": false,
+        "profileComplete": true,
+        "title": "Bolt from the Blue"
+      },
+      {
+        "jobs": null,
+        "audio": null,
+        "cache": null,
+        "activity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T16:03:30.963559+00:00",
+          "inFiveMinutes": true
+        },
+        "identified": false,
+        "profileComplete": false,
+        "title": "I Want to Live on Mars"
+      }
+    ]
+  },
+  "assembledAt": "2026-10-04T16:09:01.790592+00:00",
+  "summary": {
+    "scope": "Immutable original four-source cohort; global receipts reported separately",
+    "initialVariants": 56751,
+    "uniqueTechnicalChecks": 19979,
+    "identified": 7227,
+    "remainingUnknown": 49524,
+    "unknownCardsOriginalOwner": 38825,
+    "strictVerifiedWithCompleteEvidence": 36,
+    "strictCompleteInconclusiveCurrentProfile": 79,
+    "globalSources": 53,
+    "globalOwners": 47,
+    "outsideInitialAttemptReceipts": 2981,
+    "outsideInitialIdentificationReceipts": 1570,
+    "sixRequestedFilesIdentified": 0,
+    "limitations": [
+      "Sequential observations, overlapping populations; never sum unique checks, identified and strict outcomes.",
+      "Global receipts are cumulative operations, not unique variants.",
+      "Technical coverage is not voice-recognition throughput; historical rate and forecast are omitted.",
+      "Priority hints were refreshed and grew; since-priority counters are not comparable with the previous window.",
+      "Innocent pass3 admission and Ochi admission are not new captures or identifications.",
+      "Provider occupancy guards remain in force; no forced leases, retry dates or quarantines."
+    ]
+  },
+  "manualRequests": [
+    {
+      "at": "2026-10-04T15:57:30.531Z",
+      "title": "Innocent Voices",
+      "pass": 3,
+      "created": false,
+      "code": "LANGUAGE_AUTOMATIC_QUEUE_FULL"
+    },
+    {
+      "at": "2026-10-04T15:58:37.702Z",
+      "title": "The Legend of Ochi",
+      "route": "ordinary authenticated manual request",
+      "http": 202,
+      "state": "queued"
+    },
+    {
+      "at": "2026-10-04T16:08:09.848983Z",
+      "title": "Innocent Voices",
+      "pass": 3,
+      "created": true,
+      "state": "retry_wait"
+    }
+  ],
+  "historicalHttpErrorNewlyObserved": {
+    "at": "2026-10-04T14:37:11.539Z",
+    "catalogue": "Strng",
+    "operation": "metadata",
+    "http": 500,
+    "exactCause": "not established; preceded Edge recreation at 14:46"
+  },
+  "postDeploymentHealth": {
+    "at": "2026-10-04T16:12:46.228069+00:00",
+    "gateways": [
+      {
+        "http": 200,
+        "ok": true
+      },
+      {
+        "http": 200,
+        "ok": true
+      }
+    ],
+    "queue": [
+      {
+        "manualActive": 2,
+        "automaticActive": 32,
+        "admissionEnabled": true
+      }
+    ]
+  },
+  "postDeploymentCaptures": {
+    "at": "2026-10-04T16:15:32.440463+00:00",
+    "items": [
+      {
+        "title": "EN| Innocent Voices [SUB]",
+        "identified": false,
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_PLAYBACK_ACTIVE",
+            "pass": 3,
+            "retry": "2026-10-04T16:15:19.318+00:00",
+            "state": "retry_wait",
+            "windows": 3,
+            "receipts": 3,
+            "selected": true,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T16:13:14.704392+00:00",
+            "providerAttempts": 3
+          }
+        ]
+      },
+      {
+        "title": "Prey",
+        "identified": false,
+        "jobs": []
+      },
+      {
+        "title": "Lost on a Mountain in Maine",
+        "identified": false,
+        "jobs": []
+      },
+      {
+        "title": "The Legend of Ochi",
+        "identified": false,
+        "jobs": [
+          {
+            "code": "PROVIDER_ACCOUNT_BUSY",
+            "pass": 0,
+            "retry": "2026-10-04T16:08:15.723+00:00",
+            "state": "retry_wait",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 0
+          }
+        ]
+      },
+      {
+        "title": "Bolt from the Blue",
+        "identified": false,
+        "jobs": []
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "identified": false,
+        "jobs": []
+      }
+    ]
+  }
+}
