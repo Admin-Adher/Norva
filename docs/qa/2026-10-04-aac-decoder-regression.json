@@ -49,7 +49,7 @@
       "mediaError": null
     }
   ],
-  "audibleAcceptanceCurrentCopy": "pending",
+  "audibleAcceptanceCurrentCopy": "confirmed by user: sound is normal",
   "focusedNodeTests": {
     "passed": 90,
     "failed": 0
@@ -67,7 +67,12 @@
     "codec": "aac",
     "channels": 6,
     "englishSubtitleProven": true,
-    "newAudioIdentification": false
+    "automaticAudioIdentification": false,
+    "userConfirmedSpokenLanguage": "es",
+    "confirmationSource": "explicit user listening confirmation",
+    "confirmationDate": "2026-10-04",
+    "confirmationScope": "current Innocent Voices [SUB] copy and selected audio track",
+    "catalogueLanguagePublication": "not changed by this documentary confirmation"
   },
   "mergedCommit": "e01afdd6fe7e497990eebcb7fe73d526d572f0c1",
   "testFixtureCommit": "00d5a15c1a29c5ba81ff23c116088eac0702db48",
@@ -106,7 +111,7 @@
     "readyState": 4,
     "mediaError": null,
     "openedMenuLabel": "Piste audio · AAC · 5.1",
-    "audibleAcceptance": "pending user reply"
+    "audibleAcceptance": "confirmed by user: sound is normal"
   },
   "windowsPackage": "success"
 }

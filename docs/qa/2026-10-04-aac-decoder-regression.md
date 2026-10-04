@@ -48,7 +48,7 @@ English subtitles are independently known. The player incorrectly reparsed
 also fall through to TMDB's original language. Those fallbacks are removed.
 Exact track language and curated provider audio declarations remain supported.
 Tests cover the unknown case in all ten locales and preserve explicit audio
-declarations. No new spoken-language identification is claimed.
+declarations. The code change introduced no automatic spoken-language identification. The subsequent user listening confirmation below is separate human evidence.
 
 ## Integration and runtime verification
 
@@ -89,7 +89,12 @@ paused=false, rate=1, readyState=4, media error=null. The menu opened in the
 real app displays `Piste audio · AAC · 5.1`, without a guessed language.
 The earlier unavailable placeholder observed while the menu was closed was
 replaced when opening the menu; it was not used as an acceptance result.
-Audible acceptance of the current copy remains pending; the historical
-acceptance is not a substitute for today's test.
+On 4 October, after the corrected production replay and seek, the user explicitly
+confirmed: "le son est normal" and "le son est de l'espagnol". This closes audible
+acceptance of this exact Innocent Voices copy and records Spanish (`es`) as
+human-confirmed spoken audio. It does not turn the earlier inconclusive machine
+analyses into successful strict verification, nor change the source tag `und`.
+English subtitles remain independently confirmed. The confirmation applies to
+the selected file/track, not every version of the film or the other five films.
 This correction does not resolve the separate MULTI-SUB input-corruption
 investigation or complete the six featured-film language analyses.
