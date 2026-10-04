@@ -47,3 +47,9 @@ Ni redémarrage ni suspension du dispatcher, aucune mutation directe de travail 
 Cette optimisation est justifiée par un coût mesuré. **Elle ne certifie pas à elle seule la disparition de toutes les expirations de finalisation.** Le travail Strng du 4 octobre à 02:22 conserve son report au **5 octobre à 02:22:08 UTC**. La poursuite naturelle doit confirmer le comportement complet.
 
 Preuves agrégées : `2026-10-04-language-campaign-heartbeat-0720.json`. Aucun identifiant de compte ni URL média n'est publié.
+
+## Premier contrôle après publication
+
+À **05:50 UTC**, aucune nouvelle erreur de finalisation n'est journalisée ; les deux erreurs de 05:11 restent conservées. L'audit strict compte 27 validations réussies et 57 analyses complètes indéterminées avec profil courant correspondant. Les quatre clôtures indéterminées supplémentaires depuis 05:20 ont eu lieu **avant** le déploiement (au plus tard 05:35), elles ne lui sont donc pas attribuées.
+
+À **05:51:54**, le dispatcher a produit 17 événements et dix lots avec tentatives depuis le déploiement. **Aucune nouvelle capture stricte n'est prouvée dans cette fenêtre de six minutes**, marquée par des reports de capacité et d'occupation fournisseur. La reprise des métadonnées est confirmée ; la validation complète du prochain finaliseur naturel reste attendue.
