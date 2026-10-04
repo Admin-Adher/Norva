@@ -74,3 +74,19 @@ All eleven CI checks on the final scheduling code `42839e96e` completed successf
 ## Interpretation
 
 Global activation and prioritization do not certify completion of the entire language backlog. A provider can refuse or defer a probe; a complete voice analysis can remain inconclusive. Counts of technical checks, identified variants and completed strict voice analyses must remain separate. External playback outside Norva is observable only to the extent the provider reports it; no implementation can guarantee a provider will never ban an account.
+
+## Follow-up, 4 October 10:05–10:12 UTC
+
+The merged reference is `f15130045f4e687fda9c8adcfc696f11ee4d825e` (PR 623). All twelve GitHub check-runs on the final report/monitor commit `a95440cae` now succeeded, including the Windows package. The earlier separate `norva` Vercel preview quota failure is retained; no repeated deployment was requested. Production Edge/SQL/dispatcher deployment remains the one documented above.
+
+At 10:05, all **53 sources / 47 owners** remained discovered, including **49 sources / 46 owners outside the original cohort** already called. Their cumulative receipts reached **678 attempted operations / 297 identifications**. At 10:11:59, they reached **734 / 330**. These are receipts and cannot be advertised as unique identified files. No new source appeared in this interval; future-source inclusion remains covered by implementation and isolated tests rather than a newly observed production import.
+
+The **364 scheduling hints** remained active. Strict provider progress on featured film variants increased from **three at 10:05 to four at 10:11:59**. Six intake records include four strict admissions and two occupied-account deferrals; two metadata records are also occupied-account deferrals. Deferrals are not probes. This follow-up does not demonstrate a new identified language on those featured titles. The real strict selector took 91 ms at 10:11:59.
+
+Both Edge replicas remained healthy and both Gateways returned HTTP 200 / `ok: true`. Discovery, admission and the strict cron were active, counters preserved, one dispatcher request in flight at the last snapshot. The dispatcher still had exactly the three historical HTTP failures described above, with no new failure through 10:11:59 and no discovery failure. Current Edge finalization logs at 10:05 had no new diagnostic; older errors remain part of the history.
+
+The original immutable cohort is reported separately: **17,407 unique technical checks, 6,266 identified variants, 50,485 still unknown**, with **35 complete strict validations and 77 complete inconclusive analyses matching the current profile**. Its observed rate fell to **472 technical checks/hour** over 97 min 52 s spanning deployments and expansion to all accounts. This is not the throughput of the new global service and cannot predict exhaustive voice-analysis completion.
+
+A separate Strng job was observed after an automatic checkpoint reset: 29 provider attempts, zero current receipts, matching current profile, no active lease and not selected by the actual two-job selector at 10:10. Its last update was 09:35:40. Existing receipts can be rejected for expiration, key incompatibility, authentication or consensus validity; the precise reason for this reset was not logged and is **not established**. No retry, lease, receipt, threshold or quarantine was changed. The read-only follow-up is `/home/adrien/.norva/language-checkpoint-followup.py`; its private reference is separate from the old SQL-finalizer reference.
+
+No production mutation was performed during this follow-up. Permanent maintenance remains active. Aggregate receipt: `2026-10-04-language-campaign-heartbeat-1205.json`.

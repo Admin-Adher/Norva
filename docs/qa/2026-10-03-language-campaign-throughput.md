@@ -187,3 +187,25 @@ Deux travaux Dino sont automatiquement mis en quarantaine pour absence de progre
 Aucun report naturel `live-session` depuis le déploiement de 06:38 jusqu'à ce contrôle. La temporisation de trois minutes reste couverte par les tests de régression, **mais son application en situation réelle n'a pas encore été observée**. L'absence de lecture active ne démontre pas le gain du correctif. Les reports fournisseur et de capacité continuent d'être respectés.
 
 Aucune modification de production pendant ce contrôle. Campagne et supervision **ACTIVES**, clôture non atteinte. Reçu agrégé : `2026-10-04-language-campaign-heartbeat-1027.json`.
+
+## Contrôle du 4 octobre à 10:05 UTC — 12:05 Paris
+
+Ce tableau conserve le périmètre du manifeste initial. Le service découvre désormais tous les comptes ; les anciens champs `currentGlobal` concernent seulement le compte initial.
+
+| Catalogue | Versions distinctes contrôlées | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 6 514 | 126 | 30 068 |
+| Norva Selection | 84 | 9 | 174 |
+| Dino | 5 586 | 3 006 | 5 863 |
+| MAX OTT | 5 223 | 3 125 | 14 380 |
+| **Cohorte initiale** | **17 407** | **6 266** | **50 485** |
+
+**+770 contrôles techniques uniques en 97 min 52 s**, soit environ **472/h**, et **+279 identifications**. Les 56 751 variantes restent visibles ; le compte initial conserve 39 317 fiches sans langue. La fenêtre inclut les déploiements et le passage à tous les comptes : ce débit ne mesure pas le service global. Les requêtes sont successives. Aucune estimation fiable de fin exhaustive n'est déduite de la moyenne historique calculée par l'ancien script.
+
+L'audit strict compte **35 validations avec preuves complètes** (+3) et **77 analyses complètes indéterminées correspondant au profil courant** (+8). Ces ensembles recoupent les contrôles et identifications. Les deux quarantaines Dino demeurent incomplètes. Le finaliseur Strng ayant échoué à 02:22 reste en report jusqu'au 5 octobre ; aucune reprise forcée.
+
+À 10:05, **53 sources / 47 propriétaires** sont découverts. Hors cohorte initiale, 49 sources / 46 propriétaires ont été appelés, avec **678 reçus de tentative / 297 reçus d'identification** ; à 10:11:59, **734 / 330**. Ces compteurs peuvent recouvrir plusieurs opérations sur un même fichier. Ils ne s'ajoutent pas aux 6 266 variantes identifiées du manifeste.
+
+Quatre analyses de films mis en avant ont une progression fournisseur après enregistrement de leur priorité à 10:11:59, contre trois à 10:05. Cela ne prouve aucune identification supplémentaire de ces titres. Les reports d'occupation et de capacité sont conservés. Deux Gateways sains, découverte/admission/cron actifs ; toujours trois erreurs HTTP historiques après déploiement global, aucune nouvelle jusqu'à 10:11:59.
+
+Un autre Strng présente une réinitialisation automatique de reçus, 29 tentatives fournisseur et zéro reçu courant. Le profil concorde ; à 10:10 il n'est pas sélectionné et sa dernière mise à jour reste 09:35. La raison précise du rejet de reçus n'est pas journalisée : aucune cause supposée ni modification des protections. Aucune mutation de production pendant ce contrôle. Reçu : `2026-10-04-language-campaign-heartbeat-1205.json`.
