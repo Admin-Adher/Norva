@@ -1,0 +1,119 @@
+{
+  "observedAt": "2026-10-04T15:21:30.354162+00:00",
+  "scope": "two exact MULTI-SUB variants of the controlled account",
+  "samples": [
+    {
+      "raw": {
+        "film": "lost",
+        "at": "2026-10-04T15:03:06.724096+00:00",
+        "requestedBytes": 8388608,
+        "transport": "native-raw-recovery",
+        "mode": "relay",
+        "pathKind": "raw-bypass-finite-broker",
+        "http": 206,
+        "contentRange": "bytes 0-8388607/1941640457",
+        "contentLength": "8388608",
+        "bytes": 8388608,
+        "seconds": 13.286,
+        "sha256": "ede3f64778393f67067b5482bec01148b61d1b1b9de9b5259831fbe62b6c40ad",
+        "expired": true
+      },
+      "decode": {
+        "film": "lost",
+        "durationTest": 18,
+        "exitCode": 0,
+        "ebml": 1,
+        "corruptFrames": 1,
+        "audioErrors": 0,
+        "inputSha256": "ede3f64778393f67067b5482bec01148b61d1b1b9de9b5259831fbe62b6c40ad"
+      },
+      "remux": {
+        "film": "lost",
+        "testSeconds": 18,
+        "remuxExit": 0,
+        "decodeExit": 0,
+        "ebml": 0,
+        "corruptFrames": 1,
+        "audioErrors": 0,
+        "sampleBytes": 2049413
+      }
+    },
+    {
+      "raw": {
+        "film": "bolt",
+        "at": "2026-10-04T15:03:55.010975+00:00",
+        "requestedBytes": 16777216,
+        "transport": "native-raw-recovery",
+        "mode": "relay",
+        "pathKind": "raw-bypass-finite-broker",
+        "http": 206,
+        "contentRange": "bytes 0-16777215/1256381975",
+        "contentLength": "16777216",
+        "bytes": 16777216,
+        "seconds": 33.268,
+        "sha256": "d746e0e48018f0fa8ca5d2be921dc8c3c8061ccebe78f048fdffe503ae2f3494",
+        "expired": true
+      },
+      "decode": {
+        "film": "bolt",
+        "durationTest": 40,
+        "exitCode": 0,
+        "ebml": 0,
+        "corruptFrames": 4,
+        "audioErrors": 7,
+        "inputSha256": "d746e0e48018f0fa8ca5d2be921dc8c3c8061ccebe78f048fdffe503ae2f3494"
+      },
+      "remux": {
+        "film": "bolt",
+        "testSeconds": 40,
+        "remuxExit": 0,
+        "decodeExit": 0,
+        "ebml": 0,
+        "corruptFrames": 4,
+        "audioErrors": 7,
+        "sampleBytes": 8050725
+      }
+    }
+  ],
+  "browserReproduction": {
+    "film": "Bolt MULTI-SUB",
+    "resumeSeconds": 66,
+    "beforeFix": {
+      "currentTime": 0,
+      "paused": true,
+      "readyState": 4,
+      "bufferedRangesFirst": [
+        [
+          0.880333,
+          18.899333
+        ]
+      ],
+      "bufferedRangesLater": [
+        [
+          0.880333,
+          94.392333
+        ]
+      ],
+      "firstFrameMs": 20988
+    },
+    "note": "First frame was rendered while paused; not successful sustained playback."
+  },
+  "cleanup": {
+    "mediaSamplesRemaining": 0,
+    "temporarySessionRepliesRemoved": true
+  },
+  "gateways": [
+    {
+      "ok": true,
+      "sessions": 0
+    },
+    {
+      "ok": true,
+      "sessions": 0
+    }
+  ],
+  "dispatcher": {
+    "running": true,
+    "health": "healthy"
+  }
+}
