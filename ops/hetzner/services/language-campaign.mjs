@@ -19,7 +19,7 @@ export function delayFor(result, failures = 0) {
   if (result.httpError) return Math.min(20 * 60_000, 60_000 * 2 ** Math.min(failures, 5));
   if (/strict-analysis-deferred|automatic-queue-full/.test(code)) return 180_000;
   if (/revoked|disabled|not-visible|not-ready|paused/.test(code)) return 15 * 60_000;
-  if (/viewer|playback|provider|circuit|footprint|account/.test(code) && code !== 'metadata-no-language') return 3 * 60_000;
+  if (/viewer|playback|provider|circuit|footprint|account|live-session/.test(code) && code !== 'metadata-no-language') return 3 * 60_000;
   if (/capacity|queue-full|busy/.test(code)) return 30_000;
   if (result.hasMore === false || /exhausted|not-due/.test(code)) return 15 * 60_000;
   if (result.processed > 0 || result.scanned > 0) return 1500;

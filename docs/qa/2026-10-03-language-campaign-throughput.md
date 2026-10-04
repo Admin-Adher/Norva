@@ -148,3 +148,11 @@ Deux erreurs naturelles de finalisation à 05:11 retournent **57014**, après en
 
 Après 23 assertions SQL isolées et quatre comparaisons d'ensembles en production, la migration est déployée à **05:45:39 UTC**, sans pause, appel fournisseur ni mutation directe de travaux. Les services sont sains, la campagne continue et le report Strng jusqu'au 5 octobre est conservé. Aucun nouveau seuil ou parallélisme n'est appliqué. Reçu : `2026-10-04-language-campaign-heartbeat-0720.json`.
 
+
+## Contrôle du 4 octobre à 06:34 UTC — 08:34 Paris
+
+**14 473 versions distinctes contrôlées**, soit +1 516 en 73 min 59 s : environ **1 229 contrôles techniques/h**. **5 165 variantes identifiées** (+420), **51 586 inconnues** dans la cohorte entièrement visible. La requête globale suivante compte 51 581 variantes / 40 082 fiches inconnues. Les contrôles, identifications et analyses strictes se recoupent.
+
+L'audit strict compte **27 validations réussies**, inchangé, et **60 analyses complètes indéterminées** avec profil courant correspondant (+7 depuis 05:20). Les captures reprennent sur les quatre sources, mais aucune nouvelle validation réussie ne démontre encore le RPC complet après l'optimisation SQL de 05:45. Les deux anciennes erreurs 57014 restent conservées, sans nouveau diagnostic à 06:35.
+
+Un défaut de temporisation est reproduit puis corrigé : **472 reports de lecture active**, sans tentative fournisseur, revenaient avec un délai de 1,5 seconde. Ils attendent désormais trois minutes. **21 tests réussis**, déploiement du seul dispatcher à **06:38:47 UTC**, arrêt gracieux et compteurs conservés. Aucune limite, quarantaine ou reprise forcée. Le gain de cette réduction des appels inutiles reste à mesurer ; il n'est pas présenté comme une accélération prouvée des analyses vocales. Voir `2026-10-04-language-live-session-backoff.md` et le reçu `2026-10-04-language-campaign-heartbeat-0834.json`.
