@@ -1802,7 +1802,7 @@ function normalizeTitle(value: string, year: string | null = null) {
   // showing 8+ cards (EN-/AR-/FR-/4K-AR- The Hunger Games -> one norm: key). Fall back to the raw value if
   // stripping would empty it. Regex kept identical to cleanDisplayTitle and cleanSearchQuery — keep the three in sync.
   const rawValue = String(value || "");
-  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "");
+  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?:\s*[▎▏▍▌│┃┆┊｜|]\s*| [-–—] | -[A-Z0-9+]{1,6}- )/, "");
   let text = stripDiacritics(deprefixed.length >= 2 ? deprefixed : rawValue)
     .toLowerCase()
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
@@ -1836,7 +1836,7 @@ function cleanDisplayTitle(value: string) {
   // (4K/8K/2160P… — "8 Mile"/"4Kids"/"2160 -" stay safe). Display only —
   // original_title keeps the raw provider name, and identity_key comes from normalizeTitle(raw), so no
   // re-keying. Mirrors the frontend MediaUtils.cleanReleaseName — keep the two in sync.
-  const deprefixed = text.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, "").trim();
+  const deprefixed = text.replace(/^(?:[A-Z]{2}|MULTI|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?:\s*[▎▏▍▌│┃┆┊｜|]\s*| [-–—] | -[A-Z0-9+]{1,6}- )/, "").trim();
   if (deprefixed.length >= 2) text = deprefixed;
   // Strip a trailing second-script title providers append after the Latin name, e.g.
   // "Checkered Ninja 3 (2026) نينجاى شطرنجى 3" → "Checkered Ninja 3 (2026)" (the year-strip

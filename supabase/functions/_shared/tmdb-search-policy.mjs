@@ -2,7 +2,9 @@
 // Keep this policy pure so the Edge matcher and Node contract tests exercise the
 // exact same cleanup and locale ordering.
 
-const BOX_BAR_PREFIX = /^([A-Z0-9+_-]{2,12})\s+[▎▏▍▌│┃┆┊｜|]\s+/;
+// A bar is an explicit provider delimiter, including compact labels such as
+// "EN| Title". Dashes still require spaces to preserve real hyphenated titles.
+const BOX_BAR_PREFIX = /^([A-Z0-9+_-]{2,12})\s*[▎▏▍▌│┃┆┊｜|]\s*/;
 const DASH_PREFIX = /^((?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*)(?: [-–—] | -[A-Z0-9+]{1,6}- )/;
 
 // These are provider market labels, not always ISO language codes. Map only
@@ -41,7 +43,7 @@ const PREFIX_LOCALES = Object.freeze({
   SO: "so-SO",
 });
 
-export const TMDB_SEARCH_POLICY_VERSION = "catalog-public-reuse-v6";
+export const TMDB_SEARCH_POLICY_VERSION = "catalog-compact-prefix-v7";
 
 export function providerTitlePrefix(value) {
   const raw = String(value || "");

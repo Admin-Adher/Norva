@@ -19,6 +19,41 @@ const win = {};
 new Function('window', src)(win);
 const M = win.MediaUtils;
 
+test('Edge display and identity handle the same compact provider labels', () => {
+  const { transformSync } = require('esbuild');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'supabase/functions/_shared/vod-title-projection.ts'), 'utf8');
+  const output = { exports: {} };
+  vm.runInNewContext(transformSync(`${source}\nexport { cleanDisplayTitle, normalizeTitle };`, {
+    loader: 'ts', format: 'cjs', target: 'node22',
+  }).code, { module: output, exports: output.exports, require: () => ({}), TextEncoder, Deno: { env: { get: () => '' } } });
+  for (const [raw, clean] of [
+    ['IR| Lost on a Mountain in Maine', 'Lost on a Mountain in Maine'],
+    ['EN|Lost on a Mountain in Maine', 'Lost on a Mountain in Maine'],
+    ['AR| Lost in Mobius', 'Lost in Mobius'], ['AR| Long Lost', 'Long Lost'],
+    ['FR｜Long Lost', 'Long Lost'], ['THOR | Love and Thunder', 'THOR | Love and Thunder'],
+  ]) {
+    assert.equal(output.exports.cleanDisplayTitle(raw), clean);
+    assert.equal(output.exports.normalizeTitle(raw), output.exports.normalizeTitle(clean));
+    assert.equal(M.cleanReleaseName(raw), clean);
+  }
+});
+
+test('compact provider bars clean display and dedup without touching real punctuation', () => {
+  for (const code of ['EN', 'FR', 'IR', 'AR']) {
+    for (const gap of ['', ' ', '  ']) {
+      const raw = `${code}${gap}|${gap}Lost on a Mountain in Maine`;
+      assert.strictEqual(M.cleanReleaseName(raw), 'Lost on a Mountain in Maine');
+      assert.strictEqual(M.normalizeTitle(raw), M.normalizeTitle('Lost on a Mountain in Maine'));
+    }
+  }
+  assert.strictEqual(M.cleanReleaseName('AR| Lost in Mobius'), 'Lost in Mobius');
+  assert.strictEqual(M.cleanReleaseName('AR| Long Lost'), 'Long Lost');
+  for (const title of ['WALL-E', 'IT', 'US', '1917', 'Spider-Man', 'THOR | Love and Thunder']) {
+    assert.strictEqual(M.cleanReleaseName(title), title);
+  }
+});
+
 test('cleanReleaseName strips digit-led quality/collection prefixes (Strng IPTV 8K)', () => {
   const cases = [
     ['4K-AR - La Bête', 'La Bête'],

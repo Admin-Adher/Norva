@@ -69,6 +69,10 @@ public class CatalogLanguageAliasesInstrumentedTest {
                 + "}"
                 + "const unprobed={item_type:'movie',raw_title:'FR | Film',audio_language_validation_status:'not_analyzed'};"
                 + "if(MediaUtils.versionDescriptor(unprobed).headline!=='Language unidentified')throw Error('title guessed as audio');"
+                + "for(const prefix of ['EN|','IR|','AR|']){const raw=prefix+' Lost on a Mountain in Maine';"
+                + "if(MediaUtils.cleanReleaseName(raw)!=='Lost on a Mountain in Maine')throw Error('compact title prefix '+prefix);"
+                + "if(MediaUtils.normalizeTitle(raw)!==MediaUtils.normalizeTitle('Lost on a Mountain in Maine'))throw Error('compact title grouping '+prefix);"
+                + "if(MediaUtils.versionDescriptor({...unprobed,raw_title:raw}).headline!=='Language unidentified')throw Error('compact title guessed as audio');}"
                 + "return 'ok';}catch(e){return String(e);}})()", value -> {result.set(value); evaluated.countDown();}));
             assertTrue("WebView utility responded", evaluated.await(20, TimeUnit.SECONDS));
             assertEquals("textZoom="+zoom, "\"ok\"", result.get());

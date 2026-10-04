@@ -6,6 +6,16 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 
+test('compact MAX OTT bars do not enter the TMDB query', async () => {
+  const policy = await import('../supabase/functions/_shared/tmdb-search-policy.mjs');
+  for (const code of ['EN', 'FR', 'IR', 'AR']) {
+    assert.equal(policy.cleanTmdbSearchQuery(`${code}| Lost on a Mountain in Maine`), 'Lost on a Mountain in Maine');
+    assert.equal(policy.stripProviderSearchPrefix(`${code}|Lost in Mobius`), 'Lost in Mobius');
+  }
+  assert.deepEqual(policy.tmdbSearchLocalesForTitle('IR| Lost on a Mountain in Maine'), ['fa-IR', 'fr-FR', 'en-US']);
+  assert.equal(policy.cleanTmdbSearchQuery('EN| Innocent Voices [SUB]'), 'Innocent Voices');
+});
+
 test('Promax market prefixes are removed without damaging real titles', async () => {
   const policy = await import('../supabase/functions/_shared/tmdb-search-policy.mjs');
 
