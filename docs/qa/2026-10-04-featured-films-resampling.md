@@ -114,3 +114,23 @@ shows Spanish for Innocent Voices and English for Prey, Sinners, California
 King and Broke. See [the publication proof](2026-10-04-human-confirmed-audio-badges.md).
 This supersedes the earlier documentary-only badge limitation. Automated LID
 records and their outcomes were not rewritten.
+
+### Guarded follow-up at 21:48–21:54 UTC
+
+Innocent Voices and Prey remain human-confirmed and published; neither was
+requested again. For the four remaining exact files, current profiles/cache
+match for Lost, Ochi and Bolt; Mars still lacks a profile. The normal guarded
+profile request for Mars at 21:53:33 deferred for provider occupancy with zero
+attempts. Ordinary authenticated manual requests admitted Lost and Ochi at
+21:53:43/52, preserving the prior terminal jobs and their observed evidence.
+Both then deferred for provider occupancy without a new capture at 21:54:26.
+Bolt's preflight respected the manual/provider queue limits and sent no POST.
+No sampling-pass override, lease reset, lowered threshold, language publication
+or media launch was performed by the operator. Final follow-up and aggregate
+receipts are in [the heartbeat report](2026-10-04-language-campaign-heartbeat-2348.md).
+
+At 21:58:18 the new Lost job has two completed windows and two receipts, with
+last provider progress at 21:57:50. This demonstrates actual capture progress,
+not complete language validation. Ochi remains deferred with zero attempts.
+The earlier Lost job's single receipt is preserved separately; it is not added
+to the new job's two receipts as a fabricated three-window completion.
