@@ -328,6 +328,7 @@ test('flat media grid and search keep P display data isolated from global A unde
   const globalCalls = [];
   let catalogFlag = true;
   let hydrationFails = false;
+  let duplicateGenerationIdentity = false;
   const hydratedP = {
     id: pTitleId,
     user_id: 'user-1',
@@ -377,7 +378,11 @@ test('flat media grid and search keep P display data isolated from global A unde
           id: 'variant-g', media_item_id: '22222222-2222-4222-8222-222222222222',
           title_id: gTitleId, source_id: 'source-g', generation_id: null,
           item_type: 'movie',
-        }], error: null };
+        }, ...(duplicateGenerationIdentity ? [{
+          id: 'variant-b2', media_item_id: '33333333-3333-4333-8333-333333333333',
+          title_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', source_id: 'source-b',
+          generation_id: generationId, item_type: 'movie',
+        }] : [])], error: null };
       },
       then(resolve, reject) {
         let data;
@@ -420,7 +425,11 @@ test('flat media grid and search keep P display data isolated from global A unde
     requiredCatalogTitleVisibilityEpoch: () => '7',
     hydrateVisibleCatalogTitlesByIds: async () => {
       if (hydrationFails) throw new Error('visibility epoch moved');
-      return [structuredClone(hydratedP), structuredClone(hydratedG)];
+      return [structuredClone(hydratedP), structuredClone(hydratedG),
+        ...(duplicateGenerationIdentity ? [{ ...structuredClone(hydratedP),
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: 'Wrong duplicate payload',
+          overlay_catalog_metadata: { i18n: { fr: { title: 'Wrong duplicate payload' } } },
+        }] : [])];
     },
     titleAudioLanguages: (row) => Array.isArray(row.audio_languages) ? row.audio_languages : [],
     titleVersionLanguages: (row) => Array.isArray(row.version_languages) ? row.version_languages : [],
@@ -447,9 +456,10 @@ test('flat media grid and search keep P display data isolated from global A unde
       id: '22222222-2222-4222-8222-222222222222', source_id: 'source-g', item_type: 'movie', external_id: 'stream-200',
       title: 'Provider G raw', metadata: { providerTmdbId: '200' },
     };
-    await runtime.attachMediaLanguages([p, g], 'user-1', 'movie', 'fr');
+    const duplicate = { ...structuredClone(p), id: '33333333-3333-4333-8333-333333333333', external_id: 'stream-101' };
+    await runtime.attachMediaLanguages([p, g, ...(duplicateGenerationIdentity ? [duplicate] : [])], 'user-1', 'movie', 'fr');
     await runtime.localizeMediaTitles([p, g], 'user-1', 'fr', 'movie');
-    return { p, g, publicP: sanitizeCatalogMediaItem(p) };
+    return { p, g, duplicate, publicP: sanitizeCatalogMediaItem(p) };
   };
 
   const on = await run(true);
@@ -494,6 +504,19 @@ test('flat media grid and search keep P display data isolated from global A unde
   for (const call of globalCalls) assert.deepEqual(call.ids, ['200'],
     'an epoch failure must degrade P to provider B without consulting global A');
   hydrationFails = false;
+
+  duplicateGenerationIdentity = true;
+  const sameMovie = await run(true);
+  assert.equal(sameMovie.p.title, 'Titre B', 'the exact owned media association wins over duplicate TMDB candidates');
+  assert.equal(sameMovie.p.overview, 'Synopsis B');
+  assert.equal(sameMovie.p.year, 2026);
+  assert.equal(sameMovie.p.provider_tmdb_id, '100');
+  assert.equal(sameMovie.publicP.provider_tmdb_id, '100', 'validated identity reaches grid grouping');
+  assert.equal(sameMovie.p.external_id, 'stream-100');
+  assert.equal(sameMovie.p.source_id, 'source-b');
+  assert.equal(sameMovie.duplicate.title, 'Wrong duplicate payload', 'each file retains its own editorial projection');
+  assert.equal(sameMovie.duplicate.external_id, 'stream-101');
+  duplicateGenerationIdentity = false;
 
   const forged = { metadata: { generationId, overlayGenerationId: generationId } };
   assert.equal(runtime.flatMediaBlocksGlobalTitleOverlay(forged), false,

@@ -48,6 +48,7 @@ function fixture({ foreign = false, stale = false, ambiguous = false, progressiv
     flatMediaGenerationId: item => item.generation_id,
     flatMediaBlocksGlobalTitleOverlay: item => Boolean(item.generation_id),
     flatMediaGlobalLocalizedTitle: new WeakSet(),
+    flatMediaGenerationTitleProof: new WeakMap(),
     stringOrNull: value => value || null, recordOrEmpty: value => value || {},
     titleRailItem: () => ({ title: editorialTitle, name: editorialTitle, overview: 'Résumé TMDB',
       genres: ['Action'], tmdb: { title: 'English base title', overview: 'Résumé TMDB' }, audio_languages: ['en'], id: 'must-not-copy' }),

@@ -910,6 +910,12 @@ function applyFlatMediaGenerationTitle(
 
   const titleMetadata = recordOrEmpty(title.metadata);
   const itemMetadata = recordOrEmpty(row.metadata);
+  // Expose the validated editorial identity used by the grid's version grouping.
+  // It is distinct from per-file language and provider playback coordinates.
+  if (catalogTextStatusEligible(title.match_status) && stringOrNull(title.provider_tmdb_id)) {
+    row.provider_tmdb_id = title.provider_tmdb_id;
+    row.providerTmdbId = title.provider_tmdb_id;
+  }
   // Preserve exact provider routing/category facts, but let the active P
   // projection own every overlapping display field.
   row.metadata = { ...itemMetadata, ...titleMetadata };
@@ -1022,6 +1028,19 @@ async function bindFlatMediaGenerationTitles(
     const tmdbId = stringOrNull(metadata.providerTmdbId ?? metadata.provider_tmdb_id);
     const sourceId = stringOrNull(item.source_id);
     if (!tmdbId || !sourceId) continue;
+    // The bounded media -> visible variant -> hydrated title lookup already
+    // resolved this exact file. Several title rows can legitimately share the
+    // same TMDB ID and source generation after enrichment; a TMDB-only join
+    // would discard that stronger association as ambiguous.
+    const exactOwned = flatMediaGenerationTitle(item);
+    if (exactOwned
+        && stringOrNull(exactOwned.provider_tmdb_id) === tmdbId
+        && stringOrNull(exactOwned.display_generation_id) === flatMediaGenerationId(item)
+        && Array.isArray(exactOwned.visible_source_ids)
+        && exactOwned.visible_source_ids.includes(sourceId)) {
+      applyFlatMediaGenerationTitle(item, exactOwned, lang);
+      continue;
+    }
     const sourceCandidates = (candidatesByTmdb.get(tmdbId) ?? []).filter((title) => {
       const visibleSourceIds = Array.isArray(title.visible_source_ids)
         ? title.visible_source_ids.map(String)
@@ -1189,6 +1208,7 @@ async function attachOwnedMediaEditorialMetadata(
           // Copying a full public card here would manufacture rich fields while
           // the full overlay flag is off and could outlive an epoch failure.
           row.metadata = { ...recordOrEmpty(row.metadata), providerTmdbId: title.provider_tmdb_id };
+          flatMediaGenerationTitleProof.set(row, owner.title);
           continue;
         }
         const editorial = titleRailItem(title, [{ ...variant, metadata: recordOrEmpty(row.metadata) }], lang);

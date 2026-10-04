@@ -74,6 +74,9 @@ public class CatalogLanguageAliasesInstrumentedTest {
                 + "if(MediaUtils.normalizeTitle(raw)!==MediaUtils.normalizeTitle('Lost on a Mountain in Maine'))throw Error('compact title grouping '+prefix);"
                 + "if(MediaUtils.versionDescriptor({...unprobed,raw_title:raw}).headline!=='Language unidentified')throw Error('compact title guessed as audio');}"
                 + "if(MediaUtils.cleanReleaseName('IN| TAMIL| Gandhi Kannadi')!=='Gandhi Kannadi')throw Error('nested title prefix');"
+                + "const versions=Array.from({length:15},(_,i)=>({stream_id:String(i),sourceId:'source-'+(i%3),name:i<4?'EN| Lost on a Mountain in Maine':'Lost on a Mountain in Maine',year:2024,provider_tmdb_id:'1197619',audio_languages:i%2?['en']:['fa']}));"
+                + "const groups=MediaUtils.groupItems(versions);if(groups.length!==1||groups[0].items.length!==15)throw Error('validated movie versions split');"
+                + "if(groups[0].items.some((v,i)=>v.stream_id!==String(i)||v.audio_languages!==versions[i].audio_languages))throw Error('file identity or audio changed');"
                 + "return 'ok';}catch(e){return String(e);}})()", value -> {result.set(value); evaluated.countDown();}));
             assertTrue("WebView utility responded", evaluated.await(20, TimeUnit.SECONDS));
             assertEquals("textZoom="+zoom, "\"ok\"", result.get());
