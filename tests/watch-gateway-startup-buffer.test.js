@@ -73,6 +73,54 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
     assert.equal(gatewayBufferedAheadSeconds.call(page), 0);
 });
 
+test('Gateway startup aligns the observed positive first sample without lowering its reserve', async () => {
+    const measure = loadMethod('gatewayBufferedAheadSeconds', 'normalizeGatewayStartupPolicy');
+    const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls');
+    const hls = { levels: [{ details: { live: true, totalduration: 100 } }] };
+    const video = { currentTime: 0, paused: true, readyState: 4,
+        buffered: { length: 1, start: () => 0.880333, end: () => 18.899333 } };
+    const page = { video, hls, _pendingLocalSeekTarget: null,
+        isStalePlaybackAttempt: () => false,
+        gatewayBufferedAheadSeconds() { return measure.call(this); } };
+    assert.equal(measure.call(page), 0, 'zero is outside the observed buffered range');
+    assert.equal(await gate.call(page, 1, hls, { minimumSeconds: 6, timeoutMs: 1000 }), true);
+    assert.equal(video.currentTime, 0.880333);
+    assert.ok(measure.call(page) >= 6);
+});
+
+test('Gateway startup alignment preserves gaps, pause intent, seeks, and the full reserve', async () => {
+    const measure = loadMethod('gatewayBufferedAheadSeconds', 'normalizeGatewayStartupPolicy');
+    for (const scenario of [
+        { name: 'large leading gap', start: 2 },
+        { name: 'insufficient reserve', end: 6.880332 },
+        { name: 'unqualified 96-second reserve', minimum: 96 },
+        { name: 'user pause', page: { _gatewayUserPaused: true } },
+        { name: 'pending seek', page: { _pendingLocalSeekTarget: 12 } },
+        { name: 'previous playback', page: { _playStartedReported: true } },
+        { name: 'metadata only', video: { readyState: 1 } },
+        { name: 'seeking', video: { seeking: true } },
+        { name: 'ended', video: { ended: true } },
+        { name: 'later media position', video: { currentTime: 5 }, start: 5.88, end: 25 },
+        { name: 'changing ranges', throws: true },
+    ]) {
+        let now = 0;
+        const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls', {
+            Date: { now: () => now }, setTimeout: fn => { now += 100; fn(); },
+        });
+        const hls = { levels: [{ details: { live: true, totalduration: 100 } }] };
+        const video = { currentTime: 0, paused: true, readyState: 4,
+            ...scenario.video, buffered: { length: 1,
+                start: () => { if (scenario.throws) throw Error('range evicted'); return scenario.start ?? 0.880333; },
+                end: () => scenario.end ?? 18.899333 } };
+        const initialPosition = video.currentTime;
+        const page = { video, hls, ...scenario.page, isStalePlaybackAttempt: () => false,
+            gatewayBufferedAheadSeconds() { return measure.call(this); } };
+        assert.equal(await gate.call(page, 1, hls,
+            { minimumSeconds: scenario.minimum ?? 6, timeoutMs: 1000 }), false, scenario.name);
+        assert.equal(video.currentTime, initialPosition, scenario.name);
+    }
+});
+
 test('watch timeline paints only the contiguous buffered range on cold start and resume', () => {
     const setBufferedProgressValue = loadMethod(
         'setBufferedProgressValue',

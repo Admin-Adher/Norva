@@ -6028,6 +6028,29 @@ class WatchPage {
         this._gatewayStartupAdaptiveEvidence = null;
         while (Date.now() < deadline) {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
+            // A resumed HLS file can begin slightly after zero (Bolt: 0.880333s).
+            // While paused, hls.js has not jumped to that first playable sample:
+            // waiting for a range containing zero then deadlocks a full buffer.
+            // Align only a fresh, paused origin to an already buffered sample,
+            // with the entire normal reserve present. Never cross a later gap,
+            // override a pending seek/user pause, or shorten the startup floor.
+            const startupVideo = this.video;
+            if (startupVideo?.paused === true && !startupVideo.ended && !startupVideo.seeking
+                && Number(startupVideo.currentTime) === 0 && Number(startupVideo.readyState) >= 2
+                && this._playStartedReported !== true && !this._gatewayUserPaused
+                && !(Number(this._pendingLocalSeekTarget) > 0)) {
+                try {
+                    const ranges = startupVideo.buffered;
+                    if (ranges.length > 0) {
+                        const start = Number(ranges.start(0));
+                        const end = Number(ranges.end(0));
+                        if (Number.isFinite(start) && start > 0 && start <= 1
+                            && Number.isFinite(end) && end - start >= minimumSeconds) {
+                            startupVideo.currentTime = start;
+                        }
+                    }
+                } catch (_) { /* A live TimeRanges change must keep the gate closed. */ }
+            }
             const bufferedAhead = this.gatewayBufferedAheadSeconds();
             if (bufferedAhead >= minimumSeconds) return true;
 

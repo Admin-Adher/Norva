@@ -1,5 +1,18 @@
 /* Shared by Node and the Android WebView runtime gate. No network or provider. */
 async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
+    // Runtime regression for the observed Bolt resume: a paused origin at zero
+    // with 18 seconds buffered from 0.880333 must not wait until timeout.
+    const startup = Object.create(WatchPage.prototype);
+    const startupHls = { levels: [{ details: { live: true, totalduration: 100 } }] };
+    Object.assign(startup, {
+        video: { paused: true, currentTime: 0, readyState: 4,
+            buffered: { length: 1, start: () => 0.880333, end: () => 18.899333 } },
+        hls: startupHls, isStalePlaybackAttempt: () => false,
+    });
+    if (!await startup.waitForGatewayStartupBuffer(1, startupHls, { minimumSeconds: 6, timeoutMs: 1000 })
+        || startup.video.currentTime !== 0.880333 || startup.gatewayBufferedAheadSeconds() < 6) {
+        throw Error('positive initial timestamp deadlocked the startup gate');
+    }
     for (const userPaused of [false, true]) {
         let plays = 0, waits = 0;
         const page = Object.create(WatchPage.prototype);
