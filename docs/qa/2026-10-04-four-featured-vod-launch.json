@@ -1,0 +1,1504 @@
+{
+  "scope": "Four requested MAX OTT MULTI-SUB copies, explicitly selected EN MP4 alternatives, controlled owner. No all-customer or full-film certification.",
+  "originalCopiesRepaired": false,
+  "norvaChanges": {
+    "pullRequest": 639,
+    "code": "9f0f7682d7bc8258adcfa23f8bdeb38a49b102f8",
+    "merge": "aa3524d43388851b036eb04003bf37a5f47012ce",
+    "scope": "Typed refusal and truthful terminal error with manual retry; not repair of upstream refusal"
+  },
+  "independentAndMetadata": {
+    "receipts": [
+      {
+        "file": "hit-cold-range-20261004T174534Z.safe.json",
+        "receipt": {
+          "at": "2026-10-04T17:45:34.383110+00:00",
+          "film": "HIT: The Third Case [MULTI-SUB]",
+          "mode": "cold-range",
+          "reader": "system libcurl independent of Norva media reader",
+          "gatewayRoute": "secondary HTTP CONNECT slot 1",
+          "heartbeatSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "attempts": 1,
+          "rangeKind": "same cold Gateway range",
+          "curlExit": 0,
+          "boundedStop": false,
+          "bytesRetained": 0,
+          "seconds": 1.297,
+          "httpStatuses": [
+            200,
+            403
+          ],
+          "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bodyKind": "empty",
+          "bodySignals": {
+            "forbidden": false,
+            "expired": false,
+            "cloudflare": false,
+            "nginx": false,
+            "connectionLimit": false,
+            "proxy": false
+          },
+          "contentRanges": [],
+          "serverSignals": {
+            "cloudflare": false,
+            "nginx": true
+          },
+          "expired": true
+        }
+      },
+      {
+        "file": "hit-plain-get-20261004T174545Z.safe.json",
+        "receipt": {
+          "at": "2026-10-04T17:45:45.690020+00:00",
+          "film": "HIT: The Third Case [MULTI-SUB]",
+          "mode": "plain-get",
+          "reader": "system libcurl independent of Norva media reader",
+          "gatewayRoute": "secondary HTTP CONNECT slot 1",
+          "heartbeatSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "attempts": 1,
+          "rangeKind": "no Range header",
+          "curlExit": 0,
+          "boundedStop": false,
+          "bytesRetained": 0,
+          "seconds": 0.688,
+          "httpStatuses": [
+            200,
+            403
+          ],
+          "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bodyKind": "empty",
+          "bodySignals": {
+            "forbidden": false,
+            "expired": false,
+            "cloudflare": false,
+            "nginx": false,
+            "connectionLimit": false,
+            "proxy": false
+          },
+          "contentRanges": [],
+          "serverSignals": {
+            "cloudflare": false,
+            "nginx": true
+          },
+          "expired": true
+        }
+      },
+      {
+        "file": "mma-plain-get-20261004T174613Z.safe.json",
+        "receipt": {
+          "at": "2026-10-04T17:46:13.771866+00:00",
+          "film": "MMA Cop [MULTI-SUB]",
+          "mode": "plain-get",
+          "reader": "system libcurl independent of Norva media reader",
+          "gatewayRoute": "secondary HTTP CONNECT slot 1",
+          "heartbeatSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "attempts": 1,
+          "rangeKind": "no Range header",
+          "curlExit": 0,
+          "boundedStop": false,
+          "bytesRetained": 0,
+          "seconds": 0.643,
+          "httpStatuses": [
+            200,
+            403
+          ],
+          "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bodyKind": "empty",
+          "bodySignals": {
+            "forbidden": false,
+            "expired": false,
+            "cloudflare": false,
+            "nginx": false,
+            "connectionLimit": false,
+            "proxy": false
+          },
+          "contentRanges": [],
+          "serverSignals": {
+            "cloudflare": false,
+            "nginx": true
+          },
+          "expired": true
+        }
+      },
+      {
+        "file": "shadow-plain-get-20261004T174617Z.safe.json",
+        "receipt": {
+          "at": "2026-10-04T17:46:17.143278+00:00",
+          "film": "Shadow Force [MULTI-SUB]",
+          "mode": "plain-get",
+          "reader": "system libcurl independent of Norva media reader",
+          "gatewayRoute": "secondary HTTP CONNECT slot 1",
+          "heartbeatSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "attempts": 1,
+          "rangeKind": "no Range header",
+          "curlExit": 0,
+          "boundedStop": false,
+          "bytesRetained": 0,
+          "seconds": 0.677,
+          "httpStatuses": [
+            200,
+            403
+          ],
+          "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bodyKind": "empty",
+          "bodySignals": {
+            "forbidden": false,
+            "expired": false,
+            "cloudflare": false,
+            "nginx": false,
+            "connectionLimit": false,
+            "proxy": false
+          },
+          "contentRanges": [],
+          "serverSignals": {
+            "cloudflare": false,
+            "nginx": true
+          },
+          "expired": true
+        }
+      },
+      {
+        "file": "vengeance-plain-get-20261004T174620Z.safe.json",
+        "receipt": {
+          "at": "2026-10-04T17:46:20.282073+00:00",
+          "film": "Shadow of Vengeance [MULTI-SUB]",
+          "mode": "plain-get",
+          "reader": "system libcurl independent of Norva media reader",
+          "gatewayRoute": "secondary HTTP CONNECT slot 1",
+          "heartbeatSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "attempts": 1,
+          "rangeKind": "no Range header",
+          "curlExit": 0,
+          "boundedStop": false,
+          "bytesRetained": 0,
+          "seconds": 0.686,
+          "httpStatuses": [
+            200,
+            403
+          ],
+          "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bodyKind": "empty",
+          "bodySignals": {
+            "forbidden": false,
+            "expired": false,
+            "cloudflare": false,
+            "nginx": false,
+            "connectionLimit": false,
+            "proxy": false
+          },
+          "contentRanges": [],
+          "serverSignals": {
+            "cloudflare": false,
+            "nginx": true
+          },
+          "expired": true
+        }
+      },
+      {
+        "file": "hit-metadata.safe.json",
+        "receipt": {
+          "film": "HIT: The Third Case",
+          "at": "2026-10-04T17:49:11.530797+00:00",
+          "scope": "one get_vod_info; no media request",
+          "providerRequests": 1,
+          "nativeHeartbeatIntervalSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "seconds": 0.553,
+          "curlExit": 0,
+          "http": 200,
+          "privateMetadataFieldsRetained": true,
+          "metadata": {
+            "streamIdMatches": true,
+            "nameMatchesStored": true,
+            "container": "mkv",
+            "containerMatchesImported": true,
+            "streamContainerTupleMatches": true,
+            "directSourcePresent": false,
+            "directSourceMatchesCurrent": null
+          },
+          "outcome": "complete",
+          "expired": true,
+          "temporaryFilesRemoved": true
+        }
+      },
+      {
+        "file": "mma-metadata.safe.json",
+        "receipt": {
+          "film": "MMA Cop",
+          "at": "2026-10-04T17:49:31.793214+00:00",
+          "scope": "one get_vod_info; no media request",
+          "providerRequests": 1,
+          "nativeHeartbeatIntervalSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "seconds": 0.518,
+          "curlExit": 0,
+          "http": 200,
+          "privateMetadataFieldsRetained": true,
+          "metadata": {
+            "streamIdMatches": true,
+            "nameMatchesStored": true,
+            "container": "mkv",
+            "containerMatchesImported": true,
+            "streamContainerTupleMatches": true,
+            "directSourcePresent": false,
+            "directSourceMatchesCurrent": null
+          },
+          "outcome": "complete",
+          "expired": true,
+          "temporaryFilesRemoved": true
+        }
+      },
+      {
+        "file": "shadow-metadata.safe.json",
+        "receipt": {
+          "film": "Shadow Force",
+          "at": "2026-10-04T17:49:35.014297+00:00",
+          "scope": "one get_vod_info; no media request",
+          "providerRequests": 1,
+          "nativeHeartbeatIntervalSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "seconds": 0.534,
+          "curlExit": 0,
+          "http": 200,
+          "privateMetadataFieldsRetained": true,
+          "metadata": {
+            "streamIdMatches": true,
+            "nameMatchesStored": true,
+            "container": "mkv",
+            "containerMatchesImported": true,
+            "streamContainerTupleMatches": true,
+            "directSourcePresent": false,
+            "directSourceMatchesCurrent": null
+          },
+          "outcome": "complete",
+          "expired": true,
+          "temporaryFilesRemoved": true
+        }
+      },
+      {
+        "file": "vengeance-metadata.safe.json",
+        "receipt": {
+          "film": "Shadow of Vengeance",
+          "at": "2026-10-04T17:49:38.365216+00:00",
+          "scope": "one get_vod_info; no media request",
+          "providerRequests": 1,
+          "nativeHeartbeatIntervalSeconds": 0.5,
+          "heartbeatTimeoutSeconds": 1,
+          "seconds": 0.599,
+          "curlExit": 0,
+          "http": 200,
+          "privateMetadataFieldsRetained": true,
+          "metadata": {
+            "streamIdMatches": true,
+            "nameMatchesStored": true,
+            "container": "mkv",
+            "containerMatchesImported": true,
+            "streamContainerTupleMatches": true,
+            "directSourcePresent": false,
+            "directSourceMatchesCurrent": null
+          },
+          "outcome": "complete",
+          "expired": true,
+          "temporaryFilesRemoved": true
+        }
+      }
+    ]
+  },
+  "preDeploymentSessions": {
+    "at": "2026-10-04T18:05:30.619184+00:00",
+    "windowStartedAt": "2026-10-04T17:34:00Z",
+    "scope": "Exact selected copies of four requested films on controlled account; direct diagnostic sessions remain distinguishable from browser playbacks by mode and events.",
+    "sessions": [
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T17:34:38.241261+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T17:34:39.801869+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T17:34:39.817492+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "Unable to prepare this media file for reliable playback. PROVIDER_REQUEST_FAILED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T17:36:02.201964+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T17:36:03.130721+00:00",
+        "declaredContainer": "mkv",
+        "title": "MMA Cop [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T17:36:03.137515+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "Unable to prepare this media file for reliable playback. PROVIDER_REQUEST_FAILED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T17:39:13.259197+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T17:39:14.395236+00:00",
+        "declaredContainer": "mkv",
+        "title": "Shadow Force [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T17:39:14.411821+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "Unable to prepare this media file for reliable playback. PROVIDER_REQUEST_FAILED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T17:39:41.512776+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T17:39:42.565579+00:00",
+        "declaredContainer": "mkv",
+        "title": "Shadow of Vengeance [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T17:39:42.572427+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "Unable to prepare this media file for reliable playback. PROVIDER_REQUEST_FAILED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:45:34.493804+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:45:36.158796+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:45:45.757795+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:45:46.717655+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:46:13.859136+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:46:14.845526+00:00",
+        "declaredContainer": "mkv",
+        "title": "MMA Cop [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:46:17.246942+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:46:18.180525+00:00",
+        "declaredContainer": "mkv",
+        "title": "Shadow Force [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:46:20.373379+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:46:21.40786+00:00",
+        "declaredContainer": "mkv",
+        "title": "Shadow of Vengeance [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:49:11.596126+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:49:13.608177+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:49:31.843703+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:49:32.637036+00:00",
+        "declaredContainer": "mkv",
+        "title": "MMA Cop [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:49:35.100301+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:49:35.992255+00:00",
+        "declaredContainer": "mkv",
+        "title": "Shadow Force [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "direct",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:49:38.4571+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:49:39.432766+00:00",
+        "declaredContainer": "mkv",
+        "title": "Shadow of Vengeance [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": false
+      },
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T17:51:13.616699+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T17:51:14.988481+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN - Shadow of Vengeance (2024)",
+        "source": "Dino",
+        "events": [
+          {
+            "at": "2026-10-04T17:51:14.993815+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "Unable to prepare this media file for reliable playback. INVALID_MKV_INPUT",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:53:21.910443+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:55:47.610696+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN| Shadow of Vengeance",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T17:53:26.434821+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T17:53:27.06834+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 5859,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "gateways": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T17:53:25.051153+00:00",
+            "updatedAt": "2026-10-04T17:55:47.603481+00:00"
+          }
+        ],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 1,
+          "play_started": 1,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:56:36.728021+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T17:58:35.508161+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN| MMA Cop",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T17:56:40.890159+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T17:56:41.557143+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 5392,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "gateways": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T17:56:39.729563+00:00",
+            "updatedAt": "2026-10-04T17:58:35.499551+00:00"
+          }
+        ],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 1,
+          "play_started": 1,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "expired",
+        "createdAt": "2026-10-04T17:59:56.71154+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T18:01:39.039063+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN| HIT: The Third Case",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:00:00.882047+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T18:00:01.489357+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 5384,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "gateways": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T17:59:59.977476+00:00",
+            "updatedAt": "2026-10-04T18:01:39.031145+00:00"
+          }
+        ],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 1,
+          "play_started": 1,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "expired",
+        "createdAt": "2026-10-04T18:02:35.541423+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T18:04:21.24459+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN| Shadow Force",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:02:40.601651+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T18:02:41.41685+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 6408,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "gateways": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T18:02:39.249672+00:00",
+            "updatedAt": "2026-10-04T18:04:21.236937+00:00"
+          }
+        ],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 1,
+          "play_started": 1,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      }
+    ]
+  },
+  "gatewayDeployment": {
+    "revision": "9f0f7682d7bc8258adcfa23f8bdeb38a49b102f8",
+    "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+    "startedAt": "2026-10-04T18:05:08.641891+00:00",
+    "pausedAt": "2026-10-04T18:05:08.714228+00:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-04T18:05:57.744062+00:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-04T18:06:01.556952+00:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-04T18:06:01.658233+00:00",
+    "restoredAt": "2026-10-04T18:06:01.973117+00:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true
+  },
+  "gatewayCanary": {
+    "at": "2026-10-04T17:59:30.126364+00:00",
+    "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+    "revision": "9f0f7682d7bc8258adcfa23f8bdeb38a49b102f8",
+    "healthy": true,
+    "user": "1000:1000",
+    "network": "none",
+    "productionVolumes": false,
+    "sourceHashesMatch": true,
+    "health": {
+      "ok": true,
+      "videoEncoder": {
+        "protocol": 1,
+        "backend": "vaapi",
+        "hardware": true,
+        "ready": true,
+        "preflight": "vaapi-ready",
+        "deviceConfigured": true,
+        "decode": "vaapi-exact-profile-with-software-fallback",
+        "outputCodec": "h264"
+      },
+      "activeSessions": 0,
+      "rawPumpCount": 0
+    },
+    "providerRequests": 0
+  },
+  "webDeployment": {
+    "workflow": 37223057548,
+    "conclusion": "success",
+    "completedAt": "2026-10-04T18:07:26Z",
+    "observedWatchPageAsset": "bf6f519584"
+  },
+  "postDeploymentFirstAttempt": {
+    "at": "2026-10-04T18:26:24.641273+00:00",
+    "windowStartedAt": "2026-10-04T18:08:00Z",
+    "scope": "Exact selected copies of four requested films on controlled account; direct diagnostic sessions remain distinguishable from browser playbacks by mode and events.",
+    "sessions": [
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T18:11:57.483713+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T18:11:58.862588+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:11:58.868439+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "This media file is currently unavailable. PROVIDER_FILE_REFUSED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T18:22:05.272172+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T18:22:06.677886+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:22:06.699051+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "This media file is currently unavailable. PROVIDER_FILE_REFUSED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "expired",
+        "createdAt": "2026-10-04T18:23:03.180695+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T18:26:21.308509+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN| HIT: The Third Case",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:23:34.884136+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 32050,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 95,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T18:24:34.90626+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 96,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "gateways": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T18:23:33.408822+00:00",
+            "updatedAt": "2026-10-04T18:26:21.300836+00:00"
+          }
+        ],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 1,
+          "play_started": 1,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      }
+    ]
+  },
+  "initialUiVerification": {
+    "clickAt": "2026-10-04T18:11:54.652Z",
+    "title": "HIT: The Third Case [MULTI-SUB]",
+    "result": "Generic UI persisted. Typed code found in server diagnostics but absent from authenticated public allowlist. This first UI check failed."
+  },
+  "browserAlternatives": [
+    {
+      "title": "HIT: The Third Case",
+      "providerVersion": "EN MP4",
+      "ttffMs": 5384,
+      "mediaTimeSeconds": 96.28301,
+      "readyState": 4,
+      "paused": false,
+      "mediaError": null,
+      "source": "MAX OTT",
+      "silentSubstitution": false
+    },
+    {
+      "title": "MMA Cop",
+      "providerVersion": "EN MP4",
+      "ttffMs": 5392,
+      "mediaTimeSeconds": 112.286343,
+      "readyState": 4,
+      "paused": false,
+      "mediaError": null,
+      "source": "MAX OTT",
+      "silentSubstitution": false
+    },
+    {
+      "title": "Shadow Force",
+      "providerVersion": "EN MP4",
+      "ttffMs": 6408,
+      "mediaTimeSeconds": 96.968318,
+      "readyState": 4,
+      "paused": false,
+      "mediaError": null,
+      "source": "MAX OTT",
+      "silentSubstitution": false
+    },
+    {
+      "title": "Shadow of Vengeance",
+      "providerVersion": "EN MP4",
+      "ttffMs": 5859,
+      "mediaTimeSeconds": 139.963185,
+      "readyState": 4,
+      "paused": false,
+      "mediaError": null,
+      "source": "MAX OTT",
+      "silentSubstitution": false
+    }
+  ],
+  "limitations": [
+    "EN is provider label, not newly verified audio",
+    "Independent reader shares pinned upstream proxy; provider and proxy not distinguished",
+    "Original HTTP403 responses have zero media bytes",
+    "Dino Shadow of Vengeance INVALID_MKV_INPUT remains separate and unresolved",
+    "Gateway logs restart at deployment; absence of old session logs does not prove clean old decoding"
+  ],
+  "edgeEnvelopeDeployment": {
+    "revision": "612103be62f6d5eba18336796f70035265de3737",
+    "startedAt": "2026-10-04T18:20:34.717676+00:00",
+    "leasesForced": false,
+    "changedFiles": 1,
+    "preservedFiles": 192,
+    "pausedAt": "2026-10-04T18:20:34.804438+00:00",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "healthy": true,
+        "helperSha256": "6dde13f1e4b904f92a45ac949c4d6faf7cddf4281f53b86dc4e9bbcb0221cf4c"
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "healthy": true,
+        "helperSha256": "6dde13f1e4b904f92a45ac949c4d6faf7cddf4281f53b86dc4e9bbcb0221cf4c"
+      }
+    ],
+    "gatewaysUnchanged": true,
+    "completedAt": "2026-10-04T18:21:18.547763+00:00",
+    "restoredAt": "2026-10-04T18:21:18.867034+00:00",
+    "admissionsRestored": true,
+    "workerRestored": true,
+    "dispatcherPreserved": true
+  },
+  "finalSessions": {
+    "at": "2026-10-04T18:29:42.170690+00:00",
+    "windowStartedAt": "2026-10-04T18:08:00Z",
+    "scope": "Exact selected copies of four requested films on controlled account; direct diagnostic sessions remain distinguishable from browser playbacks by mode and events.",
+    "sessions": [
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T18:11:57.483713+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T18:11:58.862588+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:11:58.868439+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "This media file is currently unavailable. PROVIDER_FILE_REFUSED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "failed",
+        "createdAt": "2026-10-04T18:22:05.272172+00:00",
+        "errorCode": "gateway_502",
+        "updatedAt": "2026-10-04T18:22:06.677886+00:00",
+        "declaredContainer": "mkv",
+        "title": "HIT: The Third Case [MULTI-SUB]",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:22:06.699051+00:00",
+            "code": "gateway_502",
+            "mode": "transcode",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "gatewayStatus": 502,
+            "gatewayDetails": "This media file is currently unavailable. PROVIDER_FILE_REFUSED",
+            "failureCategory": "gateway_startup_failed",
+            "positionSeconds": 0,
+            "providerConcurrencySignal": false
+          }
+        ],
+        "gateways": [],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 0,
+          "play_started": 0,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 1,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      },
+      {
+        "mode": "transcode",
+        "state": "expired",
+        "createdAt": "2026-10-04T18:23:03.180695+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T18:26:21.308509+00:00",
+        "declaredContainer": "mp4",
+        "title": "EN| HIT: The Third Case",
+        "source": "MAX OTT",
+        "events": [
+          {
+            "at": "2026-10-04T18:23:34.884136+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 32050,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 95,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T18:24:34.90626+00:00",
+            "code": null,
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "gatewayStatus": null,
+            "gatewayDetails": null,
+            "failureCategory": null,
+            "positionSeconds": 96,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "gateways": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T18:23:33.408822+00:00",
+            "updatedAt": "2026-10-04T18:26:21.300836+00:00"
+          }
+        ],
+        "eventCounts": {
+          "play_requested": 0,
+          "first_frame": 1,
+          "play_started": 1,
+          "seek": 0,
+          "ended": 0,
+          "abandoned": 0,
+          "gateway_error": 0,
+          "playback_error": 0
+        },
+        "hasPlaybackEvents": true
+      }
+    ],
+    "observedByParent": {
+      "refusalClickAt": "2026-10-04T18:22:03.357Z",
+      "refusalMessageCorrect": true,
+      "resumeClickAt": "2026-10-04T18:23:01.441Z",
+      "lastVideoObservationAt": "2026-10-04T18:25:45.324Z",
+      "currentTime": 76.036894,
+      "readyState": 4,
+      "paused": false,
+      "videoError": null,
+      "bufferedRanges": [
+        [
+          43.312,
+          196.117333
+        ]
+      ],
+      "returnedToFilmsApproximately": "2026-10-04T18:26:10Z"
+    },
+    "resumeTiming": {
+      "firstFrameAt": "2026-10-04T18:23:34.884136Z",
+      "reportedTtffMs": 32050,
+      "playStartedAt": "2026-10-04T18:24:34.906260Z",
+      "firstFrameToPlayStartedMs": 60022,
+      "clickToPlayStartedMs": 93465,
+      "classification": "Delayed automatic initial playback after resume, not proven post-start rebuffering.",
+      "startupPolicy": {
+        "captured": false,
+        "reason": "Session removed from Gateway debug after closure; no policy retained in playback_hint, Gateway row or the two playback event metadata records."
+      },
+      "requestedSeekOffsetSeconds": 96,
+      "requestGatewayMode": "remux",
+      "requestVideoCodec": "h264",
+      "requestAudioMode": "copy",
+      "gatewayStartup": {
+        "readyAt": "2026-10-04T18:23:33.404Z",
+        "totalMs": 29999,
+        "ffmpegReadyMs": 29862,
+        "playlistBufferSeconds": 17.5,
+        "playlistSegmentCount": 3,
+        "firstSegmentReadyMs": 26206.614501953125,
+        "sustainedMediaProductionRateX": 2.069,
+        "inputProbeMode": "known-fast",
+        "codecProfileSource": "request",
+        "seek": true
+      }
+    },
+    "logLimitations": [
+      "Gateway logs begin at 18:05:56/18:05:59 after deployment; earlier replay cleanliness cannot be inferred from these windows.",
+      "Shutdown-adjacent truncated-input/loopback/output errors appeared at 18:26:18, after the reported return to Films. Their relationship to teardown is plausible, not established; do not label them proof of an in-playback corruption or certify a clean decoder.",
+      "The exact startup policy was not retained; do not claim the suspected client-policy mismatch as proven for this session."
+    ],
+    "health": {
+      "at": "2026-10-04T18:29:43.044359+00:00",
+      "windowStartedAt": "2026-10-04T18:08:00Z",
+      "gateways": [
+        {
+          "route": "norva-media-gateway",
+          "activeViewerSessions": 1,
+          "http": 200,
+          "ok": true,
+          "running": true,
+          "logWindowStartedAt": "2026-10-04T18:05:56.370293012Z",
+          "windowLogLines": 44,
+          "taggedPlaybackFfmpegDiagnosticLines": 4
+        },
+        {
+          "route": "norva-resume-cache-pilot-20260916",
+          "activeViewerSessions": 0,
+          "http": 200,
+          "ok": true,
+          "running": true,
+          "logWindowStartedAt": "2026-10-04T18:05:59.164930376Z",
+          "windowLogLines": 16,
+          "taggedPlaybackFfmpegDiagnosticLines": 1
+        }
+      ],
+      "sessionLogs": [
+        {
+          "title": "EN| HIT: The Third Case",
+          "created": "2026-10-04T18:23:33.408822+00:00",
+          "lastUpdated": "2026-10-04T18:26:21.300836+00:00",
+          "exactSessionAssociatedLines": 2,
+          "diagnosticCounts": {
+            "corruptPicture": 0,
+            "aacDecode": 0,
+            "processError": 0,
+            "providerRefusal": 0
+          }
+        }
+      ],
+      "logScope": "Only lines carrying exact Gateway session IDs are attributed. Untagged continuation lines and other background jobs cannot certify full decoder cleanliness."
+    }
+  },
+  "finalBrowser": {
+    "scope": "Production browser, exact original HIT MULTI-SUB then explicitly selected MAX OTT EN MP4 alternative",
+    "refusal": {
+      "clickAt": "2026-10-04T18:22:03.357Z",
+      "visibleMessage": "Ce flux est temporairement indisponible. Veuillez essayer une autre version ou réessayer dans quelques instants.",
+      "automaticRetry": false,
+      "automaticVariantChange": false,
+      "originalFilePlayable": false,
+      "screenshot": ".codex-artifacts/launch-four-refusal-ui.png"
+    },
+    "alternativeResume": {
+      "clickAt": "2026-10-04T18:23:01.441Z",
+      "requestedPositionSeconds": 96,
+      "observations": [
+        {
+          "at": "2026-10-04T18:23:38.170Z",
+          "time": 5.208332,
+          "paused": true,
+          "readyState": 4,
+          "error": null,
+          "buffered": [
+            [
+              0.103666,
+              17.535999
+            ]
+          ]
+        },
+        {
+          "at": "2026-10-04T18:24:11.821Z",
+          "time": 5.208332,
+          "paused": true,
+          "readyState": 4,
+          "error": null,
+          "buffered": [
+            [
+              0.103666,
+              38.997333
+            ]
+          ]
+        },
+        {
+          "at": "2026-10-04T18:24:54.651Z",
+          "time": 25.289952,
+          "paused": false,
+          "readyState": 4,
+          "error": null,
+          "buffered": [
+            [
+              0.103666,
+              146.453333
+            ]
+          ]
+        },
+        {
+          "at": "2026-10-04T18:25:45.324Z",
+          "time": 76.036894,
+          "paused": false,
+          "readyState": 4,
+          "error": null,
+          "buffered": [
+            [
+              43.312,
+              196.117333
+            ]
+          ]
+        }
+      ],
+      "manualPlayIntervention": false,
+      "automaticStartDelayRemains": true,
+      "screenshot": ".codex-artifacts/launch-four-hit-playing.png",
+      "exit": "Films navigation followed by detail Back to search grid; reader Back was hidden with controls, first click had no effect"
+    }
+  }
+}
