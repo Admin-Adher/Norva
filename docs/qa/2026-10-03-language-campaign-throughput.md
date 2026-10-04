@@ -96,3 +96,11 @@ Les analyses strictes comptent **15 validations réussies** (+4) et **28 analyse
 
 Aucun nouvel échec HTTP du dispatcher ni délai SQL dépassé dans les deux Edge depuis l'incident antérieur. Services sains, admission et cron actifs, priorité de lecture et limites fournisseur conservées. Aucune nouvelle modification de production pendant ce contrôle. Reçu : `2026-10-04-language-campaign-heartbeat-0112.json`.
 
+## Mesure du 4 octobre à 00:13 UTC — 02:13 Paris
+
+**8 117 contrôles techniques distincts**, soit +841 en 60 min 35 s : **833/h**. **2 810 variantes identifiées** (+175), **53 941 variantes / 41 382 fiches inconnues**. Aucune variante initiale supprimée. Le ralentissement coïncide avec les reports d'occupation et les protections des sondes Dino et MAX OTT, encore actives à 00:13 ; aucune nouvelle expiration SQL n'apparaît.
+
+**17 validations strictes réussies** (+2) et **33 analyses complètes indéterminées avec profil courant correspondant** (+5). L'ancien travail Strng au bail expiré a repassé l'admission, mais attend désormais pour occupation fournisseur sans nouvelle progression de capture : il ne gonfle aucun compteur de sonde ou d'analyse terminée.
+
+Les Gateways et le dispatcher sont sains ; la campagne continue en conservant ses limites et protections. Aucune modification de production. Le débit technique ne fournit toujours pas de délai fiable pour achever l'ensemble des analyses vocales. Reçu : `2026-10-04-language-campaign-heartbeat-0213.json`.
+
