@@ -1,0 +1,666 @@
+{
+  "proof.safe": {
+    "passed": true,
+    "assertions": 18,
+    "at": "2026-10-04T12:15:20.993987+00:00",
+    "migrationSha256": "d12c95556334db64a703c35fabca3726bee32c160636f823b46449f935597ff5",
+    "network": "none",
+    "customerRowsCopied": 0
+  },
+  "migration.safe": {
+    "at": "2026-10-04T12:16:25.803649+00:00",
+    "migrationSha256": "d12c95556334db64a703c35fabca3726bee32c160636f823b46449f935597ff5",
+    "definitionHash": "dbd9772e0bfa00e2bc5230a4392e0da70dca8d340872b574f665b0fb841e0c44"
+  },
+  "deployment.safe": {
+    "at": 1791116256.486505,
+    "revision": "featured-movie-declarations-20261004",
+    "files": {
+      "_shared/owned-provider-language-declarations.mjs": "e2e4d717c990222b713c9449069a919acfa66d354df67ca7877e50aee7070637"
+    },
+    "replicas": 2
+  },
+  "evidence.safe": {
+    "evidence": [
+      {
+        "hints": null,
+        "multiCanonical": null,
+        "profileKeys": [
+          "bitRate",
+          "probeMs",
+          "probedAt",
+          "container",
+          "subtitles",
+          "audioCodec",
+          "videoCodec",
+          "videoWidth",
+          "audioTracks",
+          "probeSource",
+          "videoHeight",
+          "audioProfile",
+          "videoProfile",
+          "audioChannels",
+          "fileSizeBytes",
+          "audioSampleRate",
+          "durationSeconds",
+          "metadataComplete",
+          "videoPixelFormat",
+          "videoStreamIndex",
+          "audioChannelLayout"
+        ],
+        "title": "EN| Innocent Voices [SUB]",
+        "ownedDeclarations": {
+          "languages": null
+        },
+        "capturedDeclaration": {
+          "audio": [
+            []
+          ],
+          "records": 1
+        },
+        "apiProvider": {
+          "provider_audio_languages": null,
+          "provider_audio_language_status": null,
+          "providerAudioLanguages": null,
+          "providerAudioLanguageStatus": null,
+          "audio_language_validation_status": "pending"
+        }
+      },
+      {
+        "hints": null,
+        "multiCanonical": null,
+        "profileKeys": [],
+        "title": "Last Bullet",
+        "ownedDeclarations": {
+          "languages": [
+            "en"
+          ]
+        },
+        "capturedDeclaration": {
+          "audio": [
+            [
+              "en"
+            ]
+          ],
+          "records": 1
+        },
+        "apiProvider": {
+          "provider_audio_languages": [
+            "en"
+          ],
+          "provider_audio_language_status": "provider_declared",
+          "providerAudioLanguages": [
+            "en"
+          ],
+          "providerAudioLanguageStatus": "provider_declared",
+          "audio_language_validation_status": "not_analyzed"
+        }
+      },
+      {
+        "hints": null,
+        "multiCanonical": null,
+        "profileKeys": [
+          "bitRate",
+          "probeMs",
+          "probedAt",
+          "container",
+          "subtitles",
+          "audioCodec",
+          "videoCodec",
+          "videoWidth",
+          "audioTracks",
+          "probeSource",
+          "videoHeight",
+          "audioProfile",
+          "videoProfile",
+          "audioChannels",
+          "fileSizeBytes",
+          "audioSampleRate",
+          "durationSeconds",
+          "metadataComplete",
+          "videoPixelFormat",
+          "videoStreamIndex",
+          "audioChannelLayout"
+        ],
+        "title": "Prey",
+        "ownedDeclarations": {
+          "languages": null
+        },
+        "capturedDeclaration": {
+          "audio": [
+            []
+          ],
+          "records": 1
+        },
+        "apiProvider": {
+          "provider_audio_languages": null,
+          "provider_audio_language_status": null,
+          "providerAudioLanguages": null,
+          "providerAudioLanguageStatus": null,
+          "audio_language_validation_status": "pending"
+        }
+      }
+    ]
+  },
+  "norva-edge-functions.audit.safe": {
+    "at": "2026-10-04T12:18:58.550050+00:00",
+    "edge": "norva-edge-functions",
+    "elapsedMs": 1770,
+    "items": [
+      {
+        "title": "EN| Innocent Voices [SUB]",
+        "variants": [
+          {
+            "source": "MAX OTT",
+            "rawTitle": "EN| Innocent Voices [SUB]",
+            "language": null,
+            "audioTracks": [
+              {
+                "index": 1,
+                "codec": "aac",
+                "channels": 6,
+                "default": true
+              }
+            ],
+            "observed": true,
+            "validationStatus": "pending",
+            "jobStatus": null,
+            "providerAudioLanguages": null,
+            "providerAudioLanguageStatus": null,
+            "verification": {
+              "status": "failed",
+              "method": "whisper-strict-consensus-v4"
+            },
+            "db": {
+              "at": "2026-10-04T12:18:58.613452+00:00",
+              "intake": {
+                "code": "strict-analysis-queued",
+                "next": null,
+                "state": "queued",
+                "updated": "2026-10-04T09:32:48.217692+00:00"
+              },
+              "variant": {
+                "updated": "2026-10-04T09:45:16.223271+00:00",
+                "language": null,
+                "metadataKeys": [
+                  "added",
+                  "rating",
+                  "categoryId",
+                  "identityKey",
+                  "categoryName"
+                ],
+                "profilePresent": true
+              },
+              "priority": {
+                "seen": "2026-10-04T09:26:58.075708+00:00",
+                "expires": "2026-10-06T09:26:58.075708+00:00"
+              },
+              "exactJobs": [
+                {
+                  "state": "failed",
+                  "retry_at": "2026-10-05T09:45:16.222+00:00",
+                  "created_at": "2026-10-04T09:32:48.20325+00:00",
+                  "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+                  "updated_at": "2026-10-04T09:45:16.22416+00:00",
+                  "quarantined": false,
+                  "verified_at": null,
+                  "selected_now": false,
+                  "attempt_count": 12,
+                  "request_origin": "automatic",
+                  "expected_tracks": 1,
+                  "stored_receipts": 6,
+                  "owned_variant_job": true,
+                  "next_track_position": 0,
+                  "provider_attempt_count": 7,
+                  "strict_lid_window_count": 6,
+                  "last_provider_progress_at": "2026-10-04T09:45:16.110401+00:00",
+                  "strict_lid_window_position": 6
+                }
+              ],
+              "identified": false,
+              "observations": [
+                {
+                  "audio": [],
+                  "observed": true
+                }
+              ],
+              "metadataRetry": null
+            }
+          }
+        ],
+        "audioTracks": [
+          {
+            "index": 1,
+            "codec": "aac",
+            "channels": 6,
+            "default": true
+          }
+        ],
+        "providerAudioLanguages": null,
+        "providerAudioLanguageStatus": null,
+        "validationStatus": "pending",
+        "jobStatus": null
+      },
+      {
+        "title": "Last Bullet",
+        "variants": [
+          {
+            "source": "MAX OTT",
+            "rawTitle": "Last Bullet [MULTI-SUB]",
+            "language": "multi",
+            "audioTracks": null,
+            "observed": false,
+            "validationStatus": "not_analyzed",
+            "jobStatus": null,
+            "providerAudioLanguages": [
+              "en"
+            ],
+            "providerAudioLanguageStatus": "provider_declared",
+            "verification": null,
+            "db": {
+              "at": "2026-10-04T12:18:58.723201+00:00",
+              "intake": null,
+              "variant": {
+                "updated": "2026-10-02T04:40:07.659009+00:00",
+                "language": "multi",
+                "metadataKeys": [
+                  "added",
+                  "rating",
+                  "categoryId",
+                  "identityKey",
+                  "categoryName"
+                ],
+                "profilePresent": true
+              },
+              "priority": {
+                "seen": "2026-10-04T09:26:58.075708+00:00",
+                "expires": "2026-10-06T09:26:58.075708+00:00"
+              },
+              "exactJobs": null,
+              "identified": true,
+              "observations": null,
+              "metadataRetry": null
+            }
+          }
+        ],
+        "audioTracks": null,
+        "providerAudioLanguages": [
+          "en"
+        ],
+        "providerAudioLanguageStatus": "provider_declared",
+        "validationStatus": "not_analyzed",
+        "jobStatus": null
+      },
+      {
+        "title": "Prey",
+        "variants": [
+          {
+            "source": "MAX OTT",
+            "rawTitle": "Prey [MULTI-SUB]",
+            "language": "multi",
+            "audioTracks": [
+              {
+                "index": 1,
+                "codec": "aac",
+                "channels": 6,
+                "default": true
+              }
+            ],
+            "observed": true,
+            "validationStatus": "pending",
+            "jobStatus": null,
+            "providerAudioLanguages": null,
+            "providerAudioLanguageStatus": null,
+            "verification": {
+              "status": "failed",
+              "method": "whisper-strict-consensus-v4"
+            },
+            "db": {
+              "at": "2026-10-04T12:18:58.813429+00:00",
+              "intake": {
+                "code": "strict-analysis-queued",
+                "next": null,
+                "state": "queued",
+                "updated": "2026-10-04T09:56:04.401+00:00"
+              },
+              "variant": {
+                "updated": "2026-10-04T10:12:24.827608+00:00",
+                "language": "multi",
+                "metadataKeys": [
+                  "added",
+                  "rating",
+                  "categoryId",
+                  "identityKey",
+                  "categoryName"
+                ],
+                "profilePresent": true
+              },
+              "priority": {
+                "seen": "2026-10-04T09:26:58.075708+00:00",
+                "expires": "2026-10-06T09:26:58.075708+00:00"
+              },
+              "exactJobs": [
+                {
+                  "state": "failed",
+                  "retry_at": "2026-10-05T10:12:24.826+00:00",
+                  "created_at": "2026-10-04T09:56:04.39601+00:00",
+                  "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+                  "updated_at": "2026-10-04T10:12:24.82804+00:00",
+                  "quarantined": false,
+                  "verified_at": null,
+                  "selected_now": false,
+                  "attempt_count": 9,
+                  "request_origin": "automatic",
+                  "expected_tracks": 1,
+                  "stored_receipts": 6,
+                  "owned_variant_job": true,
+                  "next_track_position": 0,
+                  "provider_attempt_count": 9,
+                  "strict_lid_window_count": 6,
+                  "last_provider_progress_at": "2026-10-04T10:12:24.758578+00:00",
+                  "strict_lid_window_position": 6
+                }
+              ],
+              "identified": false,
+              "observations": [
+                {
+                  "audio": [],
+                  "observed": true
+                }
+              ],
+              "metadataRetry": null
+            }
+          }
+        ],
+        "audioTracks": [
+          {
+            "index": 1,
+            "codec": "aac",
+            "channels": 6,
+            "default": true
+          }
+        ],
+        "providerAudioLanguages": null,
+        "providerAudioLanguageStatus": null,
+        "validationStatus": "pending",
+        "jobStatus": null
+      }
+    ]
+  },
+  "norva-edge-functions-2.audit.safe": {
+    "at": "2026-10-04T12:18:09.165182+00:00",
+    "edge": "norva-edge-functions-2",
+    "elapsedMs": 1422,
+    "items": [
+      {
+        "title": "EN| Innocent Voices [SUB]",
+        "variants": [
+          {
+            "source": "MAX OTT",
+            "rawTitle": "EN| Innocent Voices [SUB]",
+            "language": null,
+            "audioTracks": [
+              {
+                "index": 1,
+                "codec": "aac",
+                "channels": 6,
+                "default": true
+              }
+            ],
+            "observed": true,
+            "validationStatus": "pending",
+            "jobStatus": null,
+            "providerAudioLanguages": null,
+            "providerAudioLanguageStatus": null,
+            "verification": {
+              "status": "failed",
+              "method": "whisper-strict-consensus-v4"
+            },
+            "db": {
+              "at": "2026-10-04T12:18:09.247775+00:00",
+              "intake": {
+                "code": "strict-analysis-queued",
+                "next": null,
+                "state": "queued",
+                "updated": "2026-10-04T09:32:48.217692+00:00"
+              },
+              "variant": {
+                "updated": "2026-10-04T09:45:16.223271+00:00",
+                "language": null,
+                "metadataKeys": [
+                  "added",
+                  "rating",
+                  "categoryId",
+                  "identityKey",
+                  "categoryName"
+                ],
+                "profilePresent": true
+              },
+              "priority": {
+                "seen": "2026-10-04T09:26:58.075708+00:00",
+                "expires": "2026-10-06T09:26:58.075708+00:00"
+              },
+              "exactJobs": [
+                {
+                  "state": "failed",
+                  "retry_at": "2026-10-05T09:45:16.222+00:00",
+                  "created_at": "2026-10-04T09:32:48.20325+00:00",
+                  "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+                  "updated_at": "2026-10-04T09:45:16.22416+00:00",
+                  "quarantined": false,
+                  "verified_at": null,
+                  "selected_now": false,
+                  "attempt_count": 12,
+                  "request_origin": "automatic",
+                  "expected_tracks": 1,
+                  "stored_receipts": 6,
+                  "owned_variant_job": true,
+                  "next_track_position": 0,
+                  "provider_attempt_count": 7,
+                  "strict_lid_window_count": 6,
+                  "last_provider_progress_at": "2026-10-04T09:45:16.110401+00:00",
+                  "strict_lid_window_position": 6
+                }
+              ],
+              "identified": false,
+              "observations": [
+                {
+                  "audio": [],
+                  "observed": true
+                }
+              ],
+              "metadataRetry": null
+            }
+          }
+        ],
+        "audioTracks": [
+          {
+            "index": 1,
+            "codec": "aac",
+            "channels": 6,
+            "default": true
+          }
+        ],
+        "providerAudioLanguages": null,
+        "providerAudioLanguageStatus": null,
+        "validationStatus": "pending",
+        "jobStatus": null
+      },
+      {
+        "title": "Last Bullet",
+        "variants": [
+          {
+            "source": "MAX OTT",
+            "rawTitle": "Last Bullet [MULTI-SUB]",
+            "language": "multi",
+            "audioTracks": null,
+            "observed": false,
+            "validationStatus": "not_analyzed",
+            "jobStatus": null,
+            "providerAudioLanguages": [
+              "en"
+            ],
+            "providerAudioLanguageStatus": "provider_declared",
+            "verification": null,
+            "db": {
+              "at": "2026-10-04T12:18:09.400624+00:00",
+              "intake": null,
+              "variant": {
+                "updated": "2026-10-02T04:40:07.659009+00:00",
+                "language": "multi",
+                "metadataKeys": [
+                  "added",
+                  "rating",
+                  "categoryId",
+                  "identityKey",
+                  "categoryName"
+                ],
+                "profilePresent": true
+              },
+              "priority": {
+                "seen": "2026-10-04T09:26:58.075708+00:00",
+                "expires": "2026-10-06T09:26:58.075708+00:00"
+              },
+              "exactJobs": null,
+              "identified": true,
+              "observations": null,
+              "metadataRetry": null
+            }
+          }
+        ],
+        "audioTracks": null,
+        "providerAudioLanguages": [
+          "en"
+        ],
+        "providerAudioLanguageStatus": "provider_declared",
+        "validationStatus": "not_analyzed",
+        "jobStatus": null
+      },
+      {
+        "title": "Prey",
+        "variants": [
+          {
+            "source": "MAX OTT",
+            "rawTitle": "Prey [MULTI-SUB]",
+            "language": "multi",
+            "audioTracks": [
+              {
+                "index": 1,
+                "codec": "aac",
+                "channels": 6,
+                "default": true
+              }
+            ],
+            "observed": true,
+            "validationStatus": "pending",
+            "jobStatus": null,
+            "providerAudioLanguages": null,
+            "providerAudioLanguageStatus": null,
+            "verification": {
+              "status": "failed",
+              "method": "whisper-strict-consensus-v4"
+            },
+            "db": {
+              "at": "2026-10-04T12:18:09.519972+00:00",
+              "intake": {
+                "code": "strict-analysis-queued",
+                "next": null,
+                "state": "queued",
+                "updated": "2026-10-04T09:56:04.401+00:00"
+              },
+              "variant": {
+                "updated": "2026-10-04T10:12:24.827608+00:00",
+                "language": "multi",
+                "metadataKeys": [
+                  "added",
+                  "rating",
+                  "categoryId",
+                  "identityKey",
+                  "categoryName"
+                ],
+                "profilePresent": true
+              },
+              "priority": {
+                "seen": "2026-10-04T09:26:58.075708+00:00",
+                "expires": "2026-10-06T09:26:58.075708+00:00"
+              },
+              "exactJobs": [
+                {
+                  "state": "failed",
+                  "retry_at": "2026-10-05T10:12:24.826+00:00",
+                  "created_at": "2026-10-04T09:56:04.39601+00:00",
+                  "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+                  "updated_at": "2026-10-04T10:12:24.82804+00:00",
+                  "quarantined": false,
+                  "verified_at": null,
+                  "selected_now": false,
+                  "attempt_count": 9,
+                  "request_origin": "automatic",
+                  "expected_tracks": 1,
+                  "stored_receipts": 6,
+                  "owned_variant_job": true,
+                  "next_track_position": 0,
+                  "provider_attempt_count": 9,
+                  "strict_lid_window_count": 6,
+                  "last_provider_progress_at": "2026-10-04T10:12:24.758578+00:00",
+                  "strict_lid_window_position": 6
+                }
+              ],
+              "identified": false,
+              "observations": [
+                {
+                  "audio": [],
+                  "observed": true
+                }
+              ],
+              "metadataRetry": null
+            }
+          }
+        ],
+        "audioTracks": [
+          {
+            "index": 1,
+            "codec": "aac",
+            "channels": 6,
+            "default": true
+          }
+        ],
+        "providerAudioLanguages": null,
+        "providerAudioLanguageStatus": null,
+        "validationStatus": "pending",
+        "jobStatus": null
+      }
+    ]
+  },
+  "declaration-rpc-before.safe": {
+    "status": 500,
+    "code": "57014",
+    "elapsedMs": 8027
+  },
+  "declaration-rpc-after.safe": {
+    "status": 200,
+    "languages": [
+      "en"
+    ],
+    "elapsedMs": 47
+  },
+  "web": {
+    "url": "https://norva.tv/app#movies",
+    "reloadedAfterDeployment": true,
+    "actionCards": [
+      {
+        "title": "EN| Innocent Voices [SUB]",
+        "badge": "Langue non identifiée"
+      },
+      {
+        "title": "Last Bullet",
+        "badge": "Anglais"
+      },
+      {
+        "title": "Proie",
+        "badge": "Langue non identifiée"
+      }
+    ],
+    "evidence": "Codex browser accessibility tree and DOM; screenshot capture unavailable"
+  }
+}
