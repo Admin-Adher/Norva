@@ -523,7 +523,7 @@ test('web player reports 458 once, shows the account conflict and does not auto 
   assert.ok(watch.includes('Service déjà utilisé sur un autre appareil'));
   assert.doesNotMatch(engine, /SLOT_BUSY_RETRIES/);
   assert.doesNotMatch(errorUi, /providerBusy\s*\?\s*this\.schedulePlaybackErrorRefresh/);
-  assert.match(errorUi, /playbackSuperseded \|\| providerBusy \|\| serverRecovery[\s\S]{0,40}\? false/);
+  assert.match(errorUi, /playbackSuperseded \|\| providerBusy \|\| providerFileRefused \|\| serverRecovery[\s\S]{0,40}\? false/);
 });
 
 test('web VOD creates one cloud session and never cascades gateway, relay, or direct modes', () => {
