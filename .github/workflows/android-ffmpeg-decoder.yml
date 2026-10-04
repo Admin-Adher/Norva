@@ -1,4 +1,4 @@
-name: Build media3 FFmpeg audio decoder (LGPL)
+name: Build media3 FFmpeg audio and MPEG-4 decoder (LGPL)
 
 # Builds the androidx.media3 FFmpeg AUDIO decoder extension as a self-built .aar
 # with an LGPL-clean FFmpeg (audio decoders only, no --enable-gpl). Run manually
@@ -17,7 +17,7 @@ on:
 
 jobs:
   build-decoder:
-    name: Build FFmpeg audio decoder AAR
+    name: Build FFmpeg audio and MPEG-4 decoder AAR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,9 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - name: Install FFmpeg build deps (nasm/make)
         run: sudo apt-get update && sudo apt-get install -y nasm make pkg-config
@@ -55,7 +57,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build decoder AAR (LGPL, audio-only)
+      - name: Build decoder AAR (LGPL, audio and MPEG-4 video)
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
@@ -66,6 +68,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: media3-decoder-ffmpeg-lgpl-aar
-          path: clients/android-ffmpeg-decoder/out/*.aar
+          path: |
+            clients/android-ffmpeg-decoder/out/*.aar
+            clients/android-ffmpeg-decoder/out/build-manifest.txt
           if-no-files-found: error
           retention-days: 90

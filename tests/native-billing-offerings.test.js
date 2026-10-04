@@ -12,8 +12,8 @@ const targets = [
     main: 'clients/android-phone/app/src/main/java/tv/norva/phone/MainActivity.java',
     manifest: 'clients/android-phone/app/src/main/AndroidManifest.xml',
     gradle: 'clients/android-phone/app/build.gradle',
-    versionCode: 44,
-    versionName: '1.3.30',
+    versionCode: 45,
+    versionName: '1.3.31',
     bridgeCount: 0,
   },
 ];
@@ -289,8 +289,8 @@ test('native cloud bridges fail closed and authenticate billing and first-frame 
 
 test('Android TV release version remains explicit after billing removal', () => {
   const gradle = read('clients/android-tv/app/build.gradle');
-  assert.match(gradle, /versionCode\s+36\b/);
-  assert.match(gradle, /versionName\s+"3\.8\.23-hybrid"/);
+  assert.match(gradle, /versionCode\s+37\b/);
+  assert.match(gradle, /versionName\s+"3\.8\.24-hybrid"/);
 });
 
 test('Android builds enforce lint and opt out of OS data extraction', () => {

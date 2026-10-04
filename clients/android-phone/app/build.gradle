@@ -19,8 +19,8 @@ namespace "tv.norva.phone"
         applicationId "tv.norva.phone"
         minSdk 23
         targetSdk 36
-        versionCode 44
-        versionName "1.3.30"
+        versionCode 45
+        versionName "1.3.31"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
@@ -67,6 +67,14 @@ namespace "tv.norva.phone"
     }
 
     buildTypes {
+        debug {
+            if (project.findProperty('norvaPlayerDeviceQa') == 'true') {
+                // Isolated USB validation; never replace the Play installation
+                // or reuse its accounts/downloads. Absent in release builds.
+                applicationIdSuffix ".playbackqa"
+                resValue "string", "app_name", "Norva · Test lecture"
+            }
+        }
         release {
             // R8 left off for the first release so media3 reflection paths are
             // never stripped; enable later with tested keep rules.

@@ -38,12 +38,25 @@ public final class NativeVfwMpeg4InstrumentedTest {
         // Start beyond the initial cluster without first rendering byte zero.
         replay("s_xvid_vfw_inband_aac.mkv",7,3);
     }
+    @Test public void advancedSimpleQpelBFramesRenderAndResume() throws Exception {
+        assertTrue(Mpeg4VideoDecoder.isAvailable());
+        replay("s_xvid_vfw_asp_qpel.mkv",3,7);
+    }
+    @Test public void privateRealClipRendersResumesAndCloses() throws Exception {
+        File clip=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null),"mpeg4-real.mkv");
+        if("true".equals(InstrumentationRegistry.getArguments().getString("norvaRequireRealMpeg4")))assertTrue("Private clip missing",clip.isFile());
+        else org.junit.Assume.assumeTrue("Private real clip not supplied",clip.isFile());
+        replay("private-real",3,7);
+    }
     private void replay(String asset,int resumeSeconds,int seekSeconds) throws Exception {
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();
         Context target=ins.getTargetContext();
         File fixture=new File(target.getCacheDir(),"native-xvid.mkv");
-        try(InputStream input=ins.getContext().getAssets().open(asset)) { Files.copy(input,fixture.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-        String activityName=target.getPackageName()+".PlayerActivity";
+        try(InputStream input="private-real".equals(asset)
+                ?new java.io.FileInputStream(new File(target.getExternalFilesDir(null),"mpeg4-real.mkv"))
+                :ins.getContext().getAssets().open(asset)) { Files.copy(input,fixture.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+        String activityName=target.getPackageManager().getLaunchIntentForPackage(target.getPackageName())
+                .getComponent().getClassName().replace("MainActivity","PlayerActivity");
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(activityName,null,false);
         Activity activity=null;
         // Both real players use HTTP for online media. Phone's local lane is
@@ -74,11 +87,47 @@ public final class NativeVfwMpeg4InstrumentedTest {
             assertTrue("No audio progress",observed[2]>10);
             assertTrue("Resume position lost",observed[0]>=resumeSeconds*1000L+1000&&observed[0]<resumeSeconds*1000L+5000);
             long videoBefore=observed[1];
-            ins.runOnMainSync(()->player.seekTo(seekSeconds*1000L));SystemClock.sleep(1200);
+            long seekStarted=SystemClock.elapsedRealtime();
+            ins.runOnMainSync(()->player.seekTo(seekSeconds*1000L));
+            long[] seekObserved={0,0};
+            while(SystemClock.elapsedRealtime()-seekStarted<5000){
+                ins.runOnMainSync(()->{assertNull(player.getPlayerError());seekObserved[0]=player.getCurrentPosition();seekObserved[1]=player.getVideoDecoderCounters().renderedOutputBufferCount;});
+                if(seekObserved[0]>=seekSeconds*1000L&&seekObserved[1]>videoBefore+5)break;
+                SystemClock.sleep(50);
+            }
+            android.util.Log.i("NorvaMpeg4QA","seek initial ms="+(SystemClock.elapsedRealtime()-seekStarted)
+                    +" position="+seekObserved[0]+" before="+videoBefore+" after="+seekObserved[1]);
+            if("private-real".equals(asset)) {
+                ins.runOnMainSync(player::pause);
+                android.graphics.Bitmap screenshot=ins.getUiAutomation().takeScreenshot();
+                assertNotNull(screenshot);
+                try(OutputStream out=new java.io.FileOutputStream(new File(target.getExternalFilesDir(null),"mpeg4-real-render.png"))) {
+                    assertTrue(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out));
+                }
+                screenshot.recycle();
+            }
             ins.runOnMainSync(()->{
                 assertNull(player.getPlayerError());assertTrue("Seek position lost",player.getCurrentPosition()>=seekSeconds*1000L);
-                assertTrue("Seek must render fresh video",player.getVideoDecoderCounters().renderedOutputBufferCount>videoBefore+5);
+                assertTrue("Seek must render fresh video; before="+videoBefore+" after="+seekObserved[1]
+                        +" position="+seekObserved[0],seekObserved[1]>videoBefore+5);
             });
+            if("s_xvid_vfw_asp_qpel.mkv".equals(asset)) {
+                // Exercise actual Activity background/foreground transitions and
+                // Surface recreation, not just a decoder flush on the same view.
+                ins.runOnMainSync(()->assertTrue(opened.moveTaskToBack(true)));
+                SystemClock.sleep(500);
+                ins.runOnMainSync(()->assertFalse("Background player must pause",player.getPlayWhenReady()));
+                target.startActivity(new Intent().setClassName(target,activityName)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+                long foregroundDeadline=SystemClock.elapsedRealtime()+5000;
+                long[] resumed={0};
+                while(SystemClock.elapsedRealtime()<foregroundDeadline){
+                    ins.runOnMainSync(()->{assertNull(player.getPlayerError());resumed[0]=player.getVideoDecoderCounters().renderedOutputBufferCount;});
+                    if(resumed[0]>seekObserved[1]+5)break;
+                    SystemClock.sleep(50);
+                }
+                assertTrue("Returning must render new MPEG-4 pictures",resumed[0]>seekObserved[1]+5);
+            }
             // Exercise the platform Back dispatch, including TV's key handler.
             // Calling deprecated Activity.onBackPressed bypasses that handler.
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Build the androidx.media3 FFmpeg AUDIO decoder extension as a self-built .aar,
-# with an LGPL-clean FFmpeg (audio decoders only, NO --enable-gpl). This lets the
+# Build Media3 FFmpeg audio plus Norva MPEG-4 video decoding as a self-built .aar,
+# with a pinned FFmpeg configuration (NO --enable-gpl). This lets the
 # Norva phone app play OFFLINE downloads whose audio track is AC-3 / E-AC-3 / DTS /
 # TrueHD on devices whose hardware MediaCodec lacks those decoders (the #1 cause
-# of "downloaded but won't play" today).
+# of "downloaded but won't play" today), and decode legacy XVID locally.
 #
 # WHY self-build (not the prebuilt Jellyfin/NextLib AARs): those artifacts are
 # packaged GPL-3.0. The founder intends to close the source at commercialization,
@@ -25,14 +25,14 @@
 set -euo pipefail
 
 MEDIA3_TAG="${MEDIA3_TAG:-1.5.1}"
-FFMPEG_REF="${FFMPEG_REF:-release/6.0}"   # media3 1.5.x recommends FFmpeg 6.0
+FFMPEG_REF="${FFMPEG_REF:-b4a62c32549b8295691a8e0ff2c9b82188923159}" # exact release/6.0 revision
 API_LEVEL="${API_LEVEL:-23}"              # matches the apps' minSdk 23
 HOST_PLATFORM="${HOST_PLATFORM:-linux-x86_64}"   # darwin-x86_64 on macOS
 
-# LGPL-clean audio decoders (identical to Jellyfin's set; none needs --enable-gpl).
+# Audio decoders and MPEG-4 Part 2 video; none needs --enable-gpl.
 # Covers the offline gaps: Dolby AC-3 / E-AC-3, DTS + DTS-HD core (dca), Dolby
 # TrueHD (mlp/truehd), plus common lossless/lossy audio so nothing regresses.
-ENABLED_DECODERS=(flac alac pcm_mulaw pcm_alaw mp3 aac ac3 eac3 dca mlp truehd)
+ENABLED_DECODERS=(flac alac pcm_mulaw pcm_alaw mp3 aac ac3 eac3 dca mlp truehd mpeg4)
 
 NDK_PATH="${1:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
 if [ -z "$NDK_PATH" ] || [ ! -d "$NDK_PATH" ]; then
@@ -61,9 +61,14 @@ grep -q 'minSdkVersion = 23' media/constants.gradle \
   || { echo "::error:: minSdk 21->23 patch did not apply — check media/constants.gradle"; exit 1; }
 
 FFMPEG_MODULE_PATH="${WORK}/media/libraries/decoder_ffmpeg/src/main"
+cp "${ROOT}/norva_mpeg4_video_jni.cc" "${FFMPEG_MODULE_PATH}/jni/"
+printf '\n#include "norva_mpeg4_video_jni.cc"\n' >> "${FFMPEG_MODULE_PATH}/jni/ffmpeg_jni.cc"
 
 echo ">> [2/4] Cloning FFmpeg @ ${FFMPEG_REF} (LGPL build — audio only)"
-git clone --depth 1 --branch "${FFMPEG_REF}" https://git.ffmpeg.org/ffmpeg.git ffmpeg
+git init ffmpeg
+git -C ffmpeg remote add origin https://git.ffmpeg.org/ffmpeg.git
+git -C ffmpeg fetch --depth 1 origin "${FFMPEG_REF}"
+git -C ffmpeg checkout --detach FETCH_HEAD
 ln -sf "${WORK}/ffmpeg" "${FFMPEG_MODULE_PATH}/jni/ffmpeg"
 
 echo ">> [3/4] Building FFmpeg for all ABIs — decoders: ${ENABLED_DECODERS[*]}"
@@ -83,7 +88,8 @@ if [ -z "$AAR" ]; then
   echo "::error:: AAR not produced — check the :lib-decoder-ffmpeg:assembleRelease output above."
   exit 1
 fi
-DEST="${OUT_DIR}/media3-decoder-ffmpeg-${MEDIA3_TAG}-lgpl-audio.aar"
+DEST="${OUT_DIR}/media3-decoder-ffmpeg-${MEDIA3_TAG}-lgpl-audio-mpeg4.aar"
 cp "$AAR" "$DEST"
+(git -C "${WORK}/ffmpeg" rev-parse HEAD; git -C "${WORK}/media" rev-parse HEAD; sha256sum "$DEST" "${ROOT}/norva_mpeg4_video_jni.cc") > "${OUT_DIR}/build-manifest.txt"
 echo ">> Done: ${DEST}"
 echo ">> Next: commit it to clients/android-phone/app/libs/ (and android-tv if desired), then run the normal Android Release workflow."

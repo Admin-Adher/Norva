@@ -1,67 +1,43 @@
-# media3 FFmpeg audio decoder — self-built, LGPL-clean
+# Media3 FFmpeg audio and MPEG-4 Part 2 decoding
 
-Norva's Android **offline downloads** are byte-for-byte copies of the provider's
-VOD file, played back with media3/ExoPlayer using **the device's own decoders**.
-Phones whose hardware lacks **Dolby (AC-3 / E-AC-3)**, **DTS**, or **TrueHD** audio
-decoders therefore fail to play some downloads — the #1 real-world "downloaded but
-won't play" cause (see `docs/OFFLINE-DOWNLOAD-CODECS.md`).
+Norva bundles the Media3 FFmpeg audio extension and a small MPEG-4 Part 2 video
+adapter for Android phone and TV. Both decode locally. Downloaded files remain
+byte-for-byte copies of the provider media; this module does not transcode or
+open network connections.
 
-This module builds the **official** `androidx.media3` FFmpeg audio decoder
-extension ourselves, so ExoPlayer can decode those audio codecs **in software** as
-a fallback after the device's hardware.
+`NativeRenderersFactory` keeps the platform audio decoder first, with FFmpeg as
+fallback. For `video/mp4v-es`, Norva's `Mpeg4VideoRenderer` precedes MediaCodec:
+the POCO tested with XVID Advanced Simple produced corrupted pictures despite
+reporting successful decoding. Other video MIME types keep the normal platform
+renderer. The official Media3 1.5.1 experimental FFmpeg video renderer is not used.
 
-## Why self-build instead of the prebuilt AARs
+## Reproducible inputs
 
-The convenient prebuilt artifacts — Jellyfin `org.jellyfin.media3:media3-ffmpeg-decoder`
-and NextLib `io.github.anilbeesetti:nextlib-media3ext` — are packaged **GPL-3.0**.
-Norva's repo is GPL-3.0 **today**, but the plan is to **go private/proprietary at
-commercialization**. To stay compatible with that, we build the official media3
-module ourselves:
+- Media3 1.5.1, commit `76088cd6af7f263aba238b7a48d64bd4f060cb8b`.
+- FFmpeg `b4a62c32549b8295691a8e0ff2c9b82188923159`.
+- Android NDK r26b, API 23; armeabi-v7a, arm64-v8a, x86, x86_64.
+- Audio decoders: `flac alac pcm_mulaw pcm_alaw mp3 aac ac3 eac3 dca mlp truehd`.
+- Video decoder: `mpeg4` only. No GPL/nonfree build option is enabled.
+- Norva adapter: `norva_mpeg4_video_jni.cc`; Java renderer/decoder under
+  `clients/android-common/src/main/java/tv/norva/playback/`.
 
-- media3 wrapper code → **Apache-2.0**
-- FFmpeg → **LGPL-2.1+** (we do **not** pass `--enable-gpl`, and enable only
-  LGPL-clean decoders)
+The adapter accepts Media3 packets, preserves reordered timestamps and delayed
+B-frames, and renders YUV420P output. It does not include a demuxer or network
+client. Input sizes, dimensions and output buffers are bounded.
 
-That combination is fine to ship in a closed-source app **as long as the LGPL
-relink/attribution obligations are met** (see `NOTICE-LGPL.md`).
+## Build and verify
 
-## What's enabled
+Run `.github/workflows/android-ffmpeg-decoder.yml`, or
+`ANDROID_NDK_HOME=<r26b> ./build-ffmpeg-decoder.sh` with the documented toolchain.
+The artifact includes the AAR and a manifest of source revisions and SHA-256
+digests. Commit the same AAR in both Android apps' `app/libs/` directories.
+Media3 versions in both apps must match the decoder extension.
 
-Audio decoders only (identical to Jellyfin's set; none needs `--enable-gpl`):
+`Mpeg4VideoDecoderInstrumentedTest` compares every plane of every generated
+Advanced Simple/QPEL/B-frame picture against an FFmpeg reference, including EOS
+and seek flushing. `NativeVfwMpeg4InstrumentedTest` exercises the real player,
+audio/video progress, seek and Back. Optional private real-file tests require
+the clip and reference on the device; these files are not distributed in CI.
 
-```
-flac alac pcm_mulaw pcm_alaw mp3 aac ac3 eac3 dca mlp truehd
-```
-
-`ac3`/`eac3` = Dolby Digital / Digital Plus · `dca` = DTS + DTS-HD **core** ·
-`mlp`/`truehd` = Dolby TrueHD. No video decoders (HEVC etc. stay on device
-hardware; the download UI guard handles the rare device that can't — see the docs).
-
-> Patents: AC-3 (expired 2017), DTS core (expired 2016) and E-AC-3 (last essential
-> US patent expired 2026-01-30) are clear as of mid-2026. Still off-limits: AC-4,
-> DTS:X, Dolby Atmos/JOC (FFmpeg doesn't decode these anyway) and the **"Dolby" /
-> "DTS" trademarks** — never use them in marketing/store copy. A counsel review
-> before release is prudent as validation, not a blocker.
-
-## How to produce and use the AAR
-
-1. **Build it** (CI only — the native build can't run in the Norva agent sandbox):
-   GitHub → Actions → **"Build media3 FFmpeg audio decoder (LGPL)"** → Run workflow.
-   Download the `media3-decoder-ffmpeg-lgpl-aar` artifact.
-   (Or locally: `ANDROID_NDK_HOME=<r26b> ./build-ffmpeg-decoder.sh`.)
-2. **Drop it in** `clients/android-phone/app/libs/` (and `clients/android-tv/app/libs/`
-   if you also want TV *streaming* to decode Dolby/DTS in software) and commit it.
-3. **Rebuild** the app (Android Release workflow, bump `versionCode`). The app's
-   `implementation fileTree("libs", …)` bundles it, and PlayerActivity's
-   `DefaultRenderersFactory(...).setExtensionRendererMode(EXTENSION_RENDERER_MODE_ON)`
-   makes ExoPlayer use `FfmpegAudioRenderer` as a fallback after MediaCodec.
-4. **Smoke-test on a real device** with real AC-3 / E-AC-3 / DTS / TrueHD samples
-   before shipping — the native build is unverified until a real APK plays them.
-
-The app builds and runs fine **without** the AAR (the renderer factory silently
-skips the missing extension); nothing here is a hard build dependency.
-
-## Version pinning
-
-`MEDIA3_TAG` in `build-ffmpeg-decoder.sh` **must match** the `androidx.media3:*`
-version in both apps' `app/build.gradle` (currently `1.5.1`). Bump them together.
+See `NOTICE-LGPL.md` for distribution facts and attribution/relink requirements.
+A successful decoder build is not a legal compliance certification.

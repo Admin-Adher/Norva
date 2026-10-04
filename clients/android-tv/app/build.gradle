@@ -16,8 +16,8 @@ namespace "tv.norva.tv"
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 36
-        versionCode 36
-        versionName "3.8.23-hybrid"
+        versionCode 37
+        versionName "3.8.24-hybrid"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Public routing configuration for the dedicated Android TV project.
         // Operators can still override it for an isolated build when needed.
@@ -100,6 +100,7 @@ tasks.register("syncNorvaWebAssets", Sync) {
 preBuild.dependsOn("syncNorvaWebAssets")
 
 dependencies {
+    implementation fileTree(dir: "libs", include: ["*.aar"])
     // Standalone-mode native player (full track selection, MKV/EAC3/HEVC).
     implementation "androidx.media3:media3-exoplayer:1.5.1"
     implementation "androidx.media3:media3-exoplayer-hls:1.5.1"

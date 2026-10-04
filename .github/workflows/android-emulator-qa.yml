@@ -8,6 +8,11 @@ on:
         required: false
         default: ''
         type: string
+      tv-test-class:
+        description: 'Optional comma-separated TV instrumentation classes; empty runs the full suite'
+        required: false
+        default: ''
+        type: string
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -53,7 +58,7 @@ jobs:
       # the launcher and keyboard. The connected test task still runs below.
       - name: Compile phone and instrumentation APKs before emulator boot
         working-directory: clients/android-phone
-        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+        run: gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -92,6 +97,8 @@ jobs:
     name: Android TV API 34 (font ${{ matrix.font_scale }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      NORVA_ANDROID_TEST_CLASS: ${{ inputs['tv-test-class'] || '' }}
     strategy:
       fail-fast: false
       matrix:

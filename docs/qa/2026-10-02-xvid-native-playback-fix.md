@@ -233,6 +233,13 @@ update both Gateways; the current reference is 174 above.
 
 ## Outstanding physical replay
 
+**Update, 4 October:** phone 1.3.30 (44) is now published and installed from
+Google Play. Actual first-frame, seek, resume and Back checks succeeded, but
+the real film shows severe image corruption that a reference FFmpeg decode does
+not show. The physical playback case is **not closed**. See the
+[physical replay and decoder evidence](2026-10-04-android-1330-real-xvid-replay.md).
+The following paragraph records the earlier distribution state.
+
 The reconnected phone is still on **1.3.29 (43)**. The Play Store on the phone
 shows **Open**, with no update button. The console still reports the phone
 1.3.30 production release **under review**. Thus 1.3.29 is the newest public
