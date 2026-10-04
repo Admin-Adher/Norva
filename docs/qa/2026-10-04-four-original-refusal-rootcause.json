@@ -1,0 +1,3326 @@
+{
+  "reportVersion": 1,
+  "reportDate": "2026-10-04",
+  "status": "open",
+  "scope": "Four exact original MULTI-SUB files; no alternative treated as a repaired original.",
+  "productionChangesIntroducedByThisInvestigation": false,
+  "temporaryDiagnosticClaimsUsed": true,
+  "verifiedConclusions": {
+    "hitStillRefusedAtRecordedChecks": true,
+    "threeOriginalFilesStarted": true,
+    "threeOriginalFilesFluidityCertified": false,
+    "exactProviderRefusalRootCauseEstablished": false,
+    "sourceOfMalformedBytesEstablished": false,
+    "historicalBrowserUserAgentKnown": false,
+    "exitIpMeasured": false,
+    "malformedInputAlsoPresentOutsideNorvaMediaReader": true,
+    "independentBodiesDistinguishSharedProxyFromProvider": false
+  },
+  "verification": {
+    "existingFocusedTestsPassed": 21,
+    "offlineParserChecksPassed": 8,
+    "note": "Previously reported focused checks; not additional unique test runs and not proof of provider repair."
+  },
+  "playlistFollowup": {
+    "status": "exact-provider-entry-found-and-uri-still-refused",
+    "firstAttempt": {
+      "operatorReportedAt": "2026-10-04T19:05:00Z",
+      "timestampPrecision": "approximate",
+      "httpStatus": 200,
+      "curlExit": 63,
+      "bodyBytesInspected": 0,
+      "reason": "Advertised content length exceeded curl maximum-file-size check before any playlist body was inspected.",
+      "originalOutcomeLabel": "invalid_header",
+      "labelIsMisleading": true
+    },
+    "secondAttempt": {
+      "operatorReportedAt": "2026-10-04T19:07:00Z",
+      "timestampPrecision": "approximate",
+      "streamByteLimit": 67108864,
+      "maximumSeconds": 45,
+      "advertisedTotalSizeRejectionRemoved": true,
+      "resultIncorporated": true
+    },
+    "limits": [
+      "A truncated prefix without a target cannot prove absence from the playlist.",
+      "The requested output=ts parameter alone is not an authoritative VOD extension."
+    ],
+    "entry": {
+      "at": "2026-10-04T19:07:09.581011+00:00",
+      "filmKey": "hit",
+      "action": "get.php_m3u_plus",
+      "retryReason": "previous_curl_63_rejected_declared_total_before_any_body",
+      "streamPrefixBounded": true,
+      "providerRequests": 1,
+      "mediaRequests": 0,
+      "proxyMode": "connect",
+      "proxySlot": 1,
+      "sameReviewedRoute": true,
+      "productionUaFixed": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactFileLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "maximumBytes": 67108864,
+      "maximumSeconds": 45,
+      "followRedirects": false,
+      "targetCount": 1,
+      "seconds": 23.287,
+      "curlExit": -15,
+      "bytesReceived": 6393856,
+      "linesParsed": 59007,
+      "entryPairsParsed": 29503,
+      "extM3uPresent": true,
+      "sameIdDifferentTitleCount": 0,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "content-description",
+            "expires",
+            "cache-control",
+            "pragma",
+            "content-disposition"
+          ]
+        }
+      ],
+      "stopReason": "matched",
+      "catalogueContextUnchanged": true,
+      "outcome": "exact_entry_retained",
+      "entryRetainedPrivately": true,
+      "entryMode0600": true,
+      "idMatches": true,
+      "normalizedTitleMatches": true,
+      "rawTitleMatches": true,
+      "sameUrl": false,
+      "sameUrlHashAsExpected": false,
+      "sameScheme": true,
+      "sameAuthority": false,
+      "sameOrigin": true,
+      "samePath": true,
+      "sameDecodedPath": true,
+      "sameExtension": true,
+      "queryPresent": false,
+      "fragmentPresent": false,
+      "userinfoPresent": false,
+      "alternativeReturnedUrlRequiresReview": true,
+      "providerMoviePathMatches": true,
+      "expired": true,
+      "wholeBodyNeverStored": true,
+      "headersErrorsRemoved": true,
+      "finishedAt": "2026-10-04T19:07:33.598877+00:00"
+    },
+    "urlComparison": {
+      "at": "2026-10-04T19:17:26.678920+00:00",
+      "providerRequests": 0,
+      "expectedHashMatchesPrior": true,
+      "urlEquals": false,
+      "sameScheme": true,
+      "sameAuthority": false,
+      "sameHostname": true,
+      "sameHostnameIgnoringTrailingDot": true,
+      "sameEffectivePort": true,
+      "expectedExplicitPort": null,
+      "playlistExplicitPort": 80,
+      "expectedEffectivePort": 80,
+      "playlistEffectivePort": 80,
+      "expectedHostTrailingDot": false,
+      "playlistHostTrailingDot": false,
+      "sameAuthorityWithoutPortCaseSensitive": true,
+      "hostnameCaseDifferenceOnly": false,
+      "sameRawPath": true,
+      "sameDecodedPath": true,
+      "sameQuery": true,
+      "sameFragment": true,
+      "userinfoAbsent": true,
+      "playlistUrlWithExplicitPortRemovedEqualsExpected": true,
+      "sourceConfiguredUaFields": [],
+      "sourceConfiguredUaNonempty": false,
+      "sourceConfiguredUaMatchesVlcFallback": false
+    },
+    "exactUriRead": {
+      "at": "2026-10-04T19:21:06.852419+00:00",
+      "film": "HIT: The Third Case [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "claimTargetHashMatchesPriorFailure": true,
+      "requestUriFromRetainedPlaylist": true,
+      "textualDifferenceOnlyExplicitDefaultPort": true,
+      "expectedExplicitPort": null,
+      "playlistExplicitPort": 80,
+      "followRedirects": false,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": 0,
+      "boundedStop": false,
+      "bytesRetained": 0,
+      "seconds": 1.164,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 403,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        403
+      ],
+      "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodyKind": "empty",
+      "finishedAt": "2026-10-04T19:21:08.567153+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    "existingVlcFallbackUaRead": {
+      "at": "2026-10-04T19:21:36.402907+00:00",
+      "film": "HIT: The Third Case [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "claimUaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "requestUaSha256": "ba75127422879212f605678391629565fbb364957e496531c14b040e06ff702e",
+      "requestUaIsExistingVlcFallback": true,
+      "sameUriAsPriorProductionUaTest": true,
+      "claimTargetHashMatchesPriorFailure": true,
+      "requestUriFromRetainedPlaylist": true,
+      "textualDifferenceOnlyExplicitDefaultPort": true,
+      "expectedExplicitPort": null,
+      "playlistExplicitPort": 80,
+      "followRedirects": false,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": 0,
+      "boundedStop": false,
+      "bytesRetained": 0,
+      "seconds": 1.234,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 403,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        403
+      ],
+      "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodyKind": "empty",
+      "finishedAt": "2026-10-04T19:21:38.121972+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    "loopbackComparison": {
+      "operatorReported": true,
+      "platforms": [
+        "Windows",
+        "server"
+      ],
+      "providerRequests": 0,
+      "absentAndExplicitDefaultPortProducedIdenticalConnectAndGet": true
+    }
+  },
+  "at": "2026-10-04T19:07:23.680Z",
+  "provenance": {
+    "at": "2026-10-04T18:41:18.713848+00:00",
+    "scope": "exact four original MAX OTT files and already-played EN siblings; read-only DB plus retained metadata",
+    "providerRequests": 0,
+    "files": [
+      {
+        "sameOwner": true,
+        "sameSource": true,
+        "mediaIdExact": true,
+        "globalPresent": false,
+        "mediaHintType": "movie",
+        "sameMovieType": true,
+        "globalHintType": null,
+        "initialSession": {
+          "at": "2026-10-04T17:34:38.241261+00:00",
+          "code": "gateway_502",
+          "mode": "transcode",
+          "failed": true,
+          "hintType": "movie",
+          "clientType": "xtream",
+          "hintContainer": "mkv",
+          "hintStreamMatches": true,
+          "sameTargetAsFreshMetadataResolution": true
+        },
+        "sameExternalId": true,
+        "variantHintType": "movie",
+        "mediaLinkPresent": true,
+        "alternativeCopies": [
+          {
+            "container": "mp4",
+            "rawTitleIsEN": true,
+            "sameSourceOwner": true,
+            "sameLogicalTitle": false,
+            "differentPhysicalFile": true,
+            "successfulSessionSeen": true
+          }
+        ],
+        "generationMatches": true,
+        "ownedSourceXtream": true,
+        "mediaHintContainer": "mkv",
+        "visibleHostPresent": true,
+        "globalHintContainer": null,
+        "currentVariantUnique": true,
+        "mediaActiveGeneration": true,
+        "mediaHintStreamMatches": true,
+        "globalHintStreamMatches": null,
+        "variantActiveGeneration": true,
+        "variantHintStreamMatches": true,
+        "variantIdIsNotExternalId": true,
+        "ownedGlobalStreamTupleSame": null,
+        "publicTitleIsSeparateIdentity": true,
+        "film": "hit",
+        "providerRequests": 0,
+        "storedRawTitleMatchesMetadataSnapshot": true,
+        "storedContainerMatchesMetadataSnapshot": true,
+        "freshMetadataStreamIdMatchesSelected": true,
+        "freshMetadataNameMatchesSelected": true,
+        "freshMetadataContainerMatchesSelected": true,
+        "freshMetadataDirectSourceAbsent": true,
+        "externalIdIsDigitsOnly": true
+      },
+      {
+        "sameOwner": true,
+        "sameSource": true,
+        "mediaIdExact": true,
+        "globalPresent": false,
+        "mediaHintType": "movie",
+        "sameMovieType": true,
+        "globalHintType": null,
+        "initialSession": {
+          "at": "2026-10-04T17:36:02.201964+00:00",
+          "code": "gateway_502",
+          "mode": "transcode",
+          "failed": true,
+          "hintType": "movie",
+          "clientType": "xtream",
+          "hintContainer": "mkv",
+          "hintStreamMatches": true,
+          "sameTargetAsFreshMetadataResolution": true
+        },
+        "sameExternalId": true,
+        "variantHintType": "movie",
+        "mediaLinkPresent": true,
+        "alternativeCopies": [
+          {
+            "container": "mp4",
+            "rawTitleIsEN": true,
+            "sameSourceOwner": true,
+            "sameLogicalTitle": false,
+            "differentPhysicalFile": true,
+            "successfulSessionSeen": true
+          }
+        ],
+        "generationMatches": true,
+        "ownedSourceXtream": true,
+        "mediaHintContainer": "mkv",
+        "visibleHostPresent": true,
+        "globalHintContainer": null,
+        "currentVariantUnique": true,
+        "mediaActiveGeneration": true,
+        "mediaHintStreamMatches": true,
+        "globalHintStreamMatches": null,
+        "variantActiveGeneration": true,
+        "variantHintStreamMatches": true,
+        "variantIdIsNotExternalId": true,
+        "ownedGlobalStreamTupleSame": null,
+        "publicTitleIsSeparateIdentity": true,
+        "film": "mma",
+        "providerRequests": 0,
+        "storedRawTitleMatchesMetadataSnapshot": true,
+        "storedContainerMatchesMetadataSnapshot": true,
+        "freshMetadataStreamIdMatchesSelected": true,
+        "freshMetadataNameMatchesSelected": true,
+        "freshMetadataContainerMatchesSelected": true,
+        "freshMetadataDirectSourceAbsent": true,
+        "externalIdIsDigitsOnly": true
+      },
+      {
+        "sameOwner": true,
+        "sameSource": true,
+        "mediaIdExact": true,
+        "globalPresent": false,
+        "mediaHintType": "movie",
+        "sameMovieType": true,
+        "globalHintType": null,
+        "initialSession": {
+          "at": "2026-10-04T17:39:13.259197+00:00",
+          "code": "gateway_502",
+          "mode": "transcode",
+          "failed": true,
+          "hintType": "movie",
+          "clientType": "xtream",
+          "hintContainer": "mkv",
+          "hintStreamMatches": true,
+          "sameTargetAsFreshMetadataResolution": true
+        },
+        "sameExternalId": true,
+        "variantHintType": "movie",
+        "mediaLinkPresent": true,
+        "alternativeCopies": [
+          {
+            "container": "mp4",
+            "rawTitleIsEN": true,
+            "sameSourceOwner": true,
+            "sameLogicalTitle": false,
+            "differentPhysicalFile": true,
+            "successfulSessionSeen": true
+          }
+        ],
+        "generationMatches": true,
+        "ownedSourceXtream": true,
+        "mediaHintContainer": "mkv",
+        "visibleHostPresent": true,
+        "globalHintContainer": null,
+        "currentVariantUnique": true,
+        "mediaActiveGeneration": true,
+        "mediaHintStreamMatches": true,
+        "globalHintStreamMatches": null,
+        "variantActiveGeneration": true,
+        "variantHintStreamMatches": true,
+        "variantIdIsNotExternalId": true,
+        "ownedGlobalStreamTupleSame": null,
+        "publicTitleIsSeparateIdentity": true,
+        "film": "shadow",
+        "providerRequests": 0,
+        "storedRawTitleMatchesMetadataSnapshot": true,
+        "storedContainerMatchesMetadataSnapshot": true,
+        "freshMetadataStreamIdMatchesSelected": true,
+        "freshMetadataNameMatchesSelected": true,
+        "freshMetadataContainerMatchesSelected": true,
+        "freshMetadataDirectSourceAbsent": true,
+        "externalIdIsDigitsOnly": true
+      },
+      {
+        "sameOwner": true,
+        "sameSource": true,
+        "mediaIdExact": true,
+        "globalPresent": false,
+        "mediaHintType": "movie",
+        "sameMovieType": true,
+        "globalHintType": null,
+        "initialSession": {
+          "at": "2026-10-04T17:39:41.512776+00:00",
+          "code": "gateway_502",
+          "mode": "transcode",
+          "failed": true,
+          "hintType": "movie",
+          "clientType": "xtream",
+          "hintContainer": "mkv",
+          "hintStreamMatches": true,
+          "sameTargetAsFreshMetadataResolution": true
+        },
+        "sameExternalId": true,
+        "variantHintType": "movie",
+        "mediaLinkPresent": true,
+        "alternativeCopies": [
+          {
+            "container": "mp4",
+            "rawTitleIsEN": true,
+            "sameSourceOwner": true,
+            "sameLogicalTitle": false,
+            "differentPhysicalFile": true,
+            "successfulSessionSeen": true
+          }
+        ],
+        "generationMatches": true,
+        "ownedSourceXtream": true,
+        "mediaHintContainer": "mkv",
+        "visibleHostPresent": true,
+        "globalHintContainer": null,
+        "currentVariantUnique": true,
+        "mediaActiveGeneration": true,
+        "mediaHintStreamMatches": true,
+        "globalHintStreamMatches": null,
+        "variantActiveGeneration": true,
+        "variantHintStreamMatches": true,
+        "variantIdIsNotExternalId": true,
+        "ownedGlobalStreamTupleSame": null,
+        "publicTitleIsSeparateIdentity": true,
+        "film": "vengeance",
+        "providerRequests": 0,
+        "storedRawTitleMatchesMetadataSnapshot": true,
+        "storedContainerMatchesMetadataSnapshot": true,
+        "freshMetadataStreamIdMatchesSelected": true,
+        "freshMetadataNameMatchesSelected": true,
+        "freshMetadataContainerMatchesSelected": true,
+        "freshMetadataDirectSourceAbsent": true,
+        "externalIdIsDigitsOnly": true
+      }
+    ]
+  },
+  "sourceAndHeaders": {
+    "at": "2026-10-04T18:38:03.079116+00:00",
+    "scope": "read-only exact-four MULTI-SUB and selected EN alternatives; no provider IO",
+    "sourceStructure": {
+      "scheme": "http",
+      "hasBasePath": false,
+      "hasQuery": false,
+      "hasFragment": false,
+      "hasUserinfo": false,
+      "hasExplicitPort": false,
+      "baseChangesAfterTrim": false,
+      "credentialContainsPathReserved": false,
+      "credentialsRoundtrip": true
+    },
+    "files": [
+      {
+        "film": "HIT: The Third Case",
+        "visibleMediaRows": 1,
+        "visibleVariantRows": 1,
+        "available": true,
+        "importUpdated": "2026-10-02T04:39:40.839272+00:00",
+        "explicitContainer": true,
+        "storedContainer": "mkv",
+        "storedStreamType": "movie",
+        "storedStreamMatchesFreshMetadata": true,
+        "storedContainerMatchesFreshMetadata": true,
+        "freshMetadataAt": "2026-10-04T17:49:11.530797+00:00",
+        "freshDirectSourcePresent": false,
+        "builtPathHasExpectedSegments": true,
+        "builtQueryEmpty": true,
+        "builtFragmentEmpty": true,
+        "currentUrlHashMatchesSavedFreshTarget": true,
+        "sessionTargetsAllMatchCurrentBuilder": true,
+        "sessionCount": 8,
+        "providerAccountHashMatchesEverySession": true
+      },
+      {
+        "film": "MMA Cop",
+        "visibleMediaRows": 1,
+        "visibleVariantRows": 1,
+        "available": true,
+        "importUpdated": "2026-10-02T04:39:40.839272+00:00",
+        "explicitContainer": true,
+        "storedContainer": "mkv",
+        "storedStreamType": "movie",
+        "storedStreamMatchesFreshMetadata": true,
+        "storedContainerMatchesFreshMetadata": true,
+        "freshMetadataAt": "2026-10-04T17:49:31.793214+00:00",
+        "freshDirectSourcePresent": false,
+        "builtPathHasExpectedSegments": true,
+        "builtQueryEmpty": true,
+        "builtFragmentEmpty": true,
+        "currentUrlHashMatchesSavedFreshTarget": true,
+        "sessionTargetsAllMatchCurrentBuilder": true,
+        "sessionCount": 4,
+        "providerAccountHashMatchesEverySession": true
+      },
+      {
+        "film": "Shadow Force",
+        "visibleMediaRows": 1,
+        "visibleVariantRows": 1,
+        "available": true,
+        "importUpdated": "2026-10-02T04:39:40.839272+00:00",
+        "explicitContainer": true,
+        "storedContainer": "mkv",
+        "storedStreamType": "movie",
+        "storedStreamMatchesFreshMetadata": true,
+        "storedContainerMatchesFreshMetadata": true,
+        "freshMetadataAt": "2026-10-04T17:49:35.014297+00:00",
+        "freshDirectSourcePresent": false,
+        "builtPathHasExpectedSegments": true,
+        "builtQueryEmpty": true,
+        "builtFragmentEmpty": true,
+        "currentUrlHashMatchesSavedFreshTarget": true,
+        "sessionTargetsAllMatchCurrentBuilder": true,
+        "sessionCount": 5,
+        "providerAccountHashMatchesEverySession": true
+      },
+      {
+        "film": "Shadow of Vengeance",
+        "visibleMediaRows": 1,
+        "visibleVariantRows": 1,
+        "available": true,
+        "importUpdated": "2026-10-02T04:39:40.839272+00:00",
+        "explicitContainer": true,
+        "storedContainer": "mkv",
+        "storedStreamType": "movie",
+        "storedStreamMatchesFreshMetadata": true,
+        "storedContainerMatchesFreshMetadata": true,
+        "freshMetadataAt": "2026-10-04T17:49:38.365216+00:00",
+        "freshDirectSourcePresent": false,
+        "builtPathHasExpectedSegments": true,
+        "builtQueryEmpty": true,
+        "builtFragmentEmpty": true,
+        "currentUrlHashMatchesSavedFreshTarget": true,
+        "sessionTargetsAllMatchCurrentBuilder": true,
+        "sessionCount": 4,
+        "providerAccountHashMatchesEverySession": true
+      }
+    ],
+    "headers": [
+      {
+        "film": "HIT: The Third Case",
+        "diagnosticMode": "cold-range",
+        "httpChain": [
+          {
+            "status": 200,
+            "headerNames": [],
+            "serverClass": "other-or-absent",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          },
+          {
+            "status": 403,
+            "headerNames": [
+              "access-control-allow-origin",
+              "connection",
+              "content-type",
+              "date",
+              "server",
+              "transfer-encoding"
+            ],
+            "serverClass": "nginx",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          }
+        ]
+      },
+      {
+        "film": "HIT: The Third Case",
+        "diagnosticMode": "plain-get",
+        "httpChain": [
+          {
+            "status": 200,
+            "headerNames": [],
+            "serverClass": "other-or-absent",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          },
+          {
+            "status": 403,
+            "headerNames": [
+              "access-control-allow-origin",
+              "connection",
+              "content-type",
+              "date",
+              "server",
+              "transfer-encoding"
+            ],
+            "serverClass": "nginx",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          }
+        ]
+      },
+      {
+        "film": "MMA Cop",
+        "diagnosticMode": "plain-get",
+        "httpChain": [
+          {
+            "status": 200,
+            "headerNames": [],
+            "serverClass": "other-or-absent",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          },
+          {
+            "status": 403,
+            "headerNames": [
+              "access-control-allow-origin",
+              "connection",
+              "content-type",
+              "date",
+              "server",
+              "transfer-encoding"
+            ],
+            "serverClass": "nginx",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          }
+        ]
+      },
+      {
+        "film": "Shadow Force",
+        "diagnosticMode": "plain-get",
+        "httpChain": [
+          {
+            "status": 200,
+            "headerNames": [],
+            "serverClass": "other-or-absent",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          },
+          {
+            "status": 403,
+            "headerNames": [
+              "access-control-allow-origin",
+              "connection",
+              "content-type",
+              "date",
+              "server",
+              "transfer-encoding"
+            ],
+            "serverClass": "nginx",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          }
+        ]
+      },
+      {
+        "film": "Shadow of Vengeance",
+        "diagnosticMode": "plain-get",
+        "httpChain": [
+          {
+            "status": 200,
+            "headerNames": [],
+            "serverClass": "other-or-absent",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          },
+          {
+            "status": 403,
+            "headerNames": [
+              "access-control-allow-origin",
+              "connection",
+              "content-type",
+              "date",
+              "server",
+              "transfer-encoding"
+            ],
+            "serverClass": "nginx",
+            "contentLength": null,
+            "hasLocation": false,
+            "redirectHostSameAsSource": null,
+            "redirectPathSameAsSource": null,
+            "viaHeaderPresent": false,
+            "proxyAuthChallengePresent": false,
+            "wwwAuthChallengePresent": false
+          }
+        ]
+      }
+    ],
+    "gateways": [
+      {
+        "route": "norva-media-gateway",
+        "activeViewerCountGlobal": 1,
+        "activeViewerCountSameProvider": 0,
+        "proxySlotsConfigured": 1,
+        "proxySchemes": [
+          "http"
+        ],
+        "proxyEndpointMatchesSourceHost": false,
+        "proxySlotsSameEndpoint": true,
+        "lastSelectionForSameAccount": false,
+        "lastSelectedTransport": "http",
+        "lastSelectedSlot": 1,
+        "lastSelectedAt": "2026-10-04T18:36:38.523Z",
+        "selectedUserAgentClass": "built-in-browser",
+        "diagnosticUserAgentEqualsEffectiveGatewayDefault": false
+      },
+      {
+        "route": "norva-resume-cache-pilot-20260916",
+        "activeViewerCountGlobal": 0,
+        "activeViewerCountSameProvider": 0,
+        "proxySlotsConfigured": 1,
+        "proxySchemes": [
+          "http"
+        ],
+        "proxyEndpointMatchesSourceHost": false,
+        "proxySlotsSameEndpoint": true,
+        "lastSelectionForSameAccount": true,
+        "lastSelectedTransport": "http",
+        "lastSelectedSlot": 1,
+        "lastSelectedAt": "2026-10-04T18:23:03.441Z",
+        "selectedUserAgentClass": "built-in-browser",
+        "diagnosticUserAgentEqualsEffectiveGatewayDefault": false
+      }
+    ],
+    "gatewayProxyListsIdentical": true,
+    "admissionSnapshot": [
+      {
+        "providerActivity": {
+          "kind": "gateway",
+          "lastSeen": "2026-10-04T18:34:57.57881+00:00"
+        },
+        "activeExactFileProbeLeases": 0,
+        "activeProviderLanguageLeases": 0,
+        "activeProviderPlaybackSessions": 0
+      }
+    ]
+  },
+  "effectiveRoutePolicy": {
+    "at": "2026-10-04T18:38:57.995018+00:00",
+    "gateways": [
+      {
+        "route": "norva-media-gateway",
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "effectivePolicy": {
+          "globalForward": true,
+          "allowlistCount": 0,
+          "httpMkvForward": false,
+          "httpMp4Forward": true,
+          "httpsMkvForward": false
+        }
+      },
+      {
+        "route": "norva-resume-cache-pilot-20260916",
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "effectivePolicy": {
+          "globalForward": true,
+          "allowlistCount": 0,
+          "httpMkvForward": false,
+          "httpMp4Forward": true,
+          "httpsMkvForward": false
+        }
+      }
+    ]
+  },
+  "transportComparisons": [
+    {
+      "filmKey": "hit",
+      "connectAt": "2026-10-04T18:51:00.549193+00:00",
+      "forwardAt": "2026-10-04T18:51:11.312515+00:00",
+      "connectStatuses": [
+        200,
+        403
+      ],
+      "forwardStatuses": [
+        403
+      ],
+      "connectBytes": 0,
+      "forwardBytes": 0,
+      "samePrefixHash": true,
+      "prefixComparisonContainsMedia": false,
+      "sameNonEmptyPrefix": false,
+      "bodyKindConnect": "empty",
+      "bodyKindForward": "empty",
+      "exactOriginalBoth": true
+    },
+    {
+      "filmKey": "mma",
+      "connectAt": "2026-10-04T18:52:12.928950+00:00",
+      "forwardAt": "2026-10-04T18:51:48.302196+00:00",
+      "connectStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "forwardStatuses": [
+        302,
+        200
+      ],
+      "connectBytes": 65536,
+      "forwardBytes": 65536,
+      "samePrefixHash": true,
+      "prefixComparisonContainsMedia": true,
+      "sameNonEmptyPrefix": true,
+      "bodyKindConnect": "matroska",
+      "bodyKindForward": "matroska",
+      "exactOriginalBoth": true
+    },
+    {
+      "filmKey": "shadow",
+      "connectAt": "2026-10-04T18:52:16.942629+00:00",
+      "forwardAt": "2026-10-04T18:51:52.482860+00:00",
+      "connectStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "forwardStatuses": [
+        302,
+        200
+      ],
+      "connectBytes": 65536,
+      "forwardBytes": 65536,
+      "samePrefixHash": true,
+      "prefixComparisonContainsMedia": true,
+      "sameNonEmptyPrefix": true,
+      "bodyKindConnect": "matroska",
+      "bodyKindForward": "matroska",
+      "exactOriginalBoth": true
+    },
+    {
+      "filmKey": "vengeance",
+      "connectAt": "2026-10-04T18:52:21.704366+00:00",
+      "forwardAt": "2026-10-04T18:51:56.398791+00:00",
+      "connectStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "forwardStatuses": [
+        302,
+        200
+      ],
+      "connectBytes": 65536,
+      "forwardBytes": 65536,
+      "samePrefixHash": true,
+      "prefixComparisonContainsMedia": true,
+      "sameNonEmptyPrefix": true,
+      "bodyKindConnect": "matroska",
+      "bodyKindForward": "matroska",
+      "exactOriginalBoth": true
+    }
+  ],
+  "operatorReceipts": [
+    {
+      "name": "category-2024-authority.safe.json",
+      "at": "2026-10-04T18:53:59.152336+00:00",
+      "category": "2024",
+      "action": "get_vod_streams",
+      "providerRequests": 1,
+      "mediaRequests": 0,
+      "proxyMode": "connect",
+      "proxySlot": 1,
+      "sameReviewedRoute": true,
+      "productionUaFixed": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactFileLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "maximumBytes": 8388608,
+      "maximumSeconds": 45,
+      "targetCount": 1,
+      "seconds": 1.352,
+      "curlExit": 0,
+      "bytesReceived": 255864,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-credentials"
+          ]
+        }
+      ],
+      "catalogueContextUnchanged": true,
+      "outcome": "complete",
+      "responseEntryCount": 809,
+      "targetObjectsRetainedPrivately": 1,
+      "targets": [
+        {
+          "filmKey": "vengeance",
+          "streamIdMatches": true,
+          "titleMatches": true,
+          "containerMatches": true,
+          "categoryMatches": true,
+          "fieldTypes": {
+            "num": "number",
+            "name": "string",
+            "stream_type": "string",
+            "stream_id": "number",
+            "stream_icon": "string",
+            "rating": "number",
+            "rating_5based": "number",
+            "added": "string",
+            "category_id": "string",
+            "container_extension": "string",
+            "custom_sid": "string",
+            "direct_source": "string"
+          },
+          "unlistedFieldCount": 0,
+          "customSid": {
+            "present": true,
+            "type": "string",
+            "nonempty": false,
+            "digitsOnly": false,
+            "matchesStreamId": null
+          },
+          "urlFields": {
+            "direct_source": {
+              "fieldPresent": true,
+              "type": "string",
+              "nonemptyString": false
+            },
+            "url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_source": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "playback_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            }
+          }
+        }
+      ],
+      "expired": true,
+      "wholeBodyHeadersErrorsRemoved": true,
+      "finishedAt": "2026-10-04T18:54:01.124727+00:00"
+    },
+    {
+      "name": "category-2025-authority.safe.json",
+      "at": "2026-10-04T18:53:30.139319+00:00",
+      "category": "2025",
+      "action": "get_vod_streams",
+      "providerRequests": 1,
+      "mediaRequests": 0,
+      "proxyMode": "connect",
+      "proxySlot": 1,
+      "sameReviewedRoute": true,
+      "productionUaFixed": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactFileLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "maximumBytes": 8388608,
+      "maximumSeconds": 45,
+      "targetCount": 3,
+      "seconds": 5.439,
+      "curlExit": 0,
+      "bytesReceived": 348451,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-credentials"
+          ]
+        }
+      ],
+      "catalogueContextUnchanged": true,
+      "outcome": "complete",
+      "responseEntryCount": 1092,
+      "targetObjectsRetainedPrivately": 3,
+      "targets": [
+        {
+          "filmKey": "hit",
+          "streamIdMatches": true,
+          "titleMatches": true,
+          "containerMatches": true,
+          "categoryMatches": true,
+          "fieldTypes": {
+            "num": "number",
+            "name": "string",
+            "stream_type": "string",
+            "stream_id": "number",
+            "stream_icon": "string",
+            "rating": "number",
+            "rating_5based": "number",
+            "added": "string",
+            "category_id": "string",
+            "container_extension": "string",
+            "custom_sid": "string",
+            "direct_source": "string"
+          },
+          "unlistedFieldCount": 0,
+          "customSid": {
+            "present": true,
+            "type": "string",
+            "nonempty": false,
+            "digitsOnly": false,
+            "matchesStreamId": null
+          },
+          "urlFields": {
+            "direct_source": {
+              "fieldPresent": true,
+              "type": "string",
+              "nonemptyString": false
+            },
+            "url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_source": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "playback_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            }
+          }
+        },
+        {
+          "filmKey": "mma",
+          "streamIdMatches": true,
+          "titleMatches": true,
+          "containerMatches": true,
+          "categoryMatches": true,
+          "fieldTypes": {
+            "num": "number",
+            "name": "string",
+            "stream_type": "string",
+            "stream_id": "number",
+            "stream_icon": "string",
+            "rating": "number",
+            "rating_5based": "number",
+            "added": "string",
+            "category_id": "string",
+            "container_extension": "string",
+            "custom_sid": "string",
+            "direct_source": "string"
+          },
+          "unlistedFieldCount": 0,
+          "customSid": {
+            "present": true,
+            "type": "string",
+            "nonempty": false,
+            "digitsOnly": false,
+            "matchesStreamId": null
+          },
+          "urlFields": {
+            "direct_source": {
+              "fieldPresent": true,
+              "type": "string",
+              "nonemptyString": false
+            },
+            "url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_source": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "playback_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            }
+          }
+        },
+        {
+          "filmKey": "shadow",
+          "streamIdMatches": true,
+          "titleMatches": true,
+          "containerMatches": true,
+          "categoryMatches": true,
+          "fieldTypes": {
+            "num": "number",
+            "name": "string",
+            "stream_type": "string",
+            "stream_id": "number",
+            "stream_icon": "string",
+            "rating": "number",
+            "rating_5based": "number",
+            "added": "string",
+            "category_id": "string",
+            "container_extension": "string",
+            "custom_sid": "string",
+            "direct_source": "string"
+          },
+          "unlistedFieldCount": 0,
+          "customSid": {
+            "present": true,
+            "type": "string",
+            "nonempty": false,
+            "digitsOnly": false,
+            "matchesStreamId": null
+          },
+          "urlFields": {
+            "direct_source": {
+              "fieldPresent": true,
+              "type": "string",
+              "nonemptyString": false
+            },
+            "url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_source": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "stream_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            },
+            "playback_url": {
+              "fieldPresent": false,
+              "type": "null",
+              "nonemptyString": false
+            }
+          }
+        }
+      ],
+      "expired": true,
+      "wholeBodyHeadersErrorsRemoved": true,
+      "finishedAt": "2026-10-04T18:53:36.817611+00:00"
+    },
+    {
+      "name": "hit-connect.safe.json",
+      "at": "2026-10-04T18:51:00.549193+00:00",
+      "film": "HIT: The Third Case [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": 0,
+      "boundedStop": false,
+      "bytesRetained": 0,
+      "seconds": 1.246,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 403,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        403
+      ],
+      "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodyKind": "empty",
+      "finishedAt": "2026-10-04T18:51:02.328179+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "hit-forward.safe.json",
+      "at": "2026-10-04T18:51:11.312515+00:00",
+      "film": "HIT: The Third Case [MULTI-SUB]",
+      "mode": "forward",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "forward",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": 0,
+      "boundedStop": false,
+      "bytesRetained": 0,
+      "seconds": 0.541,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 403,
+          "headerNames": [
+            "transfer-encoding",
+            "access-control-allow-origin",
+            "connection",
+            "content-type",
+            "date",
+            "server"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        403
+      ],
+      "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodyKind": "empty",
+      "finishedAt": "2026-10-04T18:51:12.284252+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "hit-ua-chrome123.safe.json",
+      "at": "2026-10-04T18:58:13.222451+00:00",
+      "film": "HIT: The Third Case [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaCase": "chrome123",
+      "uaSha256": "fbfac33ae69df12764d9c9274e275803de3a9e96792329d1a02eb352ce105041",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "onlyChangedVariable": "User-Agent",
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": 0,
+      "boundedStop": false,
+      "bytesRetained": 0,
+      "seconds": 1.271,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 403,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        403
+      ],
+      "prefixSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bodyKind": "empty",
+      "finishedAt": "2026-10-04T18:58:15.913340+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "mma-connect.safe.json",
+      "at": "2026-10-04T18:52:12.928950+00:00",
+      "film": "MMA Cop [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 1.465,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "d9d1601a2dff73a387cef22c6251ff70b066b57da638de095646f5f100420814",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:52:14.875545+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "mma-forward.safe.json",
+      "at": "2026-10-04T18:51:48.302196+00:00",
+      "film": "MMA Cop [MULTI-SUB]",
+      "mode": "forward",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "forward",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 1.544,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "transfer-encoding",
+            "access-control-allow-origin",
+            "connection",
+            "content-type",
+            "date",
+            "location",
+            "server"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "content-length",
+            "accept-ranges",
+            "connection",
+            "content-range",
+            "content-type",
+            "date",
+            "permissions-policy",
+            "referrer-policy",
+            "server",
+            "x-content-type-options",
+            "x-xss-protection"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        302,
+        200
+      ],
+      "prefixSha256": "d9d1601a2dff73a387cef22c6251ff70b066b57da638de095646f5f100420814",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:51:50.325668+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "mma-ua-mozilla.safe.json",
+      "at": "2026-10-04T18:58:08.083973+00:00",
+      "film": "MMA Cop [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaCase": "mozilla",
+      "uaSha256": "1066b48224bb188ceb955605f4fcff98893be2688d7e965afb04d36d17e7f0d7",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "onlyChangedVariable": "User-Agent",
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 2.541,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "d9d1601a2dff73a387cef22c6251ff70b066b57da638de095646f5f100420814",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:58:11.084820+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "shadow-connect.safe.json",
+      "at": "2026-10-04T18:52:16.942629+00:00",
+      "film": "Shadow Force [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 2.109,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "8d8b377e592397ffda2b9582be44dee972cef7826fbf3bc072f8926bc05c43e5",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:52:19.522385+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "shadow-forward.safe.json",
+      "at": "2026-10-04T18:51:52.482860+00:00",
+      "film": "Shadow Force [MULTI-SUB]",
+      "mode": "forward",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "forward",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 1.288,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "transfer-encoding",
+            "access-control-allow-origin",
+            "connection",
+            "content-type",
+            "date",
+            "location",
+            "server"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "content-length",
+            "accept-ranges",
+            "connection",
+            "content-range",
+            "content-type",
+            "date",
+            "permissions-policy",
+            "referrer-policy",
+            "server",
+            "x-content-type-options",
+            "x-xss-protection"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        302,
+        200
+      ],
+      "prefixSha256": "8d8b377e592397ffda2b9582be44dee972cef7826fbf3bc072f8926bc05c43e5",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:51:54.265697+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "vengeance-connect.safe.json",
+      "at": "2026-10-04T18:52:21.704366+00:00",
+      "film": "Shadow of Vengeance [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 1.605,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "2c6073bd430b872886da0e95c3e14ac6e9f2ad5987671192bc69daecabea5e52",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:52:23.676895+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "name": "vengeance-forward.safe.json",
+      "at": "2026-10-04T18:51:56.398791+00:00",
+      "film": "Shadow of Vengeance [MULTI-SUB]",
+      "mode": "forward",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "forward",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 1.342,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "transfer-encoding",
+            "access-control-allow-origin",
+            "connection",
+            "content-type",
+            "date",
+            "location",
+            "server"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "content-length",
+            "accept-ranges",
+            "connection",
+            "content-range",
+            "content-type",
+            "date",
+            "permissions-policy",
+            "referrer-policy",
+            "server",
+            "x-content-type-options",
+            "x-xss-protection"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        302,
+        200
+      ],
+      "prefixSha256": "2c6073bd430b872886da0e95c3e14ac6e9f2ad5987671192bc69daecabea5e52",
+      "bodyKind": "matroska",
+      "finishedAt": "2026-10-04T18:51:58.232296+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    }
+  ],
+  "originalReplays": {
+    "at": "2026-10-04T19:04:52.624394+00:00",
+    "windowStartedAt": "2026-10-04T18:55:00Z",
+    "scope": "Exact four original MULTI-SUB files, transcode UI sessions only; zero provider I/O",
+    "sessions": [
+      {
+        "mode": "transcode",
+        "status": "expired",
+        "audioMode": "transcode",
+        "container": "mkv",
+        "createdAt": "2026-10-04T18:56:03.42535+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T18:57:36.873345+00:00",
+        "resumeTime": null,
+        "seekOffset": null,
+        "videoCodec": null,
+        "gatewayMode": "remux",
+        "filmKey": "mma",
+        "title": "MMA Cop [MULTI-SUB]",
+        "exactTargetHashMatchesMetadataSnapshot": true,
+        "events": [
+          {
+            "at": "2026-10-04T18:56:08.970549+00:00",
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "errorCode": null,
+            "readyState": 1,
+            "gatewayStatus": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T18:56:09.665655+00:00",
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 6655,
+            "errorCode": null,
+            "readyState": 4,
+            "gatewayStatus": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "eventCounts": {
+          "first_frame": 1,
+          "play_started": 1,
+          "gateway_error": 0,
+          "playback_error": 0,
+          "seek": 0,
+          "ended": 0
+        },
+        "gateway": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T18:56:07.808954+00:00",
+            "updatedAt": "2026-10-04T18:57:36.867075+00:00",
+            "logs": {
+              "exactAssociatedLines": 105,
+              "taggedFfmpegDiagnosticLines": 104,
+              "taggedCounts": {
+                "invalidEbml": 39,
+                "videoReference": 47,
+                "corrupt": 0,
+                "audio": 0,
+                "resyncFailure": 5,
+                "truncatedInput": 0,
+                "processExit": 0
+              },
+              "firstTaggedAt": "2026-10-04T18:56:06.913133534Z",
+              "lastTaggedAt": "2026-10-04T18:57:33.920292093Z"
+            },
+            "startupLog": {
+              "admissionWaitMs": 0,
+              "ownerProviderLockWaitMs": 0,
+              "cleanupMs": 0,
+              "slotReleaseWaitMs": 0,
+              "codecProfileMs": 0,
+              "codecProfileProbeRan": true,
+              "ffmpegReadyMs": 1048,
+              "playlistSegmentCount": 3,
+              "playlistBufferSeconds": 6.006,
+              "firstSegmentBytes": 322608,
+              "playlistSegmentBytes": 569640,
+              "totalMs": 2959,
+              "ffmpegSpawnCount": 1,
+              "analyzerSpawnCount": 2,
+              "beforeFfmpegMs": 1911,
+              "ffmpegSpawnDelayMs": 26,
+              "videoEncoder": "vaapi",
+              "videoDecode": "vaapi",
+              "vaapiHardwareDecodeFallbacks": 0,
+              "firstSegmentReadyMs": 721.24072265625,
+              "playlistProductionSpanMs": 106.9970703125,
+              "playlistPostFirstBufferSeconds": 1.084,
+              "sustainedMediaProductionRateX": 10.131,
+              "mediaProductionRateX": 10.131,
+              "inputProbeMode": "known-fast",
+              "fastInputProbeFallbacks": 0,
+              "codecProfileSource": "gateway_inband",
+              "seek": false,
+              "at": "2026-10-04T18:56:07.803Z"
+            }
+          }
+        ]
+      },
+      {
+        "mode": "transcode",
+        "status": "expired",
+        "audioMode": "transcode",
+        "container": "mkv",
+        "createdAt": "2026-10-04T19:00:16.824379+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T19:01:50.135642+00:00",
+        "resumeTime": null,
+        "seekOffset": null,
+        "videoCodec": null,
+        "gatewayMode": "remux",
+        "filmKey": "shadow",
+        "title": "Shadow Force [MULTI-SUB]",
+        "exactTargetHashMatchesMetadataSnapshot": true,
+        "events": [
+          {
+            "at": "2026-10-04T19:00:24.76564+00:00",
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 8460,
+            "errorCode": null,
+            "readyState": 4,
+            "gatewayStatus": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T19:00:31.223328+00:00",
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "errorCode": null,
+            "readyState": 4,
+            "gatewayStatus": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "eventCounts": {
+          "first_frame": 1,
+          "play_started": 1,
+          "gateway_error": 0,
+          "playback_error": 0,
+          "seek": 0,
+          "ended": 0
+        },
+        "gateway": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T19:00:23.733911+00:00",
+            "updatedAt": "2026-10-04T19:01:50.128556+00:00",
+            "logs": {
+              "exactAssociatedLines": 72,
+              "taggedFfmpegDiagnosticLines": 71,
+              "taggedCounts": {
+                "invalidEbml": 22,
+                "videoReference": 30,
+                "corrupt": 0,
+                "audio": 9,
+                "resyncFailure": 2,
+                "truncatedInput": 0,
+                "processExit": 0
+              },
+              "firstTaggedAt": "2026-10-04T19:00:19.543882831Z",
+              "lastTaggedAt": "2026-10-04T19:01:41.711221790Z"
+            },
+            "startupLog": {
+              "admissionWaitMs": 0,
+              "ownerProviderLockWaitMs": 0,
+              "cleanupMs": 1,
+              "slotReleaseWaitMs": 0,
+              "codecProfileMs": 0,
+              "codecProfileProbeRan": true,
+              "ffmpegReadyMs": 4277,
+              "playlistSegmentCount": 3,
+              "playlistBufferSeconds": 6.006,
+              "firstSegmentBytes": 75576,
+              "playlistSegmentBytes": 6238968,
+              "totalMs": 6629,
+              "ffmpegSpawnCount": 1,
+              "analyzerSpawnCount": 2,
+              "beforeFfmpegMs": 2352,
+              "ffmpegSpawnDelayMs": 9,
+              "videoEncoder": "vaapi",
+              "videoDecode": "vaapi",
+              "vaapiHardwareDecodeFallbacks": 0,
+              "firstSegmentReadyMs": 208.064208984375,
+              "playlistProductionSpanMs": 4011.885498046875,
+              "playlistPostFirstBufferSeconds": 4.004,
+              "sustainedMediaProductionRateX": 0.998,
+              "mediaProductionRateX": 0.998,
+              "inputProbeMode": "known-fast",
+              "fastInputProbeFallbacks": 0,
+              "codecProfileSource": "gateway_inband",
+              "seek": false,
+              "at": "2026-10-04T19:00:23.731Z"
+            }
+          }
+        ]
+      },
+      {
+        "mode": "transcode",
+        "status": "expired",
+        "audioMode": "transcode",
+        "container": "mkv",
+        "createdAt": "2026-10-04T19:02:38.955295+00:00",
+        "errorCode": null,
+        "updatedAt": "2026-10-04T19:03:51.147655+00:00",
+        "resumeTime": null,
+        "seekOffset": null,
+        "videoCodec": null,
+        "gatewayMode": "remux",
+        "filmKey": "vengeance",
+        "title": "Shadow of Vengeance [MULTI-SUB]",
+        "exactTargetHashMatchesMetadataSnapshot": true,
+        "events": [
+          {
+            "at": "2026-10-04T19:02:42.430987+00:00",
+            "mode": "gateway-session",
+            "event": "play_started",
+            "ttffMs": null,
+            "errorCode": null,
+            "readyState": 1,
+            "gatewayStatus": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          },
+          {
+            "at": "2026-10-04T19:02:43.026216+00:00",
+            "mode": "gateway-session",
+            "event": "first_frame",
+            "ttffMs": 4438,
+            "errorCode": null,
+            "readyState": 4,
+            "gatewayStatus": null,
+            "failureCategory": null,
+            "positionSeconds": 0,
+            "providerConcurrencySignal": null
+          }
+        ],
+        "eventCounts": {
+          "first_frame": 1,
+          "play_started": 1,
+          "gateway_error": 0,
+          "playback_error": 0,
+          "seek": 0,
+          "ended": 0
+        },
+        "gateway": [
+          {
+            "mode": "remux",
+            "route": "resume-cache-pilot",
+            "state": "expired",
+            "createdAt": "2026-10-04T19:02:41.48021+00:00",
+            "updatedAt": "2026-10-04T19:03:51.140272+00:00",
+            "logs": {
+              "exactAssociatedLines": 76,
+              "taggedFfmpegDiagnosticLines": 75,
+              "taggedCounts": {
+                "invalidEbml": 25,
+                "videoReference": 33,
+                "corrupt": 0,
+                "audio": 5,
+                "resyncFailure": 0,
+                "truncatedInput": 0,
+                "processExit": 0
+              },
+              "firstTaggedAt": "2026-10-04T19:02:41.060683654Z",
+              "lastTaggedAt": "2026-10-04T19:03:50.767758059Z"
+            },
+            "startupLog": {
+              "admissionWaitMs": 0,
+              "ownerProviderLockWaitMs": 0,
+              "cleanupMs": 0,
+              "slotReleaseWaitMs": 0,
+              "codecProfileMs": 0,
+              "codecProfileProbeRan": true,
+              "ffmpegReadyMs": 516,
+              "playlistSegmentCount": 4,
+              "playlistBufferSeconds": 8.008,
+              "firstSegmentBytes": 57152,
+              "playlistSegmentBytes": 810280,
+              "totalMs": 2267,
+              "ffmpegSpawnCount": 1,
+              "analyzerSpawnCount": 2,
+              "beforeFfmpegMs": 1751,
+              "ffmpegSpawnDelayMs": 8,
+              "videoEncoder": "vaapi",
+              "videoDecode": "vaapi",
+              "vaapiHardwareDecodeFallbacks": 0,
+              "firstSegmentReadyMs": 212.022705078125,
+              "playlistProductionSpanMs": 296.991455078125,
+              "playlistPostFirstBufferSeconds": 5.589,
+              "sustainedMediaProductionRateX": 18.819,
+              "mediaProductionRateX": 18.819,
+              "inputProbeMode": "known-fast",
+              "fastInputProbeFallbacks": 0,
+              "codecProfileSource": "gateway_inband",
+              "seek": false,
+              "at": "2026-10-04T19:02:41.476Z"
+            }
+          }
+        ]
+      }
+    ],
+    "health": [
+      {
+        "route": "norva-media-gateway",
+        "http": 200,
+        "ok": true,
+        "running": true,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "logWindowStartedAt": "2026-10-04T18:05:56.370293012Z",
+        "viewerCountGlobal": 1
+      },
+      {
+        "route": "norva-resume-cache-pilot-20260916",
+        "http": 200,
+        "ok": true,
+        "running": true,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "logWindowStartedAt": "2026-10-04T18:05:59.164930376Z",
+        "viewerCountGlobal": 0
+      }
+    ],
+    "limitations": [
+      "Successful start or current playback is not a permanent recovery nor a demonstrated causal fix.",
+      "Only exact-session tagged lines are counted. Multiline continuations and diagnostics without session tags are not attributed, so zero is not full decoder certification.",
+      "Gateway log windows begin at their listed container starts and do not cover earlier deployments."
+    ]
+  },
+  "errorTimeline": {
+    "at": "2026-10-04T19:06:07.380947+00:00",
+    "sessions": [
+      {
+        "filmKey": "mma",
+        "firstFrameAt": "2026-10-04T18:56:09.665655+00:00",
+        "expiredAt": "2026-10-04T18:57:36.867075+00:00",
+        "exactTaggedDiagnosticCounts": {
+          "beforeFirstFrame": {
+            "invalidEbml": 3,
+            "videoReferences": 1,
+            "audio": 0,
+            "resyncFailure": 0
+          },
+          "afterFirstFrameBeforeFinal15Seconds": {
+            "invalidEbml": 33,
+            "videoReferences": 41,
+            "audio": 0,
+            "resyncFailure": 5
+          },
+          "final15SecondsBeforeExpiry": {
+            "invalidEbml": 3,
+            "videoReferences": 5,
+            "audio": 0,
+            "resyncFailure": 0
+          },
+          "afterExpiry": {
+            "invalidEbml": 0,
+            "videoReferences": 0,
+            "audio": 0,
+            "resyncFailure": 0
+          }
+        }
+      },
+      {
+        "filmKey": "shadow",
+        "firstFrameAt": "2026-10-04T19:00:24.76564+00:00",
+        "expiredAt": "2026-10-04T19:01:50.128556+00:00",
+        "exactTaggedDiagnosticCounts": {
+          "beforeFirstFrame": {
+            "invalidEbml": 1,
+            "videoReferences": 0,
+            "audio": 1,
+            "resyncFailure": 0
+          },
+          "afterFirstFrameBeforeFinal15Seconds": {
+            "invalidEbml": 21,
+            "videoReferences": 30,
+            "audio": 8,
+            "resyncFailure": 2
+          },
+          "final15SecondsBeforeExpiry": {
+            "invalidEbml": 0,
+            "videoReferences": 0,
+            "audio": 0,
+            "resyncFailure": 0
+          },
+          "afterExpiry": {
+            "invalidEbml": 0,
+            "videoReferences": 0,
+            "audio": 0,
+            "resyncFailure": 0
+          }
+        }
+      },
+      {
+        "filmKey": "vengeance",
+        "firstFrameAt": "2026-10-04T19:02:43.026216+00:00",
+        "expiredAt": "2026-10-04T19:03:51.140272+00:00",
+        "exactTaggedDiagnosticCounts": {
+          "beforeFirstFrame": {
+            "invalidEbml": 3,
+            "videoReferences": 3,
+            "audio": 0,
+            "resyncFailure": 0
+          },
+          "afterFirstFrameBeforeFinal15Seconds": {
+            "invalidEbml": 22,
+            "videoReferences": 30,
+            "audio": 5,
+            "resyncFailure": 0
+          },
+          "final15SecondsBeforeExpiry": {
+            "invalidEbml": 0,
+            "videoReferences": 0,
+            "audio": 0,
+            "resyncFailure": 0
+          },
+          "afterExpiry": {
+            "invalidEbml": 0,
+            "videoReferences": 0,
+            "audio": 0,
+            "resyncFailure": 0
+          }
+        }
+      }
+    ],
+    "method": "Only exact-session tagged lines, subdivided by telemetry first_frame and Gateway expiry minus15s. Final15s is a temporal bucket, not attribution to shutdown."
+  },
+  "uiObservationsFromParent": [
+    {
+      "filmKey": "mma",
+      "observedCurrentTimes": [
+        24.458,
+        84.0066
+      ],
+      "readyState": 4,
+      "paused": false,
+      "error": null
+    },
+    {
+      "filmKey": "shadow",
+      "observedCurrentTimes": [
+        27.244,
+        69.8608
+      ],
+      "readyState": 4
+    },
+    {
+      "filmKey": "vengeance",
+      "observedCurrentTimes": [
+        58.5269
+      ],
+      "readyState": 4,
+      "visiblyCorruptedImageReported": true,
+      "finalTimeNotCollected": true
+    }
+  ],
+  "screenshots": [
+    "mma-original-resumed.png",
+    "shadow-original-resumed.png",
+    "vengeance-original-resumed.png"
+  ],
+  "conclusions": [
+    "Fresh category metadata agrees with exact owned stream IDs, titles and MKV containers; direct_source and custom_sid are empty. No alternate authoritative media URL was provided in those category entries.",
+    "At the recorded A/B times, HIT still refused both modes without media; the other three original files delivered matching 64 KiB Matroska prefixes through both modes. These later successes do not establish why the earlier requests failed.",
+    "The three original UI replays started with unchanged target hashes, but input EBML and video/audio diagnostics occurred before first frame and during playback. Start success is not verified fluid playback or a causal repair.",
+    "Server/container image and transport policy remained as recorded; no provider media request was issued by this audit script.",
+    "The original browser User-Agent was not retained. A production-default UA in independent diagnostics is not proof of the historical browser request header.",
+    "Only tagged diagnostics are counted. Non-tagged continuation lines and aggregate repeated counts are not expanded. Close-adjacent time buckets do not attribute cause."
+  ],
+  "retainedMetadataReview": {
+    "at": "2026-10-04T19:15:09.720660+00:00",
+    "providerRequests": 0,
+    "scope": "Saved get_vod_info reduced fields and full exact get_vod_streams target objects only",
+    "files": [
+      {
+        "filmKey": "hit",
+        "metadataCapturedAt": "2026-10-04T17:49:11.530797+00:00",
+        "getVodInfoReducedRetention": true,
+        "getVodInfoRetainedMovieDataShape": {
+          "stream_id": "number",
+          "name": "string",
+          "container_extension": "string",
+          "direct_source": "string"
+        },
+        "getVodInfoRetainedInfoShape": {
+          "tmdb_id": "string"
+        },
+        "getVodStreamsFullObjectShape": {
+          "num": "number",
+          "name": "string",
+          "stream_type": "string",
+          "stream_id": "number",
+          "stream_icon": "string",
+          "rating": "number",
+          "rating_5based": "number",
+          "added": "string",
+          "category_id": "string",
+          "container_extension": "string",
+          "custom_sid": "string",
+          "direct_source": "string"
+        },
+        "groups": {
+          "availability": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "duration": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "tracks": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "updated": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "node": {
+            "getVodInfoRetainedFields": [
+              "direct_source"
+            ],
+            "getVodStreamsCompleteObjectFields": [
+              "direct_source"
+            ]
+          }
+        },
+        "getVodInfoDirectSourceEmpty": true,
+        "getVodStreamsDirectSourceEmpty": true,
+        "providerAddedUtc": "2025-06-02T11:09:04+00:00",
+        "providerAddedIsNotAnUpdateOrAvailabilityProof": true
+      },
+      {
+        "filmKey": "mma",
+        "metadataCapturedAt": "2026-10-04T17:49:31.793214+00:00",
+        "getVodInfoReducedRetention": true,
+        "getVodInfoRetainedMovieDataShape": {
+          "stream_id": "number",
+          "name": "string",
+          "container_extension": "string",
+          "direct_source": "string"
+        },
+        "getVodInfoRetainedInfoShape": {
+          "tmdb_id": "string"
+        },
+        "getVodStreamsFullObjectShape": {
+          "num": "number",
+          "name": "string",
+          "stream_type": "string",
+          "stream_id": "number",
+          "stream_icon": "string",
+          "rating": "number",
+          "rating_5based": "number",
+          "added": "string",
+          "category_id": "string",
+          "container_extension": "string",
+          "custom_sid": "string",
+          "direct_source": "string"
+        },
+        "groups": {
+          "availability": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "duration": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "tracks": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "updated": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "node": {
+            "getVodInfoRetainedFields": [
+              "direct_source"
+            ],
+            "getVodStreamsCompleteObjectFields": [
+              "direct_source"
+            ]
+          }
+        },
+        "getVodInfoDirectSourceEmpty": true,
+        "getVodStreamsDirectSourceEmpty": true,
+        "providerAddedUtc": "2025-06-02T11:09:13+00:00",
+        "providerAddedIsNotAnUpdateOrAvailabilityProof": true
+      },
+      {
+        "filmKey": "shadow",
+        "metadataCapturedAt": "2026-10-04T17:49:35.014297+00:00",
+        "getVodInfoReducedRetention": true,
+        "getVodInfoRetainedMovieDataShape": {
+          "stream_id": "number",
+          "name": "string",
+          "container_extension": "string",
+          "direct_source": "string"
+        },
+        "getVodInfoRetainedInfoShape": {
+          "tmdb_id": "string"
+        },
+        "getVodStreamsFullObjectShape": {
+          "num": "number",
+          "name": "string",
+          "stream_type": "string",
+          "stream_id": "number",
+          "stream_icon": "string",
+          "rating": "number",
+          "rating_5based": "number",
+          "added": "string",
+          "category_id": "string",
+          "container_extension": "string",
+          "custom_sid": "string",
+          "direct_source": "string"
+        },
+        "groups": {
+          "availability": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "duration": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "tracks": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "updated": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "node": {
+            "getVodInfoRetainedFields": [
+              "direct_source"
+            ],
+            "getVodStreamsCompleteObjectFields": [
+              "direct_source"
+            ]
+          }
+        },
+        "getVodInfoDirectSourceEmpty": true,
+        "getVodStreamsDirectSourceEmpty": true,
+        "providerAddedUtc": "2025-06-02T11:59:16+00:00",
+        "providerAddedIsNotAnUpdateOrAvailabilityProof": true
+      },
+      {
+        "filmKey": "vengeance",
+        "metadataCapturedAt": "2026-10-04T17:49:38.365216+00:00",
+        "getVodInfoReducedRetention": true,
+        "getVodInfoRetainedMovieDataShape": {
+          "stream_id": "number",
+          "name": "string",
+          "container_extension": "string",
+          "direct_source": "string"
+        },
+        "getVodInfoRetainedInfoShape": {
+          "tmdb_id": "string"
+        },
+        "getVodStreamsFullObjectShape": {
+          "num": "number",
+          "name": "string",
+          "stream_type": "string",
+          "stream_id": "number",
+          "stream_icon": "string",
+          "rating": "number",
+          "rating_5based": "number",
+          "added": "string",
+          "category_id": "string",
+          "container_extension": "string",
+          "custom_sid": "string",
+          "direct_source": "string"
+        },
+        "groups": {
+          "availability": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "duration": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "tracks": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "updated": {
+            "getVodInfoRetainedFields": [],
+            "getVodStreamsCompleteObjectFields": []
+          },
+          "node": {
+            "getVodInfoRetainedFields": [
+              "direct_source"
+            ],
+            "getVodStreamsCompleteObjectFields": [
+              "direct_source"
+            ]
+          }
+        },
+        "getVodInfoDirectSourceEmpty": true,
+        "getVodStreamsDirectSourceEmpty": true,
+        "providerAddedUtc": "2025-06-02T11:20:46+00:00",
+        "providerAddedIsNotAnUpdateOrAvailabilityProof": true
+      }
+    ],
+    "limitations": [
+      "The get_vod_info response was deliberately reduced; absent retained duration/audio/status/node keys cannot establish absence in the original response.",
+      "The complete retained get_vod_streams objects provide no explicit availability, update, duration, audio-track or serving-node fields among the inspected names. Listing plus HTTP200 is not proof of media availability.",
+      "The provider added timestamp is entry creation metadata, not a recent health/update observation."
+    ]
+  },
+  "persistedAccountState": {
+    "at": "2026-10-04T19:20:14.348431+00:00",
+    "scope": "exact MAX OTT account persisted access state",
+    "providerRequests": 0,
+    "rows": [
+      {
+        "state": "active",
+        "checkedAt": "2026-10-04T00:01:02.151+00:00",
+        "reasonCode": "PROVIDER_CONFIRMED_ACTIVE",
+        "expiryPresent": true,
+        "manuallyOverridden": false,
+        "expiryIsFutureOrToday": true,
+        "lastConfirmedActiveAt": "2026-10-04T00:01:02.151+00:00",
+        "providerReportedExpiry": true
+      }
+    ],
+    "rawUserInfoRetained": false,
+    "connectionCountsRetainedInThisState": false
+  },
+  "independent8MiBReads": [
+    {
+      "at": "2026-10-04T19:19:03.770216+00:00",
+      "film": "MMA Cop [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "maximumBytes": 8388608,
+      "maximumReadSeconds": 45,
+      "reader": "independent system libcurl",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 8388608,
+      "seconds": 2.613,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "dc0cf49c8763c516f1b25928901427aba22adf420e76d63f688f0f3e6945544c",
+      "bodyKind": "matroska",
+      "first64KiBMatchesEarlierIndependentSuccess": true,
+      "offlineDecode": {
+        "network": "none",
+        "softwareDecode": true,
+        "gpuMounted": false,
+        "maximumSeconds": 90,
+        "maximumMediaSeconds": 45,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "exitCode": 0,
+        "seconds": 1.903,
+        "boundedStop": null,
+        "diagnosticCounts": {
+          "invalidEbml": 4,
+          "audioDecode": 0,
+          "videoDecode": 8,
+          "packetCorruption": 0,
+          "truncatedPrefixBoundary": 0
+        },
+        "diagnosticCategoriesMayOverlap": true,
+        "invalidEbmlByteOffsets": [
+          543262,
+          2885794,
+          5259309,
+          7604068
+        ],
+        "invalidEbmlOffsetsBeforeFinal64KiB": [
+          543262,
+          2885794,
+          5259309,
+          7604068
+        ],
+        "invalidEbmlLocationUnknown": false,
+        "diagnosticLineCount": 17,
+        "diagnosticSha256": "1a965b7df57b5869026ab7fb7308b7e2b56a37da2a2294400c02cc1e7e7deb92",
+        "lastProgress": {
+          "frame": 471,
+          "out_time_us": 25525500,
+          "out_time_ms": 25525500,
+          "dup_frames": 0,
+          "drop_frames": 0,
+          "progress": "end"
+        },
+        "prefixTruncationExpected": true,
+        "scope": "first video and first audio stream of bounded prefix, not full-file certification",
+        "outcome": "decoded",
+        "containerAbsentAfterCleanup": true,
+        "privateDecodeLogsRemoved": true
+      },
+      "finishedAt": "2026-10-04T19:19:08.848134+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "at": "2026-10-04T19:19:27.057507+00:00",
+      "film": "Shadow Force [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "maximumBytes": 8388608,
+      "maximumReadSeconds": 45,
+      "reader": "independent system libcurl",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 8388608,
+      "seconds": 2.53,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "1ca88b75394ed0333cd0e809b32e67c06d7bd34bbc293c488301440d1cd70c3b",
+      "bodyKind": "matroska",
+      "first64KiBMatchesEarlierIndependentSuccess": true,
+      "offlineDecode": {
+        "network": "none",
+        "softwareDecode": true,
+        "gpuMounted": false,
+        "maximumSeconds": 90,
+        "maximumMediaSeconds": 45,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "exitCode": 0,
+        "seconds": 1.503,
+        "boundedStop": null,
+        "diagnosticCounts": {
+          "invalidEbml": 4,
+          "audioDecode": 5,
+          "videoDecode": 17,
+          "packetCorruption": 4,
+          "truncatedPrefixBoundary": 0
+        },
+        "diagnosticCategoriesMayOverlap": true,
+        "invalidEbmlByteOffsets": [
+          1065380,
+          3411097,
+          5800522,
+          8127467
+        ],
+        "invalidEbmlOffsetsBeforeFinal64KiB": [
+          1065380,
+          3411097,
+          5800522,
+          8127467
+        ],
+        "invalidEbmlLocationUnknown": false,
+        "diagnosticLineCount": 33,
+        "diagnosticSha256": "a632625fed479d35f8f82dedd8a7b843c04153a224cb02a03097dbf913397f79",
+        "lastProgress": {
+          "frame": 222,
+          "out_time_us": 12158833,
+          "out_time_ms": 12158833,
+          "dup_frames": 0,
+          "drop_frames": 0,
+          "progress": "end"
+        },
+        "prefixTruncationExpected": true,
+        "scope": "first video and first audio stream of bounded prefix, not full-file certification",
+        "outcome": "decoded",
+        "containerAbsentAfterCleanup": true,
+        "privateDecodeLogsRemoved": true
+      },
+      "finishedAt": "2026-10-04T19:19:32.221485+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    },
+    {
+      "at": "2026-10-04T19:19:58.554424+00:00",
+      "film": "Shadow of Vengeance [MULTI-SUB]",
+      "mode": "connect",
+      "providerRequests": 1,
+      "rangeHeader": false,
+      "proxySlot": 1,
+      "proxyMode": "connect",
+      "maximumBytes": 8388608,
+      "maximumReadSeconds": 45,
+      "reader": "independent system libcurl",
+      "uaSha256": "80c1a9aaed9dfd275563fe08f3849e884a34f0290fc6613ecf45aef713bf3697",
+      "targetHashMatchesPriorFailure": true,
+      "sameProxyReference": true,
+      "allOwnersAccountGuards": {
+        "viewers": 0,
+        "strictJobs": 0,
+        "probeLeases": 0,
+        "strictLeases": 0,
+        "fallbackLeases": 0,
+        "exactProbeLeases": 0
+      },
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 8388608,
+      "seconds": 4.753,
+      "expired": true,
+      "responses": [
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [],
+          "proxyTunnelResponse": true
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 302,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "transfer-encoding",
+            "connection",
+            "access-control-allow-origin",
+            "location"
+          ],
+          "redirect": {
+            "originClass": "different-origin",
+            "schemeClass": "same-scheme",
+            "credentialsPresent": false
+          }
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": []
+        },
+        {
+          "httpVersion": "1.1",
+          "status": 200,
+          "headerNames": [
+            "server",
+            "date",
+            "content-type",
+            "content-length",
+            "connection",
+            "accept-ranges",
+            "content-range",
+            "x-xss-protection",
+            "x-content-type-options",
+            "referrer-policy",
+            "permissions-policy"
+          ]
+        }
+      ],
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "a763405a21fd975150a3c4d6ef6c8e3d7ad39b7ac6662fd95eebda7e43d5f644",
+      "bodyKind": "matroska",
+      "first64KiBMatchesEarlierIndependentSuccess": true,
+      "offlineDecode": {
+        "network": "none",
+        "softwareDecode": true,
+        "gpuMounted": false,
+        "maximumSeconds": 90,
+        "maximumMediaSeconds": 45,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "exitCode": 0,
+        "seconds": 2.204,
+        "boundedStop": null,
+        "diagnosticCounts": {
+          "invalidEbml": 4,
+          "audioDecode": 0,
+          "videoDecode": 8,
+          "packetCorruption": 0,
+          "truncatedPrefixBoundary": 1
+        },
+        "diagnosticCategoriesMayOverlap": true,
+        "invalidEbmlByteOffsets": [
+          532133,
+          2904466,
+          5264759,
+          7605967
+        ],
+        "invalidEbmlOffsetsBeforeFinal64KiB": [
+          532133,
+          2904466,
+          5264759,
+          7605967
+        ],
+        "invalidEbmlLocationUnknown": false,
+        "diagnosticLineCount": 22,
+        "diagnosticSha256": "0eb23101f0d71383e7a6ef338140aae0790e6353226e317e8d3833cd32e7b667",
+        "lastProgress": {
+          "frame": 470,
+          "out_time_us": 27966833,
+          "out_time_ms": 27966833,
+          "dup_frames": 0,
+          "drop_frames": 0,
+          "progress": "end"
+        },
+        "prefixTruncationExpected": true,
+        "scope": "first video and first audio stream of bounded prefix, not full-file certification",
+        "outcome": "decoded",
+        "containerAbsentAfterCleanup": true,
+        "privateDecodeLogsRemoved": true
+      },
+      "finishedAt": "2026-10-04T19:20:06.092578+00:00",
+      "privateBodyHeadersErrorsRemoved": true
+    }
+  ],
+  "independentDecodeLimitations": [
+    "Diagnostic categories can overlap; counts are not unique frames.",
+    "Intentional bounded prefixes cannot certify full-file health.",
+    "All EBML offsets precede the final64KiB of each retained body.",
+    "The same configured proxy remains common to the readers; no exit IP was measured."
+  ],
+  "accountInfo": {
+    "at": "2026-10-04T19:22:02.377669+00:00",
+    "action": "account-info",
+    "providerRequests": 1,
+    "mediaRequests": 0,
+    "proxyMode": "connect",
+    "proxySlot": 1,
+    "sameReviewedRoute": true,
+    "productionUaFixed": true,
+    "allOwnersAccountGuards": {
+      "viewers": 0,
+      "strictJobs": 0,
+      "probeLeases": 0,
+      "strictLeases": 0,
+      "fallbackLeases": 0,
+      "exactFileLeases": 0
+    },
+    "heartbeatSeconds": 0.5,
+    "heartbeatTimeoutSeconds": 1,
+    "maximumBytes": 1048576,
+    "maximumSeconds": 45,
+    "directClaimUsesExactSelectedFile": true,
+    "seconds": 0.615,
+    "curlExit": 0,
+    "bytesReceived": 435,
+    "responses": [
+      {
+        "httpVersion": "1.1",
+        "status": 200,
+        "headerNames": [],
+        "proxyTunnelResponse": true
+      },
+      {
+        "httpVersion": "1.1",
+        "status": 200,
+        "headerNames": [
+          "server",
+          "date",
+          "content-type",
+          "transfer-encoding",
+          "connection",
+          "access-control-allow-credentials"
+        ]
+      }
+    ],
+    "catalogueContextUnchanged": true,
+    "outcome": "complete",
+    "account": {
+      "status": "active",
+      "auth": true,
+      "activeConnections": 0,
+      "maxConnections": 1,
+      "expiryProvided": true,
+      "expiryParseValid": true,
+      "expiryIsFutureOrToday": true
+    },
+    "rawAccountProfileRetained": false,
+    "observationIsCurrentSnapshotOnly": true,
+    "expired": true,
+    "wholeBodyHeadersErrorsRemoved": true,
+    "finishedAt": "2026-10-04T19:22:03.526455+00:00"
+  },
+  "accountInfoLimitations": [
+    "Current provider-reported snapshot only; not proof of account state at historical failure timestamps.",
+    "Provider connection counts are not independently certified as perfectly current.",
+    "No application account-access state or limits were overwritten."
+  ],
+  "finalHealth": {
+    "at": "2026-10-04T19:23:52.315610+00:00",
+    "providerRequests": 0,
+    "health": [
+      {
+        "route": "norva-media-gateway",
+        "http": 200,
+        "ok": true,
+        "running": true,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "logWindowStartedAt": "2026-10-04T18:05:56.370293012Z",
+        "viewerCountGlobal": 1,
+        "targetAccountLiveReaders": 0
+      },
+      {
+        "route": "norva-resume-cache-pilot-20260916",
+        "http": 200,
+        "ok": true,
+        "running": true,
+        "image": "sha256:d0d85e0facb866c7ba194bff84c9e716282232790c2a430a5fe88028be8599cc",
+        "logWindowStartedAt": "2026-10-04T18:05:59.164930376Z",
+        "viewerCountGlobal": 0,
+        "targetAccountLiveReaders": 0
+      }
+    ],
+    "targetAccountState": {
+      "languageLeases": 0,
+      "exactProbeLeases": 0,
+      "targetAccountLiveClaimsAllOwners": 0
+    },
+    "dispatcher": {
+      "running": true,
+      "health": "healthy",
+      "startedAt": "2026-10-04T09:16:03.039731384Z"
+    },
+    "limits": [
+      "Global reader counts include unrelated accounts and do not imply these expired test sessions are active.",
+      "The account state is an instantaneous snapshot; the permanent dispatcher can schedule later.",
+      "Container log windows do not erase earlier failures."
+    ]
+  },
+  "finalAuditAt": "2026-10-04T19:23:52.315610+00:00",
+  "receiptCounterSemantics": {
+    "providerRequests": "One operator/curl invocation, not a count of all HTTP requests; followed redirects generate additional sequential requests.",
+    "noAddedConcurrencyOrAutomaticApplicationRetry": true
+  }
+}
