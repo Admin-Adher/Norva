@@ -88,9 +88,13 @@ public final class NativeVfwMpeg4InstrumentedTest {
             assertTrue("Resume position lost",observed[0]>=resumeSeconds*1000L+1000&&observed[0]<resumeSeconds*1000L+5000);
             long videoBefore=observed[1];
             long seekStarted=SystemClock.elapsedRealtime();
-            ins.runOnMainSync(()->player.seekTo(seekSeconds*1000L));SystemClock.sleep(1200);
+            ins.runOnMainSync(()->player.seekTo(seekSeconds*1000L));
             long[] seekObserved={0,0};
-            ins.runOnMainSync(()->{seekObserved[0]=player.getCurrentPosition();seekObserved[1]=player.getVideoDecoderCounters().renderedOutputBufferCount;});
+            while(SystemClock.elapsedRealtime()-seekStarted<5000){
+                ins.runOnMainSync(()->{assertNull(player.getPlayerError());seekObserved[0]=player.getCurrentPosition();seekObserved[1]=player.getVideoDecoderCounters().renderedOutputBufferCount;});
+                if(seekObserved[0]>=seekSeconds*1000L&&seekObserved[1]>videoBefore+5)break;
+                SystemClock.sleep(50);
+            }
             android.util.Log.i("NorvaMpeg4QA","seek initial ms="+(SystemClock.elapsedRealtime()-seekStarted)
                     +" position="+seekObserved[0]+" before="+videoBefore+" after="+seekObserved[1]);
             if("private-real".equals(asset)) {
