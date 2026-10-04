@@ -112,3 +112,11 @@ Reprise automatique Dino prouvée à 00:51:27 UTC : 29 contrôles et 16 identifi
 
 **18 validations strictes réussies** (+1) et **38 analyses complètes indéterminées avec profil courant correspondant** (+5). Aucun bail de capture/finalisation expiré dans la cohorte au relevé de 01:14. Les services sont sains et la campagne reste active, sans modification de production ni prévision fiable de fin complète. Reçu : `2026-10-04-language-campaign-heartbeat-0314.json`.
 
+## Mesure du 4 octobre à 02:15 UTC — 04:15 Paris
+
+**9 677 contrôles distincts**, soit +1 212 en 60 min 46 s : **1 197 contrôles techniques/h**, contre 340/h dans la fenêtre précédente. **3 503 variantes identifiées** (+582), **53 248 variantes / 41 122 fiches inconnues**. MAX OTT a repris automatiquement après protection, premier lot à 01:57:02 ; Dino progresse également. Aucune nouvelle expiration SQL détectée.
+
+**20 validations strictes réussies** (+2) et **43 analyses complètes indéterminées avec profil courant correspondant** (+5). Les compteurs se recoupent. Ces résultats ne valident toujours pas une clôture en une ou deux heures.
+
+Un correctif de priorité de finalisation est déployé à 02:21:45, après reproduction isolée et 21 contrôles SQL. Le travail Strng concerné est repris par le cron en 15 secondes, puis rencontre une erreur distincte de finalisation. Cette reprise de file **n'est pas une analyse terminée ni une nouvelle sonde**. Le report normal et les preuves sont conservés ; la cause RPC précise reste à établir. Gateways sains et 601 lots de métadonnées terminés au contrôle de 02:25. Reçu : `2026-10-04-language-campaign-heartbeat-0415.json`.
+
