@@ -125,9 +125,46 @@ still expecting phone 44 / 1.3.30 and TV 36 / 3.8.23. Their expected versions
 were updated to the actual release artifacts; 19 focused contract tests pass.
 No production behavior or recovery threshold was changed for these assertions.
 
+Cloud contracts [run 37188302778](https://github.com/Admin-Adher/Norva/actions/runs/37188302778)
+then passed on `3062662f4`, as did phone/TV compilation and JVM tests, Edge
+contracts, disposable database, notification policy, web/mobile journey and
+phone/TV/Windows package builds.
+
+The automatically repeated emulator matrix [37188302737](https://github.com/Admin-Adher/Norva/actions/runs/37188302737)
+is **not counted as entirely passing**. Both TV jobs passed; phone three-button
+1.0 and gesture 1.3 stopped during `attachedFiltersKeepScopeWithKeyboard`,
+before the native player tests. The three-button log records WebView renderer
+process crash code -1 immediately on entry to that test; UTP reports 10 of 73
+tests received. The exact root cause is not established. The other two phone
+jobs were still running at this observation. This recurrence is retained as
+a wider emulator/WebView-suite limitation. No code in the app changed between
+the successful six-configuration run and this repeat; only release contract
+expectations, evidence and the temporary QA build trigger changed.
+
+## Google Play submission and cleanup
+
+On 4 October, both final signed bundles above were uploaded to **production**,
+with full rollout configured and release notes in all nine console locales:
+
+- Mobile **1.3.31 (45)**, release draft 30, submission requested and listed under
+  changes in review; automated preliminary checks still running at capture.
+- TV **3.8.24-hybrid (37)**, release draft 21, submission requested and listed
+  under changes in review; this restarted the review previously containing TV 36.
+- No devices were dropped from either console's supported-device comparison.
+- Console warnings about absent obfuscation mapping and native debug symbols
+  remain recorded. Neither is reported as a blocking error by the release UI.
+- Screenshots `play-phone-submitted.jpg` and `play-tv-submitted.jpg` are retained
+  in the private evidence directory.
+
+The task-created QA application and instrumentation package were uninstalled
+successfully after preserving evidence; their private media are removed with
+that disposable app. Only the normal phone package remains. The user's actual
+Play app was checked again: **1.3.30 (44)**, installed by Google Play. The new
+release is not claimed as approved, distributed or installed on that app yet.
+
 ## Current status
 
-Correction and final signed artifacts verified, **Google Play submission pending**.
+Correction and final signed artifacts verified, **submitted to Google Play production**.
 The exact failing real excerpt now has physical all-frame and clean surface proof.
 This does not certify every title or a full-length viewing, human listening,
 all device architectures in physical hardware, or the later Play-installed update.
