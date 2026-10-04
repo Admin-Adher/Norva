@@ -50,10 +50,46 @@ Exact track language and curated provider audio declarations remain supported.
 Tests cover the unknown case in all ten locales and preserve explicit audio
 declarations. No new spoken-language identification is claimed.
 
-## Remaining verification
+## Integration and runtime verification
 
-Integration, deployment, Android WebView replay and production seek replay
-must be recorded below. Audible acceptance of the current copy remains
-pending; the historical acceptance is not a substitute for today's test.
+PR 633 is integrated as `e01afdd6fe7e497990eebcb7fe73d526d572f0c1`.
+Application code is `9fefd7aeefff7c8dcb2b2446a8789df543a50784`;
+`00d5a15c1a29c5ba81ff23c116088eac0702db48` only corrects an Android test
+fixture to mark the explicitly tagged track as `probed`. The first matrix
+failed that new assertion because the fixture omitted its required status;
+this was not a production code change or a relaxed assertion.
+
+An isolated Chromium replay consumed the same 13-second HLS output without
+another provider request. Instrumented MediaSource creation recorded
+`audio/mp4;codecs=mp4a.40.5` with 1.5.7 and
+`audio/mp4;codecs=mp4a.40.2` with 1.7.3. Both loaded, sought to seven seconds
+and finished without a fatal/media error; this demonstrates why lack of a
+decoder error alone cannot certify perceived sound. The test tab and loopback
+server are closed, and all five remote diagnostic TS files plus the local TS
+copy were deleted after recording the aggregate proof.
+
+The four phone WebView configurations passed on workflow 37217773623:
+gesture/three-button, font 1.0/1.3. These exercise the shipped WatchPage's
+audio-window recovery, startup recovery and audio label policy, not the native
+Android decoder. TV consent focus at font 1.0 passed; font 1.3 failed a D-pad
+left assertion (unchanged consent code, previously passed on 37217470135),
+and its one targeted rerun passed. All six jobs ultimately passed. This is not
+a TV audio acceptance test, and the initial focus failure remains recorded.
+The ordinary cloud/Edge/database/journey checks and both Android tests/packages
+passed before merge; Windows packaging subsequently passed as well.
+
+Cloudflare publication 37218090252 succeeded at 16:49:45 UTC, after the full
+web suite: 5,825 tests, 5,798 passed, 27 skipped, zero failures. The browser
+was reloaded and its DOM confirmed `hls-1.7.3.min.js?v=1` and
+`WatchPage.js?v=65f8e06835`. This WatchPage hash matches the integrated Git
+blob. The same history entry resumed around 24:59. A real slider seek to
+37:47 replaced the stream window normally; media progressed from 0.767926
+to 129.227723 and then 231.716089 seconds relative to the new window,
+paused=false, rate=1, readyState=4, media error=null. The menu opened in the
+real app displays `Piste audio · AAC · 5.1`, without a guessed language.
+The earlier unavailable placeholder observed while the menu was closed was
+replaced when opening the menu; it was not used as an acceptance result.
+Audible acceptance of the current copy remains pending; the historical
+acceptance is not a substitute for today's test.
 This correction does not resolve the separate MULTI-SUB input-corruption
 investigation or complete the six featured-film language analyses.

@@ -1,0 +1,112 @@
+{
+  "codeCommit": "9fefd7aeefff7c8dcb2b2446a8789df543a50784",
+  "historicalFixCommit": "1f6b4fd6ae2d9cd4efd676fa79dec52fa09a7ba5",
+  "historicalFixAncestorOfPreviousMain": false,
+  "productionBrowserBefore": {
+    "hls": "1.5.7",
+    "paused": true,
+    "playbackRate": 1,
+    "displayPosition": "24:47"
+  },
+  "alreadyGeneratedOutput": {
+    "copiedAtUtc": "2026-10-04T16:26:58Z",
+    "bytes": 3327600,
+    "audioCodec": "AAC-LC",
+    "sampleRate": 48000,
+    "channels": 2,
+    "packets": 610,
+    "ptsStart": 33.654,
+    "ptsEnd": 46.646,
+    "medianPacketInterval": 0.021333,
+    "maximumPacketInterval": 0.021334,
+    "backwardTimestamps": 0,
+    "gapsOver40ms": 0,
+    "decodeExit": 0,
+    "decodeWarnings": 0,
+    "newProviderConnections": 0
+  },
+  "isolatedChromiumReplaySameSegments": [
+    {
+      "hls": "1.5.7",
+      "audioSourceBuffer": "audio/mp4;codecs=mp4a.40.5",
+      "videoSourceBuffer": "video/mp4;codecs=avc1.640029",
+      "loaded": true,
+      "seeked": true,
+      "endTime": 13.083,
+      "readyState": 4,
+      "fatalErrors": [],
+      "mediaError": null
+    },
+    {
+      "hls": "1.7.3",
+      "audioSourceBuffer": "audio/mp4;codecs=mp4a.40.2",
+      "videoSourceBuffer": "video/mp4;codecs=avc1.640029",
+      "loaded": true,
+      "seeked": true,
+      "endTime": 13.096,
+      "readyState": 4,
+      "fatalErrors": [],
+      "mediaError": null
+    }
+  ],
+  "audibleAcceptanceCurrentCopy": "pending",
+  "focusedNodeTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "emulatorWorkflow": 37217773623,
+  "redundantAutomaticEmulatorWorkflowCancelled": 37217470988,
+  "cleanup": {
+    "remoteDiagnosticTsRemoved": 5,
+    "remoteDiagnosticTsRemaining": 0,
+    "localDiagnosticTsRemoved": true,
+    "loopbackProofServerStopped": true
+  },
+  "language": {
+    "exactTrackTag": "und",
+    "codec": "aac",
+    "channels": 6,
+    "englishSubtitleProven": true,
+    "newAudioIdentification": false
+  },
+  "mergedCommit": "e01afdd6fe7e497990eebcb7fe73d526d572f0c1",
+  "testFixtureCommit": "00d5a15c1a29c5ba81ff23c116088eac0702db48",
+  "emulatorFinalResult": "six jobs passed; TV font 1.3 passed on one rerun after a D-pad focus assertion failure",
+  "redundantAutomaticEmulatorWorkflowsCancelled": [
+    37217470988,
+    37217776671
+  ],
+  "cloudflare": {
+    "run": 37218090252,
+    "successAtUtc": "2026-10-04T16:49:45Z",
+    "regressionTests": 5825,
+    "passed": 5798,
+    "failed": 0,
+    "skipped": 27
+  },
+  "productionScriptDom": {
+    "hls": "hls-1.7.3.min.js?v=1",
+    "watch": "WatchPage.js?v=65f8e06835"
+  },
+  "gitBlobSha256": {
+    "hls": "a12e7ee1cd64a69dcdb314157e45dafcba705bfb0b1440b7935cb265d374423e",
+    "watch": "65f8e0683567aceb928c7b581930be4e06d383376fd193db4a63ef885e99bd92"
+  },
+  "productionReplay": {
+    "title": "Innocent Voices [SUB]",
+    "resumedAround": "24:59",
+    "seekTarget": "37:47",
+    "observedRelativeTimes": [
+      0.767926,
+      129.227723,
+      231.716089
+    ],
+    "paused": false,
+    "playbackRate": 1,
+    "readyState": 4,
+    "mediaError": null,
+    "openedMenuLabel": "Piste audio · AAC · 5.1",
+    "audibleAcceptance": "pending user reply"
+  },
+  "windowsPackage": "success"
+}
