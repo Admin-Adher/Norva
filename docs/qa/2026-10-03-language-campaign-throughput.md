@@ -120,3 +120,11 @@ Reprise automatique Dino prouvée à 00:51:27 UTC : 29 contrôles et 16 identifi
 
 Un correctif de priorité de finalisation est déployé à 02:21:45, après reproduction isolée et 21 contrôles SQL. Le travail Strng concerné est repris par le cron en 15 secondes, puis rencontre une erreur distincte de finalisation. Cette reprise de file **n'est pas une analyse terminée ni une nouvelle sonde**. Le report normal et les preuves sont conservés ; la cause RPC précise reste à établir. Gateways sains et 601 lots de métadonnées terminés au contrôle de 02:25. Reçu : `2026-10-04-language-campaign-heartbeat-0415.json`.
 
+## Mesure du 4 octobre à 03:18 UTC — 05:18 Paris
+
+**10 938 contrôles distincts**, soit +1 261 en 62 min 28 s : **1 211 contrôles techniques/h**. La cohorte compte **3 930 identifiées** (+427) et **52 821 inconnues**. Le contrôle global effectué ensuite trouve une variante inconnue de moins ; les requêtes ne sont pas atomiques. **22 validations strictes réussies** (+2) et **48 analyses complètes indéterminées** (+5), avec profil courant correspondant ; ces ensembles se recoupent.
+
+Pas de nouvelle erreur HTTP du dispatcher ni diagnostic SQL avant le déploiement ; Strng conserve son report de finalisation et ses preuves. Un diagnostic d'erreur limité est déployé sur les deux Edge après 45 tests ciblés, sans modification de l'admission, des seuils ou des reprises. Une pause technique des nouveaux lancements dure environ **2 min 28 s**, de 03:24:53 à 03:27:22, après la fenêtre de débit ci-dessus ; aucun travail actif n'est annulé. Le relevé suivant devra inclure cette pause dans son temps mural.
+
+La campagne reprend automatiquement. Gateways sains, 681 lots de métadonnées terminés à 03:29 ; les logs des nouveaux Edge ne remplacent pas l'historique conservé. La cause de l'erreur de finalisation n'est pas encore établie et aucun délai de clôture exhaustive n'est certifié. Reçu : `2026-10-04-language-campaign-heartbeat-0518.json`.
+

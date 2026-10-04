@@ -294,3 +294,31 @@ Le cron reprend ce travail automatiquement à **02:22:00**, soit environ 15 seco
 Les contrôles en lecture seule concordent pour le profil, les indices audio, la taille, les dates, la génération active, le cache et l'appartenance de la source. **La cause exacte de cet échec RPC n'est pas encore établie.** Le niveau PostgreSQL `log_min_messages=fatal` n'a pas conservé son erreur ; aucune modification générale de journalisation ni nouvelle tentative forcée n'est faite. Voir `2026-10-04-language-finalizer-priority.md`. Cette analyse reste à terminer ; le correctif d'ordre ne suffit pas à la déclarer validée.
 
 La campagne et la supervision restent **ACTIVES**, sans baisse des seuils ni modification des délais, limites ou quarantaines. Reçu agrégé : `2026-10-04-language-campaign-heartbeat-0415.json`.
+
+## Contrôle du 4 octobre à 05:18 Paris (03:18 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 3 984 | 62 | 30 132 |
+| Norva Selection | 71 | 6 | 177 |
+| Dino | 3 974 | 2 132 | 6 737 |
+| MAX OTT | 2 909 | 1 730 | 15 775 |
+| **Total de la cohorte** | **10 938** | **3 930** | **52 821** |
+
+**1 261 contrôles supplémentaires en 62 min 28 s**, soit **1 211 contrôles techniques/h**. La cohorte compte **427 identifications supplémentaires**, sans suppression de variante. Le total global, interrogé ensuite, est de 52 820 variantes / 40 923 fiches inconnues ; l'écart d'une variante reflète des requêtes successives, sans photographie atomique. Le total de cohorte sert au calcul du gain. L'annonce intermédiaire de 428 utilisait ce dernier total global ; le gain consolidé par source est **427**.
+
+**22 validations strictes réussies avec preuve complète** (Strng 4, Selection 4, Dino 5, MAX OTT 9), soit deux supplémentaires. **48 analyses complètes indéterminées avec profil courant correspondant** (6, 28, 11, 3), soit cinq supplémentaires. Ces ensembles se recoupent avec les contrôles et identifications. Le rythme technique ne prédit pas la fin des analyses vocales.
+
+Les deux Gateways sont sains à 03:18 ; dispatcher sans redémarrage, STOP absent, admission ouverte et cron actif, capacité observée de deux travaux. **671 lots de métadonnées non vides terminés**, contre 586 au relevé précédent. Aucun nouvel échec HTTP du dispatcher ou diagnostic d'expiration SQL avant le déploiement décrit ci-dessous. Le travail Strng en échec de finalisation demeure en report jusqu'au 5 octobre à 02:22:08 UTC, sans nouvelle tentative ni capture.
+
+### Diagnostic limité à la finalisation
+
+L'erreur RPC précise du travail Strng n'est toujours pas connue. Un diagnostic est ajouté au seul échec de `finalize_catalog_file_audio_validation_job` : catégorie erreur RPC / résultat vide, code SQL/PostgREST sur liste autorisée et durée en millisecondes. Aucun argument, message brut, détail, identifiant, média ou preuve n'est journalisé. Le code de retour, le délai de reprise et toutes les validations restent inchangés.
+
+**45 tests ciblés réussis**, dont quatre tests exécutables du diagnostic et de son filtrage. Santé du serveur de validation confirmée avant publication. Le déploiement attend la fin des travaux engagés, avec suspension temporaire des nouvelles admissions de **03:24:53 à 03:27:22 UTC** (environ 2 min 28 s), sans annulation ni réinitialisation de bail. Les deux Edge sont mis à jour successivement ; admission, cron et dispatcher reprennent automatiquement. Le serveur de validation est ensuite arrêté.
+
+Version intégrée : PR **616**, commit de code `77574436cd88be2b184e418212a843401f1c8473`. Les deux fichiers de production correspondent au SHA-256 **`bfa8f6213a89a512e3ac33610a9a6ee191f3dc968319ab12fb9b4bff558e5bea`**, contrôlé à 03:29. Les contrats cloud CI passent ; les constructions de paquets étaient encore en attente lors de la fusion. Aucun client mobile ou web n'est modifié.
+
+À 03:29, les deux Gateways sont sains, STOP absent, admission et cron restaurés ; **681 lots** sont terminés. La capacité adaptative indique une voie réseau occupée sur le Gateway principal et deux places sur l'autre, sans lecture active. Les nouvelles fenêtres de logs Edge commencent à 03:27:05 et 03:27:19 : zéro nouveau diagnostic SQL/finalisation dans ces courtes fenêtres. **Le zéro après recréation ne supprime pas les incidents historiques**, conservés dans le reçu antérieur et le relevé de 03:18.
+
+Ce diagnostic ne résout pas à lui seul la finalisation Strng. Aucun échec n'est provoqué et aucun délai n'est contourné pour le tester en production ; la prochaine occurrence naturelle fournira un code exploitable. La campagne et sa supervision restent **ACTIVES**. Reçu : `2026-10-04-language-campaign-heartbeat-0518.json`.
