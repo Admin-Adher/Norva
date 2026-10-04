@@ -209,3 +209,23 @@ L'audit strict compte **35 validations avec preuves complètes** (+3) et **77 an
 Quatre analyses de films mis en avant ont une progression fournisseur après enregistrement de leur priorité à 10:11:59, contre trois à 10:05. Cela ne prouve aucune identification supplémentaire de ces titres. Les reports d'occupation et de capacité sont conservés. Deux Gateways sains, découverte/admission/cron actifs ; toujours trois erreurs HTTP historiques après déploiement global, aucune nouvelle jusqu'à 10:11:59.
 
 Un autre Strng présente une réinitialisation automatique de reçus, 29 tentatives fournisseur et zéro reçu courant. Le profil concorde ; à 10:10 il n'est pas sélectionné et sa dernière mise à jour reste 09:35. La raison précise du rejet de reçus n'est pas journalisée : aucune cause supposée ni modification des protections. Aucune mutation de production pendant ce contrôle. Reçu : `2026-10-04-language-campaign-heartbeat-1205.json`.
+
+## Contrôle du 4 octobre à 11:05 UTC — 13:05 Paris
+
+| Catalogue initial | Versions distinctes contrôlées | Désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 6 685 | 126 | 30 068 |
+| Norva Selection | 84 | 9 | 174 |
+| Dino | 5 743 | 3 088 | 5 781 |
+| MAX OTT | 5 401 | 3 233 | 14 272 |
+| **Cohorte initiale** | **17 913** | **6 456** | **50 295** |
+
+**+506 contrôles uniques en 60 min 18 s**, environ **504 contrôles techniques/h**, et **+190 identifications**. Toute la cohorte demeure visible ; 39 190 fiches sont encore inconnues sur ce compte. **36 validations strictes avec preuve complète** (+1 MAX OTT, terminée à 10:13:33) et **78 analyses complètes indéterminées au profil courant** (+1 MAX OTT, à 10:12:24). Les ensembles se recoupent ; aucun délai de fin exhaustive n'est extrapolé.
+
+Le service global découvre toujours **53 sources / 47 propriétaires**, avec les 49 sources / 46 propriétaires hors cohorte déjà appelés. Il a reçu sur ce périmètre extérieur **1 120 reçus de tentative / 424 reçus d'identification** à 11:05, contre 678 / 297 au précédent relevé initial de 10:05. Ces reçus ne sont pas des variantes uniques. Un audit de file globale à 11:10 constate des captures et changements d'état sur plusieurs propriétaires ; aucune stagnation globale n'est déduite de la faible progression des seules quatre sources initiales.
+
+Le compteur des **variantes de films mis en avant avec langue connue passe de 131 à 137**, sur 364 indices de priorité inchangés. Ce sont des variantes, pas six cartes distinctes ni six reconnaissances vocales certifiées. Les quatre travaux stricts prioritaires ayant progressé sont désormais indéterminés avec leurs délais conservés. Aucun inventaire de série mis en avant n'a été mis à jour depuis sa priorité ; les derniers tours d'inventaire Strng et MAX OTT à 11:04 / 11:00 se sont reportés pour occupation fournisseur sans tentative. À 11:10, les marqueurs récents sont présence pour Strng, actualisation catalogue pour Dino et métadonnées pour MAX OTT. Ils ne prouvent pas une lecture vidéo : la garde de cinq minutes est conservée, sans augmenter la concurrence.
+
+Le travail Strng précédemment réinitialisé a repassé l'admission puis a été reporté à 10:35 pour `PROVIDER_ACCOUNT_BUSY`. **29 tentatives fournisseur inchangées**, zéro reçu et dernière capture à 09:35 : aucune nouvelle sonde ni récidive de réinitialisation prouvée. L'ancien finaliseur SQL reste distinct, en report au 5 octobre. Les deux quarantaines Dino ne sont pas relancées.
+
+Deux Gateways HTTP 200 / ok, deux Edge sains, dispatcher sans redémarrage, admission et crons actifs. Trois anciennes erreurs HTTP conservées, aucune nouvelle à 11:05 ; aucun nouveau diagnostic de finalisation. Les cinq vérifications GitHub de la PR documentaire 624 ont désormais réussi, paquets compris. Aucune mutation de production. Reçu : `2026-10-04-language-campaign-heartbeat-1305.json`.
