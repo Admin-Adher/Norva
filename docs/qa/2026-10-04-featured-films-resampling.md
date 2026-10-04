@@ -71,3 +71,16 @@ inconclusive automated runs, source audio tag `und`, and independently known
 English subtitles retain their original provenance. This documentary update
 does not publish a fabricated provider declaration or strict worker result.
 The other five requested film identifications remain open.
+
+
+### Second user listening confirmation: Prey
+
+The user then explicitly confirmed: "Prey l'audio est anglais je confirme".
+English (`en`) is recorded as human-confirmed for the Prey copy discussed in
+this playback investigation. This does not apply to every Prey variant or
+turn its expired/inconclusive automated jobs into completed validations.
+Together with Innocent Voices (`es`), two requested films now have direct
+user listening confirmations; the other four remain unconfirmed in this
+six-film request. These documentary confirmations have not changed the
+catalogue badges; a separate human-provenance publication path is absent
+from the code audited at this point.
