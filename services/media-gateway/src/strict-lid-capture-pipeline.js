@@ -62,7 +62,7 @@ function createStrictLidCapturePipeline({ store, claimNetwork, openBroker, extra
         const startedAt = Date.now();
         let stage = 'lookup';
         let audioMilliseconds = [];
-        const requestedMilliseconds = planStrictSpeechWindow(normalized.durationSeconds, normalized.windowOrdinal).searchDurationMilliseconds;
+        const requestedMilliseconds = planStrictSpeechWindow(normalized.durationSeconds, normalized.windowOrdinal, normalized.samplingPass).searchDurationMilliseconds;
         const reservations = [];
         let closePromise;
         const closeBroker = () => {

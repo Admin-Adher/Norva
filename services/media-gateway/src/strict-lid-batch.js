@@ -233,11 +233,13 @@ function normalizeStrictLidTimelineDurationSeconds(value) {
 function strictLidTimelineOffsets(
     durationSeconds,
     sampleDurationSeconds = STRICT_LID_SAMPLE_DURATION_SECONDS,
+    samplingPass = 0,
 ) {
     const duration = normalizeStrictLidTimelineDurationSeconds(durationSeconds);
     const sampleDuration = Number(sampleDurationSeconds);
     if (
         duration === null
+        || !Number.isSafeInteger(samplingPass) || samplingPass < 0 || samplingPass > 6
         || !Number.isFinite(sampleDuration)
         || sampleDuration <= 0
         || duration < STRICT_LID_MIN_TIMELINE_WINDOWS * sampleDuration
@@ -248,8 +250,17 @@ function strictLidTimelineOffsets(
         ? STRICT_LID_FULL_TIMELINE_WINDOWS
         : STRICT_LID_MIN_TIMELINE_WINDOWS;
     const lastStart = duration - sampleDuration;
+    // An explicitly authorized second analysis explores a different part of
+    // each stratum. The pass is signed and bound to every receipt; callers
+    // cannot pick an offset after seeing a language prediction. Pass zero
+    // retains the byte-for-byte historical plan and pending receipts.
+    let fraction = 0;
+    for (let n = samplingPass + 1, weight = 0.5; n > 0; n = Math.floor(n / 2), weight /= 2) {
+        fraction += (n % 2) * weight;
+    }
+    if (samplingPass > 0 && duration / windowCount < 480) return null;
     return Object.freeze(Array.from({ length: windowCount }, (_, index) => {
-        const stratumCenter = ((index + 0.5) * duration) / windowCount;
+        const stratumCenter = ((index + fraction) * duration) / windowCount;
         const rawStart = stratumCenter - sampleDuration / 2;
         return Math.min(lastStart, Math.max(0, Math.round(rawStart * 1000) / 1000));
     }));

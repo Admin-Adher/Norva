@@ -226,7 +226,7 @@ class StrictLidCaptureStore {
                 || record.expiresAt - record.createdAt > this.ttlMs || typeof record.wav !== 'string') return null;
             const wav = Buffer.from(record.wav, 'base64');
             const parsed = parsePcm16Wav(wav);
-            const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal);
+            const plan = planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal, binding.samplingPass);
             if (sha(wav) !== record.sha256 || !usableCaptureDuration(parsed, plan)) return null;
             return { ...record, binding, wav };
         } catch (_) { return null; }
@@ -251,7 +251,7 @@ class StrictLidCaptureStore {
         return this.withLock(async () => {
             if (attestation?.providerDrained !== true || attestation?.providerDrainProtocol !== 1) throw error('LID_CAPTURE_DRAIN_REQUIRED');
             const normalized = captureBinding(binding);
-            const plan = planStrictSpeechWindow(normalized.durationSeconds, normalized.windowOrdinal);
+            const plan = planStrictSpeechWindow(normalized.durationSeconds, normalized.windowOrdinal, normalized.samplingPass);
             const parsed = parsePcm16Wav(wav);
             if (!usableCaptureDuration(parsed, plan)) throw error('LID_CAPTURE_DURATION_INVALID');
             await this.prune();

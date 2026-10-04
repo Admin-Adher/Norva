@@ -248,7 +248,7 @@ function createPassiveLidCapture({ store, resolveSource, resourcesAvailable, bin
                 const source=resolveSource(binding,context);
                 if(!source) return miss('source-not-current');
                 const alive=()=>!signal?.aborted && resourcesAvailable() && source.isCurrent();
-                const window=planStrictSpeechWindow(binding.durationSeconds,binding.windowOrdinal);
+                const window=planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal, binding.samplingPass);
                 const playlist=await readPlaylist(source.root,source.playlistName);
                 const plan=passiveWindowPlan(playlist,{ startSeconds:window.searchStartSeconds,
                     durationSeconds:window.searchDurationSeconds,prefix:source.segmentPrefix });

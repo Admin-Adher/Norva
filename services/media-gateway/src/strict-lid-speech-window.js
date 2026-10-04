@@ -10,8 +10,8 @@ const STRICT_LID_SPEECH_SEARCH_MS = 60_000;
 // ordinal. Boundaries share the existing anchor's millisecond precision: rounding
 // both sides of a shared boundary identically preserves disjoint strata without
 // losing a millisecond on near-minimum-duration files.
-function planStrictSpeechWindow(durationSeconds, windowOrdinal) {
-    const anchors = strictLidTimelineOffsets(durationSeconds);
+function planStrictSpeechWindow(durationSeconds, windowOrdinal, samplingPass = 0) {
+    const anchors = strictLidTimelineOffsets(durationSeconds, 20, samplingPass);
     if (!anchors || !Number.isSafeInteger(windowOrdinal)
         || windowOrdinal < 1 || windowOrdinal > anchors.length) return null;
     const ordinalIndex = windowOrdinal - 1;
