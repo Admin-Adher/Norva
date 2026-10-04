@@ -234,3 +234,31 @@ Les protections de sondes sont actives, selon le relevé de 00:13:51, jusqu'à *
 Les deux Gateways sont sains (HTTP 200 / `ok=true`), sans lecture active au relevé. Dispatcher sain sans redémarrage, STOP absent, admission ouverte et cron strict actif, capacité observée de deux travaux. **Aucun nouvel échec HTTP ni diagnostic SQL** depuis l'incident de 21:20 ; 472 lots de métadonnées non vides terminés depuis la réduction de pagination, contre 409 précédemment. La cause précise de l'ancien incident SQL reste non établie.
 
 Aucune modification du traitement de production pendant ce contrôle. La campagne et sa supervision restent **ACTIVES**, sans clôture. Reçu agrégé : `2026-10-04-language-campaign-heartbeat-0213.json`.
+
+## Contrôle du 4 octobre à 03:14 Paris (01:14 UTC)
+
+| Catalogue | Versions distinctes contrôlées depuis le lancement | Initialement inconnues, désormais identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 3 327 | 47 | 30 147 |
+| Norva Selection | 60 | 5 | 178 |
+| Dino | 2 646 | 1 407 | 7 462 |
+| MAX OTT | 2 432 | 1 462 | 16 043 |
+| **Total** | **8 465** | **2 921** | **53 830** |
+
+Toutes les variantes initiales restent visibles ; **41 356 fiches distinctes** sont encore sans langue. **348 nouveaux contrôles en 61 min 26 s**, soit environ **340 contrôles techniques/h**, contre 833/h précédemment. La projection compte **111 identifications supplémentaires**. Les requêtes par source restent successives et ces mesures ne fournissent pas une échéance de fin des analyses vocales.
+
+### Reprise fournisseur et analyses strictes
+
+La reprise automatique des métadonnées **Dino est prouvée à 00:51:27 UTC**, après l'échéance de protection de 00:34:09 : premier lot de 29 contrôles, dont 16 identifications. Dix lots avec tentatives sont observés après cette échéance, le dernier à 00:58:02 avant de nouveaux reports d'occupation fournisseur. Dino a gagné 219 variantes distinctes contrôlées et 109 identifications pendant la fenêtre. Aucun circuit n'a été réinitialisé manuellement.
+
+La protection MAX OTT reste active jusqu'à **01:56:05 UTC (03:56 Paris)**. Aucun nouveau contrôle distinct n'est compté pour ce catalogue pendant cette heure. Sa huitième validation stricte a toutefois été finalisée à 00:51:00, à partir d'une capture dont la dernière progression date de 00:11:31. Cette finalisation est une identification supplémentaire, pas une nouvelle version sondée.
+
+Le total strict est **18 validations réussies avec preuve complète** (+1 : Strng 3, Selection 3, Dino 4, MAX OTT 8) et **38 analyses complètes indéterminées** (+5 : Strng 5, Selection 23, Dino 9, MAX OTT 1), avec fenêtres, reçus et profil observé correspondant. Aucun résultat indéterminé n'est converti arbitrairement en langue. Ces ensembles recoupent les autres compteurs.
+
+Le contrôle ne trouve **aucun travail de la cohorte avec un bail de capture/finalisation expiré** à 01:14. Des progressions fournisseur existent à 01:14 pour Strng, 01:11 pour Selection et 01:12 pour Dino. Depuis le correctif de file de 20:28, 43 variantes ont progressé et dix validations ont réussi. Les retraits de travaux obsolètes restent exclus de ces sondes. Des reports ordinaires de capacité et d'occupation restent présents : la disparition d'un bail expiré ne prouve pas que chaque analyse soit terminée.
+
+### Santé et continuité
+
+Les deux Gateways répondent HTTP 200 / `ok=true`, sans lecture active au relevé ; capacité observée de deux travaux. Le dispatcher est sain sans redémarrage ni marqueur STOP, admission ouverte et cron strict actif. **Aucun nouvel échec HTTP du dispatcher ni diagnostic SQL** depuis l'incident du 3 octobre à 21:20. Les lots de métadonnées non vides terminés passent de 472 à **511**.
+
+Aucune modification du traitement de production, des limites, seuils, baux ou quarantaines. Les reports ne sont pas comptés comme sondes ; le délai de fin n'est toujours pas certifié. La campagne et sa supervision restent **ACTIVES**. Reçu : `2026-10-04-language-campaign-heartbeat-0314.json`.
