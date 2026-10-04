@@ -1,5 +1,6 @@
 import { preferredTmdbSynopsis } from "../_shared/tmdb-enrichment-policy.mjs";
 import { supplementSelectionEditorial, supplementSelectionExtras } from "../_shared/selection-editorial-supplements.mjs";
+import { scheduleFeaturedLanguagePriority } from "../_shared/featured-language-priority.mjs";
 import { attachAudioJobStates, audioJobFields, titleAudioJobState } from "../_shared/catalog-audio-job-status.mjs";
 import { attachSelectionSourceIntegrity } from "../_shared/selection-source-integrity.mjs";
 import { attachSharedSelectionFileFacts } from "../_shared/selection-shared-file-facts.mjs";
@@ -140,7 +141,9 @@ async function handleRequest(req: Request): Promise<Response> {
 
     if (req.method === "GET" && isHomeRailsRoute(segments)) {
       const userId = await requireUserId(req);
-      return jsonCached(req, sanitizeCatalogMediaPayload(await listHomeRails(req, url, userId)), 60);
+      const payload = sanitizeCatalogMediaPayload(await listHomeRails(req, url, userId));
+      scheduleFeaturedLanguagePriority(db, userId, payload);
+      return jsonCached(req, payload, 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
@@ -155,12 +158,18 @@ async function handleRequest(req: Request): Promise<Response> {
 
     if (req.method === "GET" && (segments[0] === "media-genre-rails" || (segments[0] === "device" && segments[1] === "media-genre-rails"))) {
       const userId = await requireUserId(req);
-      return jsonCached(req, sanitizeCatalogMediaPayload(await listGenreRails(req, url, userId)), 60);
+      const payload = sanitizeCatalogMediaPayload(await listGenreRails(req, url, userId));
+      scheduleFeaturedLanguagePriority(db, userId, payload);
+      return jsonCached(req, payload, 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-items" || (segments[0] === "device" && segments[1] === "media-genre-items"))) {
       const userId = await requireUserId(req);
-      return jsonCached(req, sanitizeCatalogMediaPayload(await listGenreItems(req, url, userId)), 30);
+      const payload = sanitizeCatalogMediaPayload(await listGenreItems(req, url, userId));
+      if (boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000) === 0) {
+        scheduleFeaturedLanguagePriority(db, userId, payload);
+      }
+      return jsonCached(req, payload, 30);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-summary" || (segments[0] === "device" && segments[1] === "media-genre-summary"))) {

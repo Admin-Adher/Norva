@@ -5,6 +5,48 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const counters = ['processed', 'attempted', 'queued', 'identified', 'verified', 'inconclusive', 'deferred', 'failed', 'scanned'];
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Discovery grants no network admission. Each existing Edge/SQL guard remains
+// authoritative, including a source revoked between discovery and dispatch.
+export async function discoverSources(url, key, request = fetch) {
+  if (!key) throw new Error('Missing discovery credential');
+  const found = []; const seen = new Set(); let after = null;
+  for (let page = 0; page < 100; page++) {
+    const response = await request(url, { method: 'POST', redirect: 'error',
+      headers: { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_after: after, p_limit: 128 }), signal: AbortSignal.timeout(10000) });
+    if (!response.ok) { await response.body?.cancel(); throw new Error('Discovery unavailable'); }
+    const text = await response.text();
+    if (text.length > 65536) throw new Error('Oversize discovery');
+    const rows = JSON.parse(text);
+    if (!Array.isArray(rows) || rows.length > 128) throw new Error('Invalid discovery');
+    for (const row of rows) {
+      if (!uuid.test(row.id) || !uuid.test(row.userId) || typeof row.xtream !== 'boolean'
+          || seen.has(row.id) || (after && row.id <= after)) throw new Error('Invalid discovery scope');
+      seen.add(row.id); after = row.id; found.push({ id: row.id, userId: row.userId, xtream: row.xtream });
+    }
+    if (rows.length < 128) return found;
+  }
+  throw new Error('Discovery pagination incomplete'); // Never dispatch a partial inventory.
+}
+export function reconcileSources(state, discovered, original, now = Date.now()) {
+  const labels = new Map(original.map(s => [s.id, s.label]));
+  const seen = new Set();
+  return discovered.map(source => {
+    if (seen.has(source.id)) throw new Error('Duplicate source');
+    seen.add(source.id);
+    const current = state.sources[source.id];
+    if (current?.userId && current.userId !== source.userId) throw new Error('Source owner changed');
+    if (!current) state.sources[source.id] = recoverState(null, [source], now).sources[source.id];
+    const entry = state.sources[source.id];
+    entry.userId = source.userId;
+    // A type change can enable metadata, but never reset existing delays.
+    if (source.xtream && !entry.lanes.metadata) entry.lanes.metadata = {
+      calls: 0, totals: {}, failures: 0, nextAt: Math.max(now, entry.blockedUntil || 0, entry.nextAt || 0) };
+    entry.label ||= labels.get(source.id) || `Catalogue ${Object.keys(state.sources).indexOf(source.id) + 1}`;
+    return { ...source, label: entry.label };
+  });
+}
 export function safeResult(value) {
   const r = {};
   for (const key of counters) r[key] = Number.isSafeInteger(value?.[key]) && value[key] >= 0 ? value[key] : 0;
@@ -41,10 +83,14 @@ export function recoverState(state, sources, now = Date.now()) {
     for (const lane of source.xtream ? ['metadata', 'exact'] : ['exact']) {
       entry.lanes[lane] ||= { calls: 0, totals: {}, failures: 0, nextAt: entry.nextAt ?? now };
     }
+  }
+  // A dynamically discovered source can be absent from the original cohort.
+  // Recover its uncertain request as well, even if it has since been removed.
+  for (const entry of Object.values(state.sources)) {
     if (entry.inFlight) {
       // The Edge request may still own a 20-minute intake lease. Never reset it.
       entry.blockedUntil = Math.max(entry.blockedUntil || 0, entry.inFlight + 21 * 60_000);
-      for (const lane of Object.values(entry.lanes)) lane.nextAt = Math.max(lane.nextAt, entry.blockedUntil);
+      for (const lane of Object.values(entry.lanes || {})) lane.nextAt = Math.max(lane.nextAt, entry.blockedUntil);
       delete entry.inFlight; delete entry.inFlightLane;
     }
   }
@@ -104,12 +150,17 @@ export async function main() {
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid Edge URL');
   const file = path.join(root, 'state.json');
   const state = recoverState(fs.existsSync(file) ? JSON.parse(fs.readFileSync(file)) : null, config.sources);
+  let sources = config.discovery ? [] : config.sources;
+  let discoveryNextAt = 0;
+  let discoveryOk = !config.discovery;
   const busy = new Set();
   let stopping = false;
   process.on('SIGTERM', () => { stopping = true; });
   process.on('SIGINT', () => { stopping = true; });
   const save = () => atomic(file, state);
-  const heartbeat = setInterval(() => atomic(path.join(root, 'health.json'), { at: Date.now(), inFlight: busy.size, stopping }), 10_000);
+  const heartbeat = setInterval(() => atomic(path.join(root, 'health.json'), {
+    at: Date.now(), inFlight: busy.size, stopping, discoveryOk, sourceCount: sources.length,
+    ownerCount: new Set(sources.map(s => s.userId)).size }), 10_000);
   save();
   async function dispatch(source, lane) {
     const entry = state.sources[source.id];
@@ -132,10 +183,22 @@ export async function main() {
       // Operator completion is based on the independent exact-variant audit,
       // never on aggregate counters or a single cursor exhaustion response.
       if (fs.existsSync(path.join(root, 'STOP'))) { await new Promise(r => setTimeout(r, 2000)); continue; }
+      if (config.discovery && busy.size === 0 && Date.now() >= discoveryNextAt) {
+        try {
+          const discovered = await discoverSources(config.discovery.url, process.env.NORVA_CAMPAIGN_DISCOVERY_KEY);
+          sources = reconcileSources(state, discovered, config.sources); discoveryOk = true; save();
+          console.log(JSON.stringify({ at: new Date().toISOString(), event: 'source-discovery', sources: sources.length,
+            owners: new Set(sources.map(s => s.userId)).size }));
+          discoveryNextAt = Date.now() + 300000;
+        } catch (_) {
+          discoveryOk = false; sources = []; discoveryNextAt = Date.now() + 60000;
+          console.log(JSON.stringify({ at: new Date().toISOString(), event: 'source-discovery-unavailable' }));
+        }
+      }
       // Leave a second global slot available to the minute-based strict audio
       // worker. Filling both slots with intake can starve its queued jobs.
       if (busy.size < 1) {
-        const work = chooseWork(state, config.sources, busy);
+        const work = chooseWork(state, sources, busy);
         if (work) { dispatch(work.source, work.lane).catch(() => { stopping = true; process.exitCode = 1; }); continue; }
       }
       await new Promise(r => setTimeout(r, 1000));
