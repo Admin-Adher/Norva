@@ -1,5 +1,7 @@
 # Four featured VOD startup refusals
 
+> Later evidence, 19:04 UTC: the [exact-original follow-up](2026-10-04-four-original-refusal-rootcause.md) records that three original MULTI-SUB files subsequently started but produced input/decode errors; HIT still refused access. The observations below retain their original test window and are not a current claim that all four remain inaccessible.
+
 ## Result and scope
 
 4 October 2026, controlled account, real production browser. The requested copies of **HIT: The Third Case, MMA Cop, Shadow Force and Shadow of Vengeance**, all MAX OTT `[MULTI-SUB]`, remain inaccessible. This report does **not** certify those copies repaired. Each has a separately selected MAX OTT `EN` MP4 copy that started and continued playing in this test.
