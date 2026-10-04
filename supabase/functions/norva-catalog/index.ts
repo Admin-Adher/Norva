@@ -747,6 +747,39 @@ function prepareProviderMediaRow(row: Record<string, any>) {
 // Restored fiches carry a provider file identity, while their displayed title
 // may be translated. Resolve that identity through the current visible variants
 // and hydrate the same title projection used by the grid, without a name search.
+async function loadExactMovieRecoveryTitles(title: JsonRecord, userId: string): Promise<JsonRecord[]> {
+  const tmdbId = stringOrNull(title.provider_tmdb_id);
+  if (title.item_type !== "movie" || !tmdbId || !/^[1-9][0-9]*$/.test(tmdbId)
+      || !catalogTextStatusEligible(title.match_status)) return [title];
+  const titleId = catalogTitleUuid(title.id);
+  const visibilityEpoch = requiredCatalogTitleVisibilityEpoch(userId);
+  const limit = 64;
+  const { data, error } = await db.rpc("norva_get_owned_movie_recovery_title_ids", {
+    p_user_id: userId,
+    p_anchor_title_id: titleId,
+    p_expected_visibility_epoch: visibilityEpoch,
+    p_limit: limit,
+  });
+  // A failed or truncated lookup must not masquerade as "no other version".
+  if (error || !isRecord(data) || data.contract !== "owned-movie-recovery-v1"
+      || data.anchorTitleId !== titleId || !Array.isArray(data.titleIds)
+      || data.titleIds.length < 1 || data.titleIds.length > limit) throw catalogTitleReadUnavailable();
+  catalogTitleVisibilityEpoch(data.visibilityEpoch, visibilityEpoch);
+  const ids = data.titleIds.map(catalogTitleUuid);
+  if (ids[0] !== titleId || new Set(ids).size !== ids.length) throw catalogTitleReadUnavailable();
+  if (ids.length === 1) return [title];
+  const titles = await hydrateVisibleCatalogTitlesByIds(userId, ids, visibilityEpoch);
+  // The RPC proves canonical identity against the active projections. Hydrate
+  // those projections again through the normal owner/epoch path, and reject any
+  // association changed between the two reads. Never copy one file's evidence
+  // or editorial payload over another title's variants.
+  if (titles.length !== ids.length || titles.some((candidate, index) =>
+    String(candidate.id) !== ids[index] || String(candidate.user_id) !== userId
+    || candidate.item_type !== "movie" || stringOrNull(candidate.provider_tmdb_id) !== tmdbId
+    || !catalogTextStatusEligible(candidate.match_status))) throw catalogTitleReadUnavailable();
+  return titles;
+}
+
 async function listExactCatalogMediaItems(url: URL, userId: string) {
   const sourceId = stringOrNull(url.searchParams.get("sourceId"));
   const externalId = stringOrNull(url.searchParams.get("externalId"));
@@ -765,14 +798,18 @@ async function listExactCatalogMediaItems(url: URL, userId: string) {
   if (!titleId) return empty;
   const title = await loadTitleById(userId, titleId);
   if (!title || title.item_type !== itemType) return empty;
-  const variantsByTitle = await listVariantsByTitleIds([titleId], userId);
+  const titles = await loadExactMovieRecoveryTitles(title, userId);
+  const variantsByTitle = await listVariantsByTitleIds(titles.map(row => String(row.id)), userId);
   const variants = variantsByTitle.get(titleId) ?? [];
   // A visibility change during hydration must not substitute another source's
   // file, even when that source contains the same provider-local identifier.
   if (!variants.some(v => String(v.source_id) === sourceId && String(v.external_id) === externalId)) return empty;
   const lang = railLang(url);
-  await applyCatalogOverlay([title], itemType, lang);
-  return { ...empty, count: 1, films: 1, items: [titleRailItem(title, variants, lang)] };
+  const visibleTitles = titles.filter(row => (variantsByTitle.get(String(row.id)) ?? []).length > 0);
+  await applyCatalogOverlay(visibleTitles, itemType, lang);
+  const items = visibleTitles.map(row => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang));
+  // Several internal projections still represent this one canonical film.
+  return { ...empty, count: items.length, films: 1, items };
 }
 
 async function listMediaItems(url: URL, userId: string) {
