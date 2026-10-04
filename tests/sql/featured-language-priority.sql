@@ -105,6 +105,11 @@ insert into catalog_series_episode_memberships(user_id,source_id,provider_identi
 set local session_replication_role=origin;
 select pg_temp.ok(record_catalog_featured_language_titles(pg_temp.uid(1),array[pg_temp.uid(3002)])=1,'featured_series_recorded');
 select pg_temp.ok((select parent_series_id='302' from catalog_series_inventory_candidates(pg_temp.uid(1),pg_temp.uid(11),1)),'featured_series_inventory_first');
+insert into catalog_series_inventory_state(user_id,source_id,provider_identity_id,parent_title_id,parent_variant_id,parent_series_id,generation_id,consecutive_failures,next_retry_at)
+ values(pg_temp.uid(1),pg_temp.uid(11),pg_temp.uid(31),pg_temp.uid(3002),pg_temp.uid(302),'302',pg_temp.uid(21),1,now()+interval '1 day');
+select pg_temp.ok((select parent_series_id='301' from catalog_series_inventory_candidates(pg_temp.uid(1),pg_temp.uid(11),1)),'featured_series_inventory_future_retry_preserved');
+update catalog_series_inventory_state set next_retry_at=now()-interval '1 second' where parent_series_id='302';
+select pg_temp.ok((select parent_series_id='302' from catalog_series_inventory_candidates(pg_temp.uid(1),pg_temp.uid(11),1)),'featured_series_inventory_due_retry_selected');
 select pg_temp.ok((select episode_id='402' from catalog_episode_probe_candidates(pg_temp.uid(1),pg_temp.uid(11),1)),'featured_episode_probe_first');
 insert into catalog_file_tracks(server_host,item_type,external_id,audio_tracks,audio_probed_at)
  select pg_temp.uid(31)::text,'episode',(400+n)::text,'[{"index":0,"lang":null}]',now() from generate_series(1,2)n;
