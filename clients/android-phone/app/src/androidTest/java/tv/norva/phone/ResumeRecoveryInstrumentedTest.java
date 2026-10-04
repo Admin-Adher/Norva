@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.*;
 import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.View;
 import androidx.core.content.ContextCompat;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -84,24 +86,22 @@ public final class ResumeRecoveryInstrumentedTest {
             long deadline = SystemClock.elapsedRealtime()+3000;
             AtomicReference<Boolean> visible = new AtomicReference<>(false);
             while (!visible.get() && SystemClock.elapsedRealtime()<deadline) {
-                ins.runOnMainSync(() -> visible.set(shown.findViewById(R.id.norva_player_error_message).getVisibility()==View.VISIBLE));
+                ins.runOnMainSync(() -> visible.set(shown.findViewById(R.id.norva_player_error_message).isShown()));
                 SystemClock.sleep(50);
             }
             assertTrue("Explicit rejection displays a terminal state without the 60-second timeout", visible.get());
             if (otherVersions) {
-                AtomicReference<View> choice = new AtomicReference<>();
                 ins.runOnMainSync(() -> {
                     View action = shown.findViewById(R.id.norva_player_change_version_button);
                     assertEquals(View.VISIBLE, action.getVisibility());
                     assertTrue("Other versions receives keyboard/accessibility focus", action.isFocused());
                     assertTrue("Native action remains at least 48dp", action.getHeight()
                             >= Math.round(48 * target.getResources().getDisplayMetrics().density));
-                    choice.set(action);
-                    shown.findViewById(R.id.norva_player_retry_button).performClick();
                 });
+                tapOnce(ins, shown, R.id.norva_player_retry_button);
                 long retryDeadline = SystemClock.elapsedRealtime() + 3000;
                 while (requestCount.get() < 2 && SystemClock.elapsedRealtime() < retryDeadline) SystemClock.sleep(50);
-                assertEquals("One explicit retry requests one fresh resolution", 2, requestCount.get());
+                assertEquals("One physical tap on Retry requests one fresh resolution", 2, requestCount.get());
                 assertEquals("resume-fixture-source", request.get().getStringExtra(PlayerActivity.EXTRA_SOURCE_ID));
                 assertEquals("resume-recovery-fixture", request.get().getStringExtra(PlayerActivity.EXTRA_ITEM_ID));
                 assertEquals(300L, request.get().getLongExtra("positionSeconds", -1L));
@@ -115,7 +115,7 @@ public final class ResumeRecoveryInstrumentedTest {
                     SystemClock.sleep(50);
                 }
                 assertTrue("Repeated failure stays in explicit recovery", visible.get());
-                ins.runOnMainSync(() -> choice.get().performClick());
+                tapOnce(ins, shown, R.id.norva_player_change_version_button);
                 assertEquals("Opening the catalogue does not request another stream", 2, requestCount.get());
             } else {
                 ins.runOnMainSync(() -> {
@@ -123,10 +123,36 @@ public final class ResumeRecoveryInstrumentedTest {
                     shown.onBackPressed();
                 });
             }
-            assertTrue(shown.isFinishing());
+            assertTrue("One action closes the native player without a second tap", shown.isFinishing());
         } finally {
             if (activity!=null && !activity.isFinishing()) { Activity shown=activity; ins.runOnMainSync(shown::finish); }
             target.unregisterReceiver(receiver); ins.removeMonitor(monitor);
+        }
+    }
+
+    private void tapOnce(Instrumentation ins, Activity activity, int viewId) {
+        final float[] center = new float[2];
+        ins.runOnMainSync(() -> {
+            View action = activity.findViewById(viewId);
+            assertTrue("Touch action must be visible and enabled", action.isShown() && action.isEnabled());
+            int[] location = new int[2];
+            action.getLocationOnScreen(location);
+            center[0] = location[0] + action.getWidth() / 2f;
+            center[1] = location[1] + action.getHeight() / 2f;
+        });
+        long downTime = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, center[0], center[1], 0);
+        MotionEvent up = MotionEvent.obtain(downTime, downTime + 60, MotionEvent.ACTION_UP, center[0], center[1], 0);
+        down.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        up.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        try {
+            ins.sendPointerSync(down);
+            SystemClock.sleep(60);
+            ins.sendPointerSync(up);
+            ins.waitForIdleSync();
+        } finally {
+            down.recycle();
+            up.recycle();
         }
     }
 }

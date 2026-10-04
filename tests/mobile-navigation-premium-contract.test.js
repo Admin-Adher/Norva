@@ -88,7 +88,9 @@ test('delayed search and fiche work is invalidated by route and same-page intent
   for (const page of [movies, series]) {
     assert.match(page, /beginFicheIntent\(\)/);
     assert.match(page, /isFicheIntentCurrent\(token\)/);
-    assert.match(page, /async openByItem\(item, \{ intentToken = null \} = \{\}\)/);
+    assert.match(page, page === movies
+      ? /async openByItem\(item, \{ intentToken = null, focusVersions = false, requireOwned = false, beforeOpen = null \} = \{\}\)/
+      : /async openByItem\(item, \{ intentToken = null \} = \{\}\)/);
     assert.match(page, /if \(!this\.isFicheIntentCurrent\(token\)\) return false/);
   }
   assert.match(series, /tryNextHealthyVersion\([\s\S]{0,180}intentToken = null/);

@@ -93,8 +93,11 @@ public class ProviderVersionCardsInstrumentedTest {
                                     + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();")
                             + "const audioPage=Object.create(WatchPage.prototype);audioPage.content={rawTitle:'ES | Example'};"
                             + "audioPage.audioLanguageValidationStatus='pending';audioPage.audioTracks=[{index:1,codec:'ac3',channels:6,channelLayout:'5.1(side)'}];"
-                            + "if(audioPage.getProbeAudioTracks()[0].label!==audioPage.getLanguageDisplayName('es')+' · AC3 · 5.1')throw Error('public player qualifier');"
+                            + "const unknownAudioLabel=NorvaI18n.t('ui_web_e4a847983868',{defaultValue:'Audio track'})+' · AC3 · 5.1';"
+                            + "if(audioPage.getProbeAudioTracks()[0].label!==unknownAudioLabel)throw Error('untagged audio must not inherit filename language');"
                             + "if(audioPage.audioLanguageValidationStatus!=='pending')throw Error('player hint upgraded validation');"
+                            + "audioPage.audioLanguageValidationStatus='probed';audioPage.audioTracks[0].language='fr';"
+                            + "if(audioPage.getProbeAudioTracks()[0].label!==audioPage.getLanguageDisplayName('fr')+' · AC3 · 5.1')throw Error('exact file audio ignored');"
                             + "if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);"
                             + "window.versionResult='ok';}catch(e){window.versionResult=String(e);}})();");
                         String result = "\"pending\"";

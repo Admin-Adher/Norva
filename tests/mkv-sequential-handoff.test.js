@@ -158,7 +158,7 @@ test('sequential 10-title contract: replacement always expires the previous sess
   assert.ok(play.indexOf('await this.stop({ preservePlaybackResolutionAttempt: true })') < play.indexOf('await this.waitForProviderSlotRelease(2500)'));
   assert.ok(play.indexOf('await this.waitForProviderSlotRelease(2500)') < play.indexOf('resolved = await streamUrlResolver({'));
   assert.match(stopFn, /this\.stopCloudPlaybackSessions\(\)/);
-  assert.match(expire, /expireSession\(sessionId, expireOptions\)/);
+  assert.match(expire, /expireSession\(sessionId, options\)/);
   assert.match(create, /claim_cloud_playback_session/);
   assert.doesNotMatch(loadVideo, /waitForProviderSlotRelease\(2500\)/);
   assert.doesNotMatch(

@@ -4048,7 +4048,13 @@ class WatchPage {
     }
 
     async stopCloudPlaybackSessions(options = {}) {
-        const { strict = false, ...expireOptions } = options;
+        const strict = options.strict === true;
+        // Keep the ordinary API options (including keepalive and AbortSignal)
+        // intact. Only the local recovery flag is removed before forwarding.
+        if (Object.prototype.hasOwnProperty.call(options, 'strict')) {
+            options = { ...options };
+            delete options.strict;
+        }
         this.stopCloudPlaybackHeartbeat();
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
         this._unclosedCloudPlaybackSessionIds ||= new Set();
@@ -4074,7 +4080,7 @@ class WatchPage {
         await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
             console.log('[WatchPage] Expiring cloud playback session:', sessionId);
             try {
-                const result = await playbackApi.expireSession(sessionId, expireOptions);
+                const result = await playbackApi.expireSession(sessionId, options);
                 if (strict && (String(result?.session?.id || '') !== String(sessionId)
                     || result?.session?.status !== 'expired'
                     || !Number.isInteger(result?.gatewayErrors) || result.gatewayErrors !== 0)) {

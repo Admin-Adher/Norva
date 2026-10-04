@@ -1421,7 +1421,9 @@ public class PlayerActivity extends Activity {
                 ? changeVersionButton
                 : (retryAllowed ? retryButton : errorBackButton);
         if (focusTarget != null) {
-            focusTarget.requestFocus();
+            // Move keyboard focus after a touch-driven failure without making
+            // sibling buttons consume their first tap solely to take focus.
+            if (!focusTarget.requestFocus()) focusTarget.requestFocusFromTouch();
             focusTarget.announceForAccessibility(
                     getString(R.string.player_state_accessibility,
                             getString(titleRes), message));

@@ -235,6 +235,18 @@ test('strict expiry rejects incomplete 200 responses, but exact 404 is an idempo
     await f.watch.stopCloudPlaybackSessions({strict:true});assert.equal(f.watch.activeCloudPlaybackSessionIds.size,0);
 });
 
+test('strict close preserves keepalive and the exact abort signal without mutating caller options',async()=>{
+    const f=fixture();const signal={aborted:false};const options={strict:true,keepalive:true,signal};
+    Object.assign(f.watch,{activeCloudPlaybackSessionIds:new Set(['owned-session']),stopCloudPlaybackHeartbeat(){}});
+    f.sandbox.window.NorvaCloud={token:'fixture',playback:{async expireSession(id,forwarded){
+        assert.equal(id,'owned-session');assert.equal(forwarded.keepalive,true);assert.equal(forwarded.signal,signal);
+        assert.equal(Object.hasOwn(forwarded,'strict'),false);
+        return {session:{id,status:'expired'},gatewayErrors:0};
+    }}};
+    await f.watch.stopCloudPlaybackSessions(options);
+    assert.equal(options.strict,true);assert.equal(options.signal,signal);assert.equal(options.keepalive,true);
+});
+
 test('strict transcode close settles every stop and retains only failed identifiers',async()=>{
     const f=fixture();const closed=[];
     Object.assign(f.watch,{activeSessionIds:new Set(['ok','bad']),currentSessionId:'bad'});
